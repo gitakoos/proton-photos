@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.ProtonPhotos" parent="@style/ProtonTheme">
+        <item name="colorSurface">@color/pp_bg1</item>
+        <item name="colorOnSurface">@color/pp_fg_primary</item>
+        <item name="android:colorBackground">@color/pp_bg0</item>
+        <!-- Override ProtonTheme's animated window background with a plain dark colour -->
+        <item name="android:windowBackground">@color/pp_bg0</item>
+        <item name="android:windowIsTranslucent">false</item>
+    </style>
+
+    <!-- Dark override for ProtonCore auth screens -->
+    <style name="Theme.ProtonPhotos.Auth" parent="@style/ProtonTheme">
+        <item name="android:windowBackground">@color/pp_bg0</item>
+        <item name="android:colorBackground">@color/pp_bg0</item>
+        <item name="colorSurface">@color/pp_bg0</item>
+        <item name="proton_background_norm">@color/pp_bg0</item>
+        <item name="proton_background_secondary">@color/pp_bg2</item>
+        <item name="proton_text_norm">@color/pp_fg_primary</item>
+        <item name="proton_text_weak">@color/pp_fg_dim</item>
+        <item name="proton_text_hint">@color/pp_fg_mute</item>
+        <item name="proton_icon_norm">@color/pp_fg_primary</item>
+        <item name="proton_icon_weak">@color/pp_fg_dim</item>
+        <item name="proton_separator_norm">@color/pp_separator</item>
+        <item name="proton_interaction_weak">@color/pp_interaction_weak</item>
+        <item name="brand_norm">@color/pp_accent</item>
+        <item name="colorPrimary">@color/pp_accent</item>
+        <item name="colorPrimaryVariant">@color/pp_accent2</item>
+        <item name="colorPrimaryDark">@color/pp_accent2</item>
+        <item name="colorOnSurface">@color/pp_fg_primary</item>
+        <item name="colorOnBackground">@color/pp_fg_primary</item>
+    </style>
+</resources>

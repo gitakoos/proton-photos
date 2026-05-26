@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.MANAGE_MEDIA" />
+    <!--
+        FOREGROUND_SERVICE + FOREGROUND_SERVICE_DATA_SYNC are required by AlbumDownloadWorker
+        so the album-download Worker can call setForeground() and keep running once the
+        user navigates away from the album screen or backgrounds the app. The
+        foregroundServiceType="dataSync" attribute on the WorkManager service entry below
+        is the Android-12+ counterpart to FOREGROUND_SERVICE_DATA_SYNC.
+    -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!--
+        POST_NOTIFICATIONS is required on Android 13+ to show the download-progress
+        notification. Already requested at runtime alongside media permissions.
+    -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <application
+        android:name=".App"
+        android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.ProtonPhotos"
+        android:localeConfig="@xml/locale_config"
+        tools:replace="android:theme">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- Dark theme override for ProtonCore auth screens -->
+        <activity
+            android:name="me.proton.core.auth.presentation.ui.LoginActivity"
+            android:theme="@style/Theme.ProtonPhotos.Auth"
+            tools:replace="android:theme" />
+        <activity
+            android:name="me.proton.core.auth.presentation.ui.LoginTwoStepActivity"
+            android:theme="@style/Theme.ProtonPhotos.Auth"
+            tools:replace="android:theme" />
+        <activity
+            android:name="me.proton.core.auth.presentation.ui.SecondFactorActivity"
+            android:theme="@style/Theme.ProtonPhotos.Auth"
+            tools:replace="android:theme" />
+        <activity
+            android:name="me.proton.core.auth.presentation.ui.AddAccountActivity"
+            android:theme="@style/Theme.ProtonPhotos.Auth"
+            tools:replace="android:theme" />
+        <activity
+            android:name="me.proton.core.auth.presentation.ui.TwoPassModeActivity"
+            android:theme="@style/Theme.ProtonPhotos.Auth"
+            tools:replace="android:theme" />
+
+        <!-- ── Photo Widget ──────────────────────────────────────────────── -->
+        <receiver
+            android:name=".widget.PhotoWidgetReceiver"
+            android:exported="true"
+            android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/photo_widget_info" />
+        </receiver>
+
+        <activity
+            android:name=".widget.PhotoWidgetConfigActivity"
+            android:exported="true"
+            android:theme="@style/Theme.ProtonPhotos">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
+            </intent-filter>
+        </activity>
+
+        <provider
+            android:name="androidx.startup.InitializationProvider"
+            android:authorities="${applicationId}.androidx-startup"
+            android:exported="false"
+            tools:node="merge">
+            <meta-data
+                android:name="androidx.work.WorkManagerInitializer"
+                android:value="androidx.startup"
+                tools:node="remove" />
+        </provider>
+
+        <!--
+            WorkManager's SystemForegroundService entry — needs explicit
+            foregroundServiceType="dataSync" on Android 14+ for any worker that calls
+            setForeground(). Without this the system kills the worker on Android 14+ as
+            soon as it tries to promote itself.
+        -->
+        <service
+            android:name="androidx.work.impl.foreground.SystemForegroundService"
+            android:foregroundServiceType="dataSync"
+            tools:node="merge" />
+
+    </application>
+
+</manifest>

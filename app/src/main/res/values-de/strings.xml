@@ -1,0 +1,368 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- machine-translated -->
+<resources>
+    <string name="app_name">Proton Photos</string>
+
+    <!-- Auth / Sign-in landing -->
+    <string name="sign_in_subtitle">Private, Ende-zu-Ende-verschlüsselte Fotosicherung.</string>
+    <string name="sign_in_unofficial_tag">Inoffizielle Drittanbieter-App, nicht mit Proton AG verbunden</string>
+    <string name="sign_in_button">Anmelden</string>
+    <string name="sign_in_footer">Sichere Anmeldung mit Ihrem Proton-Konto</string>
+
+    <!-- Auth -->
+    <string name="auth_login_title">Bei Proton anmelden</string>
+    <string name="auth_error_network">Keine Internetverbindung. Bitte überprüfen Sie Ihr Netzwerk.</string>
+    <string name="auth_error_invalid_credentials">Falscher Benutzername oder falsches Passwort.</string>
+    <string name="auth_error_generic">Anmeldung fehlgeschlagen. Bitte erneut versuchen.</string>
+
+    <!-- Gallery -->
+    <string name="gallery_title">Fotos</string>
+    <string name="gallery_empty_title">Noch keine Fotos</string>
+    <string name="gallery_empty_subtitle">Ihre Fotos erscheinen hier nach der Synchronisation.</string>
+    <string name="gallery_filter_all">Alle</string>
+    <string name="gallery_filter_local">Nur lokal</string>
+    <string name="gallery_filter_backed_up">Gesichert</string>
+    <string name="gallery_pull_refresh">Aktualisieren…</string>
+    <string name="gallery_loading">Fotos werden geladen…</string>
+    <string name="gallery_tab_photos">Fotos</string>
+    <string name="gallery_tab_albums">Alben</string>
+    <string name="gallery_tab_shared">Geteilt</string>
+    <string name="gallery_count_photos">%d Fotos</string>
+    <string name="gallery_selected_count">%d ausgewählt</string>
+    <string name="gallery_cancel_selection">Auswahl abbrechen</string>
+    <string name="gallery_download_selected">Auswahl herunterladen</string>
+    <string name="gallery_delete_selected">Auswahl löschen</string>
+    <string name="gallery_download_done">%1$d Fotos heruntergeladen</string>
+    <string name="gallery_download_done_singular">1 Foto heruntergeladen</string>
+    <string name="gallery_download_partial">%1$d heruntergeladen, %2$d fehlgeschlagen</string>
+    <string name="gallery_filter_favorites">Favoriten</string>
+    <string name="gallery_filter_hidden">Versteckt</string>
+    <string name="gallery_filter_categories">Kategorien</string>
+    <string name="gallery_filter_screenshots">Screenshots</string>
+    <string name="gallery_filter_live_photos">Live-Fotos</string>
+    <string name="gallery_filter_motion_photos">Bewegungsfotos</string>
+    <string name="gallery_filter_selfies">Selfies</string>
+    <string name="gallery_filter_portraits">Porträts</string>
+    <string name="gallery_filter_bursts">Serienaufnahmen</string>
+    <string name="gallery_filter_panoramas">Panoramen</string>
+    <string name="gallery_filter_raw">RAW</string>
+    <string name="gallery_filter_photos">Fotos</string>
+
+    <!-- Permission -->
+    <string name="permission_media_rationale">Erlauben Sie Proton Photos den Zugriff auf Ihre Fotos und Videos.</string>
+    <string name="permission_grant_button">Zugriff erlauben</string>
+    <string name="permission_open_settings">Einstellungen öffnen</string>
+    <string name="permission_denied_banner">Erlauben Sie den Zugriff, um lokale Fotos anzuzeigen.</string>
+    <string name="permission_permanently_denied_banner">Medienzugriff verweigert. Öffnen Sie die Einstellungen, um ihn zu erlauben.</string>
+
+    <!-- Sync -->
+    <string name="sync_in_progress">Synchronisierung…</string>
+    <string name="sync_last_synced">Zuletzt synchronisiert: %1$s</string>
+    <string name="sync_never">Nie synchronisiert</string>
+    <string name="sync_now">Jetzt synchronisieren</string>
+    <string name="sync_error_network">Synchronisierung fehlgeschlagen: keine Internetverbindung.</string>
+    <string name="sync_error_storage_full">Proton-Speicher voll. Upgrade auf proton.me.</string>
+    <string name="sync_section">Synchronisierung</string>
+    <string name="sync_backed_up">Gesichert</string>
+    <string name="sync_pending">Ausstehend</string>
+    <string name="sync_none">Keine</string>
+    <string name="sync_photo_count">%1$d Fotos</string>
+    <string name="sync_photo_count_singular">1 Foto</string>
+    <string name="sync_progress_completed">%1$d%% abgeschlossen</string>
+    <string name="sync_progress_x_of_n">%1$d von %2$d</string>
+    <string name="sync_progress_show_files">Dateien anzeigen</string>
+    <string name="sync_progress_hide_files">Dateien ausblenden</string>
+
+    <!-- Delete bottom sheet -->
+    <string name="delete_title">%1$d Foto(s) löschen?</string>
+    <string name="delete_free_up_space_label">SPEICHER FREIGEBEN</string>
+    <string name="delete_free_up_space_description">Vom Gerät entfernen. Bleibt in der Proton-Sicherung verschlüsselt.</string>
+    <string name="delete_also_cloud_label">AUCH AUS SICHERUNG LÖSCHEN</string>
+    <string name="delete_also_cloud_description">Wird überall dauerhaft entfernt.</string>
+    <string name="delete_also_cloud_warning">Das Original wird dauerhaft gelöscht. Proton kann es nicht wiederherstellen.</string>
+    <string name="delete_album_container_warning">Dies löscht das Album, behält aber deine Fotos in Proton Drive.</string>
+    <string name="bucket_album_readonly_msg">%s ist ein Geräteordner. Nutze \'Zu Album hinzufügen\' aus Fotos, um Fotos zu organisieren.</string>
+    <string name="delete_cancel">Abbrechen</string>
+    <string name="delete_button_free_up">Speicher freigeben</string>
+    <string name="delete_button_permanently">Dauerhaft löschen</string>
+    <string name="delete_snackbar_no_backup">Gelöscht. Keine Sicherung vorhanden.</string>
+    <string name="delete_snackbar_freed_up">Speicher freigegeben. Sicherung erhalten.</string>
+    <string name="delete_snackbar_cloud_error">Konnte nicht aus der Sicherung gelöscht werden. Erneut versuchen.</string>
+    <string name="delete_cloud_only_not_on_device">Nicht auf diesem Gerät</string>
+    <string name="delete_multi_mixed_msg">Einige dieser Fotos sind auf Proton Drive gesichert. Wählen Sie die Löschmethode.</string>
+    <string name="delete_multi_remove_device">Vom Gerät entfernen</string>
+    <string name="delete_multi_remove_device_desc">Die Proton Drive-Sicherung bleibt erhalten</string>
+    <string name="delete_multi_move_trash">In den Papierkorb verschieben</string>
+    <string name="delete_multi_move_trash_desc">In Kürzlich gelöscht verschoben, 30 Tage wiederherstellbar</string>
+    <string name="delete_multi_remove_cloud">Aus der Cloud entfernen</string>
+    <string name="delete_multi_remove_cloud_desc">Fotos auf diesem Gerät behalten, Backups in den Drive-Papierkorb verschieben</string>
+    <string name="delete_multi_move_trash_everywhere">Überall in den Papierkorb</string>
+    <string name="delete_multi_move_trash_everywhere_desc">Verschiebt in den Gerät- und Proton Drive-Papierkorb</string>
+    <string name="delete_multi_drive_trash">In Drive-Papierkorb verschieben</string>
+    <string name="delete_multi_drive_trash_desc">In Drive Kürzlich gelöscht verschoben, wiederherstellbar</string>
+
+    <!-- Settings -->
+    <string name="settings_title">Einstellungen</string>
+    <string name="settings_sync_section">Synchronisierung</string>
+    <string name="settings_auto_sync">Automatische Synchronisierung</string>
+    <string name="settings_sync_wifi_only">Nur über WLAN synchronisieren</string>
+    <string name="settings_last_sync">Letzte Synchronisierung</string>
+    <string name="settings_sync_now">Jetzt synchronisieren</string>
+    <string name="settings_storage_section">Speicher</string>
+    <string name="settings_auto_free_up">Automatische Speicherfreigabe</string>
+    <string name="settings_free_up_after">Freigeben nach</string>
+    <string name="settings_free_up_wifi_only">Nur über WLAN</string>
+    <string name="settings_device_storage">Gerätespeicher belegt</string>
+    <string name="settings_backed_up_only">Nur gesicherte</string>
+    <string name="settings_free_up_now">Jetzt Speicher freigeben</string>
+    <string name="settings_free_up_interval_after_backup">Nach der Sicherung</string>
+    <string name="settings_free_up_interval_1_day">1 Tag</string>
+    <string name="settings_free_up_interval_1_week">1 Woche</string>
+    <string name="settings_free_up_interval_1_month">1 Monat</string>
+    <string name="settings_account_section">Konto</string>
+    <string name="settings_sign_out">Abmelden</string>
+    <string name="sign_out_dialog_title">Abmelden?</string>
+    <string name="sign_out_dialog_message">Möchten Sie sich wirklich von Ihrem Proton-Konto abmelden?</string>
+    <string name="cancel">Abbrechen</string>
+    <string name="settings_language">Sprache</string>
+    <string name="settings_language_system">Systemstandard</string>
+    <string name="settings_storage">Speicher</string>
+    <string name="settings_auto_sync_desc">Verschlüsselte sichere Sicherung vom Gerät</string>
+    <string name="settings_sync_wifi_desc">Upload bei Mobilfunk pausieren</string>
+    <string name="settings_background_sync">Hintergrundsynchronisierung</string>
+    <string name="settings_background_sync_desc">Synchronisieren nach App-Schließung</string>
+    <string name="settings_sync_now_action">Synchronisieren →</string>
+    <string name="settings_backup_folders">Sicherungsordner</string>
+    <string name="settings_backup_folders_desc">Wählen Sie aus, welche Ordner gesichert werden sollen</string>
+    <string name="settings_recently_deleted">Kürzlich gelöscht</string>
+    <string name="settings_recently_deleted_desc">Wiederherstellen oder endgültig löschen</string>
+    <string name="settings_recently_deleted_subtitle">%1$d Fotos · in den letzten 30 Tagen gelöscht</string>
+    <string name="settings_recently_deleted_subtitle_singular">1 Foto · in den letzten 30 Tagen gelöscht</string>
+    <string name="settings_recently_deleted_empty">Leer</string>
+    <string name="settings_free_up_desc">Bereits gesicherte Dateien vom Gerät löschen</string>
+    <string name="settings_free_up_action">Löschen</string>
+    <string name="settings_storage_used_pct">%d%% belegt</string>
+    <string name="settings_backup_size">%s von diesem Gerät gesichert</string>
+    <!-- Storage card, Proton / Device / App-cache sub-sections -->
+    <string name="settings_storage_proton">Proton Drive</string>
+    <string name="settings_storage_device">Auf diesem Gerät</string>
+    <string name="settings_storage_app_cache">App-Cache</string>
+    <string name="settings_storage_device_free">%1$s frei / %2$s gesamt</string>
+    <string name="settings_storage_app_cache_desc">Vorschaubilder, gestreamte Videos und temporäre Upload-Blöcke</string>
+    <string name="settings_storage_clear_cache">Cache leeren</string>
+    <string name="settings_storage_clear_cache_dialog_title">App-Cache leeren?</string>
+    <string name="settings_storage_clear_cache_dialog_message">Dadurch werden %s an zwischengespeicherten Dateien gelöscht. Sie werden bei Bedarf erneut heruntergeladen.</string>
+    <string name="settings_storage_refresh">Speicher aktualisieren</string>
+    <string name="settings_auto_backup_new_folders">Neue Ordner automatisch sichern</string>
+    <string name="settings_auto_backup_new_folders_desc">Fotos aus neuen Kameraordnern automatisch sichern, sobald sie erscheinen</string>
+    <string name="settings_section_settings">Einstellungen</string>
+    <string name="settings_privacy_metadata">Privatsphäre &amp; Metadaten</string>
+    <string name="settings_privacy_metadata_desc">EXIF, GPS, Kamerainfos vor dem Hochladen entfernen</string>
+    <string name="settings_security">Sicherheit</string>
+    <string name="settings_security_desc">App-Sperre, versteckte Fotos</string>
+    <string name="settings_strip_metadata_upload">Metadaten beim Upload entfernen</string>
+    <string name="settings_strip_metadata_upload_desc">Persönliche Daten von Fotos vor dem Upload zu Drive entfernen</string>
+    <string name="settings_strip_gps">GPS-Position entfernen</string>
+    <string name="settings_strip_gps_desc">GPS-Koordinaten und Standortdaten entfernen</string>
+    <string name="settings_strip_camera">Kamerainfos entfernen</string>
+    <string name="settings_strip_camera_desc">Marke, Modell, Objektiv und Belichtungsdaten entfernen</string>
+    <string name="settings_strip_timestamp">Zeitstempel entfernen</string>
+    <string name="settings_strip_timestamp_desc">Aufnahmedatum/-zeit aus EXIF entfernen</string>
+    <string name="settings_strip_software">Software-Informationen entfernen</string>
+    <string name="settings_strip_software_desc">Software-, Künstler- und Copyright-Felder entfernen</string>
+    <string name="settings_app_lock">App-Sperre</string>
+    <string name="settings_app_lock_desc">Biometrie oder PIN beim Öffnen der App erforderlich</string>
+    <string name="settings_hidden_photos">Versteckte Fotos</string>
+    <string name="settings_hidden_photos_desc">Aus der Hauptgalerie versteckte Fotos, biometrisch geschützt</string>
+    <string name="settings_media_management">Medienverwaltung</string>
+    <string name="settings_media_management_granted">Erteilt, Löschen fragt nicht mehr nach</string>
+    <string name="settings_media_management_grant_desc">Einmal erlauben, um die Bestätigung bei jedem Löschen zu überspringen</string>
+    <string name="settings_media_management_grant_action">Erteilen</string>
+    <string name="settings_appearance">Darstellung</string>
+    <string name="settings_appearance_section">Anzeige</string>
+    <string name="settings_appearance_desc">Hell, dunkel oder System</string>
+    <string name="settings_about_desc">Version, Mitwirkende und Lizenzen</string>
+
+    <string name="gallery_count_photos_resource">%d Fotos</string>
+    <string name="albums_empty_title">Noch keine Alben</string>
+    <string name="albums_empty_subtitle">In Drive erstellte Alben werden hier angezeigt</string>
+    <string name="album_photo_count">%d Fotos</string>
+    <string name="selection_photos_only">%d Fotos</string>
+    <string name="selection_videos_only">%d Videos</string>
+    <string name="selection_mixed">%1$d Fotos, %2$d Videos</string>
+    <string name="editor_error_load_local">Bild konnte nicht geladen werden</string>
+    <string name="editor_error_not_signed_in">Du bist nicht angemeldet</string>
+    <string name="editor_error_download_failed">Bild konnte nicht heruntergeladen werden</string>
+    <string name="editor_error_decode_failed">Bild konnte nicht dekodiert werden</string>
+    <string name="hidden_photos_title">Versteckte Fotos</string>
+    <string name="hidden_photos_auth_prompt">Authentifiziere dich, um deine versteckten Fotos anzuzeigen</string>
+    <string name="hidden_photos_unlock">Entsperren</string>
+    <string name="album_rename">Album umbenennen</string>
+    <string name="album_rename_confirm">Umbenennen</string>
+    <string name="album_remove_from_album">Aus Album entfernen</string>
+    <string name="album_set_as_cover">Als Titelbild festlegen</string>
+    <string name="month_photo_count">%d Fotos</string>
+    <string name="language_label">Sprache</string>
+    <string name="close">Schließen</string>
+
+    <!-- Theme mode -->
+    <string name="theme_mode_system">Systemstandard</string>
+    <string name="theme_mode_light">Hell</string>
+    <string name="theme_mode_dark">Dunkel</string>
+    <string name="theme_mode_section">Design</string>
+    <string name="theme_mode_desc_system">Geräteeinstellungen folgen</string>
+    <string name="theme_mode_desc_light">Immer helles Design verwenden</string>
+    <string name="theme_mode_desc_dark">Immer dunkles Design verwenden</string>
+
+    <!-- Language -->
+    <string name="language_en">Englisch, English</string>
+    <string name="language_fr">Französisch, Français</string>
+    <string name="language_de">Deutsch</string>
+    <string name="language_es">Spanisch, Español</string>
+    <string name="language_hu">Ungarisch, Magyar</string>
+    <string name="language_it">Italienisch, Italiano</string>
+    <string name="language_section">Anzeigesprache</string>
+    <string name="language_section_desc">Kein Neustart nötig, Oberfläche aktualisiert sich sofort</string>
+
+    <!-- About -->
+    <string name="about_title">Über</string>
+    <string name="about_app_title_quoted">\"Proton\" Photos</string>
+    <string name="about_section_author">Autor</string>
+    <string name="about_section_source">Quellcode</string>
+    <string name="about_section_built_with">Verwendete Projekte</string>
+    <string name="about_section_disclaimer">Haftungsausschluss</string>
+    <string name="about_version">Version %1$s (Build %2$d)</string>
+    <string name="about_description">Inoffizieller Proton Drive Photos-Client für Android. Open Source, von der Community gebaut, Ende-zu-Ende-verschlüsselt.</string>
+    <string name="about_disclaimer">Nicht mit Proton AG verbunden. Proton, Proton Drive und Proton Photos sind Marken von Proton AG. Dies ist ein inoffizieller Drittanbieter-Client, der gegen die öffentlich dokumentierte Drive-API gebaut wurde.</string>
+    <string name="about_author_subtitle">Entwickler und Maintainer</string>
+    <string name="about_source_subtitle">Quellcode auf GitHub ansehen</string>
+    <string name="about_section_license">Lizenz</string>
+    <string name="about_license_title">GPL-3.0-Lizenz</string>
+    <string name="about_license_subtitle">Freie Software unter der GNU GPL v3, siehe LICENSE-Datei</string>
+    <string name="about_lib_android_drive">Drive-API-Referenzimplementierung</string>
+    <string name="about_lib_protoncore">Auth-, Krypto- und Netzwerk-SDK</string>
+    <string name="about_lib_compose">Deklaratives UI-Toolkit von Google</string>
+    <string name="about_lib_hilt">Dependency Injection</string>
+    <string name="about_lib_coil">Bildlade-Bibliothek</string>
+    <string name="about_lib_room">Lokale Datenbank</string>
+    <string name="about_lib_gopenpgp">OpenPGP-Implementierung</string>
+
+    <!-- Albums -->
+    <string name="albums_filter_local">Lokal</string>
+    <string name="albums_filter_backed_up">Gesichert</string>
+    <string name="albums_filter_title">Alben filtern</string>
+    <string name="albums_filter_type">Typ</string>
+    <string name="albums_new_album">Neues Album</string>
+    <string name="albums_create_album">Album erstellen</string>
+    <string name="albums_create_album_hint">Albumname</string>
+    <string name="albums_no_photos">Keine Fotos in diesem Album</string>
+    <string name="albums_download_all">Alles herunterladen</string>
+    <string name="album_download_channel_name">Album-Downloads</string>
+    <string name="album_download_channel_desc">Zeigt den Fortschritt beim Herunterladen eines Albums im Hintergrund.</string>
+    <string name="album_download_notification_title">%1$s wird heruntergeladen</string>
+    <string name="album_download_notification_progress">%1$d von %2$d</string>
+    <string name="album_download_notification_cancel">Abbrechen</string>
+    <string name="album_download_enqueued">Download läuft im Hintergrund, siehe Benachrichtigungen</string>
+    <!-- Sync worker foreground notification -->
+    <string name="sync_worker_channel_name">Foto-Sicherung</string>
+    <string name="sync_worker_channel_desc">Zeigt den Fortschritt beim Sichern von Fotos auf Proton Drive.</string>
+    <string name="sync_worker_notification_title">Fotos werden gesichert…</string>
+    <string name="sync_worker_notification_progress">%1$d hochgeladen / %2$d ausstehend</string>
+    <string name="sync_worker_notification_cancel">Abbrechen</string>
+    <string name="albums_share_button">Album teilen</string>
+    <string name="album_link_copied">Link in Zwischenablage kopiert</string>
+
+    <!-- Share -->
+    <string name="share_title">Album teilen</string>
+    <string name="share_copy_link">Öffentlichen Link kopieren</string>
+    <string name="share_invite">Per E-Mail einladen</string>
+    <string name="share_email_hint">name@beispiel.de</string>
+    <string name="share_invite_button">Einladen</string>
+    <string name="share_remove_member">Entfernen</string>
+    <string name="share_shared_with">Geteilt mit</string>
+    <string name="share_filter_by_person">Nach Person filtern</string>
+    <string name="share_no_shared">Noch keine mit mir geteilten Alben</string>
+    <string name="share_all">Alle</string>
+    <string name="share_shared_with_me">Mit mir geteilt</string>
+    <string name="share_shared_by_me">Von mir geteilt</string>
+    <string name="share_filter_account">Nach Konto filtern</string>
+
+    <!-- Share sheet, redesigned to mirror the Drive web dialog -->
+    <string name="share_sheet_title">%1$s teilen</string>
+    <string name="share_add_people_hint">Personen oder Gruppen zum Teilen hinzufügen</string>
+    <string name="share_who_has_access">Wer Zugriff hat</string>
+    <string name="share_role_owner">Eigentümer</string>
+    <string name="share_role_can_view">kann ansehen</string>
+    <string name="share_role_can_edit">kann bearbeiten</string>
+    <string name="share_role_pending">ausstehend</string>
+    <string name="share_public_link">Öffentlicher Link</string>
+    <string name="share_public_link_active">Aktiv</string>
+    <string name="share_public_link_inactive">Inaktiv</string>
+    <string name="share_public_link_audience">Jeder im Internet mit dem Link</string>
+    <string name="share_copy_link_button">Link kopieren</string>
+    <string name="share_stop_sharing">Freigabe beenden</string>
+    <string name="share_close">Schließen</string>
+
+    <!-- Content filter sheet -->
+    <string name="filter_title">Filter</string>
+    <string name="filter_type_label">Typ</string>
+    <string name="filter_type_videos">Videos</string>
+    <string name="filter_sync_label">Synchronisierung</string>
+    <string name="filter_sync_local">Nur lokal</string>
+    <string name="filter_sync_backedup">Gesichert</string>
+    <string name="filter_year_label">Jahr</string>
+    <string name="filter_any">Beliebig</string>
+    <string name="filter_month_label">Monat</string>
+    <string name="filter_reset">Zurücksetzen</string>
+    <string name="filter_apply">Anwenden</string>
+    <string name="filter_group_by">Gruppieren nach</string>
+    <string name="filter_group_day">Tag</string>
+    <string name="filter_group_month">Monat</string>
+    <string name="filter_group_year">Jahr</string>
+    <string name="filter_timeline_grouping">Zeitleiste gruppieren</string>
+
+    <!-- Errors -->
+    <string name="error_http_network">Netzwerkfehler. Überprüfen Sie Ihre Verbindung.</string>
+    <string name="error_http_storage_full">Speicherkontingent überschritten. Aktualisieren Sie Ihren Proton-Plan.</string>
+    <string name="error_http_rate_limited">Zu viele Anfragen. Erneuter Versuch in %1$d Sekunden.</string>
+    <string name="error_http_server">Serverfehler. Bitte später erneut versuchen.</string>
+    <string name="error_http_client">Anfrage fehlgeschlagen. Bitte erneut versuchen.</string>
+    <string name="error_photo_load_failed">Foto konnte nicht geladen werden.</string>
+    <string name="viewer_downloading_progress">%1$d %% geladen, %2$s / %3$s</string>
+
+    <!-- Widget -->
+    <string name="widget_description">Proton Photos, zeigt Ihre Fotos auf dem Startbildschirm an</string>
+    <string name="widget_setup_title">Foto-Widget</string>
+    <string name="widget_mode_section">Anzeigemodus</string>
+    <string name="widget_mode_all">Alle Fotos</string>
+    <string name="widget_mode_all_desc">Wählt jeden Zyklus ein zufälliges Foto</string>
+    <string name="widget_mode_selected">Ausgewählte Fotos</string>
+    <string name="widget_mode_selected_desc">Durch ausgewählte Fotos blättern</string>
+    <string name="widget_mode_album">Aus Album</string>
+    <string name="widget_mode_album_desc">Durch ein bestimmtes Album blättern</string>
+    <string name="widget_interval_section">Foto wechseln alle</string>
+    <string name="widget_interval_30min">30 Min</string>
+    <string name="widget_interval_1hr">1 Stunde</string>
+    <string name="widget_interval_3hr">3 Stunden</string>
+    <string name="widget_interval_8hr">8 Stunden</string>
+    <string name="widget_interval_1day">1 Tag</string>
+    <string name="widget_add_button">Widget hinzufügen</string>
+    <string name="widget_select_photos">+ Fotos auswählen</string>
+    <string name="widget_photos_selected">%d Fotos ausgewählt</string>
+    <string name="widget_no_photos">Keine Fotos gefunden</string>
+    <string name="widget_loading">Wird geladen…</string>
+
+    <plurals name="delete_title_plural">
+        <item quantity="one">1 Foto löschen?</item>
+        <item quantity="other">%1$d Fotos löschen?</item>
+    </plurals>
+
+    <plurals name="count_photos_plural">
+        <item quantity="one">1 Foto</item>
+        <item quantity="other">%d Fotos</item>
+    </plurals>
+    <plurals name="count_videos_plural">
+        <item quantity="one">1 Video</item>
+        <item quantity="other">%d Videos</item>
+    </plurals>
+</resources>

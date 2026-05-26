@@ -1,0 +1,367 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Proton Fotók</string>
+
+    <!-- Auth / Sign-in landing -->
+    <string name="sign_in_subtitle">Privát, titkosított fotókönyvtárad a felhőben.</string>
+    <string name="sign_in_unofficial_tag">Nem hivatalos, harmadik féltől származó alkalmazás, nem áll kapcsolatban a Proton AG-val</string>
+    <string name="sign_in_button">Bejelentkezés</string>
+    <string name="sign_in_footer">Biztonságos belépés Proton-fiókkal</string>
+
+    <!-- Auth -->
+    <string name="auth_login_title">Bejelentkezés a Protonba</string>
+    <string name="auth_error_network">Nincs internetkapcsolat. Ellenőrizd a hálózatot.</string>
+    <string name="auth_error_invalid_credentials">Hibás felhasználónév vagy jelszó.</string>
+    <string name="auth_error_generic">Bejelentkezés sikertelen. Próbáld újra.</string>
+
+    <!-- Gallery -->
+    <string name="gallery_title">Fotók</string>
+    <string name="gallery_empty_title">Még nincsenek fotók</string>
+    <string name="gallery_empty_subtitle">A fotóid szinkronizálás után jelennek meg itt.</string>
+    <string name="gallery_filter_all">Összes</string>
+    <string name="gallery_filter_local">Csak helyi</string>
+    <string name="gallery_filter_backed_up">Mentett</string>
+    <string name="gallery_pull_refresh">Frissítés…</string>
+    <string name="gallery_loading">Fotók betöltése…</string>
+    <string name="gallery_tab_photos">Fotók</string>
+    <string name="gallery_tab_albums">Albumok</string>
+    <string name="gallery_tab_shared">Megosztott</string>
+    <string name="gallery_count_photos">%d kép</string>
+    <string name="gallery_selected_count">%d kijelölve</string>
+    <string name="gallery_cancel_selection">Kijelölés visszavonása</string>
+    <string name="gallery_download_selected">Kijelöltek letöltése</string>
+    <string name="gallery_delete_selected">Kijelöltek törlése</string>
+    <string name="gallery_download_done">%1$d fotó letöltve</string>
+    <string name="gallery_download_done_singular">1 fotó letöltve</string>
+    <string name="gallery_download_partial">Letöltve: %1$d, sikertelen: %2$d</string>
+    <string name="gallery_filter_favorites">Kedvencek</string>
+    <string name="gallery_filter_hidden">Rejtett</string>
+    <string name="gallery_filter_categories">Kategóriák</string>
+    <string name="gallery_filter_screenshots">Képernyőképek</string>
+    <string name="gallery_filter_live_photos">Live fotók</string>
+    <string name="gallery_filter_motion_photos">Motion fotók</string>
+    <string name="gallery_filter_selfies">Szelfik</string>
+    <string name="gallery_filter_portraits">Portrék</string>
+    <string name="gallery_filter_bursts">Sorozatfelvételek</string>
+    <string name="gallery_filter_panoramas">Panorámák</string>
+    <string name="gallery_filter_raw">RAW</string>
+    <string name="gallery_filter_photos">Fotók</string>
+
+    <!-- Permission -->
+    <string name="permission_media_rationale">Engedélyezd a Proton Fotóknak a fotóid és videóid elérését.</string>
+    <string name="permission_grant_button">Hozzáférés engedélyezése</string>
+    <string name="permission_open_settings">Beállítások megnyitása</string>
+    <string name="permission_denied_banner">Engedélyezd a hozzáférést a helyi fotók megjelenítéséhez.</string>
+    <string name="permission_permanently_denied_banner">Média hozzáférés megtagadva. Nyisd meg a Beállításokat az engedélyezéshez.</string>
+
+    <!-- Sync -->
+    <string name="sync_in_progress">Szinkronizálás…</string>
+    <string name="sync_last_synced">Utoljára szinkronizálva: %1$s</string>
+    <string name="sync_never">Soha nem volt szinkronizálva</string>
+    <string name="sync_now">Szinkronizálás most</string>
+    <string name="sync_error_network">Szinkronizálás sikertelen: nincs internetkapcsolat.</string>
+    <string name="sync_error_storage_full">A Proton tárhely megtelt. Bővítsd a proton.me oldalon.</string>
+    <string name="sync_section">Szinkronizálás</string>
+    <string name="sync_backed_up">Mentve</string>
+    <string name="sync_pending">Függőben</string>
+    <string name="sync_none">Nincs</string>
+    <string name="sync_photo_count">%1$d kép</string>
+    <string name="sync_photo_count_singular">1 kép</string>
+    <string name="sync_progress_completed">%1$d%% kész</string>
+    <string name="sync_progress_x_of_n">%1$d / %2$d</string>
+    <string name="sync_progress_show_files">Fájlok mutatása</string>
+    <string name="sync_progress_hide_files">Fájlok elrejtése</string>
+
+    <!-- Delete bottom sheet -->
+    <string name="delete_title">%1$d fotó törlése?</string>
+    <string name="delete_free_up_space_label">HELY FELSZABADÍTÁSA</string>
+    <string name="delete_free_up_space_description">Eltávolítás az eszközről. Titkosított biztonsági mentésben megmarad.</string>
+    <string name="delete_also_cloud_label">MENTÉSBŐL IS TÖRLÉS</string>
+    <string name="delete_also_cloud_description">Mindenhonnan véglegesen eltávolítja.</string>
+    <string name="delete_also_cloud_warning">Ez véglegesen törli az eredetit. A Proton nem tudja visszaállítani.</string>
+    <string name="delete_album_container_warning">Ez törli az albumot, de a fényképeid megmaradnak a Proton Drive-ban.</string>
+    <string name="bucket_album_readonly_msg">A(z) %s eszközmappa. A fényképek rendezéséhez használd a Fényképek \'Hozzáadás albumhoz\' funkcióját.</string>
+    <string name="delete_cancel">Mégse</string>
+    <string name="delete_button_free_up">Hely felszabadítása</string>
+    <string name="delete_button_permanently">Végleges törlés</string>
+    <string name="delete_snackbar_no_backup">Törölve. Nem volt biztonsági mentés.</string>
+    <string name="delete_snackbar_freed_up">Hely felszabadítva. Mentés megmaradt.</string>
+    <string name="delete_snackbar_cloud_error">Nem sikerült törölni a mentésből. Próbáld újra.</string>
+    <string name="delete_cloud_only_not_on_device">Nem található az eszközön</string>
+    <string name="delete_multi_mixed_msg">Néhány fotó már fel van mentve a Proton Drive-ra. Válaszd ki, hogyan töröljük őket.</string>
+    <string name="delete_multi_remove_device">Eltávolítás az eszközről</string>
+    <string name="delete_multi_remove_device_desc">A Proton Drive biztonsági mentés megmarad</string>
+    <string name="delete_multi_move_trash">Áthelyezés a kukába</string>
+    <string name="delete_multi_move_trash_desc">A nemrég törölt elemek között marad, 30 napig visszaállítható</string>
+    <string name="delete_multi_remove_cloud">Eltávolítás a felhőből</string>
+    <string name="delete_multi_remove_cloud_desc">A fényképek itt maradnak az eszközön, a biztonsági mentések a Drive kukába kerülnek</string>
+    <string name="delete_multi_move_trash_everywhere">Mindenhol kukába helyezés</string>
+    <string name="delete_multi_move_trash_everywhere_desc">Áthelyezés az eszköz és a Proton Drive kukájába</string>
+    <string name="delete_multi_drive_trash">Drive kukába helyezés</string>
+    <string name="delete_multi_drive_trash_desc">A Drive kukájába kerül, visszaállítható</string>
+
+    <!-- Settings -->
+    <string name="settings_title">Beállítások</string>
+    <string name="settings_sync_section">Szinkronizálás</string>
+    <string name="settings_auto_sync">Automatikus szinkronizálás</string>
+    <string name="settings_sync_wifi_only">Csak Wi‑Fi-n szinkronizálj</string>
+    <string name="settings_last_sync">Utolsó szinkronizálás</string>
+    <string name="settings_sync_now">Szinkronizálás most</string>
+    <string name="settings_storage_section">Tárhely</string>
+    <string name="settings_auto_free_up">Automatikus helyfoglalás csökkentés</string>
+    <string name="settings_free_up_after">Felszabadítás ennyi idő után</string>
+    <string name="settings_free_up_wifi_only">Csak Wi‑Fi-n</string>
+    <string name="settings_device_storage">Eszköz tárhelyhasználata</string>
+    <string name="settings_backed_up_only">Csak mentett</string>
+    <string name="settings_free_up_now">Hely felszabadítása most</string>
+    <string name="settings_free_up_interval_after_backup">Mentés után</string>
+    <string name="settings_free_up_interval_1_day">1 nap</string>
+    <string name="settings_free_up_interval_1_week">1 hét</string>
+    <string name="settings_free_up_interval_1_month">1 hónap</string>
+    <string name="settings_account_section">Fiók</string>
+    <string name="settings_sign_out">Kijelentkezés</string>
+    <string name="sign_out_dialog_title">Kijelentkezés?</string>
+    <string name="sign_out_dialog_message">Biztosan ki akarsz jelentkezni a Proton-fiókodból?</string>
+    <string name="cancel">Mégse</string>
+    <string name="settings_language">Nyelv</string>
+    <string name="settings_language_system">Rendszer alapértelmezett</string>
+    <string name="settings_storage">Tárhely</string>
+    <string name="settings_auto_sync_desc">Titkosított biztonsági mentés az eszközről</string>
+    <string name="settings_sync_wifi_desc">Feltöltés szüneteltetése mobilhálózaton</string>
+    <string name="settings_background_sync">Háttérszinkron</string>
+    <string name="settings_background_sync_desc">Szinkronizálás az app bezárása után is</string>
+    <string name="settings_sync_now_action">Szinkronizálás →</string>
+    <string name="settings_backup_folders">Mentett mappák</string>
+    <string name="settings_backup_folders_desc">Válaszd ki, mely mappákat menteni</string>
+    <string name="settings_recently_deleted">Nemrég törölt</string>
+    <string name="settings_recently_deleted_desc">Visszaállítás vagy végleges törlés</string>
+    <string name="settings_recently_deleted_subtitle">%1$d kép · 30 napon belül törölt</string>
+    <string name="settings_recently_deleted_subtitle_singular">1 kép · 30 napon belül törölt</string>
+    <string name="settings_recently_deleted_empty">Üres</string>
+    <string name="settings_free_up_desc">Már mentett fájlok törlése az eszközről</string>
+    <string name="settings_free_up_action">Törlés</string>
+    <string name="settings_storage_used_pct">%d%% felhasználva</string>
+    <string name="settings_backup_size">%s feltöltve erről az eszközről</string>
+    <!-- Storage card, Proton / Device / App-cache sub-sections -->
+    <string name="settings_storage_proton">Proton Drive</string>
+    <string name="settings_storage_device">Az eszközön</string>
+    <string name="settings_storage_app_cache">App gyorsítótár</string>
+    <string name="settings_storage_device_free">%1$s szabad / %2$s összesen</string>
+    <string name="settings_storage_app_cache_desc">Bélyegképek, streamelt videók és ideiglenes feltöltési blokkok</string>
+    <string name="settings_storage_clear_cache">Gyorsítótár ürítése</string>
+    <string name="settings_storage_clear_cache_dialog_title">Üríted az alkalmazás gyorsítótárát?</string>
+    <string name="settings_storage_clear_cache_dialog_message">Ez %s gyorsítótárazott fájlt töröl. Szükség esetén újra letöltődnek.</string>
+    <string name="settings_storage_refresh">Tárhely frissítése</string>
+    <string name="settings_auto_backup_new_folders">Új mappák automatikus mentése</string>
+    <string name="settings_auto_backup_new_folders_desc">Automatikusan mentsd az új kamera-mappákban megjelenő fotókat</string>
+    <string name="settings_section_settings">Beállítások</string>
+    <string name="settings_privacy_metadata">Adatvédelem és metaadatok</string>
+    <string name="settings_privacy_metadata_desc">EXIF, GPS és kamerainfó eltávolítása feltöltéskor</string>
+    <string name="settings_security">Biztonság</string>
+    <string name="settings_security_desc">Alkalmazás zárolása, rejtett fotók</string>
+    <string name="settings_strip_metadata_upload">Metaadatok eltávolítása feltöltéskor</string>
+    <string name="settings_strip_metadata_upload_desc">Személyes adatok eltávolítása a Drive-ra feltöltés előtt</string>
+    <string name="settings_strip_gps">GPS-hely eltávolítása</string>
+    <string name="settings_strip_gps_desc">GPS-koordináták és helyadatok eltávolítása</string>
+    <string name="settings_strip_camera">Kamera-információ eltávolítása</string>
+    <string name="settings_strip_camera_desc">Gyártó, modell, lencse és expozíciós adatok eltávolítása</string>
+    <string name="settings_strip_timestamp">Időbélyeg eltávolítása</string>
+    <string name="settings_strip_timestamp_desc">Felvétel dátum/idő eltávolítása az EXIF-ből</string>
+    <string name="settings_strip_software">Szoftver-információ eltávolítása</string>
+    <string name="settings_strip_software_desc">Szoftver, művész és copyright mezők eltávolítása</string>
+    <string name="settings_app_lock">Alkalmazás zárolása</string>
+    <string name="settings_app_lock_desc">Biometrikus vagy PIN-azonosítás az alkalmazás indításakor</string>
+    <string name="settings_hidden_photos">Rejtett fotók</string>
+    <string name="settings_hidden_photos_desc">A főgalériából elrejtett fotók, biometrikusan védve</string>
+    <string name="settings_media_management">Médiakezelés</string>
+    <string name="settings_media_management_granted">Megadva, törlés nem kér megerősítést</string>
+    <string name="settings_media_management_grant_desc">Add meg egyszer, hogy ne kérdezzen rá minden törlésnél</string>
+    <string name="settings_media_management_grant_action">Megadás</string>
+    <string name="settings_appearance">Megjelenés</string>
+    <string name="settings_appearance_section">Kijelző</string>
+    <string name="settings_appearance_desc">Világos, sötét vagy rendszer</string>
+    <string name="settings_about_desc">Verzió, közreműködők és licencek</string>
+
+    <string name="gallery_count_photos_resource">%d kép</string>
+    <string name="albums_empty_title">Még nincs album</string>
+    <string name="albums_empty_subtitle">A Drive-on létrehozott albumok itt fognak megjelenni</string>
+    <string name="album_photo_count">%d kép</string>
+    <string name="selection_photos_only">%d kép</string>
+    <string name="selection_videos_only">%d videó</string>
+    <string name="selection_mixed">%1$d kép, %2$d videó</string>
+    <string name="editor_error_load_local">Nem sikerült betölteni a képet</string>
+    <string name="editor_error_not_signed_in">Nem vagy bejelentkezve</string>
+    <string name="editor_error_download_failed">Nem sikerült letölteni a képet</string>
+    <string name="editor_error_decode_failed">Nem sikerült dekódolni a képet</string>
+    <string name="hidden_photos_title">Rejtett képek</string>
+    <string name="hidden_photos_auth_prompt">Hitelesítsd magad a rejtett képek megtekintéséhez</string>
+    <string name="hidden_photos_unlock">Feloldás</string>
+    <string name="album_rename">Album átnevezése</string>
+    <string name="album_rename_confirm">Átnevez</string>
+    <string name="album_remove_from_album">Eltávolítás az albumból</string>
+    <string name="album_set_as_cover">Beállítás borítóként</string>
+    <string name="month_photo_count">%d kép</string>
+    <string name="language_label">Nyelv</string>
+    <string name="close">Bezárás</string>
+
+    <!-- Theme mode -->
+    <string name="theme_mode_system">Rendszer szerint</string>
+    <string name="theme_mode_light">Világos</string>
+    <string name="theme_mode_dark">Sötét</string>
+    <string name="theme_mode_section">Téma</string>
+    <string name="theme_mode_desc_system">Eszköz beállításának követése</string>
+    <string name="theme_mode_desc_light">Mindig világos téma</string>
+    <string name="theme_mode_desc_dark">Mindig sötét téma</string>
+
+    <!-- Language -->
+    <string name="language_en">Angol, English</string>
+    <string name="language_fr">Francia, Français</string>
+    <string name="language_de">Német, Deutsch</string>
+    <string name="language_es">Spanyol, Español</string>
+    <string name="language_hu">Magyar</string>
+    <string name="language_it">Olasz, Italiano</string>
+    <string name="language_section">Felület nyelve</string>
+    <string name="language_section_desc">Újraindítás nem szükséges, a felület azonnal frissül</string>
+
+    <!-- About -->
+    <string name="about_title">Névjegy</string>
+    <string name="about_app_title_quoted">\"Proton\" Fotók</string>
+    <string name="about_section_author">Készítő</string>
+    <string name="about_section_source">Forráskód</string>
+    <string name="about_section_built_with">Felhasznált projektek</string>
+    <string name="about_section_disclaimer">Jogi nyilatkozat</string>
+    <string name="about_version">Verzió: %1$s (build %2$d)</string>
+    <string name="about_description">Nem hivatalos Proton Drive Photos kliens Androidra. Nyílt forráskódú, közösség által épített, végpontok közötti titkosítással.</string>
+    <string name="about_disclaimer">Nem áll kapcsolatban a Proton AG-vel. A Proton, Proton Drive és Proton Photos a Proton AG védjegyei. Ez egy nem hivatalos, harmadik féltől származó kliens, amely a nyilvánosan dokumentált Drive API-ra épül.</string>
+    <string name="about_author_subtitle">Készítő és karbantartó</string>
+    <string name="about_source_subtitle">Forráskód megtekintése GitHubon</string>
+    <string name="about_section_license">Licenc</string>
+    <string name="about_license_title">GPL-3.0 licenc</string>
+    <string name="about_license_subtitle">Szabad szoftver a GNU GPL v3 alatt, lásd a LICENSE fájlt</string>
+    <string name="about_lib_android_drive">Drive API referencia-implementáció</string>
+    <string name="about_lib_protoncore">Auth, kriptó és hálózati SDK</string>
+    <string name="about_lib_compose">Deklaratív UI eszközkészlet a Google-tól</string>
+    <string name="about_lib_hilt">Függőség-injektálás</string>
+    <string name="about_lib_coil">Képbetöltő könyvtár</string>
+    <string name="about_lib_room">Helyi adatbázis</string>
+    <string name="about_lib_gopenpgp">OpenPGP implementáció</string>
+
+    <!-- Albums -->
+    <string name="albums_filter_local">Helyi</string>
+    <string name="albums_filter_backed_up">Mentett</string>
+    <string name="albums_filter_title">Albumok szűrése</string>
+    <string name="albums_filter_type">Típus</string>
+    <string name="albums_new_album">Új album</string>
+    <string name="albums_create_album">Album létrehozása</string>
+    <string name="albums_create_album_hint">Album neve</string>
+    <string name="albums_no_photos">Nincs fotó ebben az albumban</string>
+    <string name="albums_download_all">Összes letöltése</string>
+    <string name="album_download_channel_name">Album letöltések</string>
+    <string name="album_download_channel_desc">A háttérben futó albumletöltés állapotát mutatja.</string>
+    <string name="album_download_notification_title">%1$s letöltése</string>
+    <string name="album_download_notification_progress">%1$d / %2$d</string>
+    <string name="album_download_notification_cancel">Mégse</string>
+    <string name="album_download_enqueued">Letöltés a háttérben, nézd meg az értesítéseket</string>
+    <!-- Sync worker foreground notification -->
+    <string name="sync_worker_channel_name">Fényképmentés</string>
+    <string name="sync_worker_channel_desc">A Proton Drive-ra történő fényképmentés állapotát mutatja.</string>
+    <string name="sync_worker_notification_title">Fényképek mentése…</string>
+    <string name="sync_worker_notification_progress">%1$d feltöltve / %2$d függőben</string>
+    <string name="sync_worker_notification_cancel">Mégse</string>
+    <string name="albums_share_button">Album megosztása</string>
+    <string name="album_link_copied">Link a vágólapra másolva</string>
+
+    <!-- Share -->
+    <string name="share_title">Album megosztása</string>
+    <string name="share_copy_link">Nyilvános link másolása</string>
+    <string name="share_invite">Meghívás e-mailben</string>
+    <string name="share_email_hint">nev@pelda.com</string>
+    <string name="share_invite_button">Meghívás</string>
+    <string name="share_remove_member">Eltávolítás</string>
+    <string name="share_shared_with">Megosztva ezekkel</string>
+    <string name="share_filter_by_person">Szűrés személyenként</string>
+    <string name="share_no_shared">Még nincs velem megosztott album</string>
+    <string name="share_all">Összes</string>
+    <string name="share_shared_with_me">Velem megosztva</string>
+    <string name="share_shared_by_me">Általam megosztva</string>
+    <string name="share_filter_account">Szűrés fiók szerint</string>
+
+    <!-- Share sheet, redesigned to mirror the Drive web dialog -->
+    <string name="share_sheet_title">%1$s megosztása</string>
+    <string name="share_add_people_hint">Személyek vagy csoportok hozzáadása</string>
+    <string name="share_who_has_access">Hozzáféréssel rendelkezők</string>
+    <string name="share_role_owner">tulajdonos</string>
+    <string name="share_role_can_view">megtekintheti</string>
+    <string name="share_role_can_edit">szerkesztheti</string>
+    <string name="share_role_pending">függőben</string>
+    <string name="share_public_link">Nyilvános link</string>
+    <string name="share_public_link_active">Aktív</string>
+    <string name="share_public_link_inactive">Inaktív</string>
+    <string name="share_public_link_audience">Bárki az interneten, akinek megvan a link</string>
+    <string name="share_copy_link_button">Link másolása</string>
+    <string name="share_stop_sharing">Megosztás leállítása</string>
+    <string name="share_close">Bezárás</string>
+
+    <!-- Content filter sheet -->
+    <string name="filter_title">Szűrő</string>
+    <string name="filter_type_label">Típus</string>
+    <string name="filter_type_videos">Videók</string>
+    <string name="filter_sync_label">Szinkronizálás</string>
+    <string name="filter_sync_local">Csak helyi</string>
+    <string name="filter_sync_backedup">Mentett</string>
+    <string name="filter_year_label">Év</string>
+    <string name="filter_any">Bármelyik</string>
+    <string name="filter_month_label">Hónap</string>
+    <string name="filter_reset">Visszaállítás</string>
+    <string name="filter_apply">Alkalmaz</string>
+    <string name="filter_group_by">Csoportosítás</string>
+    <string name="filter_group_day">Nap</string>
+    <string name="filter_group_month">Hónap</string>
+    <string name="filter_group_year">Év</string>
+    <string name="filter_timeline_grouping">Idővonal csoportosítás</string>
+
+    <!-- Errors -->
+    <string name="error_http_network">Hálózati hiba. Ellenőrizd a kapcsolatot.</string>
+    <string name="error_http_storage_full">Tárhelykvóta túllépve. Bővítsd a Proton csomagod.</string>
+    <string name="error_http_rate_limited">Túl sok kérés. Újrapróbálkozás %1$d másodpercen belül.</string>
+    <string name="error_http_server">Szerver hiba. Próbáld újra később.</string>
+    <string name="error_http_client">Kérés sikertelen. Próbáld újra.</string>
+    <string name="error_photo_load_failed">Fotó betöltése sikertelen.</string>
+    <string name="viewer_downloading_progress">Letöltés %1$d%%, %2$s / %3$s</string>
+
+    <!-- Widget -->
+    <string name="widget_description">Proton Fotók, fotóid megjelenítése a kezdőképernyőn</string>
+    <string name="widget_setup_title">Fotó widget</string>
+    <string name="widget_mode_section">Megjelenítési mód</string>
+    <string name="widget_mode_all">Összes fotó</string>
+    <string name="widget_mode_all_desc">Véletlenszerű fotót választ minden ciklusban</string>
+    <string name="widget_mode_selected">Kiválasztott fotók</string>
+    <string name="widget_mode_selected_desc">Görgetés az általad kiválasztott fotók között</string>
+    <string name="widget_mode_album">Albumból</string>
+    <string name="widget_mode_album_desc">Görgetés egy adott album fotói között</string>
+    <string name="widget_interval_section">Fotó cseréje</string>
+    <string name="widget_interval_30min">30 perc</string>
+    <string name="widget_interval_1hr">1 óra</string>
+    <string name="widget_interval_3hr">3 óra</string>
+    <string name="widget_interval_8hr">8 óra</string>
+    <string name="widget_interval_1day">1 nap</string>
+    <string name="widget_add_button">Widget hozzáadása</string>
+    <string name="widget_select_photos">+ Fotók kiválasztása</string>
+    <string name="widget_photos_selected">%d fotó kijelölve</string>
+    <string name="widget_no_photos">Nincs fotó</string>
+    <string name="widget_loading">Betöltés…</string>
+
+    <plurals name="delete_title_plural">
+        <item quantity="one">1 fotó törlése?</item>
+        <item quantity="other">%1$d fotó törlése?</item>
+    </plurals>
+
+    <plurals name="count_photos_plural">
+        <item quantity="one">1 kép</item>
+        <item quantity="other">%d kép</item>
+    </plurals>
+    <plurals name="count_videos_plural">
+        <item quantity="one">1 videó</item>
+        <item quantity="other">%d videó</item>
+    </plurals>
+</resources>
