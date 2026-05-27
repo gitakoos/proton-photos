@@ -300,7 +300,7 @@ class SettingsViewModel @Inject constructor(
                 it.copy(
                     autoSync = migratedPrefs[SettingsKeys.AUTO_SYNC] ?: true,
                     syncWifiOnly = migratedPrefs[SettingsKeys.SYNC_WIFI_ONLY] ?: true,
-                    syncIntervalMinutes = migratedPrefs[SettingsKeys.SYNC_INTERVAL_MINUTES] ?: 15L,
+                    syncIntervalMinutes = migratedPrefs[SettingsKeys.SYNC_INTERVAL_MINUTES] ?: 360L,
                     autoBackupNewFolders = migratedPrefs[SettingsKeys.AUTO_BACKUP_NEW_FOLDERS] ?: false,
                     autoFreeUp = migratedPrefs[SettingsKeys.AUTO_FREE_UP] ?: false,
                     freeUpInterval = FreeUpInterval.valueOf(
@@ -316,6 +316,7 @@ class SettingsViewModel @Inject constructor(
                     stripTimestamp = migratedPrefs[SettingsKeys.STRIP_TIMESTAMP] ?: false,
                     stripSoftwareInfo = migratedPrefs[SettingsKeys.STRIP_SOFTWARE_INFO] ?: false,
                     appLockEnabled = migratedPrefs[SettingsKeys.APP_LOCK_ENABLED] ?: false,
+                    appLockTimeoutMinutes = migratedPrefs[SettingsKeys.APP_LOCK_TIMEOUT_MINUTES] ?: 0,
                 )
             }
         }
@@ -549,6 +550,13 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             appLockManager.setLockEnabled(enabled)
             _uiState.update { it.copy(appLockEnabled = enabled) }
+        }
+    }
+
+    fun setAppLockTimeoutMinutes(minutes: Int) {
+        viewModelScope.launch {
+            appLockManager.setLockTimeoutMinutes(minutes)
+            _uiState.update { it.copy(appLockTimeoutMinutes = minutes) }
         }
     }
 

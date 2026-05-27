@@ -21,6 +21,7 @@ import me.proton.core.accountmanager.domain.AccountManager
 import me.proton.photos.data.preferences.SettingsKeys
 import me.proton.photos.data.preferences.settingsDataStore
 import me.proton.photos.domain.entity.GalleryItem
+import me.proton.photos.domain.repository.DrivePhotoRepository
 import me.proton.photos.domain.usecase.GetGalleryItemsUseCase
 import javax.inject.Inject
 
@@ -29,6 +30,7 @@ class LocalAlbumDetailViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val getGalleryItems: GetGalleryItemsUseCase,
     private val accountManager: AccountManager,
+    private val driveRepo: DrivePhotoRepository,
 ) : ViewModel() {
 
     private val _items = MutableStateFlow<List<GalleryItem>>(emptyList())
@@ -65,13 +67,50 @@ class LocalAlbumDetailViewModel @Inject constructor(
      *     [SettingsKeys.LOCAL_ALBUM_VIRTUAL_MEMBERSHIP] (virtual membership — file is still
      *     in its real Camera bucket, but it's also referenced by this album).
      *
-     * [GalleryItem.CloudOnly] items are excluded because they have no on-device counterpart
-     * and don't belong to a local album view.
+     * When [cloudAlbumLinkId] is non-null, this is a MERGED album — a local bucket whose
+     * name matches an existing Drive album. In that case the grid also includes
+     * [GalleryItem.CloudOnly] photos that belong to the cloud album, so the user sees the
+     * union of "what's on this device in this bucket" and "what's in the matching Drive
+     * album". Dedup happens automatically: a backed-up photo surfaces as a Synced item, not
+     * as both LocalOnly + CloudOnly.
      */
-    fun loadAlbum(bucketName: String) {
+    private val _isRefreshing = kotlinx.coroutines.flow.MutableStateFlow(false)
+    val isRefreshing: kotlinx.coroutines.flow.StateFlow<Boolean> = _isRefreshing
+
+    private var currentCloudAlbumLinkId: String? = null
+
+    fun refresh() {
+        viewModelScope.launch {
+            _isRefreshing.value = true
+            try {
+                val userId = accountManager.getPrimaryUserId().first()
+                if (userId != null) {
+                    runCatching { driveRepo.refreshCloudPhotosIncremental(userId) }
+                }
+                if (currentAlbumName.isBlank()) return@launch
+                loadAlbum(currentAlbumName, currentCloudAlbumLinkId)
+            } finally {
+                _isRefreshing.value = false
+            }
+        }
+    }
+
+    fun loadAlbum(bucketName: String, cloudAlbumLinkId: String? = null) {
+        currentCloudAlbumLinkId = cloudAlbumLinkId
         currentAlbumName = bucketName
         viewModelScope.launch {
             val userId = accountManager.getPrimaryUserId().first() ?: return@launch
+
+            // Resolve cloud album membership once on load — `loadAlbumPhotos` already serves
+            // the DB cache for repeat calls, so this is fast enough to keep inline. Failures
+            // degrade gracefully to "only show local items" instead of blowing up the screen.
+            val cloudAlbumLinkIds: Set<String> = if (cloudAlbumLinkId == null) emptySet()
+            else runCatching {
+                driveRepo.loadAlbumPhotos(userId, cloudAlbumLinkId, volumeId = null)
+                    .map { it.linkId }
+                    .toSet()
+            }.getOrElse { emptySet() }
+
             val virtualUrisFlow = context.settingsDataStore.data
                 .map { prefs ->
                     val raw = prefs[SettingsKeys.LOCAL_ALBUM_VIRTUAL_MEMBERSHIP] ?: emptySet()
@@ -88,8 +127,11 @@ class LocalAlbumDetailViewModel @Inject constructor(
                         is GalleryItem.LocalOnly ->
                             item.local.bucketName == bucketName || item.local.uri in virtualUris
                         is GalleryItem.Synced ->
-                            item.local.bucketName == bucketName || item.local.uri in virtualUris
-                        is GalleryItem.CloudOnly -> false
+                            item.local.bucketName == bucketName ||
+                                item.local.uri in virtualUris ||
+                                item.cloud.linkId in cloudAlbumLinkIds
+                        is GalleryItem.CloudOnly ->
+                            item.cloud.linkId in cloudAlbumLinkIds
                     }
                 }
             }.collect { _items.value = it }

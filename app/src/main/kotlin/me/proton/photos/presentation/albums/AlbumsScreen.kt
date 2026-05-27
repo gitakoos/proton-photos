@@ -102,6 +102,10 @@ fun AlbumsScreen(
     gridState: LazyGridState = rememberLazyGridState(),
     onAlbumClick: (Album) -> Unit = {},
     onLocalAlbumClick: (LocalAlbum) -> Unit = {},
+    /** Tap on an [AlbumEntry.Merged] card — passes BOTH the local bucket and the matching
+     *  cloud album so NavGraph can route to a detail screen that shows the union of both
+     *  sources. Falls back to local-only nav if the host hasn't wired this. */
+    onMergedAlbumClick: (LocalAlbum, Album) -> Unit = { local, _ -> onLocalAlbumClick(local) },
     viewModel: AlbumsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -301,9 +305,11 @@ fun AlbumsScreen(
                                     local       = entry.local,
                                     cloud       = entry.cloud,
                                     onClick     = {
-                                        // Navigate to cloud if it has photos; fall back to local while syncing
-                                        if (entry.cloud.photoCount > 0) onAlbumClick(entry.cloud)
-                                        else onLocalAlbumClick(entry.local)
+                                        // Open a merged detail view that shows BOTH the local
+                                        // bucket photos AND the matching cloud album photos
+                                        // deduped. Previously fell back to cloud-only or
+                                        // local-only, hiding the other side from the user.
+                                        onMergedAlbumClick(entry.local, entry.cloud)
                                     },
                                     onLongClick = { albumToDelete = entry.cloud },
                                 )
@@ -782,10 +788,16 @@ private fun MergedAlbumCard(
         cloud.coverThumbnailUrl != null -> cloud.coverThumbnailUrl
         else                            -> null
     }
+    // Merged-view count must include the cloud side too. The user complained the card showed
+    // only the local bucket count (e.g. "1 photos") even when the cloud album had many more.
+    // max(local, cloud) is a tight lower bound of the true union for the common case where
+    // the device's bucket is a subset of the cloud album (typical post-backup state). It does
+    // overstate slightly when both sides have items the other doesn't, but never understates.
+    val mergedCount = maxOf(local.itemCount, cloud.photoCount)
     val metaText = when {
-        local.isFullyBackedUp -> "Backed up · ${local.itemCount}"
-        local.hasAnyBackedUp  -> "${local.backedUpCount}/${local.itemCount} backed up"
-        else                  -> "${local.itemCount} photos"
+        local.isFullyBackedUp -> "Backed up · $mergedCount"
+        local.hasAnyBackedUp  -> "${local.backedUpCount}/$mergedCount backed up"
+        else                  -> "$mergedCount photos"
     }
     UnifiedAlbumCard(
         coverModel  = coverModel,

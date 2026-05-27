@@ -29,15 +29,27 @@ class DeletePhotoUseCase @Inject constructor(
             val cloudLinkIds: List<String>,
             val itemsBeingDeleted: List<GalleryItem>,
             val freeUpSpace: Boolean,
+            /** Whether this delete is part of a HIDE flow — controls whether the post-confirm
+             *  SyncState transitions to HIDDEN (hide) or CLOUD_ONLY (regular free-up-space). */
+            val hide: Boolean,
         ) : Result
         data object CloudDeleteFailed : Result
     }
 
+    /**
+     * @param hide When true, this is a HIDE operation, not a regular delete:
+     *   - The local URI is permanently removed via [MediaStore.createDeleteRequest] (no system
+     *     trash, since the file is already preserved in the app-private Hidden vault).
+     *   - The post-confirm SyncState is set to [SyncStatus.HIDDEN] instead of [SyncStatus.CLOUD_ONLY]
+     *     so reconcile / cleanup skip it and the cloud copy can be rendered with a hidden-eye
+     *     overlay rather than appearing as a generic cloud-only photo.
+     */
     suspend operator fun invoke(
         userId: UserId,
         items: List<GalleryItem>,
         freeUpSpace: Boolean,
         deleteFromCloud: Boolean,
+        hide: Boolean = false,
     ): Result {
         val cloudLinkIds = items.mapNotNull { item ->
             when {
@@ -56,14 +68,21 @@ class DeletePhotoUseCase @Inject constructor(
 
         // Android 11+ with local URIs: defer the cloud delete until the user confirms the
         // system trash dialog. Returning here means cancel ↔ no cloud delete, no divergence.
+        // HIDE flows use createDeleteRequest (permanent removal) instead of createTrashRequest:
+        // the file is already preserved in the app-private Hidden vault, so leaving a copy in
+        // MediaStore Trash for 30 days would just clutter the user's Recently Deleted list.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && localUriStrings.isNotEmpty()) {
             val allLocalUris = localUriStrings.map { Uri.parse(it) }
-            val pi = MediaStore.createTrashRequest(context.contentResolver, allLocalUris, true)
+            val pi = if (hide)
+                MediaStore.createDeleteRequest(context.contentResolver, allLocalUris)
+            else
+                MediaStore.createTrashRequest(context.contentResolver, allLocalUris, true)
             return Result.NeedsMediaWritePermission(
                 pendingIntent       = pi,
                 cloudLinkIds        = cloudLinkIds,
                 itemsBeingDeleted   = items,
                 freeUpSpace         = freeUpSpace,
+                hide                = hide,
             )
         }
 
@@ -81,7 +100,7 @@ class DeletePhotoUseCase @Inject constructor(
             for (uri in localUriStrings.map(Uri::parse)) {
                 runCatching { context.contentResolver.delete(uri, null, null) }
             }
-            updateSyncStateAfterLocalDelete(items, freeUpSpace)
+            updateSyncStateAfterLocalDelete(items, freeUpSpace, hide)
         }
         return Result.Success
     }
@@ -95,6 +114,7 @@ class DeletePhotoUseCase @Inject constructor(
         cloudLinkIds: List<String>,
         items: List<GalleryItem>,
         freeUpSpace: Boolean,
+        hide: Boolean = false,
     ): Result {
         if (cloudLinkIds.isNotEmpty()) {
             try {
@@ -103,15 +123,21 @@ class DeletePhotoUseCase @Inject constructor(
                 return Result.CloudDeleteFailed
             }
         }
-        updateSyncStateAfterLocalDelete(items, freeUpSpace)
+        updateSyncStateAfterLocalDelete(items, freeUpSpace, hide)
         return Result.Success
     }
 
-    private suspend fun updateSyncStateAfterLocalDelete(items: List<GalleryItem>, freeUpSpace: Boolean) {
+    private suspend fun updateSyncStateAfterLocalDelete(items: List<GalleryItem>, freeUpSpace: Boolean, hide: Boolean) {
         for (item in items) {
             when {
                 item is GalleryItem.LocalOnly ->
                     syncStateRepo.updateStatusAndDeleteLocal(item.local.uri, SyncStatus.LOCAL_ONLY)
+                // HIDE wins over freeUpSpace: a hidden synced photo must not appear in the
+                // gallery as a plain CLOUD_ONLY photo or the user has no way to tell which
+                // cloud photos are hidden. The HIDDEN status also keeps reconcile from
+                // demoting it on every refresh and the upload pipeline from re-uploading it.
+                item is GalleryItem.Synced && hide ->
+                    syncStateRepo.updateStatusAndDeleteLocal(item.local.uri, SyncStatus.HIDDEN)
                 item is GalleryItem.Synced && freeUpSpace ->
                     syncStateRepo.updateStatusAndDeleteLocal(item.local.uri, SyncStatus.CLOUD_ONLY)
             }

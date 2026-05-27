@@ -109,6 +109,7 @@
     <string name="settings_last_sync">Letzte Synchronisierung</string>
     <string name="settings_sync_now">Jetzt synchronisieren</string>
     <string name="settings_storage_section">Speicher</string>
+    <string name="settings_storage_nav_desc">Drive-Kontingent, Gerät, App-Cache, Papierkorb</string>
     <string name="settings_auto_free_up">Automatische Speicherfreigabe</string>
     <string name="settings_free_up_after">Freigeben nach</string>
     <string name="settings_free_up_wifi_only">Nur über WLAN</string>
@@ -172,6 +173,14 @@
     <string name="settings_strip_software_desc">Software-, Künstler- und Copyright-Felder entfernen</string>
     <string name="settings_app_lock">App-Sperre</string>
     <string name="settings_app_lock_desc">Biometrie oder PIN beim Öffnen der App erforderlich</string>
+    <string name="settings_app_lock_timeout">Sperren nach</string>
+    <string name="settings_app_lock_timeout_desc">App nach dieser Zeit im Hintergrund erneut sperren</string>
+    <string name="settings_app_lock_timeout_immediate">Sofort</string>
+    <string name="settings_app_lock_timeout_1min">1 Minute</string>
+    <string name="settings_app_lock_timeout_5min">5 Minuten</string>
+    <string name="settings_app_lock_timeout_10min">10 Minuten</string>
+    <string name="settings_app_lock_timeout_15min">15 Minuten</string>
+    <string name="settings_app_lock_timeout_1h">1 Stunde</string>
     <string name="settings_hidden_photos">Versteckte Fotos</string>
     <string name="settings_hidden_photos_desc">Aus der Hauptgalerie versteckte Fotos, biometrisch geschützt</string>
     <string name="settings_media_management">Medienverwaltung</string>
@@ -191,6 +200,7 @@
     <string name="selection_videos_only">%d Videos</string>
     <string name="selection_mixed">%1$d Fotos, %2$d Videos</string>
     <string name="editor_error_load_local">Bild konnte nicht geladen werden</string>
+    <string name="editor_saved_as_copy_toast">Original ist schreibgeschützt, als Kopie in Pictures/Proton Photos gespeichert</string>
     <string name="editor_error_not_signed_in">Du bist nicht angemeldet</string>
     <string name="editor_error_download_failed">Bild konnte nicht heruntergeladen werden</string>
     <string name="editor_error_decode_failed">Bild konnte nicht dekodiert werden</string>
@@ -320,6 +330,28 @@
     <string name="filter_group_month">Monat</string>
     <string name="filter_group_year">Jahr</string>
     <string name="filter_timeline_grouping">Zeitleiste gruppieren</string>
+
+    <!-- Geteilte Alben -->
+    <string name="shared_pending_invitations">Ausstehende Einladungen</string>
+    <string name="shared_invited_to_album">hat dich zu einem Album eingeladen</string>
+    <string name="shared_decline">Ablehnen</string>
+    <string name="shared_accept">Annehmen</string>
+    <string name="shared_empty_with_me_title">Noch nichts mit dir geteilt</string>
+    <string name="shared_empty_by_me_title">Du hast noch keine Alben geteilt</string>
+    <string name="shared_empty_with_me_body">Mit dir geteilte Alben erscheinen hier.</string>
+    <string name="shared_empty_by_me_body">Teile ein Album über den Alben-Tab, um es hier zu sehen.</string>
+    <string name="shared_by_email">von %1$s</string>
+    <string name="shared_photo_count">%1$d Fotos</string>
+
+    <!-- Benachrichtigungsberechtigung -->
+    <string name="notifications_blocked_snackbar">Benachrichtigungen sind aus. Du siehst keinen Upload- oder Download-Fortschritt.</string>
+    <string name="notifications_blocked_open_settings">Einstellungen</string>
+
+    <!-- Suche -->
+    <string name="search_title">Suche</string>
+    <string name="search_placeholder">Nach Dateinamen suchen</string>
+    <string name="search_empty_idle">Namen eingeben, um zu suchen</string>
+    <string name="search_empty_no_results">Keine Treffer</string>
 
     <!-- Errors -->
     <string name="error_http_network">Netzwerkfehler. Überprüfen Sie Ihre Verbindung.</string>

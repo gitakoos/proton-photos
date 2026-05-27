@@ -33,9 +33,22 @@ android {
         // versionCode bumped per release tag — keep monotonically increasing.
         // versionName mirrors the GitHub release tag (e.g. v0.9.1 → "0.9.1") so the About
         // screen and the published APK report the same version the user downloaded.
-        versionCode = 100
-        versionName = "1.0.0-beta"
+        versionCode = 110
+        versionName = "1.1.0-beta"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    // Extract libgojni.so (Proton's Go-based OpenPGP) onto the filesystem at install time
+    // instead of keeping it inside the APK as a memory-mapped page. Android 16's new
+    // userfaultfd-based CMC garbage collector races against Go's signal handlers when
+    // the Go runtime is reading code pages straight out of the APK, producing SIGABRT
+    // on the DefaultDispatch thread (verified on Samsung S22 / Pixel 9 with Android 16
+    // BP2A — S23 on Android 15 doesn't crash). Extracted .so files have their own pages
+    // managed by the linker, which sidesteps the userfaultfd contention.
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
     }
 
     signingConfigs {

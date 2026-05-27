@@ -108,6 +108,7 @@
     <string name="settings_last_sync">Utolsó szinkronizálás</string>
     <string name="settings_sync_now">Szinkronizálás most</string>
     <string name="settings_storage_section">Tárhely</string>
+    <string name="settings_storage_nav_desc">Drive kvóta, eszköz, app cache, kuka</string>
     <string name="settings_auto_free_up">Automatikus helyfoglalás csökkentés</string>
     <string name="settings_free_up_after">Felszabadítás ennyi idő után</string>
     <string name="settings_free_up_wifi_only">Csak Wi‑Fi-n</string>
@@ -171,6 +172,14 @@
     <string name="settings_strip_software_desc">Szoftver, művész és copyright mezők eltávolítása</string>
     <string name="settings_app_lock">Alkalmazás zárolása</string>
     <string name="settings_app_lock_desc">Biometrikus vagy PIN-azonosítás az alkalmazás indításakor</string>
+    <string name="settings_app_lock_timeout">Zárolás ennyi után</string>
+    <string name="settings_app_lock_timeout_desc">Ennyi háttérben töltött idő után újra lezárja az appot</string>
+    <string name="settings_app_lock_timeout_immediate">Azonnal</string>
+    <string name="settings_app_lock_timeout_1min">1 perc</string>
+    <string name="settings_app_lock_timeout_5min">5 perc</string>
+    <string name="settings_app_lock_timeout_10min">10 perc</string>
+    <string name="settings_app_lock_timeout_15min">15 perc</string>
+    <string name="settings_app_lock_timeout_1h">1 óra</string>
     <string name="settings_hidden_photos">Rejtett fotók</string>
     <string name="settings_hidden_photos_desc">A főgalériából elrejtett fotók, biometrikusan védve</string>
     <string name="settings_media_management">Médiakezelés</string>
@@ -190,6 +199,7 @@
     <string name="selection_videos_only">%d videó</string>
     <string name="selection_mixed">%1$d kép, %2$d videó</string>
     <string name="editor_error_load_local">Nem sikerült betölteni a képet</string>
+    <string name="editor_saved_as_copy_toast">Az eredeti csak olvasható, másolatként mentve a Pictures/Proton Photos mappába</string>
     <string name="editor_error_not_signed_in">Nem vagy bejelentkezve</string>
     <string name="editor_error_download_failed">Nem sikerült letölteni a képet</string>
     <string name="editor_error_decode_failed">Nem sikerült dekódolni a képet</string>
@@ -319,6 +329,28 @@
     <string name="filter_group_month">Hónap</string>
     <string name="filter_group_year">Év</string>
     <string name="filter_timeline_grouping">Idővonal csoportosítás</string>
+
+    <!-- Megosztott albumok képernyő -->
+    <string name="shared_pending_invitations">Függő meghívók</string>
+    <string name="shared_invited_to_album">meghívott egy albumba</string>
+    <string name="shared_decline">Elutasítás</string>
+    <string name="shared_accept">Elfogadás</string>
+    <string name="shared_empty_with_me_title">Még nincs veled megosztott album</string>
+    <string name="shared_empty_by_me_title">Még nem osztottál meg albumot</string>
+    <string name="shared_empty_with_me_body">A veled megosztott albumok itt fognak megjelenni.</string>
+    <string name="shared_empty_by_me_body">Ossz meg egy albumot az Albumok fülről, és itt látni fogod.</string>
+    <string name="shared_by_email">%1$s által</string>
+    <string name="shared_photo_count">%1$d kép</string>
+
+    <!-- Értesítés engedély hiba -->
+    <string name="notifications_blocked_snackbar">Az értesítések ki vannak kapcsolva. Nem fogod látni a feltöltés és letöltés folyamatát.</string>
+    <string name="notifications_blocked_open_settings">Beállítások</string>
+
+    <!-- Keresés -->
+    <string name="search_title">Keresés</string>
+    <string name="search_placeholder">Keresés fájlnév szerint</string>
+    <string name="search_empty_idle">Írj be egy nevet a kereséshez</string>
+    <string name="search_empty_no_results">Nincs találat</string>
 
     <!-- Errors -->
     <string name="error_http_network">Hálózati hiba. Ellenőrizd a kapcsolatot.</string>

@@ -114,4 +114,13 @@ object CoreModule {
     @Singleton
     fun provideHumanVerificationVersion(): HumanVerificationVersion =
         HumanVerificationVersion.HV3
+
+    // Note: the new ProtonCore LoginTwoStepActivity (used for username+password) is Compose-
+    // only and hard-codes a light Compose theme — it ignores both AppCompatDelegate's
+    // night-mode setting and our XML manifest theme override. The 2FA / TwoPassMode /
+    // CreateAddress activities are still XML-themed (respect Theme.ProtonPhotos.Auth).
+    // We can't disable the two-step flow via Hilt because the ProtonCore default
+    // IsLoginTwoStepEnabledImpl is bound in auth-data with @Binds, and binding it again
+    // here triggers a Dagger DuplicateBindings error in production. Leaving the sign-in
+    // screen on the ProtonCore Compose theme until upstream exposes a theme override hook.
 }

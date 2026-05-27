@@ -14,10 +14,19 @@ object ThemePrefsBoot {
     private const val PREFS_NAME = "theme_boot"
     private const val KEY_MODE = "theme_mode"
 
-    /** Returns the cached mode key, or `"system"` if never written. Sync, fast. */
+    /**
+     * Returns the cached mode key, or `"dark"` if never written.
+     *
+     * Default changed from "system" to "dark" because the welcome + ProtonCore login
+     * activities (LoginActivity, LoginTwoStepActivity, etc.) follow AppCompatDelegate's
+     * night-mode setting — and the app's color resources are designed for dark surfaces.
+     * Falling back to system mode meant the login flow appeared in light theme when the
+     * device's system theme was light, even though the rest of the app forces dark on
+     * Compose. Users can switch to system or light from Settings → Appearance.
+     */
     fun read(context: Context): String {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        return prefs.getString(KEY_MODE, null) ?: "system"
+        return prefs.getString(KEY_MODE, null) ?: "dark"
     }
 
     /**

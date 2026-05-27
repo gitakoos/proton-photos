@@ -41,6 +41,8 @@ data class SettingsUiState(
     val stripSoftwareInfo: Boolean = false,
     // App lock
     val appLockEnabled: Boolean = false,
+    /** Lock-on-return timeout in minutes. 0 = immediate; common picks: 5 / 10 / 15 / 60. */
+    val appLockTimeoutMinutes: Int = 0,
     // Trash
     val trashedCount: Int = 0,
     // Free-up space: non-null when system delete dialog should be launched

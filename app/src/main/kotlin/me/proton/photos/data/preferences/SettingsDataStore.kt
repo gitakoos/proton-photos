@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
@@ -16,9 +17,19 @@ object SettingsKeys {
     val SYNC_WIFI_ONLY = booleanPreferencesKey("sync_wifi_only")
     /**
      * Periodic-sync interval in minutes. WorkManager's hard floor is 15 minutes, so values
-     * below that get clamped. Default is 15. Common picks: 15, 30, 60, 180, 360, 720, 1440.
+     * below that get clamped. Default is 360 (6h) — the MediaStore ContentObserver fires the
+     * sync within seconds of a new photo arriving, so the periodic schedule only exists as a
+     * safety net for missed events (Doze, observer dropouts, brand-new install with backlog).
+     * Common picks: 15, 30, 60, 180, 360, 720, 1440.
      */
     val SYNC_INTERVAL_MINUTES = androidx.datastore.preferences.core.longPreferencesKey("sync_interval_minutes")
+    /**
+     * App-lock timeout in minutes — how long the app can be in the background before re-locking
+     * on resume. 0 = lock immediately (the legacy v1.0.0-beta behavior). Larger values mean the
+     * user can quickly switch to another app and back without re-authenticating.
+     * Common picks: 0 (immediate), 1, 5, 10, 15, 60.
+     */
+    val APP_LOCK_TIMEOUT_MINUTES = intPreferencesKey("app_lock_timeout_minutes")
     val AUTO_FREE_UP = booleanPreferencesKey("auto_free_up")
     val FREE_UP_INTERVAL = stringPreferencesKey("free_up_interval")
     val FREE_UP_WIFI_ONLY = booleanPreferencesKey("free_up_wifi_only")
@@ -73,6 +84,8 @@ object SettingsKeys {
 
     // App lock — biometric/device credential lock for the entire app
     val APP_LOCK_ENABLED = booleanPreferencesKey("app_lock_enabled")
+
+    val MANAGE_MEDIA_PROMPTED = booleanPreferencesKey("manage_media_prompted")
 
     // Favorites — stores URIs (local) or linkIds (cloud) of favorited photos
     val FAVORITE_IDS = stringSetPreferencesKey("favorite_ids")

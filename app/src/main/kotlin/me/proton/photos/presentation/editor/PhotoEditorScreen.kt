@@ -1,5 +1,7 @@
 package me.proton.photos.presentation.editor
 
+import me.proton.photos.R
+
 import android.graphics.Bitmap
 import android.graphics.PointF
 import androidx.compose.foundation.Canvas
@@ -62,6 +64,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size as GSize
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
@@ -93,6 +97,7 @@ import kotlin.math.min
 private enum class Tool(val label: String, val icon: ImageVector) {
     Adjust("Adjust", Icons.Default.Tune),
     Filter("Filter", Icons.Default.AutoFixHigh),
+    Crop("Crop", Icons.Default.Crop),
     Redact("Redact", Icons.Default.Brush),
     Rotate("Rotate", Icons.AutoMirrored.Filled.RotateRight),
 }
@@ -126,14 +131,44 @@ fun PhotoEditorScreen(
         Unit
     }
 
-    // Navigate away after a successful save.
+    // System consent dialog for overwriting foreign MediaStore URIs.
+    val writePermissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.StartIntentSenderForResult(),
+    ) { result ->
+        if (result.resultCode == android.app.Activity.RESULT_OK) vm.onWritePermissionGranted()
+        else vm.onWritePermissionDenied()
+    }
+    androidx.compose.runtime.LaunchedEffect(state.pendingWriteIntent) {
+        val pi = state.pendingWriteIntent ?: return@LaunchedEffect
+        writePermissionLauncher.launch(
+            androidx.activity.result.IntentSenderRequest.Builder(pi.intentSender).build()
+        )
+    }
+
+    // Navigate away after a successful save. SuccessAsCopy gets a toast so the user knows
+    // the original wasn't replaced — without it the user would think Overwrite "did nothing"
+    // because the photo on screen (the original) looks the same after navigating back.
+    val saveContext = androidx.compose.ui.platform.LocalContext.current
     remember(state.saveResult) {
-        if (state.saveResult is SaveResult.Success) {
-            vm.consumeSaveResult()
-            onSaved()
+        when (state.saveResult) {
+            is SaveResult.Success -> {
+                vm.consumeSaveResult()
+                onSaved()
+            }
+            is SaveResult.SuccessAsCopy -> {
+                android.widget.Toast.makeText(
+                    saveContext,
+                    saveContext.getString(R.string.editor_saved_as_copy_toast),
+                    android.widget.Toast.LENGTH_LONG,
+                ).show()
+                vm.consumeSaveResult()
+                onSaved()
+            }
+            else -> { /* Failed / null — let the existing Failed-message UI render */ }
         }
         Unit
     }
+
 
     Column(Modifier.fillMaxSize().background(Bg0).statusBarsPadding()) {
         TopBar(
@@ -187,6 +222,7 @@ fun PhotoEditorScreen(
                 when (activeTool) {
                     Tool.Adjust -> AdjustPanel(state, vm)
                     Tool.Filter -> FilterPanel(state, vm)
+                    Tool.Crop   -> CropPanel(state, vm)
                     Tool.Redact -> RedactPanel(state, vm)
                     Tool.Rotate -> RotatePanel(vm)
                 }
@@ -481,20 +517,36 @@ private fun fitRect(bmpW: Float, bmpH: Float, boxW: Float, boxH: Float): FitRect
 @Composable
 private fun AdjustPanel(state: EditorUiState, vm: PhotoEditorViewModel) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        SliderRow("Brightness", state.adjustments.brightness) { vm.updateBrightness(it) }
-        SliderRow("Contrast", state.adjustments.contrast) { vm.updateContrast(it) }
-        SliderRow("Saturation", state.adjustments.saturation) { vm.updateSaturation(it) }
+        SliderRow("Brightness", state.adjustments.brightness, onChange = { vm.updateBrightness(it) }, onChangeFinished = { vm.finalizeAdjustments() })
+        SliderRow("Contrast", state.adjustments.contrast, onChange = { vm.updateContrast(it) }, onChangeFinished = { vm.finalizeAdjustments() })
+        SliderRow("Saturation", state.adjustments.saturation, onChange = { vm.updateSaturation(it) }, onChangeFinished = { vm.finalizeAdjustments() })
     }
 }
 
 @Composable
 private fun FilterPanel(state: EditorUiState, vm: PhotoEditorViewModel) {
     val original = state.originalBitmap
+    // The chip thumbnails can pull from a downsampled copy so a 12MP photo doesn't have to
+    // re-decode at full resolution six times in a LazyRow. Cached on the bitmap reference so
+    // a new photo invalidates it automatically.
+    val thumb = remember(original) {
+        original?.let {
+            val maxEdge = 160f
+            val scale = (maxEdge / maxOf(it.width, it.height)).coerceAtMost(1f)
+            if (scale >= 1f) it
+            else Bitmap.createScaledBitmap(
+                it,
+                (it.width * scale).toInt().coerceAtLeast(1),
+                (it.height * scale).toInt().coerceAtLeast(1),
+                true,
+            )
+        }
+    }
     LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         items(FilterPreset.entries.toList()) { filter ->
             FilterThumb(
                 filter = filter,
-                source = original,
+                source = thumb,
                 selected = state.adjustments.filter == filter,
                 onClick = { vm.selectFilter(filter) },
             )
@@ -558,11 +610,76 @@ private fun RotatePanel(vm: PhotoEditorViewModel) {
     }
 }
 
+private enum class CropAspect(val label: String, val ratio: Float?) {
+    Original("Original", null),
+    OneToOne("1:1", 1f),
+    FourThree("4:3", 4f / 3f),
+    ThreeFour("3:4", 3f / 4f),
+    SixteenNine("16:9", 16f / 9f),
+    NineSixteen("9:16", 9f / 16f),
+}
+
+private fun centeredCrop(srcW: Int, srcH: Int, aspect: Float): android.graphics.Rect {
+    val srcRatio = srcW.toFloat() / srcH
+    return if (srcRatio > aspect) {
+        val newW = (srcH * aspect).toInt().coerceAtLeast(1)
+        val xOffset = (srcW - newW) / 2
+        android.graphics.Rect(xOffset, 0, xOffset + newW, srcH)
+    } else {
+        val newH = (srcW / aspect).toInt().coerceAtLeast(1)
+        val yOffset = (srcH - newH) / 2
+        android.graphics.Rect(0, yOffset, srcW, yOffset + newH)
+    }
+}
+
+@Composable
+private fun CropPanel(state: EditorUiState, vm: PhotoEditorViewModel) {
+    val orig = state.originalBitmap ?: return
+    val current = state.adjustments.cropRect
+    val selected = CropAspect.entries.firstOrNull { aspect ->
+        if (aspect.ratio == null) current == null
+        else current != null && current == centeredCrop(orig.width, orig.height, aspect.ratio)
+    } ?: CropAspect.Original
+
+    LazyRow(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        items(CropAspect.entries.toList()) { aspect ->
+            val isSelected = aspect == selected
+            Box(
+                modifier = Modifier
+                    .height(40.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(if (isSelected) Accent.copy(alpha = 0.22f) else PanelChip)
+                    .clickable {
+                        if (aspect.ratio == null) vm.applyCrop(null)
+                        else vm.applyCrop(centeredCrop(orig.width, orig.height, aspect.ratio))
+                    }
+                    .padding(horizontal = 14.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    aspect.label,
+                    color = if (isSelected) Accent else FgPrimary,
+                    fontSize = 13.sp,
+                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                )
+            }
+        }
+    }
+}
+
 // ─── Reusable components ────────────────────────────────────────────────────
 
 /** Clean custom slider: 4dp track, 18dp thumb, no Material stop indicator. */
 @Composable
-private fun SliderRow(label: String, value: Int, onChange: (Int) -> Unit) {
+private fun SliderRow(
+    label: String,
+    value: Int,
+    onChange: (Int) -> Unit,
+    onChangeFinished: () -> Unit = {},
+) {
     val density = LocalDensity.current
     val trackHeightPx = with(density) { 4.dp.toPx() }
     val thumbRadiusPx = with(density) { 9.dp.toPx() }
@@ -593,6 +710,8 @@ private fun SliderRow(label: String, value: Int, onChange: (Int) -> Unit) {
                             onChange((pct * 200 - 100).toInt())
                             change.consume()
                         },
+                        onDragEnd = { onChangeFinished() },
+                        onDragCancel = { onChangeFinished() },
                     )
                 }
                 .pointerInput(Unit) {
@@ -600,6 +719,7 @@ private fun SliderRow(label: String, value: Int, onChange: (Int) -> Unit) {
                         onTap = { o ->
                             val pct = (o.x / size.width).coerceIn(0f, 1f)
                             onChange((pct * 200 - 100).toInt())
+                            onChangeFinished()
                         },
                     )
                 },
@@ -648,11 +768,17 @@ private fun FilterThumb(filter: FilterPreset, source: Bitmap?, selected: Boolean
             contentAlignment = Alignment.Center,
         ) {
             if (source != null) {
+                // Apply the filter's ColorMatrix at draw time so the chip previews what
+                // selecting it would do to the photo — instead of showing the unmodified
+                // source under every label. Stays cheap because the source is already a
+                // ~160px thumbnail and Compose runs the matrix on the GPU.
+                val colorFilter = remember(filter) { composeColorFilterFor(filter) }
                 Image(
                     bitmap = source.asImageBitmap(),
                     contentDescription = null,
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Crop,
+                    colorFilter = colorFilter,
                 )
             }
             if (selected) {
@@ -735,4 +861,51 @@ private fun ActionChip(
         Icon(icon, null, tint = if (enabled) FgPrimary else FgDim.copy(alpha = 0.4f), modifier = Modifier.size(18.dp))
         Text(label, color = if (enabled) FgPrimary else FgDim.copy(alpha = 0.4f), fontSize = 13.sp)
     }
+}
+
+/**
+ * Compose-side mirror of [PhotoEditorViewModel.filterMatrix]. The ViewModel matrix is the
+ * authoritative one (used when bitmaps are rendered for save). This duplicate is used only
+ * by filter-chip thumbnails so they can preview the effect via [ColorFilter.colorMatrix]
+ * without driving a bitmap recompute per chip. Keep the rows in sync if the ViewModel
+ * presets change.
+ */
+private fun composeColorFilterFor(filter: FilterPreset): ColorFilter? = when (filter) {
+    FilterPreset.None -> null
+    FilterPreset.BlackWhite -> ColorFilter.colorMatrix(ColorMatrix(floatArrayOf(
+        0.299f, 0.587f, 0.114f, 0f, 0f,
+        0.299f, 0.587f, 0.114f, 0f, 0f,
+        0.299f, 0.587f, 0.114f, 0f, 0f,
+        0f, 0f, 0f, 1f, 0f,
+    )))
+    FilterPreset.Sepia -> ColorFilter.colorMatrix(ColorMatrix(floatArrayOf(
+        0.393f, 0.769f, 0.189f, 0f, 0f,
+        0.349f, 0.686f, 0.168f, 0f, 0f,
+        0.272f, 0.534f, 0.131f, 0f, 0f,
+        0f, 0f, 0f, 1f, 0f,
+    )))
+    FilterPreset.Vintage -> ColorFilter.colorMatrix(ColorMatrix(floatArrayOf(
+        0.9f, 0.1f, 0.1f, 0f, 20f,
+        0.1f, 0.85f, 0.1f, 0f, 10f,
+        0.1f, 0.2f, 0.7f, 0f, 0f,
+        0f, 0f, 0f, 1f, 0f,
+    )))
+    FilterPreset.Vivid -> ColorFilter.colorMatrix(ColorMatrix(floatArrayOf(
+        1.3f, -0.1f, -0.1f, 0f, 0f,
+        -0.1f, 1.3f, -0.1f, 0f, 0f,
+        -0.1f, -0.1f, 1.3f, 0f, 0f,
+        0f, 0f, 0f, 1f, 0f,
+    )))
+    FilterPreset.Cool -> ColorFilter.colorMatrix(ColorMatrix(floatArrayOf(
+        0.9f, 0f, 0.1f, 0f, 0f,
+        0f, 1f, 0f, 0f, 0f,
+        0.1f, 0f, 1.1f, 0f, 10f,
+        0f, 0f, 0f, 1f, 0f,
+    )))
+    FilterPreset.Warm -> ColorFilter.colorMatrix(ColorMatrix(floatArrayOf(
+        1.1f, 0f, 0f, 0f, 10f,
+        0f, 1.0f, 0f, 0f, 5f,
+        0f, 0f, 0.9f, 0f, 0f,
+        0f, 0f, 0f, 1f, 0f,
+    )))
 }

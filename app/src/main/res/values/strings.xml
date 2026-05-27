@@ -38,6 +38,7 @@
     <!-- Photo editor error strings, previously hardcoded Hungarian in PhotoEditorViewModel.
          Surfaced via state.errorMessage on the editor screen. -->
     <string name="editor_error_load_local">Couldn\'t load the image</string>
+    <string name="editor_saved_as_copy_toast">Original is read-only, saved as a copy in Pictures/Proton Photos</string>
     <string name="editor_error_not_signed_in">You\'re not signed in</string>
     <string name="editor_error_download_failed">Couldn\'t download the image</string>
     <string name="editor_error_decode_failed">Couldn\'t decode the image</string>
@@ -148,6 +149,7 @@
     <string name="settings_last_sync">Last sync</string>
     <string name="settings_sync_now">Sync now</string>
     <string name="settings_storage_section">Storage</string>
+    <string name="settings_storage_nav_desc">Drive quota, device space, app cache, recently deleted</string>
     <string name="settings_auto_free_up">Auto free-up space</string>
     <string name="settings_free_up_after">Free up after</string>
     <string name="settings_free_up_wifi_only">Only on Wi‑Fi</string>
@@ -211,6 +213,14 @@
     <string name="settings_strip_software_desc">Strip software, artist and copyright fields</string>
     <string name="settings_app_lock">App Lock</string>
     <string name="settings_app_lock_desc">Require biometric or PIN when opening the app</string>
+    <string name="settings_app_lock_timeout">Lock after</string>
+    <string name="settings_app_lock_timeout_desc">Re-lock the app after this much time in the background</string>
+    <string name="settings_app_lock_timeout_immediate">Immediately</string>
+    <string name="settings_app_lock_timeout_1min">1 minute</string>
+    <string name="settings_app_lock_timeout_5min">5 minutes</string>
+    <string name="settings_app_lock_timeout_10min">10 minutes</string>
+    <string name="settings_app_lock_timeout_15min">15 minutes</string>
+    <string name="settings_app_lock_timeout_1h">1 hour</string>
     <string name="settings_hidden_photos">Hidden Photos</string>
     <string name="settings_hidden_photos_desc">Photos hidden from main gallery, protected by biometrics</string>
     <string name="settings_media_management">Media Management</string>
@@ -327,6 +337,18 @@
     <string name="share_stop_sharing">Stop sharing</string>
     <string name="share_close">Close</string>
 
+    <!-- Shared albums screen -->
+    <string name="shared_pending_invitations">Pending invitations</string>
+    <string name="shared_invited_to_album">invited you to an album</string>
+    <string name="shared_decline">Decline</string>
+    <string name="shared_accept">Accept</string>
+    <string name="shared_empty_with_me_title">Nothing shared with you yet</string>
+    <string name="shared_empty_by_me_title">You haven\'t shared any albums</string>
+    <string name="shared_empty_with_me_body">Albums shared with you will appear here.</string>
+    <string name="shared_empty_by_me_body">Share an album from your Albums tab to see it here.</string>
+    <string name="shared_by_email">by %1$s</string>
+    <string name="shared_photo_count">%1$d photos</string>
+
     <!-- Content filter sheet -->
     <string name="filter_title">Filter</string>
     <string name="filter_type_label">Type</string>
@@ -344,6 +366,16 @@
     <string name="filter_group_month">Month</string>
     <string name="filter_group_year">Year</string>
     <string name="filter_timeline_grouping">Timeline grouping</string>
+
+    <!-- Notification permission rationale -->
+    <string name="notifications_blocked_snackbar">Notifications are off. You won\'t see upload or download progress.</string>
+    <string name="notifications_blocked_open_settings">Settings</string>
+
+    <!-- Search -->
+    <string name="search_title">Search</string>
+    <string name="search_placeholder">Search by filename</string>
+    <string name="search_empty_idle">Type a name to start searching</string>
+    <string name="search_empty_no_results">No matches</string>
 
     <!-- Errors -->
     <string name="error_http_network">Network error. Please check your connection.</string>

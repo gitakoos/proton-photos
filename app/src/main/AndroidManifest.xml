@@ -33,6 +33,9 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.ProtonPhotos"
         android:localeConfig="@xml/locale_config"
+        android:allowNativeHeapPointerTagging="false"
+        android:extractNativeLibs="true"
+        android:largeHeap="true"
         tools:replace="android:theme">
 
         <activity

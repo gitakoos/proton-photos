@@ -186,8 +186,15 @@ fun AlbumDetailScreen(
 
     val coverUrl = coverThumbnailUrl ?: state.photos.firstOrNull()?.thumbnailUrl
     val appColors = AppColors.current
+    val pullRefreshState = androidx.compose.material3.pulltorefresh.rememberPullToRefreshState()
 
     Box(modifier = Modifier.fillMaxSize().background(appColors.bg0)) {
+        androidx.compose.material3.pulltorefresh.PullToRefreshBox(
+            isRefreshing = state.isLoading && state.photos.isNotEmpty(),
+            onRefresh = { viewModel.refresh() },
+            state = pullRefreshState,
+            modifier = Modifier.fillMaxSize(),
+        ) {
         LazyVerticalGrid(
             columns = GridCells.Fixed(3),
             contentPadding = PaddingValues(bottom = 24.dp),
@@ -247,6 +254,7 @@ fun AlbumDetailScreen(
                     )
                 }
             }
+        }
         }
 
         // Fixed back button — floats over the hero image

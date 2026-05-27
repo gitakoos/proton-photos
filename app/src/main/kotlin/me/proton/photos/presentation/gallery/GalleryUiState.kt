@@ -25,6 +25,10 @@ data class GalleryUiState(
     val pendingUploadCount: Int = 0,
     val uploadedCount: Int = 0,
     val timelineGrouping: TimelineGrouping = TimelineGrouping.Month,
+    /** Cloud linkIds whose local twin lives in the Hidden vault. Used by [PhotoCell] to draw
+     *  a crossed-out eye overlay so the user can tell at a glance which cloud photos are
+     *  hidden on this device. Derived from SyncStateRepo rows with [SyncStatus.HIDDEN]. */
+    val hiddenCloudLinkIds: Set<String> = emptySet(),
 ) {
     val storageFraction: Float
         get() = if (cloudMaxBytes > 0L)

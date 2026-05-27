@@ -125,6 +125,15 @@ class PhotoViewerViewModel @Inject constructor(
     val albums: StateFlow<List<Album>> = _albums.asStateFlow()
 
     /**
+     * Cloud-album linkIds that contain the currently-viewed photo. Drives the checkmarks
+     * + remove-on-tap behavior in the "Add to album" picker sheet. Refreshed alongside
+     * [loadAlbums] every time the sheet opens, so a stale value (e.g. user removed the
+     * photo from an album on Drive web) self-corrects on the next open.
+     */
+    private val _currentPhotoAlbumIds = MutableStateFlow<Set<String>>(emptySet())
+    val currentPhotoAlbumIds: StateFlow<Set<String>> = _currentPhotoAlbumIds.asStateFlow()
+
+    /**
      * Names of all on-device albums: auto-discovered MediaStore buckets + user-created
      * manual markers + every album referenced by a virtual-membership entry. Deduplicated
      * and sorted alphabetically for predictable picker order.
@@ -219,6 +228,7 @@ class PhotoViewerViewModel @Inject constructor(
                         cloudLinkIds    = pending.cloudLinkIds,
                         items           = pending.itemsBeingDeleted,
                         freeUpSpace     = pending.freeUpSpace,
+                        hide            = pending.hide,
                     )
                 }
             } else DeletePhotoUseCase.Result.Success
@@ -321,10 +331,13 @@ class PhotoViewerViewModel @Inject constructor(
                 items           = listOf(item),
                 freeUpSpace     = true,    // delete the on-device file
                 deleteFromCloud = false,   // never delete the Drive copy on a hide
+                hide            = true,    // route through createDeleteRequest + HIDDEN status
             )
             when (result) {
-                is DeletePhotoUseCase.Result.NeedsMediaWritePermission ->
+                is DeletePhotoUseCase.Result.NeedsMediaWritePermission -> {
+                    pendingPermissionResult = result
                     _deleteState.value = DeleteState.NeedsPermission(result.pendingIntent)
+                }
                 is DeletePhotoUseCase.Result.Success -> {
                     // Pre-Q: delete succeeded synchronously. Commit the hidden URI now.
                     commitPendingHide()
@@ -530,6 +543,49 @@ class PhotoViewerViewModel @Inject constructor(
             runCatching { cloudRepo.loadAlbums(userId) }
                 .onSuccess { _albums.value = it }
                 .onFailure { e -> _transientError.value = "Could not load albums: ${e.message ?: "unknown error"}" }
+        }
+    }
+
+    /**
+     * Resolves the cloud-album linkIds that contain [item] (a Synced or CloudOnly photo) and
+     * publishes them via [currentPhotoAlbumIds]. The picker sheet observes this state to
+     * draw checkmarks on already-member albums and switch the tap-action to "remove" for
+     * those rows. No-op for LocalOnly items — those have no cloud linkId to look up.
+     */
+    fun loadCurrentPhotoAlbumIds(item: GalleryItem) {
+        viewModelScope.launch {
+            val cloudLinkId = when (item) {
+                is GalleryItem.Synced    -> item.cloud.linkId
+                is GalleryItem.CloudOnly -> item.cloud.linkId
+                is GalleryItem.LocalOnly -> { _currentPhotoAlbumIds.value = emptySet(); return@launch }
+            }
+            val userId = accountManager.getPrimaryUserId().first() ?: return@launch
+            runCatching { cloudRepo.getAlbumIdsByPhoto(userId) }
+                .onSuccess { map -> _currentPhotoAlbumIds.value = map[cloudLinkId].orEmpty() }
+                .onFailure { e -> Log.w("PhotoViewerVM", "loadCurrentPhotoAlbumIds failed: ${e.message}") }
+        }
+    }
+
+    /**
+     * Removes the viewed cloud item from [albumLinkId]. Counterpart to [addToAlbum]: the
+     * picker sheet calls this when the user taps an album row that's already a member.
+     * Refreshes [currentPhotoAlbumIds] on success so the checkmark disappears immediately.
+     */
+    fun removeFromAlbum(albumLinkId: String, item: GalleryItem) {
+        viewModelScope.launch {
+            val cloudLinkId = when (item) {
+                is GalleryItem.Synced    -> item.cloud.linkId
+                is GalleryItem.CloudOnly -> item.cloud.linkId
+                is GalleryItem.LocalOnly -> return@launch
+            }
+            val userId = accountManager.getPrimaryUserId().first() ?: return@launch
+            _isAddingToAlbum.value = true
+            runCatching { cloudRepo.removePhotosFromAlbum(userId, albumLinkId, listOf(cloudLinkId)) }
+                .onSuccess {
+                    _currentPhotoAlbumIds.value = _currentPhotoAlbumIds.value - albumLinkId
+                }
+                .onFailure { e -> _transientError.value = "Remove from album failed: ${e.message ?: "unknown error"}" }
+            _isAddingToAlbum.value = false
         }
     }
 

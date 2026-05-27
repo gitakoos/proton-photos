@@ -13,6 +13,10 @@ import javax.inject.Singleton
 
 private const val TAG = "LinkDetailHelpers"
 private const val BATCH_SIZE = 50
+/** Drive `/drive/volumes/{volumeId}/thumbnails` rejects requests with more than 30 IDs per
+ *  call. The general batchGetLinks endpoint accepts our [BATCH_SIZE] (50), but thumbnail URL
+ *  resolution is throttled tighter server-side, so we chunk it smaller. */
+private const val THUMBNAIL_BATCH_SIZE = 30
 
 /** Pre-fetched thumbnail download coordinates from the batch URL endpoint. */
 data class ThumbnailUrlInfo(val bareUrl: String, val token: String?)
@@ -103,7 +107,12 @@ class LinkDetailHelpers @Inject constructor(
     ): Map<String, ThumbnailUrlInfo> {
         val result = mutableMapOf<String, ThumbnailUrlInfo>()
         val manager = apiProvider.get<DriveApiService>(userId)
-        for (chunk in thumbnailIds.chunked(BATCH_SIZE)) {
+        // Tighter chunk size for the thumbnails endpoint — server returns
+        // "This collection should contain 30 elements or less." for anything larger,
+        // which silently dropped photo thumbnail URL resolution and left the gallery
+        // grid showing placeholder tiles even though album covers (different code path)
+        // worked fine.
+        for (chunk in thumbnailIds.chunked(THUMBNAIL_BATCH_SIZE)) {
             try {
                 shareService.networkSemaphore.withPermit {
                     val response = manager.invoke {

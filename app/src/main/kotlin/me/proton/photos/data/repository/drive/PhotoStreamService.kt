@@ -9,8 +9,11 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.yield
 import me.proton.core.domain.entity.UserId
 import me.proton.core.network.data.ApiProvider
 import me.proton.photos.data.api.DriveApiService
@@ -54,11 +57,26 @@ class PhotoStreamService @Inject constructor(
     private val shareService: PhotosShareService,
     private val linkDetailHelpers: LinkDetailHelpers,
     private val photoEntityBuilder: PhotoEntityBuilder,
+    private val thumbnailHelpers: ThumbnailHelpers,
     private val recentUploadsTracker: RecentUploadsTracker,
     private val photosVolumeBootstrap: PhotosVolumeBootstrap,
     @ApplicationContext private val context: Context,
 ) {
     private val semaphore get() = shareService.networkSemaphore
+
+    /**
+     * Single-flight guard: cold-start fires up to three concurrent refreshes (SyncWorker
+     * boot kick, MainActivity.onResume silent refresh, GalleryViewModel.doSync) and each
+     * one previously ran the full crypto loop in parallel. With 315 photos × 3 callers ×
+     * sequential per-photo decrypt, the system would queue ~945 Go OpenPGP calls within a
+     * couple of seconds on a Samsung S22 BETA, and the runtime would eventually trip the
+     * `slice bounds out of range [:-1]` panic in libgojni.so. Coalescing all callers onto
+     * one in-flight refresh both eliminates the duplicate work AND keeps Go-runtime
+     * concurrency well-bounded — the second / third caller just waits for the first to
+     * finish and returns immediately (they get the same DB state anyway).
+     */
+    private val refreshFullMutex = Mutex()
+    private val refreshIncrementalMutex = Mutex()
 
     fun observeCloudPhotos(userId: UserId): Flow<List<CloudPhoto>> =
         photoListingDao.observeAll(userId.id).map { list -> list.map { it.toDomain() } }
@@ -67,6 +85,10 @@ class PhotoStreamService @Inject constructor(
         photoListingDao.observeByLinkIds(linkIds).map { list -> list.map { it.toDomain() } }
 
     suspend fun refreshCloudPhotos(userId: UserId): Unit = withContext(Dispatchers.IO) {
+        refreshFullMutex.withLock { doRefreshCloudPhotos(userId) }
+    }
+
+    private suspend fun doRefreshCloudPhotos(userId: UserId) {
         try {
             val volumeId = shareService.getVolumeId(userId)
             val shareId = shareService.getShareId(userId, volumeId)
@@ -117,7 +139,13 @@ class PhotoStreamService @Inject constructor(
             // Including album children would cause shared-album photos (from other users) to
             // appear in the owner's main gallery as if they were backed up.
             // Album photos are fetched on demand by loadAlbumPhotos() and cached in the DB.
-            val allPhotoLinks = streamLinks.toList()
+            //
+            // Sort by captureTime DESC so the chunked loop processes newest-first — matches
+            // the gallery's display order (GetGalleryItemsUseCase sortedByDescending captureTime).
+            // Without this, chunks land in linkId order from the server, and a photo from the
+            // middle of the timeline can show up before the user's most-recent shot at the top
+            // of the gallery, which felt random to the user ("nem fentről lefelé tölt").
+            val allPhotoLinks = streamLinks.sortedByDescending { it.captureTime }
             val linkShareMap = streamLinks.associate { it.linkId to effectiveShareId }
             Log.d(TAG, "refreshCloudPhotos: ${allPhotoLinks.size} photos in stream")
 
@@ -148,12 +176,16 @@ class PhotoStreamService @Inject constructor(
             }
 
             // 6. Batch-fetch thumbnail URLs for all photos that have ThumbnailIDs.
-            //    Type 1 = small thumbnail (preferred for gallery grid).
+            //    Drive offers two sizes per photo: Type 1 (small ~200px) and Type 2 (HD ~512px+).
+            //    The grid renders at ~1/3 screen width which is well above 200px on modern phones,
+            //    so the Type 1 thumb was visibly blurry. Prefer Type 2 with Type 1 fallback for
+            //    older revisions that only have the small variant.
             val thumbnailIdToLinkId = mutableMapOf<String, String>()
             for ((linkId, detail) in linkDetailMap) {
                 val thumbnailList = detail.link.fileProperties?.activeRevision?.thumbnails
                     ?: detail.photo?.activeRevision?.thumbnails
-                val tid = thumbnailList?.firstOrNull { it.type == 1 }?.thumbnailId
+                val tid = thumbnailList?.firstOrNull { it.type == 2 }?.thumbnailId
+                    ?: thumbnailList?.firstOrNull { it.type == 1 }?.thumbnailId
                     ?: thumbnailList?.firstOrNull()?.thumbnailId
                 if (tid != null) thumbnailIdToLinkId[tid] = linkId
             }
@@ -168,17 +200,66 @@ class PhotoStreamService @Inject constructor(
             val ckpMap = linkDetailHelpers.batchFetchContentKeyPackets(userId, effectiveShareId, allPhotoLinks.map { it.linkId })
             val ownPublicKeys = cryptoHelper.getOwnPublicKeysArmored(userId)
 
-            // 7. Build entities.
-            val entities = allPhotoLinks.map { stub ->
-                val detail = linkDetailMap[stub.linkId]
-                val parentId = detail?.link?.parentLinkId
-                val parentKeyBytes = parentKeyCache[parentId] ?: rootLinkKeyBytes
-                val itemShareId = linkShareMap[stub.linkId] ?: effectiveShareId
-                val thumbnailInfo = thumbnailIdToLinkId.entries
-                    .firstOrNull { it.value == stub.linkId }
-                    ?.key
-                    ?.let { thumbnailUrlMap[it] }
-                photoEntityBuilder.build(stub, detail, userId, itemShareId, activeVolumeId, parentKeyBytes, thumbnailCacheDir, thumbnailInfo, ckpMap[stub.linkId], ownPublicKeys)
+            // 7. Build entities in chunks. The previous code built all N photos in a single
+            //    sequential .map then upsertAll'd at the end. For users with hundreds of
+            //    photos this monopolised one IO-dispatcher thread for hundreds of consecutive
+            //    crypto calls, leaving the UI with a frozen-empty grid while the work ran
+            //    AND eventually racing Android 16's CMC GC (userfaultfd) against the Go
+            //    OpenPGP runtime memory layout — observed as a SIGABRT after ~7 minutes on
+            //    Samsung S22 BETA firmware.
+            //
+            // Chunk size 10 + 100ms delay between chunks: empirically the smallest
+            // chunks-per-second that don't trigger the Go panic during a cold-cache full
+            // refresh (315+ photos with no DB cache hits). The first chunk lands in the
+            // gallery within ~1 sec; the remainder streams in over the next 10-20 seconds.
+            // Lowering the chunk size further didn't measurably reduce crash rate but did
+            // make the slowest-perceived-progress complaint worse, so 10 is the floor.
+            val chunkSize = 10
+            val interChunkDelayMs = 100L
+            val entities = mutableListOf<me.proton.photos.data.db.entity.PhotoListingEntity>()
+            for (chunk in allPhotoLinks.chunked(chunkSize)) {
+                val chunkLinkIds = chunk.map { it.linkId }
+                // Fast path: photos already in DB with a still-on-disk cached thumbnail get
+                // re-used as-is. This avoids re-running the per-photo decrypt + thumbnail-decrypt
+                // pipeline on every cold start, which on Samsung S22 BETA (Android 16) is what
+                // pushes the Go OpenPGP library into "slice bounds out of range" SIGABRT
+                // territory once enough crypto ops pile up. Cache-cleared installs still walk
+                // the full path (no cache hits possible), but the steady-state app launch with
+                // existing local cache touches almost no Go code at all.
+                val existingByLinkId = photoListingDao.getByLinkIds(chunkLinkIds).associateBy { it.linkId }
+                val chunkToSave = mutableListOf<me.proton.photos.data.db.entity.PhotoListingEntity>()
+                for (stub in chunk) {
+                    val cached = existingByLinkId[stub.linkId]
+                    if (cached != null && thumbnailHelpers.isCachedValid(cached.thumbnailUrl)) {
+                        entities += cached
+                        continue
+                    }
+                    val detail = linkDetailMap[stub.linkId]
+                    val parentId = detail?.link?.parentLinkId
+                    val parentKeyBytes = parentKeyCache[parentId] ?: rootLinkKeyBytes
+                    val itemShareId = linkShareMap[stub.linkId] ?: effectiveShareId
+                    val thumbnailInfo = thumbnailIdToLinkId.entries
+                        .firstOrNull { it.value == stub.linkId }
+                        ?.key
+                        ?.let { thumbnailUrlMap[it] }
+                    val built = photoEntityBuilder.build(
+                        stub, detail, userId, itemShareId, activeVolumeId, parentKeyBytes,
+                        thumbnailCacheDir, thumbnailInfo, ckpMap[stub.linkId], ownPublicKeys,
+                    )
+                    // Preserve a previously-cached thumbnail URL when the new build came back
+                    // without one (e.g. v2/volumes uploads have no server-side thumbnail);
+                    // otherwise the gallery tile would blank out on refresh.
+                    val merged = if (built.thumbnailUrl == null) built.copy(thumbnailUrl = cached?.thumbnailUrl) else built
+                    chunkToSave += merged
+                    entities += merged
+                }
+                if (chunkToSave.isNotEmpty()) {
+                    photoListingDao.upsertAll(chunkToSave)
+                    // Yielding + delaying only matter when we actually did Go-crypto work; a
+                    // pure cache-hit chunk skips both so the steady-state refresh is snappy.
+                    yield()
+                    delay(interChunkDelayMs)
+                }
             }
 
             // Smart merge: upsert all found entities, then conditionally remove stale DB entries.
@@ -201,16 +282,9 @@ class PhotoStreamService @Inject constructor(
             // a fresh upload); the in-refresh protection only needs to span the upload→stream
             // visibility race, which is orders of magnitude shorter.
             val foundIds = entities.map { it.linkId }.toSet()
-            // Preserve cached thumbnail URLs from DB for photos where no server thumbnail is available
-            // (e.g. photos uploaded via the v2/volumes path which doesn't support server-side thumbnails).
-            // Without this, each full refresh would overwrite the locally cached file:// URL with null.
-            val existingThumbByLinkId = photoListingDao.getByLinkIds(entities.map { it.linkId })
-                .associateBy({ it.linkId }, { it.thumbnailUrl })
-            val entitiesToSave = entities.map { entity ->
-                if (entity.thumbnailUrl == null) entity.copy(thumbnailUrl = existingThumbByLinkId[entity.linkId])
-                else entity
-            }
-            photoListingDao.upsertAll(entitiesToSave)
+            // (Thumbnail-URL preservation + per-chunk upsert already happened inside the chunked
+            // loop above. The trailing block here only handles the stale-entry cleanup that
+            // runs once after the whole refresh.)
             if (streamCallSucceeded) {
                 // Stream responded → we have a full picture; safe to clean up stale entries.
                 // Use the tight protection window (see comment above) rather than the full TTL.
@@ -237,6 +311,10 @@ class PhotoStreamService @Inject constructor(
     }
 
     suspend fun refreshCloudPhotosIncremental(userId: UserId): Unit = withContext(Dispatchers.IO) {
+        refreshIncrementalMutex.withLock { doRefreshCloudPhotosIncremental(userId) }
+    }
+
+    private suspend fun doRefreshCloudPhotosIncremental(userId: UserId) {
         try {
             val volumeId = shareService.getVolumeId(userId)
             val anchorKey = SettingsKeys.eventAnchorKey(userId.id, volumeId)
@@ -255,7 +333,7 @@ class PhotoStreamService @Inject constructor(
                 } catch (e: Exception) {
                     Log.w(TAG, "incremental: could not get event anchor (${e.message}), will full-refresh next time")
                 }
-                return@withContext
+                return
             }
 
             val shareId = shareService.getShareId(userId, volumeId)

@@ -47,6 +47,7 @@ import me.proton.photos.presentation.settings.SecuritySettingsScreen
 import me.proton.photos.presentation.settings.SettingsScreen
 import me.proton.photos.presentation.settings.SyncFoldersScreen
 import me.proton.photos.presentation.settings.SyncSettingsScreen
+import me.proton.photos.presentation.search.SearchScreen
 import me.proton.photos.presentation.settings.TrashScreen
 import me.proton.photos.presentation.viewer.PhotoViewerScreen
 import javax.inject.Inject
@@ -55,6 +56,7 @@ sealed class Screen(val route: String) {
     data object Gallery : Screen("gallery")
     data object Settings : Screen("settings")
     data object SyncSettings : Screen("sync_settings")
+    data object StorageSettings : Screen("storage_settings")
     data object PrivacySettings : Screen("privacy_settings")
     data object SecuritySettings : Screen("security_settings")
     data object Viewer : Screen("viewer")
@@ -69,6 +71,7 @@ sealed class Screen(val route: String) {
     data object About : Screen("about")
     data object AppearanceSettings : Screen("appearance_settings")
     data object LanguageSettings : Screen("language_settings")
+    data object Search : Screen("search")
 }
 
 @HiltViewModel
@@ -91,6 +94,11 @@ fun NavGraph(
     var selectedViewerIndex by remember { mutableIntStateOf(0) }
     var selectedAlbum by remember { mutableStateOf<Album?>(null) }
     var selectedLocalAlbum by remember { mutableStateOf<LocalAlbum?>(null) }
+    // When the user taps a Merged album card (a local bucket whose name matches a Drive
+    // album), this holds the matching cloud album's linkId so LocalAlbumDetailScreen can
+    // include CloudOnly photos from the Drive album alongside the local items. Cleared
+    // whenever the user opens a non-merged album so a stale linkId doesn't leak across.
+    var mergedCloudAlbumLinkId by remember { mutableStateOf<String?>(null) }
     // True when the viewer was opened from an album detail (not from the main gallery).
     // Suppresses the per-photo "Save to device" button — the album has its own "Download all".
     var viewerFromAlbum by remember { mutableStateOf(false) }
@@ -144,14 +152,27 @@ fun NavGraph(
                 },
                 onAlbumClick = { album ->
                     selectedAlbum = album
+                    mergedCloudAlbumLinkId = null
                     navController.navigate(Screen.AlbumDetail.route)
                 },
                 onLocalAlbumClick = { album ->
                     selectedLocalAlbum = album
+                    mergedCloudAlbumLinkId = null
+                    navController.navigate(Screen.LocalAlbumDetail.route)
+                },
+                onMergedAlbumClick = { local, cloud ->
+                    // Merged albums (local bucket + Drive album with matching name) route
+                    // through the local-album detail screen because it already speaks
+                    // GalleryItem.LocalOnly/Synced/CloudOnly natively. The cloud linkId is
+                    // passed alongside so the screen merges in the cloud-only entries too.
+                    selectedLocalAlbum = local
+                    selectedAlbum = cloud
+                    mergedCloudAlbumLinkId = cloud.linkId
                     navController.navigate(Screen.LocalAlbumDetail.route)
                 },
                 onSettingsClick = { navController.navigate(Screen.Settings.route) },
                 onHiddenAlbumClick = { navController.navigate(Screen.HiddenAlbum.route) },
+                onSearchClick = { navController.navigate(Screen.Search.route) },
             )
         }
 
@@ -239,6 +260,7 @@ fun NavGraph(
                         navController.navigate(Screen.Viewer.route)
                     },
                     onBack = { navController.popBackStack() },
+                    cloudAlbumLinkId = mergedCloudAlbumLinkId,
                 )
             }
         }
@@ -247,6 +269,7 @@ fun NavGraph(
             SettingsScreen(
                 onBack                    = { navController.popBackStack() },
                 onSyncSettingsClick       = { navController.navigate(Screen.SyncSettings.route) },
+                onStorageClick            = { navController.navigate(Screen.StorageSettings.route) },
                 onPrivacySettingsClick    = { navController.navigate(Screen.PrivacySettings.route) },
                 onSecuritySettingsClick   = { navController.navigate(Screen.SecuritySettings.route) },
                 onRecentlyDeletedClick    = { navController.navigate(Screen.Trash.route) },
@@ -272,6 +295,13 @@ fun NavGraph(
             SyncSettingsScreen(
                 onBack               = { navController.popBackStack() },
                 onBackupFoldersClick = { navController.navigate(Screen.SyncFolders.route) },
+                onRecentlyDeletedClick = { navController.navigate(Screen.Trash.route) },
+            )
+        }
+
+        composable(Screen.StorageSettings.route) {
+            me.proton.photos.presentation.settings.StorageSettingsScreen(
+                onBack                 = { navController.popBackStack() },
                 onRecentlyDeletedClick = { navController.navigate(Screen.Trash.route) },
             )
         }
@@ -308,6 +338,18 @@ fun NavGraph(
 
         composable(Screen.Trash.route) {
             TrashScreen(onBack = { navController.popBackStack() })
+        }
+
+        composable(Screen.Search.route) {
+            SearchScreen(
+                onBack = { navController.popBackStack() },
+                onPhotoClick = { items, index ->
+                    selectedViewerItems = items
+                    selectedViewerIndex = index
+                    viewerFromAlbum = false
+                    navController.navigate(Screen.Viewer.route)
+                },
+            )
         }
     }
 }

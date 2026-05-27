@@ -386,7 +386,18 @@ class PhotosShareService @Inject constructor(
      * is encrypted to the ROOT LINK key, NOT the share key.
      */
     suspend fun getRootLinkKeyBytes(userId: UserId): ByteArray? {
-        cachedRootLinkKeyBytes?.let { Log.d(TAG, "getRootLinkKeyBytes: cache hit"); return it }
+        cachedRootLinkKeyBytes?.let {
+            Log.d(TAG, "getRootLinkKeyBytes: cache hit")
+            // The root NodeHashKey may have failed to populate on the first fetch (e.g., the
+            // batch endpoint returned the link without a Folder DTO on fresh login). Without
+            // this, downstream callers like renameAlbum see rootNodeHashKey=null and report
+            // "album already exists" because the name hash comparison breaks. Re-attempt the
+            // load on every cache-hit so a missing key on first call self-heals on retry.
+            if (cachedRootNodeHashKeyBytes == null) {
+                ensureRootNodeHashKeyLoaded(userId, it)
+            }
+            return it
+        }
         val shareKeyBytes = getShareKeyBytes(userId)
         if (shareKeyBytes == null) {
             Log.w(TAG, "getRootLinkKeyBytes: shareKey=NULL cachedKey=${cachedPhotosShareKey?.take(30)} cachedPass=${cachedPhotosSharePassphrase?.take(30)}")
@@ -432,6 +443,38 @@ class PhotosShareService @Inject constructor(
         } catch (e: Exception) {
             Log.e(TAG, "getRootLinkKeyBytes failed", e)
             null
+        }
+    }
+
+    /**
+     * Refreshes [cachedRootNodeHashKeyBytes] when it's missing but the root link key is already
+     * decrypted. Used by [getRootLinkKeyBytes] cache-hit path and any caller that needs the
+     * NodeHashKey but might encounter it null on a fresh-login session.
+     *
+     * Why this exists: the initial batchGetLinks response on first-run sometimes omits the
+     * `Folder` DTO (only `Link` is present), so `cachedRootNodeHashKeyBytes` stays null even
+     * though decrypting the root link key succeeded. A subsequent root-only batch fetch
+     * reliably returns the Folder structure. This is idempotent and safe to call any time.
+     */
+    private suspend fun ensureRootNodeHashKeyLoaded(userId: UserId, rootKeyBytes: ByteArray) {
+        if (cachedRootNodeHashKeyBytes != null) return
+        val volumeId = cachedPhotosVolumeId ?: return
+        val rootLinkId = cachedPhotosRootLinkId ?: return
+        try {
+            val manager = apiProvider.get<DriveApiService>(userId)
+            val batchResp = networkSemaphore.withPermit {
+                manager.invoke { batchGetLinks(volumeId, BatchLinksRequest(listOf(rootLinkId))) }.valueOrThrow
+            }
+            val encNodeHashKey = batchResp.links.firstOrNull()?.folder?.nodeHashKey
+            if (encNodeHashKey != null) {
+                cachedRootNodeHashKeyBytes = cryptoContext.pgpCrypto.decryptData(encNodeHashKey, rootKeyBytes)
+                Log.d(TAG, "ensureRootNodeHashKeyLoaded: root NodeHashKey decrypted on retry " +
+                    "(${cachedRootNodeHashKeyBytes?.size} bytes)")
+            } else {
+                Log.w(TAG, "ensureRootNodeHashKeyLoaded: still no Folder.NodeHashKey on retry")
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "ensureRootNodeHashKeyLoaded failed: ${e.message}")
         }
     }
 

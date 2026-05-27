@@ -10,6 +10,8 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.automirrored.filled.VolumeOff
@@ -400,40 +402,11 @@ fun PhotoViewerScreen(
                             if (stateMatchesPage) Text(s.message ?: "Error loading photo", color = ErrorColor, fontSize = 14.sp)
                     }
 
-                    // Download progress overlay — shown while fetching full-res. Includes
-                    // a localized "Downloading X% — Y MB / Z MB" label sourced from the
-                    // ViewModel's debounced (doneBytes, totalBytes) flow.
-                    if (isDownloading) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .background(Color.Black.copy(alpha = 0.35f)),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(12.dp),
-                            ) {
-                                CircularProgressIndicator(color = Color.White, strokeWidth = 3.dp)
-                                val dp = downloadProgress
-                                if (dp != null && dp.totalBytes > 0) {
-                                    val pct = ((dp.doneBytes * 100L) / dp.totalBytes)
-                                        .coerceIn(0L, 100L)
-                                        .toInt()
-                                    Text(
-                                        text = androidx.compose.ui.res.stringResource(
-                                            id = me.proton.photos.R.string.viewer_downloading_progress,
-                                            pct,
-                                            formatBytes(dp.doneBytes),
-                                            formatBytes(dp.totalBytes),
-                                        ),
-                                        color = FgMute,
-                                        fontSize = 13.sp,
-                                    )
-                                }
-                            }
-                        }
-                    }
+                    // (Per user feedback the visible "Downloading X% / N MB" overlay was
+                    // distracting during fast viewer swipes — the thumbnail is already on
+                    // screen, the full-res just silently replaces it once downloadFullResPhoto
+                    // completes. If we ever need to bring back a progress indicator, make it a
+                    // tiny corner spinner instead of a centred backdrop.)
                 }
             }
         }
@@ -631,6 +604,32 @@ fun PhotoViewerScreen(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                // Cloud/device badge — sits to the LEFT of the position counter, with a thin
+                // separator. Mirrors the gallery cell badges so the user can tell at a glance
+                // whether the currently viewed photo is in cloud + on device (green cloud),
+                // cloud-only (white cloud), or device-only (no badge — no point showing
+                // anything since the user is obviously looking at it).
+                when (currentItem) {
+                    is GalleryItem.Synced -> {
+                        Icon(
+                            Icons.Default.Cloud,
+                            contentDescription = "Backed up, also on device",
+                            tint = Color(0xFF30D158),
+                            modifier = Modifier.size(13.dp),
+                        )
+                        Text("·", color = FgMute, fontSize = 13.sp)
+                    }
+                    is GalleryItem.CloudOnly -> {
+                        Icon(
+                            Icons.Default.Cloud,
+                            contentDescription = "Only in Drive",
+                            tint = Color.White,
+                            modifier = Modifier.size(13.dp),
+                        )
+                        Text("·", color = FgMute, fontSize = 13.sp)
+                    }
+                    else -> { /* LocalOnly — no badge */ }
+                }
                 Text(
                     "${pagerState.currentPage + 1} / ${items.size}",
                     color = FgPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium,
@@ -711,15 +710,30 @@ fun PhotoViewerScreen(
     if (showAddToAlbumSheet) {
         val settledItem = items.getOrNull(pagerState.settledPage)
         val localAlbumNames by viewModel.localAlbumNames.collectAsStateWithLifecycle()
+        val currentPhotoAlbumIds by viewModel.currentPhotoAlbumIds.collectAsStateWithLifecycle()
         val hasLocal = settledItem is GalleryItem.LocalOnly || settledItem is GalleryItem.Synced
         val hasCloud = settledItem is GalleryItem.Synced || settledItem is GalleryItem.CloudOnly
+        // Refresh membership for the current photo every time the sheet opens — fast on cache
+        // hit (5-min TTL in AlbumService) and self-heals if the user removed the photo from an
+        // album on Drive web between sheet opens.
+        LaunchedEffect(showAddToAlbumSheet, settledItem) {
+            if (settledItem != null && hasCloud) viewModel.loadCurrentPhotoAlbumIds(settledItem)
+        }
         AddToAlbumSheet(
             sheetState = addToAlbumSheetState,
             cloudAlbums = if (hasCloud) albums else emptyList(),
             localAlbumNames = if (hasLocal) localAlbumNames else emptyList(),
+            currentPhotoAlbumIds = currentPhotoAlbumIds,
             onDismiss = { showAddToAlbumSheet = false },
             onCloudAlbumPicked = { albumLinkId ->
-                if (settledItem != null) viewModel.addToAlbum(albumLinkId, settledItem)
+                if (settledItem != null) {
+                    // Tap-to-remove when the photo is already in this album, otherwise add.
+                    if (albumLinkId in currentPhotoAlbumIds) {
+                        viewModel.removeFromAlbum(albumLinkId, settledItem)
+                    } else {
+                        viewModel.addToAlbum(albumLinkId, settledItem)
+                    }
+                }
                 showAddToAlbumSheet = false
             },
             onLocalAlbumPicked = { albumName ->
@@ -1614,6 +1628,7 @@ private fun AddToAlbumSheet(
     sheetState: androidx.compose.material3.SheetState,
     cloudAlbums: List<Album>,
     localAlbumNames: List<String>,
+    currentPhotoAlbumIds: Set<String> = emptySet(),
     onDismiss: () -> Unit,
     onCloudAlbumPicked: (String) -> Unit,
     onLocalAlbumPicked: (String) -> Unit,
@@ -1656,6 +1671,7 @@ private fun AddToAlbumSheet(
                     modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
                 )
                 cloudAlbums.forEach { album ->
+                    val isMember = album.linkId in currentPhotoAlbumIds
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1681,9 +1697,32 @@ private fun AddToAlbumSheet(
                                     .background(Bg0, RoundedCornerShape(8.dp)),
                             )
                         }
-                        Column {
+                        Column(modifier = Modifier.weight(1f)) {
                             Text(album.name, color = FgPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium)
-                            Text("${album.photoCount} photos", color = FgMute, fontSize = 12.sp)
+                            Text(
+                                if (isMember) "Tap to remove from album"
+                                else "${album.photoCount} photos",
+                                color = if (isMember) Accent else FgMute,
+                                fontSize = 12.sp,
+                            )
+                        }
+                        // Member indicator: filled accent-coloured check tile on the trailing
+                        // edge of the row. Doubles as the "tap removes" affordance because the
+                        // whole row's onClick handles both add + remove based on this state.
+                        if (isMember) {
+                            Box(
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .background(Accent, RoundedCornerShape(14.dp)),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(
+                                    Icons.Default.Check,
+                                    contentDescription = "Photo is in this album",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                            }
                         }
                     }
                     HorizontalDivider(color = Line2, thickness = 0.5.dp,

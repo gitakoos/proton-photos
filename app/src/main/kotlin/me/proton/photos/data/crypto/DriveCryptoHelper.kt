@@ -73,15 +73,24 @@ class DriveCryptoHelper @Inject constructor(
     // ─── Decryption (download) ────────────────────────────────────────────────
 
     /**
-     * Returns the primary address's PUBLIC keys (armored) — used as verification keys
-     * when we know the signer is the current user (e.g. anything WE uploaded).
+     * Returns the PUBLIC keys (armored) of EVERY enabled user address. Used as verification
+     * keys when we know the signer is the current user (anything WE uploaded). The previous
+     * version returned only the primary address's keys — which produced confusing
+     * "VERIFY_FAIL nodePassphrase / name" warnings AND empty display names whenever an
+     * upload had been signed by a non-primary address (aliases, multi-address accounts,
+     * users who later changed primary). decryptAndVerifyData falls back to an unverified
+     * decrypt on signature failure, but that fallback can itself fail in edge cases, leaving
+     * the gallery showing blank album / photo names until the user touched the album.
+     * Aggregating all addresses' public keys removes the false negative.
      */
     suspend fun getOwnPublicKeysArmored(userId: UserId): List<String> {
         val addresses = userAddressRepository.getAddresses(userId, false)
-        val primary = addresses.filter { it.enabled && it.keys.isNotEmpty() }.minByOrNull { it.order }
-            ?: return emptyList()
-        return primary.keys.mapNotNull { addrKey ->
-            runCatching { cryptoContext.pgpCrypto.getPublicKey(addrKey.privateKey.key) }.getOrNull()
+            .filter { it.enabled && it.keys.isNotEmpty() }
+        if (addresses.isEmpty()) return emptyList()
+        return addresses.flatMap { address ->
+            address.keys.mapNotNull { addrKey ->
+                runCatching { cryptoContext.pgpCrypto.getPublicKey(addrKey.privateKey.key) }.getOrNull()
+            }
         }
     }
 
@@ -143,17 +152,42 @@ class DriveCryptoHelper @Inject constructor(
     ): ByteArray {
         shareKeyCache[userId.id]?.let { return it }
         val addresses = userAddressRepository.getAddresses(userId, false)
-        // Use primary address (lowest order = highest priority).
-        val address = addresses.filter { it.enabled && it.keys.isNotEmpty() }.minByOrNull { it.order }
-            ?: error("No active address for userId=${userId.id}")
-        val passphraseBytes: ByteArray = address.useKeys(cryptoContext) {
-            decryptData(sharePassphraseArmored)
+            .filter { it.enabled && it.keys.isNotEmpty() }
+            .sortedBy { it.order }
+        if (addresses.isEmpty()) error("No active address for userId=${userId.id}")
+
+        // Try every active address in order. The share's passphrase is encrypted to ONE of
+        // the user's addresses (usually the one that owned the share at create time), and
+        // that isn't always the primary — accounts with aliases, multi-address users, or
+        // users who later changed their primary address all hit "Cannot decrypt message with
+        // provided Key list" if we only try the primary.
+        //
+        // CRITICAL: the WHOLE address attempt (decrypt + unlock) goes inside one runCatching.
+        // An earlier version only wrapped the decryptData call — if a non-matching address
+        // happened to return non-error bytes (rare, but observed with PGP-armored payloads
+        // that decrypt under multiple keys producing nonsense), the bytes were passed to
+        // unlock(), which DID throw, and we never fell through to the next address. The
+        // wrong "decrypted" passphrase never reached the cache, but every refresh from cold
+        // start would hit the same dead address first and fail before trying the right one.
+        var lastError: Throwable? = null
+        for (address in addresses) {
+            val attempt = runCatching {
+                val passphraseBytes = address.useKeys(cryptoContext) {
+                    decryptData(sharePassphraseArmored)
+                }
+                val unlockedKey = cryptoContext.pgpCrypto.unlock(shareKeyArmored, passphraseBytes)
+                val keyBytes = unlockedKey.value.copyOf()
+                unlockedKey.close()
+                keyBytes
+            }
+            if (attempt.isSuccess) {
+                val keyBytes = attempt.getOrThrow()
+                shareKeyCache[userId.id] = keyBytes
+                return keyBytes
+            }
+            lastError = attempt.exceptionOrNull()
         }
-        val unlockedKey = cryptoContext.pgpCrypto.unlock(shareKeyArmored, passphraseBytes)
-        val keyBytes = unlockedKey.value.copyOf()
-        unlockedKey.close()
-        shareKeyCache[userId.id] = keyBytes
-        return keyBytes
+        throw lastError ?: error("Share passphrase did not match any address key")
     }
 
     fun decryptNodeKey(
@@ -161,6 +195,13 @@ class DriveCryptoHelper @Inject constructor(
         nodePassphraseArmored: String,
         parentKeyBytes: ByteArray,
     ): ByteArray {
+        // Empty/blank PGP armor strings are NOT just garbage input — they make the underlying
+        // Go OpenPGP library panic with "runtime error: slice bounds out of range [:-1]"
+        // (it strips a trailing newline from a 0-length string). The panic aborts the whole
+        // process via SIGABRT and Kotlin's try/catch can't recover from it. Fail fast in
+        // Kotlin so a JobCancellationException replaces the SIGABRT.
+        require(nodeKeyArmored.isNotBlank()) { "decryptNodeKey: nodeKeyArmored is blank" }
+        require(nodePassphraseArmored.isNotBlank()) { "decryptNodeKey: nodePassphraseArmored is blank" }
         val nodePassphraseBytes = cryptoContext.pgpCrypto.decryptData(nodePassphraseArmored, parentKeyBytes)
         val unlockedKey = cryptoContext.pgpCrypto.unlock(nodeKeyArmored, nodePassphraseBytes)
         val keyBytes = unlockedKey.value.copyOf()
@@ -168,26 +209,39 @@ class DriveCryptoHelper @Inject constructor(
         return keyBytes
     }
 
-    fun decryptLinkName(encryptedNameArmored: String, nodeKeyBytes: ByteArray): String? = try {
-        // Names uploaded by the web/mobile client are encrypted+signed binary packets.
-        // decryptData works for both binary (encryptAndSignData) and text (encryptText) modes.
-        val bytes = cryptoContext.pgpCrypto.decryptData(encryptedNameArmored, nodeKeyBytes)
-        String(bytes, Charsets.UTF_8)
-    } catch (e: Exception) {
-        // Fallback: legacy text-mode messages
-        try { cryptoContext.pgpCrypto.decryptText(encryptedNameArmored, nodeKeyBytes) }
-        catch (e2: Exception) { Log.w(TAG, "decryptLinkName failed: ${e2.message}"); null }
+    fun decryptLinkName(encryptedNameArmored: String, nodeKeyBytes: ByteArray): String? {
+        if (encryptedNameArmored.isBlank()) return null
+        return try {
+            // Names uploaded by the web/mobile client are encrypted+signed binary packets.
+            // decryptData works for both binary (encryptAndSignData) and text (encryptText) modes.
+            val bytes = cryptoContext.pgpCrypto.decryptData(encryptedNameArmored, nodeKeyBytes)
+            String(bytes, Charsets.UTF_8)
+        } catch (e: Exception) {
+            // Fallback: legacy text-mode messages
+            try { cryptoContext.pgpCrypto.decryptText(encryptedNameArmored, nodeKeyBytes) }
+            catch (e2: Exception) { Log.w(TAG, "decryptLinkName failed: ${e2.message}"); null }
+        }
     }
 
-    fun decryptSessionKey(contentKeyPacketBase64: String, nodeKeyBytes: ByteArray): SessionKey? = try {
-        val keyPacketBytes = Base64.decode(contentKeyPacketBase64, Base64.DEFAULT)
-        cryptoContext.pgpCrypto.decryptSessionKey(keyPacketBytes, nodeKeyBytes)
-    } catch (e: Exception) {
-        Log.w(TAG, "decryptSessionKey failed: ${e.message}")
-        null
+    fun decryptSessionKey(contentKeyPacketBase64: String, nodeKeyBytes: ByteArray): SessionKey? {
+        if (contentKeyPacketBase64.isBlank()) return null
+        return try {
+            val keyPacketBytes = Base64.decode(contentKeyPacketBase64, Base64.DEFAULT)
+            if (keyPacketBytes.isEmpty()) return null
+            cryptoContext.pgpCrypto.decryptSessionKey(keyPacketBytes, nodeKeyBytes)
+        } catch (e: Exception) {
+            Log.w(TAG, "decryptSessionKey failed: ${e.message}")
+            null
+        }
     }
 
     fun decryptFileToDestination(sessionKey: SessionKey, encryptedFile: File, destFile: File): File {
+        // Same rationale as decryptNodeKey's require()s — empty/missing bytes make the Go
+        // OpenPGP library panic with "slice bounds out of range [:-1]" and abort the entire
+        // process via SIGABRT, bypassing Kotlin's try/catch. Validate in Kotlin first.
+        require(encryptedFile.exists() && encryptedFile.length() > 0) {
+            "decryptFileToDestination: encryptedFile is empty or missing"
+        }
         val result = cryptoContext.pgpCrypto.decryptFile(encryptedFile, destFile, sessionKey)
         return result.file
     }
@@ -207,6 +261,11 @@ class DriveCryptoHelper @Inject constructor(
      *   4. decryptData(dataPacket, sessionKey) → plaintext bytes
      */
     fun decryptBinaryPgpWithNodeKey(data: ByteArray, nodeKeyBytes: ByteArray): ByteArray? {
+        // Empty / too-short input is rejected here before reaching Go. A 0-byte buffer made
+        // the GoPGP library panic with "slice bounds out of range [:-1]" while parsing the
+        // armor header, killing the whole process with SIGABRT. Minimum length is the
+        // smallest PGP message we'd see in practice (a few dozen bytes).
+        if (data.size < 16) return null
         return try {
             // Use getArmored() for proper ASCII-armor including CRC24 checksum, then
             // decrypt via the standard decryptData(armored, keyBytes) path — the same
@@ -519,22 +578,39 @@ class DriveCryptoHelper @Inject constructor(
         )
     }
 
-    /** Decrypts an external share's key without touching the internal cache. */
+    /**
+     * Decrypts an external share's key without touching the internal cache.
+     *
+     * Tries every active address in primary-first order — same rationale as
+     * [getOrDecryptShareKey]: the share's passphrase may be encrypted to any of the user's
+     * addresses (especially for accounts with aliases or address-history), and assuming
+     * primary-only produces the same "Cannot decrypt with provided Key list" failure mode
+     * we hit on 2FA + multi-address accounts.
+     */
     suspend fun decryptExternalShareKey(
         userId: UserId,
         shareKeyArmored: String,
         sharePassphraseArmored: String,
     ): ByteArray {
         val addresses = userAddressRepository.getAddresses(userId, false)
-        val address = addresses.filter { it.enabled && it.keys.isNotEmpty() }.minByOrNull { it.order }
-            ?: error("No active address for userId=${userId.id}")
-        val passphraseBytes: ByteArray = address.useKeys(cryptoContext) {
-            decryptData(sharePassphraseArmored)
+            .filter { it.enabled && it.keys.isNotEmpty() }
+            .sortedBy { it.order }
+        if (addresses.isEmpty()) error("No active address for userId=${userId.id}")
+        var lastError: Throwable? = null
+        for (address in addresses) {
+            val attempt = runCatching {
+                address.useKeys(cryptoContext) { decryptData(sharePassphraseArmored) }
+            }
+            if (attempt.isSuccess) {
+                val passphraseBytes = attempt.getOrThrow()
+                val unlockedKey = cryptoContext.pgpCrypto.unlock(shareKeyArmored, passphraseBytes)
+                val keyBytes = unlockedKey.value.copyOf()
+                unlockedKey.close()
+                return keyBytes
+            }
+            lastError = attempt.exceptionOrNull()
         }
-        val unlockedKey = cryptoContext.pgpCrypto.unlock(shareKeyArmored, passphraseBytes)
-        val keyBytes = unlockedKey.value.copyOf()
-        unlockedKey.close()
-        return keyBytes
+        throw lastError ?: error("External share passphrase did not match any address key")
     }
 
     /** Wipes the cached share key bytes for [userId] before dropping the map entry, so heap

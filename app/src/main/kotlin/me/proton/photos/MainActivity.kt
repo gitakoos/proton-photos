@@ -25,10 +25,22 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.work.WorkManager
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import me.proton.core.accountmanager.domain.AccountManager
+import me.proton.core.accountmanager.presentation.observe
+import me.proton.core.accountmanager.presentation.onAccountCreateAddressFailed
+import me.proton.core.accountmanager.presentation.onAccountCreateAddressNeeded
+import me.proton.core.accountmanager.presentation.onAccountDisabled
+import me.proton.core.accountmanager.presentation.onAccountTwoPassModeFailed
+import me.proton.core.accountmanager.presentation.onAccountTwoPassModeNeeded
+import me.proton.core.accountmanager.presentation.onSessionForceLogout
+import me.proton.core.accountmanager.presentation.onSessionSecondFactorFailed
+import me.proton.core.accountmanager.presentation.onSessionSecondFactorNeeded
+import me.proton.core.accountmanager.presentation.onUserAddressKeyCheckFailed
+import me.proton.core.accountmanager.presentation.onUserKeyCheckFailed
 import me.proton.core.auth.presentation.AuthOrchestrator
 import me.proton.photos.data.api.FORCE_UPDATE_REQUIRED
 import me.proton.photos.data.preferences.SettingsKeys
@@ -55,7 +67,16 @@ class MainActivity : AppCompatActivity() {
 
     private var isLocked by mutableStateOf(false)
     private var lockEnabled = false
-    private var wentToBackground = false
+    /** Wall-clock timestamp of the last ON_STOP (real backgrounding). Compared against the
+     *  user-configured timeout (read from DataStore inside the lifecycle check) to decide
+     *  whether enough time has elapsed to re-lock the app. */
+    private var lastBackgroundMs = 0L
+    /** Timestamp of the last successful unlock. Used to gate the re-lock check below: the
+     *  Android BiometricPrompt internally cycles the host activity through ON_STOP / ON_RESTART
+     *  on success, which used to re-fire the lock guard and lock the app right after the user
+     *  unlocked. A short grace window after [onUnlocked] suppresses that re-entry. */
+    private var lastUnlockMs = 0L
+    private val unlockGraceMs = 2000L
 
     /** Foreground-resume guard: silent refresh fires only when this much time has passed since
      *  the last successful sync. Mirrors the threshold the user sees as "fresh enough". */
@@ -66,11 +87,42 @@ class MainActivity : AppCompatActivity() {
         authOrchestrator.register(this)
         enableEdgeToEdge()
 
+        // ProtonCore account-state handler. Without this, accounts with 2FA or two-pass mode
+        // enabled get stuck after entering the password: the LoginActivity closes (because
+        // first-factor auth succeeded), the AccountManager transitions to SessionSecondFactorNeeded
+        // / AccountTwoPassModeNeeded, but nothing observes those states and the user is left
+        // staring at the sign-in screen with no way forward. Wiring the observers here triggers
+        // the corresponding workflows (which open the right ProtonCore activity).
+        accountManager.observe(this.lifecycle, Lifecycle.State.CREATED)
+            .onAccountTwoPassModeNeeded { authOrchestrator.startTwoPassModeWorkflow(it) }
+            .onAccountTwoPassModeFailed {
+                lifecycleScope.launch { accountManager.disableAccount(it.userId) }
+            }
+            .onAccountCreateAddressNeeded { authOrchestrator.startChooseAddressWorkflow(it) }
+            .onAccountCreateAddressFailed {
+                lifecycleScope.launch { accountManager.disableAccount(it.userId) }
+            }
+            .onSessionSecondFactorNeeded { authOrchestrator.startSecondFactorWorkflow(it) }
+            .onSessionSecondFactorFailed {
+                lifecycleScope.launch { accountManager.disableAccount(it.userId) }
+            }
+            .onSessionForceLogout {
+                lifecycleScope.launch { accountManager.disableAccount(it.userId) }
+            }
+            .onAccountDisabled { /* NavGraph already routes to login when isLoggedIn = false */ }
+            .onUserKeyCheckFailed { /* corrupt user key — best to just disable and re-login */ }
+            .onUserAddressKeyCheckFailed { /* same */ }
+
         lifecycleScope.launch {
             val prefs = settingsDataStore.data.first()
             val autoSync = prefs[SettingsKeys.AUTO_SYNC] != false
             val wifiOnly = prefs[SettingsKeys.SYNC_WIFI_ONLY] != false
-            val intervalMinutes = prefs[SettingsKeys.SYNC_INTERVAL_MINUTES] ?: 15L
+            // Default to a 6-hour periodic interval — the ContentObserver in
+            // LocalMediaRepositoryImpl fires the sync within seconds of a new photo arriving,
+            // so the periodic schedule is purely a safety net for events the observer might
+            // miss (Doze, OEM throttling, fresh-install backlog). 15 minutes was overkill and
+            // burned battery for almost no real upload work.
+            val intervalMinutes = prefs[SettingsKeys.SYNC_INTERVAL_MINUTES] ?: 360L
             if (autoSync) {
                 SyncWorker.schedule(workManager, wifiOnly, intervalMinutes)
                 // Don't wait 15 minutes for the first periodic fire — kick off a OneTime run
@@ -81,21 +133,60 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // Observe lock setting changes
+        // Observe lock setting changes. The DataStore-backed flow re-emits on every preference
+        // write (e.g. LAST_SYNC_MS bumps every sync), so without distinctUntilChanged this
+        // collector would re-assert isLocked=true on every sync tick — that was the user-visible
+        // "lock keeps popping up over and over even after I unlock" symptom.
+        //
+        // Track previous value so a user-driven OFF→ON toggle in Settings re-locks immediately,
+        // but a same-value emission (the spurious one we're guarding against) does nothing.
+        var sawFirstEmission = false
+        var previousEnabled = false
         lifecycleScope.launch {
-            appLockManager.isLockEnabled.collect { enabled ->
+            appLockManager.isLockEnabled.distinctUntilChanged().collect { enabled ->
                 lockEnabled = enabled
-                if (enabled && savedInstanceState == null) isLocked = true
+                if (!sawFirstEmission) {
+                    // Initial state on cold start: lock if enabled and there's no saved state.
+                    if (enabled && savedInstanceState == null) isLocked = true
+                } else if (enabled && !previousEnabled) {
+                    // User just turned the lock ON from Settings — apply immediately.
+                    isLocked = true
+                }
+                previousEnabled = enabled
+                sawFirstEmission = true
             }
         }
 
-        // Lock the app when it comes back from background
+        // Re-lock on foreground when the user has been backgrounded longer than the configured
+        // timeout. The lifecycle re-enters STARTED on every resume; the check itself is cheap
+        // (a couple of Long comparisons + one DataStore read) so it's fine to run on every
+        // STARTED entry.
+        //
+        // We suspend-read the timeout INSIDE the block instead of caching it in a field. The
+        // cached approach raced against the DataStore-backed flow: if the STARTED block fired
+        // before the flow's initial emission, lockTimeoutMs was still 0 (the field default),
+        // and a "Lock after 5 minutes" preference would behave as "Lock immediately". Reading
+        // the current value at check time eliminates the race.
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
-                if (wentToBackground && lockEnabled) {
+                val timeoutMs = appLockManager.lockTimeoutMinutes.first().toLong() * 60_000L
+                val now = System.currentTimeMillis()
+                val sinceUnlock = now - lastUnlockMs
+                val sinceBackground = if (lastBackgroundMs == 0L) 0L else now - lastBackgroundMs
+                // Conditions to re-lock:
+                //   - lock feature on at all
+                //   - the activity actually was backgrounded since the last unlock (lastBackgroundMs != 0)
+                //   - background duration >= the user-configured timeout
+                //   - not inside the post-unlock biometric-prompt grace window
+                if (lockEnabled
+                    && lastBackgroundMs != 0L
+                    && sinceBackground >= timeoutMs
+                    && sinceUnlock > unlockGraceMs
+                ) {
                     isLocked = true
                 }
-                wentToBackground = false
+                // Always clear the background marker on STARTED entry — fresh resume cycle.
+                lastBackgroundMs = 0L
             }
         }
 
@@ -108,11 +199,11 @@ class MainActivity : AppCompatActivity() {
                         ?: when (prefs[SettingsKeys.DARK_MODE]) {
                             true  -> "dark"
                             false -> "light"
-                            null  -> "system"
+                            null  -> "dark"  // first-launch default — matches ThemePrefsBoot
                         }
                 }
             }
-            val themeKey by themeKeyFlow.collectAsState(initial = "system")
+            val themeKey by themeKeyFlow.collectAsState(initial = "dark")
             val themeMode = ThemeMode.fromKey(themeKey)
             val systemDark = isSystemInDarkTheme()
             val useDark = when (themeMode) {
@@ -141,7 +232,10 @@ class MainActivity : AppCompatActivity() {
 
                 when {
                     forceUpdate -> ForceUpdateDialog()
-                    isLocked -> AppLockScreen(onUnlocked = { isLocked = false })
+                    isLocked -> AppLockScreen(onUnlocked = {
+                        lastUnlockMs = System.currentTimeMillis()
+                        isLocked = false
+                    })
                     else -> NavGraph(
                         onStartLogin = { authOrchestrator.startLoginWorkflow(null) },
                     )
@@ -173,7 +267,12 @@ class MainActivity : AppCompatActivity() {
 
     override fun onStop() {
         super.onStop()
-        wentToBackground = true
+        // Record the wall-clock time the activity stopped being visible — the re-lock check
+        // in repeatOnLifecycle compares this against the configured timeout. We deliberately
+        // use System.currentTimeMillis (not elapsedRealtime) so a clock change while the app
+        // is in the background still does the sensible thing — clock-forward locks the app,
+        // clock-backward leaves it unlocked (the right safe default).
+        lastBackgroundMs = System.currentTimeMillis()
     }
 
     override fun onResume() {

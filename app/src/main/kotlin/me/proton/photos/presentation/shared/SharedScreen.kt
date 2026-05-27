@@ -45,6 +45,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -53,6 +54,7 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
+import me.proton.photos.R
 import me.proton.photos.domain.entity.Album
 import me.proton.photos.domain.entity.PendingInvitation
 import me.proton.photos.presentation.gallery.SharedFilter
@@ -204,7 +206,7 @@ private fun PendingInvitationsSection(
                 modifier = Modifier.size(18.dp),
             )
             Text(
-                "Pending invitations",
+                stringResource(R.string.shared_pending_invitations),
                 color = FgPrimary,
                 fontSize = 14.sp,
                 fontWeight = FontWeight.SemiBold,
@@ -244,13 +246,13 @@ private fun PendingInvitationsSection(
                         overflow = TextOverflow.Ellipsis,
                     )
                     Text(
-                        "invited you to an album",
+                        stringResource(R.string.shared_invited_to_album),
                         color = FgMute,
                         fontSize = 12.sp,
                     )
                 }
                 TextButton(onClick = { onDecline(inv.invitationId) }) {
-                    Text("Decline", color = ErrorColor, fontSize = 13.sp)
+                    Text(stringResource(R.string.shared_decline), color = ErrorColor, fontSize = 13.sp)
                 }
                 Spacer(Modifier.size(4.dp))
                 Box(
@@ -262,7 +264,7 @@ private fun PendingInvitationsSection(
                         .padding(horizontal = 14.dp),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text("Accept", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    Text(stringResource(R.string.shared_accept), color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                 }
             }
         }
@@ -289,7 +291,10 @@ private fun EmptySharedState(
             )
             Spacer(Modifier.height(16.dp))
             Text(
-                text = if (filter == SharedFilter.SharedWithMe) "Nothing shared with you yet" else "You haven't shared any albums",
+                text = if (filter == SharedFilter.SharedWithMe)
+                    stringResource(R.string.shared_empty_with_me_title)
+                else
+                    stringResource(R.string.shared_empty_by_me_title),
                 color = FgPrimary,
                 fontSize = 17.sp,
                 fontWeight = FontWeight.SemiBold,
@@ -297,9 +302,9 @@ private fun EmptySharedState(
             Spacer(modifier = Modifier.height(8.dp))
             Text(
                 text = if (filter == SharedFilter.SharedWithMe)
-                    "Albums shared with you will appear here."
+                    stringResource(R.string.shared_empty_with_me_body)
                 else
-                    "Share an album from your Albums tab to see it here.",
+                    stringResource(R.string.shared_empty_by_me_body),
                 color = FgDim,
                 fontSize = 14.sp,
             )
@@ -319,7 +324,8 @@ private fun SharedAlbumCard(album: Album, onClick: () -> Unit) {
         else ->
             me.proton.photos.presentation.albums.AlbumShareBadge.SharedByMe
     }
-    val metaText = album.sharedByEmail?.let { "by $it" } ?: "${album.photoCount} photos"
+    val metaText = album.sharedByEmail?.let { stringResource(R.string.shared_by_email, it) }
+        ?: stringResource(R.string.shared_photo_count, album.photoCount)
     me.proton.photos.presentation.albums.UnifiedAlbumCard(
         coverModel = album.coverThumbnailUrl,
         title      = album.name,

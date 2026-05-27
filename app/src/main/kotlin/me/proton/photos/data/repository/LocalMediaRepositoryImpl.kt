@@ -11,6 +11,7 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.MediaStore
 import androidx.core.content.ContextCompat
+import androidx.datastore.preferences.core.Preferences
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.BufferOverflow
@@ -20,13 +21,18 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.flow.onStart
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import me.proton.photos.data.preferences.SettingsKeys
+import me.proton.photos.data.preferences.settingsDataStore
 import me.proton.photos.domain.entity.LocalMediaItem
 import me.proton.photos.domain.repository.LocalMediaRepository
+import me.proton.photos.worker.SyncWorker
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -48,10 +54,49 @@ class LocalMediaRepositoryImpl @Inject constructor(
         refreshTrigger.tryEmit(Unit)
     }
 
+    /**
+     * Settle-and-kick scheduler for the auto-sync trigger. OneDrive-style: when a new photo
+     * arrives, wait for a short quiet window (no more MediaStore changes), then start the
+     * SyncWorker. This batches camera bursts (10 photos in 2 seconds) into a single sync
+     * run instead of pinging the worker once per file.
+     *
+     * Each onChange resets the pending kick — so the timer only fires after the user stops
+     * adding files for [syncSettleMs] milliseconds. The kick itself is a OneTime enqueue,
+     * which KEEP-coalesces with any in-flight periodic / oneshot worker.
+     */
+    private val syncKickHandler = Handler(Looper.getMainLooper())
+    private val syncSettleMs: Long = 2_000L
+    private val syncKickRunnable = Runnable { performSyncKick() }
+
+    private fun maybeKickSync() {
+        syncKickHandler.removeCallbacks(syncKickRunnable)
+        syncKickHandler.postDelayed(syncKickRunnable, syncSettleMs)
+    }
+
+    private fun performSyncKick() {
+        try {
+            val prefs: Preferences = runBlocking { context.settingsDataStore.data.first() }
+            val autoSync = prefs[SettingsKeys.AUTO_SYNC] != false
+            val wifiOnly = prefs[SettingsKeys.SYNC_WIFI_ONLY] != false
+            val selectedFolders = prefs[SettingsKeys.SYNC_FOLDER_NAMES]
+            if (!autoSync) return
+            if (selectedFolders.isNullOrEmpty()) return
+            SyncWorker.runNow(context, wifiOnly)
+        } catch (_: Throwable) {
+            // Losing one kick is harmless — the next MediaStore change or the periodic
+            // fallback will pick the photos up.
+        }
+    }
+
     override fun observeLocalMedia(): Flow<List<LocalMediaItem>> = callbackFlow {
         val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
             override fun onChange(selfChange: Boolean) {
                 trySend(Unit)
+                // New camera photos otherwise sit until the next periodic SyncWorker fire
+                // (up to 15 minutes by default). Kicking here closes the gap to "a few
+                // seconds after the picture is saved", subject to the upload-pipeline's
+                // own folder-selection guards.
+                maybeKickSync()
             }
         }
 
@@ -184,7 +229,12 @@ class LocalMediaRepositoryImpl @Inject constructor(
             MediaStore.MediaColumns.DURATION,
         )
 
-        val selection = "${MediaStore.MediaColumns.IS_PENDING} = 0"
+        // IS_PENDING <= 1 (not == 0) so freshly-captured camera photos still mid-finalization
+        // appear in the query result. The MediaStore observer fires once when the file is
+        // created (IS_PENDING=1) and again when the camera app commits (IS_PENDING=0); the
+        // earlier appearance lets the sync pipeline have the SyncState row ready by the time
+        // the commit lands, instead of waiting a full periodic cycle after.
+        val selection = "${MediaStore.MediaColumns.IS_PENDING} <= 1"
         val sortOrder = "${MediaStore.MediaColumns.DATE_TAKEN} DESC, ${MediaStore.MediaColumns.DATE_ADDED} DESC"
 
         for (uri in listOf(

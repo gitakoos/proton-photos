@@ -29,6 +29,14 @@ interface DrivePhotoRepository {
      * know the album membership upfront. 5-min cache; safe to call on every download.
      */
     suspend fun getAlbumMemberships(userId: UserId): Map<String, String>
+
+    /**
+     * Returns `photoLinkId → Set<albumLinkId>` across every album the user owns. Photos
+     * absent from the map are not in any album. Used by the PhotoViewer's "Add to album"
+     * sheet to show which albums the current photo is already in so the user can tap one
+     * to REMOVE the photo instead of adding it again.
+     */
+    suspend fun getAlbumIdsByPhoto(userId: UserId): Map<String, Set<String>>
     suspend fun createDriveAlbum(userId: UserId, name: String): Album
     suspend fun loadAlbumChildren(userId: UserId, albumLinkId: String): List<AlbumChild>
     suspend fun loadAlbumPhotos(userId: UserId, albumLinkId: String, volumeId: String? = null): List<CloudPhoto>

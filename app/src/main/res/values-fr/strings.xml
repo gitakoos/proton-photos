@@ -109,6 +109,7 @@
     <string name="settings_last_sync">Dernière synchronisation</string>
     <string name="settings_sync_now">Synchroniser maintenant</string>
     <string name="settings_storage_section">Stockage</string>
+    <string name="settings_storage_nav_desc">Quota Drive, appareil, cache, corbeille</string>
     <string name="settings_auto_free_up">Libération automatique d\'espace</string>
     <string name="settings_free_up_after">Libérer après</string>
     <string name="settings_free_up_wifi_only">Seulement en Wi-Fi</string>
@@ -172,6 +173,14 @@
     <string name="settings_strip_software_desc">Supprimer les champs logiciel, auteur et copyright</string>
     <string name="settings_app_lock">Verrouillage de l\'app</string>
     <string name="settings_app_lock_desc">Demander la biométrie ou un code à l\'ouverture</string>
+    <string name="settings_app_lock_timeout">Verrouiller après</string>
+    <string name="settings_app_lock_timeout_desc">Reverrouiller l\'app après ce temps en arrière-plan</string>
+    <string name="settings_app_lock_timeout_immediate">Immédiatement</string>
+    <string name="settings_app_lock_timeout_1min">1 minute</string>
+    <string name="settings_app_lock_timeout_5min">5 minutes</string>
+    <string name="settings_app_lock_timeout_10min">10 minutes</string>
+    <string name="settings_app_lock_timeout_15min">15 minutes</string>
+    <string name="settings_app_lock_timeout_1h">1 heure</string>
     <string name="settings_hidden_photos">Photos masquées</string>
     <string name="settings_hidden_photos_desc">Photos masquées de la galerie principale, protégées par biométrie</string>
     <string name="settings_media_management">Gestion des médias</string>
@@ -191,6 +200,7 @@
     <string name="selection_videos_only">%d vidéos</string>
     <string name="selection_mixed">%1$d photos, %2$d vidéos</string>
     <string name="editor_error_load_local">Impossible de charger l\'image</string>
+    <string name="editor_saved_as_copy_toast">L\'original est en lecture seule, enregistré comme copie dans Pictures/Proton Photos</string>
     <string name="editor_error_not_signed_in">Vous n\'êtes pas connecté</string>
     <string name="editor_error_download_failed">Impossible de télécharger l\'image</string>
     <string name="editor_error_decode_failed">Impossible de décoder l\'image</string>
@@ -320,6 +330,28 @@
     <string name="filter_group_month">Mois</string>
     <string name="filter_group_year">Année</string>
     <string name="filter_timeline_grouping">Regroupement chronologique</string>
+
+    <!-- Albums partagés -->
+    <string name="shared_pending_invitations">Invitations en attente</string>
+    <string name="shared_invited_to_album">vous a invité dans un album</string>
+    <string name="shared_decline">Refuser</string>
+    <string name="shared_accept">Accepter</string>
+    <string name="shared_empty_with_me_title">Rien partagé avec vous pour l\'instant</string>
+    <string name="shared_empty_by_me_title">Vous n\'avez partagé aucun album</string>
+    <string name="shared_empty_with_me_body">Les albums partagés avec vous apparaîtront ici.</string>
+    <string name="shared_empty_by_me_body">Partage un album depuis l\'onglet Albums pour le voir ici.</string>
+    <string name="shared_by_email">par %1$s</string>
+    <string name="shared_photo_count">%1$d photos</string>
+
+    <!-- Permission notifications -->
+    <string name="notifications_blocked_snackbar">Notifications désactivées. Tu ne verras pas la progression des transferts.</string>
+    <string name="notifications_blocked_open_settings">Paramètres</string>
+
+    <!-- Recherche -->
+    <string name="search_title">Rechercher</string>
+    <string name="search_placeholder">Rechercher par nom de fichier</string>
+    <string name="search_empty_idle">Saisis un nom pour rechercher</string>
+    <string name="search_empty_no_results">Aucun résultat</string>
 
     <!-- Errors -->
     <string name="error_http_network">Erreur réseau. Vérifiez votre connexion.</string>

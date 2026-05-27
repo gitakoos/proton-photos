@@ -165,6 +165,12 @@ class AlbumDetailViewModel @Inject constructor(
         }
     }
 
+    fun refresh() {
+        val s = _uiState.value
+        if (s.albumLinkId.isBlank()) return
+        load(s.albumLinkId, s.albumName, s.shareId, s.sharedByEmail, s.volumeId)
+    }
+
     fun loadInvitations() {
         val shareId = _uiState.value.shareId ?: return
         if (_uiState.value.isSharedWithMe) return

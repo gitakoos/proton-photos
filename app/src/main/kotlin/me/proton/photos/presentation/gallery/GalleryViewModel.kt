@@ -74,6 +74,27 @@ class GalleryViewModel @Inject constructor(
         observeFolderSettings()
         loadTimelineGrouping()
         observeFavorites()
+        observeBackgroundUploadProgress()
+    }
+
+    /**
+     * Mirror [UploadPendingUseCase.progress] into [GalleryUiState.isSyncing] so the avatar
+     * spinner reflects ALL upload activity — not just the foreground [doSync] calls. Without
+     * this, a SyncWorker tick that started from the MediaStore ContentObserver (camera fired)
+     * uploads silently and the user has no in-app indicator that anything is happening.
+     *
+     * Idle frames clear the flag; per-file Uploading/Queued frames set it.
+     */
+    private fun observeBackgroundUploadProgress() {
+        viewModelScope.launch {
+            upload.progress.collect { evt ->
+                val syncing = evt.status == me.proton.photos.domain.usecase.UploadStatus.Uploading ||
+                    evt.status == me.proton.photos.domain.usecase.UploadStatus.Queued
+                if (_uiState.value.isSyncing != syncing) {
+                    _uiState.update { it.copy(isSyncing = syncing) }
+                }
+            }
+        }
     }
 
     private fun observeFavorites() {
@@ -166,12 +187,28 @@ class GalleryViewModel @Inject constructor(
                 it[SettingsKeys.HIDDEN_PHOTO_URIS] ?: emptySet()
             }
 
-            getGalleryItems.invoke(userId)
-                .combine(hiddenUrisFlow) { items, hiddenUris -> items to hiddenUris }
+            // SyncStateRepo rows with HIDDEN status carry the cloud linkId of a photo whose
+            // local twin lives in the Hidden vault. The gallery shows those cloud photos but
+            // marks them with a crossed-out eye overlay so the user can see which cloud
+            // entries are "hidden on this device" without opening the Hidden screen.
+            val hiddenCloudLinkIdsFlow = syncStateRepo.observeAll(userId).map { states ->
+                states.asSequence()
+                    .filter { it.status == SyncStatus.HIDDEN && it.cloudFileId != null }
+                    .map { it.cloudFileId!! }
+                    .toSet()
+            }
+
+            combine(
+                getGalleryItems.invoke(userId),
+                hiddenUrisFlow,
+                hiddenCloudLinkIdsFlow,
+            ) { items, hiddenUris, hiddenCloudLinkIds ->
+                Triple(items, hiddenUris, hiddenCloudLinkIds)
+            }
                 .catch { e ->
                     _uiState.update { it.copy(isLoading = false, error = e.message) }
                 }
-                .collect { (allItems, hiddenUris) ->
+                .collect { (allItems, hiddenUris, hiddenCloudLinkIds) ->
                     val items = allItems.filter { item ->
                         val uri = when (item) {
                             is GalleryItem.LocalOnly -> item.local.uri
@@ -187,6 +224,7 @@ class GalleryViewModel @Inject constructor(
                             items = items,
                             filteredItems = applyFilter(applyContentFilter(items, state.contentFilter), state.selectedFilter, state.favoriteIds),
                             pendingUploadCount = pending,
+                            hiddenCloudLinkIds = hiddenCloudLinkIds,
                         )
                     }
                 }
@@ -398,6 +436,7 @@ class GalleryViewModel @Inject constructor(
                         cloudLinkIds    = pending.cloudLinkIds,
                         items           = pending.itemsBeingDeleted,
                         freeUpSpace     = pending.freeUpSpace,
+                        hide            = pending.hide,
                     )
                 }
             } else DeletePhotoUseCase.Result.Success
@@ -471,6 +510,7 @@ class GalleryViewModel @Inject constructor(
                 items           = hideables,
                 freeUpSpace     = true,
                 deleteFromCloud = false,
+                hide            = true,
             )
             when (result) {
                 is DeletePhotoUseCase.Result.Success -> {

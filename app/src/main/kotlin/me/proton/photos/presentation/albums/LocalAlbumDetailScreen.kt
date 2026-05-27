@@ -61,21 +61,27 @@ import me.proton.photos.presentation.theme.FgMute
 import me.proton.photos.presentation.theme.FgPrimary
 import me.proton.photos.presentation.theme.PillBorder
 
-@OptIn(ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class, androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun LocalAlbumDetailScreen(
     localAlbum: LocalAlbum,
     onPhotoClick: (items: List<GalleryItem>, index: Int) -> Unit,
     onBack: () -> Unit,
+    /** When the user opened a Merged album card (local bucket + matching Drive album), this
+     *  is the cloud album's linkId so [LocalAlbumDetailViewModel] can pull in CloudOnly photos
+     *  too. Null for purely local albums — preserves the legacy "local-only" behavior. */
+    cloudAlbumLinkId: String? = null,
     viewModel: LocalAlbumDetailViewModel = hiltViewModel(),
 ) {
-    LaunchedEffect(localAlbum.name) {
-        viewModel.loadAlbum(localAlbum.name)
+    LaunchedEffect(localAlbum.name, cloudAlbumLinkId) {
+        viewModel.loadAlbum(localAlbum.name, cloudAlbumLinkId)
     }
 
     val galleryItems by viewModel.items.collectAsState()
     val selectedUris by viewModel.selectedUris.collectAsState()
+    val isRefreshing by viewModel.isRefreshing.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
+    val pullRefreshState = androidx.compose.material3.pulltorefresh.rememberPullToRefreshState()
 
     // Surface the remove-from-album result so the user knows what happened — bucket members
     // can't be removed and we want to tell them why, not silently no-op.
@@ -97,6 +103,12 @@ fun LocalAlbumDetailScreen(
             .fillMaxSize()
             .background(Bg0),
     ) {
+        androidx.compose.material3.pulltorefresh.PullToRefreshBox(
+            isRefreshing = isRefreshing,
+            onRefresh = { viewModel.refresh() },
+            state = pullRefreshState,
+            modifier = Modifier.fillMaxSize(),
+        ) {
         LazyVerticalGrid(
             columns = GridCells.Fixed(3),
             contentPadding = PaddingValues(
@@ -148,7 +160,6 @@ fun LocalAlbumDetailScreen(
                         is GalleryItem.CloudOnly -> null
                     }
                     val isSelected = itemUri != null && itemUri in selectedUris
-                    val isBacked = item is GalleryItem.Synced
 
                     Box(
                         modifier = Modifier
@@ -176,21 +187,44 @@ fun LocalAlbumDetailScreen(
                             contentScale = ContentScale.Crop,
                             modifier = Modifier.fillMaxSize(),
                         )
-                        if (isBacked && !isSelectionMode) {
-                            Box(
-                                modifier = Modifier
-                                    .align(Alignment.BottomEnd)
-                                    .padding(5.dp)
-                                    .size(20.dp)
-                                    .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(4.dp)),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Icon(
-                                    Icons.Default.Cloud,
-                                    contentDescription = "Backed up",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(12.dp),
-                                )
+                        // Per-cell cloud state badge. Mirrors PhotoCell in GalleryScreen so a
+                        // merged album view tells the user what's where at a glance:
+                        //   Synced    → green cloud (file is here AND on Drive)
+                        //   CloudOnly → white cloud (only in Drive, not on this device)
+                        //   LocalOnly → no badge (just on the device, not backed up)
+                        if (!isSelectionMode) {
+                            when (item) {
+                                is GalleryItem.Synced -> Box(
+                                    modifier = Modifier
+                                        .align(Alignment.BottomEnd)
+                                        .padding(5.dp)
+                                        .size(20.dp)
+                                        .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(4.dp)),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Icon(
+                                        Icons.Default.Cloud,
+                                        contentDescription = "Backed up, also on device",
+                                        tint = Color(0xFF30D158),
+                                        modifier = Modifier.size(12.dp),
+                                    )
+                                }
+                                is GalleryItem.CloudOnly -> Box(
+                                    modifier = Modifier
+                                        .align(Alignment.BottomEnd)
+                                        .padding(5.dp)
+                                        .size(20.dp)
+                                        .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(4.dp)),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Icon(
+                                        Icons.Default.Cloud,
+                                        contentDescription = "Only in Drive",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(12.dp),
+                                    )
+                                }
+                                is GalleryItem.LocalOnly -> { /* no badge */ }
                             }
                         }
                         if (isSelectionMode) {
@@ -215,6 +249,7 @@ fun LocalAlbumDetailScreen(
                     }
                 }
             }
+        }
         }
 
         // Fixed back button — floats over hero image. In selection mode it cancels selection.

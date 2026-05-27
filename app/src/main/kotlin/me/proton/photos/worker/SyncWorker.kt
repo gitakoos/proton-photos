@@ -159,7 +159,9 @@ class SyncWorker @AssistedInject constructor(
             .setProgress(total.coerceAtLeast(1), done.coerceAtMost(total), total <= 0)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
+            // DEFAULT (not LOW) matches the channel importance so the heads-up shows once
+            // on the first emit, then setOnlyAlertOnce keeps the per-file progress quiet.
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .setCategory(NotificationCompat.CATEGORY_PROGRESS)
             .addAction(
                 android.R.drawable.ic_menu_close_clear_cancel,
@@ -196,13 +198,21 @@ class SyncWorker @AssistedInject constructor(
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
             val nm = context.getSystemService(NotificationManager::class.java) ?: return
             if (nm.getNotificationChannel(CHANNEL_ID) != null) return
+            // IMPORTANCE_DEFAULT (not LOW) so the user actually sees the upload notification
+            // pop up in the status bar when an automatic background upload kicks off. LOW
+            // showed only a silent icon and several users reported "the sync isn't working"
+            // when really it was — they just couldn't tell from the UI. DEFAULT still does
+            // NOT play a sound (setShowBadge(false) + we leave defaults), but the heads-up
+            // banner gives a clear "upload started" signal.
             val channel = NotificationChannel(
                 CHANNEL_ID,
                 context.getString(R.string.sync_worker_channel_name),
-                NotificationManager.IMPORTANCE_LOW,
+                NotificationManager.IMPORTANCE_DEFAULT,
             ).apply {
                 description = context.getString(R.string.sync_worker_channel_desc)
                 setShowBadge(false)
+                setSound(null, null)
+                enableVibration(false)
             }
             nm.createNotificationChannel(channel)
         }

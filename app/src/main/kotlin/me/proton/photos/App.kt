@@ -5,9 +5,13 @@ import androidx.appcompat.app.AppCompatDelegate
 import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.Configuration
 import androidx.work.DelegatingWorkerFactory
+import android.graphics.Bitmap
 import coil.ImageLoader
 import coil.ImageLoaderFactory
 import coil.decode.VideoFrameDecoder
+import coil.disk.DiskCache
+import coil.memory.MemoryCache
+import coil.request.CachePolicy
 import dagger.hilt.android.HiltAndroidApp
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -64,11 +68,19 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
      */
     private fun applyStoredThemeMode() {
         val cached = ThemePrefsBoot.read(this)
+        // The AppCompatDelegate night-mode setting governs ProtonCore's Compose-based login
+        // screens (LoginTwoStepActivity etc.) because they read Configuration.uiMode via
+        // `isSystemInDarkTheme()`. We force NIGHT_YES for every value except an explicit
+        // "light" preference — the app's color palette is built for dark surfaces, and the
+        // previous "system" default made the login flow appear light on light-system phones
+        // (S22, default Samsung). The Compose-side ProtonPhotosTheme in MainActivity still
+        // respects the user's full system/dark/light choice for the in-app surfaces, so a
+        // user who explicitly picks "system" after first login still gets a system-following
+        // main app — the login flow just doesn't bounce between modes.
         AppCompatDelegate.setDefaultNightMode(
             when (cached) {
-                "dark"  -> AppCompatDelegate.MODE_NIGHT_YES
                 "light" -> AppCompatDelegate.MODE_NIGHT_NO
-                else    -> AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM
+                else    -> AppCompatDelegate.MODE_NIGHT_YES
             }
         )
         // Refresh the mirror from DataStore in the background — handles two cases:
@@ -93,13 +105,25 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
         }
     }
 
-    /**
-     * Custom Coil ImageLoader registered through [ImageLoaderFactory] (Coil 2 discovers it via
-     * the Application). Adds [VideoFrameDecoder] so video URIs render a poster frame in the
-     * gallery grid and filmstrip just like image URIs do.
-     */
+    // Coil ImageLoader. VideoFrameDecoder for video posters. Memory cache capped at 12%
+    // (largeHeap default of 25% balloons past 400 MB and made scrolling laggy), RGB_565 to
+    // halve per-bitmap memory for opaque JPEG thumbnails.
     override fun newImageLoader(): ImageLoader = ImageLoader.Builder(this)
         .components { add(VideoFrameDecoder.Factory()) }
         .crossfade(true)
+        .bitmapConfig(Bitmap.Config.RGB_565)
+        .memoryCache {
+            MemoryCache.Builder(this)
+                .maxSizePercent(0.12)
+                .build()
+        }
+        .diskCache {
+            DiskCache.Builder()
+                .directory(cacheDir.resolve("coil_cache"))
+                .maxSizeBytes(256L * 1024 * 1024)
+                .build()
+        }
+        .memoryCachePolicy(CachePolicy.ENABLED)
+        .diskCachePolicy(CachePolicy.ENABLED)
         .build()
 }

@@ -102,6 +102,17 @@ class ReconcileSyncStateUseCase @Inject constructor(
 
         for (local in localItems) {
             val existingSync = syncStateRepo.getByUri(local.uri)
+            // HIDDEN rows belong to a photo the user moved into the Hidden vault — the local
+            // MediaStore copy is gone (or about to be), so reconcile must NOT generate a new
+            // SyncState entry that would overwrite the HIDDEN status with LOCAL_ONLY/SYNCED.
+            // This is the cleanup that previously caused "hidden photo reappears as cloud-only
+            // after a refresh" — without skipping, the next reconcile after a hide flips the
+            // row back to a regular cloud entry and loses the hidden marker.
+            if (existingSync?.status == SyncStatus.HIDDEN) {
+                done++
+                if (done % 50 == 0) emit(SyncProgress(total, done, true))
+                continue
+            }
             val byId = existingSync?.cloudFileId?.let { cloudByLinkId[it] }
             val byHash = existingSync?.localHash?.takeIf { it.isNotEmpty() }?.let { cloudByHash[it] }
             // captureTime in CloudPhoto is Unix seconds; LocalMediaItem.dateTaken is ms.
@@ -172,6 +183,8 @@ class ReconcileSyncStateUseCase @Inject constructor(
         // Clean up stale LOCAL_ONLY entries for items that are no longer in scope
         // (e.g. the user unchecked their folder/album from the backup selection).
         // Without this, removed-folder items stay LOCAL_ONLY forever and keep being uploaded.
+        // HIDDEN rows are excluded by the status filter — they never have a corresponding
+        // MediaStore file anyway, so they look "out of scope" by every other heuristic.
         val inScopeUris = newStates.map { it.localUri }.toSet()
         val staleLocalOnly = syncStateRepo.observeAll(userId).first()
             .filter { it.status == SyncStatus.LOCAL_ONLY && it.localUri !in inScopeUris }

@@ -64,6 +64,19 @@ class AlbumService @Inject constructor(
     private val membershipCacheTtlMs = 5 * 60 * 1000L
 
     /**
+     * Full multi-album membership lookup: `photoLinkId → Set<albumLinkId>`. Distinct from
+     * [membershipCache] which only keeps the first album per photo (used for download
+     * folder routing). This map is what the PhotoViewer's "Add to album" sheet needs so it
+     * can show a checkmark next to every album the current photo is already in — and let
+     * the user tap one of them to remove the photo from that album.
+     *
+     * Same 5-minute TTL + invalidation as [membershipCache] (both are dropped together by
+     * [invalidateMembershipCache]). Both maps are built in the same loop in
+     * [getAlbumMemberships], so adding the second map costs nothing extra at refresh time.
+     */
+    @Volatile private var fullMembershipCache: Map<String, Set<String>>? = null
+
+    /**
      * Returns a `photoLinkId → albumName` lookup spanning every album the user owns.
      * For photos that live in multiple albums, the alphabetically first album wins
      * (stable, deterministic, no surprises for users sorting by name in their gallery).
@@ -72,39 +85,59 @@ class AlbumService @Inject constructor(
      * never poisons the whole map.
      */
     suspend fun getAlbumMemberships(userId: UserId): Map<String, String> = withContext(Dispatchers.IO) {
+        ensureMembershipCachesFresh(userId)
+        membershipCache ?: emptyMap()
+    }
+
+    /**
+     * Returns `photoLinkId → Set<albumLinkId>` covering every album the user owns. Used by
+     * the photo viewer's "Add to album" sheet to mark which albums the current photo is
+     * already in (so the same tap can REMOVE it instead of just adding it again).
+     */
+    suspend fun getAlbumIdsByPhoto(userId: UserId): Map<String, Set<String>> = withContext(Dispatchers.IO) {
+        ensureMembershipCachesFresh(userId)
+        fullMembershipCache ?: emptyMap()
+    }
+
+    /**
+     * Builds both [membershipCache] (name lookup, alphabetically-first wins) and
+     * [fullMembershipCache] (full set of album linkIds) in a single album-walk pass. Both
+     * maps share a 5-minute TTL and a single invalidation entry point.
+     */
+    private suspend fun ensureMembershipCachesFresh(userId: UserId) {
         val now = System.currentTimeMillis()
-        val cached = membershipCache
-        if (cached != null && now - membershipCacheTime < membershipCacheTtlMs) {
-            return@withContext cached
+        if (membershipCache != null && fullMembershipCache != null
+            && now - membershipCacheTime < membershipCacheTtlMs) {
+            return
         }
         val albums = runCatching { loadAlbums(userId) }.getOrElse {
-            Log.w(TAG, "getAlbumMemberships: loadAlbums failed: ${it.message}")
-            return@withContext emptyMap()
+            Log.w(TAG, "membership refresh: loadAlbums failed: ${it.message}")
+            return
         }
-        // Sort alphabetically before walking so putIfAbsent gives us the ABC-first album
-        // for multi-album photos. lowercase() to match what users see in case-insensitive
-        // gallery apps.
-        val sorted = albums.sortedBy { it.name.lowercase() }
-        val result = mutableMapOf<String, String>()
-        for (album in sorted) {
+        val sortedAlbums = albums.sortedBy { it.name.lowercase() }
+        val nameMap = mutableMapOf<String, String>()
+        val idsMap = mutableMapOf<String, MutableSet<String>>()
+        for (album in sortedAlbums) {
             try {
                 val children = loadAlbumChildren(userId, album.linkId)
                 for (child in children) {
-                    result.putIfAbsent(child.linkId, album.name)
+                    nameMap.putIfAbsent(child.linkId, album.name)
+                    idsMap.getOrPut(child.linkId) { mutableSetOf() }.add(album.linkId)
                 }
             } catch (e: Exception) {
-                Log.w(TAG, "getAlbumMemberships: album ${album.linkId} children failed: ${e.message}")
+                Log.w(TAG, "membership refresh: album ${album.linkId} children failed: ${e.message}")
             }
         }
-        membershipCache = result
+        membershipCache = nameMap
+        fullMembershipCache = idsMap.mapValues { it.value.toSet() }
         membershipCacheTime = now
-        Log.d(TAG, "getAlbumMemberships: built ${result.size}-entry map across ${albums.size} albums")
-        result
+        Log.d(TAG, "membership refresh: built ${nameMap.size} name entries, ${idsMap.size} id sets across ${albums.size} albums")
     }
 
-    /** Drops the cached membership map so the next [getAlbumMemberships] re-fetches. */
+    /** Drops both membership caches so the next read re-fetches. */
     fun invalidateMembershipCache() {
         membershipCache = null
+        fullMembershipCache = null
         membershipCacheTime = 0L
     }
 
@@ -149,7 +182,9 @@ class AlbumService @Inject constructor(
                 for ((coverId, detail) in coverDetails) {
                     val tl = detail.link.fileProperties?.activeRevision?.thumbnails
                         ?: detail.photo?.activeRevision?.thumbnails
-                    val tid = tl?.firstOrNull { it.type == 1 }?.thumbnailId
+                    // Prefer Type 2 (HD, ~512px+) over Type 1 (~200px) for sharp album-card covers.
+                    val tid = tl?.firstOrNull { it.type == 2 }?.thumbnailId
+                        ?: tl?.firstOrNull { it.type == 1 }?.thumbnailId
                         ?: tl?.firstOrNull()?.thumbnailId
                     if (tid != null) thumbnailIdToLinkId[tid] = coverId
                 }
@@ -276,11 +311,21 @@ class AlbumService @Inject constructor(
         // Album name encrypted to root link's public key, signed with address key.
         val encryptedName = cryptoHelper.encryptName(name, rootLinkPublicKey, signingKey.unlockedKeyBytes)
 
-        // NodeHashKey: random 32-byte secret encrypted to the album's own public key.
-        // The raw bytes are also used to compute the name Hash (HMAC-SHA256 of plaintext name).
+        // NodeHashKey: a random 32-byte secret encrypted to the album's own public key. The
+        // album's NodeHashKey is what the album's CHILDREN (photos) use to compute their
+        // own name hashes — it is NOT used for the album's own name hash.
         val hashKeyBytes = cryptoContext.pgpCrypto.generateRandomBytes(32)
         val nodeHashKey = cryptoHelper.encryptDataToPgpMessage(hashKeyBytes, albumNodeKey.publicKeyArmored)
-        val nameHash = cryptoHelper.computeNameHash(name, hashKeyBytes)
+        // Album's OWN name hash is computed with the PARENT's (root's) NodeHashKey — albums are
+        // direct children of the root link, so their name hash space lives under root. Previously
+        // computed with hashKeyBytes (the album's own children-key), which produced a hash the
+        // server stored in its hash-space-for-photos-in-this-album, not its hash-space-for-children-
+        // of-root. Renaming such albums then failed with "out of date" because the OriginalHash
+        // we sent (also computed wrong) didn't line up with what the server expected for a root-
+        // child rename.
+        val rootNodeHashKey = shareService.rootNodeHashKeyBytes()
+            ?: error("createDriveAlbum: rootNodeHashKey unavailable")
+        val nameHash = cryptoHelper.computeNameHash(name, rootNodeHashKey)
 
         val manager = apiProvider.get<DriveApiService>(userId)
 
@@ -385,7 +430,9 @@ class AlbumService @Inject constructor(
         for ((linkId, detail) in linkDetailMap) {
             val thumbnailList = detail.link.fileProperties?.activeRevision?.thumbnails
                 ?: detail.photo?.activeRevision?.thumbnails
-            val tid = thumbnailList?.firstOrNull { it.type == 1 }?.thumbnailId
+            // Prefer Type 2 (HD, ~512px+) over Type 1 (~200px) so the album grid is crisp.
+            val tid = thumbnailList?.firstOrNull { it.type == 2 }?.thumbnailId
+                ?: thumbnailList?.firstOrNull { it.type == 1 }?.thumbnailId
                 ?: thumbnailList?.firstOrNull()?.thumbnailId
             if (tid != null) thumbnailIdToLinkId[tid] = linkId
         }
@@ -405,63 +452,73 @@ class AlbumService @Inject constructor(
             Log.w(TAG, "loadAlbumPhotos: removed ${children.size - uniqueChildren.size} duplicate linkIds")
         }
 
-        // Build result list using for-loop so we can call suspend DB functions inside.
+        // Build result in chunks (same pattern as PhotoStreamService.refreshCloudPhotos): batch
+        // the DB lookups, run crypto for misses chunk-by-chunk, persist after each chunk + yield.
+        // For users opening an album of a few hundred photos this drops the user-perceived
+        // "loading…" time from N×crypto-sequential to one chunk's worth (~1s), since the rest
+        // streams in via observePhotosByLinkIds while the user is already looking at the first
+        // tiles. Also makes the work cooperative with the GC, mirroring the fix that stopped
+        // the Android 16 BETA SIGABRT on Samsung BP2A firmware.
+        //
+        // Same chunk-size + delay tuning as PhotoStreamService.refreshCloudPhotos:
+        // 10 photos per chunk + a 100ms breather lets the ART CMC GC run cleanly between
+        // bursts of Go crypto calls.
         val result = mutableListOf<CloudPhoto>()
-        val newEntities = mutableListOf<PhotoListingEntity>()
+        val chunkSize = 10
+        val interChunkDelayMs = 100L
+        for (chunk in uniqueChildren.chunked(chunkSize)) {
+            val chunkLinkIds = chunk.map { it.linkId }
+            // Batch DB read — sequential getByLinkId in the old code was N synchronous SQL
+            // queries (one per album child), which alone added perceptible delay on big albums.
+            val cachedByLinkId = photoListingDao.getByLinkIds(chunkLinkIds).associateBy { it.linkId }
+            val chunkNewEntities = mutableListOf<PhotoListingEntity>()
+            for (child in chunk) {
+                val cached = cachedByLinkId[child.linkId]
+                // Fast path: photo already in DB with a still-on-disk cached thumbnail.
+                if (cached != null && thumbnailHelpers.isCachedValid(cached.thumbnailUrl)) {
+                    result.add(cached.toDomain())
+                    continue
+                }
 
-        for (child in uniqueChildren) {
-            // Fast path: photo already in DB — use it directly, BUT verify the cached thumbnail
-            // file still exists on disk. The thumbnails dir is private cache and the OS can wipe
-            // it; the DB row would still point at a now-missing file:// URI and the album grid
-            // would render empty tiles. If the file is gone, drop the fast path and re-decrypt.
-            val cached = photoListingDao.getByLinkId(child.linkId)
-            if (cached != null && thumbnailHelpers.isCachedValid(cached.thumbnailUrl)) {
-                result.add(cached.toDomain())
-                continue
+                val stub = PhotoLinkDto(
+                    linkId = child.linkId,
+                    captureTime = child.captureTime ?: 0L,
+                )
+                val thumbnailInfo = thumbnailIdToLinkId.entries
+                    .firstOrNull { it.value == child.linkId }
+                    ?.key?.let { thumbnailUrlMap[it] }
+
+                // Photos in albums physically live in the Photos root folder (parentLinkId ==
+                // rootLinkId), so their NodePassphrase is encrypted to the ROOT key — NOT the
+                // album key. The album is just a reference list. Fall back to album key only
+                // for exotic layouts (e.g. shared albums with photos under a different parent).
+                val photoParentLinkId = linkDetailMap[child.linkId]?.link?.parentLinkId
+                val photoParentKeyBytes = when {
+                    rootLinkKeyBytes != null &&
+                        (photoParentLinkId == null || photoParentLinkId == shareService.photosRootLinkId()) ->
+                        rootLinkKeyBytes
+                    else -> albumKeyBytes
+                }
+
+                val entity = photoEntityBuilder.build(
+                    stub, linkDetailMap[child.linkId], userId, shareId,
+                    resolvedVolumeId, photoParentKeyBytes, thumbnailCacheDir,
+                    thumbnailInfo, ckpMap[child.linkId], ownPublicKeys,
+                )
+                chunkNewEntities.add(entity)
+                result.add(entity.toDomain())
             }
-
-            val stub = PhotoLinkDto(
-                linkId = child.linkId,
-                captureTime = child.captureTime ?: 0L,
-            )
-            val thumbnailInfo = thumbnailIdToLinkId.entries
-                .firstOrNull { it.value == child.linkId }
-                ?.key?.let { thumbnailUrlMap[it] }
-
-            // Determine the correct parent key for each photo.
-            // Photos physically live in the Photos root folder (parentLinkId == rootLinkId),
-            // so their NodePassphrase is encrypted to the ROOT LINK key — NOT the album key.
-            // (The album is just a reference list; photos are never moved into the album folder.)
-            // For safety, fall back to the album key if the parentLinkId differs.
-            val photoParentLinkId = linkDetailMap[child.linkId]?.link?.parentLinkId
-            val photoParentKeyBytes = when {
-                rootLinkKeyBytes != null &&
-                    (photoParentLinkId == null || photoParentLinkId == shareService.photosRootLinkId()) ->
-                    rootLinkKeyBytes
-                else -> albumKeyBytes  // fallback for exotic layouts
+            // Persist this chunk so the observePhotosByLinkIds Flow can emit it to the UI
+            // before the next chunk's crypto work begins.
+            if (chunkNewEntities.isNotEmpty()) {
+                try {
+                    photoListingDao.upsertAll(chunkNewEntities)
+                } catch (e: Exception) {
+                    Log.w(TAG, "loadAlbumPhotos: DB upsert failed for chunk: ${e.message}")
+                }
             }
-
-            val entity = photoEntityBuilder.build(
-                stub, linkDetailMap[child.linkId], userId, shareId,
-                resolvedVolumeId, photoParentKeyBytes, thumbnailCacheDir,
-                thumbnailInfo, ckpMap[child.linkId], ownPublicKeys,
-            )
-
-            // Always persist album photo entities in the local DB so future opens are fast
-            // (DB cache hit) and the observePhotosByLinkIds Flow can serve them reactively.
-            newEntities.add(entity)
-
-            result.add(entity.toDomain())
-        }
-
-        // Batch-persist any newly resolved thumbnails.
-        if (newEntities.isNotEmpty()) {
-            try {
-                photoListingDao.upsertAll(newEntities)
-                Log.d(TAG, "loadAlbumPhotos: cached ${newEntities.size} new thumbnail entries in DB")
-            } catch (e: Exception) {
-                Log.w(TAG, "loadAlbumPhotos: DB upsert failed: ${e.message}")
-            }
+            kotlinx.coroutines.yield()
+            kotlinx.coroutines.delay(interChunkDelayMs)
         }
 
         // Sort by captureTime DESC to match the order produced by observeByLinkIds,
@@ -659,32 +716,39 @@ class AlbumService @Inject constructor(
 
         // Parent of every album is the root link. Use the root key for encryption and the
         // root NodeHashKey for hash computation — albums are NOT children of other albums.
+        //
+        // A fresh-login session can land here with the root link key populated but the root
+        // NodeHashKey still null — the batch endpoint sometimes omits the Folder DTO on the
+        // initial fetch. getRootLinkKeyBytes self-heals that on cache hit, so calling it
+        // unconditionally before reading rootNodeHashKey is what makes rename work on the
+        // first try instead of "album already exists" / "NodeHashKey unavailable".
         val rootLinkKeyBytes = shareService.getRootLinkKeyBytes(userId)
             ?: error("renameAlbum: root link key unavailable")
         val rootLinkArmored = shareService.rootLinkArmoredKey()
             ?: error("renameAlbum: root link armored key unavailable")
         val rootPublicKey = cryptoContext.pgpCrypto.getPublicKey(rootLinkArmored)
         val rootNodeHashKey = shareService.rootNodeHashKeyBytes()
-            ?: error("renameAlbum: root NodeHashKey unavailable")
+            ?: error("renameAlbum: root NodeHashKey unavailable after eager refresh")
 
         // Pull the album's current state so we can supply OriginalHash for the server's
-        // optimistic-concurrency check. The server compares OriginalHash to its stored Hash
-        // byte-for-byte; if we recompute the hash locally (decrypt name → HMAC) the result
-        // can differ from the server-stored hash (e.g. names containing combining unicode
-        // can normalise differently across libraries), giving a confusing "out of date"
-        // rejection on the very first rename attempt. Use the server-canonical Hash field
-        // directly and only fall back to a local recompute if the server omitted it.
+        // optimistic-concurrency check.
+        //
+        // Why we recompute locally rather than echoing back the server's `Hash` field:
+        // older app versions (and the buggy createDriveAlbum path before this commit) stored
+        // album name hashes computed with the album's OWN NodeHashKey instead of the root's.
+        // The server's stored Hash for those albums is in a different hash-space — echoing it
+        // straight back makes the server's "is this OriginalHash consistent with the current
+        // root-child" check reject with "out of date". Recomputing OriginalHash locally with
+        // the same rootNodeHashKey we'll use for `newHash` keeps both sides in the same
+        // hash-space. Drive Web's rename works the same way (it never relies on the server-
+        // echoed value).
         val albumDetail = linkDetailHelpers.batchFetchLinkDetails(userId, volumeId, listOf(albumLinkId))[albumLinkId]
             ?: error("renameAlbum: album link not found: $albumLinkId")
-        val originalHash = albumDetail.link.hash ?: run {
-            // Defensive fallback — should not happen in practice; the Drive API always
-            // returns Hash on link-detail responses.
-            val currentEncryptedName = albumDetail.link.name
-                ?: error("renameAlbum: album has no encrypted Name field")
-            val currentPlainName = cryptoHelper.decryptLinkName(currentEncryptedName, rootLinkKeyBytes)
-                ?: error("renameAlbum: failed to decrypt current album name for fallback hash")
-            cryptoHelper.computeNameHash(currentPlainName, rootNodeHashKey)
-        }
+        val currentEncryptedName = albumDetail.link.name
+            ?: error("renameAlbum: album has no encrypted Name field")
+        val currentPlainName = cryptoHelper.decryptLinkName(currentEncryptedName, rootLinkKeyBytes)
+            ?: error("renameAlbum: failed to decrypt current album name")
+        val originalHash = cryptoHelper.computeNameHash(currentPlainName, rootNodeHashKey)
 
         // Encrypt + sign the new name; HMAC for the lookup hash; signing email goes in metadata.
         val signingKey = cryptoHelper.getAddressSigningKey(userId)

@@ -93,6 +93,7 @@ private fun storageColor(fraction: Float): Color = when {
 fun SettingsScreen(
     onBack: () -> Unit,
     onSyncSettingsClick: () -> Unit = {},
+    onStorageClick: () -> Unit = {},
     onPrivacySettingsClick: () -> Unit = {},
     onSecuritySettingsClick: () -> Unit = {},
     onRecentlyDeletedClick: () -> Unit = {},
@@ -263,57 +264,16 @@ fun SettingsScreen(
 
             Spacer(Modifier.height(24.dp))
 
-            // ── Storage (realtime) ────────────────────────────────────────────
-            // Refresh-on-entry so the device-storage and app-cache numbers don't lag behind
-            // an external file delete that happened while we were elsewhere in the app.
-            LaunchedEffect(Unit) { viewModel.refreshLocalStorage() }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                SectionLabel(stringResource(R.string.settings_storage_section))
-                Spacer(Modifier.weight(1f))
-                Box(
-                    modifier = Modifier
-                        .size(24.dp)
-                        .clip(CircleShape)
-                        .clickable { viewModel.refresh() },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Refresh,
-                        contentDescription = stringResource(R.string.settings_storage_refresh),
-                        tint = colors.fgMute,
-                        modifier = Modifier.size(14.dp),
-                    )
-                }
-            }
-            Spacer(Modifier.height(8.dp))
-            SettingsCard {
-                StorageContent(
-                    state = state,
-                    isFreeingUp = state.isFreeingUp,
-                    onFreeUp = { viewModel.freeUpNow() },
-                    onClearCache = { viewModel.clearAppCache() },
-                )
-            }
-
-            Spacer(Modifier.height(24.dp))
-
-            // ── Recently Deleted ──────────────────────────────────────────────
-            SectionLabel(stringResource(R.string.settings_recently_deleted))
-            Spacer(Modifier.height(8.dp))
-            RecentlyDeletedCard(
-                count = state.trashedCount,
-                onClick = onRecentlyDeletedClick,
-            )
-
-            Spacer(Modifier.height(24.dp))
-
             // ── Settings nav rows ─────────────────────────────────────────────
             SectionLabel(stringResource(R.string.settings_section_settings))
             Spacer(Modifier.height(8.dp))
             SettingsCard {
+                NavRow(
+                    label = stringResource(R.string.settings_storage_section),
+                    description = stringResource(R.string.settings_storage_nav_desc),
+                    onClick = onStorageClick,
+                )
+                RowDivider()
                 NavRow(
                     label = stringResource(R.string.settings_privacy_metadata),
                     description = stringResource(R.string.settings_privacy_metadata_desc),
@@ -450,6 +410,70 @@ fun SyncSettingsScreen(
     }
 }
 
+// ── Storage Settings sub-page ─────────────────────────────────────────────────
+
+@Composable
+fun StorageSettingsScreen(
+    onBack: () -> Unit,
+    onRecentlyDeletedClick: () -> Unit = {},
+    viewModel: SettingsViewModel = hiltViewModel(),
+) {
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val colors = AppColors.current
+    val freeUpPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) viewModel.onFreeUpPermissionGranted()
+        else viewModel.clearFreeUpIntent()
+    }
+    LaunchedEffect(state.freeUpPendingIntent) {
+        state.freeUpPendingIntent?.let { pi ->
+            freeUpPermissionLauncher.launch(IntentSenderRequest.Builder(pi.intentSender).build())
+        }
+    }
+    LaunchedEffect(Unit) { viewModel.refreshLocalStorage() }
+
+    SubPageScaffold(title = stringResource(R.string.settings_storage_section), onBack = onBack) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            SectionLabel(stringResource(R.string.settings_storage_section))
+            Spacer(Modifier.weight(1f))
+            Box(
+                modifier = Modifier
+                    .size(24.dp)
+                    .clip(CircleShape)
+                    .clickable { viewModel.refresh() },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Refresh,
+                    contentDescription = stringResource(R.string.settings_storage_refresh),
+                    tint = colors.fgMute,
+                    modifier = Modifier.size(14.dp),
+                )
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        SettingsCard {
+            StorageContent(
+                state = state,
+                isFreeingUp = state.isFreeingUp,
+                onFreeUp = { viewModel.freeUpNow() },
+                onClearCache = { viewModel.clearAppCache() },
+            )
+        }
+        Spacer(Modifier.height(24.dp))
+        SectionLabel(stringResource(R.string.settings_recently_deleted))
+        Spacer(Modifier.height(8.dp))
+        RecentlyDeletedCard(
+            count = state.trashedCount,
+            onClick = onRecentlyDeletedClick,
+        )
+    }
+}
+
 // ── Privacy Settings sub-page ─────────────────────────────────────────────────
 
 @Composable
@@ -524,6 +548,15 @@ fun SecuritySettingsScreen(
                 checked = state.appLockEnabled,
                 onCheckedChange = { viewModel.setAppLockEnabled(it) },
             )
+            if (state.appLockEnabled) {
+                RowDivider()
+                AppLockTimeoutRow(
+                    label = stringResource(R.string.settings_app_lock_timeout),
+                    description = stringResource(R.string.settings_app_lock_timeout_desc),
+                    selectedMinutes = state.appLockTimeoutMinutes,
+                    onSelected = viewModel::setAppLockTimeoutMinutes,
+                )
+            }
             RowDivider()
             NavRow(
                 label = stringResource(R.string.settings_hidden_photos),
@@ -1181,7 +1214,7 @@ internal fun SyncIntervalRow(
         1440L to R.string.settings_sync_interval_24h,
     )
     val selectedLabel = options.firstOrNull { it.first == selectedMinutes }?.second
-        ?: R.string.settings_sync_interval_15min
+        ?: R.string.settings_sync_interval_6h
     Row(
         modifier = Modifier.fillMaxWidth().padding(
             start = if (indented) 28.dp else 16.dp,
@@ -1201,6 +1234,60 @@ internal fun SyncIntervalRow(
                     .background(colors.surfaceWeak)
                     .border(0.5.dp, colors.line2, RoundedCornerShape(8.dp))
                     .clickable(enabled = enabled) { expanded = true }
+                    .padding(horizontal = 10.dp, vertical = 5.dp),
+            )
+            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                options.forEach { (minutes, labelRes) ->
+                    DropdownMenuItem(
+                        text = { Text(stringResource(labelRes), color = colors.fgPrimary) },
+                        onClick = { onSelected(minutes); expanded = false },
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * App-lock timeout picker. 0 = lock immediately on background; non-zero values mean the
+ * lock only kicks in after that many minutes in the background, so a quick app-switch
+ * doesn't re-prompt for biometrics every time.
+ */
+@Composable
+internal fun AppLockTimeoutRow(
+    label: String,
+    description: String? = null,
+    selectedMinutes: Int,
+    onSelected: (Int) -> Unit,
+) {
+    val colors = AppColors.current
+    var expanded by remember { mutableStateOf(false) }
+    val options: List<Pair<Int, Int>> = listOf(
+        0   to R.string.settings_app_lock_timeout_immediate,
+        1   to R.string.settings_app_lock_timeout_1min,
+        5   to R.string.settings_app_lock_timeout_5min,
+        10  to R.string.settings_app_lock_timeout_10min,
+        15  to R.string.settings_app_lock_timeout_15min,
+        60  to R.string.settings_app_lock_timeout_1h,
+    )
+    val selectedLabel = options.firstOrNull { it.first == selectedMinutes }?.second
+        ?: R.string.settings_app_lock_timeout_immediate
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 11.dp, bottom = 11.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(label, color = colors.fgPrimary, fontSize = 13.5.sp, fontWeight = FontWeight.Medium)
+            if (description != null) Text(description, color = colors.fgMute, fontSize = 11.5.sp)
+        }
+        Box {
+            Text(
+                stringResource(selectedLabel), color = colors.fgDim, fontSize = 12.5.sp,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(colors.surfaceWeak)
+                    .border(0.5.dp, colors.line2, RoundedCornerShape(8.dp))
+                    .clickable { expanded = true }
                     .padding(horizontal = 10.dp, vertical = 5.dp),
             )
             DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {

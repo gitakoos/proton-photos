@@ -87,6 +87,9 @@ class DrivePhotoRepositoryImpl @Inject constructor(
     override suspend fun getAlbumMemberships(userId: UserId): Map<String, String> =
         albumService.getAlbumMemberships(userId)
 
+    override suspend fun getAlbumIdsByPhoto(userId: UserId): Map<String, Set<String>> =
+        albumService.getAlbumIdsByPhoto(userId)
+
     override suspend fun removePhotosFromAlbum(
         userId: UserId,
         albumLinkId: String,

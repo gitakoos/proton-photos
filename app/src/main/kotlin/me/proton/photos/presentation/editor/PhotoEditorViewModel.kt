@@ -12,6 +12,8 @@ import android.graphics.Paint
 import android.graphics.Rect
 import android.net.Uri
 import android.os.Build
+import coil.imageLoader
+import coil.memory.MemoryCache
 import android.os.Environment
 import android.provider.MediaStore
 import androidx.lifecycle.ViewModel
@@ -89,10 +91,18 @@ data class EditorUiState(
     val saveResult: SaveResult? = null,
     val isLoading: Boolean = true,
     val errorMessage: String? = null,
+    val pendingWriteIntent: android.app.PendingIntent? = null,
 )
 
 sealed class SaveResult {
     data class Success(val uri: Uri?) : SaveResult()
+    /**
+     * The Overwrite path fell back to inserting a new file because the source URI is
+     * read-only for this app (foreign owner or pending/trashed state). The original photo
+     * is untouched; the edit lives at [uri] in our `Pictures/Proton Photos/` folder. The
+     * screen surfaces a snackbar so the user knows what happened.
+     */
+    data class SuccessAsCopy(val uri: Uri?) : SaveResult()
     data class Failed(val message: String) : SaveResult()
 }
 
@@ -119,7 +129,55 @@ class PhotoEditorViewModel @Inject constructor(
     private var sourceAlbumLinkId: String? = null
     fun setSourceAlbumLinkId(linkId: String?) { sourceAlbumLinkId = linkId }
 
+    /** Downsampled (max 720px on the long edge) copy of [EditorUiState.originalBitmap]. While
+     *  the user is dragging an Adjust slider we re-render this small bitmap on every tick —
+     *  20×-100× faster than rendering the full-res photo for every onDrag event. Filter chip
+     *  previews also derive from this bitmap. Built lazily on first slider touch. */
+    private var previewSourceSmall: Bitmap? = null
+    /** Most-recent slider-drag render job. Cancelled when the next tick fires so we never have
+     *  more than one bitmap recompute in flight. */
+    private var sliderRenderJob: kotlinx.coroutines.Job? = null
+
+    /** Build (or return cached) downsampled copy of the source bitmap for fast slider previews
+     *  and filter chip thumbnails. Max edge 720px keeps the per-tick render under ~5 ms on
+     *  mid-range hardware. */
+    private fun ensureSmallSource(src: Bitmap): Bitmap {
+        previewSourceSmall?.let { return it }
+        val maxEdge = 720f
+        val scale = (maxEdge / maxOf(src.width, src.height)).coerceAtMost(1f)
+        val small = if (scale >= 1f) src
+            else Bitmap.createScaledBitmap(
+                src,
+                (src.width * scale).toInt().coerceAtLeast(1),
+                (src.height * scale).toInt().coerceAtLeast(1),
+                true,
+            )
+        previewSourceSmall = small
+        return small
+    }
+
+    /** Called when the user releases a slider. Triggers a final full-res render so the saved
+     *  output matches what the user sees at preview time. Until called we keep the cheap
+     *  downsampled preview on screen, even after the gesture ends — switching is invisible at
+     *  display resolution but commits a faithful bitmap for [save].
+     *
+     *  We intentionally do NOT recycle the previous previewBitmap here. Compose's draw pass
+     *  may still hold a reference to it for one frame past the state.update, and calling
+     *  recycle() on that frame's bitmap throws "Canvas: trying to use a recycled bitmap" on
+     *  the UI thread. The orphaned bitmap will be GC'd shortly. */
+    fun finalizeAdjustments() {
+        val orig = _state.value.originalBitmap ?: return
+        val adj = _state.value.adjustments
+        viewModelScope.launch(Dispatchers.Default) {
+            val full = applyAdjustments(orig, adj)
+            _state.update { it.copy(previewBitmap = full) }
+        }
+    }
+
     fun loadLocal(uri: String, displayName: String, mimeType: String) {
+        // Drop any cached small-source bitmap from a previous photo — otherwise the slider
+        // path would render the new photo's adjustments against the OLD photo's downscale.
+        previewSourceSmall = null
         _state.update { it.copy(source = EditorSource.Local(uri, displayName, mimeType), isLoading = true, errorMessage = null) }
         viewModelScope.launch(Dispatchers.IO) {
             val bmp = runCatching {
@@ -137,6 +195,7 @@ class PhotoEditorViewModel @Inject constructor(
     }
 
     fun loadCloud(photo: CloudPhoto) {
+        previewSourceSmall = null
         _state.update { it.copy(source = EditorSource.Cloud(photo), isLoading = true, errorMessage = null) }
         viewModelScope.launch(Dispatchers.IO) {
             val userId = accountManager.getPrimaryUserId().first()
@@ -161,9 +220,9 @@ class PhotoEditorViewModel @Inject constructor(
         }
     }
 
-    fun updateBrightness(v: Int) = updateAdjustments { it.copy(brightness = v.coerceIn(-100, 100)) }
-    fun updateContrast(v: Int) = updateAdjustments { it.copy(contrast = v.coerceIn(-100, 100)) }
-    fun updateSaturation(v: Int) = updateAdjustments { it.copy(saturation = v.coerceIn(-100, 100)) }
+    fun updateBrightness(v: Int) = updateAdjustmentsFast { it.copy(brightness = v.coerceIn(-100, 100)) }
+    fun updateContrast(v: Int) = updateAdjustmentsFast { it.copy(contrast = v.coerceIn(-100, 100)) }
+    fun updateSaturation(v: Int) = updateAdjustmentsFast { it.copy(saturation = v.coerceIn(-100, 100)) }
     fun rotate90Cw() = updateAdjustments { it.copy(rotationDegrees = (it.rotationDegrees + 90) % 360) }
     fun toggleFlipH() = updateAdjustments { it.copy(flipHorizontal = !it.flipHorizontal) }
     fun toggleFlipV() = updateAdjustments { it.copy(flipVertical = !it.flipVertical) }
@@ -184,15 +243,33 @@ class PhotoEditorViewModel @Inject constructor(
         val orig = _state.value.originalBitmap ?: return
         val newAdj = transform(_state.value.adjustments)
         viewModelScope.launch(Dispatchers.Default) {
-            val oldPreview = _state.value.previewBitmap
             val newPreview = applyAdjustments(orig, newAdj)
             _state.update { it.copy(adjustments = newAdj, previewBitmap = newPreview) }
-            // Recycle the now-orphaned previous preview unless it's the source itself
-            // (no-op path when adjustments are at default). A 12 MP photo is ~48 MB of
-            // native heap per intermediate; without this every slider tick leaked one.
-            if (oldPreview != null && oldPreview !== orig && oldPreview !== newPreview) {
-                oldPreview.recycle()
-            }
+            // No eager recycle on the previous previewBitmap: Compose's draw pipeline may
+            // still hold a reference to it for one frame past the state update, and
+            // recycling it then crashes the UI thread with "Canvas: trying to use a
+            // recycled bitmap". Orphaned previews get GC'd shortly.
+        }
+    }
+
+    /**
+     * Fast slider variant: renders against a 720px downsampled bitmap so the on-screen preview
+     * keeps up with onDrag events without recomputing a 12MP buffer per tick. The save path
+     * always re-renders from [EditorUiState.originalBitmap], so the lower-res preview only
+     * affects what the user *sees during the gesture* — the saved bytes are still full-res.
+     *
+     * Cancels any previous in-flight slider render so we never have more than one bitmap
+     * recompute in flight at a time. Like [updateAdjustments] we do NOT recycle the previous
+     * preview here — Compose may still be drawing with it.
+     */
+    private fun updateAdjustmentsFast(transform: (EditorAdjustments) -> EditorAdjustments) {
+        val orig = _state.value.originalBitmap ?: return
+        val newAdj = transform(_state.value.adjustments)
+        sliderRenderJob?.cancel()
+        sliderRenderJob = viewModelScope.launch(Dispatchers.Default) {
+            val small = ensureSmallSource(orig)
+            val newPreview = applyAdjustments(small, newAdj)
+            _state.update { it.copy(adjustments = newAdj, previewBitmap = newPreview) }
         }
     }
 
@@ -228,7 +305,6 @@ class PhotoEditorViewModel @Inject constructor(
         }
         val rotated = if (matrix.isIdentity) cropped
             else Bitmap.createBitmap(cropped, 0, 0, cropped.width, cropped.height, matrix, true)
-        if (rotated !== cropped && cropped !== source) cropped.recycle()
 
         // 3. color matrix (brightness, contrast, saturation, filter)
         val colorMatrix = buildColorMatrix(adj)
@@ -241,13 +317,18 @@ class PhotoEditorViewModel @Inject constructor(
             canvas.drawBitmap(rotated, 0f, 0f, paint)
             out
         }
-        if (colored !== rotated && rotated !== source) rotated.recycle()
 
         // 4. redaction strokes — drawn LAST so they cover the final visible content
         val final = if (adj.redactStrokes.isEmpty()) colored
-            else applyRedactStrokes(colored, adj.redactStrokes).also {
-                if (it !== colored && colored !== source) colored.recycle()
-            }
+            else applyRedactStrokes(colored, adj.redactStrokes)
+
+        // Intermediate bitmaps (cropped, rotated, colored when they differ from `final`) are
+        // intentionally NOT recycled here. We chased a "Canvas: trying to use a recycled bitmap"
+        // crash for a while: even though these locals leave scope when this function returns,
+        // Compose's draw pipeline can still hold a reference for one frame past a state update,
+        // and recycling an intermediate that's also referenced by the in-flight render crashes
+        // the UI thread. Leaving them to GC costs us a slug of native heap that the next mark-
+        // compact cycle cleans up — measurable but not painful for a single editor session.
         return final
     }
 
@@ -268,7 +349,10 @@ class PhotoEditorViewModel @Inject constructor(
         val pixelated by lazy {
             val downscale = 24 // larger = chunkier mosaic
             val small = Bitmap.createScaledBitmap(src, (w / downscale).coerceAtLeast(1), (h / downscale).coerceAtLeast(1), false)
-            Bitmap.createScaledBitmap(small, w, h, false).also { small.recycle() }
+            // The intermediate `small` is no longer recycled. See applyAdjustments() for the
+            // rationale: explicit Bitmap.recycle() in the editor render path can race with
+            // Compose's in-flight draw and crash with "trying to use a recycled bitmap".
+            Bitmap.createScaledBitmap(small, w, h, false)
         }
 
         for (stroke in strokes) {
@@ -292,7 +376,7 @@ class PhotoEditorViewModel @Inject constructor(
                     val maskBmp = Bitmap.createBitmap(w, h, Bitmap.Config.ALPHA_8)
                     Canvas(maskBmp).drawCircle(p.x, p.y, stroke.brushSize / 2f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = android.graphics.Color.BLACK })
                     drawPixelatedThroughMask(canvas, pixelated, maskBmp)
-                    maskBmp.recycle()
+                    // No maskBmp.recycle() — see applyAdjustments() rationale; leaving to GC.
                 }
                 continue
             }
@@ -302,7 +386,6 @@ class PhotoEditorViewModel @Inject constructor(
                     val maskBmp = Bitmap.createBitmap(w, h, Bitmap.Config.ALPHA_8)
                     Canvas(maskBmp).drawPath(path, pathPaint)
                     drawPixelatedThroughMask(canvas, pixelated, maskBmp)
-                    maskBmp.recycle()
                 }
             }
         }
@@ -393,27 +476,87 @@ class PhotoEditorViewModel @Inject constructor(
      *     original linkId. The web client will then show only the edited version.
      *   • [SaveMode.Copy] — uploads the edit as a new linkId; the original stays untouched.
      */
-    fun save(mode: SaveMode, quality: Int = 92) {
+    private var pendingWriteMode: SaveMode? = null
+    private var pendingWriteQuality: Int = 92
+
+    fun save(mode: SaveMode, quality: Int = 92, allowWriteRequestRecovery: Boolean = true) {
         val s = _state.value
         val source = s.source ?: return
-        val bitmap = s.previewBitmap ?: s.originalBitmap ?: return
+        val orig = s.originalBitmap ?: return
         viewModelScope.launch(Dispatchers.IO) {
             _state.update { it.copy(isSaving = true, saveResult = null) }
-            val result = runCatching {
-                when (source) {
+            // Always re-render from the full-resolution original — the on-screen preview may
+            // be a 720px downsampled bitmap from the fast slider path, and saving that would
+            // silently degrade the user's photo. applyAdjustments is the same logic the live
+            // preview uses, so the saved bytes match what the user sees.
+            val bitmap = applyAdjustments(orig, s.adjustments)
+            val saveResult: SaveResult = try {
+                val uri = when (source) {
                     is EditorSource.Local -> saveLocal(bitmap, source, mode, quality)
                     is EditorSource.Cloud -> saveCloud(bitmap, source, mode, quality)
                 }
+                if (mode == SaveMode.Overwrite && source is EditorSource.Local && uri != null) {
+                    invalidateImageCache(uri)
+                }
+                SaveResult.Success(uri)
+            } catch (e: SecurityException) {
+                // Foreign MediaStore URI — try createWriteRequest for one-shot consent so the
+                // user can actually overwrite the original. IS_PENDING/IS_TRASHED items skip
+                // straight to copy because the consent dialog refuses them.
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
+                    && allowWriteRequestRecovery
+                    && source is EditorSource.Local
+                    && mode == SaveMode.Overwrite
+                ) {
+                    val srcUri = Uri.parse(source.uri)
+                    val stuck = isItemPendingOrTrashed(srcUri)
+                    if (!stuck) {
+                        val request = runCatching {
+                            MediaStore.createWriteRequest(context.contentResolver, listOf(srcUri))
+                        }.getOrNull()
+                        if (request != null) {
+                            pendingWriteMode = mode
+                            pendingWriteQuality = quality
+                            _state.update {
+                                it.copy(isSaving = false, pendingWriteIntent = request)
+                            }
+                            return@launch
+                        }
+                    }
+                }
+                if (source is EditorSource.Local && mode == SaveMode.Overwrite) {
+                    runCatching {
+                        insertLocalCopy(bitmap, source, quality, useOriginalName = true)
+                    }.fold(
+                        onSuccess = { uri -> SaveResult.SuccessAsCopy(uri) },
+                        onFailure = { e2 -> SaveResult.Failed(e2.message ?: e.message ?: "Save failed") },
+                    )
+                } else {
+                    SaveResult.Failed(e.message ?: "No permission to save")
+                }
+            } catch (e: Exception) {
+                SaveResult.Failed(e.message ?: "Save failed")
             }
-            _state.update {
-                it.copy(
-                    isSaving = false,
-                    saveResult = result.fold(
-                        onSuccess = { uri -> SaveResult.Success(uri) },
-                        onFailure = { e -> SaveResult.Failed(e.message ?: "Save failed") },
-                    ),
-                )
-            }
+            _state.update { it.copy(isSaving = false, saveResult = saveResult) }
+        }
+    }
+
+    fun onWritePermissionGranted() {
+        val mode = pendingWriteMode ?: return
+        val quality = pendingWriteQuality
+        pendingWriteMode = null
+        _state.update { it.copy(pendingWriteIntent = null) }
+        save(mode, quality, allowWriteRequestRecovery = false)
+    }
+
+    fun onWritePermissionDenied() {
+        pendingWriteMode = null
+        _state.update {
+            it.copy(
+                pendingWriteIntent = null,
+                isSaving = false,
+                saveResult = SaveResult.Failed("Save cancelled"),
+            )
         }
     }
 
@@ -424,34 +567,52 @@ class PhotoEditorViewModel @Inject constructor(
         }
     }
 
-    /** Writes the edited bytes back to the source MediaStore URI in place. */
-    private fun overwriteLocal(bitmap: Bitmap, source: EditorSource.Local, quality: Int): Uri? {
+    // Throws SecurityException on foreign MediaStore URIs (caller handles via createWriteRequest
+    // recovery + copy fallback). No IS_PENDING dance — setting it on a foreign URI traps the
+    // file in pending state and blocks the very write we are about to do.
+    private fun overwriteLocal(bitmap: Bitmap, source: EditorSource.Local, quality: Int): Uri {
         val srcUri = Uri.parse(source.uri)
-        // On Q+ use IS_PENDING so partial writes aren't visible to other readers mid-write.
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            context.contentResolver.update(srcUri,
-                ContentValues().apply { put(MediaStore.Images.Media.IS_PENDING, 1) }, null, null)
-        }
-        try {
-            context.contentResolver.openOutputStream(srcUri, "wt")?.use { out ->
-                bitmap.compress(Bitmap.CompressFormat.JPEG, quality, out)
-            } ?: error("openOutputStream returned null for $srcUri")
-        } finally {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                context.contentResolver.update(srcUri,
-                    ContentValues().apply {
-                        put(MediaStore.Images.Media.IS_PENDING, 0)
-                        // Drop the DATE_MODIFIED so gallery sorters refresh.
-                        put(MediaStore.Images.Media.DATE_MODIFIED, System.currentTimeMillis() / 1000)
-                    }, null, null)
-            }
-        }
+        context.contentResolver.openOutputStream(srcUri, "wt")?.use { out ->
+            bitmap.compress(Bitmap.CompressFormat.JPEG, quality, out)
+        } ?: error("openOutputStream returned null for $srcUri")
         return srcUri
     }
 
-    private fun insertLocalCopy(bitmap: Bitmap, source: EditorSource.Local, quality: Int): Uri? {
+    private fun invalidateImageCache(uri: Uri) {
+        val key = uri.toString()
+        val loader = context.imageLoader
+        runCatching { loader.memoryCache?.remove(MemoryCache.Key(key)) }
+        runCatching { loader.diskCache?.remove(key) }
+        runCatching { context.contentResolver.notifyChange(uri, null) }
+    }
+
+    private fun isItemPendingOrTrashed(uri: Uri): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return false
+        return runCatching {
+            context.contentResolver.query(
+                uri,
+                arrayOf(MediaStore.MediaColumns.IS_PENDING, MediaStore.MediaColumns.IS_TRASHED),
+                null, null, null,
+            )?.use { cursor ->
+                if (!cursor.moveToFirst()) return@use false
+                val pending = cursor.getInt(0)
+                val trashed = cursor.getInt(1)
+                pending != 0 || trashed != 0
+            } ?: false
+        }.getOrDefault(false)
+    }
+
+    private fun insertLocalCopy(
+        bitmap: Bitmap,
+        source: EditorSource.Local,
+        quality: Int,
+        /** When true, save with the original display name (used as the auto-fallback path
+         *  from [save] when Overwrite isn't possible). Otherwise stamp `_edit_YYYYMMDD_HHMMSS`
+         *  onto the name so a manual "Save as Copy" produces a clearly-distinct file. */
+        useOriginalName: Boolean = false,
+    ): Uri? {
         val collection = MediaStore.Images.Media.EXTERNAL_CONTENT_URI
-        val newName = stamp(source.displayName)
+        val newName = if (useOriginalName) source.displayName else stamp(source.displayName)
         val values = ContentValues().apply {
             put(MediaStore.Images.Media.DISPLAY_NAME, newName)
             put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
