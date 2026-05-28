@@ -42,6 +42,9 @@
     <string name="editor_error_not_signed_in">You\'re not signed in</string>
     <string name="editor_error_download_failed">Couldn\'t download the image</string>
     <string name="editor_error_decode_failed">Couldn\'t decode the image</string>
+    <string name="editor_auto_fix">Auto-fix</string>
+    <string name="editor_crop_apply">Apply</string>
+    <string name="editor_crop_reset">Reset</string>
 
     <!-- Hidden album screen, previously hardcoded English. -->
     <string name="hidden_photos_title">Hidden Photos</string>
@@ -53,6 +56,12 @@
     <string name="gallery_download_done">Downloaded %1$d photos</string>
     <string name="gallery_download_done_singular">Downloaded 1 photo</string>
     <string name="gallery_download_partial">Downloaded %1$d, failed %2$d</string>
+    <string name="gallery_add_to_album">Add to album</string>
+    <string name="gallery_strip_metadata">Strip metadata</string>
+    <string name="gallery_added_to_album">Added %1$d photos to %2$s</string>
+    <string name="gallery_stripped_metadata">Stripped metadata from %1$d photos</string>
+    <string name="gallery_stripped_with_skipped">Stripped %1$d, skipped %2$d (foreign)</string>
+    <string name="gallery_new_album">New album</string>
     <string name="gallery_filter_favorites">Favorites</string>
     <string name="gallery_filter_hidden">Hidden</string>
     <string name="gallery_filter_categories">Categories</string>
@@ -336,6 +345,18 @@
     <string name="share_copy_link_button">Copy link</string>
     <string name="share_stop_sharing">Stop sharing</string>
     <string name="share_close">Close</string>
+    <!-- Drive-web-style invite popup (multi-chip flow) -->
+    <string name="share_invite_email_hint">Email address</string>
+    <string name="share_invite_add">Add</string>
+    <string name="share_invite_will_invite">Will invite</string>
+    <string name="share_invite_message_hint">Add a message (optional)</string>
+    <string name="share_invite_send">Share</string>
+    <string name="share_invite_cancel">Cancel</string>
+    <string name="share_invite_email_invalid">Not a valid email address</string>
+    <string name="share_invite_email_duplicate">Already added</string>
+    <string name="share_invite_summary_success">Invited %1$d</string>
+    <string name="share_invite_summary_partial">Invited %1$d, failed %2$d</string>
+    <string name="share_invite_summary_all_failed">Failed to invite %1$d</string>
 
     <!-- Shared albums screen -->
     <string name="shared_pending_invitations">Pending invitations</string>
@@ -388,6 +409,9 @@
     <!-- Photo viewer, cloud-download progress label. %1$d = percent (0..100),
          %2$s = bytes-done formatted, %3$s = total-bytes formatted. -->
     <string name="viewer_downloading_progress">Downloading %1$d%%, %2$s / %3$s</string>
+    <!-- Photo viewer slideshow controls -->
+    <string name="viewer_play_slideshow">Play slideshow</string>
+    <string name="viewer_pause_slideshow">Pause slideshow</string>
 
     <!-- Widget -->
     <string name="widget_description">Proton Photos, displays your photos on the home screen</string>
@@ -424,4 +448,46 @@
         <item quantity="one">1 video</item>
         <item quantity="other">%d videos</item>
     </plurals>
+
+    <!-- "On this day" memories card on the Photos tab. Shown above the grid when the user
+         has photos taken on TODAY's calendar date (same month + day) in earlier years. -->
+    <string name="gallery_on_this_day">On this day</string>
+    <plurals name="count_years_ago_plural">
+        <item quantity="one">%1$d year ago</item>
+        <item quantity="other">%1$d years ago</item>
+    </plurals>
+
+    <!-- Viewer overflow menu -->
+    <string name="viewer_menu_more">More</string>
+    <string name="viewer_menu_save_to_device">Save to device</string>
+    <string name="viewer_menu_details">Details</string>
+    <string name="viewer_menu_delete">Delete</string>
+    <string name="viewer_menu_hide">Hide</string>
+    <string name="viewer_menu_unhide">Unhide</string>
+    <string name="viewer_hidden_label">Hidden on this device</string>
+
+    <!-- Video editor -->
+    <string name="video_editor_title">Edit video</string>
+    <string name="video_editor_trim">Trim</string>
+    <string name="video_editor_rotate">Rotate</string>
+    <string name="video_editor_start">Start</string>
+    <string name="video_editor_end">End</string>
+    <string name="video_editor_save_overwrite">Save</string>
+    <string name="video_editor_save_copy">Save as copy</string>
+    <string name="video_editor_unsupported_cloud">Editing cloud videos isn\'t supported yet</string>
+    <string name="video_editor_crop">Crop</string>
+    <string name="video_editor_audio">Music</string>
+    <string name="video_editor_add_music">Add music</string>
+    <string name="video_editor_remove_music">Remove</string>
+    <string name="video_editor_music_start">Music start</string>
+    <string name="video_editor_music_end">Music end</string>
+    <string name="video_editor_apply_crop">Apply crop</string>
+    <string name="video_editor_reset_crop">Reset crop</string>
+    <string name="video_editor_reencoding">Re-encoding video…</string>
+    <string name="video_editor_audio_original">Original audio</string>
+    <string name="video_editor_audio_original_on">Kept in the saved video</string>
+    <string name="video_editor_audio_original_muted">Will be removed on save</string>
+    <string name="video_editor_audio_mute">Mute</string>
+    <string name="video_editor_audio_muted">Muted</string>
+    <string name="video_editor_audio_overlay_hint">Music replaces the original soundtrack in the saved video.</string>
 </resources>

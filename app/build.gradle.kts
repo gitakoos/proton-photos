@@ -18,7 +18,7 @@ val keystoreProps: Properties? = if (keystorePropsFile.exists()) {
 } else null
 
 android {
-    namespace = "me.proton.photos"
+    namespace = "eu.akoos.photos"
     compileSdk = 35
 
     defaultConfig {
@@ -33,8 +33,8 @@ android {
         // versionCode bumped per release tag — keep monotonically increasing.
         // versionName mirrors the GitHub release tag (e.g. v0.9.1 → "0.9.1") so the About
         // screen and the published APK report the same version the user downloaded.
-        versionCode = 110
-        versionName = "1.1.0-beta"
+        versionCode = 120
+        versionName = "1.2.0-beta"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 

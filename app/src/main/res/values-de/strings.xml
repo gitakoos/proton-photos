@@ -35,6 +35,12 @@
     <string name="gallery_download_done">%1$d Fotos heruntergeladen</string>
     <string name="gallery_download_done_singular">1 Foto heruntergeladen</string>
     <string name="gallery_download_partial">%1$d heruntergeladen, %2$d fehlgeschlagen</string>
+    <string name="gallery_add_to_album">Zum Album hinzufügen</string>
+    <string name="gallery_strip_metadata">Metadaten entfernen</string>
+    <string name="gallery_added_to_album">%1$d Fotos zu %2$s hinzugefügt</string>
+    <string name="gallery_stripped_metadata">Metadaten von %1$d Fotos entfernt</string>
+    <string name="gallery_stripped_with_skipped">%1$d entfernt, %2$d übersprungen (fremd)</string>
+    <string name="gallery_new_album">Neues Album</string>
     <string name="gallery_filter_favorites">Favoriten</string>
     <string name="gallery_filter_hidden">Versteckt</string>
     <string name="gallery_filter_categories">Kategorien</string>
@@ -82,6 +88,8 @@
     <string name="delete_also_cloud_warning">Das Original wird dauerhaft gelöscht. Proton kann es nicht wiederherstellen.</string>
     <string name="delete_album_container_warning">Dies löscht das Album, behält aber deine Fotos in Proton Drive.</string>
     <string name="bucket_album_readonly_msg">%s ist ein Geräteordner. Nutze \'Zu Album hinzufügen\' aus Fotos, um Fotos zu organisieren.</string>
+    <string name="albums_new_kind_cloud">Cloud</string>
+    <string name="albums_new_kind_local">Lokal</string>
     <string name="delete_cancel">Abbrechen</string>
     <string name="delete_button_free_up">Speicher freigeben</string>
     <string name="delete_button_permanently">Dauerhaft löschen</string>
@@ -106,6 +114,15 @@
     <string name="settings_sync_section">Synchronisierung</string>
     <string name="settings_auto_sync">Automatische Synchronisierung</string>
     <string name="settings_sync_wifi_only">Nur über WLAN synchronisieren</string>
+    <string name="settings_sync_interval">Synchronisierungsintervall</string>
+    <string name="settings_sync_interval_desc">Wie oft nach neuen Fotos gesucht wird</string>
+    <string name="settings_sync_interval_15min">Alle 15 Minuten</string>
+    <string name="settings_sync_interval_30min">Alle 30 Minuten</string>
+    <string name="settings_sync_interval_1h">Jede Stunde</string>
+    <string name="settings_sync_interval_3h">Alle 3 Stunden</string>
+    <string name="settings_sync_interval_6h">Alle 6 Stunden</string>
+    <string name="settings_sync_interval_12h">Alle 12 Stunden</string>
+    <string name="settings_sync_interval_24h">Einmal täglich</string>
     <string name="settings_last_sync">Letzte Synchronisierung</string>
     <string name="settings_sync_now">Jetzt synchronisieren</string>
     <string name="settings_storage_section">Speicher</string>
@@ -204,6 +221,9 @@
     <string name="editor_error_not_signed_in">Du bist nicht angemeldet</string>
     <string name="editor_error_download_failed">Bild konnte nicht heruntergeladen werden</string>
     <string name="editor_error_decode_failed">Bild konnte nicht dekodiert werden</string>
+    <string name="editor_auto_fix">Auto-Korrektur</string>
+    <string name="editor_crop_apply">Anwenden</string>
+    <string name="editor_crop_reset">Zurücksetzen</string>
     <string name="hidden_photos_title">Versteckte Fotos</string>
     <string name="hidden_photos_auth_prompt">Authentifiziere dich, um deine versteckten Fotos anzuzeigen</string>
     <string name="hidden_photos_unlock">Entsperren</string>
@@ -312,6 +332,18 @@
     <string name="share_copy_link_button">Link kopieren</string>
     <string name="share_stop_sharing">Freigabe beenden</string>
     <string name="share_close">Schließen</string>
+    <!-- Drive-web-style invite popup (multi-chip flow) -->
+    <string name="share_invite_email_hint">E-Mail-Adresse</string>
+    <string name="share_invite_add">Hinzufügen</string>
+    <string name="share_invite_will_invite">Wird eingeladen</string>
+    <string name="share_invite_message_hint">Nachricht hinzufügen (optional)</string>
+    <string name="share_invite_send">Teilen</string>
+    <string name="share_invite_cancel">Abbrechen</string>
+    <string name="share_invite_email_invalid">Keine gültige E-Mail-Adresse</string>
+    <string name="share_invite_email_duplicate">Bereits hinzugefügt</string>
+    <string name="share_invite_summary_success">%1$d eingeladen</string>
+    <string name="share_invite_summary_partial">%1$d eingeladen, %2$d fehlgeschlagen</string>
+    <string name="share_invite_summary_all_failed">Einladung an %1$d fehlgeschlagen</string>
 
     <!-- Content filter sheet -->
     <string name="filter_title">Filter</string>
@@ -361,6 +393,8 @@
     <string name="error_http_client">Anfrage fehlgeschlagen. Bitte erneut versuchen.</string>
     <string name="error_photo_load_failed">Foto konnte nicht geladen werden.</string>
     <string name="viewer_downloading_progress">%1$d %% geladen, %2$s / %3$s</string>
+    <string name="viewer_play_slideshow">Diashow starten</string>
+    <string name="viewer_pause_slideshow">Diashow pausieren</string>
 
     <!-- Widget -->
     <string name="widget_description">Proton Photos, zeigt Ihre Fotos auf dem Startbildschirm an</string>
@@ -397,4 +431,44 @@
         <item quantity="one">1 Video</item>
         <item quantity="other">%d Videos</item>
     </plurals>
+
+    <string name="gallery_on_this_day">An diesem Tag</string>
+    <plurals name="count_years_ago_plural">
+        <item quantity="one">vor %1$d Jahr</item>
+        <item quantity="other">vor %1$d Jahren</item>
+    </plurals>
+
+    <!-- Viewer-Menü -->
+    <string name="viewer_menu_more">Mehr</string>
+    <string name="viewer_menu_save_to_device">Auf Gerät speichern</string>
+    <string name="viewer_menu_details">Details</string>
+    <string name="viewer_menu_delete">Löschen</string>
+    <string name="viewer_menu_hide">Verbergen</string>
+    <string name="viewer_menu_unhide">Einblenden</string>
+    <string name="viewer_hidden_label">Auf diesem Gerät ausgeblendet</string>
+
+    <!-- Video-Editor -->
+    <string name="video_editor_title">Video bearbeiten</string>
+    <string name="video_editor_trim">Zuschneiden</string>
+    <string name="video_editor_rotate">Drehen</string>
+    <string name="video_editor_start">Start</string>
+    <string name="video_editor_end">Ende</string>
+    <string name="video_editor_save_overwrite">Speichern</string>
+    <string name="video_editor_save_copy">Als Kopie speichern</string>
+    <string name="video_editor_unsupported_cloud">Bearbeiten von Cloud-Videos wird noch nicht unterstützt</string>
+    <string name="video_editor_crop">Beschneiden</string>
+    <string name="video_editor_audio">Musik</string>
+    <string name="video_editor_add_music">Musik hinzufügen</string>
+    <string name="video_editor_remove_music">Entfernen</string>
+    <string name="video_editor_music_start">Musikstart</string>
+    <string name="video_editor_music_end">Musikende</string>
+    <string name="video_editor_apply_crop">Zuschnitt anwenden</string>
+    <string name="video_editor_reset_crop">Zuschnitt zurücksetzen</string>
+    <string name="video_editor_reencoding">Video wird neu kodiert…</string>
+    <string name="video_editor_audio_original">Originalton</string>
+    <string name="video_editor_audio_original_on">Bleibt im gespeicherten Video erhalten</string>
+    <string name="video_editor_audio_original_muted">Wird beim Speichern entfernt</string>
+    <string name="video_editor_audio_mute">Stumm</string>
+    <string name="video_editor_audio_muted">Stummgeschaltet</string>
+    <string name="video_editor_audio_overlay_hint">Musik ersetzt im gespeicherten Video die Originaltonspur.</string>
 </resources>

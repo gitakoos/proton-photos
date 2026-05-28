@@ -34,6 +34,12 @@
     <string name="gallery_download_done">%1$d fotó letöltve</string>
     <string name="gallery_download_done_singular">1 fotó letöltve</string>
     <string name="gallery_download_partial">Letöltve: %1$d, sikertelen: %2$d</string>
+    <string name="gallery_add_to_album">Albumba</string>
+    <string name="gallery_strip_metadata">Metadat torles</string>
+    <string name="gallery_added_to_album">%1$d fotó hozzáadva ehhez: %2$s</string>
+    <string name="gallery_stripped_metadata">%1$d fotó metaadata törölve</string>
+    <string name="gallery_stripped_with_skipped">Törölve: %1$d, kihagyva: %2$d (idegen)</string>
+    <string name="gallery_new_album">Új album</string>
     <string name="gallery_filter_favorites">Kedvencek</string>
     <string name="gallery_filter_hidden">Rejtett</string>
     <string name="gallery_filter_categories">Kategóriák</string>
@@ -81,6 +87,8 @@
     <string name="delete_also_cloud_warning">Ez véglegesen törli az eredetit. A Proton nem tudja visszaállítani.</string>
     <string name="delete_album_container_warning">Ez törli az albumot, de a fényképeid megmaradnak a Proton Drive-ban.</string>
     <string name="bucket_album_readonly_msg">A(z) %s eszközmappa. A fényképek rendezéséhez használd a Fényképek \'Hozzáadás albumhoz\' funkcióját.</string>
+    <string name="albums_new_kind_cloud">Felhő</string>
+    <string name="albums_new_kind_local">Helyi</string>
     <string name="delete_cancel">Mégse</string>
     <string name="delete_button_free_up">Hely felszabadítása</string>
     <string name="delete_button_permanently">Végleges törlés</string>
@@ -105,6 +113,15 @@
     <string name="settings_sync_section">Szinkronizálás</string>
     <string name="settings_auto_sync">Automatikus szinkronizálás</string>
     <string name="settings_sync_wifi_only">Csak Wi‑Fi-n szinkronizálj</string>
+    <string name="settings_sync_interval">Szinkronizálási gyakoriság</string>
+    <string name="settings_sync_interval_desc">Milyen gyakran keressen új fotókat</string>
+    <string name="settings_sync_interval_15min">15 percenként</string>
+    <string name="settings_sync_interval_30min">30 percenként</string>
+    <string name="settings_sync_interval_1h">Óránként</string>
+    <string name="settings_sync_interval_3h">3 óránként</string>
+    <string name="settings_sync_interval_6h">6 óránként</string>
+    <string name="settings_sync_interval_12h">12 óránként</string>
+    <string name="settings_sync_interval_24h">Naponta egyszer</string>
     <string name="settings_last_sync">Utolsó szinkronizálás</string>
     <string name="settings_sync_now">Szinkronizálás most</string>
     <string name="settings_storage_section">Tárhely</string>
@@ -203,6 +220,9 @@
     <string name="editor_error_not_signed_in">Nem vagy bejelentkezve</string>
     <string name="editor_error_download_failed">Nem sikerült letölteni a képet</string>
     <string name="editor_error_decode_failed">Nem sikerült dekódolni a képet</string>
+    <string name="editor_auto_fix">Automatikus javítás</string>
+    <string name="editor_crop_apply">Alkalmaz</string>
+    <string name="editor_crop_reset">Visszaállít</string>
     <string name="hidden_photos_title">Rejtett képek</string>
     <string name="hidden_photos_auth_prompt">Hitelesítsd magad a rejtett képek megtekintéséhez</string>
     <string name="hidden_photos_unlock">Feloldás</string>
@@ -311,6 +331,18 @@
     <string name="share_copy_link_button">Link másolása</string>
     <string name="share_stop_sharing">Megosztás leállítása</string>
     <string name="share_close">Bezárás</string>
+    <!-- Drive-web-style invite popup (multi-chip flow) -->
+    <string name="share_invite_email_hint">E-mail cím</string>
+    <string name="share_invite_add">Hozzáadás</string>
+    <string name="share_invite_will_invite">Meghívandó</string>
+    <string name="share_invite_message_hint">Üzenet hozzáadása (nem kötelező)</string>
+    <string name="share_invite_send">Megosztás</string>
+    <string name="share_invite_cancel">Mégse</string>
+    <string name="share_invite_email_invalid">Érvénytelen e-mail cím</string>
+    <string name="share_invite_email_duplicate">Már hozzáadva</string>
+    <string name="share_invite_summary_success">%1$d meghíva</string>
+    <string name="share_invite_summary_partial">%1$d meghíva, %2$d sikertelen</string>
+    <string name="share_invite_summary_all_failed">%1$d meghívása sikertelen</string>
 
     <!-- Content filter sheet -->
     <string name="filter_title">Szűrő</string>
@@ -360,6 +392,8 @@
     <string name="error_http_client">Kérés sikertelen. Próbáld újra.</string>
     <string name="error_photo_load_failed">Fotó betöltése sikertelen.</string>
     <string name="viewer_downloading_progress">Letöltés %1$d%%, %2$s / %3$s</string>
+    <string name="viewer_play_slideshow">Diavetítés indítása</string>
+    <string name="viewer_pause_slideshow">Diavetítés szüneteltetése</string>
 
     <!-- Widget -->
     <string name="widget_description">Proton Fotók, fotóid megjelenítése a kezdőképernyőn</string>
@@ -396,4 +430,44 @@
         <item quantity="one">1 videó</item>
         <item quantity="other">%d videó</item>
     </plurals>
+
+    <string name="gallery_on_this_day">Ezen a napon</string>
+    <plurals name="count_years_ago_plural">
+        <item quantity="one">%1$d éve</item>
+        <item quantity="other">%1$d éve</item>
+    </plurals>
+
+    <!-- Nézegető menü -->
+    <string name="viewer_menu_more">Tovább</string>
+    <string name="viewer_menu_save_to_device">Mentés eszközre</string>
+    <string name="viewer_menu_details">Részletek</string>
+    <string name="viewer_menu_delete">Törlés</string>
+    <string name="viewer_menu_hide">Elrejtés</string>
+    <string name="viewer_menu_unhide">Visszaállítás</string>
+    <string name="viewer_hidden_label">Elrejtve ezen az eszközön</string>
+
+    <!-- Videó szerkesztő -->
+    <string name="video_editor_title">Videó szerkesztése</string>
+    <string name="video_editor_trim">Vágás</string>
+    <string name="video_editor_rotate">Forgatás</string>
+    <string name="video_editor_start">Kezdés</string>
+    <string name="video_editor_end">Vég</string>
+    <string name="video_editor_save_overwrite">Mentés</string>
+    <string name="video_editor_save_copy">Mentés másolatként</string>
+    <string name="video_editor_unsupported_cloud">Felhős videók szerkesztése még nem támogatott</string>
+    <string name="video_editor_crop">Kivágás</string>
+    <string name="video_editor_audio">Zene</string>
+    <string name="video_editor_add_music">Zene hozzáadása</string>
+    <string name="video_editor_remove_music">Eltávolítás</string>
+    <string name="video_editor_music_start">Zene kezdés</string>
+    <string name="video_editor_music_end">Zene vég</string>
+    <string name="video_editor_apply_crop">Vágás alkalmazása</string>
+    <string name="video_editor_reset_crop">Vágás visszaállítása</string>
+    <string name="video_editor_reencoding">Videó újrakódolása…</string>
+    <string name="video_editor_audio_original">Eredeti hang</string>
+    <string name="video_editor_audio_original_on">Megmarad a mentett videóban</string>
+    <string name="video_editor_audio_original_muted">Mentéskor eltávolításra kerül</string>
+    <string name="video_editor_audio_mute">Némítás</string>
+    <string name="video_editor_audio_muted">Némítva</string>
+    <string name="video_editor_audio_overlay_hint">A zene helyettesíti az eredeti hangsávot a mentett videóban.</string>
 </resources>

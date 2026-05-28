@@ -10,7 +10,7 @@
     android:maxResizeHeight="4096dp"
     android:resizeMode="horizontal|vertical"
     android:widgetCategory="home_screen"
-    android:configure="me.proton.photos.widget.PhotoWidgetConfigActivity"
+    android:configure="eu.akoos.photos.widget.PhotoWidgetConfigActivity"
     android:updatePeriodMillis="0"
     android:previewImage="@mipmap/ic_launcher"
     android:description="@string/widget_description" />

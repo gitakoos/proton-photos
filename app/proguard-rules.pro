@@ -23,7 +23,7 @@
     kotlinx.serialization.KSerializer serializer(...);
 }
 # All Drive DTOs are in this package — keep them whole.
--keep class me.proton.photos.data.api.dto.** { *; }
+-keep class eu.akoos.photos.data.api.dto.** { *; }
 
 # ── Retrofit ──────────────────────────────────────────────────────────────
 -keepattributes Signature,Exceptions
@@ -79,7 +79,7 @@
 -dontwarn coil.**
 
 # ── App-side: Workers (HiltWorker reflection) + Application class ────────
--keep class me.proton.photos.App { *; }
+-keep class eu.akoos.photos.App { *; }
 -keep class * extends androidx.work.ListenableWorker { <init>(...); }
 -keep @androidx.hilt.work.HiltWorker class * { *; }
 
