@@ -231,6 +231,8 @@
     <string name="album_rename_confirm">Renommer</string>
     <string name="album_remove_from_album">Retirer de l\'album</string>
     <string name="album_set_as_cover">Définir comme couverture</string>
+    <string name="album_set_as_album_cover">Définir comme couverture de l\'album</string>
+    <string name="album_cover_updated">Couverture mise à jour</string>
     <string name="month_photo_count">%d photos</string>
     <string name="language_label">Langue</string>
     <string name="close">Fermer</string>
@@ -243,6 +245,15 @@
     <string name="theme_mode_desc_system">Suivre les paramètres de l\'appareil</string>
     <string name="theme_mode_desc_light">Toujours utiliser le thème clair</string>
     <string name="theme_mode_desc_dark">Toujours utiliser le thème sombre</string>
+
+    <!-- Themed palettes -->
+    <string name="settings_palette_section">Palette</string>
+    <string name="palette_default">Par défaut</string>
+    <string name="palette_forest">Forêt</string>
+    <string name="palette_sunset">Coucher de soleil</string>
+    <string name="palette_sea">Mer</string>
+    <string name="palette_sepia">Sépia</string>
+    <string name="palette_mono">Mono</string>
 
     <!-- Language -->
     <string name="language_en">Anglais, English</string>

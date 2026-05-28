@@ -51,6 +51,7 @@ import eu.akoos.photos.navigation.NavGraph
 import eu.akoos.photos.presentation.lock.AppLockManager
 import eu.akoos.photos.presentation.lock.AppLockScreen
 import eu.akoos.photos.presentation.settings.ThemeMode
+import eu.akoos.photos.presentation.settings.ThemePalette
 import eu.akoos.photos.presentation.theme.ProtonPhotosTheme
 import eu.akoos.photos.worker.SyncWorker
 import javax.inject.Inject
@@ -135,8 +136,8 @@ class MainActivity : AppCompatActivity() {
 
         // Observe lock setting changes. The DataStore-backed flow re-emits on every preference
         // write (e.g. LAST_SYNC_MS bumps every sync), so without distinctUntilChanged this
-        // collector would re-assert isLocked=true on every sync tick — that was the user-visible
-        // "lock keeps popping up over and over even after I unlock" symptom.
+        // collector would re-assert isLocked=true on every sync tick — manifesting as the lock
+        // screen reappearing repeatedly after the user already unlocked.
         //
         // Track previous value so a user-driven OFF→ON toggle in Settings re-locks immediately,
         // but a same-value emission (the spurious one we're guarding against) does nothing.
@@ -212,6 +213,14 @@ class MainActivity : AppCompatActivity() {
                 ThemeMode.Dark   -> true
             }
 
+            // Accent-color palette — DataStore-backed, re-collected so changes apply live
+            // without an app restart. Independent of light/dark.
+            val paletteFlow = remember {
+                settingsDataStore.data.map { it[SettingsKeys.THEME_PALETTE] }
+            }
+            val paletteKey by paletteFlow.collectAsState(initial = null)
+            val palette = ThemePalette.fromKey(paletteKey)
+
             // Flip status/navigation-bar icon contrast to match the active theme so they stay
             // legible on light backgrounds.
             val view = LocalView.current
@@ -224,7 +233,7 @@ class MainActivity : AppCompatActivity() {
                 }
             }
 
-            ProtonPhotosTheme(darkTheme = useDark) {
+            ProtonPhotosTheme(darkTheme = useDark, palette = palette) {
                 val forceUpdateFlow = remember {
                     settingsDataStore.data.map { it[FORCE_UPDATE_REQUIRED] == true }
                 }

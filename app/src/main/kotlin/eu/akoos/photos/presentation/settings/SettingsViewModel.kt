@@ -309,6 +309,7 @@ class SettingsViewModel @Inject constructor(
                     ),
                     freeUpWifiOnly = migratedPrefs[SettingsKeys.FREE_UP_WIFI_ONLY] ?: true,
                     themeMode = ThemeMode.fromKey(migratedPrefs[SettingsKeys.THEME_MODE]),
+                    palette = ThemePalette.fromKey(migratedPrefs[SettingsKeys.THEME_PALETTE]),
                     lastSyncMs = migratedPrefs[SettingsKeys.LAST_SYNC_MS],
                     language = migratedPrefs[SettingsKeys.LANGUAGE] ?: "system",
                     stripOnUpload = migratedPrefs[SettingsKeys.STRIP_ON_UPLOAD] ?: true,
@@ -510,6 +511,21 @@ class SettingsViewModel @Inject constructor(
                 }
             )
             _uiState.update { it.copy(themeMode = mode) }
+        }
+    }
+
+    /**
+     * Persist the chosen accent palette and update the in-memory state so the active
+     * `ProtonPhotosTheme` re-collects the new key. Note: NOT mirrored to ThemePrefsBoot
+     * and does NOT touch AppCompatDelegate — palette is purely an in-Compose accent
+     * swap and doesn't affect light/dark, system-bar styling, or cold-start theming.
+     */
+    fun setThemePalette(palette: ThemePalette) {
+        viewModelScope.launch {
+            context.settingsDataStore.edit {
+                it[SettingsKeys.THEME_PALETTE] = palette.storageKey
+            }
+            _uiState.update { it.copy(palette = palette) }
         }
     }
 

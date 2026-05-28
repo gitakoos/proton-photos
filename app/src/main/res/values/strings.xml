@@ -249,6 +249,8 @@
     <string name="album_rename_confirm">Rename</string>
     <string name="album_remove_from_album">Remove from album</string>
     <string name="album_set_as_cover">Set as cover</string>
+    <string name="album_cover_updated">Cover updated</string>
+    <string name="album_set_as_album_cover">Set as album cover</string>
     <string name="month_photo_count">%d photos</string>
     <string name="language_label">Language</string>
     <string name="close">Close</string>
@@ -261,6 +263,15 @@
     <string name="theme_mode_desc_system">Follow device settings</string>
     <string name="theme_mode_desc_light">Always use light theme</string>
     <string name="theme_mode_desc_dark">Always use dark theme</string>
+
+    <!-- Palette -->
+    <string name="settings_palette_section">Palette</string>
+    <string name="palette_default">Default</string>
+    <string name="palette_forest">Forest</string>
+    <string name="palette_sunset">Sunset</string>
+    <string name="palette_sea">Sea</string>
+    <string name="palette_sepia">Sepia</string>
+    <string name="palette_mono">Mono</string>
 
     <!-- Language -->
     <string name="language_en">English</string>

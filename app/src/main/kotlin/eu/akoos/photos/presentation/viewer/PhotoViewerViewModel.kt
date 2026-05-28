@@ -175,6 +175,15 @@ class PhotoViewerViewModel @Inject constructor(
     private val _addToAlbumDone = MutableSharedFlow<String>(replay = 0, extraBufferCapacity = 1)
     val addToAlbumDone: SharedFlow<String> = _addToAlbumDone.asSharedFlow()
 
+    /**
+     * One-shot emission when the viewer's overflow "Set as album cover" item succeeds for
+     * the currently-viewed photo. The screen uses this to pop a Toast/snackbar. Same shape
+     * as [addToAlbumDone] — replay=0, single-buffered so a paused screen doesn't block the
+     * VM. Errors route through [transientError] like the rest of the viewer.
+     */
+    private val _setCoverDone = MutableSharedFlow<Unit>(replay = 0, extraBufferCapacity = 1)
+    val setCoverDone: SharedFlow<Unit> = _setCoverDone.asSharedFlow()
+
     /** Errors that the UI should toast/snackbar. Set by previously-silent failure paths
      *  (add-to-album, download-to-device, load albums) so the user gets feedback instead of a
      *  silently spinning indicator. Caller clears via [clearTransientError]. */
@@ -659,6 +668,32 @@ class PhotoViewerViewModel @Inject constructor(
     }
 
     /**
+     * Sets the currently-viewed cloud photo as the cover of [albumLinkId]. Called from the
+     * viewer's overflow menu when the viewer was opened from an album context — the screen
+     * only surfaces the menu item when [sourceAlbumLinkId] is non-null.
+     *
+     * Emits to [setCoverDone] on success so the screen can pop a snackbar, and routes
+     * failures through [transientError]. Local-only items can't be a cloud album cover, so
+     * the call is a no-op in that branch (the menu item is already gated on isCloudItem).
+     */
+    fun setCurrentAsAlbumCover(item: GalleryItem, albumLinkId: String) {
+        if (albumLinkId.isBlank()) return
+        viewModelScope.launch {
+            val userId = accountManager.getPrimaryUserId().first() ?: return@launch
+            val cloudLinkId = when (item) {
+                is GalleryItem.Synced    -> item.cloud.linkId
+                is GalleryItem.CloudOnly -> item.cloud.linkId
+                is GalleryItem.LocalOnly -> return@launch
+            }
+            runCatching { cloudRepo.setAlbumCover(userId, albumLinkId, cloudLinkId) }
+                .onSuccess { _setCoverDone.tryEmit(Unit) }
+                .onFailure { e ->
+                    _transientError.value = "Set cover failed: ${e.message ?: "unknown error"}"
+                }
+        }
+    }
+
+    /**
      * Adds the single viewed item to a cloud album by linkId. Used by the viewer's
      * action-bar bubble when the user picks a Drive album from the picker sheet.
      *
@@ -848,7 +883,11 @@ class PhotoViewerViewModel @Inject constructor(
                     // may have swiped to another page during the download. Without this guard
                     // the late-arriving full-res blob would overwrite whatever the *new* page
                     // loaded, flashing the previous photo onto the current one.
-                    if ((_state.value.itemKey ?: itemKey) != itemKey) return@fold
+                    // Strict equality, no Elvis fallback — when the state's itemKey is null
+                    // (transient Loading / Error during a swap) the `?: itemKey` form would
+                    // short-circuit the guard to false and publish the late blob onto whatever
+                    // page is now visible. Pure `!=` correctly drops the blob in that case.
+                    if (_state.value.itemKey != itemKey) return@fold
                     _state.value = if (isVideo)
                         ViewerState.ShowVideo(fileUri, itemKey = itemKey, isFullRes = true)
                     else

@@ -79,6 +79,16 @@ class DriveCryptoHelper @Inject constructor(
     // lock yields ~2x slower throughput but eliminates the crash.
     private val cryptoLock = java.util.concurrent.locks.ReentrantLock()
 
+    /**
+     * Wrap any direct pgpCrypto.* call site (anything not already routed through this helper)
+     * with this guard so the same ReentrantLock serializes the call into libgojni. Without it,
+     * services that decrypt names / unlock keys / generate keys in parallel can race the same
+     * Go signal handlers that the in-class methods are already protected against. Targets:
+     * PhotoEntityBuilder, AlbumService, PhotosShareService, PhotosVolumeBootstrap,
+     * PhotoUploadService — the five remaining bypassers identified by the Pixel 9 audit.
+     */
+    fun <T> withCryptoLock(block: () -> T): T = cryptoLock.withLock(block)
+
     // ─── Decryption (download) ────────────────────────────────────────────────
 
     /**

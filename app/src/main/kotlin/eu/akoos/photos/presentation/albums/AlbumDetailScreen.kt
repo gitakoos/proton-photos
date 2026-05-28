@@ -179,6 +179,14 @@ fun AlbumDetailScreen(
         viewModel.clearInviteBatchResult()
     }
 
+    val coverUpdatedMsg = stringResource(R.string.album_cover_updated)
+    LaunchedEffect(state.coverUpdatedTick) {
+        // tick == 0 is the initial state; only act on real bumps coming from the VM.
+        if (state.coverUpdatedTick > 0) {
+            snackbarHostState.showSnackbar(coverUpdatedMsg)
+        }
+    }
+
     val enqueuedMsg = stringResource(R.string.album_download_enqueued)
     LaunchedEffect(state.downloadState) {
         when (val ds = state.downloadState) {
@@ -272,11 +280,25 @@ fun AlbumDetailScreen(
                         localUri = state.localUriByLinkId[photo.linkId],
                         isSelected = photo.linkId in state.selectedPhotos,
                         isSelectionMode = state.isSelectionMode,
+                        // Long-press opens a per-cell context menu unless the user is already
+                        // in multi-select (then it falls through to togglePhotoSelection, so
+                        // a "long-press to deselect" still feels natural). Shared-with-me
+                        // albums skip the context-menu fast-path because none of its actions
+                        // are valid for an album the user doesn't own.
+                        showLongPressMenu = !state.isSharedWithMe && !state.isSelectionMode,
                         onTap = {
                             if (state.isSelectionMode) viewModel.togglePhotoSelection(photo.linkId)
                             else onPhotoClick(state.photos, index)
                         },
                         onLongPress = { viewModel.togglePhotoSelection(photo.linkId) },
+                        onSetAsCover = { viewModel.setPhotoAsCover(photo.linkId) },
+                        onRemoveFromAlbum = {
+                            // Reuse the existing multi-select bulk-remove path with a
+                            // single-photo selection so the VM's error / progress handling
+                            // is shared between the menu and the pill button.
+                            viewModel.togglePhotoSelection(photo.linkId)
+                            viewModel.removeSelectedPhotosFromAlbum()
+                        },
                         onRequestThumbnail = viewModel::requestThumbnailDecrypt,
                         onCancelThumbnail = viewModel::cancelThumbnailDecrypt,
                     )
@@ -751,8 +773,14 @@ private fun PhotoCell(
     localUri: String? = null,
     isSelected: Boolean,
     isSelectionMode: Boolean,
+    /** When true, long-press pops the per-cell context menu (Set as cover / Remove from album).
+     *  When false, long-press falls through to [onLongPress] (multi-select toggle). The screen
+     *  flips this off for shared-with-me albums and while already in multi-select mode. */
+    showLongPressMenu: Boolean = false,
     onTap: () -> Unit,
     onLongPress: () -> Unit,
+    onSetAsCover: () -> Unit = {},
+    onRemoveFromAlbum: () -> Unit = {},
     onRequestThumbnail: (linkId: String) -> Unit = {},
     onCancelThumbnail: (linkId: String) -> Unit = {},
 ) {
@@ -774,12 +802,24 @@ private fun PhotoCell(
         }
     }
 
+    // Per-cell long-press menu state. The menu anchors to the cell because [DropdownMenu]
+    // positions relative to its parent — placing it inside the cell's Box means it pops
+    // right where the user pressed instead of in a fixed screen corner.
+    var menuExpanded by remember { mutableStateOf(false) }
+    val appColors = AppColors.current
+
     Box(
         modifier = Modifier
             .aspectRatio(1f)
             .clip(RoundedCornerShape(if (isSelected) 8.dp else 6.dp))
             .background(Bg2)
-            .combinedClickable(onClick = onTap, onLongClick = onLongPress)
+            .combinedClickable(
+                onClick = onTap,
+                onLongClick = {
+                    if (showLongPressMenu) menuExpanded = true
+                    else onLongPress()
+                },
+            )
             .then(if (isSelected) Modifier.border(2.dp, Accent, RoundedCornerShape(8.dp)) else Modifier),
     ) {
         if (imageModel != null) {
@@ -861,6 +901,50 @@ private fun PhotoCell(
                             .border(1.5.dp, Color.White.copy(0.8f), CircleShape),
                     )
                 }
+            }
+        }
+
+        // Per-cell long-press context menu. Anchored to the cell Box so the popup appears
+        // over the photo the user pressed. Only mounted when the cell is in the
+        // long-press-menu mode — saves recompositions when the screen is in multi-select.
+        if (showLongPressMenu) {
+            DropdownMenu(
+                expanded = menuExpanded,
+                onDismissRequest = { menuExpanded = false },
+                shape = RoundedCornerShape(16.dp),
+                containerColor = appColors.cardBg,
+                border = androidx.compose.foundation.BorderStroke(0.5.dp, appColors.pillBorder),
+            ) {
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.album_set_as_cover), color = appColors.fgPrimary) },
+                    leadingIcon = {
+                        Icon(
+                            Icons.Default.PhotoLibrary,
+                            contentDescription = null,
+                            tint = Accent,
+                            modifier = Modifier.size(20.dp),
+                        )
+                    },
+                    onClick = {
+                        menuExpanded = false
+                        onSetAsCover()
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.album_remove_from_album), color = appColors.fgPrimary) },
+                    leadingIcon = {
+                        Icon(
+                            Icons.Default.RemoveCircleOutline,
+                            contentDescription = null,
+                            tint = ErrorColor,
+                            modifier = Modifier.size(20.dp),
+                        )
+                    },
+                    onClick = {
+                        menuExpanded = false
+                        onRemoveFromAlbum()
+                    },
+                )
             }
         }
     }

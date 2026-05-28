@@ -77,7 +77,9 @@ class PhotoEntityBuilder @Inject constructor(
                         val nodePassSig = link.nodePassphraseSignature
                         if (nodePassSig != null && ownPublicKeys.isNotEmpty()) {
                             val passphraseBytes = runCatching {
-                                cryptoContext.pgpCrypto.decryptData(nodePassphraseArmored, parentKeyBytes)
+                                cryptoHelper.withCryptoLock {
+                                    cryptoContext.pgpCrypto.decryptData(nodePassphraseArmored, parentKeyBytes)
+                                }
                             }.getOrNull()
                             if (passphraseBytes != null) {
                                 val ok = cryptoHelper.verifyDetachedSignature(passphraseBytes, nodePassSig, ownPublicKeys)

@@ -123,9 +123,9 @@ class ReconcileSyncStateUseCase @Inject constructor(
             // HIDDEN rows belong to a photo the user moved into the Hidden vault — the local
             // MediaStore copy is gone (or about to be), so reconcile must NOT generate a new
             // SyncState entry that would overwrite the HIDDEN status with LOCAL_ONLY/SYNCED.
-            // This is the cleanup that previously caused "hidden photo reappears as cloud-only
-            // after a refresh" — without skipping, the next reconcile after a hide flips the
-            // row back to a regular cloud entry and loses the hidden marker.
+            // Without this skip the next reconcile after a hide would flip the row back to a
+            // regular cloud entry and the hidden marker would be lost (manifesting as the
+            // hidden photo reappearing as cloud-only after a refresh).
             if (existingSync?.status == SyncStatus.HIDDEN) {
                 done++
                 if (done % 50 == 0) emit(SyncProgress(total, done, true))

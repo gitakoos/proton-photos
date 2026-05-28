@@ -429,7 +429,9 @@ class PhotosShareService @Inject constructor(
             val encNodeHashKey = batchResp.links.firstOrNull()?.folder?.nodeHashKey
             if (encNodeHashKey != null) {
                 try {
-                    cachedRootNodeHashKeyBytes = cryptoContext.pgpCrypto.decryptData(encNodeHashKey, keyBytes)
+                    cachedRootNodeHashKeyBytes = cryptoHelper.withCryptoLock {
+                        cryptoContext.pgpCrypto.decryptData(encNodeHashKey, keyBytes)
+                    }
                     Log.d(TAG, "getRootLinkKeyBytes: root NodeHashKey decrypted (${cachedRootNodeHashKeyBytes?.size} bytes)")
                 } catch (e: Exception) {
                     Log.w(TAG, "getRootLinkKeyBytes: failed to decrypt root NodeHashKey: ${e.message}")
@@ -467,7 +469,9 @@ class PhotosShareService @Inject constructor(
             }
             val encNodeHashKey = batchResp.links.firstOrNull()?.folder?.nodeHashKey
             if (encNodeHashKey != null) {
-                cachedRootNodeHashKeyBytes = cryptoContext.pgpCrypto.decryptData(encNodeHashKey, rootKeyBytes)
+                cachedRootNodeHashKeyBytes = cryptoHelper.withCryptoLock {
+                    cryptoContext.pgpCrypto.decryptData(encNodeHashKey, rootKeyBytes)
+                }
                 Log.d(TAG, "ensureRootNodeHashKeyLoaded: root NodeHashKey decrypted on retry " +
                     "(${cachedRootNodeHashKeyBytes?.size} bytes)")
             } else {

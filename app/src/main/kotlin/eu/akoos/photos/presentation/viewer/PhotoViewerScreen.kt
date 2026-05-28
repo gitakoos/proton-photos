@@ -107,6 +107,7 @@ import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.LibraryAdd
+import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.VisibilityOff
 import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.entity.GalleryItem
@@ -204,6 +205,19 @@ fun PhotoViewerScreen(
             android.widget.Toast.makeText(
                 context,
                 "Added to \"$albumName\"",
+                android.widget.Toast.LENGTH_SHORT,
+            ).show()
+        }
+    }
+    // Success feedback for "Set as album cover" — same Toast pattern as the add-to-album
+    // done flow above so the user gets immediate confirmation without us threading a
+    // SnackbarHost into the viewer (it doesn't have one).
+    val coverUpdatedToast = stringResource(R.string.album_cover_updated)
+    LaunchedEffect(Unit) {
+        viewModel.setCoverDone.collect {
+            android.widget.Toast.makeText(
+                context,
+                coverUpdatedToast,
                 android.widget.Toast.LENGTH_SHORT,
             ).show()
         }
@@ -759,6 +773,29 @@ fun PhotoViewerScreen(
                                     onClick = {
                                         menuExpanded = false
                                         viewModel.downloadToDevice(settledItem)
+                                    },
+                                )
+                            }
+                            // "Set as album cover" — only visible when the viewer was opened
+                            // from an album (sourceAlbumLinkId != null) AND the item is a cloud
+                            // photo (Synced/CloudOnly carry a Drive linkId — LocalOnly doesn't).
+                            // No-op when the user owns the album but the cover is unchanged,
+                            // because setAlbumCover is idempotent server-side.
+                            val isCloudItemForCover = settledItem is GalleryItem.Synced ||
+                                settledItem is GalleryItem.CloudOnly
+                            if (sourceAlbumLinkId != null && isCloudItemForCover) {
+                                androidx.compose.material3.DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.album_set_as_album_cover),
+                                        color = FgPrimary) },
+                                    leadingIcon = { Icon(
+                                        Icons.Default.PhotoLibrary,
+                                        null,
+                                        tint = Accent,
+                                        modifier = Modifier.size(20.dp),
+                                    ) },
+                                    onClick = {
+                                        menuExpanded = false
+                                        viewModel.setCurrentAsAlbumCover(settledItem, sourceAlbumLinkId)
                                     },
                                 )
                             }

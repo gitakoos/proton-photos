@@ -124,12 +124,11 @@ fun VideoEditorScreen(
     val saveSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val context = LocalContext.current
 
-    remember(localUri, cloudPhoto?.linkId) {
+    androidx.compose.runtime.LaunchedEffect(localUri, cloudPhoto?.linkId) {
         when {
             cloudPhoto != null -> vm.loadCloud(cloudPhoto, sourceAlbumLinkId)
             localUri != null   -> vm.loadLocal(localUri, localDisplayName ?: "video.mp4", localMimeType ?: "video/mp4")
         }
-        Unit
     }
 
     // Side effects on save completion. LaunchedEffect rather than remember{} so the

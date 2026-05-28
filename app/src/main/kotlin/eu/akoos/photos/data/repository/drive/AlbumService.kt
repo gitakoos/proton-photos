@@ -297,7 +297,9 @@ class AlbumService @Inject constructor(
             ?: error("Cannot load root link key for album creation")
         val rootLinkArmoredKey = shareService.rootLinkArmoredKey()
             ?: error("Root link armored key not available")
-        val rootLinkPublicKey = cryptoContext.pgpCrypto.getPublicKey(rootLinkArmoredKey)
+        val rootLinkPublicKey = cryptoHelper.withCryptoLock {
+            cryptoContext.pgpCrypto.getPublicKey(rootLinkArmoredKey)
+        }
         val signingKey = cryptoHelper.getAddressSigningKey(userId)
 
         // Generate album node key pair
@@ -315,7 +317,9 @@ class AlbumService @Inject constructor(
         // NodeHashKey: a random 32-byte secret encrypted to the album's own public key. The
         // album's NodeHashKey is what the album's CHILDREN (photos) use to compute their
         // own name hashes — it is NOT used for the album's own name hash.
-        val hashKeyBytes = cryptoContext.pgpCrypto.generateRandomBytes(32)
+        val hashKeyBytes = cryptoHelper.withCryptoLock {
+            cryptoContext.pgpCrypto.generateRandomBytes(32)
+        }
         val nodeHashKey = cryptoHelper.encryptDataToPgpMessage(hashKeyBytes, albumNodeKey.publicKeyArmored)
         // Album's OWN name hash is computed with the PARENT's (root's) NodeHashKey — albums are
         // direct children of the root link, so their name hash space lives under root. Previously
@@ -591,12 +595,16 @@ class AlbumService @Inject constructor(
         // Decrypt the album's private key (to decrypt its NodeHashKey)
         val albumKeyBytes = cryptoHelper.decryptNodeKey(albumNodeKeyArmored, albumNodePassphraseArmored, rootLinkKeyBytes)
         // Extract album's public key — used to re-encrypt photo passphrases and names TO the album
-        val albumPublicKeyArmored = cryptoContext.pgpCrypto.getPublicKey(albumNodeKeyArmored)
+        val albumPublicKeyArmored = cryptoHelper.withCryptoLock {
+            cryptoContext.pgpCrypto.getPublicKey(albumNodeKeyArmored)
+        }
 
         // Decrypt the album's NodeHashKey (symmetric key for HMAC-SHA256 name hashing)
         val albumNodeHashKeyEncrypted = albumDto.album?.nodeHashKey
             ?: error("addPhotosToAlbum: album has no NodeHashKey in AlbumMeta")
-        val albumNodeHashKeyBytes = cryptoContext.pgpCrypto.decryptData(albumNodeHashKeyEncrypted, albumKeyBytes)
+        val albumNodeHashKeyBytes = cryptoHelper.withCryptoLock {
+            cryptoContext.pgpCrypto.decryptData(albumNodeHashKeyEncrypted, albumKeyBytes)
+        }
 
         // 3. Address signing key (for signing re-encrypted names)
         val signingKey = cryptoHelper.getAddressSigningKey(userId)
@@ -629,11 +637,15 @@ class AlbumService @Inject constructor(
 
             try {
                 // Decrypt photo's raw passphrase bytes (currently encrypted to root link key)
-                val photoPassphraseBytes = cryptoContext.pgpCrypto.decryptData(photoNodePassArmored, rootLinkKeyBytes)
+                val photoPassphraseBytes = cryptoHelper.withCryptoLock {
+                    cryptoContext.pgpCrypto.decryptData(photoNodePassArmored, rootLinkKeyBytes)
+                }
 
                 // Unlock photo's node key with decrypted passphrase
-                val photoNodeKeyBytes = cryptoContext.pgpCrypto.unlock(photoNodeKeyArmored, photoPassphraseBytes).let {
-                    val b = it.value.copyOf(); it.close(); b
+                val photoNodeKeyBytes = cryptoHelper.withCryptoLock {
+                    cryptoContext.pgpCrypto.unlock(photoNodeKeyArmored, photoPassphraseBytes).let {
+                        val b = it.value.copyOf(); it.close(); b
+                    }
                 }
 
                 // Decrypt plaintext file name
@@ -763,7 +775,9 @@ class AlbumService @Inject constructor(
             ?: error("renameAlbum: root link key unavailable")
         val rootLinkArmored = shareService.rootLinkArmoredKey()
             ?: error("renameAlbum: root link armored key unavailable")
-        val rootPublicKey = cryptoContext.pgpCrypto.getPublicKey(rootLinkArmored)
+        val rootPublicKey = cryptoHelper.withCryptoLock {
+            cryptoContext.pgpCrypto.getPublicKey(rootLinkArmored)
+        }
         val rootNodeHashKey = shareService.rootNodeHashKeyBytes()
             ?: error("renameAlbum: root NodeHashKey unavailable after eager refresh")
 

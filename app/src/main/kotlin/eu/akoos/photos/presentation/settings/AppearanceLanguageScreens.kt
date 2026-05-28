@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -36,6 +37,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import eu.akoos.photos.R
 import eu.akoos.photos.presentation.theme.AppColors
+import eu.akoos.photos.presentation.theme.paletteAccent
 
 @Composable
 fun AppearanceSettingsScreen(
@@ -68,6 +70,38 @@ fun AppearanceSettingsScreen(
                     onClick = { viewModel.setThemeMode(mode) },
                 )
                 if (index < ThemeMode.entries.lastIndex) RowDivider()
+            }
+        }
+
+        Spacer(Modifier.height(20.dp))
+        SectionLabel(stringResource(R.string.settings_palette_section))
+        Spacer(Modifier.height(8.dp))
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(colors.cardBg, RoundedCornerShape(12.dp))
+                .border(0.5.dp, colors.cardBorder, RoundedCornerShape(12.dp)),
+        ) {
+            ThemePalette.entries.forEachIndexed { index, p ->
+                val selected = state.palette == p
+                // Swatch resolves to the palette's accent in the *current* light/dark mode,
+                // so the user sees exactly the shade they'll get applied.
+                val swatch = paletteAccent(p, isLight = colors.isLight)
+                ChoiceRow(
+                    label = stringResource(p.labelRes),
+                    description = null,
+                    selected = selected,
+                    onClick = { viewModel.setThemePalette(p) },
+                    leading = {
+                        Box(
+                            modifier = Modifier
+                                .size(18.dp)
+                                .background(swatch, CircleShape)
+                                .border(0.5.dp, colors.cardBorder, CircleShape),
+                        )
+                    },
+                )
+                if (index < ThemePalette.entries.lastIndex) RowDivider()
             }
         }
     }
@@ -127,6 +161,7 @@ private fun ChoiceRow(
     description: String?,
     selected: Boolean,
     onClick: () -> Unit,
+    leading: (@Composable () -> Unit)? = null,
 ) {
     val colors = AppColors.current
     Row(
@@ -136,6 +171,10 @@ private fun ChoiceRow(
             .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        if (leading != null) {
+            leading()
+            Spacer(Modifier.width(12.dp))
+        }
         Column(modifier = Modifier.weight(1f)) {
             Text(label, color = colors.fgPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
             if (description != null) {

@@ -237,7 +237,7 @@ class LocalMediaRepositoryImpl @Inject constructor(
         // IS_PENDING <= 1 (not == 0) so freshly-captured camera photos still mid-finalization
         // appear in the query result. The MediaStore observer fires once when the file is
         // created (IS_PENDING=1) and again when the camera app commits (IS_PENDING=0); the
-        // earlier appearance lets the sync pipeline have the SyncState row ready by the time
+        // prior appearance lets the sync pipeline have the SyncState row ready by the time
         // the commit lands, instead of waiting a full periodic cycle after.
         val selection = "${MediaStore.MediaColumns.IS_PENDING} <= 1"
         val sortOrder = "${MediaStore.MediaColumns.DATE_TAKEN} DESC, ${MediaStore.MediaColumns.DATE_ADDED} DESC"

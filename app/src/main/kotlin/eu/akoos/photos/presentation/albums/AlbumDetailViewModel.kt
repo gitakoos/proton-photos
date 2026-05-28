@@ -85,6 +85,11 @@ data class AlbumDetailUiState(
     val isInvitingBatch: Boolean = false,
     /** Set after a [AlbumDetailViewModel.inviteUsers] batch completes; consumed once by the UI snackbar. */
     val inviteBatchResult: InviteBatchResult? = null,
+    /** Bumped when [AlbumDetailViewModel.setPhotoAsCover] or [setSelectedPhotoAsCover] succeed; the
+     *  UI consumes this via a LaunchedEffect to show a one-shot "Cover updated" snackbar. Using a
+     *  monotonically increasing tick (not a Boolean flag) means two consecutive sets in a row still
+     *  trigger two snackbars without a manual "clear" round-trip. */
+    val coverUpdatedTick: Int = 0,
 ) {
     val isSelectionMode: Boolean get() = selectedPhotos.isNotEmpty()
     val selectedCount: Int get() = selectedPhotos.size
@@ -391,17 +396,47 @@ class AlbumDetailViewModel @Inject constructor(
     /**
      * Sets the single selected photo as the album cover. No-op if more or fewer than one
      * photo is selected — the UI only exposes this action in that exact state.
+     *
+     * On success: bumps [AlbumDetailUiState.coverUpdatedTick] so the screen pops a snackbar,
+     * and notifies [albumListEvents] so the AlbumsViewModel re-fetches and the gallery
+     * album-card thumbnail picks up the new cover without waiting for pull-to-refresh.
      */
     fun setSelectedPhotoAsCover() {
         val albumLinkId = _uiState.value.albumLinkId.ifBlank { return }
         val selected = _uiState.value.selectedPhotos
         if (selected.size != 1) return
         val coverLinkId = selected.first()
+        runSetCover(albumLinkId, coverLinkId, clearSelection = true)
+    }
+
+    /**
+     * One-shot "set this specific photo as the cover" — bypasses the multi-select flow.
+     * Used by the per-cell long-press context menu in [AlbumDetailScreen] and (proxied
+     * through a separate VM method) the viewer's overflow "Set as album cover" action.
+     */
+    fun setPhotoAsCover(coverLinkId: String) {
+        val albumLinkId = _uiState.value.albumLinkId.ifBlank { return }
+        if (coverLinkId.isBlank()) return
+        runSetCover(albumLinkId, coverLinkId, clearSelection = false)
+    }
+
+    private fun runSetCover(albumLinkId: String, coverLinkId: String, clearSelection: Boolean) {
         viewModelScope.launch {
             val userId = accountManager.getPrimaryUserId().first() ?: return@launch
             runCatching { driveRepo.setAlbumCover(userId, albumLinkId, coverLinkId) }
                 .fold(
-                    onSuccess = { _uiState.update { it.copy(selectedPhotos = emptySet(), error = null) } },
+                    onSuccess = {
+                        _uiState.update {
+                            it.copy(
+                                selectedPhotos = if (clearSelection) emptySet() else it.selectedPhotos,
+                                error = null,
+                                coverUpdatedTick = it.coverUpdatedTick + 1,
+                            )
+                        }
+                        // Albums grid card needs to re-fetch so its thumbnail flips to the
+                        // newly chosen cover the moment the user pops back to the list.
+                        albumListEvents.notifyChanged()
+                    },
                     onFailure = { e -> _uiState.update { it.copy(error = "Set cover failed: ${e.message}") } },
                 )
         }

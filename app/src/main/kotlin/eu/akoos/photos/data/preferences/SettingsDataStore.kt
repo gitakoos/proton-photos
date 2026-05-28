@@ -40,6 +40,13 @@ object SettingsKeys {
     val THEME_MODE = stringPreferencesKey("theme_mode")
     /** Legacy — kept only so old installs migrate cleanly to [THEME_MODE]. */
     val DARK_MODE = booleanPreferencesKey("dark_mode")
+    /**
+     * Accent-color palette selection. Independent of [THEME_MODE] — palette only swaps
+     * the accent/accent2 tokens, never the light/dark base surfaces. Default value is
+     * the historical Proton purple so installs upgrading through this commit see no
+     * visual change until they pick a different palette.
+     */
+    val THEME_PALETTE = stringPreferencesKey("theme_palette")
     val LAST_SYNC_MS = longPreferencesKey("last_sync_ms")
     val LANGUAGE = stringPreferencesKey("language")
     /** Folders selected for backup. null (key absent) = back up nothing (first-run default). */

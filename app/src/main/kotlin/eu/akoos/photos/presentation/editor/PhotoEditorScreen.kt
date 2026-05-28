@@ -144,18 +144,24 @@ fun PhotoEditorScreen(
         }
     }
     // Inform the VM about the source album so save() can re-attach the new linkId.
-    remember(sourceAlbumLinkId) { vm.setSourceAlbumLinkId(sourceAlbumLinkId); Unit }
+    // LaunchedEffect over the older remember{...; Unit} hack — Compose lint flags the
+    // dropped-Unit form as fragile (future runtime tweaks could stop firing the side
+    // effect when the result is unused).
+    androidx.compose.runtime.LaunchedEffect(sourceAlbumLinkId) {
+        vm.setSourceAlbumLinkId(sourceAlbumLinkId)
+    }
     // Inform the VM about the cloud counterpart (Synced case) so save() can propagate
     // the edit to Drive after the local file is written.
-    remember(syncedCloudCounterpart?.linkId) { vm.setCloudCounterpart(syncedCloudCounterpart); Unit }
+    androidx.compose.runtime.LaunchedEffect(syncedCloudCounterpart?.linkId) {
+        vm.setCloudCounterpart(syncedCloudCounterpart)
+    }
 
     // Load source once.
-    remember(localUri, cloudPhoto?.linkId) {
+    androidx.compose.runtime.LaunchedEffect(localUri, cloudPhoto?.linkId) {
         when {
             cloudPhoto != null -> vm.loadCloud(cloudPhoto)
             localUri != null   -> vm.loadLocal(localUri, localDisplayName ?: "photo.jpg", localMimeType ?: "image/jpeg")
         }
-        Unit
     }
 
     // System consent dialog for overwriting foreign MediaStore URIs.
@@ -192,8 +198,8 @@ fun PhotoEditorScreen(
     // before navigating, otherwise the screen pops back while the system prompt is still
     // building and the user never sees the Allow/Deny choice.
     val saveContext = androidx.compose.ui.platform.LocalContext.current
-    remember(state.saveResult, state.pendingDeleteIntent) {
-        if (state.pendingDeleteIntent != null) return@remember Unit
+    androidx.compose.runtime.LaunchedEffect(state.saveResult, state.pendingDeleteIntent) {
+        if (state.pendingDeleteIntent != null) return@LaunchedEffect
         when (state.saveResult) {
             is SaveResult.Success -> {
                 vm.consumeSaveResult()
@@ -210,7 +216,6 @@ fun PhotoEditorScreen(
             }
             else -> { /* Failed / null — let the existing Failed-message UI render */ }
         }
-        Unit
     }
 
 

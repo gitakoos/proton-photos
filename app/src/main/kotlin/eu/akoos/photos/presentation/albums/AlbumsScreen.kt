@@ -307,8 +307,8 @@ fun AlbumsScreen(
                                     onClick     = {
                                         // Open a merged detail view that shows BOTH the local
                                         // bucket photos AND the matching cloud album photos
-                                        // deduped. Previously fell back to cloud-only or
-                                        // local-only, hiding the other side from the user.
+                                        // deduped, so neither side is hidden from the user
+                                        // when a local bucket and a cloud album share a name.
                                         onMergedAlbumClick(entry.local, entry.cloud)
                                     },
                                     onLongClick = { albumToDelete = entry.cloud },
@@ -330,10 +330,10 @@ fun AlbumsScreen(
             titleContentColor = AppColors.current.fgPrimary,
             title = { Text("\"${album.name}\"", fontWeight = FontWeight.SemiBold) },
             // AlbumService.deleteAlbum passes deleteAlbumPhotos=0, so only the album container
-            // is removed — the photos themselves stay in Proton Drive. The string was previously
-            // shared with the in-album multi-delete confirmation (which IS destructive), but the
-            // copy promised "permanently delete the original" here too — which was a lie. Use a
-            // dedicated string that matches what actually happens.
+            // is removed — the photos themselves stay in Proton Drive. Uses a dedicated string
+            // (not the in-album multi-delete confirmation, which IS destructive) so the copy
+            // accurately describes the container-only delete instead of promising to
+            // "permanently delete the original".
             text  = { Text(stringResource(R.string.delete_album_container_warning), color = AppColors.current.fgDim, fontSize = 13.sp) },
             confirmButton = {
                 TextButton(onClick = { viewModel.deleteAlbum(album.linkId); albumToDelete = null }) {

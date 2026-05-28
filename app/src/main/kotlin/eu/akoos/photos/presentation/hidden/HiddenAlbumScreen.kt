@@ -289,10 +289,10 @@ private fun HiddenPhotoCell(
                 Icon(
                     androidx.compose.material.icons.Icons.Default.Cloud,
                     contentDescription = "Backed up",
-                    // Same green as the gallery's SyncedCloudBadge so the user sees ONE
-                    // visual language for "this photo is on Drive" — earlier I used the
-                    // brand Accent (purple) here which made it look like a third badge
-                    // colour and confused users into thinking the hidden item was a
+                    // Same green as the gallery's SyncedCloudBadge so the visual language
+                    // for "this photo is on Drive" stays consistent between Hidden and the
+                    // regular timeline. Using the brand Accent (purple) here instead would
+                    // read as a third badge colour and imply the hidden item lives on a
                     // different kind of cloud than the regular Synced ones.
                     tint = Color(0xFF30D158),
                     modifier = Modifier.size(12.dp),

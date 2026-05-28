@@ -72,9 +72,9 @@ private suspend fun <T> retryUploadCall(block: suspend (attempt: Int) -> T): T =
         shouldRetry = { e ->
             // Walk the cause chain — ProtonCore wraps IOExceptions inside ApiException
             // wrappers, so message-only matching on `e.message` misses the real reason.
-            // Concatenating up to 4 levels covers nearly every Drive backend exception
-            // we've seen in the field (UnknownHostException, SSLException, SSL_PROTOCOL_ERROR,
-            // read errors mid-handshake, mobile-radio reattach timeouts).
+            // Concatenating up to 4 levels covers the common Drive backend exceptions
+            // (UnknownHostException, SSLException, SSL_PROTOCOL_ERROR, read errors
+            // mid-handshake, mobile-radio reattach timeouts).
             val msgs = generateSequence<Throwable>(e) { it.cause }
                 .take(4)
                 .mapNotNull { it.message }
@@ -140,7 +140,9 @@ class PhotoUploadService @Inject constructor(
             val rootLinkArmoredKey = shareService.rootLinkArmoredKey()
                 ?: run { shareService.getRootLinkKeyBytes(userId); shareService.rootLinkArmoredKey() }
                 ?: error("Root link armored key not available")
-            val rootLinkPublicKey = cryptoContext.pgpCrypto.getPublicKey(rootLinkArmoredKey)
+            val rootLinkPublicKey = cryptoHelper.withCryptoLock {
+                cryptoContext.pgpCrypto.getPublicKey(rootLinkArmoredKey)
+            }
             val nodePassphraseEncrypted = cryptoHelper.encryptDataToPgpMessage(nodeKey.passphraseBytes, rootLinkPublicKey)
             // Detached PGP signature — the Drive API requires plain signData here (same as web client).
             val nodePassphraseSignature = cryptoHelper.signData(nodeKey.passphraseBytes, signingKey.unlockedKeyBytes)

@@ -608,8 +608,8 @@ fun GalleryScreen(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    // No translucent grey strip behind the pills — earlier the alpha-0.95
-                    // bg0 wash made the selection bar look heavier than the regular photo
+                    // No translucent grey strip behind the pills — a full-width bg0 wash
+                    // would make the selection bar look heavier than the regular photo
                     // chips on the same screen. Floating pills match the rest of the top
                     // chrome.
                     .onGloballyPositioned { headerHeightPx = it.size.height }

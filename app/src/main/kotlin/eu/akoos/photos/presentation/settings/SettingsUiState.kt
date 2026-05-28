@@ -32,6 +32,7 @@ data class SettingsUiState(
     val syncedPhotoCount: Int = 0,
     val syncedVideoCount: Int = 0,
     val themeMode: ThemeMode = ThemeMode.System,
+    val palette: ThemePalette = ThemePalette.Default,
     val userDisplayName: String = "",
     val userEmail: String = "",
     val cloudUsedBytes: Long = 0L,
@@ -80,6 +81,25 @@ enum class ThemeMode(val storageKey: String, val labelRes: Int) {
 
     companion object {
         fun fromKey(key: String?): ThemeMode = entries.firstOrNull { it.storageKey == key } ?: System
+    }
+}
+
+/**
+ * Accent-color palette. Orthogonal to [ThemeMode] — picking Forest doesn't switch
+ * between light and dark, only the accent/accent2 tokens shift. [Default] is the
+ * original Proton purple kept around for backward compatibility (no visual change
+ * for users who never open the new picker).
+ */
+enum class ThemePalette(val storageKey: String, val labelRes: Int) {
+    Default("default", eu.akoos.photos.R.string.palette_default),
+    Forest ("forest",  eu.akoos.photos.R.string.palette_forest),
+    Sunset ("sunset",  eu.akoos.photos.R.string.palette_sunset),
+    Sea    ("sea",     eu.akoos.photos.R.string.palette_sea),
+    Sepia  ("sepia",   eu.akoos.photos.R.string.palette_sepia),
+    Mono   ("mono",    eu.akoos.photos.R.string.palette_mono);
+
+    companion object {
+        fun fromKey(key: String?): ThemePalette = entries.firstOrNull { it.storageKey == key } ?: Default
     }
 }
 

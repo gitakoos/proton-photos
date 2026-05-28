@@ -80,7 +80,7 @@ class PhotoStreamService @Inject constructor(
     private val refreshIncrementalMutex = Mutex()
 
     /**
-     * Cooldown to break a refresh-loop we saw in the field: when [getLatestEventAnchor]
+     * Cooldown to break a known refresh-loop: when [getLatestEventAnchor]
      * returns "Invalid ID" (some accounts simply don't have an event anchor available),
      * [doRefreshCloudPhotosIncremental] never persists an anchor, so EVERY subsequent
      * call falls through to a full refresh. With three callers (gallery init, onResume,
@@ -165,8 +165,8 @@ class PhotoStreamService @Inject constructor(
             // Sort by captureTime DESC so the chunked loop processes newest-first — matches
             // the gallery's display order (GetGalleryItemsUseCase sortedByDescending captureTime).
             // Without this, chunks land in linkId order from the server, and a photo from the
-            // middle of the timeline can show up before the user's most-recent shot at the top
-            // of the gallery, which felt random to the user ("nem fentről lefelé tölt").
+            // middle of the timeline can show up before the most-recent shot at the top of the
+            // gallery, so the load order looks random instead of top-down.
             val allPhotoLinks = streamLinks.sortedByDescending { it.captureTime }
             val linkShareMap = streamLinks.associate { it.linkId to effectiveShareId }
             Log.d(TAG, "refreshCloudPhotos: ${allPhotoLinks.size} photos in stream")

@@ -231,6 +231,8 @@
     <string name="album_rename_confirm">Umbenennen</string>
     <string name="album_remove_from_album">Aus Album entfernen</string>
     <string name="album_set_as_cover">Als Titelbild festlegen</string>
+    <string name="album_set_as_album_cover">Als Albumtitelbild festlegen</string>
+    <string name="album_cover_updated">Titelbild aktualisiert</string>
     <string name="month_photo_count">%d Fotos</string>
     <string name="language_label">Sprache</string>
     <string name="close">Schließen</string>
@@ -243,6 +245,15 @@
     <string name="theme_mode_desc_system">Geräteeinstellungen folgen</string>
     <string name="theme_mode_desc_light">Immer helles Design verwenden</string>
     <string name="theme_mode_desc_dark">Immer dunkles Design verwenden</string>
+
+    <!-- Themed palettes -->
+    <string name="settings_palette_section">Palette</string>
+    <string name="palette_default">Standard</string>
+    <string name="palette_forest">Wald</string>
+    <string name="palette_sunset">Sonnenuntergang</string>
+    <string name="palette_sea">Meer</string>
+    <string name="palette_sepia">Sepia</string>
+    <string name="palette_mono">Mono</string>
 
     <!-- Language -->
     <string name="language_en">Englisch, English</string>

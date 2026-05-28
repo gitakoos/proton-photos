@@ -13,6 +13,7 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.node.DelegatableNode
+import eu.akoos.photos.presentation.settings.ThemePalette
 
 // No-op indication — suppresses all press ripple/animation
 private object NoIndication : IndicationNodeFactory {
@@ -33,6 +34,13 @@ private val FgDimDark = Color(0xFFA4A1B4)
 private val FgMuteDark = Color(0xFF6B6880)
 private val AccentDark = Color(0xFF8B7CFF)
 private val Accent2Dark = Color(0xFF6957D7)
+// ── Palette accents (dark mode) — only `accent`/`accent2` shift between palettes. ──
+// Default keeps the historical purple (callers still using AccentStatic stay unchanged).
+private val AccentDarkForest  = Color(0xFF7BC47F); private val Accent2DarkForest  = Color(0xFF3F8C44)
+private val AccentDarkSunset  = Color(0xFFFF8A65); private val Accent2DarkSunset  = Color(0xFFE64A19)
+private val AccentDarkSea     = Color(0xFF4FC3F7); private val Accent2DarkSea     = Color(0xFF0288D1)
+private val AccentDarkSepia   = Color(0xFFD4A574); private val Accent2DarkSepia   = Color(0xFF8B6F47)
+private val AccentDarkMono    = Color(0xFFE0E0E0); private val Accent2DarkMono    = Color(0xFF9E9E9E)
 private val LineDark = Color(0x14FFFFFF)
 private val Line2Dark = Color(0x1EFFFFFF)
 private val PillBgDark = Color(0xBE1C1C1E)
@@ -49,6 +57,12 @@ private val FgDimLight = Color(0xFF5C5A6B)
 private val FgMuteLight = Color(0xFF8E8B9C)
 private val AccentLight = Color(0xFF6957D7)
 private val Accent2Light = Color(0xFF4A37BC)
+// ── Palette accents (light mode). ──
+private val AccentLightForest = Color(0xFF388E3C); private val Accent2LightForest = Color(0xFF1B5E20)
+private val AccentLightSunset = Color(0xFFE64A19); private val Accent2LightSunset = Color(0xFFBF360C)
+private val AccentLightSea    = Color(0xFF0288D1); private val Accent2LightSea    = Color(0xFF01579B)
+private val AccentLightSepia  = Color(0xFF8B6F47); private val Accent2LightSepia  = Color(0xFF5D4037)
+private val AccentLightMono   = Color(0xFF424242); private val Accent2LightMono   = Color(0xFF212121)
 private val LineLight = Color(0x14000000)
 private val Line2Light = Color(0x1F000000)
 private val PillBgLight = Color(0xBEF2F2F4)
@@ -97,76 +111,106 @@ data class AppColorsTokens(
     val arcTrack: Color,          // background ring behind the storage progress arc
 )
 
-private val DarkAppColors = AppColorsTokens(
-    isLight        = false,
-    bg0            = Bg0Dark,
-    bg1            = Bg1Dark,
-    bg2            = Bg2Dark,
-    pageBg         = Color(0xFF0E0E0F),
-    cardBg         = Color(0xFF1C1C1E),
-    cardBorder     = Color(0xFF2C2C2E),
-    surfaceWeak    = Color(0x14FFFFFF),
-    fgPrimary      = FgPrimaryDark,
-    fgDim          = FgDimDark,
-    fgMute         = FgMuteDark,
-    accent         = AccentDark,
-    accent2        = Accent2Dark,
-    line           = LineDark,
-    line2          = Line2Dark,
-    pillBg         = PillBgDark,
-    pillBgOpaque   = PillBgOpaqueDark,
-    pillBorder     = PillBorderDark,
-    errorColor     = ErrorColorDark,
-    chipUnselectedBg = Color(0xFF1C1C1E),
-    chipSelectedBg   = Color(0xFF3A3A3C),
-    filterPillBg     = Color(0xFF3A3A3C),
-    activeChipText   = ActiveChipTextDark,
-    panelBg          = Color(0xFF14111B),
-    panelChip        = Color(0xFF1F1B29),
-    trackBg          = Color(0xFF2E2A38),
-    deleteTint       = Color(0x18FF453A),
-    errorChipBg      = Color(0x33FF8C7A),
-    arcTrack         = Color(0xFF2C2C2E),
-)
+// ── Palette → accent resolution ───────────────────────────────────────────────────
+// Only `accent` and `accent2` shift per palette; every other token stays palette-
+// agnostic. Default returns the historical Proton purple so existing installs see
+// zero visual change after this code lands.
+private fun darkAccentFor(palette: ThemePalette): Pair<Color, Color> = when (palette) {
+    ThemePalette.Default -> AccentDark         to Accent2Dark
+    ThemePalette.Forest  -> AccentDarkForest   to Accent2DarkForest
+    ThemePalette.Sunset  -> AccentDarkSunset   to Accent2DarkSunset
+    ThemePalette.Sea     -> AccentDarkSea      to Accent2DarkSea
+    ThemePalette.Sepia   -> AccentDarkSepia   to Accent2DarkSepia
+    ThemePalette.Mono    -> AccentDarkMono     to Accent2DarkMono
+}
 
-private val LightAppColors = AppColorsTokens(
-    isLight        = true,
-    bg0            = Bg0Light,
-    bg1            = Bg1Light,
-    bg2            = Bg2Light,
-    pageBg         = Color(0xFFF2F2F5),
-    cardBg         = Color(0xFFFFFFFF),
-    cardBorder     = Color(0xFFD8D8DC),
-    surfaceWeak    = Color(0x14000000),
-    fgPrimary      = FgPrimaryLight,
-    fgDim          = FgDimLight,
-    fgMute         = FgMuteLight,
-    accent         = AccentLight,
-    accent2        = Accent2Light,
-    line           = LineLight,
-    line2          = Line2Light,
-    pillBg         = PillBgLight,
-    pillBgOpaque   = PillBgOpaqueLight,
-    pillBorder     = PillBorderLight,
-    errorColor     = ErrorColorLight,
-    chipUnselectedBg = Color(0xFFFFFFFF),
-    chipSelectedBg   = Color(0xFFE2E2E5),
-    filterPillBg     = Color(0xFFE2E2E5),
-    activeChipText   = ActiveChipTextLight,
-    panelBg          = Color(0xFFEEEFF2),
-    panelChip        = Color(0xFFFFFFFF),
-    trackBg          = Color(0xFFDCDCE0),
-    deleteTint       = Color(0x1FD8351E),
-    errorChipBg      = Color(0x33D8351E),
-    arcTrack         = Color(0xFFD8D8DC),
-)
+private fun lightAccentFor(palette: ThemePalette): Pair<Color, Color> = when (palette) {
+    ThemePalette.Default -> AccentLight        to Accent2Light
+    ThemePalette.Forest  -> AccentLightForest  to Accent2LightForest
+    ThemePalette.Sunset  -> AccentLightSunset  to Accent2LightSunset
+    ThemePalette.Sea     -> AccentLightSea     to Accent2LightSea
+    ThemePalette.Sepia   -> AccentLightSepia   to Accent2LightSepia
+    ThemePalette.Mono    -> AccentLightMono    to Accent2LightMono
+}
 
-private val DarkColorScheme = darkColorScheme(
-    primary = AccentDark,
+private fun darkAppColors(palette: ThemePalette): AppColorsTokens {
+    val (accent, accent2) = darkAccentFor(palette)
+    return AppColorsTokens(
+        isLight        = false,
+        bg0            = Bg0Dark,
+        bg1            = Bg1Dark,
+        bg2            = Bg2Dark,
+        pageBg         = Color(0xFF0E0E0F),
+        cardBg         = Color(0xFF1C1C1E),
+        cardBorder     = Color(0xFF2C2C2E),
+        surfaceWeak    = Color(0x14FFFFFF),
+        fgPrimary      = FgPrimaryDark,
+        fgDim          = FgDimDark,
+        fgMute         = FgMuteDark,
+        accent         = accent,
+        accent2        = accent2,
+        line           = LineDark,
+        line2          = Line2Dark,
+        pillBg         = PillBgDark,
+        pillBgOpaque   = PillBgOpaqueDark,
+        pillBorder     = PillBorderDark,
+        errorColor     = ErrorColorDark,
+        chipUnselectedBg = Color(0xFF1C1C1E),
+        chipSelectedBg   = Color(0xFF3A3A3C),
+        filterPillBg     = Color(0xFF3A3A3C),
+        activeChipText   = ActiveChipTextDark,
+        panelBg          = Color(0xFF14111B),
+        panelChip        = Color(0xFF1F1B29),
+        trackBg          = Color(0xFF2E2A38),
+        deleteTint       = Color(0x18FF453A),
+        errorChipBg      = Color(0x33FF8C7A),
+        arcTrack         = Color(0xFF2C2C2E),
+    )
+}
+
+private fun lightAppColors(palette: ThemePalette): AppColorsTokens {
+    val (accent, accent2) = lightAccentFor(palette)
+    return AppColorsTokens(
+        isLight        = true,
+        bg0            = Bg0Light,
+        bg1            = Bg1Light,
+        bg2            = Bg2Light,
+        pageBg         = Color(0xFFF2F2F5),
+        cardBg         = Color(0xFFFFFFFF),
+        cardBorder     = Color(0xFFD8D8DC),
+        surfaceWeak    = Color(0x14000000),
+        fgPrimary      = FgPrimaryLight,
+        fgDim          = FgDimLight,
+        fgMute         = FgMuteLight,
+        accent         = accent,
+        accent2        = accent2,
+        line           = LineLight,
+        line2          = Line2Light,
+        pillBg         = PillBgLight,
+        pillBgOpaque   = PillBgOpaqueLight,
+        pillBorder     = PillBorderLight,
+        errorColor     = ErrorColorLight,
+        chipUnselectedBg = Color(0xFFFFFFFF),
+        chipSelectedBg   = Color(0xFFE2E2E5),
+        filterPillBg     = Color(0xFFE2E2E5),
+        activeChipText   = ActiveChipTextLight,
+        panelBg          = Color(0xFFEEEFF2),
+        panelChip        = Color(0xFFFFFFFF),
+        trackBg          = Color(0xFFDCDCE0),
+        deleteTint       = Color(0x1FD8351E),
+        errorChipBg      = Color(0x33D8351E),
+        arcTrack         = Color(0xFFD8D8DC),
+    )
+}
+
+private fun darkColorSchemeFor(palette: ThemePalette) = darkColorScheme(
+    primary = darkAccentFor(palette).first,
     onPrimary = Color.White,
-    primaryContainer = Color(0xFF3A2F8A),
+    // Chips / switches sit on a tinted accent container — derive it from the active
+    // palette so Material3 components (FilterChip, Switch thumb, etc.) match.
+    primaryContainer = darkAccentFor(palette).first.copy(alpha = 0.2f),
     onPrimaryContainer = FgPrimaryDark,
-    secondary = Accent2Dark,
+    secondary = darkAccentFor(palette).second,
     onSecondary = Color.White,
     background = Bg0Dark,
     onBackground = FgPrimaryDark,
@@ -181,12 +225,12 @@ private val DarkColorScheme = darkColorScheme(
     surfaceTint = Color.Transparent,
 )
 
-private val LightColorScheme = lightColorScheme(
-    primary = AccentLight,
+private fun lightColorSchemeFor(palette: ThemePalette) = lightColorScheme(
+    primary = lightAccentFor(palette).first,
     onPrimary = Color.White,
-    primaryContainer = Color(0xFFE2DDFF),
+    primaryContainer = lightAccentFor(palette).first.copy(alpha = 0.2f),
     onPrimaryContainer = FgPrimaryLight,
-    secondary = Accent2Light,
+    secondary = lightAccentFor(palette).second,
     onSecondary = Color.White,
     background = Bg0Light,
     onBackground = FgPrimaryLight,
@@ -201,8 +245,16 @@ private val LightColorScheme = lightColorScheme(
     surfaceTint = Color.Transparent,
 )
 
+/**
+ * Resolve the accent color for an arbitrary palette in the given light/dark mode.
+ * Used by the Settings palette picker to render swatch dots for every option
+ * regardless of which palette is currently active.
+ */
+fun paletteAccent(palette: ThemePalette, isLight: Boolean): Color =
+    if (isLight) lightAccentFor(palette).first else darkAccentFor(palette).first
+
 /** Composition-local with the active app color tokens. */
-val LocalAppColors = staticCompositionLocalOf { DarkAppColors }
+val LocalAppColors = staticCompositionLocalOf { darkAppColors(ThemePalette.Default) }
 
 /** Accessor — call AppColors.current to read tokens in a Composable. */
 object AppColors {
@@ -329,15 +381,19 @@ val Bg0Static = Bg0Dark
 val Bg1Static = Bg1Dark
 val Bg2Static = Bg2Dark
 val FgPrimaryStatic = FgPrimaryDark
+// TODO: widgets currently stay on the historical default purple regardless of the
+// active ThemePalette. Wire RemoteViews drawables to the user's palette in a future
+// pass (requires palette key access from the widget update path).
 val AccentStatic = AccentDark
 
 @Composable
 fun ProtonPhotosTheme(
     darkTheme: Boolean = true,
+    palette: ThemePalette = ThemePalette.Default,
     content: @Composable () -> Unit,
 ) {
-    val colors  = if (darkTheme) DarkAppColors else LightAppColors
-    val scheme  = if (darkTheme) DarkColorScheme else LightColorScheme
+    val colors  = if (darkTheme) darkAppColors(palette) else lightAppColors(palette)
+    val scheme  = if (darkTheme) darkColorSchemeFor(palette) else lightColorSchemeFor(palette)
     MaterialTheme(colorScheme = scheme) {
         CompositionLocalProvider(
             LocalIndication provides NoIndication,

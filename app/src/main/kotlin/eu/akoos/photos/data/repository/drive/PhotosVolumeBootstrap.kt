@@ -45,7 +45,16 @@ class PhotosVolumeBootstrap @Inject constructor(
      */
     suspend fun build(userId: UserId): CreatePhotosVolumeRequest {
         val signingKey = cryptoHelper.getAddressSigningKey(userId)
+        // The crypto-heavy block from here down is wrapped under one withCryptoLock call —
+        // first-launch volume bootstrap generates two PGP key pairs, performs unlocks, and
+        // encrypts the hash seed via direct cryptoContext.pgpCrypto.* calls that would
+        // otherwise race the same Go signal handlers cryptoHelper's own methods are
+        // already protected against. ReentrantLock is re-entrant so the nested
+        // cryptoHelper.encrypt/sign calls cost nothing extra.
+        return cryptoHelper.withCryptoLock { buildCryptoBlock(signingKey) }
+    }
 
+    private fun buildCryptoBlock(signingKey: eu.akoos.photos.data.crypto.AddressSigningKey): CreatePhotosVolumeRequest {
         // ─── Share key ────────────────────────────────────────────────────────
         // ShareKey = new PGP key pair, passphrase = base64(random 32B) for clean UTF-8.
         // SharePassphrase = passphrase armored + encrypted-to-address-pubkey + signed by address.

@@ -230,6 +230,8 @@
     <string name="album_rename_confirm">Átnevez</string>
     <string name="album_remove_from_album">Eltávolítás az albumból</string>
     <string name="album_set_as_cover">Beállítás borítóként</string>
+    <string name="album_set_as_album_cover">Beállítás albumborítóként</string>
+    <string name="album_cover_updated">Borító frissítve</string>
     <string name="month_photo_count">%d kép</string>
     <string name="language_label">Nyelv</string>
     <string name="close">Bezárás</string>
@@ -242,6 +244,15 @@
     <string name="theme_mode_desc_system">Eszköz beállításának követése</string>
     <string name="theme_mode_desc_light">Mindig világos téma</string>
     <string name="theme_mode_desc_dark">Mindig sötét téma</string>
+
+    <!-- Themed palettes -->
+    <string name="settings_palette_section">Paletta</string>
+    <string name="palette_default">Alapértelmezett</string>
+    <string name="palette_forest">Erdő</string>
+    <string name="palette_sunset">Naplemente</string>
+    <string name="palette_sea">Tenger</string>
+    <string name="palette_sepia">Szépia</string>
+    <string name="palette_mono">Mono</string>
 
     <!-- Language -->
     <string name="language_en">Angol, English</string>
