@@ -45,6 +45,17 @@
     <string name="editor_auto_fix">Auto-fix</string>
     <string name="editor_crop_apply">Apply</string>
     <string name="editor_crop_reset">Reset</string>
+    <!-- Adjustment pill labels in the redesigned Adjust panel. The Auto pill reuses
+         the existing editor_auto_fix string. -->
+    <string name="editor_adj_brightness">Brightness</string>
+    <string name="editor_adj_exposure">Exposure</string>
+    <string name="editor_adj_contrast">Contrast</string>
+    <string name="editor_adj_highlights">Highlights</string>
+    <string name="editor_adj_shadows">Shadows</string>
+    <string name="editor_adj_saturation">Saturation</string>
+    <string name="editor_adj_tone">Tone</string>
+    <string name="editor_adj_temperature">Temperature</string>
+    <string name="editor_adj_auto">Auto</string>
 
     <!-- Hidden album screen, previously hardcoded English. -->
     <string name="hidden_photos_title">Hidden Photos</string>
@@ -408,6 +419,11 @@
     <string name="search_placeholder">Search by filename</string>
     <string name="search_empty_idle">Type a name to start searching</string>
     <string name="search_empty_no_results">No matches</string>
+    <string name="search_section_on_this_day">On this day</string>
+    <string name="search_section_on_this_day_years">%1$d year ago</string>
+    <string name="search_section_on_this_day_years_plural">%1$d years ago</string>
+    <string name="search_section_jump_to_month">Jump to month</string>
+    <string name="search_section_recent">Recent</string>
 
     <!-- Errors -->
     <string name="error_http_network">Network error. Please check your connection.</string>
@@ -501,4 +517,24 @@
     <string name="video_editor_audio_mute">Mute</string>
     <string name="video_editor_audio_muted">Muted</string>
     <string name="video_editor_audio_overlay_hint">Music replaces the original soundtrack in the saved video.</string>
+
+    <!-- Calendar view -->
+    <string name="gallery_calendar">Calendar</string>
+    <string name="calendar_title">Calendar</string>
+    <string name="calendar_no_photos">No photos this month</string>
+    <string name="calendar_search_placeholder">Search by date, place or note</string>
+    <string name="calendar_search_no_results">No matching days</string>
+    <string name="calendar_view_toggle_cd">Switch view mode</string>
+    <string name="calendar_search_cd">Search calendar</string>
+    <string name="calendar_jump_cd">Jump to month</string>
+    <string name="calendar_jump_title">Jump to month</string>
+    <string name="day_detail_location_label">Location</string>
+    <string name="day_detail_location_hint">Add a place</string>
+    <string name="day_detail_description_label">Description</string>
+    <string name="day_detail_description_hint">Add a note about this day</string>
+    <string name="day_detail_edit_location_title">Edit location</string>
+    <string name="day_detail_edit_description_title">Edit description</string>
+    <string name="day_detail_save">Save</string>
+    <string name="day_detail_set_as_cover">Set as day cover</string>
+    <string name="day_detail_photos_count">%1$d photos</string>
 </resources>

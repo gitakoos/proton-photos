@@ -103,9 +103,12 @@ fun BoxScope.TimelineScrubber(
 
     val dateFormat = remember(grouping) {
         when (grouping) {
-            TimelineGrouping.Day -> SimpleDateFormat("d MMMM yyyy", Locale.getDefault())
+            // None level mirrors the Month format — when the user is on the flat
+            // ungrouped wall the tooltip still benefits from the broader month label.
+            TimelineGrouping.None  -> SimpleDateFormat("MMMM yyyy", Locale.getDefault())
+            TimelineGrouping.Day   -> SimpleDateFormat("d MMMM yyyy", Locale.getDefault())
             TimelineGrouping.Month -> SimpleDateFormat("MMMM yyyy", Locale.getDefault())
-            TimelineGrouping.Year -> SimpleDateFormat("yyyy", Locale.getDefault())
+            TimelineGrouping.Year  -> SimpleDateFormat("yyyy", Locale.getDefault())
         }
     }
     val tooltipDate by remember(items, grouping) {

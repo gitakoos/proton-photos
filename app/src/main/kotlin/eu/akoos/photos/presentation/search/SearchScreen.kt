@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -60,7 +61,12 @@ import eu.akoos.photos.presentation.gallery.ContentFilterSheet
 import eu.akoos.photos.presentation.gallery.GalleryFilter
 import eu.akoos.photos.presentation.gallery.MediaType
 import eu.akoos.photos.presentation.gallery.SyncStatusFilter
+import eu.akoos.photos.presentation.search.components.JumpToMonthGridSection
+import eu.akoos.photos.presentation.search.components.OnThisDayRow
+import eu.akoos.photos.presentation.search.components.RecentRow
+import eu.akoos.photos.presentation.search.components.buildMonthBuckets
 import eu.akoos.photos.presentation.theme.AppColors
+import eu.akoos.photos.util.computeOnThisDay
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
@@ -75,6 +81,7 @@ fun SearchScreen(
     val query by vm.query.collectAsStateWithLifecycle()
     val results by vm.results.collectAsStateWithLifecycle()
     val filter by vm.contentFilter.collectAsStateWithLifecycle()
+    val allItems by vm.allItems.collectAsStateWithLifecycle()
 
     var showFilterSheet by remember { mutableStateOf(false) }
     val filterSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -82,7 +89,7 @@ fun SearchScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(colors.pageBg)
+            .background(colors.bg0)
             .statusBarsPadding(),
     ) {
         // Top bar: back arrow + screen title.
@@ -175,16 +182,76 @@ fun SearchScreen(
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        if (results.isEmpty()) {
+        val isIdle = query.isBlank() && filter == ContentFilter()
+        if (results.isEmpty() && isIdle) {
+            // Idle empty state — surface "On this day" memories + a month-jump grid
+            // so the page is useful without typing anything. Both sections live inside
+            // one LazyColumn so they scroll as a unit and benefit from item-level
+            // recycling when there are many month buckets.
+            val onThisDay = remember(allItems) { computeOnThisDay(allItems) }
+            val monthBuckets = remember(allItems) { buildMonthBuckets(allItems) }
+            val recent = remember(allItems) { allItems.take(6) }
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .navigationBarsPadding(),
+                contentPadding = PaddingValues(bottom = 24.dp),
+            ) {
+                if (recent.isNotEmpty()) {
+                    item(key = "recent_section") {
+                        RecentRow(
+                            items = recent,
+                            onPhotoClick = onPhotoClick,
+                        )
+                    }
+                }
+                if (onThisDay.isNotEmpty()) {
+                    item(key = "on_this_day_section") {
+                        OnThisDayRow(
+                            yearGroups = onThisDay,
+                            onPhotoClick = onPhotoClick,
+                        )
+                    }
+                }
+                if (monthBuckets.isNotEmpty()) {
+                    item(key = "jump_to_month_section") {
+                        JumpToMonthGridSection(
+                            buckets = monthBuckets,
+                            onMonthClick = { year, month ->
+                                vm.setContentFilter(
+                                    ContentFilter(year = year, month = month),
+                                )
+                            },
+                        )
+                    }
+                }
+                // True empty library — show the legacy hint so the user understands
+                // why the page is otherwise blank. The "type a name" copy still fits
+                // the active-filter-but-no-results path below.
+                if (onThisDay.isEmpty() && monthBuckets.isEmpty()) {
+                    item(key = "empty_hint") {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(top = 80.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                text = stringResource(R.string.search_empty_idle),
+                                color = colors.fgMute,
+                                fontSize = 14.sp,
+                            )
+                        }
+                    }
+                }
+            }
+        } else if (results.isEmpty()) {
             Box(
                 modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
-                    text = if (query.isBlank() && filter == ContentFilter())
-                        stringResource(R.string.search_empty_idle)
-                    else
-                        stringResource(R.string.search_empty_no_results),
+                    text = stringResource(R.string.search_empty_no_results),
                     color = colors.fgMute,
                     fontSize = 14.sp,
                 )

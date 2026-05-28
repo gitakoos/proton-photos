@@ -61,6 +61,30 @@ object Migrations {
         }
     }
 
+    /**
+     * v5 → v6: new `day_meta` table for the Calendar view's per-day notes
+     * (location text, free-form description, user-picked cover photo). Keyed on an
+     * ISO-8601 date string so callers can do `getByDate("2026-05-28")` directly.
+     * All optional columns default to NULL — no data is generated for legacy installs;
+     * the row only appears the first time the user edits a day in the Calendar.
+     */
+    val MIGRATION_5_6 = object : Migration(5, 6) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS day_meta (
+                    date TEXT NOT NULL PRIMARY KEY,
+                    userId TEXT NOT NULL,
+                    coverPhotoUri TEXT DEFAULT NULL,
+                    locationText TEXT DEFAULT NULL,
+                    description TEXT DEFAULT NULL,
+                    updatedAt INTEGER NOT NULL DEFAULT 0
+                )
+                """.trimIndent()
+            )
+        }
+    }
+
     /** All migrations in version-ascending order — pass to [androidx.room.RoomDatabase.Builder.addMigrations]. */
-    val ALL: Array<Migration> = arrayOf(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+    val ALL: Array<Migration> = arrayOf(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
 }

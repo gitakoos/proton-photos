@@ -51,6 +51,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.ui.draw.blur
 import androidx.compose.material.icons.automirrored.filled.CallMade
@@ -161,7 +162,6 @@ import eu.akoos.photos.presentation.theme.PillBg
 import eu.akoos.photos.presentation.theme.PillBgOpaque
 import eu.akoos.photos.presentation.theme.PillBorder
 import eu.akoos.photos.presentation.theme.StatusSynced
-import androidx.compose.material.icons.filled.DateRange
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -222,6 +222,7 @@ fun GalleryScreen(
     onSettingsClick: () -> Unit,
     onHiddenAlbumClick: () -> Unit = {},
     onSearchClick: () -> Unit = {},
+    onCalendarClick: () -> Unit = {},
     viewModel: GalleryViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -357,9 +358,9 @@ fun GalleryScreen(
     var showAlbumsFilterSheet by remember { mutableStateOf(false) }
     val albumsFilterSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
-    // ── Grouping sheet state ──────────────────────────────────────────────────
-    var showGroupingSheet by remember { mutableStateOf(false) }
-    val groupingSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    // Grouping is now controlled exclusively by the photo grid's pinch gesture
+    // (see PhotoGrid). The previous "Group by" pill + bottom-sheet picker has been
+    // removed — pinching zooms across (cols, grouping) pairs in one motion.
 
     // ── Media delete permission launcher ──────────────────────────────────────
     val deletePermissionLauncher = rememberLauncherForActivityResult(
@@ -506,6 +507,7 @@ fun GalleryScreen(
                                 onLongPress        = viewModel::toggleSelection,
                                 onToggleSelect     = viewModel::toggleSelection,
                                 grouping           = state.timelineGrouping,
+                                onGroupingChanged  = viewModel::setTimelineGrouping,
                                 hiddenCloudLinkIds = state.hiddenCloudLinkIds,
                                 onRequestThumbnail = viewModel::requestThumbnailDecrypt,
                                 onCancelThumbnail  = viewModel::cancelThumbnailDecrypt,
@@ -557,9 +559,8 @@ fun GalleryScreen(
                                 onFilterSelected = viewModel::onFilterSelected,
                                 contentFilter = state.contentFilter,
                                 onSearchClick = onSearchClick,
+                                onCalendarClick = onCalendarClick,
                                 onClearContentFilter = { viewModel.setContentFilter(ContentFilter()) },
-                                grouping = state.timelineGrouping,
-                                onShowGroupingSheet = { showGroupingSheet = true },
                                 modifier = Modifier.weight(1f),
                             )
                         }
@@ -847,24 +848,6 @@ fun GalleryScreen(
                 currentFilter = albumsState.albumsFilter,
                 onApply = { albumsViewModel.setFilter(it) },
                 onDismiss = { showAlbumsFilterSheet = false },
-            )
-        }
-    }
-
-    // ── Grouping picker sheet ─────────────────────────────────────────────────
-    if (showGroupingSheet) {
-        ModalBottomSheet(
-            onDismissRequest = { showGroupingSheet = false },
-            sheetState = groupingSheetState,
-            containerColor = Bg2,
-        ) {
-            GroupingPickerSheet(
-                current = state.timelineGrouping,
-                onSelect = { grouping ->
-                    viewModel.setTimelineGrouping(grouping)
-                    showGroupingSheet = false
-                },
-                onDismiss = { showGroupingSheet = false },
             )
         }
     }
@@ -1458,9 +1441,8 @@ private fun FilterRail(
     onFilterSelected: (GalleryFilter) -> Unit,
     contentFilter: ContentFilter,
     onSearchClick: () -> Unit,
+    onCalendarClick: () -> Unit,
     onClearContentFilter: () -> Unit,
-    grouping: TimelineGrouping = TimelineGrouping.Month,
-    onShowGroupingSheet: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val isContentFilterActive = contentFilter != ContentFilter()
@@ -1552,19 +1534,23 @@ private fun FilterRail(
             }
         }
 
-        // ── Grouping button ───────────────────────────────────────────────────
-        item(key = "grouping_button") {
+        // ── Calendar button ───────────────────────────────────────────────────
+        item(key = "calendar_button") {
             Box(
                 modifier = Modifier
                     .size(38.dp)
                     .background(PillBg, pillShape)
                     .border(0.5.dp, PillBorder, pillShape)
-                    .clickable { onShowGroupingSheet() },
+                    .clickable { onCalendarClick() },
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(Icons.Default.DateRange, stringResource(R.string.filter_timeline_grouping), tint = FgDim, modifier = Modifier.size(15.dp))
+                Icon(Icons.Default.CalendarMonth, "Calendar",
+                    tint = FgDim, modifier = Modifier.size(18.dp))
             }
         }
+
+        // The previous "Group by" pill was removed in favour of pinch-to-zoom on the
+        // photo grid: pinching cycles through (cols, grouping) levels in a single gesture.
     }
 }
 
@@ -1655,6 +1641,7 @@ private fun PhotoGrid(
     onLongPress: (GalleryItem) -> Unit = {},
     onToggleSelect: (GalleryItem) -> Unit = {},
     grouping: TimelineGrouping = TimelineGrouping.Month,
+    onGroupingChanged: (TimelineGrouping) -> Unit = {},
     hiddenCloudLinkIds: Set<String> = emptySet(),
     onRequestThumbnail: (linkId: String) -> Unit = {},
     onCancelThumbnail: (linkId: String) -> Unit = {},
@@ -1667,31 +1654,74 @@ private fun PhotoGrid(
         derivedStateOf { computeOnThisDay(allItems) }
     }
     val context = LocalContext.current
-    val dateFormat = remember(grouping) {
+
+    // ── Pinch-to-zoom levels ──────────────────────────────────────────────────
+    // Six discrete (cols, grouping) levels that pinch cycles through in one motion.
+    // Most-zoomed-out = 6 cols + no grouping (densest "thumbnail wall"); most-zoomed-in
+    // = 1 col + year headers (one giant tile per row with chunky temporal context).
+    // The cross-over from "no grouping" to grouped views happens between L2 and L3,
+    // which intentionally matches the spot where individual tiles get big enough that
+    // a date header above them stops feeling like clutter.
+    val zoomLevels = remember {
+        // Mapping reflects how the user navigates: big tiles need fine-grained markers
+        // (day) because the user is browsing close-up; small tiles need broad markers
+        // (none / year) because the user is scrolling through history at speed.
+        listOf(
+            6 to TimelineGrouping.None,    // L0 — smallest tiles, flat thumbnail wall
+            5 to TimelineGrouping.Year,    // L1 — year headers start appearing
+            4 to TimelineGrouping.Month,   // L2 — month headers
+            3 to TimelineGrouping.Month,   // L3 — month headers (still wide)
+            2 to TimelineGrouping.Day,     // L4 — day headers, larger tiles
+            1 to TimelineGrouping.Day,     // L5 — biggest tile + day headers
+        )
+    }
+    // Initial level is derived from the persisted grouping. For the ambiguous "None"
+    // case we pick the middle of the three flat levels (4 cols) so pinching in either
+    // direction is symmetric.
+    val initialLevel = remember(grouping) {
         when (grouping) {
+            TimelineGrouping.None  -> 2
+            TimelineGrouping.Day   -> 3
+            TimelineGrouping.Month -> 4
+            TimelineGrouping.Year  -> 5
+        }
+    }
+    var levelIndex by rememberSaveable { mutableIntStateOf(initialLevel) }
+    val (columnCount, effectiveGrouping) = zoomLevels[levelIndex]
+
+    val dateFormat = remember(effectiveGrouping) {
+        when (effectiveGrouping) {
+            // None still needs a (never-rendered) formatter to keep the type concrete; the
+            // grouped loop short-circuits the header below so it's only used as a sentinel.
+            TimelineGrouping.None -> SimpleDateFormat("yyyy", Locale.getDefault())
             TimelineGrouping.Day -> SimpleDateFormat("d MMMM yyyy", Locale.getDefault())
             TimelineGrouping.Month -> SimpleDateFormat("MMMM yyyy", Locale.getDefault())
             TimelineGrouping.Year -> SimpleDateFormat("yyyy", Locale.getDefault())
         }
     }
-    val grouped = remember(items, grouping) {
-        items.groupBy { item -> dateFormat.format(Date(item.captureTimeMs)) }.entries.toList()
+    val grouped = remember(items, effectiveGrouping) {
+        if (effectiveGrouping == TimelineGrouping.None) {
+            // Single flat bucket — no header row will be emitted for it (the header loop
+            // below skips MonthHeader entirely in None mode). Wrapping in a one-element
+            // map keeps the same Map.Entry shape the for-loop already destructures.
+            mapOf("" to items).entries.toList()
+        } else {
+            items.groupBy { item -> dateFormat.format(Date(item.captureTimeMs)) }.entries.toList()
+        }
     }
 
-    // Discrete column counts the grid can land on. Phone screens look balanced at 3-5;
-    // 2 is for "show me detail", 6 is for "fit a year on one screen".
-    val columnSteps = listOf(2, 3, 4, 5, 6)
-    var columnCount by rememberSaveable { mutableIntStateOf(3) }
+    val haptics = androidx.compose.ui.platform.LocalHapticFeedback.current
+
     // Two-finger pinch detector that does NOT eat single-finger drags — the previous
     // Modifier.transformable consumed every gesture including vertical scrolls, so the
     // grid's own LazyVerticalGrid scroll competed with pinch and felt "twitchy". This
     // one only activates when the second finger goes down, so scrolling stays smooth
     // and pinch is isolated to a deliberate two-finger gesture.
-    // Two-finger pinch detector that does NOT consume single-finger touches. Uses raw
-    // pointerInput so the gesture stream is fully under our control: while only one
-    // finger is down, events flow through to the LazyVerticalGrid for normal scrolling;
-    // a second finger entering switches to pinch mode and consumes those frames. Once
-    // both fingers leave we go back to scroll-passthrough on the next gesture.
+    //
+    // Each gesture commits exactly one level step in either direction once the distance
+    // ratio crosses ±30%. Cycling through every level needs multiple gestures, which
+    // matches users' expectation that one pinch = one zoom step and keeps the snap from
+    // feeling jittery while the fingers are still moving.
     val pinchModifier = Modifier.pointerInput(Unit) {
         awaitEachGesture {
             val firstDown = awaitFirstDown(requireUnconsumed = false)
@@ -1704,14 +1734,16 @@ private fun PhotoGrid(
                 if (event.changes.none { p -> p.pressed }) return@awaitEachGesture
                 second = event.changes.firstOrNull { p -> p.id != firstDown.id && p.pressed }
             }
-            val startDist = kotlin.math.max(
+            // Reference distance is reset to the current distance AFTER each snap, so the
+            // user can keep zooming in / out continuously during one gesture (every +/-30%
+            // since the last snap fires a new step) without lifting and re-pinching.
+            var refDist = kotlin.math.max(
                 1f,
                 kotlin.math.hypot(
                     (firstDown.position.x - second.position.x).toDouble(),
                     (firstDown.position.y - second.position.y).toDouble(),
                 ).toFloat(),
             )
-            var snappedThisGesture = false
             while (true) {
                 val event = awaitPointerEvent()
                 val p1 = event.changes.firstOrNull { p -> p.id == firstDown.id }
@@ -1724,16 +1756,29 @@ private fun PhotoGrid(
                         (p1.position.y - p2.position.y).toDouble(),
                     ).toFloat(),
                 )
-                val ratio = curDist / startDist
-                if (!snappedThisGesture) {
-                    val idx = columnSteps.indexOf(columnCount).coerceAtLeast(0)
-                    when {
-                        ratio >= 1.30f && idx > 0 -> {
-                            columnCount = columnSteps[idx - 1]; snappedThisGesture = true
-                        }
-                        ratio <= 1f / 1.30f && idx < columnSteps.lastIndex -> {
-                            columnCount = columnSteps[idx + 1]; snappedThisGesture = true
-                        }
+                val ratio = curDist / refDist
+                // Pinch-OUT (fingers spread, ratio > 1) zooms IN — bigger tiles, finer
+                // day-level navigation. Pinch-IN (ratio < 1) zooms OUT — smaller tiles,
+                // broader year-level overview. levelIndex grows as columns SHRINK in
+                // the zoomLevels list (L0=6 cols flat, L5=1 col day-grouped), so
+                // pinch-out increments toward L5. After each snap refDist is reset so
+                // the same gesture can roll through multiple levels.
+                when {
+                    ratio >= 1.30f && levelIndex < zoomLevels.lastIndex -> {
+                        levelIndex += 1
+                        onGroupingChanged(zoomLevels[levelIndex].second)
+                        haptics.performHapticFeedback(
+                            androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove,
+                        )
+                        refDist = curDist
+                    }
+                    ratio <= 1f / 1.30f && levelIndex > 0 -> {
+                        levelIndex -= 1
+                        onGroupingChanged(zoomLevels[levelIndex].second)
+                        haptics.performHapticFeedback(
+                            androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove,
+                        )
+                        refDist = curDist
                     }
                 }
                 // Consume so the grid doesn't try to scroll while both fingers are down.
@@ -1804,8 +1849,13 @@ private fun PhotoGrid(
                 mt.startsWith("video/")
             }
             val monthPhotos = monthItems.size - monthVideos
-            item(span = { GridItemSpan(columnCount) }) {
-                MonthHeader(month = month, photoCount = monthPhotos, videoCount = monthVideos)
+            // None-grouping levels (L0..L2) skip the header entirely so the user gets a
+            // truly flat thumbnail wall. The single placeholder "bucket" produced above
+            // is still iterated to render its items.
+            if (effectiveGrouping != TimelineGrouping.None) {
+                item(span = { GridItemSpan(columnCount) }) {
+                    MonthHeader(month = month, photoCount = monthPhotos, videoCount = monthVideos)
+                }
             }
             items(monthItems, key = { item ->
                 when (item) {
@@ -1837,10 +1887,12 @@ private fun PhotoGrid(
     }
 
         // Timeline scrubber sidebar — fades in while scrolling, draggable to seek.
+        // Reads the effective (pinch-controlled) grouping so its tooltip format matches
+        // the headers the user is currently seeing.
         TimelineScrubber(
             gridState = gridState,
             items = items,
-            grouping = grouping,
+            grouping = effectiveGrouping,
             topPadding = topContentPadding + 8.dp,
             bottomPadding = 120.dp,
         )
@@ -2709,70 +2761,6 @@ private fun AlbumsFilterSheet(
                     selected = currentFilter == status,
                     onClick = { onApply(status); onDismiss() },
                 )
-            }
-        }
-    }
-}
-
-// ── Grouping picker sheet ─────────────────────────────────────────────────────
-
-@Composable
-private fun GroupingPickerSheet(
-    current: TimelineGrouping,
-    onSelect: (TimelineGrouping) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    val options = listOf(
-        TimelineGrouping.Day to stringResource(R.string.filter_group_day),
-        TimelineGrouping.Month to stringResource(R.string.filter_group_month),
-        TimelineGrouping.Year to stringResource(R.string.filter_group_year),
-    )
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 20.dp)
-            .padding(bottom = 36.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Text(
-            stringResource(R.string.filter_group_by),
-            color = FgPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.padding(bottom = 8.dp),
-        )
-        val colors = AppColors.current
-        options.forEach { (grouping, label) ->
-            val isSelected = current == grouping
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(
-                        if (isSelected) colors.chipSelectedBg else colors.chipUnselectedBg,
-                        RoundedCornerShape(12.dp),
-                    )
-                    .border(
-                        0.5.dp,
-                        if (isSelected) Accent.copy(alpha = 0.5f) else colors.cardBorder,
-                        RoundedCornerShape(12.dp),
-                    )
-                    .clickable { onSelect(grouping) }
-                    .padding(horizontal = 16.dp, vertical = 14.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    label,
-                    color = if (isSelected) FgPrimary else FgDim,
-                    fontSize = 15.sp,
-                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
-                )
-                if (isSelected) {
-                    Icon(
-                        Icons.Default.Check,
-                        contentDescription = null,
-                        tint = Accent,
-                        modifier = Modifier.size(18.dp),
-                    )
-                }
             }
         }
     }

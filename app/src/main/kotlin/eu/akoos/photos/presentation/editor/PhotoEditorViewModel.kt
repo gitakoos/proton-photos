@@ -72,6 +72,16 @@ data class EditorAdjustments(
     val brightness: Int = 0,
     val contrast: Int = 0,
     val saturation: Int = 0,
+    /** Multiplicative gain on RGB — bumps overall luminance like exposure compensation. */
+    val exposure: Int = 0,
+    /** Pulls down the bright end of the histogram without compressing midtones. */
+    val highlights: Int = 0,
+    /** Lifts the dark end of the histogram without crushing midtones. */
+    val shadows: Int = 0,
+    /** Warm (+) / cool (-) — shifts R up and B down (or vice versa). */
+    val temperature: Int = 0,
+    /** Green (+) / magenta (-) — shifts G up (or down). */
+    val tone: Int = 0,
     val rotationDegrees: Int = 0, // 0, 90, 180, 270
     val flipHorizontal: Boolean = false,
     val flipVertical: Boolean = false,
@@ -328,6 +338,11 @@ class PhotoEditorViewModel @Inject constructor(
     fun updateBrightness(v: Int) = updateAdjustmentsFast { it.copy(brightness = v.coerceIn(-100, 100)) }
     fun updateContrast(v: Int) = updateAdjustmentsFast { it.copy(contrast = v.coerceIn(-100, 100)) }
     fun updateSaturation(v: Int) = updateAdjustmentsFast { it.copy(saturation = v.coerceIn(-100, 100)) }
+    fun updateExposure(v: Int) = updateAdjustmentsFast { it.copy(exposure = v.coerceIn(-100, 100)) }
+    fun updateHighlights(v: Int) = updateAdjustmentsFast { it.copy(highlights = v.coerceIn(-100, 100)) }
+    fun updateShadows(v: Int) = updateAdjustmentsFast { it.copy(shadows = v.coerceIn(-100, 100)) }
+    fun updateTemperature(v: Int) = updateAdjustmentsFast { it.copy(temperature = v.coerceIn(-100, 100)) }
+    fun updateTone(v: Int) = updateAdjustmentsFast { it.copy(tone = v.coerceIn(-100, 100)) }
     fun rotate90Cw() = updateAdjustments { it.copy(rotationDegrees = (it.rotationDegrees + 90) % 360) }
     fun toggleFlipH() = updateAdjustments { it.copy(flipHorizontal = !it.flipHorizontal) }
     fun toggleFlipV() = updateAdjustments { it.copy(flipVertical = !it.flipVertical) }
@@ -382,12 +397,26 @@ class PhotoEditorViewModel @Inject constructor(
             }
             val contrastDelta = if (spread >= 220) 0 else 12
             val saturationDelta = 10
+            // Per-channel histogram-derived nudges for the five adjustments added in the
+            // editor pill rework. Each is a conservative auto-fix value the user can
+            // dial in further by dragging the matching pill's slider afterwards.
+            //   exposure   — neutral default; raise slightly when scene mean is dark
+            //   highlights — pull DOWN when the brightest pixels are blown
+            //   shadows    — lift when the darkest pixels are crushed
+            //   temperature, tone — leave at zero (auto WB is too unreliable from a
+            //                       single luma histogram; user can warm/cool manually)
+            val exposureDelta = if (mean < 90) 8 else 0
+            val highlightsDelta = if (maxL > 240) -15 else 0
+            val shadowsDelta = if (minL < 15) 15 else 0
             withContext(Dispatchers.Main) {
                 updateAdjustments {
                     it.copy(
                         brightness = brightnessDelta.coerceIn(-100, 100),
                         contrast = contrastDelta.coerceIn(-100, 100),
                         saturation = saturationDelta.coerceIn(-100, 100),
+                        exposure = exposureDelta.coerceIn(-100, 100),
+                        highlights = highlightsDelta.coerceIn(-100, 100),
+                        shadows = shadowsDelta.coerceIn(-100, 100),
                     )
                 }
             }
@@ -577,7 +606,10 @@ class PhotoEditorViewModel @Inject constructor(
     }
 
     private fun buildColorMatrix(adj: EditorAdjustments): ColorMatrix? {
-        if (adj.brightness == 0 && adj.contrast == 0 && adj.saturation == 0 && adj.filter == FilterPreset.None) {
+        if (adj.brightness == 0 && adj.contrast == 0 && adj.saturation == 0
+            && adj.exposure == 0 && adj.highlights == 0 && adj.shadows == 0
+            && adj.temperature == 0 && adj.tone == 0
+            && adj.filter == FilterPreset.None) {
             return null
         }
         val brightness = adj.brightness * 1.5f       // -150..150 range on 0..255 channel
@@ -597,6 +629,77 @@ class PhotoEditorViewModel @Inject constructor(
         val combined = ColorMatrix()
         combined.postConcat(mSat)
         combined.postConcat(mAdjust)
+
+        // Exposure: scale all RGB by (1 + exposure/100). Multiplicative gain — similar
+        // to brightness but proportional instead of additive, so highlights bloom and
+        // shadows stay relatively darker like a real EV bump.
+        if (adj.exposure != 0) {
+            val expScale = 1f + adj.exposure / 100f
+            val mExposure = ColorMatrix(floatArrayOf(
+                expScale, 0f, 0f, 0f, 0f,
+                0f, expScale, 0f, 0f, 0f,
+                0f, 0f, expScale, 0f, 0f,
+                0f, 0f, 0f, 1f, 0f,
+            ))
+            combined.postConcat(mExposure)
+        }
+
+        // Highlights: bias the scale toward bright by multiplying RGB by (1 - h/200)
+        // and adding a small constant. Pulls bright pixels down without crushing
+        // the midtones to near-zero. Approximation — a real highlight tool needs a
+        // per-pixel curve, but this gets us 80% of the visual effect within a ColorMatrix.
+        if (adj.highlights != 0) {
+            val hScale = 1f - adj.highlights / 200f  // -0.5..+0.5 → 1.5..0.5 scale
+            val hOffset = -adj.highlights * 0.3f      // tiny additive push back
+            val mHigh = ColorMatrix(floatArrayOf(
+                hScale, 0f, 0f, 0f, hOffset,
+                0f, hScale, 0f, 0f, hOffset,
+                0f, 0f, hScale, 0f, hOffset,
+                0f, 0f, 0f, 1f, 0f,
+            ))
+            combined.postConcat(mHigh)
+        }
+
+        // Shadows: opposite bias — lifts the dark end. Slight positive scale + positive
+        // offset together push low values up without saturating the top.
+        if (adj.shadows != 0) {
+            val sScale = 1f + adj.shadows / 200f      // -0.5..+0.5 → 0.5..1.5 scale
+            val sOffset = adj.shadows * 0.3f          // additive lift on darks
+            val mShadow = ColorMatrix(floatArrayOf(
+                sScale, 0f, 0f, 0f, sOffset,
+                0f, sScale, 0f, 0f, sOffset,
+                0f, 0f, sScale, 0f, sOffset,
+                0f, 0f, 0f, 1f, 0f,
+            ))
+            combined.postConcat(mShadow)
+        }
+
+        // Temperature: warm (+) shifts R up and B down; cool (-) flips. 0.5 multiplier
+        // keeps the slider sensitivity reasonable — at +100 R gains 50, B loses 50.
+        if (adj.temperature != 0) {
+            val t = adj.temperature * 0.5f
+            val mTemp = ColorMatrix(floatArrayOf(
+                1f, 0f, 0f, 0f, t,
+                0f, 1f, 0f, 0f, 0f,
+                0f, 0f, 1f, 0f, -t,
+                0f, 0f, 0f, 1f, 0f,
+            ))
+            combined.postConcat(mTemp)
+        }
+
+        // Tone: green (+) / magenta (-) — shifts only the G channel. Same 0.5 scaling
+        // as temperature so the two feel balanced when paired.
+        if (adj.tone != 0) {
+            val g = adj.tone * 0.5f
+            val mTone = ColorMatrix(floatArrayOf(
+                1f, 0f, 0f, 0f, 0f,
+                0f, 1f, 0f, 0f, g,
+                0f, 0f, 1f, 0f, 0f,
+                0f, 0f, 0f, 1f, 0f,
+            ))
+            combined.postConcat(mTone)
+        }
+
         mFilter?.let { combined.postConcat(it) }
         return combined
     }

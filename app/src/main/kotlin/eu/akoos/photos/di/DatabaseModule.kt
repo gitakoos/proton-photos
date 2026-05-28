@@ -27,6 +27,7 @@ import me.proton.core.usersettings.data.db.OrganizationDatabase
 import me.proton.core.usersettings.data.db.UserSettingsDatabase
 import eu.akoos.photos.data.db.AppDatabase
 import eu.akoos.photos.data.db.Migrations
+import eu.akoos.photos.data.db.dao.DayMetaDao
 import eu.akoos.photos.data.db.dao.PhotoListingDao
 import eu.akoos.photos.data.db.dao.SyncStateDao
 import javax.inject.Singleton
@@ -102,5 +103,9 @@ abstract class DatabaseModule {
         @Provides
         @Singleton
         fun providePhotoListingDao(db: AppDatabase): PhotoListingDao = db.photoListingDao()
+
+        @Provides
+        @Singleton
+        fun provideDayMetaDao(db: AppDatabase): DayMetaDao = db.dayMetaDao()
     }
 }

@@ -7,6 +7,7 @@ import android.graphics.PointF
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -22,9 +23,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentHeight
-import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -36,8 +35,11 @@ import androidx.compose.material.icons.automirrored.filled.RotateRight
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.Block
+import androidx.compose.material.icons.filled.BrightnessMedium
 import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Contrast
+import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Crop
 import androidx.compose.material.icons.filled.Flip
 import androidx.compose.material.icons.filled.GridOn
@@ -91,9 +93,17 @@ import eu.akoos.photos.presentation.theme.FgMute
 import eu.akoos.photos.presentation.theme.FgPrimary
 import eu.akoos.photos.presentation.theme.PanelBg
 import eu.akoos.photos.presentation.theme.PanelChip
+import eu.akoos.photos.presentation.theme.PillBg
+import eu.akoos.photos.presentation.theme.PillBgOpaque
+import eu.akoos.photos.presentation.theme.PillBorder
 import eu.akoos.photos.presentation.theme.TrackBg
 import kotlin.math.max
 import kotlin.math.min
+
+// Match the photos page top filter row recipe verbatim — one shared shape token used
+// by every pill in the editor so the editor and gallery look like they share a
+// component library. Anything bigger than 999.dp is just a fully-rounded capsule.
+private val pillShape = RoundedCornerShape(999.dp)
 
 private enum class Tool(val label: String, val icon: ImageVector) {
     Adjust("Adjust", Icons.Default.Tune),
@@ -102,6 +112,11 @@ private enum class Tool(val label: String, val icon: ImageVector) {
     Redact("Redact", Icons.Default.Brush),
     Rotate("Rotate", Icons.AutoMirrored.Filled.RotateRight),
 }
+
+/** Which slider the Adjust tab is currently exposing in the floating slider pill.
+ *  Null until the user picks one of the adjustment chips — that's the "no pill"
+ *  state requested in the spec. */
+private enum class Adjustment { Brightness, Exposure, Contrast, Highlights, Shadows, Saturation, Tone, Temperature }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -123,6 +138,15 @@ fun PhotoEditorScreen(
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
     var activeTool by remember { mutableStateOf(Tool.Adjust) }
+    // Adjust tab now exposes ONE slider at a time — the user picks which adjustment
+    // (Brightness / Contrast / Saturation) via the pill row, and only then does the
+    // floating slider pill appear above the row. Null = no slider shown.
+    var activeAdjustment by remember { mutableStateOf<Adjustment?>(null) }
+    // Resetting back to null whenever the tool changes prevents a "stale" slider
+    // pill flashing when the user pops between tabs.
+    androidx.compose.runtime.LaunchedEffect(activeTool) {
+        if (activeTool != Tool.Adjust) activeAdjustment = null
+    }
     var showSaveSheet by remember { mutableStateOf(false) }
     val saveSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     // Draft rect for the free-form crop. Stays null until the user enters the Crop
@@ -266,33 +290,81 @@ fun PhotoEditorScreen(
             }
         }
 
-        // ── Bottom sheet panel ──────────────────────────────────────────────
+        // ── Bottom area ──────────────────────────────────────────────────────
+        // NO single big rounded panel — three independent pill containers stacked
+        // vertically over the same Bg0 the preview sits on. Each pill stands on its
+        // own surrounded by empty space, identical recipe to the photos page filter
+        // row (PillBg / PillBorder / pillShape).
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp))
-                .background(PanelBg)
                 .navigationBarsPadding()
-                .padding(top = 14.dp, bottom = 14.dp),
+                .padding(bottom = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            // Tool tabs
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly,
-            ) {
-                Tool.entries.forEach { tool ->
-                    ToolTab(tool = tool, selected = tool == activeTool, onClick = { activeTool = tool })
+            // Slider pill — Adjust tab + an adjustment selected. Hidden otherwise.
+            if (activeTool == Tool.Adjust && activeAdjustment != null) {
+                val adj = activeAdjustment!!
+                val value = when (adj) {
+                    Adjustment.Brightness  -> state.adjustments.brightness
+                    Adjustment.Exposure    -> state.adjustments.exposure
+                    Adjustment.Contrast    -> state.adjustments.contrast
+                    Adjustment.Highlights  -> state.adjustments.highlights
+                    Adjustment.Shadows     -> state.adjustments.shadows
+                    Adjustment.Saturation  -> state.adjustments.saturation
+                    Adjustment.Tone        -> state.adjustments.tone
+                    Adjustment.Temperature -> state.adjustments.temperature
+                }
+                val label = when (adj) {
+                    Adjustment.Brightness  -> "Brightness"
+                    Adjustment.Exposure    -> "Exposure"
+                    Adjustment.Contrast    -> "Contrast"
+                    Adjustment.Highlights  -> "Highlights"
+                    Adjustment.Shadows     -> "Shadows"
+                    Adjustment.Saturation  -> "Saturation"
+                    Adjustment.Tone        -> "Tone"
+                    Adjustment.Temperature -> "Temperature"
+                }
+                val onChange: (Int) -> Unit = when (adj) {
+                    Adjustment.Brightness  -> { v -> vm.updateBrightness(v) }
+                    Adjustment.Exposure    -> { v -> vm.updateExposure(v) }
+                    Adjustment.Contrast    -> { v -> vm.updateContrast(v) }
+                    Adjustment.Highlights  -> { v -> vm.updateHighlights(v) }
+                    Adjustment.Shadows     -> { v -> vm.updateShadows(v) }
+                    Adjustment.Saturation  -> { v -> vm.updateSaturation(v) }
+                    Adjustment.Tone        -> { v -> vm.updateTone(v) }
+                    Adjustment.Temperature -> { v -> vm.updateTemperature(v) }
+                }
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 22.dp),
+                ) {
+                    SliderRow(
+                        label = label,
+                        value = value,
+                        onChange = onChange,
+                        onChangeFinished = { vm.finalizeAdjustments() },
+                    )
                 }
             }
 
-            Spacer(Modifier.height(14.dp))
-
-            // Tool panel — wrap content height for a tighter feel
+            // Panel — varies per tool. Lives in horizontal-padding so the inner pills
+            // don't kiss the screen edges, but does NOT have its own outer pill (per
+            // spec: adjustment chips are individual loose capsules; filter / crop /
+            // redact / rotate panels render their own pill recipes inside).
             Box(
                 Modifier.fillMaxWidth().padding(horizontal = 18.dp).wrapContentHeight(),
             ) {
                 when (activeTool) {
-                    Tool.Adjust -> AdjustPanel(state, vm)
+                    Tool.Adjust -> AdjustPanel(
+                        active = activeAdjustment,
+                        onSelect = { next ->
+                            // Tap-to-toggle: tapping the active chip hides the slider again.
+                            activeAdjustment = if (activeAdjustment == next) null else next
+                        },
+                        onAutoFix = { vm.autoFix() },
+                    )
                     Tool.Filter -> FilterPanel(state, vm)
                     Tool.Crop   -> CropPanel(
                         state = state,
@@ -311,8 +383,27 @@ fun PhotoEditorScreen(
                     text = saveResult.message,
                     color = Color(0xFFFF3B30),
                     fontSize = 13.sp,
-                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp, start = 18.dp, end = 18.dp),
+                    modifier = Modifier.fillMaxWidth().padding(start = 18.dp, end = 18.dp),
                 )
+            }
+
+            // Bottom tab bar — ONE pill containing the 5 tab tap targets. Matches
+            // GalleryScreen.BottomDock: PillBgOpaque + 0.5.dp PillBorder + pillShape
+            // + 4.dp inner padding. Each tab inside is a 44.dp circle that fills with
+            // Accent.copy(alpha = 0.22f) when selected.
+            Row(
+                modifier = Modifier
+                    .padding(horizontal = 18.dp)
+                    .fillMaxWidth()
+                    .background(PillBgOpaque, pillShape)
+                    .border(0.5.dp, PillBorder, pillShape)
+                    .padding(4.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Tool.entries.forEach { tool ->
+                    ToolTab(tool = tool, selected = tool == activeTool, onClick = { activeTool = tool })
+                }
             }
         }
     }
@@ -497,37 +588,40 @@ private fun SavePill(isSaving: Boolean, onClick: () -> Unit) {
 
 @Composable
 private fun IconBubble(onClick: () -> Unit, enabled: Boolean = true, content: @Composable () -> Unit) {
+    // Same recipe as the photos page header icon buttons (search, grouping, etc.):
+    // PillBg fill + 0.5.dp PillBorder + CircleShape. Keeps the top bar visually
+    // contiguous with the bottom tab dock and gallery filter rail.
     Box(
         modifier = Modifier
             .size(40.dp)
-            .clip(CircleShape)
-            .background(PanelChip)
+            .background(PillBg, CircleShape)
+            .border(0.5.dp, PillBorder, CircleShape)
             .clickable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) { content() }
 }
 
+/** 44.dp circle tap target inside the tab bar pill. Icon-only — labels were
+ *  dropped to keep the bar a single thin pill the same height as the photos
+ *  page BottomDock. Selected state mirrors that screen: Accent.copy(alpha = 0.22f)
+ *  fill + accent-tinted icon. Unselected = transparent + dim icon. */
 @Composable
 private fun ToolTab(tool: Tool, selected: Boolean, onClick: () -> Unit) {
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
+    Box(
         modifier = Modifier
-            .clip(RoundedCornerShape(14.dp))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 6.dp),
+            .size(44.dp)
+            .background(
+                if (selected) Accent.copy(alpha = 0.22f) else Color.Transparent,
+                CircleShape,
+            )
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
     ) {
         Icon(
             imageVector = tool.icon,
             contentDescription = tool.label,
             tint = if (selected) Accent else FgDim,
             modifier = Modifier.size(22.dp),
-        )
-        Spacer(Modifier.height(4.dp))
-        Text(
-            tool.label,
-            color = if (selected) Accent else FgDim,
-            fontSize = 11.sp,
-            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
         )
     }
 }
@@ -629,39 +723,130 @@ private fun fitRect(bmpW: Float, bmpH: Float, boxW: Float, boxH: Float): FitRect
 
 // ─── Tool panels ────────────────────────────────────────────────────────────
 
+/** Adjust tab — loose individual capsule pills (LazyRow). One Auto-Fix pill that
+ *  fires `vm.autoFix()` instantly and three adjustment selector pills. Picking a
+ *  selector toggles the floating slider pill above; tapping the active one again
+ *  hides it. Visual recipe is the same PillBg / PillBorder / pillShape used on
+ *  the photos page filter row. */
 @Composable
-private fun AdjustPanel(state: EditorUiState, vm: PhotoEditorViewModel) {
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        // Auto-fix sits at the top so it's the user's first option on this tool.
-        // It commits one set of brightness/contrast/saturation values through the
-        // normal undo path, so Reset (or a single Undo press) clears it.
-        AutoFixButton(onClick = { vm.autoFix() })
-        SliderRow("Brightness", state.adjustments.brightness, onChange = { vm.updateBrightness(it) }, onChangeFinished = { vm.finalizeAdjustments() })
-        SliderRow("Contrast", state.adjustments.contrast, onChange = { vm.updateContrast(it) }, onChangeFinished = { vm.finalizeAdjustments() })
-        SliderRow("Saturation", state.adjustments.saturation, onChange = { vm.updateSaturation(it) }, onChangeFinished = { vm.finalizeAdjustments() })
+private fun AdjustPanel(
+    active: Adjustment?,
+    onSelect: (Adjustment) -> Unit,
+    onAutoFix: () -> Unit,
+) {
+    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        item(key = "auto_fix") {
+            AdjustCapsulePill(
+                label = androidx.compose.ui.res.stringResource(R.string.editor_auto_fix),
+                icon = Icons.Default.AutoFixHigh,
+                selected = false,
+                accentIcon = true,
+                onClick = onAutoFix,
+            )
+        }
+        item(key = "brightness") {
+            AdjustCapsulePill(
+                label = "Brightness",
+                icon = Icons.Default.BrightnessMedium,
+                selected = active == Adjustment.Brightness,
+                onClick = { onSelect(Adjustment.Brightness) },
+            )
+        }
+        item(key = "exposure") {
+            AdjustCapsulePill(
+                label = "Exposure",
+                icon = Icons.Default.AutoFixHigh,
+                selected = active == Adjustment.Exposure,
+                onClick = { onSelect(Adjustment.Exposure) },
+            )
+        }
+        item(key = "contrast") {
+            AdjustCapsulePill(
+                label = "Contrast",
+                icon = Icons.Default.Contrast,
+                selected = active == Adjustment.Contrast,
+                onClick = { onSelect(Adjustment.Contrast) },
+            )
+        }
+        item(key = "highlights") {
+            AdjustCapsulePill(
+                label = "Highlights",
+                icon = Icons.Default.Tune,
+                selected = active == Adjustment.Highlights,
+                onClick = { onSelect(Adjustment.Highlights) },
+            )
+        }
+        item(key = "shadows") {
+            AdjustCapsulePill(
+                label = "Shadows",
+                icon = Icons.Default.Block,
+                selected = active == Adjustment.Shadows,
+                onClick = { onSelect(Adjustment.Shadows) },
+            )
+        }
+        item(key = "saturation") {
+            AdjustCapsulePill(
+                label = "Saturation",
+                icon = Icons.Default.Palette,
+                selected = active == Adjustment.Saturation,
+                onClick = { onSelect(Adjustment.Saturation) },
+            )
+        }
+        item(key = "tone") {
+            AdjustCapsulePill(
+                label = "Tone",
+                icon = Icons.Default.SwapHoriz,
+                selected = active == Adjustment.Tone,
+                onClick = { onSelect(Adjustment.Tone) },
+            )
+        }
+        item(key = "temperature") {
+            AdjustCapsulePill(
+                label = "Temperature",
+                icon = Icons.Default.Brush,
+                selected = active == Adjustment.Temperature,
+                onClick = { onSelect(Adjustment.Temperature) },
+            )
+        }
     }
 }
 
+/** Individual capsule pill matching the photos page filter row recipe verbatim.
+ *  Selected = Accent.copy(alpha = 0.18f) fill (no border, like the gallery's
+ *  active filter pill). Unselected = PillBg + 0.5.dp PillBorder. */
 @Composable
-private fun AutoFixButton(onClick: () -> Unit) {
+private fun AdjustCapsulePill(
+    label: String,
+    icon: ImageVector,
+    selected: Boolean,
+    accentIcon: Boolean = false,
+    onClick: () -> Unit,
+) {
     Row(
         modifier = Modifier
-            .fillMaxWidth()
-            .height(44.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .background(PanelChip)
+            .height(38.dp)
+            .background(if (selected) Accent.copy(alpha = 0.18f) else PillBg, pillShape)
+            .then(if (!selected) Modifier.border(0.5.dp, PillBorder, pillShape) else Modifier)
             .clickable(onClick = onClick)
             .padding(horizontal = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.Center,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Icon(Icons.Default.AutoFixHigh, null, tint = Accent, modifier = Modifier.size(18.dp))
-        Spacer(Modifier.width(8.dp))
+        Icon(
+            icon,
+            null,
+            tint = when {
+                selected   -> Accent
+                accentIcon -> Accent
+                else       -> FgDim
+            },
+            modifier = Modifier.size(14.dp),
+        )
         Text(
-            text = androidx.compose.ui.res.stringResource(R.string.editor_auto_fix),
-            color = FgPrimary,
+            label,
+            color = if (selected) Accent else FgPrimary,
             fontSize = 13.sp,
-            fontWeight = FontWeight.SemiBold,
+            fontWeight = FontWeight.Medium,
         )
     }
 }
@@ -742,10 +927,11 @@ private fun RedactPanel(state: EditorUiState, vm: PhotoEditorViewModel) {
 
 @Composable
 private fun RotatePanel(vm: PhotoEditorViewModel) {
+    // Center the three actions horizontally so the panel doesn't read as a left-
+    // anchored list against the wider editor frame.
     Row(
-        Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceEvenly,
-        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+        modifier = Modifier.fillMaxWidth(),
     ) {
         ActionTile("Rotate", Icons.AutoMirrored.Filled.RotateRight) { vm.rotate90Cw() }
         ActionTile("Flip H", Icons.Default.Flip) { vm.toggleFlipH() }
@@ -795,6 +981,7 @@ private fun CropPanel(
     } ?: if (fullImage) CropAspect.Original else null
 
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        // Aspect ratio chips — same pill recipe as the photos page filter row.
         LazyRow(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier.fillMaxWidth(),
@@ -803,9 +990,12 @@ private fun CropPanel(
                 val isSelected = aspect == selected
                 Box(
                     modifier = Modifier
-                        .height(40.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(if (isSelected) Accent.copy(alpha = 0.22f) else PanelChip)
+                        .height(38.dp)
+                        .background(
+                            if (isSelected) Accent.copy(alpha = 0.18f) else PillBg,
+                            pillShape,
+                        )
+                        .then(if (!isSelected) Modifier.border(0.5.dp, PillBorder, pillShape) else Modifier)
                         .clickable {
                             val newRect = if (aspect.ratio == null)
                                 android.graphics.Rect(0, 0, orig.width, orig.height)
@@ -820,7 +1010,7 @@ private fun CropPanel(
                         aspect.label,
                         color = if (isSelected) Accent else FgPrimary,
                         fontSize = 13.sp,
-                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
                     )
                 }
             }
@@ -1079,45 +1269,59 @@ private fun SliderRow(
     onChangeFinished: () -> Unit = {},
 ) {
     val density = LocalDensity.current
-    val trackHeightPx = with(density) { 4.dp.toPx() }
-    val thumbRadiusPx = with(density) { 9.dp.toPx() }
+    val trackHeightPx = with(density) { 2.dp.toPx() }
+    val thumbRadiusPx = with(density) { 7.dp.toPx() }
     var widthPx by remember { mutableFloatStateOf(0f) }
     val normalized = (value + 100) / 200f // 0..1
     val accentColor = Accent
     val fgDimColor = FgDim
     val trackColor = TrackBg
-    Column {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(label, color = FgPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-            Text(value.toString(), color = FgDim, fontSize = 13.sp)
-        }
-        Spacer(Modifier.height(8.dp))
+    // pointerInput(Unit) captures the FIRST `onChange` lambda forever — the gesture
+    // pipeline starts once and never reruns. When the parent swaps `onChange` because
+    // the active adjustment changed (e.g. Brightness → Exposure), the captured lambda
+    // still points at vm.updateBrightness — so the slider visually shows Exposure's
+    // value (it reads `value` on recomposition) but every drag updates Brightness.
+    // rememberUpdatedState lets the long-lived gesture loop reach the latest lambda
+    // without re-keying the pointerInput on every recomposition.
+    val latestOnChange = androidx.compose.runtime.rememberUpdatedState(onChange)
+    val latestOnChangeFinished = androidx.compose.runtime.rememberUpdatedState(onChangeFinished)
+    // The active adjustment is already shown in the pill row below; the slider only
+    // needs the current numeric value centered above its track so the user can read it
+    // at a glance during a drag.
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(
+            value.toString(),
+            color = FgDim,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Medium,
+        )
+        Spacer(Modifier.height(4.dp))
         Canvas(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(28.dp)
+                .height(20.dp)
                 .onSizeChanged { widthPx = it.width.toFloat() }
                 .pointerInput(Unit) {
                     detectDragGestures(
                         onDragStart = { o ->
                             val pct = (o.x / size.width).coerceIn(0f, 1f)
-                            onChange((pct * 200 - 100).toInt())
+                            latestOnChange.value((pct * 200 - 100).toInt())
                         },
                         onDrag = { change, _ ->
                             val pct = (change.position.x / size.width).coerceIn(0f, 1f)
-                            onChange((pct * 200 - 100).toInt())
+                            latestOnChange.value((pct * 200 - 100).toInt())
                             change.consume()
                         },
-                        onDragEnd = { onChangeFinished() },
-                        onDragCancel = { onChangeFinished() },
+                        onDragEnd = { latestOnChangeFinished.value() },
+                        onDragCancel = { latestOnChangeFinished.value() },
                     )
                 }
                 .pointerInput(Unit) {
                     detectTapGestures(
                         onTap = { o ->
                             val pct = (o.x / size.width).coerceIn(0f, 1f)
-                            onChange((pct * 200 - 100).toInt())
-                            onChangeFinished()
+                            latestOnChange.value((pct * 200 - 100).toInt())
+                            latestOnChangeFinished.value()
                         },
                     )
                 },
@@ -1158,11 +1362,16 @@ private fun FilterThumb(filter: FilterPreset, source: Bitmap?, selected: Boolean
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier.clickable(onClick = onClick),
     ) {
+        // Filter swatches are square thumbnails (a circle hides too much of the
+        // preview to read), so they keep a rounded-rect shape — but use the same
+        // PillBg + PillBorder tokens so they sit on the editor background the same
+        // way the gallery filter pills do.
         Box(
             modifier = Modifier
                 .size(64.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(PanelChip),
+                .clip(RoundedCornerShape(14.dp))
+                .background(PillBg)
+                .border(0.5.dp, PillBorder, RoundedCornerShape(14.dp)),
             contentAlignment = Alignment.Center,
         ) {
             if (source != null) {
@@ -1198,19 +1407,28 @@ private fun FilterThumb(filter: FilterPreset, source: Bitmap?, selected: Boolean
     }
 }
 
+/** Rotate / Flip pills — match the photos page filter row recipe so the bar above
+ *  the tab dock reads as the same kind of control regardless of which tool is
+ *  active. Horizontal capsule rather than the old tall square tile. */
 @Composable
 private fun ActionTile(label: String, icon: ImageVector, onClick: () -> Unit) {
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
+    Row(
         modifier = Modifier
-            .clip(RoundedCornerShape(14.dp))
+            .height(38.dp)
+            .background(PillBg, pillShape)
+            .border(0.5.dp, PillBorder, pillShape)
             .clickable(onClick = onClick)
-            .background(PanelChip)
-            .padding(horizontal = 20.dp, vertical = 14.dp),
+            .padding(horizontal = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Icon(icon, label, tint = FgPrimary, modifier = Modifier.size(26.dp))
-        Spacer(Modifier.height(6.dp))
-        Text(label, color = FgPrimary, fontSize = 12.sp)
+        Icon(icon, label, tint = FgDim, modifier = Modifier.size(14.dp))
+        Text(
+            label,
+            color = FgPrimary,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Medium,
+        )
     }
 }
 
@@ -1224,17 +1442,21 @@ private fun ModeChip(
 ) {
     Row(
         modifier = modifier
-            .height(44.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .background(if (selected) Accent.copy(alpha = 0.22f) else PanelChip)
+            .height(40.dp)
+            .background(if (selected) Accent.copy(alpha = 0.18f) else PillBg, pillShape)
+            .then(if (!selected) Modifier.border(0.5.dp, PillBorder, pillShape) else Modifier)
             .clickable(onClick = onClick)
             .padding(horizontal = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Icon(icon, null, tint = if (selected) Accent else FgPrimary, modifier = Modifier.size(18.dp))
-        Text(label, color = if (selected) Accent else FgPrimary, fontSize = 13.sp,
-            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal)
+        Icon(icon, null, tint = if (selected) Accent else FgDim, modifier = Modifier.size(16.dp))
+        Text(
+            label,
+            color = if (selected) Accent else FgPrimary,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Medium,
+        )
     }
 }
 
@@ -1248,16 +1470,26 @@ private fun ActionChip(
 ) {
     Row(
         modifier = modifier
-            .height(44.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .background(PanelChip)
+            .height(40.dp)
+            .background(PillBg, pillShape)
+            .border(0.5.dp, PillBorder, pillShape)
             .clickable(enabled = enabled, onClick = onClick)
             .padding(horizontal = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Icon(icon, null, tint = if (enabled) FgPrimary else FgDim.copy(alpha = 0.4f), modifier = Modifier.size(18.dp))
-        Text(label, color = if (enabled) FgPrimary else FgDim.copy(alpha = 0.4f), fontSize = 13.sp)
+        Icon(
+            icon,
+            null,
+            tint = if (enabled) FgDim else FgDim.copy(alpha = 0.4f),
+            modifier = Modifier.size(16.dp),
+        )
+        Text(
+            label,
+            color = if (enabled) FgPrimary else FgDim.copy(alpha = 0.4f),
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Medium,
+        )
     }
 }
 

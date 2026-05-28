@@ -35,6 +35,20 @@ class SearchViewModel @Inject constructor(
     private val _contentFilter = MutableStateFlow(ContentFilter())
     val contentFilter: StateFlow<ContentFilter> = _contentFilter.asStateFlow()
 
+    /**
+     * Unfiltered gallery source. The search page's empty state surfaces "On this day"
+     * memories and a "Jump to month" grid that must reflect the user's entire library
+     * — independent of any active query/contentFilter. Exposing the raw merged feed
+     * here keeps that derived UI in sync with sync state changes without re-running
+     * the filter pipeline.
+     */
+    val allItems: StateFlow<List<GalleryItem>> = accountManager.getPrimaryUserId()
+        .flatMapLatest { userId ->
+            if (userId == null) flowOf(emptyList())
+            else getGalleryItems.invoke(userId)
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
     val results: StateFlow<List<GalleryItem>> = accountManager.getPrimaryUserId()
         .flatMapLatest { userId ->
             if (userId == null) flowOf(emptyList())

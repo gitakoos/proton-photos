@@ -37,6 +37,8 @@ import eu.akoos.photos.presentation.albums.LocalAlbumDetailScreen
 import androidx.compose.runtime.mutableIntStateOf
 import eu.akoos.photos.presentation.albums.AlbumDetailScreen
 import eu.akoos.photos.presentation.auth.SignInScreen
+import eu.akoos.photos.presentation.calendar.CalendarScreen
+import eu.akoos.photos.presentation.calendar.DayDetailScreen
 import eu.akoos.photos.presentation.editor.PhotoEditorScreen
 import eu.akoos.photos.presentation.editor.VideoEditorScreen
 import eu.akoos.photos.presentation.gallery.GalleryScreen
@@ -74,6 +76,8 @@ sealed class Screen(val route: String) {
     data object AppearanceSettings : Screen("appearance_settings")
     data object LanguageSettings : Screen("language_settings")
     data object Search : Screen("search")
+    data object Calendar : Screen("calendar")
+    data object DayDetail : Screen("day_detail")
 }
 
 @HiltViewModel
@@ -112,6 +116,11 @@ fun NavGraph(
 
     // Selected item handed to the editor. Carries local URI + display name OR a CloudPhoto.
     var editorItem by remember { mutableStateOf<GalleryItem?>(null) }
+
+    // ISO date string (yyyy-MM-dd) handed from Calendar to DayDetail. Held here so the
+    // composable-level rememberSaveable inside DayDetailScreen isn't the source of truth
+    // (nav between days from the calendar root needs to push fresh dates onto this state).
+    var selectedDayDate by remember { mutableStateOf<String?>(null) }
 
     val isLoggedIn = navViewModel.isLoggedIn
 
@@ -181,7 +190,37 @@ fun NavGraph(
                 onSettingsClick = { navController.navigate(Screen.Settings.route) },
                 onHiddenAlbumClick = { navController.navigate(Screen.HiddenAlbum.route) },
                 onSearchClick = { navController.navigate(Screen.Search.route) },
+                onCalendarClick = { navController.navigate(Screen.Calendar.route) },
             )
+        }
+
+        composable(Screen.Calendar.route) {
+            CalendarScreen(
+                onBack = { navController.popBackStack() },
+                onDayClick = { date ->
+                    selectedDayDate = date
+                    navController.navigate(Screen.DayDetail.route)
+                },
+            )
+        }
+
+        composable(Screen.DayDetail.route) {
+            val date = selectedDayDate
+            if (date == null) {
+                navController.popBackStack()
+            } else {
+                DayDetailScreen(
+                    date = date,
+                    onBack = { navController.popBackStack() },
+                    onPhotoClick = { items, idx ->
+                        selectedViewerItems = items
+                        selectedViewerIndex = idx
+                        selectedViewerHiddenLinkIds = emptySet()
+                        viewerFromAlbum = false
+                        navController.navigate(Screen.Viewer.route)
+                    },
+                )
+            }
         }
 
         composable(Screen.Viewer.route) { backStackEntry ->

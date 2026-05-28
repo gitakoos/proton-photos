@@ -17,10 +17,12 @@ End-to-end encrypted photo backup and browsing for your Proton Drive Photos libr
 - Reinstall pairing — previously backed-up photos rejoin Synced state automatically after a clean install.
 - Albums — create, rename, add / remove photos, quick-set cover via long-press on any photo.
 - Multi-step share dialog — email chips, viewer / editor permissions, optional invite message.
-- Built-in photo editor — adjust, filter, redact, rotate, free-form crop, undo / redo.
+- Built-in photo editor — eight adjustments (brightness, exposure, contrast, highlights, shadows, saturation, tone, temperature), filter, redact, rotate, free-form crop, undo / redo.
 - Built-in video editor — trim, crop, rotate, music overlay with audio trim. Works on both device and cloud-hosted videos.
 - Photo viewer — slideshow with video support (waits for clips to finish), pinch-zoom, "On this day" memories card.
-- Search — filename, media type, sync state, year and month filters.
+- Pinch-to-zoom on the photos grid groups by day, month or year as you zoom in / out.
+- Calendar view — every day on a calendar, with a hero photo per day, an editable place + description, and the full grid of that day's photos and videos.
+- Search — filename, media type, sync state, year and month filters; the empty-state shows recent photos, an "On this day" carousel and a jump-to-month grid.
 - Timeline scrubber on the photos grid for fast year-jump navigation.
 - Multi-select bulk actions — download, add to album, delete, hide, strip metadata.
 - Hidden vault behind biometric / PIN. Heavy blur overlay on cells and viewer.

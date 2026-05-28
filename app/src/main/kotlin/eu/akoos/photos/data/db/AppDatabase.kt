@@ -92,8 +92,10 @@ import me.proton.core.usersettings.data.db.dao.UserSettingsDao
 import me.proton.core.usersettings.data.entity.OrganizationEntity
 import me.proton.core.usersettings.data.entity.OrganizationKeysEntity
 import me.proton.core.usersettings.data.entity.UserSettingsEntity
+import eu.akoos.photos.data.db.dao.DayMetaDao
 import eu.akoos.photos.data.db.dao.PhotoListingDao
 import eu.akoos.photos.data.db.dao.SyncStateDao
+import eu.akoos.photos.data.db.entity.DayMetaEntity
 import eu.akoos.photos.data.db.entity.PhotoListingEntity
 import eu.akoos.photos.data.db.entity.SyncStateEntity
 
@@ -113,6 +115,7 @@ import eu.akoos.photos.data.db.entity.SyncStateEntity
     entities = [
         SyncStateEntity::class,
         PhotoListingEntity::class,
+        DayMetaEntity::class,
         // Account
         AccountEntity::class,
         AccountMetadataEntity::class,
@@ -152,7 +155,7 @@ import eu.akoos.photos.data.db.entity.SyncStateEntity
         // Telemetry
         TelemetryEventEntity::class,
     ],
-    version = 5,
+    version = 6,
     exportSchema = true,
 )
 abstract class AppDatabase : BaseDatabase(),
@@ -174,6 +177,7 @@ abstract class AppDatabase : BaseDatabase(),
 
     abstract fun syncStateDao(): SyncStateDao
     abstract fun photoListingDao(): PhotoListingDao
+    abstract fun dayMetaDao(): DayMetaDao
 
     abstract override fun accountDao(): AccountDao
     abstract override fun sessionDao(): SessionDao
