@@ -111,17 +111,7 @@
     <!-- Settings -->
     <string name="settings_title">Beállítások</string>
     <string name="settings_sync_section">Szinkronizálás</string>
-    <string name="settings_auto_sync">Automatikus szinkronizálás</string>
     <string name="settings_sync_wifi_only">Csak Wi‑Fi-n szinkronizálj</string>
-    <string name="settings_sync_interval">Szinkronizálási gyakoriság</string>
-    <string name="settings_sync_interval_desc">Milyen gyakran keressen új fotókat</string>
-    <string name="settings_sync_interval_15min">15 percenként</string>
-    <string name="settings_sync_interval_30min">30 percenként</string>
-    <string name="settings_sync_interval_1h">Óránként</string>
-    <string name="settings_sync_interval_3h">3 óránként</string>
-    <string name="settings_sync_interval_6h">6 óránként</string>
-    <string name="settings_sync_interval_12h">12 óránként</string>
-    <string name="settings_sync_interval_24h">Naponta egyszer</string>
     <string name="settings_last_sync">Utolsó szinkronizálás</string>
     <string name="settings_sync_now">Szinkronizálás most</string>
     <string name="settings_storage_section">Tárhely</string>
@@ -144,13 +134,28 @@
     <string name="settings_language">Nyelv</string>
     <string name="settings_language_system">Rendszer alapértelmezett</string>
     <string name="settings_storage">Tárhely</string>
-    <string name="settings_auto_sync_desc">Titkosított biztonsági mentés az eszközről</string>
     <string name="settings_sync_wifi_desc">Feltöltés szüneteltetése mobilhálózaton</string>
-    <string name="settings_background_sync">Háttérszinkron</string>
-    <string name="settings_background_sync_desc">Szinkronizálás az app bezárása után is</string>
     <string name="settings_sync_now_action">Szinkronizálás →</string>
     <string name="settings_backup_folders">Mentett mappák</string>
     <string name="settings_backup_folders_desc">Válaszd ki, mely mappákat menteni</string>
+    <!-- Sync settings reorganisation (v1.3.2): two grouped sections. -->
+    <string name="settings_what_backed_up_section">Mit mentsünk</string>
+    <string name="settings_when_section">Mikor</string>
+    <string name="settings_continuous_backup">Folyamatos mentés</string>
+    <string name="settings_continuous_backup_desc">A fotók és videók másodperceken belül feltöltődnek.</string>
+    <string name="settings_backup_everything">Minden mentése</string>
+    <string name="settings_backup_everything_desc">Az eszközön lévő összes fotó és videó automatikus feltöltése.</string>
+    <!-- Excluded folders feature (paired with backup-everything mode). -->
+    <string name="settings_excluded_folders">Kizárt mappák</string>
+    <string name="settings_excluded_folders_desc_none">Nincs kizárt mappa</string>
+    <string name="settings_excluded_folders_desc_singular">1 mappa kizárva</string>
+    <string name="settings_excluded_folders_desc_count">%1$d mappa kizárva</string>
+    <string name="settings_excluded_folders_title">Kizárt mappák</string>
+    <string name="settings_excluded_folders_intro">Az ezekben a mappákban lévő fotók akkor sem kerülnek mentésre, ha a „Minden mentése" be van kapcsolva. A már feltöltött elemek a Drive-on maradnak.</string>
+    <string name="settings_excluded_folders_empty">Nem található mappa ezen az eszközön</string>
+    <string name="settings_excluded_folders_count_label">%1$d / %2$d mappa kizárva</string>
+    <string name="settings_excluded_folders_select_all">Mind kizárása</string>
+    <string name="settings_excluded_folders_deselect_all">Mind visszavétele</string>
     <string name="settings_recently_deleted">Nemrég törölt</string>
     <string name="settings_recently_deleted_desc">Visszaállítás vagy végleges törlés</string>
     <string name="settings_recently_deleted_subtitle">%1$d kép · 30 napon belül törölt</string>
@@ -221,6 +226,15 @@
     <string name="editor_error_download_failed">Nem sikerült letölteni a képet</string>
     <string name="editor_error_decode_failed">Nem sikerült dekódolni a képet</string>
     <string name="editor_auto_fix">Automatikus javítás</string>
+    <!-- Editor — adjust panel pill labels. -->
+    <string name="editor_adj_brightness">Fényerő</string>
+    <string name="editor_adj_exposure">Expozíció</string>
+    <string name="editor_adj_contrast">Kontraszt</string>
+    <string name="editor_adj_highlights">Csúcsfények</string>
+    <string name="editor_adj_shadows">Árnyékok</string>
+    <string name="editor_adj_saturation">Telítettség</string>
+    <string name="editor_adj_tone">Tónus</string>
+    <string name="editor_adj_temperature">Hőmérséklet</string>
     <string name="editor_crop_apply">Alkalmaz</string>
     <string name="editor_crop_reset">Visszaállít</string>
     <string name="hidden_photos_title">Rejtett képek</string>
@@ -481,4 +495,30 @@
     <string name="video_editor_audio_mute">Némítás</string>
     <string name="video_editor_audio_muted">Némítva</string>
     <string name="video_editor_audio_overlay_hint">A zene helyettesíti az eredeti hangsávot a mentett videóban.</string>
+
+    <!-- v1.3.2 missing-translation backfill -->
+    <string name="sync_worker_notification_checking">Új fotók keresése…</string>
+    <string name="bg_sync_service_channel_name">Háttér-fotómentés</string>
+    <string name="bg_sync_service_channel_desc">Lehetővé teszi, hogy az alkalmazás reagáljon az új fotókra a háttérben.</string>
+    <string name="bg_sync_service_title">Fotómentés</string>
+    <string name="bg_sync_service_text">Új fotókat figyel</string>
+    <string name="search_section_on_this_day">Ezen a napon</string>
+    <string name="search_section_on_this_day_years">%1$d éve</string>
+    <string name="search_section_on_this_day_years_plural">%1$d éve</string>
+    <string name="search_section_jump_to_month">Ugrás hónaphoz</string>
+    <string name="search_section_recent">Legutóbbi</string>
+    <string name="calendar_title">Naptár</string>
+    <string name="calendar_no_photos">Nincs fotó ebben a hónapban</string>
+    <string name="calendar_search_placeholder">Keresés dátum, hely vagy jegyzet szerint</string>
+    <string name="calendar_search_no_results">Nincs találat</string>
+    <string name="calendar_view_toggle_cd">Nézet váltása</string>
+    <string name="calendar_search_cd">Keresés a naptárban</string>
+    <string name="calendar_jump_cd">Ugrás hónaphoz</string>
+    <string name="calendar_jump_title">Ugrás hónaphoz</string>
+    <string name="day_detail_location_hint">Adj hozzá egy helyet</string>
+    <string name="day_detail_description_hint">Írj egy jegyzetet ehhez a naphoz</string>
+    <string name="day_detail_edit_location_title">Hely szerkesztése</string>
+    <string name="day_detail_edit_description_title">Leírás szerkesztése</string>
+    <string name="day_detail_save">Mentés</string>
+    <string name="day_detail_photos_count">%1$d fotó</string>
 </resources>

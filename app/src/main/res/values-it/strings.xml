@@ -112,17 +112,7 @@
     <!-- Settings -->
     <string name="settings_title">Impostazioni</string>
     <string name="settings_sync_section">Sincronizzazione</string>
-    <string name="settings_auto_sync">Sincronizzazione automatica</string>
     <string name="settings_sync_wifi_only">Sincronizza solo con Wi-Fi</string>
-    <string name="settings_sync_interval">Intervallo di sincronizzazione</string>
-    <string name="settings_sync_interval_desc">Ogni quanto controllare le nuove foto</string>
-    <string name="settings_sync_interval_15min">Ogni 15 minuti</string>
-    <string name="settings_sync_interval_30min">Ogni 30 minuti</string>
-    <string name="settings_sync_interval_1h">Ogni ora</string>
-    <string name="settings_sync_interval_3h">Ogni 3 ore</string>
-    <string name="settings_sync_interval_6h">Ogni 6 ore</string>
-    <string name="settings_sync_interval_12h">Ogni 12 ore</string>
-    <string name="settings_sync_interval_24h">Una volta al giorno</string>
     <string name="settings_last_sync">Ultima sincronizzazione</string>
     <string name="settings_sync_now">Sincronizza ora</string>
     <string name="settings_storage_section">Archiviazione</string>
@@ -145,13 +135,28 @@
     <string name="settings_language">Lingua</string>
     <string name="settings_language_system">Predefinita di sistema</string>
     <string name="settings_storage">Archiviazione</string>
-    <string name="settings_auto_sync_desc">Backup crittografato e sicuro dal dispositivo</string>
     <string name="settings_sync_wifi_desc">Sospendi caricamento su rete mobile</string>
-    <string name="settings_background_sync">Sincronizzazione in background</string>
-    <string name="settings_background_sync_desc">Sincronizza dopo la chiusura dell\'app</string>
     <string name="settings_sync_now_action">Sincronizza →</string>
     <string name="settings_backup_folders">Cartelle da salvare</string>
     <string name="settings_backup_folders_desc">Scegli quali cartelle salvare</string>
+    <!-- Sync settings reorganisation (v1.3.2): two grouped sections. -->
+    <string name="settings_what_backed_up_section">Cosa viene salvato</string>
+    <string name="settings_when_section">Quando avviene</string>
+    <string name="settings_continuous_backup">Backup continuo</string>
+    <string name="settings_continuous_backup_desc">Foto e video vengono caricati pochi secondi dopo lo scatto.</string>
+    <string name="settings_backup_everything">Salva tutto</string>
+    <string name="settings_backup_everything_desc">Carica automaticamente ogni foto e video di questo dispositivo.</string>
+    <!-- Excluded folders feature (paired with backup-everything mode). -->
+    <string name="settings_excluded_folders">Cartelle escluse</string>
+    <string name="settings_excluded_folders_desc_none">Nessuna cartella esclusa</string>
+    <string name="settings_excluded_folders_desc_singular">1 cartella esclusa</string>
+    <string name="settings_excluded_folders_desc_count">%1$d cartelle escluse</string>
+    <string name="settings_excluded_folders_title">Cartelle escluse</string>
+    <string name="settings_excluded_folders_intro">Le foto in queste cartelle non verranno salvate, anche con „Salva tutto" attivo. Gli elementi già caricati restano su Drive.</string>
+    <string name="settings_excluded_folders_empty">Nessuna cartella trovata su questo dispositivo</string>
+    <string name="settings_excluded_folders_count_label">%1$d di %2$d cartelle escluse</string>
+    <string name="settings_excluded_folders_select_all">Escludi tutto</string>
+    <string name="settings_excluded_folders_deselect_all">Includi tutto</string>
     <string name="settings_recently_deleted">Eliminati di recente</string>
     <string name="settings_recently_deleted_desc">Ripristina o elimina definitivamente</string>
     <string name="settings_recently_deleted_subtitle">%1$d foto · eliminate negli ultimi 30 giorni</string>
@@ -222,6 +227,15 @@
     <string name="editor_error_download_failed">Impossibile scaricare l\'immagine</string>
     <string name="editor_error_decode_failed">Impossibile decodificare l\'immagine</string>
     <string name="editor_auto_fix">Correzione auto</string>
+    <!-- Editor — adjust panel pill labels. -->
+    <string name="editor_adj_brightness">Luminosità</string>
+    <string name="editor_adj_exposure">Esposizione</string>
+    <string name="editor_adj_contrast">Contrasto</string>
+    <string name="editor_adj_highlights">Alte luci</string>
+    <string name="editor_adj_shadows">Ombre</string>
+    <string name="editor_adj_saturation">Saturazione</string>
+    <string name="editor_adj_tone">Tonalità</string>
+    <string name="editor_adj_temperature">Temperatura</string>
     <string name="editor_crop_apply">Applica</string>
     <string name="editor_crop_reset">Ripristina</string>
     <string name="hidden_photos_title">Foto nascoste</string>
@@ -486,4 +500,30 @@
     <string name="video_editor_audio_mute">Disattiva</string>
     <string name="video_editor_audio_muted">Disattivato</string>
     <string name="video_editor_audio_overlay_hint">La musica sostituisce la traccia audio originale nel video salvato.</string>
+
+    <!-- v1.3.2 missing-translation backfill -->
+    <string name="sync_worker_notification_checking">Ricerca di nuove foto…</string>
+    <string name="bg_sync_service_channel_name">Backup foto in background</string>
+    <string name="bg_sync_service_channel_desc">Consente all\'app di reagire alle nuove foto in background.</string>
+    <string name="bg_sync_service_title">Backup foto</string>
+    <string name="bg_sync_service_text">In attesa di nuove foto</string>
+    <string name="search_section_on_this_day">In questo giorno</string>
+    <string name="search_section_on_this_day_years">%1$d anno fa</string>
+    <string name="search_section_on_this_day_years_plural">%1$d anni fa</string>
+    <string name="search_section_jump_to_month">Vai al mese</string>
+    <string name="search_section_recent">Recenti</string>
+    <string name="calendar_title">Calendario</string>
+    <string name="calendar_no_photos">Nessuna foto questo mese</string>
+    <string name="calendar_search_placeholder">Cerca per data, luogo o nota</string>
+    <string name="calendar_search_no_results">Nessun giorno corrispondente</string>
+    <string name="calendar_view_toggle_cd">Cambia modalità di visualizzazione</string>
+    <string name="calendar_search_cd">Cerca nel calendario</string>
+    <string name="calendar_jump_cd">Vai al mese</string>
+    <string name="calendar_jump_title">Vai al mese</string>
+    <string name="day_detail_location_hint">Aggiungi un luogo</string>
+    <string name="day_detail_description_hint">Aggiungi una nota su questo giorno</string>
+    <string name="day_detail_edit_location_title">Modifica luogo</string>
+    <string name="day_detail_edit_description_title">Modifica descrizione</string>
+    <string name="day_detail_save">Salva</string>
+    <string name="day_detail_photos_count">%1$d foto</string>
 </resources>

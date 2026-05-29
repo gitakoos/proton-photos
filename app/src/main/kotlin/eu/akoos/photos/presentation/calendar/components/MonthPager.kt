@@ -86,8 +86,7 @@ fun MonthPager(
         // Each page fills the pager exactly — we pass `expanded = true` so the grid's
         // six week rows divide the remaining vertical space (after the month title /
         // weekday strip) equally. Bottom navigation-bars padding keeps the last row off
-        // the system gesture area, and a small bottom inset gives the grid room to breathe
-        // matching the 16dp brief.
+        // the system gesture area, and a 16dp bottom inset gives the grid room to breathe.
         Column(
             modifier = Modifier
                 .fillMaxSize()

@@ -37,32 +37,30 @@ class ReconcileSyncStateUseCase @Inject constructor(
         // up like Google Photos" mode, opt-in via Settings.
         val prefs: Preferences = context.settingsDataStore.data.first()
         val backupEverything = prefs[SettingsKeys.BACKUP_EVERYTHING] ?: false
-        var selectedFolders: Set<String>? = prefs[SettingsKeys.SYNC_FOLDER_NAMES]
-        val autoBackupNew = prefs[SettingsKeys.AUTO_BACKUP_NEW_FOLDERS] ?: false
+        val selectedFolders: Set<String>? = prefs[SettingsKeys.SYNC_FOLDER_NAMES]
+        // Backup-everything carve-outs. Only consulted while [backupEverything] is true —
+        // when the per-folder picker is in charge, exclusions don't apply (the user picked
+        // an explicit allow-list; we don't second-guess it with a parallel deny-list).
+        val excludedFolders: Set<String> = prefs[SettingsKeys.EXCLUDED_FOLDER_NAMES] ?: emptySet()
 
         val allLocalItems = localRepo.observeLocalMedia().first()
-
-        // Auto-backup new folders: discover any bucket not yet in the selection and add it.
-        // Only kicks in once the user has set up backup at least once (selectedFolders non-null),
-        // so a brand-new install doesn't immediately back up everything by surprise.
-        if (autoBackupNew && selectedFolders != null) {
-            val knownFolders = selectedFolders ?: emptySet()
-            val discovered = allLocalItems.mapNotNull { it.bucketName }.toSet()
-            val newFolders = discovered - knownFolders
-            if (newFolders.isNotEmpty()) {
-                val merged = knownFolders + newFolders
-                context.settingsDataStore.edit { it[SettingsKeys.SYNC_FOLDER_NAMES] = merged }
-                selectedFolders = merged
-                Log.d(TAG, "auto-backup: added ${newFolders.size} new folder(s) → ${newFolders.joinToString()}")
-            }
-        }
 
         val localItems = if (backupEverything) {
             // Backup-everything mode: skip the folder selection entirely. Every local
             // image/video flows into reconcile and gets either marked SYNCED (already
-            // on Drive) or LOCAL_ONLY (needs upload).
-            Log.d(TAG, "Backup-everything ON — ${allLocalItems.size} items eligible (no folder filter)")
-            allLocalItems
+            // on Drive) or LOCAL_ONLY (needs upload). Excluded buckets are dropped here
+            // so the user can keep Screenshots / Movies / WhatsApp-Status out of Drive
+            // without abandoning the everything-else guarantee. Items with a null bucket
+            // (rare — usually orphan rows) bypass the exclusion since we can't match.
+            if (excludedFolders.isNotEmpty()) {
+                val kept = allLocalItems.filter { it.bucketName == null || it.bucketName !in excludedFolders }
+                Log.d(TAG, "Backup-everything ON, ${excludedFolders.size} excluded — " +
+                    "${kept.size}/${allLocalItems.size} items eligible")
+                kept
+            } else {
+                Log.d(TAG, "Backup-everything ON — ${allLocalItems.size} items eligible (no folder filter)")
+                allLocalItems
+            }
         } else if (selectedFolders == null) {
             // Key absent → first run, user hasn't selected any folders yet; backup nothing.
             Log.d(TAG, "No backup folders configured (first-run default) — nothing to upload")

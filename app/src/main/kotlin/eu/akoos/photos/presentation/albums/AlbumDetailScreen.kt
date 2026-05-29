@@ -952,7 +952,7 @@ private fun PhotoCell(
 
 // ── Share sheet ────────────────────────────────────────────────────────────────
 //
-// Redesigned (2026-05-27) to mirror the Drive web share dialog:
+// Mirrors the Drive web share dialog:
 //   ┌────────────────────────────────────────────────────────────────────┐
 //   │ Share <albumName>                                              [×] │
 //   ├────────────────────────────────────────────────────────────────────┤
@@ -1171,10 +1171,10 @@ private fun ShareAlbumSheet(
                         enabled = !isInvitingBatch,
                         keyboardOptions = KeyboardOptions(
                             keyboardType = KeyboardType.Email,
-                            // Done over Send — Send used to fire the invite immediately;
-                            // the new flow only adds to the chip list, so Done is more
-                            // intention-matching and avoids the "I hit enter and lost the
-                            // input but no chip showed up" footgun if the email was invalid.
+                            // Done over Send — the IME action only adds to the chip list, not
+                            // submits the whole invite, so Done is more intention-matching and
+                            // avoids the "I hit enter and lost the input but no chip showed up"
+                            // footgun if the email was invalid.
                             imeAction = ImeAction.Done,
                         ),
                         keyboardActions = KeyboardActions(onDone = {

@@ -163,7 +163,6 @@ class AlbumDownloadWorker @AssistedInject constructor(
          * so this returns immediately.
          */
         fun ensureChannel(context: Context) {
-            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
             val nm = context.getSystemService(NotificationManager::class.java) ?: return
             // getNotificationChannel returns null if absent — only create on first call.
             // Re-creating with the same id every time would silently reset user-changed

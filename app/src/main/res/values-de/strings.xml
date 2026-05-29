@@ -112,17 +112,7 @@
     <!-- Settings -->
     <string name="settings_title">Einstellungen</string>
     <string name="settings_sync_section">Synchronisierung</string>
-    <string name="settings_auto_sync">Automatische Synchronisierung</string>
     <string name="settings_sync_wifi_only">Nur über WLAN synchronisieren</string>
-    <string name="settings_sync_interval">Synchronisierungsintervall</string>
-    <string name="settings_sync_interval_desc">Wie oft nach neuen Fotos gesucht wird</string>
-    <string name="settings_sync_interval_15min">Alle 15 Minuten</string>
-    <string name="settings_sync_interval_30min">Alle 30 Minuten</string>
-    <string name="settings_sync_interval_1h">Jede Stunde</string>
-    <string name="settings_sync_interval_3h">Alle 3 Stunden</string>
-    <string name="settings_sync_interval_6h">Alle 6 Stunden</string>
-    <string name="settings_sync_interval_12h">Alle 12 Stunden</string>
-    <string name="settings_sync_interval_24h">Einmal täglich</string>
     <string name="settings_last_sync">Letzte Synchronisierung</string>
     <string name="settings_sync_now">Jetzt synchronisieren</string>
     <string name="settings_storage_section">Speicher</string>
@@ -145,13 +135,28 @@
     <string name="settings_language">Sprache</string>
     <string name="settings_language_system">Systemstandard</string>
     <string name="settings_storage">Speicher</string>
-    <string name="settings_auto_sync_desc">Verschlüsselte sichere Sicherung vom Gerät</string>
     <string name="settings_sync_wifi_desc">Upload bei Mobilfunk pausieren</string>
-    <string name="settings_background_sync">Hintergrundsynchronisierung</string>
-    <string name="settings_background_sync_desc">Synchronisieren nach App-Schließung</string>
     <string name="settings_sync_now_action">Synchronisieren →</string>
     <string name="settings_backup_folders">Sicherungsordner</string>
     <string name="settings_backup_folders_desc">Wählen Sie aus, welche Ordner gesichert werden sollen</string>
+    <!-- Sync settings reorganisation (v1.3.2): two grouped sections. -->
+    <string name="settings_what_backed_up_section">Was gesichert wird</string>
+    <string name="settings_when_section">Wann gesichert wird</string>
+    <string name="settings_continuous_backup">Kontinuierliche Sicherung</string>
+    <string name="settings_continuous_backup_desc">Fotos und Videos werden innerhalb von Sekunden nach der Aufnahme hochgeladen.</string>
+    <string name="settings_backup_everything">Alles sichern</string>
+    <string name="settings_backup_everything_desc">Jedes Foto und Video auf diesem Gerät automatisch hochladen.</string>
+    <!-- Excluded folders feature (paired with backup-everything mode). -->
+    <string name="settings_excluded_folders">Ausgeschlossene Ordner</string>
+    <string name="settings_excluded_folders_desc_none">Keine Ordner ausgeschlossen</string>
+    <string name="settings_excluded_folders_desc_singular">1 Ordner ausgeschlossen</string>
+    <string name="settings_excluded_folders_desc_count">%1$d Ordner ausgeschlossen</string>
+    <string name="settings_excluded_folders_title">Ausgeschlossene Ordner</string>
+    <string name="settings_excluded_folders_intro">Fotos in diesen Ordnern werden nicht gesichert, auch wenn „Alles sichern" aktiv ist. Bereits hochgeladene Elemente bleiben auf Drive.</string>
+    <string name="settings_excluded_folders_empty">Keine Ordner auf diesem Gerät gefunden</string>
+    <string name="settings_excluded_folders_count_label">%1$d von %2$d Ordnern ausgeschlossen</string>
+    <string name="settings_excluded_folders_select_all">Alle ausschließen</string>
+    <string name="settings_excluded_folders_deselect_all">Alle einschließen</string>
     <string name="settings_recently_deleted">Kürzlich gelöscht</string>
     <string name="settings_recently_deleted_desc">Wiederherstellen oder endgültig löschen</string>
     <string name="settings_recently_deleted_subtitle">%1$d Fotos · in den letzten 30 Tagen gelöscht</string>
@@ -222,6 +227,15 @@
     <string name="editor_error_download_failed">Bild konnte nicht heruntergeladen werden</string>
     <string name="editor_error_decode_failed">Bild konnte nicht dekodiert werden</string>
     <string name="editor_auto_fix">Auto-Korrektur</string>
+    <!-- Editor — adjust panel pill labels. -->
+    <string name="editor_adj_brightness">Helligkeit</string>
+    <string name="editor_adj_exposure">Belichtung</string>
+    <string name="editor_adj_contrast">Kontrast</string>
+    <string name="editor_adj_highlights">Lichter</string>
+    <string name="editor_adj_shadows">Schatten</string>
+    <string name="editor_adj_saturation">Sättigung</string>
+    <string name="editor_adj_tone">Ton</string>
+    <string name="editor_adj_temperature">Farbtemperatur</string>
     <string name="editor_crop_apply">Anwenden</string>
     <string name="editor_crop_reset">Zurücksetzen</string>
     <string name="hidden_photos_title">Versteckte Fotos</string>
@@ -482,4 +496,30 @@
     <string name="video_editor_audio_mute">Stumm</string>
     <string name="video_editor_audio_muted">Stummgeschaltet</string>
     <string name="video_editor_audio_overlay_hint">Musik ersetzt im gespeicherten Video die Originaltonspur.</string>
+
+    <!-- v1.3.2 missing-translation backfill -->
+    <string name="sync_worker_notification_checking">Suche nach neuen Fotos…</string>
+    <string name="bg_sync_service_channel_name">Hintergrund-Fotosicherung</string>
+    <string name="bg_sync_service_channel_desc">Ermöglicht der App, im Hintergrund auf neue Fotos zu reagieren.</string>
+    <string name="bg_sync_service_title">Fotosicherung</string>
+    <string name="bg_sync_service_text">Überwacht neue Fotos</string>
+    <string name="search_section_on_this_day">An diesem Tag</string>
+    <string name="search_section_on_this_day_years">Vor %1$d Jahr</string>
+    <string name="search_section_on_this_day_years_plural">Vor %1$d Jahren</string>
+    <string name="search_section_jump_to_month">Zum Monat springen</string>
+    <string name="search_section_recent">Zuletzt</string>
+    <string name="calendar_title">Kalender</string>
+    <string name="calendar_no_photos">Keine Fotos in diesem Monat</string>
+    <string name="calendar_search_placeholder">Suche nach Datum, Ort oder Notiz</string>
+    <string name="calendar_search_no_results">Keine passenden Tage</string>
+    <string name="calendar_view_toggle_cd">Ansichtsmodus wechseln</string>
+    <string name="calendar_search_cd">Kalender durchsuchen</string>
+    <string name="calendar_jump_cd">Zum Monat springen</string>
+    <string name="calendar_jump_title">Zum Monat springen</string>
+    <string name="day_detail_location_hint">Einen Ort hinzufügen</string>
+    <string name="day_detail_description_hint">Eine Notiz zu diesem Tag hinzufügen</string>
+    <string name="day_detail_edit_location_title">Ort bearbeiten</string>
+    <string name="day_detail_edit_description_title">Beschreibung bearbeiten</string>
+    <string name="day_detail_save">Speichern</string>
+    <string name="day_detail_photos_count">%1$d Fotos</string>
 </resources>

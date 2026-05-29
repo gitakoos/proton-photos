@@ -273,9 +273,9 @@ class PhotoEditorViewModel @Inject constructor(
     private var cloudCounterpart: CloudPhoto? = null
 
     /** Mirrored into UiState so the save dialog can adjust its subtitle when a Synced
-     *  edit will fan out to both device and cloud — the previous "creates a new file
-     *  in Pictures/Proton Photos" text was misleading for Synced photos because it
-     *  omitted the cloud-counterpart upload that also kicks off. */
+     *  edit will fan out to both device and cloud. Without this flag, the subtitle would
+     *  describe only the device-side file creation and omit the cloud-counterpart upload
+     *  that also kicks off for Synced photos. */
     private val _hasCloudCounterpart = MutableStateFlow(false)
 
     fun setCloudCounterpart(photo: CloudPhoto?) {
@@ -397,9 +397,9 @@ class PhotoEditorViewModel @Inject constructor(
             }
             val contrastDelta = if (spread >= 220) 0 else 12
             val saturationDelta = 10
-            // Per-channel histogram-derived nudges for the five adjustments added in the
-            // editor pill rework. Each is a conservative auto-fix value the user can
-            // dial in further by dragging the matching pill's slider afterwards.
+            // Per-channel histogram-derived nudges for the five tonal adjustments. Each
+            // is a conservative auto-fix value the user can dial in further by dragging
+            // the matching pill's slider afterwards.
             //   exposure   — neutral default; raise slightly when scene mean is dark
             //   highlights — pull DOWN when the brightest pixels are blown
             //   shadows    — lift when the darkest pixels are crushed

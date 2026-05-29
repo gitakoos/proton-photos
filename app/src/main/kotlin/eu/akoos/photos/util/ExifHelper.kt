@@ -182,10 +182,9 @@ object ExifHelper {
                 if (config.stripCameraInfo) {
                     // Keep this set in sync with [stripToTempFile] — the user-facing UI
                     // ("Strip camera info" button) calls THIS path, so any tag missing here
-                    // survives a manual wipe but gets stripped on upload, which is a
+                    // survives a manual wipe but gets stripped on upload, which would be a
                     // confusing privacy gap. Aperture-value / ISO-ratings / white-balance /
-                    // exposure-mode were missing pre-2026-05-25 — bug 1 in the metadata-
-                    // remover review.
+                    // exposure-mode must be wiped here to match `stripToTempFile`.
                     exif.setAttribute(ExifInterface.TAG_MAKE, null)
                     exif.setAttribute(ExifInterface.TAG_MODEL, null)
                     exif.setAttribute(ExifInterface.TAG_LENS_MAKE, null)

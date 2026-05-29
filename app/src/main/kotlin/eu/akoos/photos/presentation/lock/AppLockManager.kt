@@ -19,7 +19,7 @@ class AppLockManager @Inject constructor(
 
     /**
      * Timeout in minutes between backgrounding the app and re-locking it on resume.
-     * 0 = lock immediately (legacy v1.0.0-beta behavior). Larger values let the user briefly
+     * 0 = lock immediately (the default before this option existed). Larger values let the user briefly
      * switch to other apps without re-authenticating on every return.
      */
     val lockTimeoutMinutes: Flow<Int> = context.settingsDataStore.data

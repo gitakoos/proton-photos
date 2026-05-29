@@ -49,6 +49,7 @@ import eu.akoos.photos.presentation.settings.LanguageSettingsScreen
 import eu.akoos.photos.presentation.settings.PrivacySettingsScreen
 import eu.akoos.photos.presentation.settings.SecuritySettingsScreen
 import eu.akoos.photos.presentation.settings.SettingsScreen
+import eu.akoos.photos.presentation.settings.ExcludedFoldersScreen
 import eu.akoos.photos.presentation.settings.SyncFoldersScreen
 import eu.akoos.photos.presentation.settings.SyncSettingsScreen
 import eu.akoos.photos.presentation.search.SearchScreen
@@ -67,6 +68,7 @@ sealed class Screen(val route: String) {
     data object AlbumDetail : Screen("album_detail")
     data object LocalAlbumDetail : Screen("local_album_detail")
     data object SyncFolders : Screen("sync_folders")
+    data object ExcludedFolders : Screen("excluded_folders")
     data object Trash : Screen("trash")
     data object HiddenAlbum : Screen("hidden_album")
     data object PhotoEditor : Screen("photo_editor")
@@ -443,9 +445,10 @@ fun NavGraph(
 
         composable(Screen.SyncSettings.route) {
             SyncSettingsScreen(
-                onBack               = { navController.popBackStack() },
-                onBackupFoldersClick = { navController.navigate(Screen.SyncFolders.route) },
-                onRecentlyDeletedClick = { navController.navigate(Screen.Trash.route) },
+                onBack                  = { navController.popBackStack() },
+                onBackupFoldersClick    = { navController.navigate(Screen.SyncFolders.route) },
+                onExcludedFoldersClick  = { navController.navigate(Screen.ExcludedFolders.route) },
+                onRecentlyDeletedClick  = { navController.navigate(Screen.Trash.route) },
             )
         }
 
@@ -485,6 +488,10 @@ fun NavGraph(
 
         composable(Screen.SyncFolders.route) {
             SyncFoldersScreen(onBack = { navController.popBackStack() })
+        }
+
+        composable(Screen.ExcludedFolders.route) {
+            ExcludedFoldersScreen(onBack = { navController.popBackStack() })
         }
 
         composable(Screen.Trash.route) {

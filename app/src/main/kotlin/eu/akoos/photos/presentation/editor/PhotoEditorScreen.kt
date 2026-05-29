@@ -114,8 +114,8 @@ private enum class Tool(val label: String, val icon: ImageVector) {
 }
 
 /** Which slider the Adjust tab is currently exposing in the floating slider pill.
- *  Null until the user picks one of the adjustment chips — that's the "no pill"
- *  state requested in the spec. */
+ *  Null until the user picks one of the adjustment chips — null means no slider
+ *  pill is shown. */
 private enum class Adjustment { Brightness, Exposure, Contrast, Highlights, Shadows, Saturation, Tone, Temperature }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -138,9 +138,10 @@ fun PhotoEditorScreen(
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
     var activeTool by remember { mutableStateOf(Tool.Adjust) }
-    // Adjust tab now exposes ONE slider at a time — the user picks which adjustment
-    // (Brightness / Contrast / Saturation) via the pill row, and only then does the
-    // floating slider pill appear above the row. Null = no slider shown.
+    // Adjust tab exposes ONE slider at a time — the user picks which adjustment
+    // (Brightness / Exposure / Contrast / Highlights / Shadows / Saturation / Tone /
+    // Temperature) via the pill row, and only then does the floating slider pill appear
+    // above the row. Null = no slider shown.
     var activeAdjustment by remember { mutableStateOf<Adjustment?>(null) }
     // Resetting back to null whenever the tool changes prevents a "stale" slider
     // pill flashing when the user pops between tabs.
@@ -291,8 +292,8 @@ fun PhotoEditorScreen(
         }
 
         // ── Bottom area ──────────────────────────────────────────────────────
-        // NO single big rounded panel — three independent pill containers stacked
-        // vertically over the same Bg0 the preview sits on. Each pill stands on its
+        // Three independent pill containers stacked vertically over the same Bg0 the
+        // preview sits on, rather than a single rounded panel. Each pill stands on its
         // own surrounded by empty space, identical recipe to the photos page filter
         // row (PillBg / PillBorder / pillShape).
         Column(
@@ -350,9 +351,9 @@ fun PhotoEditorScreen(
             }
 
             // Panel — varies per tool. Lives in horizontal-padding so the inner pills
-            // don't kiss the screen edges, but does NOT have its own outer pill (per
-            // spec: adjustment chips are individual loose capsules; filter / crop /
-            // redact / rotate panels render their own pill recipes inside).
+            // don't kiss the screen edges, but does not have its own outer pill:
+            // adjustment chips are individual loose capsules, and the filter / crop /
+            // redact / rotate panels render their own pill recipes inside.
             Box(
                 Modifier.fillMaxWidth().padding(horizontal = 18.dp).wrapContentHeight(),
             ) {
@@ -387,7 +388,7 @@ fun PhotoEditorScreen(
                 )
             }
 
-            // Bottom tab bar — ONE pill containing the 5 tab tap targets. Matches
+            // Bottom tab bar — a single pill containing the 5 tab tap targets. Matches
             // GalleryScreen.BottomDock: PillBgOpaque + 0.5.dp PillBorder + pillShape
             // + 4.dp inner padding. Each tab inside is a 44.dp circle that fills with
             // Accent.copy(alpha = 0.22f) when selected.
@@ -459,12 +460,12 @@ private fun SaveSheet(
         )
         Spacer(Modifier.height(18.dp))
 
-        // Unified with the video editor: only "Save as Copy" is offered. Overwrite for
-        // photos used to fall back to "save as copy" when MediaStore refused write
-        // permission on foreign URIs anyway, leaving a duplicate next to the original
-        // in 60-70% of real-world tries (camera roll, screenshots). Skipping straight
-        // to Copy makes the outcome predictable: original always survives, edit lands
-        // as a new file next to it (device) or as a new linkId in Drive (cloud).
+        // Unified with the video editor: only "Save as Copy" is offered. Overwrite is
+        // unreliable for foreign URIs (camera roll, screenshots) because MediaStore
+        // frequently refuses write permission and the fallback leaves a duplicate next
+        // to the original anyway. Skipping straight to Copy makes the outcome
+        // predictable: original always survives, edit lands as a new file next to it
+        // (device) or as a new linkId in Drive (cloud).
         SaveOptionRow(
             icon = if (isCloud) Icons.Default.CloudUpload else Icons.Default.ContentCopy,
             title = if (isCloud) "Save as new copy" else "Save as copy",
@@ -601,10 +602,10 @@ private fun IconBubble(onClick: () -> Unit, enabled: Boolean = true, content: @C
     ) { content() }
 }
 
-/** 44.dp circle tap target inside the tab bar pill. Icon-only — labels were
- *  dropped to keep the bar a single thin pill the same height as the photos
- *  page BottomDock. Selected state mirrors that screen: Accent.copy(alpha = 0.22f)
- *  fill + accent-tinted icon. Unselected = transparent + dim icon. */
+/** 44.dp circle tap target inside the tab bar pill. Icon-only so the bar stays
+ *  a single thin pill the same height as the photos page BottomDock. Selected
+ *  state mirrors that screen: Accent.copy(alpha = 0.22f) fill + accent-tinted
+ *  icon. Unselected = transparent + dim icon. */
 @Composable
 private fun ToolTab(tool: Tool, selected: Boolean, onClick: () -> Unit) {
     Box(
@@ -746,7 +747,7 @@ private fun AdjustPanel(
         }
         item(key = "brightness") {
             AdjustCapsulePill(
-                label = "Brightness",
+                label = androidx.compose.ui.res.stringResource(R.string.editor_adj_brightness),
                 icon = Icons.Default.BrightnessMedium,
                 selected = active == Adjustment.Brightness,
                 onClick = { onSelect(Adjustment.Brightness) },
@@ -754,7 +755,7 @@ private fun AdjustPanel(
         }
         item(key = "exposure") {
             AdjustCapsulePill(
-                label = "Exposure",
+                label = androidx.compose.ui.res.stringResource(R.string.editor_adj_exposure),
                 icon = Icons.Default.AutoFixHigh,
                 selected = active == Adjustment.Exposure,
                 onClick = { onSelect(Adjustment.Exposure) },
@@ -762,7 +763,7 @@ private fun AdjustPanel(
         }
         item(key = "contrast") {
             AdjustCapsulePill(
-                label = "Contrast",
+                label = androidx.compose.ui.res.stringResource(R.string.editor_adj_contrast),
                 icon = Icons.Default.Contrast,
                 selected = active == Adjustment.Contrast,
                 onClick = { onSelect(Adjustment.Contrast) },
@@ -770,7 +771,7 @@ private fun AdjustPanel(
         }
         item(key = "highlights") {
             AdjustCapsulePill(
-                label = "Highlights",
+                label = androidx.compose.ui.res.stringResource(R.string.editor_adj_highlights),
                 icon = Icons.Default.Tune,
                 selected = active == Adjustment.Highlights,
                 onClick = { onSelect(Adjustment.Highlights) },
@@ -778,7 +779,7 @@ private fun AdjustPanel(
         }
         item(key = "shadows") {
             AdjustCapsulePill(
-                label = "Shadows",
+                label = androidx.compose.ui.res.stringResource(R.string.editor_adj_shadows),
                 icon = Icons.Default.Block,
                 selected = active == Adjustment.Shadows,
                 onClick = { onSelect(Adjustment.Shadows) },
@@ -786,7 +787,7 @@ private fun AdjustPanel(
         }
         item(key = "saturation") {
             AdjustCapsulePill(
-                label = "Saturation",
+                label = androidx.compose.ui.res.stringResource(R.string.editor_adj_saturation),
                 icon = Icons.Default.Palette,
                 selected = active == Adjustment.Saturation,
                 onClick = { onSelect(Adjustment.Saturation) },
@@ -794,7 +795,7 @@ private fun AdjustPanel(
         }
         item(key = "tone") {
             AdjustCapsulePill(
-                label = "Tone",
+                label = androidx.compose.ui.res.stringResource(R.string.editor_adj_tone),
                 icon = Icons.Default.SwapHoriz,
                 selected = active == Adjustment.Tone,
                 onClick = { onSelect(Adjustment.Tone) },
@@ -802,7 +803,7 @@ private fun AdjustPanel(
         }
         item(key = "temperature") {
             AdjustCapsulePill(
-                label = "Temperature",
+                label = androidx.compose.ui.res.stringResource(R.string.editor_adj_temperature),
                 icon = Icons.Default.Brush,
                 selected = active == Adjustment.Temperature,
                 onClick = { onSelect(Adjustment.Temperature) },
@@ -1409,7 +1410,7 @@ private fun FilterThumb(filter: FilterPreset, source: Bitmap?, selected: Boolean
 
 /** Rotate / Flip pills — match the photos page filter row recipe so the bar above
  *  the tab dock reads as the same kind of control regardless of which tool is
- *  active. Horizontal capsule rather than the old tall square tile. */
+ *  active. Horizontal capsule shape keeps the row uniform with the adjustment chips. */
 @Composable
 private fun ActionTile(label: String, icon: ImageVector, onClick: () -> Unit) {
     Row(

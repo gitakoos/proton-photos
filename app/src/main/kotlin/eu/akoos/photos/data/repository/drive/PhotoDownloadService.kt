@@ -130,19 +130,20 @@ class PhotoDownloadService @Inject constructor(
         }
         val outputFile = File(cacheDir, "${photo.linkId}.$ext")
         val tempFile = File(cacheDir, "${photo.linkId}.$ext.tmp")
-        // A partial .tmp from a previous interrupted download (process death, network
-        // failure, user backgrounding mid-write) used to land at outputFile directly,
-        // and the cache-hit check below treated it as complete. ExoPlayer's
-        // FileDataSource then opened it, read the truncated MOOV header, and threw
-        // FileDataSourceException → the user saw a black screen on swipe-back-to-video.
-        // Atomic temp-rename below guarantees outputFile only exists when the byte
-        // stream + manifest verification both finished.
+        // Atomic temp-rename: writes go to a `.tmp` sibling and only get renamed to
+        // outputFile after the byte stream + manifest verification both finish. Without
+        // this, a partial download from process death / network failure / mid-write
+        // backgrounding lands at outputFile directly and the cache-hit check below treats
+        // it as complete; ExoPlayer's FileDataSource then opens it, reads the truncated
+        // MOOV header, and throws FileDataSourceException → black screen on
+        // swipe-back-to-video.
         if (outputFile.exists() && outputFile.length() > 0) {
-            // Size-validate against the cloud metadata so a truncated file from
-            // BEFORE the atomic-rename fix doesn't keep getting served as a "cache hit"
-            // — that's how the user kept seeing FileDataSourceException after first install.
-            // photo.sizeBytes is 0 when the server didn't report a size (rare for photos,
-            // common for older album-share items); in that case we trust whatever we have.
+            // Size-validate against the cloud metadata so any truncated file (from an
+            // older app version without atomic-rename, or any other source) doesn't keep
+            // getting served as a "cache hit" — that path is how FileDataSourceException
+            // resurfaces after first install. photo.sizeBytes is 0 when the server didn't
+            // report a size (rare for photos, common for older album-share items); in that
+            // case we trust whatever we have.
             val matches = photo.sizeBytes == 0L || outputFile.length() == photo.sizeBytes
             if (matches) {
                 onProgress?.invoke(outputFile.length(), outputFile.length())

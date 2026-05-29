@@ -25,8 +25,10 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.merge
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.onStart
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
@@ -66,16 +68,20 @@ class LocalMediaRepositoryImpl @Inject constructor(
      */
     private val syncKickHandler = Handler(Looper.getMainLooper())
     private val syncSettleMs: Long = 2_000L
-    private val syncKickRunnable = Runnable { performSyncKick() }
+    /** IO scope for the DataStore read inside [performSyncKick]. The Handler post stays on
+     *  the main looper for the settle/debounce, but the actual work hops off so the cold
+     *  cache read can't stall the UI thread. */
+    private val syncKickScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val syncKickRunnable = Runnable { syncKickScope.launch { performSyncKick() } }
 
     private fun maybeKickSync() {
         syncKickHandler.removeCallbacks(syncKickRunnable)
         syncKickHandler.postDelayed(syncKickRunnable, syncSettleMs)
     }
 
-    private fun performSyncKick() {
+    private suspend fun performSyncKick() {
         try {
-            val prefs: Preferences = runBlocking { context.settingsDataStore.data.first() }
+            val prefs: Preferences = context.settingsDataStore.data.first()
             val autoSync = prefs[SettingsKeys.AUTO_SYNC] != false
             val wifiOnly = prefs[SettingsKeys.SYNC_WIFI_ONLY] != false
             val backupEverything = prefs[SettingsKeys.BACKUP_EVERYTHING] ?: false

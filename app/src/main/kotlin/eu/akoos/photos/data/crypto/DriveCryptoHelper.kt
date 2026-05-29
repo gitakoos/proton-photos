@@ -182,12 +182,11 @@ class DriveCryptoHelper @Inject constructor(
         // provided Key list" if we only try the primary.
         //
         // CRITICAL: the WHOLE address attempt (decrypt + unlock) goes inside one runCatching.
-        // An earlier version only wrapped the decryptData call — if a non-matching address
-        // happened to return non-error bytes (rare, but observed with PGP-armored payloads
-        // that decrypt under multiple keys producing nonsense), the bytes were passed to
-        // unlock(), which DID throw, and we never fell through to the next address. The
-        // wrong "decrypted" passphrase never reached the cache, but every refresh from cold
-        // start would hit the same dead address first and fail before trying the right one.
+        // A non-matching address can return non-error bytes that fail at unlock() instead of
+        // at decryptData — wrapping only decryptData lets the unlock() throw escape the
+        // address loop, so we never fall through to the next address. The wrong "decrypted"
+        // passphrase never reaches the cache, but every refresh from cold start hits the same
+        // dead address first and fails before trying the right one.
         var lastError: Throwable? = null
         for (address in addresses) {
             val attempt = runCatching {

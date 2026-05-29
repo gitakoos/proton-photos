@@ -22,8 +22,10 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import me.proton.core.accountmanager.domain.AccountManager
@@ -70,7 +72,25 @@ class SettingsViewModel @Inject constructor(
         observeBackedUpBytes()
         observeTrashedCount()
         observeUploadProgress()
+        observeExcludedFolders()
         refreshLocalStorage()
+    }
+
+    /**
+     * Keep [SettingsUiState.excludedFolderNames] in lockstep with DataStore so changes
+     * made inside [ExcludedFoldersScreen] (its own ViewModel) propagate back to the
+     * SyncSettings card the moment the user pops the back stack. Without this, the
+     * "N folders excluded" subtitle would stale-cache until process restart.
+     */
+    private fun observeExcludedFolders() {
+        viewModelScope.launch {
+            context.settingsDataStore.data
+                .map { it[SettingsKeys.EXCLUDED_FOLDER_NAMES] ?: emptySet() }
+                .distinctUntilChanged()
+                .collectLatest { excluded ->
+                    _uiState.update { it.copy(excludedFolderNames = excluded) }
+                }
+        }
     }
 
     /**
@@ -300,9 +320,8 @@ class SettingsViewModel @Inject constructor(
                 it.copy(
                     autoSync = migratedPrefs[SettingsKeys.AUTO_SYNC] ?: true,
                     syncWifiOnly = migratedPrefs[SettingsKeys.SYNC_WIFI_ONLY] ?: true,
-                    syncIntervalMinutes = migratedPrefs[SettingsKeys.SYNC_INTERVAL_MINUTES] ?: 360L,
-                    autoBackupNewFolders = migratedPrefs[SettingsKeys.AUTO_BACKUP_NEW_FOLDERS] ?: false,
                     backupEverything = migratedPrefs[SettingsKeys.BACKUP_EVERYTHING] ?: false,
+                    excludedFolderNames = migratedPrefs[SettingsKeys.EXCLUDED_FOLDER_NAMES] ?: emptySet(),
                     autoFreeUp = migratedPrefs[SettingsKeys.AUTO_FREE_UP] ?: false,
                     freeUpInterval = FreeUpInterval.valueOf(
                         migratedPrefs[SettingsKeys.FREE_UP_INTERVAL] ?: FreeUpInterval.AfterBackup.name
@@ -329,32 +348,24 @@ class SettingsViewModel @Inject constructor(
             context.settingsDataStore.edit { it[SettingsKeys.AUTO_SYNC] = enabled }
             _uiState.update { it.copy(autoSync = enabled) }
             if (enabled) {
-                SyncWorker.schedule(workManager, _uiState.value.syncWifiOnly, _uiState.value.syncIntervalMinutes)
+                // Hardcoded 15-min floor — the OS content URI trigger covers fresh photos
+                // within seconds; periodic is just the Doze/OEM-throttle safety net.
+                SyncWorker.schedule(workManager, _uiState.value.syncWifiOnly, SyncWorker.MIN_INTERVAL_MINUTES)
+                // Bring BackgroundSyncService back so the in-process MediaStore observer
+                // resumes catching fresh photos within seconds of capture. Without this,
+                // re-enabling Continuous backup would only restart the 15-min periodic
+                // worker — the user-perceived "instant upload" only returns at next
+                // app-foreground.
+                eu.akoos.photos.service.BackgroundSyncService.start(context)
             } else {
                 SyncWorker.cancel(workManager)
+                // Stop the persistent foreground service so the LOW "Watching for new
+                // photos" notification disappears immediately. Leaving it running would
+                // ALSO keep the ContentObserver firing SyncWorker.runNow on every photo
+                // write — that worker would early-return (LOCAL_ONLY empty when autoSync
+                // is off), but the wasted wake-ups burn battery and confuse users.
+                eu.akoos.photos.service.BackgroundSyncService.stop(context)
             }
-        }
-    }
-
-    /**
-     * Update the periodic-sync cadence. Re-schedules WorkManager so the change takes effect
-     * on the next fire (via [ExistingPeriodicWorkPolicy.UPDATE]).
-     */
-    fun setSyncIntervalMinutes(minutes: Long) {
-        viewModelScope.launch {
-            val clamped = minutes.coerceAtLeast(SyncWorker.MIN_INTERVAL_MINUTES)
-            context.settingsDataStore.edit { it[SettingsKeys.SYNC_INTERVAL_MINUTES] = clamped }
-            _uiState.update { it.copy(syncIntervalMinutes = clamped) }
-            if (_uiState.value.autoSync) {
-                SyncWorker.schedule(workManager, _uiState.value.syncWifiOnly, clamped)
-            }
-        }
-    }
-
-    fun setAutoBackupNewFolders(enabled: Boolean) {
-        viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.AUTO_BACKUP_NEW_FOLDERS] = enabled }
-            _uiState.update { it.copy(autoBackupNewFolders = enabled) }
         }
     }
 
@@ -377,7 +388,7 @@ class SettingsViewModel @Inject constructor(
             context.settingsDataStore.edit { it[SettingsKeys.SYNC_WIFI_ONLY] = wifiOnly }
             _uiState.update { it.copy(syncWifiOnly = wifiOnly) }
             if (_uiState.value.autoSync) {
-                SyncWorker.schedule(workManager, wifiOnly, _uiState.value.syncIntervalMinutes)
+                SyncWorker.schedule(workManager, wifiOnly, SyncWorker.MIN_INTERVAL_MINUTES)
             }
         }
     }

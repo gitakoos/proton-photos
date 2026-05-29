@@ -17,6 +17,14 @@ val keystoreProps: Properties? = if (keystorePropsFile.exists()) {
     Properties().apply { keystorePropsFile.inputStream().use { load(it) } }
 } else null
 
+// APK base name — picked up by the AGP packager so the produced files are
+// named protonphotos-<ABI>-<buildType>.apk instead of the default app-*.apk.
+// Keeps the GitHub release assets self-describing for end users who download
+// them directly without context.
+base {
+    archivesName.set("protonphotos")
+}
+
 android {
     namespace = "eu.akoos.photos"
     compileSdk = 35
@@ -33,8 +41,8 @@ android {
         // versionCode bumped per release tag — keep monotonically increasing.
         // versionName mirrors the GitHub release tag (e.g. v0.9.1 → "0.9.1") so the About
         // screen and the published APK report the same version the user downloaded.
-        versionCode = 130
-        versionName = "1.3.0-beta"
+        versionCode = 132
+        versionName = "1.3.2-beta"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 

@@ -37,8 +37,9 @@ private const val TAG = "PhotoStreamSvc"
  * any observed server-side stream-indexing lag, while short enough that items the user
  * deleted on Drive web are cleaned up on the very next refresh.
  *
- * See the comment in `refreshCloudPhotos` for the wider story (over-protection caused
- * beta-blocker bug 2026-05-26: cloud-deleted photos kept showing the green cloud icon).
+ * See the comment in `refreshCloudPhotos` for the wider rationale — over-protection
+ * here means cloud-deleted photos keep showing the green cloud icon until the window
+ * elapses.
  */
 private const val UPLOAD_PROTECTION_WINDOW_MS: Long = 90L * 1000L
 
@@ -305,8 +306,7 @@ class PhotoStreamService @Inject constructor(
                     // request (it only fires when thumbnailUrl == null) and the grid sticks on
                     // broken placeholders until a future full refresh happens to walk the slow
                     // path for that row. Clearing the stale URL lets the scheduler kick in and
-                    // rebuild the cache file on demand as cells scroll into view — matching
-                    // the fresh-login experience the user expects.
+                    // rebuild the cache file on demand as cells scroll into view.
                     val cachedThumb = cached?.thumbnailUrl
                         ?.takeIf { thumbnailHelpers.isCachedValid(it) }
                     val merged = if (built.thumbnailUrl == null) built.copy(thumbnailUrl = cachedThumb) else built

@@ -23,9 +23,6 @@ import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.SyncStateRepository
 import eu.akoos.photos.worker.AlbumDownloadWorker
 import javax.inject.Inject
-// Note: DownloadPhotosUseCase is no longer injected — album downloads are now driven by
-// AlbumDownloadWorker, which calls the use case from its own worker scope so the work
-// survives view-exit and app-close.
 
 /**
  * Result of a bulk invite-by-email batch — used to feed a single snackbar summary

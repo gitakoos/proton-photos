@@ -36,12 +36,15 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
-import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -336,16 +339,70 @@ fun SettingsScreen(
 fun SyncSettingsScreen(
     onBack: () -> Unit,
     onBackupFoldersClick: () -> Unit = {},
+    onExcludedFoldersClick: () -> Unit = {},
     onRecentlyDeletedClick: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val colors = AppColors.current
     SubPageScaffold(title = stringResource(R.string.sync_section), onBack = onBack) {
+        // ── WHAT GETS BACKED UP ───────────────────────────────────────────────
+        // Backup-scope decisions live here: the everything-toggle and either the
+        // include drilldown (off) or the exclude drilldown (on). Sync cadence /
+        // network gating moved to the WHEN section below — keeping "what" and
+        // "when" separate makes the screen scannable.
+        SectionLabel(stringResource(R.string.settings_what_backed_up_section))
+        Spacer(Modifier.height(8.dp))
         SettingsCard {
             ToggleRow(
-                label = stringResource(R.string.settings_auto_sync),
-                description = stringResource(R.string.settings_auto_sync_desc),
+                label = stringResource(R.string.settings_backup_everything),
+                description = stringResource(R.string.settings_backup_everything_desc),
+                checked = state.backupEverything,
+                onCheckedChange = viewModel::setBackupEverything,
+                enabled = state.autoSync,
+            )
+            // The two drilldown rows are mutually exclusive — only one is visible at
+            // a time depending on the everything-toggle. Indented (28.dp) so the eye
+            // groups them as children of the parent toggle.
+            if (state.backupEverything) {
+                RowDivider()
+                val excludedCount = state.excludedFolderNames.size
+                val excludedDesc = when (excludedCount) {
+                    0 -> stringResource(R.string.settings_excluded_folders_desc_none)
+                    1 -> stringResource(R.string.settings_excluded_folders_desc_singular)
+                    else -> stringResource(R.string.settings_excluded_folders_desc_count, excludedCount)
+                }
+                IndentedNavRow(
+                    label = stringResource(R.string.settings_excluded_folders),
+                    description = excludedDesc,
+                    onClick = onExcludedFoldersClick,
+                    enabled = state.autoSync,
+                )
+            } else {
+                RowDivider()
+                IndentedNavRow(
+                    label = stringResource(R.string.settings_backup_folders),
+                    description = stringResource(R.string.settings_backup_folders_desc),
+                    onClick = onBackupFoldersClick,
+                    enabled = state.autoSync,
+                )
+            }
+        }
+
+        Spacer(Modifier.height(24.dp))
+
+        // ── WHEN IT HAPPENS ───────────────────────────────────────────────────
+        // Continuous backup is the only top-level cadence knob now — the periodic
+        // interval picker is gone because the OS-level content-URI trigger +
+        // BackgroundSyncService observer already kick the upload pipeline within
+        // seconds of a new photo, so the interval was misleading UI: it suggested
+        // "we only check every N hours" when in reality we check immediately.
+        SectionLabel(stringResource(R.string.settings_when_section))
+        Spacer(Modifier.height(8.dp))
+        SettingsCard {
+            ToggleRow(
+                label = stringResource(R.string.settings_continuous_backup),
+                description = stringResource(R.string.settings_continuous_backup_desc),
                 checked = state.autoSync,
                 onCheckedChange = viewModel::setAutoSync,
             )
@@ -358,44 +415,6 @@ fun SyncSettingsScreen(
                 indented = true,
                 enabled = state.autoSync,
             )
-            RowDivider()
-            SyncIntervalRow(
-                label = stringResource(R.string.settings_sync_interval),
-                description = stringResource(R.string.settings_sync_interval_desc),
-                selectedMinutes = state.syncIntervalMinutes,
-                onSelected = viewModel::setSyncIntervalMinutes,
-                indented = true,
-                enabled = state.autoSync,
-            )
-            RowDivider()
-            ToggleRow(
-                label = stringResource(R.string.settings_background_sync),
-                description = stringResource(R.string.settings_background_sync_desc),
-                checked = state.autoFreeUp,
-                onCheckedChange = viewModel::setAutoFreeUp,
-                indented = true,
-                enabled = state.autoSync,
-            )
-            RowDivider()
-            // Backup-everything is the user-friendly default. When ON the folder picker
-            // is hidden entirely — it would just be confusing UI for a mode that ignores
-            // it. The auto-add-new-folders toggle is gone for the same reason: with
-            // "back up everything" doing exactly that already, it was redundant.
-            ToggleRow(
-                label = "Back up everything",
-                description = "Auto-upload every photo and video on this device — no folders needed.",
-                checked = state.backupEverything,
-                onCheckedChange = viewModel::setBackupEverything,
-                enabled = state.autoSync,
-            )
-            if (!state.backupEverything) {
-                RowDivider()
-                NavRow(
-                    label = stringResource(R.string.settings_backup_folders),
-                    description = stringResource(R.string.settings_backup_folders_desc),
-                    onClick = onBackupFoldersClick,
-                )
-            }
             RowDivider()
             Row(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
@@ -413,6 +432,35 @@ fun SyncSettingsScreen(
                 }
             }
         }
+    }
+}
+
+/**
+ * Drilldown row that sits underneath a parent toggle. Visually the same as [NavRow]
+ * but indented (28.dp start) so the user reads it as a child of the toggle above.
+ * Greys out when the parent is disabled — same alpha treatment as [ToggleRow] for
+ * consistency.
+ */
+@Composable
+private fun IndentedNavRow(
+    label: String,
+    description: String? = null,
+    onClick: () -> Unit,
+    enabled: Boolean = true,
+) {
+    val colors = AppColors.current
+    val alpha = if (enabled) 1f else 0.4f
+    Row(
+        modifier = Modifier.fillMaxWidth()
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(start = 28.dp, end = 16.dp, top = 12.dp, bottom = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(label, color = colors.fgPrimary.copy(alpha = alpha), fontSize = 13.5.sp, fontWeight = FontWeight.Medium)
+            if (description != null) Text(description, color = colors.fgMute.copy(alpha = alpha), fontSize = 11.5.sp)
+        }
+        Icon(Icons.AutoMirrored.Filled.ArrowForwardIos, null, tint = colors.fgMute.copy(alpha = alpha), modifier = Modifier.size(13.dp))
     }
 }
 
@@ -706,15 +754,18 @@ private fun SyncProgressPanel(
             )
         }
         if (expanded && events.isNotEmpty()) {
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(10.dp))
             // Show the most recent activity at the top (mirrors a download manager).
+            // Pills are self-contained capsules now (PillBg + PillBorder + 999.dp radius),
+            // so the panel doesn't need its own container background — only an 8.dp gap
+            // between rows. We still cap the scroll height so the list can't push the
+            // rest of Settings off-screen during a 30-file burst.
             val ordered = remember(events) { events.asReversed() }
             LazyColumn(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(min = 80.dp, max = 200.dp)
-                    .background(colors.surfaceWeak, RoundedCornerShape(8.dp))
-                    .padding(vertical = 4.dp),
+                    .heightIn(min = 56.dp, max = 240.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 items(items = ordered, key = { it.uri.ifEmpty { it.displayName + it.status } }) { evt ->
                     UploadEventRow(evt)
@@ -727,54 +778,77 @@ private fun SyncProgressPanel(
 @Composable
 private fun UploadEventRow(evt: UploadEvent) {
     val colors = AppColors.current
+    // Each row is a standalone pill: PillBg + 0.5dp PillBorder + 999.dp corner radius,
+    // matching the gallery filter pills and the editor adjustment pills. Read-only —
+    // no clickable modifier — so the row only communicates status, never invites taps.
+    val pillShape = RoundedCornerShape(999.dp)
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 10.dp, vertical = 5.dp),
+            .background(colors.pillBg, pillShape)
+            .border(0.5.dp, colors.pillBorder, pillShape)
+            .padding(horizontal = 14.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        // Status glyph: spinner / check / X. Internal "Queued" label kept English-only per task
-        // scope — the actual upload code path doesn't emit it today, so users rarely see it.
+        // Status glyph at 18dp. Uploading uses a circular progress so users see live
+        // activity; the rest are static Material icons tinted from the theme. "Queued"
+        // falls back to a clock — the upload pipeline rarely emits it, but matching the
+        // spec keeps the design consistent if it ever does.
         when (evt.status) {
-            UploadEventStatus.Uploading -> CircularProgressIndicator(
-                modifier = Modifier.size(12.dp),
-                strokeWidth = 1.5.dp,
-                color = colors.accent,
+            UploadEventStatus.Uploading -> Box(
+                modifier = Modifier.size(18.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(16.dp),
+                    strokeWidth = 1.8.dp,
+                    color = colors.accent,
+                )
+            }
+            UploadEventStatus.Queued -> Icon(
+                imageVector = Icons.Default.Schedule,
+                contentDescription = null,
+                tint = colors.fgMute,
+                modifier = Modifier.size(18.dp),
             )
             UploadEventStatus.Done -> Icon(
-                imageVector = Icons.Default.Check,
+                imageVector = Icons.Default.CheckCircle,
                 contentDescription = null,
                 tint = StatusSynced,
-                modifier = Modifier.size(14.dp),
+                modifier = Modifier.size(18.dp),
             )
             UploadEventStatus.Failed -> Icon(
-                imageVector = Icons.Default.Close,
+                imageVector = Icons.Default.ErrorOutline,
                 contentDescription = null,
-                tint = StatusError,
-                modifier = Modifier.size(14.dp),
-            )
-            UploadEventStatus.Queued -> Box(
-                modifier = Modifier.size(8.dp).background(colors.fgMute, CircleShape),
+                tint = colors.errorColor,
+                modifier = Modifier.size(18.dp),
             )
         }
-        Spacer(Modifier.width(8.dp))
+        Spacer(Modifier.width(10.dp))
         Text(
             text = evt.displayName,
             color = colors.fgPrimary,
-            fontSize = 12.sp,
+            fontSize = 12.5.sp,
+            fontWeight = FontWeight.Medium,
             maxLines = 1,
             overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),
         )
-        Spacer(Modifier.width(8.dp))
-        // Inline status label — internal v1 strings, kept English (caught in localization pass).
-        val (label, color) = when (evt.status) {
-            UploadEventStatus.Uploading -> "Uploading" to colors.accent
-            UploadEventStatus.Done -> "Done" to StatusSynced
-            UploadEventStatus.Failed -> "Failed" to StatusError
+        Spacer(Modifier.width(10.dp))
+        // Trailing status label — kept English: status copy not yet localized. The label
+        // colour mirrors the icon so the eye reads icon + label as a single status token.
+        val (label, labelColor) = when (evt.status) {
+            UploadEventStatus.Uploading -> "Uploading…" to colors.accent
             UploadEventStatus.Queued -> "Queued" to colors.fgMute
+            UploadEventStatus.Done -> "Done" to StatusSynced
+            UploadEventStatus.Failed -> "Failed" to colors.errorColor
         }
-        Text(label, color = color, fontSize = 10.5.sp, fontWeight = FontWeight.Medium)
+        Text(
+            text = label,
+            color = labelColor,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Medium,
+        )
     }
 }
 
@@ -1192,73 +1266,6 @@ internal fun SelectRow(
                     DropdownMenuItem(
                         text = { Text(stringResource(interval.labelRes), color = colors.fgPrimary) },
                         onClick = { onSelected(interval); expanded = false },
-                    )
-                }
-            }
-        }
-    }
-}
-
-/**
- * Periodic-sync interval picker. Mirrors [SelectRow]'s look but for the Long-minute values
- * actually consumed by WorkManager. WorkManager's hard floor is 15 minutes — the first
- * option matches that. Longer cadences trade fresher backup for less battery/data.
- */
-@Composable
-internal fun SyncIntervalRow(
-    label: String,
-    description: String? = null,
-    selectedMinutes: Long,
-    onSelected: (Long) -> Unit,
-    indented: Boolean = false,
-    enabled: Boolean = true,
-) {
-    val colors = AppColors.current
-    var expanded by remember { mutableStateOf(false) }
-    val alpha = if (enabled) 1f else 0.4f
-    val options: List<Pair<Long, Int>> = listOf(
-        15L to R.string.settings_sync_interval_15min,
-        30L to R.string.settings_sync_interval_30min,
-        60L to R.string.settings_sync_interval_1h,
-        180L to R.string.settings_sync_interval_3h,
-        360L to R.string.settings_sync_interval_6h,
-        720L to R.string.settings_sync_interval_12h,
-        1440L to R.string.settings_sync_interval_24h,
-    )
-    val selectedLabel = options.firstOrNull { it.first == selectedMinutes }?.second
-        ?: R.string.settings_sync_interval_6h
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(
-            start = if (indented) 28.dp else 16.dp,
-            end = 16.dp, top = 11.dp, bottom = 11.dp,
-        ),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(label, color = colors.fgPrimary.copy(alpha = alpha), fontSize = 13.5.sp, fontWeight = FontWeight.Medium)
-            if (description != null) Text(description, color = colors.fgMute.copy(alpha = alpha), fontSize = 11.5.sp)
-        }
-        Box {
-            Text(
-                stringResource(selectedLabel), color = if (enabled) colors.fgDim else colors.fgMute, fontSize = 12.5.sp,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(colors.surfaceWeak)
-                    .border(0.5.dp, colors.line2, RoundedCornerShape(8.dp))
-                    .clickable(enabled = enabled) { expanded = true }
-                    .padding(horizontal = 10.dp, vertical = 5.dp),
-            )
-            DropdownMenu(
-                expanded = expanded,
-                onDismissRequest = { expanded = false },
-                shape = RoundedCornerShape(16.dp),
-                containerColor = colors.cardBg,
-                border = BorderStroke(0.5.dp, colors.pillBorder),
-            ) {
-                options.forEach { (minutes, labelRes) ->
-                    DropdownMenuItem(
-                        text = { Text(stringResource(labelRes), color = colors.fgPrimary) },
-                        onClick = { onSelected(minutes); expanded = false },
                     )
                 }
             }

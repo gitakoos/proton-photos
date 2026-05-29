@@ -358,9 +358,8 @@ fun GalleryScreen(
     var showAlbumsFilterSheet by remember { mutableStateOf(false) }
     val albumsFilterSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
-    // Grouping is now controlled exclusively by the photo grid's pinch gesture
-    // (see PhotoGrid). The previous "Group by" pill + bottom-sheet picker has been
-    // removed — pinching zooms across (cols, grouping) pairs in one motion.
+    // Grouping is controlled exclusively by the photo grid's pinch gesture (see
+    // PhotoGrid). Pinching zooms across (cols, grouping) pairs in one motion.
 
     // ── Media delete permission launcher ──────────────────────────────────────
     val deletePermissionLauncher = rememberLauncherForActivityResult(
@@ -409,8 +408,7 @@ fun GalleryScreen(
     var showCreateAlbumInline by remember { mutableStateOf(false) }
     val addToAlbumSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
-    // Add-to-album used to require an Android Q+ MediaStore write-consent dialog (we moved
-    // files between buckets). The virtual-album pivot dropped that — every leg now runs inline.
+    // No MediaStore consent dialog: add-to-album is a DataStore append, not a file move.
 
     val addToAlbumState = state.addToAlbumState
     LaunchedEffect(addToAlbumState) {
@@ -1548,9 +1546,6 @@ private fun FilterRail(
                     tint = FgDim, modifier = Modifier.size(18.dp))
             }
         }
-
-        // The previous "Group by" pill was removed in favour of pinch-to-zoom on the
-        // photo grid: pinching cycles through (cols, grouping) levels in a single gesture.
     }
 }
 
@@ -1667,12 +1662,12 @@ private fun PhotoGrid(
         // (day) because the user is browsing close-up; small tiles need broad markers
         // (none / year) because the user is scrolling through history at speed.
         listOf(
-            6 to TimelineGrouping.None,    // L0 — smallest tiles, flat thumbnail wall
-            5 to TimelineGrouping.Year,    // L1 — year headers start appearing
-            4 to TimelineGrouping.Month,   // L2 — month headers
-            3 to TimelineGrouping.Month,   // L3 — month headers (still wide)
-            2 to TimelineGrouping.Day,     // L4 — day headers, larger tiles
-            1 to TimelineGrouping.Day,     // L5 — biggest tile + day headers
+            6 to TimelineGrouping.None,    // L0 — 6 cols, no grouping (densest thumbnail wall)
+            5 to TimelineGrouping.Year,    // L1 — 5 cols, year headers
+            4 to TimelineGrouping.Month,   // L2 — 4 cols, month headers
+            3 to TimelineGrouping.Month,   // L3 — 3 cols, month headers (still wide)
+            2 to TimelineGrouping.Day,     // L4 — 2 cols, day headers, larger tiles
+            1 to TimelineGrouping.Day,     // L5 — 1 col, biggest tile + day headers
         )
     }
     // Initial level is derived from the persisted grouping. For the ambiguous "None"
@@ -1689,15 +1684,17 @@ private fun PhotoGrid(
     var levelIndex by rememberSaveable { mutableIntStateOf(initialLevel) }
     val (columnCount, effectiveGrouping) = zoomLevels[levelIndex]
 
+    @Suppress("RememberReturnType")
     val dateFormat = remember(effectiveGrouping) {
-        when (effectiveGrouping) {
-            // None still needs a (never-rendered) formatter to keep the type concrete; the
-            // grouped loop short-circuits the header below so it's only used as a sentinel.
-            TimelineGrouping.None -> SimpleDateFormat("yyyy", Locale.getDefault())
-            TimelineGrouping.Day -> SimpleDateFormat("d MMMM yyyy", Locale.getDefault())
-            TimelineGrouping.Month -> SimpleDateFormat("MMMM yyyy", Locale.getDefault())
-            TimelineGrouping.Year -> SimpleDateFormat("yyyy", Locale.getDefault())
+        // None still needs a (never-rendered) formatter to keep the type concrete; the
+        // grouped loop short-circuits the header below so it's only used as a sentinel.
+        val pattern = when (effectiveGrouping) {
+            TimelineGrouping.None -> "yyyy"
+            TimelineGrouping.Day -> "d MMMM yyyy"
+            TimelineGrouping.Month -> "MMMM yyyy"
+            TimelineGrouping.Year -> "yyyy"
         }
+        SimpleDateFormat(pattern, Locale.getDefault())
     }
     val grouped = remember(items, effectiveGrouping) {
         if (effectiveGrouping == TimelineGrouping.None) {
@@ -1712,11 +1709,10 @@ private fun PhotoGrid(
 
     val haptics = androidx.compose.ui.platform.LocalHapticFeedback.current
 
-    // Two-finger pinch detector that does NOT eat single-finger drags — the previous
-    // Modifier.transformable consumed every gesture including vertical scrolls, so the
-    // grid's own LazyVerticalGrid scroll competed with pinch and felt "twitchy". This
-    // one only activates when the second finger goes down, so scrolling stays smooth
-    // and pinch is isolated to a deliberate two-finger gesture.
+    // Two-finger pinch detector that does NOT eat single-finger drags. It only activates
+    // once the second finger goes down, which leaves the grid's own LazyVerticalGrid
+    // scroll free to handle vertical drags without competing for the gesture. Pinch is
+    // isolated to a deliberate two-finger interaction.
     //
     // Each gesture commits exactly one level step in either direction once the distance
     // ratio crosses ±30%. Cycling through every level needs multiple gestures, which
@@ -2096,9 +2092,9 @@ private fun MonthHeader(month: String, photoCount: Int, videoCount: Int) {
             modifier = Modifier.weight(1f),
         )
         // Use the plurals-aware count strings so "1 photo" / "1 video" render correctly
-        // instead of the previously-shown "1 photos" / "1 videos". Mixed case is a simple
-        // localised join of the two plural results — most romance + germanic languages
-        // accept comma+space, and the comma is invariant.
+        // instead of "1 photos" / "1 videos". Mixed case is a simple localised join of the two
+        // plural results — most romance + germanic languages accept comma+space, and the
+        // comma is invariant.
         val photosText = androidx.compose.ui.res.pluralStringResource(
             R.plurals.count_photos_plural, photoCount, photoCount,
         )

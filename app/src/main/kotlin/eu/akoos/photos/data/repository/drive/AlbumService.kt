@@ -321,13 +321,12 @@ class AlbumService @Inject constructor(
             cryptoContext.pgpCrypto.generateRandomBytes(32)
         }
         val nodeHashKey = cryptoHelper.encryptDataToPgpMessage(hashKeyBytes, albumNodeKey.publicKeyArmored)
-        // Album's OWN name hash is computed with the PARENT's (root's) NodeHashKey — albums are
-        // direct children of the root link, so their name hash space lives under root. Previously
-        // computed with hashKeyBytes (the album's own children-key), which produced a hash the
-        // server stored in its hash-space-for-photos-in-this-album, not its hash-space-for-children-
-        // of-root. Renaming such albums then failed with "out of date" because the OriginalHash
-        // we sent (also computed wrong) didn't line up with what the server expected for a root-
-        // child rename.
+        // Album's own name hash is computed with the PARENT's NodeHashKey because albums are
+        // direct children of root — their name hash space lives under root. Computing it with
+        // hashKeyBytes (the album's own children-key) puts the hash in the wrong hash-space
+        // (children-of-album rather than children-of-root), so a later rename fails with "out
+        // of date" because OriginalHash doesn't line up with what the server expects for a
+        // root-child rename.
         val rootNodeHashKey = shareService.rootNodeHashKeyBytes()
             ?: error("createDriveAlbum: rootNodeHashKey unavailable")
         val nameHash = cryptoHelper.computeNameHash(name, rootNodeHashKey)
@@ -678,8 +677,8 @@ class AlbumService @Inject constructor(
         }
 
         if (albumDataEntries.isEmpty()) {
-            // Old behaviour silently returned here, masking total crypto failure as success. Now
-            // we throw so the caller's runCatching surfaces it instead of "0 added, all good".
+            // Throw on empty so the caller's runCatching surfaces total crypto failure
+            // instead of "0 added, all good".
             Log.w(TAG, "addPhotosToAlbum: no valid entries built — every photo failed crypto")
             error("addPhotosToAlbum: all ${photoLinkIds.size} photos failed crypto preparation")
         }
@@ -785,14 +784,13 @@ class AlbumService @Inject constructor(
         // optimistic-concurrency check.
         //
         // Why we recompute locally rather than echoing back the server's `Hash` field:
-        // older app versions (and the buggy createDriveAlbum path before this commit) stored
-        // album name hashes computed with the album's OWN NodeHashKey instead of the root's.
-        // The server's stored Hash for those albums is in a different hash-space — echoing it
-        // straight back makes the server's "is this OriginalHash consistent with the current
-        // root-child" check reject with "out of date". Recomputing OriginalHash locally with
-        // the same rootNodeHashKey we'll use for `newHash` keeps both sides in the same
-        // hash-space. Drive Web's rename works the same way (it never relies on the server-
-        // echoed value).
+        // older app versions stored album name hashes computed with the album's own
+        // NodeHashKey instead of the root's. The server's stored Hash for those albums is in a
+        // different hash-space — echoing it straight back makes the server's "is this
+        // OriginalHash consistent with the current root-child" check reject with "out of
+        // date". Recomputing OriginalHash locally with the same rootNodeHashKey we'll use for
+        // `newHash` keeps both sides in the same hash-space. Drive Web's rename works the same
+        // way (it never relies on the server-echoed value).
         val albumDetail = linkDetailHelpers.batchFetchLinkDetails(userId, volumeId, listOf(albumLinkId))[albumLinkId]
             ?: error("renameAlbum: album link not found: $albumLinkId")
         val currentEncryptedName = albumDetail.link.name

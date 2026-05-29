@@ -255,9 +255,9 @@ class CalendarViewModel @Inject constructor(
         // most-recent-photo month is the first entry they see, not the December of that
         // year filled with empty grids. The lower bound rounds to January of the oldest
         // year so months without photos still appear in the listing in between (a year
-        // with one photo in March still renders Jan/Feb/Apr…/Dec as empty grids — the
-        // user wants a continuous calendar, not a jagged "only months with content"
-        // list).
+        // with one photo in March still renders Jan/Feb/Apr…/Dec as empty grids). This
+        // keeps the calendar continuous rather than a jagged "only months with content"
+        // list.
         val months = mutableListOf<MonthBucket>()
         cal.timeInMillis = System.currentTimeMillis()
         cal.set(Calendar.DAY_OF_MONTH, 1)

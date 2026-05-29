@@ -3,6 +3,7 @@
 .kotlin
 /local.properties
 /.idea/
+.claude/
 .DS_Store
 /build
 /app/build
@@ -17,9 +18,10 @@ keystore.properties
 # Gradle wrapper except the jar
 !gradle/wrapper/gradle-wrapper.jar
 
-# Planning / audit / capture artefacts — not needed for build.
+# Planning / audit / release-prep artefacts — not needed for build.
 AGENT_*.md
 AUDIT_*.md
+.release_notes_v*.md
 *.har
 
 # Scratch + test artefacts under build/ that crept into commits.

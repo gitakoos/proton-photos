@@ -1,6 +1,12 @@
 package eu.akoos.photos
 
 import android.app.Application
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.os.Build
+import android.util.Log
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.Configuration
@@ -22,6 +28,7 @@ import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.ThemePrefsBoot
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.worker.AlbumDownloadWorker
+import eu.akoos.photos.worker.SyncWorker
 import javax.inject.Inject
 
 @HiltAndroidApp
@@ -52,6 +59,43 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
         // run doesn't race with channel creation (Android 8+). Idempotent — safe to call
         // every cold start.
         AlbumDownloadWorker.ensureChannel(this)
+        registerUserPresentReceiver()
+    }
+
+    /**
+     * Process-lifetime receiver for [Intent.ACTION_USER_PRESENT] — fires when the user
+     * unlocks the device. Lock-screen photos (camera with quick-launch, screenshots taken
+     * while locked) flow into MediaStore but the per-Activity ContentObserver in
+     * LocalMediaRepositoryImpl is only registered while the gallery is open. Without this
+     * receiver the user has to open the app to kick a sync after unlock — exactly the
+     * "I unlocked but nothing uploaded until I opened the app" symptom users reported.
+     * Static manifest receivers can't observe ACTION_USER_PRESENT on Android 8+, so this
+     * has to be a runtime registration on the Application context.
+     */
+    private fun registerUserPresentReceiver() {
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
+                if (intent.action != Intent.ACTION_USER_PRESENT) return
+                appScope.launch {
+                    val prefs = runCatching { settingsDataStore.data.first() }.getOrNull() ?: return@launch
+                    val autoSync = prefs[SettingsKeys.AUTO_SYNC] != false
+                    if (!autoSync) return@launch
+                    val wifiOnly = prefs[SettingsKeys.SYNC_WIFI_ONLY] != false
+                    Log.d("App", "ACTION_USER_PRESENT — kicking SyncWorker.runNow")
+                    SyncWorker.runNow(this@App, wifiOnly)
+                }
+            }
+        }
+        val filter = IntentFilter(Intent.ACTION_USER_PRESENT)
+        // ACTION_USER_PRESENT is sent by com.android.systemui (a different UID), so the
+        // receiver MUST be exported. RECEIVER_NOT_EXPORTED silently drops the broadcast
+        // with an "Exported Denial" in the broadcast log — the receiver looks armed via
+        // dumpsys but never fires on unlock.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED)
+        } else {
+            registerReceiver(receiver, filter)
+        }
     }
 
     /**

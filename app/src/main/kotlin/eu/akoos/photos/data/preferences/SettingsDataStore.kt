@@ -16,16 +16,8 @@ object SettingsKeys {
     val AUTO_SYNC = booleanPreferencesKey("auto_sync")
     val SYNC_WIFI_ONLY = booleanPreferencesKey("sync_wifi_only")
     /**
-     * Periodic-sync interval in minutes. WorkManager's hard floor is 15 minutes, so values
-     * below that get clamped. Default is 360 (6h) — the MediaStore ContentObserver fires the
-     * sync within seconds of a new photo arriving, so the periodic schedule only exists as a
-     * safety net for missed events (Doze, observer dropouts, brand-new install with backlog).
-     * Common picks: 15, 30, 60, 180, 360, 720, 1440.
-     */
-    val SYNC_INTERVAL_MINUTES = androidx.datastore.preferences.core.longPreferencesKey("sync_interval_minutes")
-    /**
      * App-lock timeout in minutes — how long the app can be in the background before re-locking
-     * on resume. 0 = lock immediately (the legacy v1.0.0-beta behavior). Larger values mean the
+     * on resume. 0 = lock immediately (the default before this option existed). Larger values mean the
      * user can quickly switch to another app and back without re-authenticating.
      * Common picks: 0 (immediate), 1, 5, 10, 15, 60.
      */
@@ -63,6 +55,21 @@ object SettingsKeys {
     val BACKUP_EVERYTHING = booleanPreferencesKey("backup_everything")
 
     /**
+     * Bucket names the user has carved out of [BACKUP_EVERYTHING]. When backup-everything
+     * is ON, reconcile drops any local item whose bucket appears here — useful for
+     * keeping Screenshots / Movies / WhatsApp-Status out of Drive without abandoning the
+     * "everything else" guarantee. Empty set (or key absent) = back up everything,
+     * no exclusions. Ignored entirely when [BACKUP_EVERYTHING] is OFF — the per-folder
+     * picker is its own model.
+     *
+     * NOTE: matches MediaStore bucket display names, which can collide across paths
+     * (two "Movies" folders on different mount points both get excluded). This is the
+     * same limitation [SYNC_FOLDER_NAMES] has — disambiguating would mean tracking
+     * BUCKET_ID, which loses meaning across device factory resets.
+     */
+    val EXCLUDED_FOLDER_NAMES = stringSetPreferencesKey("excluded_folder_names")
+
+    /**
      * hiddenUri → cloudFileId mapping persisted as a set of "hiddenUri|cloudFileId"
      * strings (DataStore lacks a native Map type). Read at unhide time so the restored
      * MediaStore entry can inherit the original cloud linkId on its new SyncState row,
@@ -72,13 +79,6 @@ object SettingsKeys {
      * a visible duplicate in Drive.
      */
     val HIDDEN_URI_CLOUD_ID_MAP = stringSetPreferencesKey("hidden_uri_cloud_id_map")
-
-    /**
-     * When true, any newly discovered MediaStore bucket (camera-roll folder) is automatically
-     * added to [SYNC_FOLDER_NAMES] on the next reconcile, so future photos in fresh albums
-     * start uploading without manual action. Default: false (opt-in).
-     */
-    val AUTO_BACKUP_NEW_FOLDERS = booleanPreferencesKey("auto_backup_new_folders")
 
     /**
      * User-declared local folder names that aren't backed by an existing MediaStore bucket yet.

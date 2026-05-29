@@ -189,8 +189,7 @@ fun PhotoViewerScreen(
     LaunchedEffect(Unit) { viewModel.loadAlbums() }
     val scope = rememberCoroutineScope()
 
-    // Surface previously-silent failures (add-to-album / save / load albums) as a Toast so
-    // the user actually sees that something went wrong.
+    // Surface add-to-album / save / load-albums failures as a Toast.
     val transientError by viewModel.transientError.collectAsStateWithLifecycle()
     val context = androidx.compose.ui.platform.LocalContext.current
     LaunchedEffect(transientError) {
@@ -198,8 +197,8 @@ fun PhotoViewerScreen(
         android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_LONG).show()
         viewModel.clearTransientError()
     }
-    // Success feedback for "Add to album" — previously silent. Mirrors the
-    // AddToAlbumState.Done snackbar in GalleryScreen.
+    // Success feedback for "Add to album". Mirrors the AddToAlbumState.Done snackbar in
+    // GalleryScreen.
     LaunchedEffect(Unit) {
         viewModel.addToAlbumDone.collect { albumName ->
             android.widget.Toast.makeText(
@@ -347,7 +346,7 @@ fun PhotoViewerScreen(
         if (isVideoItem) {
             // Give the player up to 8 seconds to start; once playing, wait for it to
             // actually stop (clip ended, or buffer underrun → not-playing). Avoids the
-            // 4-second forced-skip the user saw mid-clip.
+            // 4-second forced-skip mid-clip.
             val startDeadline = System.currentTimeMillis() + 8_000L
             while (isPlaying && !isVideoPlaying && System.currentTimeMillis() < startDeadline) {
                 delay(200)
@@ -571,8 +570,8 @@ fun PhotoViewerScreen(
                     // looks like a dead player to the user. videoEverPlayed flips true the
                     // first time the player reports isPlaying after a settle; after that the
                     // pill stays hidden through ordinary pause/resume cycles. Without this
-                    // continuity the user saw the pill disappear at 100% but the video took
-                    // another second to start, leaving an empty black frame in between.
+                    // continuity the pill disappears at 100% but the video takes another
+                    // second to start, leaving an empty black frame in between.
                     val isVideoLoading = isVideoItemThumb && (
                         isDownloading ||
                         (state is PhotoViewerViewModel.ViewerState.ShowVideo && !videoEverPlayed)

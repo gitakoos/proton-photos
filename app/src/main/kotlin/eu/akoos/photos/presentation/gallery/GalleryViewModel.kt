@@ -327,7 +327,11 @@ class GalleryViewModel @Inject constructor(
                 SyncWorker.runNow(context, wifiOnly)
             }
             upload(userId)
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            // Rethrow cancellation so the parent coroutine's structured concurrency stays
+            // intact — swallowing it would leave the parent thinking the child completed
+            // normally and could mask UI state inversions.
+            if (e is kotlinx.coroutines.CancellationException) throw e
         } finally {
             syncInFlight.set(false)
             _uiState.update { it.copy(isSyncing = false) }
@@ -693,8 +697,7 @@ class GalleryViewModel @Inject constructor(
     //   - LocalOnly   → virtual-membership append (DataStore only — no file movement)
     //   - Synced      → both legs (cloud add + virtual-membership append)
     //
-    // The local leg used to require a Q+ MediaStore write-consent dialog (file moves between
-    // buckets), but the virtual-album pivot dropped that — every legs runs inline now.
+    // No MediaStore consent dialog: add-to-album is a DataStore append, not a file move.
 
     /**
      * Begin adding the current selection to an album.
@@ -808,7 +811,8 @@ class GalleryViewModel @Inject constructor(
                     prefs[SettingsKeys.LOCAL_ALBUM_VIRTUAL_MEMBERSHIP] = current + additions
                 }
                 localMoved = localUris.size
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
                 // DataStore write failed — count as failed so the UI surfaces an error.
                 // (Caller still records the manual-album marker below so the album shows up.)
             }

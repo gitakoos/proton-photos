@@ -213,11 +213,9 @@ class PhotoUploadService @Inject constructor(
 
             // Try Photos stream endpoint first, fall back to v2/volumes path.
             // useVolumeEndpoints = true means we must also use volume-based upload/commit paths.
-            // Both create paths run through retryWithBackoff — the metadata endpoints
-            // had zero retry before, so a single DNS hiccup at the start of upload surfaced
-            // as a hard failure and required a manual retry of the whole edit-and-save
-            // (observed as: first cloud-video copy attempt returned an HTML/DNS error,
-            // second attempt succeeded).
+            // Both create paths run through retryWithBackoff — without retry on the metadata
+            // endpoints, a single DNS hiccup at the start of upload surfaces as a hard failure
+            // and requires a manual retry of the whole edit-and-save.
             var useVolumeEndpoints = false
             val streamResult = runCatching {
                 val resp = retryUploadCall { _ ->
@@ -492,7 +490,7 @@ class PhotoUploadService @Inject constructor(
             // xAttr.BlockSizes carries PLAINTEXT block boundaries so the Drive Web client
             // can split the ciphertext stream back into PGP packets. See BlockSpill's
             // plaintextSize doc-comment for why storing encrypted sizes corrupts video
-            // playback on Drive Web (it had been encBlockSizes before that fix).
+            // playback on Drive Web.
             val plaintextBlockSizes = blockInfos.map { it.plaintextSize }
             val xAttr = cryptoHelper.encryptXAttr(
                 modificationTimeIso  = modTime,

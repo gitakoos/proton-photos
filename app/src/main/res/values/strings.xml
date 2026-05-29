@@ -55,7 +55,6 @@
     <string name="editor_adj_saturation">Saturation</string>
     <string name="editor_adj_tone">Tone</string>
     <string name="editor_adj_temperature">Temperature</string>
-    <string name="editor_adj_auto">Auto</string>
 
     <!-- Hidden album screen, previously hardcoded English. -->
     <string name="hidden_photos_title">Hidden Photos</string>
@@ -115,8 +114,16 @@
     <string name="sync_worker_channel_name">Photo backup</string>
     <string name="sync_worker_channel_desc">Shows progress while backing up photos to Proton Drive.</string>
     <string name="sync_worker_notification_title">Backing up photos…</string>
-    <string name="sync_worker_notification_progress">%1$d uploaded / %2$d pending</string>
+    <string name="sync_worker_notification_progress">%1$d of %2$d uploaded</string>
+    <string name="sync_worker_notification_checking">Checking for new photos…</string>
     <string name="sync_worker_notification_cancel">Cancel</string>
+    <!-- Background sync service. LOW-importance, idle ContentObserver only — keeps the
+         process alive on Samsung One UI so OS-level MediaStore triggers still wake the
+         upload pipeline after the user closes the app. -->
+    <string name="bg_sync_service_channel_name">Background photo backup</string>
+    <string name="bg_sync_service_channel_desc">Lets the app react to new photos in the background.</string>
+    <string name="bg_sync_service_title">Photo backup</string>
+    <string name="bg_sync_service_text">Watching for new photos</string>
 
     <!-- Delete bottom sheet -->
     <string name="delete_title">Delete %1$d photo(s)?</string>
@@ -155,17 +162,7 @@
     <!-- Settings -->
     <string name="settings_title">Settings</string>
     <string name="settings_sync_section">Sync</string>
-    <string name="settings_auto_sync">Auto-sync</string>
     <string name="settings_sync_wifi_only">Sync on Wi‑Fi only</string>
-    <string name="settings_sync_interval">Sync interval</string>
-    <string name="settings_sync_interval_desc">How often to check for new photos</string>
-    <string name="settings_sync_interval_15min">Every 15 minutes</string>
-    <string name="settings_sync_interval_30min">Every 30 minutes</string>
-    <string name="settings_sync_interval_1h">Every hour</string>
-    <string name="settings_sync_interval_3h">Every 3 hours</string>
-    <string name="settings_sync_interval_6h">Every 6 hours</string>
-    <string name="settings_sync_interval_12h">Every 12 hours</string>
-    <string name="settings_sync_interval_24h">Once a day</string>
     <string name="settings_last_sync">Last sync</string>
     <string name="settings_sync_now">Sync now</string>
     <string name="settings_storage_section">Storage</string>
@@ -188,13 +185,28 @@
     <string name="settings_language">Language</string>
     <string name="settings_language_system">System default</string>
     <string name="settings_storage">Storage</string>
-    <string name="settings_auto_sync_desc">Encrypted secure backup from device</string>
     <string name="settings_sync_wifi_desc">Pause upload on mobile network</string>
-    <string name="settings_background_sync">Background sync</string>
-    <string name="settings_background_sync_desc">Sync after app is closed</string>
     <string name="settings_sync_now_action">Sync →</string>
     <string name="settings_backup_folders">Backup folders</string>
     <string name="settings_backup_folders_desc">Choose which folders to back up</string>
+    <!-- Sync settings reorganisation (v1.3.2): two grouped sections. -->
+    <string name="settings_what_backed_up_section">What gets backed up</string>
+    <string name="settings_when_section">When it happens</string>
+    <string name="settings_continuous_backup">Continuous backup</string>
+    <string name="settings_continuous_backup_desc">Photos and videos upload within seconds of capture.</string>
+    <string name="settings_backup_everything">Back up everything</string>
+    <string name="settings_backup_everything_desc">Auto-upload every photo and video on this device.</string>
+    <!-- Excluded folders feature (paired with backup-everything mode). -->
+    <string name="settings_excluded_folders">Excluded folders</string>
+    <string name="settings_excluded_folders_desc_none">No folders excluded</string>
+    <string name="settings_excluded_folders_desc_singular">1 folder excluded</string>
+    <string name="settings_excluded_folders_desc_count">%1$d folders excluded</string>
+    <string name="settings_excluded_folders_title">Excluded folders</string>
+    <string name="settings_excluded_folders_intro">Photos in these folders won\'t back up, even while \"Back up everything\" is on. Already-uploaded items stay on Drive.</string>
+    <string name="settings_excluded_folders_empty">No folders found on this device</string>
+    <string name="settings_excluded_folders_count_label">%1$d of %2$d folders excluded</string>
+    <string name="settings_excluded_folders_select_all">Exclude all</string>
+    <string name="settings_excluded_folders_deselect_all">Include all</string>
     <string name="settings_recently_deleted">Recently Deleted</string>
     <string name="settings_recently_deleted_desc">Restore or permanently delete trashed photos</string>
     <string name="settings_recently_deleted_subtitle">%1$d photos · deleted within 30 days</string>
@@ -519,7 +531,6 @@
     <string name="video_editor_audio_overlay_hint">Music replaces the original soundtrack in the saved video.</string>
 
     <!-- Calendar view -->
-    <string name="gallery_calendar">Calendar</string>
     <string name="calendar_title">Calendar</string>
     <string name="calendar_no_photos">No photos this month</string>
     <string name="calendar_search_placeholder">Search by date, place or note</string>
@@ -528,13 +539,10 @@
     <string name="calendar_search_cd">Search calendar</string>
     <string name="calendar_jump_cd">Jump to month</string>
     <string name="calendar_jump_title">Jump to month</string>
-    <string name="day_detail_location_label">Location</string>
     <string name="day_detail_location_hint">Add a place</string>
-    <string name="day_detail_description_label">Description</string>
     <string name="day_detail_description_hint">Add a note about this day</string>
     <string name="day_detail_edit_location_title">Edit location</string>
     <string name="day_detail_edit_description_title">Edit description</string>
     <string name="day_detail_save">Save</string>
-    <string name="day_detail_set_as_cover">Set as day cover</string>
     <string name="day_detail_photos_count">%1$d photos</string>
 </resources>

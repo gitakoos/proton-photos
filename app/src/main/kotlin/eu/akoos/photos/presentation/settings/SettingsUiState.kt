@@ -3,13 +3,15 @@ package eu.akoos.photos.presentation.settings
 data class SettingsUiState(
     val autoSync: Boolean = true,
     val syncWifiOnly: Boolean = true,
-    /** Periodic-sync cadence in minutes; clamped to WorkManager's 15-minute floor. */
-    val syncIntervalMinutes: Long = 15L,
     val autoBackupNewFolders: Boolean = false,
     /** Backup-everything mode: when true, every MediaStore image/video is auto-uploaded,
      *  regardless of which folders the user picked. Folder picker becomes informational
      *  only. Toggle lives next to the existing folder-mode toggles in Settings. */
     val backupEverything: Boolean = false,
+    /** Names of MediaStore buckets the user carved out of [backupEverything]. Only
+     *  surfaced in the UI / consulted by reconcile while [backupEverything] is ON.
+     *  Empty = no exclusions, back up everything. */
+    val excludedFolderNames: Set<String> = emptySet(),
     val lastSyncMs: Long? = null,
     val isSyncing: Boolean = false,
     val syncError: String? = null,

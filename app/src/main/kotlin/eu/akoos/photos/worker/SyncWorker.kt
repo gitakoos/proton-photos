@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.pm.ServiceInfo
 import android.os.Build
 import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import androidx.datastore.preferences.core.edit
 import androidx.hilt.work.HiltWorker
 import androidx.work.Constraints
@@ -25,6 +26,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import me.proton.core.domain.entity.UserId
 import me.proton.core.accountmanager.domain.AccountManager
 import eu.akoos.photos.R
 import eu.akoos.photos.data.preferences.SettingsKeys
@@ -88,21 +90,76 @@ class SyncWorker @AssistedInject constructor(
         }
 
         try {
+            // ONE reconcile + upload pass. Multi-stage trailing passes inside one worker run
+            // cause 90-second "0 of 0 uploaded" notification loops when there's nothing to do.
+            // The OS content-URI trigger (rearmed in finally) fires multiple times during a
+            // camera burst — APPEND_OR_REPLACE coalesces them — so per-worker multi-pass adds
+            // complexity without buying anything the OS isn't already giving.
+            val pass = runSyncPass(userId, firstPass = true)
+            val uploadFailed = pass.failed
+
+            context.settingsDataStore.edit { it[SettingsKeys.LAST_SYNC_MS] = System.currentTimeMillis() }
+            return@coroutineScope if (uploadFailed && runAttemptCount < 3) Result.retry()
+            else if (uploadFailed) Result.failure()
+            else Result.success()
+        } catch (e: IOException) {
+            Log.w(TAG, "sync IO error — will retry", e)
+            return@coroutineScope if (runAttemptCount < 3) Result.retry() else Result.failure()
+        } catch (e: Exception) {
+            // Cancellation is a normal shutdown path — rethrow so WorkManager records the
+            // run as cancelled instead of failed (the latter retries unnecessarily).
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            Log.e(TAG, "sync failed", e)
+            return@coroutineScope Result.failure()
+        } finally {
+            progressJob.cancel()
+            // WorkManager auto-dismisses the foreground notification when the worker exits,
+            // but on some OEMs the sticky ongoing notification lingers — explicitly cancel it
+            // so users don't see a stale "X of Y uploaded" after the batch completes.
+            runCatching {
+                NotificationManagerCompat.from(context).cancel(NOTIFICATION_ID)
+            }
+            // Content-URI trigger is a OneTime work item that fires ONCE and then disappears.
+            // Re-arm it from finally so the next MediaStore change wakes us again — without
+            // this the OS-level watcher is silently lost after the first fire and the user
+            // has to take a new photo to trigger the gallery's in-app observer (the exact
+            // "I unlocked but nothing uploaded" symptom users reported).
+            runCatching {
+                val wifiOnly = context.settingsDataStore.data.first()[SettingsKeys.SYNC_WIFI_ONLY] != false
+                scheduleContentObserver(context, wifiOnly)
+            }
+        }
+    }
+
+    /**
+     * Runs a single reconcile+upload pass. Returns `true` if upload failed (so the caller can
+     * track failure across multiple trailing passes), `false` on success or no-op.
+     *
+     * `firstPass = true` is informational only — both first and trailing calls do the same
+     * refresh + reconcile + upload sequence. The trailing passes are still necessary even when
+     * the first pass succeeded, because photos taken between pass 1's reconcile and the end
+     * of pass 1's upload (or that had IS_PENDING=1 during pass 1's MediaStore query) won't
+     * be in the pending list until pass 2 re-queries.
+     */
+    /** Outcome of a single sync pass. `attempted = 0` means reconcile saw no pending items —
+     *  trailing passes can skip in that case to avoid the "0 of 0 uploaded" notification loop. */
+    private data class PassResult(val failed: Boolean, val attempted: Int)
+
+    private suspend fun runSyncPass(userId: UserId, firstPass: Boolean): PassResult {
+        try {
             // Refresh cloud state first so deleted-cloud photos are removed from DB before reconcile.
             cloudRepo.refreshCloudPhotosIncremental(userId)
             reconcile(userId).collect {}
-            // Upload errors must NOT silently disappear — the previous swallow gave a "success"
-            // verdict even when nothing was uploaded, so the user saw a stale "last sync time"
-            // with no idea the backup was broken. Log the error and let LAST_SYNC_MS still
-            // advance (the reconcile work above DID succeed), but a non-IO upload exception
-            // surfaces as a retryable failure so WorkManager re-runs sooner.
+            // Upload errors must NOT silently disappear — swallowing them gives a "success"
+            // verdict even when nothing was uploaded, leaving a stale "last sync time" with no
+            // indication the backup is broken.
             var uploadFailed = false
+            var attempted = 0
             try {
-                val uploadResult = upload(userId)
+                val uploadResult = upload(userId) { isStopped }
+                attempted = uploadResult.attempted
                 // Stale-success guard: UploadPendingUseCase catches per-item exceptions and
                 // keeps looping, so an "all N items threw" run reaches us with no exception.
-                // Without this check, LAST_SYNC_MS would advance and the UI would say
-                // "synced just now" even though zero photos uploaded.
                 if (uploadResult.allFailed) {
                     Log.w(TAG, "upload tried ${uploadResult.attempted} items, 0 succeeded — retrying")
                     uploadFailed = true
@@ -116,18 +173,13 @@ class SyncWorker @AssistedInject constructor(
                 Log.e(TAG, "upload failed — sync verdict downgraded", e)
                 uploadFailed = true
             }
-            context.settingsDataStore.edit { it[SettingsKeys.LAST_SYNC_MS] = System.currentTimeMillis() }
-            return@coroutineScope if (uploadFailed && runAttemptCount < 3) Result.retry()
-            else if (uploadFailed) Result.failure()
-            else Result.success()
+            return PassResult(uploadFailed, attempted)
         } catch (e: IOException) {
-            Log.w(TAG, "sync IO error — will retry", e)
-            return@coroutineScope if (runAttemptCount < 3) Result.retry() else Result.failure()
-        } catch (e: Exception) {
-            Log.e(TAG, "sync failed", e)
-            return@coroutineScope Result.failure()
-        } finally {
-            progressJob.cancel()
+            // Re-throw on first pass so the outer catch handles retries; on trailing passes,
+            // a transient network blip shouldn't abort the whole worker — log and move on.
+            if (firstPass) throw e
+            Log.w(TAG, "trailing pass IO error — continuing", e)
+            return PassResult(failed = true, attempted = 0)
         }
     }
 
@@ -147,7 +199,15 @@ class SyncWorker @AssistedInject constructor(
 
         val cancelIntent = WorkManager.getInstance(context).createCancelPendingIntent(id)
         val title = context.getString(R.string.sync_worker_notification_title)
-        val content = context.getString(R.string.sync_worker_notification_progress, done, total)
+        // total = 0 means we don't know the batch size yet (worker just started, reconcile
+        // hasn't run). Show a "Checking…" line instead of "0 of 0 uploaded" — the latter
+        // makes the notification flicker between real progress and a confusing zero-state
+        // whenever a follow-up worker fires right after a finished batch.
+        val content = if (total <= 0) {
+            context.getString(R.string.sync_worker_notification_checking)
+        } else {
+            context.getString(R.string.sync_worker_notification_progress, done, total)
+        }
         val cancelLabel = context.getString(R.string.sync_worker_notification_cancel)
 
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
@@ -195,7 +255,6 @@ class SyncWorker @AssistedInject constructor(
          * channel so the user can mute one without affecting the other.
          */
         fun ensureChannel(context: Context) {
-            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
             val nm = context.getSystemService(NotificationManager::class.java) ?: return
             if (nm.getNotificationChannel(CHANNEL_ID) != null) return
             // IMPORTANCE_DEFAULT (not LOW) so the user actually sees the upload notification
@@ -235,15 +294,50 @@ class SyncWorker @AssistedInject constructor(
         fun cancel(workManager: WorkManager) = workManager.cancelUniqueWork(TAG)
 
         /**
+         * OS-level MediaStore content-URI trigger via WorkManager. The system itself watches
+         * the URIs even when our process is dead and wakes SyncWorker within seconds of a
+         * MediaStore change. Re-armed by [doWork]'s finally block so each fire arms the
+         * NEXT one.
+         */
+        fun scheduleContentObserver(context: Context, wifiOnly: Boolean = true) {
+            val networkType = if (wifiOnly) NetworkType.UNMETERED else NetworkType.CONNECTED
+            val constraints = Constraints.Builder()
+                .setRequiredNetworkType(networkType)
+                .addContentUriTrigger(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, true)
+                .addContentUriTrigger(android.provider.MediaStore.Video.Media.EXTERNAL_CONTENT_URI, true)
+                .build()
+            val request = OneTimeWorkRequestBuilder<SyncWorker>()
+                .setConstraints(constraints)
+                .addTag(TAG_CONTENT_OBSERVER)
+                .build()
+            WorkManager.getInstance(context).enqueueUniqueWork(
+                NAME_CONTENT_OBSERVER,
+                ExistingWorkPolicy.REPLACE,
+                request,
+            )
+        }
+
+        const val NAME_CONTENT_OBSERVER = "sync_worker_content_observer"
+        const val TAG_CONTENT_OBSERVER = "sync_content_observer"
+
+        /**
          * Immediately enqueue a OneTime sync run so the user doesn't have to wait for the next
          * periodic fire (which can be up to 15 min away). The OneTime work uses the same
          * Wi-Fi-only constraint as periodic, then runs as a foreground service so the user
          * sees a notification while it works.
          *
-         * Uniqueness ([NAME_ONESHOT]) + [ExistingWorkPolicy.KEEP] means concurrent kick-off
-         * calls (e.g. gallery foreground + folder-settings change) coalesce into a single run.
-         * If a periodic run is already in progress when this is called, KEEP also avoids
-         * duplicating that work.
+         * Uniqueness ([NAME_ONESHOT]) + [ExistingWorkPolicy.APPEND_OR_REPLACE] means:
+         *   - If no worker is running for [NAME_ONESHOT], the request runs immediately.
+         *   - If one IS running, this request is APPENDED to run after the current one
+         *     finishes. This is the key fix for camera bursts: photo #1 fires the observer,
+         *     SyncWorker starts uploading. While it's mid-upload, photos #2, #3, #4 arrive.
+         *     With the previous KEEP policy those kicks were silently dropped, and reconcile
+         *     never re-queried MediaStore — the unfinished photos would sit until the next
+         *     periodic fire OR the next foreground enter. APPEND_OR_REPLACE guarantees a
+         *     second pass picks them up.
+         *   - APPEND_OR_REPLACE (instead of plain APPEND) means we only ever queue ONE
+         *     follow-up — a burst of 20 kicks doesn't queue 20 workers, it queues 1 that
+         *     handles whatever pending state the burst left in MediaStore.
          */
         fun runNow(context: Context, wifiOnly: Boolean = true) {
             ensureChannel(context)
@@ -254,7 +348,7 @@ class SyncWorker @AssistedInject constructor(
                 .build()
             WorkManager.getInstance(context).enqueueUniqueWork(
                 NAME_ONESHOT,
-                ExistingWorkPolicy.KEEP,
+                ExistingWorkPolicy.APPEND_OR_REPLACE,
                 request,
             )
         }

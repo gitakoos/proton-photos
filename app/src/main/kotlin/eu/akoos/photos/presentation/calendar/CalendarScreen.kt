@@ -131,8 +131,8 @@ fun CalendarScreen(
         // bar is open.
         val contentTopPad = when {
             // 56 (status approx) + 56 (header) + 64 (search field) + 32 (16dp breathing
-            // room above & below the field per the polish pass) + 8 (slack) when search
-            // is open; otherwise just the header zone.
+            // room above & below the field) + 8 (slack) when search is open; otherwise
+            // just the header zone.
             state.isSearchActive -> 156.dp
             else -> 76.dp
         }
@@ -176,13 +176,11 @@ fun CalendarScreen(
                         items = state.months,
                         key = { bucket -> "${bucket.year}-${bucket.month}" },
                     ) { bucket ->
-                        // Each month tile takes a full screen so the day cells in stacked
-                        // mode have the same generous sizing as PerMonth — the user wanted
-                        // the wider-day layout applied to both modes. fillParentMaxHeight
+                        // Each month tile takes a full screen so day cells stay generously
+                        // sized in both stacked and per-month modes. fillParentMaxHeight
                         // gives the inner expanded grid a concrete height to weight against.
-                        // No "no photos this month" caption — empty grids speak for
-                        // themselves and the extra line of text broke the per-month
-                        // height rhythm when scrolling.
+                        // Empty months render as a blank grid (no caption) so the per-month
+                        // height rhythm stays consistent while scrolling.
                         Box(modifier = Modifier.fillParentMaxHeight()) {
                             MonthGrid(
                                 bucket = bucket,

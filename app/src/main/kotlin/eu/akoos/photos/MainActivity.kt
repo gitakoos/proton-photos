@@ -115,22 +115,30 @@ class MainActivity : AppCompatActivity() {
             .onUserAddressKeyCheckFailed { /* same */ }
 
         lifecycleScope.launch {
+            // Login gate: don't surface the BG "Watching for new photos" notification
+            // until the user has actually signed in. A pre-login start meant a fresh
+            // install that never completed login would show a permanent BG notif
+            // pointing at an app that does no work — confusing and battery-curious.
+            val userId = accountManager.getPrimaryUserId().first()
+            if (userId == null) return@launch
+
             val prefs = settingsDataStore.data.first()
             val autoSync = prefs[SettingsKeys.AUTO_SYNC] != false
             val wifiOnly = prefs[SettingsKeys.SYNC_WIFI_ONLY] != false
-            // Default to a 6-hour periodic interval — the ContentObserver in
-            // LocalMediaRepositoryImpl fires the sync within seconds of a new photo arriving,
-            // so the periodic schedule is purely a safety net for events the observer might
-            // miss (Doze, OEM throttling, fresh-install backlog). 15 minutes was overkill and
-            // burned battery for almost no real upload work.
-            val intervalMinutes = prefs[SettingsKeys.SYNC_INTERVAL_MINUTES] ?: 360L
+            // Periodic 15-min run + OS content URI trigger + persistent BG service. The
+            // content trigger gives sub-second reaction on stock Android; the periodic
+            // is the OEM-throttle safety net; the BG service keeps the in-process
+            // MediaStore observer alive on Samsung One UI where the content trigger
+            // doesn't survive Recents-swipe.
             if (autoSync) {
-                SyncWorker.schedule(workManager, wifiOnly, intervalMinutes)
-                // Don't wait 15 minutes for the first periodic fire — kick off a OneTime run
-                // immediately so any pending uploads (including newly-imported photos) start
-                // backing up the moment the app launches. KEEP-policy enqueue inside
-                // SyncWorker.runNow coalesces with the periodic run if it's already active.
+                SyncWorker.schedule(workManager, wifiOnly, SyncWorker.MIN_INTERVAL_MINUTES)
+                // Don't wait for the first periodic fire — kick off a OneTime run immediately
+                // so any pending uploads (including newly-imported photos) start backing up
+                // the moment the app launches. APPEND_OR_REPLACE inside SyncWorker.runNow
+                // coalesces with the periodic run if it's already active.
                 SyncWorker.runNow(this@MainActivity, wifiOnly)
+                SyncWorker.scheduleContentObserver(this@MainActivity, wifiOnly)
+                eu.akoos.photos.service.BackgroundSyncService.start(this@MainActivity)
             }
         }
 

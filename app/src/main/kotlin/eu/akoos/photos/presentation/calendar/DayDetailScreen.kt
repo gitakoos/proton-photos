@@ -209,8 +209,8 @@ fun DayDetailScreen(
     }
 
     // Edit-field bottom sheets — at most one is open at a time. Save commits to Room
-    // via the existing VM setters (same path the inline OutlinedTextField used to take);
-    // cancel just dismisses without persisting.
+    // via the existing VM setters (same path the VM setters use); cancel just dismisses
+    // without persisting.
     if (editingLocation) {
         eu.akoos.photos.presentation.calendar.components.EditFieldSheet(
             title = stringResource(R.string.day_detail_edit_location_title),

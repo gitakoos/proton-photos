@@ -125,7 +125,7 @@ class HiddenStorageManager @Inject constructor(
                 MediaStore.Images.Media.EXTERNAL_CONTENT_URI
             // Mirror DownloadPhotosUseCase's routing — album-bound files into
             // Pictures/<AlbumName>/ (or Movies/<AlbumName>/), unaffiliated files into the
-            // Pictures/ or Movies/ root. The previous "Recovered" subfolder is gone.
+            // Pictures/ or Movies/ root.
             val baseDir = if (isVideo) "Movies" else "Pictures"
             val relPath = if (albumFolderName.isNullOrBlank()) baseDir else "$baseDir/$albumFolderName"
 

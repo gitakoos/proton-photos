@@ -23,6 +23,12 @@
         notification. Already requested at runtime alongside media permissions.
     -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!--
+        RECEIVE_BOOT_COMPLETED lets BootCompletedReceiver re-arm the OS content-URI
+        trigger and restart BackgroundSyncService after a device reboot, so users who
+        reboot and never re-open the app still back up the next camera capture
+        automatically.
+    -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <application
@@ -71,6 +77,24 @@
             android:theme="@style/Theme.ProtonPhotos.Auth"
             tools:replace="android:theme" />
 
+        <!--
+            Re-arms the SyncWorker MediaStore content-URI trigger after device reboot, so
+            users who reboot and never re-open the app still get auto-upload within seconds
+            of the next camera capture. Periodic SyncWorker is persisted across reboots by
+            WorkManager itself; only the OneTime content-trigger request needs explicit
+            re-enqueueing. Receiver lives under .service alongside BackgroundSyncService
+            since it also kick-starts that long-running service after boot.
+        -->
+        <receiver
+            android:name=".service.BootCompletedReceiver"
+            android:exported="true"
+            android:enabled="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+
         <!-- ── Photo Widget ──────────────────────────────────────────────── -->
         <receiver
             android:name=".widget.PhotoWidgetReceiver"
@@ -114,6 +138,16 @@
             android:name="androidx.work.impl.foreground.SystemForegroundService"
             android:foregroundServiceType="dataSync"
             tools:node="merge" />
+
+        <!-- Idle ContentObserver foreground service. Holds NO wakelock and does no CPU
+             work itself — exists solely to keep the app process alive on Samsung One UI
+             so the in-service MediaStore observer can kick SyncWorker the moment a new
+             photo appears, even after the user has swiped the app from Recents. LOW
+             channel importance so the notification stays out of the way. -->
+        <service
+            android:name=".service.BackgroundSyncService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
 
     </application>
 

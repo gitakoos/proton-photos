@@ -13,7 +13,7 @@ End-to-end encrypted photo backup and browsing for your Proton Drive Photos libr
 ## Features
 
 - End-to-end encryption via ProtonCore + GoOpenPGP.
-- Background sync — per-folder selection or "back up everything", Wi-Fi-only toggle, configurable interval.
+- Background sync — per-folder selection or "back up everything" with a per-folder exclude list, Wi-Fi-only toggle, continuous backup (uploads start within seconds of capture and resume after device reboot), three-photo parallel uploads.
 - Reinstall pairing — previously backed-up photos rejoin Synced state automatically after a clean install.
 - Albums — create, rename, add / remove photos, quick-set cover via long-press on any photo.
 - Multi-step share dialog — email chips, viewer / editor permissions, optional invite message.
@@ -67,6 +67,7 @@ app/src/main/kotlin/eu/akoos/photos/
 │   ├── preferences/  DataStore
 │   └── hidden/       Hidden-vault storage
 ├── worker/           WorkManager workers
+├── service/          Foreground service + boot receiver for continuous backup
 ├── widget/           Home-screen widget
 └── App.kt + MainActivity.kt
 ```
@@ -102,7 +103,7 @@ Telemetry / observability modules are pulled in (transitively required by some d
 | `PhotoDownloadService` | Cloud → device. Stream + decrypt + apply `DATE_TAKEN` from `captureTime + zone offset`. Optional album subfolder. |
 | `PhotoStreamService` | Incremental cloud-state sync (mutation journal). Owns `createOrGetPhotosVolume` lazy bootstrap. |
 | `AlbumService` | Album CRUD: create / rename / set-cover, add/remove photos (batched). |
-| `AlbumSharingService` | Public link mint, email invite (PKESK encrypt to invitee + sign), member list / revoke, shared-with-me (primary + v2 backup endpoints), accept/decline. The multi-step share popup (email chips, permission picker, optional message) is wired through this service; the underlying `inviteToAlbum` API currently returns "outdated app" — diagnostic work pending. |
+| `AlbumSharingService` | Public link mint, email invite (PKESK encrypt to invitee + sign), member list / revoke, shared-with-me (primary + v2 backup endpoints), accept/decline. The multi-step share popup (email chips, permission picker, optional message) is wired through this service. |
 | `PhotosShareService` | Per-user key cache (volumeId, shareId, rootLinkId, rootLinkKeyBytes, rootNodeHashKey) + shared API semaphore. Wiped on sign-out. |
 | `PhotosVolumeBootstrap` | First-run Photos volume + share + root-link creation. Handles `ALREADY_EXISTS` race via `getVolumes()` fallback. |
 | `CloudTrashService` | Cloud trash listing, restore (`moveTrashLinks`), permanent delete. |

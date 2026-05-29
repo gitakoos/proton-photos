@@ -9,10 +9,8 @@ import androidx.sqlite.db.SupportSQLiteDatabase
  * own tables (Proton Core tables migrate themselves through ProtonCore's
  * bundled migrators).
  *
- * Why this exists at all: the v0.x app shipped with `fallbackToDestructiveMigration`,
- * which wipes the local SyncState on every schema bump. Once the app is in users'
- * hands that wipe would lose upload progress (contentHash-based matching, recent-
- * upload IDs, …) — so before the first public release we need explicit migrations.
+ * Each migration is hand-written so SyncState rows (contentHash, recent upload IDs)
+ * survive schema bumps.
  */
 object Migrations {
 
