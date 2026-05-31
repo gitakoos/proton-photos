@@ -1,3 +1,25 @@
+/*
+ * Photos for Proton
+ * Copyright (C) 2026 Akoos <https://akoos.eu>
+ *
+ * Source:  https://github.com/gitakoos/proton-photos
+ * Website: https://photos.akoos.eu
+ *
+ * This file is part of Photos for Proton.
+ *
+ * Photos for Proton is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 3 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 package eu.akoos.photos.domain.repository
 
 import kotlinx.coroutines.flow.Flow
@@ -62,19 +84,42 @@ interface DrivePhotoRepository {
      * [onProgress] (optional) receives `(doneBytes, totalBytes)` while blocks decrypt — debounced
      * to ~250 ms by the implementation, plus a guaranteed final emission at 100%. Used by the
      * photo viewer to render a percentage instead of an opaque spinner on multi-MB videos.
+     *
+     * Cached output lives in `cacheDir/fullres/` and survives across screens. Eviction is
+     * handled by a TTL sweeper ([PhotoDownloadService.pruneStaleFullResCache]) — files older
+     * than the TTL are reclaimed when the device is online. The sweeper holds off while
+     * offline so cached photos stay viewable until the network returns.
      */
     suspend fun downloadFullResPhoto(
         userId: UserId,
         photo: CloudPhoto,
         onProgress: ((doneBytes: Long, totalBytes: Long) -> Unit)? = null,
     ): File
-    /** [uploadUri] overrides [item].uri — used when metadata has been stripped to a temp file. */
-    suspend fun uploadFile(userId: UserId, item: LocalMediaItem, hash: String, uploadUri: String = item.uri): String
     /**
-     * Adds photos to an album. Per-photo crypto failures used to be silently swallowed; the
-     * caller now receives an explicit breakdown so the UI can warn the user when some entries
-     * are missing. If *every* entry fails (and the input was non-empty), the implementation
-     * throws so the surrounding runCatching surfaces the error as a hard failure.
+     * [uploadUri] overrides [item].uri — used when metadata has been stripped to a temp file.
+     *
+     * [onProgress] (optional) receives `(phase, doneBytes, totalBytes)` as bytes flow through
+     * the encrypt pipeline and then the CDN PUT pipeline. The implementation debounces emissions
+     * to ~250 ms per phase and guarantees a final 100 % emission as each phase transitions.
+     * [UploadPendingUseCase] forwards these into its per-file SharedFlow so the Settings progress
+     * bar can render a live byte counter instead of a per-file-completion bar.
+     */
+    suspend fun uploadFile(
+        userId: UserId,
+        item: LocalMediaItem,
+        hash: String,
+        uploadUri: String = item.uri,
+        onProgress: ((
+            phase: eu.akoos.photos.data.repository.drive.UploadPhase,
+            doneBytes: Long,
+            totalBytes: Long,
+        ) -> Unit)? = null,
+    ): String
+    /**
+     * Adds photos to an album. Returns an explicit breakdown of per-photo crypto failures so
+     * the UI can warn when some entries are missing. If *every* entry fails (and the input was
+     * non-empty), the implementation throws so the surrounding runCatching surfaces the error
+     * as a hard failure.
      */
     suspend fun addPhotosToAlbum(
         userId: UserId,
@@ -186,7 +231,7 @@ interface DrivePhotoRepository {
      */
     fun clearCacheForSignOut()
 
-    // ── Lazy thumbnail decrypt (v1.3) ──────────────────────────────────────
+    // ── Lazy thumbnail decrypt ────────────────────────────────────────────
     //
     // Cells call [requestThumbnailDecrypt] when they enter the LazyGrid viewport and
     // [cancelThumbnailDecrypt] on dispose. The repository looks up the persisted

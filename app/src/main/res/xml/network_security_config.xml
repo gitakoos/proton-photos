@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Explicit egress allowlist. Any OkHttpClient call to a host outside this set
+    fails at the TLS layer rather than silently leaking data. The base-config
+    disables cleartext globally; per-domain entries only narrow the set, never
+    re-enable HTTP.
+
+    Hosts:
+      proton.me            - Drive API, account, mail, calendar, alt routing.
+                             includeSubdomains catches drive.proton.me,
+                             account.proton.me, verify.proton.me, the CDN
+                             block hosts, and ProtonCore alt-routing hosts
+                             which are always proton.me subdomains.
+      quad9.net            - DoH primary (dns11.quad9.net).
+      cloudflare-dns.com   - DoH fallback (no Google DoH).
+
+    Anything else - rejected.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">proton.me</domain>
+    </domain-config>
+
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">quad9.net</domain>
+    </domain-config>
+
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">cloudflare-dns.com</domain>
+    </domain-config>
+</network-security-config>

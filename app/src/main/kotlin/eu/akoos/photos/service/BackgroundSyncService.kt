@@ -1,10 +1,34 @@
+/*
+ * Photos for Proton
+ * Copyright (C) 2026 Akoos <https://akoos.eu>
+ *
+ * Source:  https://github.com/gitakoos/proton-photos
+ * Website: https://photos.akoos.eu
+ *
+ * This file is part of Photos for Proton.
+ *
+ * Photos for Proton is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 3 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 package eu.akoos.photos.service
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.database.ContentObserver
 import android.net.Uri
@@ -20,9 +44,11 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.Observer
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
+import dagger.hilt.android.AndroidEntryPoint
 import eu.akoos.photos.R
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.domain.usecase.PendingDeleteNotificationUseCase
 import eu.akoos.photos.worker.SyncWorker
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -30,6 +56,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import javax.inject.Inject
 
 /**
  * Long-running foreground service that keeps the app process alive on aggressive OEMs
@@ -54,10 +81,30 @@ import kotlinx.coroutines.launch
  *  - [onStartCommand] → idempotent; returns START_STICKY so the OS restarts us
  *  - [onDestroy]  → unregister observer, cancel pending debounce
  */
+@AndroidEntryPoint
 class BackgroundSyncService : Service() {
+
+    @Inject lateinit var pendingDeleteNotif: PendingDeleteNotificationUseCase
 
     private val handler = Handler(Looper.getMainLooper())
     private val debounceRunnable = Runnable { fireSync() }
+
+    /**
+     * Fires on every screen unlock (ACTION_USER_PRESENT). Reconciles the delete
+     * consent queue against MediaStore reality and re-posts the notification if
+     * any URIs are still pending — covers the case where an upload finished
+     * while the phone was locked and Samsung One UI swallowed the lock screen
+     * notification (LOW/DEFAULT importance) before the user could see it.
+     *
+     * Has to be registered dynamically: ACTION_USER_PRESENT is a "protected"
+     * broadcast since Android 7, so a manifest declared receiver never fires.
+     */
+    private val userPresentReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action != Intent.ACTION_USER_PRESENT) return
+            scope.launch { runCatching { pendingDeleteNotif() } }
+        }
+    }
 
     /** Service-scoped coroutine scope for [fireSync] — avoids the previous main-thread
      *  `runBlocking` DataStore read which could stall the UI thread on slow flash. */
@@ -108,6 +155,18 @@ class BackgroundSyncService : Service() {
         WorkManager.getInstance(applicationContext)
             .getWorkInfosByTagLiveData(SyncWorker.TAG)
             .observeForever(workInfoObserver)
+        // Wake up the delete consent reconciliation on every screen unlock — the
+        // Samsung lock screen often swallows the worker's notification post when
+        // it lands while the device is locked.
+        runCatching {
+            val filter = IntentFilter(Intent.ACTION_USER_PRESENT)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                registerReceiver(userPresentReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+            } else {
+                @Suppress("UnspecifiedRegisterReceiverFlag")
+                registerReceiver(userPresentReceiver, filter)
+            }
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -131,6 +190,7 @@ class BackgroundSyncService : Service() {
                 .getWorkInfosByTagLiveData(SyncWorker.TAG)
                 .removeObserver(workInfoObserver)
         }
+        runCatching { unregisterReceiver(userPresentReceiver) }
         scope.cancel()
     }
 
@@ -142,9 +202,8 @@ class BackgroundSyncService : Service() {
     private fun registerObserver() {
         val obs = object : ContentObserver(handler) {
             override fun onChange(selfChange: Boolean, uri: Uri?) {
-                // Debounce — a single camera write often fires multiple notify events
-                // (one for the table, one for the row, sometimes one per side-car). Without
-                // debounce we'd kick the worker 3-5 times for a single photo.
+                // Debounce — a single camera write fires multiple notify events; without
+                // debounce the worker would kick 3-5 times per photo.
                 handler.removeCallbacks(debounceRunnable)
                 handler.postDelayed(debounceRunnable, DEBOUNCE_MS)
             }
@@ -184,7 +243,7 @@ class BackgroundSyncService : Service() {
     }
 
     private fun buildNotification() = NotificationCompat.Builder(this, CHANNEL_ID)
-        .setSmallIcon(android.R.drawable.stat_sys_upload)
+        .setSmallIcon(R.drawable.ic_notification)
         .setContentTitle(getString(R.string.bg_sync_service_title))
         // Suppress the "Watching for new photos" subtitle while SyncWorker is uploading —
         // its own foreground notification carries the live progress, and two overlapping

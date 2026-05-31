@@ -1,3 +1,25 @@
+/*
+ * Photos for Proton
+ * Copyright (C) 2026 Akoos <https://akoos.eu>
+ *
+ * Source:  https://github.com/gitakoos/proton-photos
+ * Website: https://photos.akoos.eu
+ *
+ * This file is part of Photos for Proton.
+ *
+ * Photos for Proton is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 3 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 package eu.akoos.photos.di
 
 import dagger.Module
@@ -19,9 +41,18 @@ import me.proton.core.network.domain.serverconnection.DohAlternativesListener
 import me.proton.core.payment.presentation.entity.SecureEndpoint
 import me.proton.core.plan.domain.SupportSignupPaidPlans
 import me.proton.core.plan.domain.SupportUpgradePaidPlans
+import okhttp3.CertificatePinner
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.OkHttpClient
+import javax.inject.Qualifier
 import javax.inject.Singleton
+
+/**
+ * Tags the pinned [OkHttpClient] used by CDN block + thumbnail fetches so it
+ * doesn't collide with ProtonCore's own bound clients on the DI graph.
+ */
+@Qualifier @Retention(AnnotationRetention.RUNTIME) annotation class CdnOkHttpClient
 
 @Module
 @InstallIn(SingletonComponent::class)
@@ -40,8 +71,12 @@ object CoreModule {
     @Singleton
     @DohProviderUrls
     fun provideDohProviderUrls(): Array<String> = arrayOf(
+        // Quad9 (Switzerland based, no logging) + Cloudflare (1.1.1.1, no logging,
+        // explicit privacy policy). Google was previously included as a fallback but
+        // we deliberately avoid Google infrastructure for DNS — every DoH lookup
+        // would advertise the user's interest in Proton to Google's logs.
         "https://dns11.quad9.net/dns-query/",
-        "https://dns.google/dns-query/",
+        "https://cloudflare-dns.com/dns-query/",
     )
 
     // Public SHA-256 SPKI pins for *.proton.me — sourced from
@@ -71,9 +106,15 @@ object CoreModule {
             override suspend fun onProxiesFailed() {}
         }
 
+    // Payments are disabled in this build (IsPaymentsV5Enabled = false,
+    // IsMobileUpgradesEnabled = false, ProtonIAPBillingLibrary.isAvailable() = false
+    // in StubModule). SecureEndpoint is still required by the ProtonCore Hilt graph,
+    // so we point it at an unresolvable placeholder — any code path that managed to
+    // reach this string would fail fast on DNS instead of silently contacting Proton's
+    // payments host with the user's session.
     @Provides
     @Singleton
-    fun provideSecureEndpoint(): SecureEndpoint = SecureEndpoint("payments.proton.me")
+    fun provideSecureEndpoint(): SecureEndpoint = SecureEndpoint("localhost")
 
     // SPKI pins used for the alternative-routing (DoH-resolved) hosts —
     // protoncore_android.di.Constants.ALTERNATIVE_API_SPKI_PINS.
@@ -86,6 +127,41 @@ object CoreModule {
         "MSlVrBCdL0hKyczvgYVSRNm88RicyY04Q2y5qrBt0xA=",
         "C2UxW0T1Ckl9s+8cXfjXxlEqwAfPM4HiW2y3UdtBeCw=",
     )
+
+    /**
+     * Shared OkHttpClient for the CDN block + thumbnail fetches. The block PUT/GET
+     * traffic bypasses ProtonCore's ApiProvider (it uses pm-storage-token headers
+     * instead of Bearer auth), so by default it had no cert pinning at all — a
+     * compromised CA in the device's trust store could MITM the encrypted blocks.
+     * Pinning to the same SPKIs CoreModule uses for the main API closes that gap.
+     * The pin entries below match [provideCertificatePins] in raw value, just
+     * reformatted to OkHttp's "sha256/<base64>" convention.
+     */
+    @Provides
+    @Singleton
+    @CdnOkHttpClient
+    fun provideCdnOkHttpClient(): OkHttpClient {
+        val pins = arrayOf(
+            "drtmcR2kFkM8qJClsuWgUzxgBkePfRCkRpqUesyDmeE=",
+            "YRGlaY0jyJ4Jw2/4M8FIftwbDIQfh8Sdro96CeEel54=",
+            "AfMENBVvOS8MnISprtvyPsjKlPooqh8nMB/pvCrpJpw=",
+            "CT56BhOTmj5ZIPgb/xD5mH8rY3BLo/MlhP7oPyJUEDo=",
+            "35Dx28/uzN3LeltkCBQ8RHK0tlNSa2kCpCRGNp34Gxc=",
+            "qYIukVc63DEITct8sFT7ebIq5qsWmuscaIKeJx+5J5A=",
+        )
+        val builder = CertificatePinner.Builder()
+        // The Proton CDN returns block URLs anywhere on the proton.me public suffix
+        // (drive-blocks.proton.me, drive-static.proton.me, etc.). Wildcard pinning
+        // at the registrable domain covers any future subdomain reshuffle without
+        // requiring a client rebuild.
+        for (pin in pins) {
+            builder.add("*.proton.me", "sha256/$pin")
+            builder.add("proton.me", "sha256/$pin")
+        }
+        return OkHttpClient.Builder()
+            .certificatePinner(builder.build())
+            .build()
+    }
 
     @Provides
     @Singleton

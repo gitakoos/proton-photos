@@ -1,3 +1,25 @@
+/*
+ * Photos for Proton
+ * Copyright (C) 2026 Akoos <https://akoos.eu>
+ *
+ * Source:  https://github.com/gitakoos/proton-photos
+ * Website: https://photos.akoos.eu
+ *
+ * This file is part of Photos for Proton.
+ *
+ * Photos for Proton is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 3 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 package eu.akoos.photos.presentation.shared
 
 import androidx.compose.foundation.background
@@ -9,7 +31,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -25,12 +46,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.MailOutline
 import androidx.compose.material.icons.filled.People
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.Snackbar
-import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -44,7 +62,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -53,16 +70,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import coil.compose.AsyncImage
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.entity.PendingInvitation
+import eu.akoos.photos.presentation.common.EmptyState
 import eu.akoos.photos.presentation.gallery.SharedFilter
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.Bg0
-import eu.akoos.photos.presentation.theme.Bg2
 import eu.akoos.photos.presentation.theme.ErrorColor
-import eu.akoos.photos.presentation.theme.FgDim
 import eu.akoos.photos.presentation.theme.FgMute
 import eu.akoos.photos.presentation.theme.FgPrimary
 import eu.akoos.photos.presentation.theme.PillBg
@@ -101,7 +116,7 @@ fun SharedScreen(
             .fillMaxSize()
             .background(Bg0)
     ) {
-        SnackbarHost(snackbarHost, modifier = Modifier.align(Alignment.BottomCenter))
+        eu.akoos.photos.presentation.common.ThemedSnackbarHost(snackbarHost, modifier = Modifier.align(Alignment.BottomCenter))
         PullToRefreshBox(
             isRefreshing = state.isLoading,
             onRefresh = { viewModel.refresh() },
@@ -132,8 +147,16 @@ fun SharedScreen(
                     }
 
                 albums.isEmpty() && !showPendingInvitations ->
-                    EmptySharedState(
-                        filter = filter,
+                    EmptyState(
+                        title = if (filter == SharedFilter.SharedWithMe)
+                            stringResource(R.string.shared_empty_with_me_title)
+                        else
+                            stringResource(R.string.shared_empty_by_me_title),
+                        subtitle = if (filter == SharedFilter.SharedWithMe)
+                            stringResource(R.string.shared_empty_with_me_body)
+                        else
+                            stringResource(R.string.shared_empty_by_me_body),
+                        icon = Icons.Default.People,
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(top = topPadding),
@@ -267,47 +290,6 @@ private fun PendingInvitationsSection(
                     Text(stringResource(R.string.shared_accept), color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                 }
             }
-        }
-    }
-}
-
-// ── Empty state ────────────────────────────────────────────────────────────────
-
-@Composable
-private fun EmptySharedState(
-    filter: SharedFilter,
-    modifier: Modifier = Modifier,
-) {
-    Box(
-        modifier = modifier,
-        contentAlignment = Alignment.Center,
-    ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Icon(
-                Icons.Default.People,
-                contentDescription = null,
-                tint = FgMute,
-                modifier = Modifier.size(48.dp),
-            )
-            Spacer(Modifier.height(16.dp))
-            Text(
-                text = if (filter == SharedFilter.SharedWithMe)
-                    stringResource(R.string.shared_empty_with_me_title)
-                else
-                    stringResource(R.string.shared_empty_by_me_title),
-                color = FgPrimary,
-                fontSize = 17.sp,
-                fontWeight = FontWeight.SemiBold,
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = if (filter == SharedFilter.SharedWithMe)
-                    stringResource(R.string.shared_empty_with_me_body)
-                else
-                    stringResource(R.string.shared_empty_by_me_body),
-                color = FgDim,
-                fontSize = 14.sp,
-            )
         }
     }
 }

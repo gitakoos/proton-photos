@@ -1,3 +1,25 @@
+/*
+ * Photos for Proton
+ * Copyright (C) 2026 Akoos <https://akoos.eu>
+ *
+ * Source:  https://github.com/gitakoos/proton-photos
+ * Website: https://photos.akoos.eu
+ *
+ * This file is part of Photos for Proton.
+ *
+ * Photos for Proton is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 3 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 package eu.akoos.photos.data.api.dto
 
 import kotlinx.serialization.SerialName
@@ -802,6 +824,11 @@ data class RevisionWithBlocksDto(
     @SerialName("ContentKeyPacket") val contentKeyPacket: String? = null,
     @SerialName("ManifestSignature") val manifestSignature: String? = null,
     @SerialName("SignatureAddress") val signatureAddress: String? = null,
+    // Thumbnails are signed INTO the manifest (prepended to content block hashes), so the
+    // download-side manifest verify needs to read them back. The batch link endpoint omits
+    // this list; the revision endpoint includes it — capture it here so PhotoDownloadService
+    // can prepend the bytes before calling verifyDetachedSignature.
+    @SerialName("Thumbnails") val thumbnails: List<ThumbnailEntryDto>? = null,
     // Photo revisions returned by the volume endpoint may nest ContentKeyPacket here:
     @SerialName("Photo") val photo: PhotoRevisionInnerDto? = null,
 )

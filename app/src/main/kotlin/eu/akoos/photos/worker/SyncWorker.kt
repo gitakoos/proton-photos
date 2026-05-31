@@ -1,3 +1,25 @@
+/*
+ * Photos for Proton
+ * Copyright (C) 2026 Akoos <https://akoos.eu>
+ *
+ * Source:  https://github.com/gitakoos/proton-photos
+ * Website: https://photos.akoos.eu
+ *
+ * This file is part of Photos for Proton.
+ *
+ * Photos for Proton is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 3 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 package eu.akoos.photos.worker
 
 import android.app.NotificationChannel
@@ -119,11 +141,8 @@ class SyncWorker @AssistedInject constructor(
             runCatching {
                 NotificationManagerCompat.from(context).cancel(NOTIFICATION_ID)
             }
-            // Content-URI trigger is a OneTime work item that fires ONCE and then disappears.
-            // Re-arm it from finally so the next MediaStore change wakes us again — without
-            // this the OS-level watcher is silently lost after the first fire and the user
-            // has to take a new photo to trigger the gallery's in-app observer (the exact
-            // "I unlocked but nothing uploaded" symptom users reported).
+            // Content-URI trigger is OneTime; re-arm from finally so it keeps firing
+            // after each capture.
             runCatching {
                 val wifiOnly = context.settingsDataStore.data.first()[SettingsKeys.SYNC_WIFI_ONLY] != false
                 scheduleContentObserver(context, wifiOnly)
@@ -170,6 +189,10 @@ class SyncWorker @AssistedInject constructor(
                 Log.w(TAG, "upload IO error — will retry", e)
                 uploadFailed = true
             } catch (e: Exception) {
+                // CancellationException must propagate so structured concurrency cancels the
+                // surrounding coroutineScope correctly; downgrading it to "upload failed"
+                // would swallow the cancel and keep the worker running past its budget.
+                if (e is kotlinx.coroutines.CancellationException) throw e
                 Log.e(TAG, "upload failed — sync verdict downgraded", e)
                 uploadFailed = true
             }
@@ -211,7 +234,7 @@ class SyncWorker @AssistedInject constructor(
         val cancelLabel = context.getString(R.string.sync_worker_notification_cancel)
 
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.stat_sys_upload)
+            .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(title)
             .setContentText(content)
             // Indeterminate when no batch is in flight yet (total == 0); determinate progress
@@ -279,7 +302,18 @@ class SyncWorker @AssistedInject constructor(
             val networkType = if (wifiOnly) NetworkType.UNMETERED else NetworkType.CONNECTED
             val safeInterval = intervalMinutes.coerceAtLeast(MIN_INTERVAL_MINUTES)
             val request = PeriodicWorkRequestBuilder<SyncWorker>(safeInterval, TimeUnit.MINUTES)
-                .setConstraints(Constraints.Builder().setRequiredNetworkType(networkType).build())
+                // batteryNotLow gates the periodic sync away from running while the
+                // device is in the OS's "low battery" state (~15 %). Aligns with the
+                // other periodic workers (FreeUpSpace, CachePrune) which already had
+                // it. A user can still trigger a manual Sync now from Settings —
+                // that uses runNow() below, which deliberately omits this constraint
+                // because the user explicitly asked for it.
+                .setConstraints(
+                    Constraints.Builder()
+                        .setRequiredNetworkType(networkType)
+                        .setRequiresBatteryNotLow(true)
+                        .build()
+                )
                 .addTag(TAG)
                 .build()
             // UPDATE (not KEEP) is essential when the user toggles the Wi-Fi-only setting:

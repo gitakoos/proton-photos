@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Notification small icon for Proton Photos.
+    Monochrome (white-on-transparent) so the Android system can tint it for the
+    status bar. A cloud silhouette with an upward arrow communicates the
+    "uploading to backup" intent at a glance — readable down to ~14dp in the
+    status bar, brand-neutral enough to also work as the foreground-service
+    indicator while the gallery watcher is running.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+
+    <!--
+        Cloud + upload arrow as a single filled path. The arrow is "cut out" of
+        the cloud body via even-odd fill so the system tints the whole glyph
+        with one alpha channel pass.
+
+        Cloud outer outline (clockwise):
+          start at left tail (4, 18), arc up over the left lobe, dip into the
+          notch, arc over the right lobe, arc back along the bottom to close.
+
+        Arrow (cut-out, counter-clockwise winding):
+          centered shaft from (10.5, 18) up to (10.5, 13), chevron head
+          spanning (8, 13) → (12, 9) → (16, 13), chevron base (13.5, 13)
+          back down to (13.5, 18), close.
+    -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M7.5,18 A4.5,4.5 0 0 1 7.9,9.05 A6,6 0 0 1 19.6,10.6 A4,4 0 0 1 19,18.5 L7.5,18 Z M10.5,18 L10.5,13 L8,13 L12,9 L16,13 L13.5,13 L13.5,18 Z" />
+
+</vector>

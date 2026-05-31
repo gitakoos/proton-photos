@@ -88,10 +88,19 @@
 -keepclassmembers class kotlinx.coroutines.** { volatile <fields>; }
 -dontwarn kotlinx.coroutines.flow.**
 
-# ── Drop verbose logging in release builds ───────────────────────────────
-# Log.v / Log.d calls become no-ops. Log.w / Log.e stay so production crashes
-# still surface useful info. Don't touch println — already gone via tree-shake.
+# ── Strip ALL android.util.Log calls in release ──────────────────────────
+# Privacy hardening: the upload + download + reconcile pipelines emit plaintext
+# filenames, filesystem paths, Drive linkIds, user signer emails, and short
+# prefixes of encrypted key material at Log.d/i/w/e level. Stripping every
+# Log call in release means an attacker with `adb logcat` access on an unlocked
+# device sees nothing about the user's photos, account, or Drive layout.
+# Debug builds keep all logs for development.
 -assumenosideeffects class android.util.Log {
     public static *** v(...);
     public static *** d(...);
+    public static *** i(...);
+    public static *** w(...);
+    public static *** e(...);
+    public static *** wtf(...);
+    public static *** println(...);
 }

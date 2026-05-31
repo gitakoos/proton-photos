@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Empty allowlist - blocks the Android 12+ device-to-device transfer and
+    cloud-backup paths from copying anything app-private. Pairs with
+    allowBackup="false" which covers the pre-12 Auto Backup path. The encrypted
+    Room DB holding refresh tokens, the DataStore with sync prefs, and any
+    cache content stay on the original device.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="root" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="external" />
+        <exclude domain="file" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="external" />
+        <exclude domain="file" />
+    </device-transfer>
+</data-extraction-rules>

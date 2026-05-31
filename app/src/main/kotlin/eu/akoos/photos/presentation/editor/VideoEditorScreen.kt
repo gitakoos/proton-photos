@@ -1,3 +1,27 @@
+/*
+ * Photos for Proton
+ * Copyright (C) 2026 Akoos <https://akoos.eu>
+ *
+ * Source:  https://github.com/gitakoos/proton-photos
+ * Website: https://photos.akoos.eu
+ *
+ * This file is part of Photos for Proton.
+ *
+ * Photos for Proton is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 3 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
+@file:androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+
 package eu.akoos.photos.presentation.editor
 
 import android.graphics.Bitmap
@@ -13,6 +37,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -24,12 +49,14 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.border
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import eu.akoos.photos.presentation.theme.PillBg
+import eu.akoos.photos.presentation.theme.PillBgOpaque
 import eu.akoos.photos.presentation.theme.PillBorder
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -44,7 +71,6 @@ import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.filled.Crop
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Restore
-import androidx.compose.material.icons.filled.SaveAlt
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -58,6 +84,10 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.foundation.layout.requiredHeight
+import androidx.compose.foundation.layout.requiredWidth
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -74,6 +104,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -85,6 +116,9 @@ import androidx.media3.common.MediaItem
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import eu.akoos.photos.R
+import eu.akoos.photos.presentation.common.ConfirmDialog
+import eu.akoos.photos.presentation.common.ErrorPopup
+import eu.akoos.photos.presentation.editor.components.SaveOptionRow
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.Bg0
 import eu.akoos.photos.presentation.theme.FgDim
@@ -93,6 +127,7 @@ import eu.akoos.photos.presentation.theme.FgPrimary
 import eu.akoos.photos.presentation.theme.PanelBg
 import eu.akoos.photos.presentation.theme.PanelChip
 import eu.akoos.photos.presentation.theme.TrackBg
+import eu.akoos.photos.presentation.util.formatVideoTime
 import kotlin.math.max
 import kotlin.math.min
 
@@ -111,9 +146,14 @@ fun VideoEditorScreen(
     localMimeType: String?,
     /** Non-null routes the editor through the cloud flow — VM downloads, edits, re-uploads. */
     cloudPhoto: eu.akoos.photos.domain.entity.CloudPhoto? = null,
-    /** The album linkId to re-attach the re-uploaded edit to (if the cloud video came from
-     *  an album view). Null = sit at the photo timeline root. */
+    /** The album linkId to re-attach the re-uploaded edit to (if the video came from an
+     *  album view). Null = sit at the photo timeline root. */
     sourceAlbumLinkId: String? = null,
+    /** Non-null when the editor was opened on a Synced video (device + cloud). The local
+     *  save path then propagates the edit up to Drive too so the cloud version doesn't
+     *  stay stale. cloudPhoto remains null in this case because the EDIT SOURCE is the
+     *  device file — the cloud counterpart is just a side-effect target. */
+    syncedCloudCounterpart: eu.akoos.photos.domain.entity.CloudPhoto? = null,
     onBack: () -> Unit,
     onSaved: () -> Unit,
     vm: VideoEditorViewModel = hiltViewModel(),
@@ -131,13 +171,29 @@ fun VideoEditorScreen(
         }
     }
 
+    // Inform the VM about the source album so save()'s cloud fan-out re-attaches the new
+    // linkId to the same album the source lived in. Mirrors PhotoEditorScreen's wiring.
+    androidx.compose.runtime.LaunchedEffect(sourceAlbumLinkId) {
+        vm.setSourceAlbumLinkId(sourceAlbumLinkId)
+    }
+    // Inform the VM about the cloud counterpart (Synced case) so save() can propagate the
+    // edit to Drive after the local file is written.
+    androidx.compose.runtime.LaunchedEffect(syncedCloudCounterpart?.linkId) {
+        vm.setCloudCounterpart(syncedCloudCounterpart)
+    }
+
     // Side effects on save completion. LaunchedEffect rather than remember{} so the
     // body runs OUTSIDE composition — calling navController.popBackStack() (via onSaved)
     // during composition leaves the ModalBottomSheet half-dismissed and the user has to
     // re-tap save. Firing the effect after composition lets the sheet animate out as the
     // screen pops normally.
-    androidx.compose.runtime.LaunchedEffect(state.saveResult) {
-        when (val r = state.saveResult) {
+    //
+    // Gate on pendingDeleteIntent: if the VM surfaced an OS delete-consent dialog
+    // (Synced + Overwrite-fallback-Copy case), wait for it to resolve before navigating
+    // so the system prompt isn't built while the screen pops out from under it.
+    androidx.compose.runtime.LaunchedEffect(state.saveResult, state.pendingDeleteIntent) {
+        if (state.pendingDeleteIntent != null) return@LaunchedEffect
+        when (state.saveResult) {
             is VideoSaveResult.Success -> {
                 showSaveSheet = false
                 vm.consumeSaveResult()
@@ -154,18 +210,18 @@ fun VideoEditorScreen(
                 onSaved()
             }
             is VideoSaveResult.Failed -> {
-                // Surface the failure with a toast and dismiss the dialog so the user
-                // isn't stuck in an "endless save dialog" loop. The Failed result is
-                // also rendered inline below the panel for the next entry.
-                if (r.message != "__pending_write_permission__") {
-                    android.widget.Toast.makeText(
-                        context,
-                        "Save failed: ${r.message}",
-                        android.widget.Toast.LENGTH_LONG,
-                    ).show()
-                    showSaveSheet = false
-                    vm.consumeSaveResult()
-                }
+                // Surface a Toast with the error so the user sees WHAT failed — the
+                // previous flow dismissed the sheet (`showSaveSheet = false`) before the
+                // failure message could be rendered, leaving them with no feedback at
+                // all. The failure message also stays in state for the inline label
+                // below the panel; we leave `vm.consumeSaveResult()` deliberately
+                // un-called so the inline error persists until the next save attempt.
+                android.widget.Toast.makeText(
+                    context,
+                    (state.saveResult as VideoSaveResult.Failed).message,
+                    android.widget.Toast.LENGTH_LONG,
+                ).show()
+                showSaveSheet = false
             }
             null -> Unit
         }
@@ -188,16 +244,175 @@ fun VideoEditorScreen(
         )
     }
 
-    // Hoisted ExoPlayer reference so the Trim / Audio slider drags can call seekTo() and
-    // the user sees the frame at the handle position while they fine-tune the in/out
-    // points. Captured into the screen's scope, NOT the VM's — the player belongs to the
-    // composable and is released by VideoPreview's DisposableEffect when leaving.
-    var previewPlayer by remember { mutableStateOf<ExoPlayer?>(null) }
+    // OS consent dialog for deleting the original device file after a Synced + Overwrite
+    // fallback-to-Copy. The VM surfaces createDeleteRequest's PendingIntent; on either
+    // Allow or Deny the system has actioned the choice by the callback, so we just clear
+    // the pending state and let the saveResult Effect proceed.
+    val deletePermissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.StartIntentSenderForResult(),
+    ) { _ -> vm.onDeletePermissionResolved() }
+    androidx.compose.runtime.LaunchedEffect(state.pendingDeleteIntent) {
+        val pi = state.pendingDeleteIntent ?: return@LaunchedEffect
+        deletePermissionLauncher.launch(
+            androidx.activity.result.IntentSenderRequest.Builder(pi.intentSender).build()
+        )
+    }
+
+    // Hoisted ExoPlayer at the SCREEN level so it survives tab swaps. The previous
+    // version owned the player inside VideoPreview's remember(uri); the Crop tab unmounts
+    // VideoPreview to show a static first-frame canvas, which fired the DisposableEffect's
+    // onDispose → player.release(). Coming back to Trim/Rotate/Audio re-created the player
+    // from scratch — the user saw a black surface for a beat and had to tap play again.
+    // Owning the player here keeps it alive across the tab `when` switch; VideoPreview
+    // just attaches its PlayerView to the existing instance.
+    val sourceUri = state.sourceUri
+    val previewPlayer = remember(sourceUri) {
+        if (sourceUri == null) {
+            null
+        } else {
+            ExoPlayer.Builder(context).build().apply {
+                setMediaItem(MediaItem.fromUri(Uri.parse(sourceUri)))
+                prepare()
+                // Start with playWhenReady=true so the renderer immediately decodes and
+                // paints frame 0 to the surface — the listener below pauses on first
+                // STATE_READY, by which point the user sees the still image instead of
+                // a black void. Without this, playWhenReady=false leaves the renderer
+                // idle and the surface stays black until the user taps play.
+                playWhenReady = true
+                repeatMode = ExoPlayer.REPEAT_MODE_ONE
+            }
+        }
+    }
+    androidx.compose.runtime.DisposableEffect(previewPlayer) {
+        onDispose { previewPlayer?.release() }
+    }
+    // Real-time preview gain — without this the volume slider only changes the saved
+    // bytes and the user hears the same playback in the editor regardless of the
+    // value, leading to "the slider does nothing" reports. ExoPlayer.volume accepts
+    // [0..1] which maps 1:1 onto our originalAudioGain field.
+    androidx.compose.runtime.LaunchedEffect(previewPlayer, state.originalAudioGain) {
+        previewPlayer?.volume = state.originalAudioGain.coerceIn(0f, 1f)
+    }
+
+    // Music overlay preview — a separate ExoPlayer for the picked audio file so the
+    // user hears the music alongside the video in the editor (matches what the save
+    // pipeline will mix). Sync is best-effort: play/pause follows the video player and
+    // we seek the overlay to its trim-start whenever the video position jumps via
+    // scrub. Without this the music gain slider was inaudible until after save.
+    val overlayPlayer = remember(state.audioOverlayUri) {
+        val uri = state.audioOverlayUri ?: return@remember null
+        ExoPlayer.Builder(context).build().apply {
+            setMediaItem(MediaItem.fromUri(Uri.parse(uri)))
+            prepare()
+            playWhenReady = false
+            repeatMode = ExoPlayer.REPEAT_MODE_OFF
+        }
+    }
+    androidx.compose.runtime.DisposableEffect(overlayPlayer) {
+        onDispose { overlayPlayer?.release() }
+    }
+    androidx.compose.runtime.LaunchedEffect(overlayPlayer, state.musicAudioGain) {
+        overlayPlayer?.volume = state.musicAudioGain.coerceIn(0f, 1f)
+    }
+    // Follow the video player's play / pause / seek so the two stay in lockstep during
+    // preview. The video player is the timeline source of truth; the overlay just
+    // mirrors. Seek maps video-position → overlay-position via the user's trim offsets:
+    // when the video is at trimStartMs the overlay should be at audioTrimStartMs.
+    androidx.compose.runtime.LaunchedEffect(
+        previewPlayer, overlayPlayer, state.audioTrimStartMs, state.trimStartMs,
+    ) {
+        val pv = previewPlayer ?: return@LaunchedEffect
+        val ov = overlayPlayer ?: return@LaunchedEffect
+        val listener = object : androidx.media3.common.Player.Listener {
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                if (isPlaying) ov.play() else ov.pause()
+            }
+            override fun onPositionDiscontinuity(
+                oldPosition: androidx.media3.common.Player.PositionInfo,
+                newPosition: androidx.media3.common.Player.PositionInfo,
+                reason: Int,
+            ) {
+                if (reason == androidx.media3.common.Player.DISCONTINUITY_REASON_SEEK) {
+                    val videoOffset = (newPosition.positionMs - state.trimStartMs).coerceAtLeast(0L)
+                    ov.seekTo(state.audioTrimStartMs + videoOffset)
+                }
+            }
+        }
+        pv.addListener(listener)
+        // try/finally — the previous `awaitCancellation().also { ... }` block never ran
+        // its cleanup because awaitCancellation throws CancellationException on scope
+        // cancel, which short-circuits the `.also` lambda. The listener then leaked into
+        // the next composition pass and kept observing the dead player.
+        try {
+            kotlinx.coroutines.awaitCancellation()
+        } finally {
+            pv.removeListener(listener)
+        }
+    }
 
     // Save is allowed when we have a source URI to edit — local OR a downloaded
     // cloud file. The cloud branch flips the URI on inside loadCloud once the file
     // lands in cache, so isLoading guards the early window.
     val hasSource = state.sourceUri != null && !state.isLoading
+
+    // Filmstrip thumbnails live at the screen scope so swapping tools (Trim → Crop →
+    // Trim) does NOT throw away the extracted bitmaps and re-extract. Each switch was
+    // previously a 12-frame × ~200 ms MediaMetadataRetriever pass. Hoisting here means
+    // the SnapshotStateList outlives the inner `when (activeTool)` branch swap.
+    val filmstripThumbnails = remember(state.sourceUri, state.durationMs) {
+        androidx.compose.runtime.mutableStateListOf<android.graphics.Bitmap>()
+    }
+    LaunchedEffect(state.sourceUri, state.durationMs) {
+        val uri = state.sourceUri ?: return@LaunchedEffect
+        val durationMs = state.durationMs
+        if (durationMs <= 0L) return@LaunchedEffect
+        filmstripThumbnails.clear()
+        withContext(Dispatchers.IO) {
+            val retriever = MediaMetadataRetriever()
+            runCatching { retriever.setDataSource(context, Uri.parse(uri)) }
+                .onFailure { runCatching { retriever.release() }; return@withContext }
+            val count = 12
+            // 320 px target keeps the 64dp-tall strip crisp on 3x density displays without
+            // burning extra extract time; getScaledFrameAtTime preserves aspect.
+            val targetSize = 320
+            for (i in 0 until count) {
+                val ratio = (i.toFloat() + 0.5f) / count
+                val tUs = (ratio * durationMs * 1000L).toLong()
+                val bmp = runCatching {
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O_MR1) {
+                        retriever.getScaledFrameAtTime(
+                            tUs,
+                            MediaMetadataRetriever.OPTION_CLOSEST_SYNC,
+                            targetSize, targetSize,
+                        )
+                    } else {
+                        val full = retriever.getFrameAtTime(tUs, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                        full?.let { android.graphics.Bitmap.createScaledBitmap(it, targetSize, targetSize, true) }
+                    }
+                }.getOrNull()
+                if (bmp != null) filmstripThumbnails.add(bmp)
+            }
+            runCatching { retriever.release() }
+        }
+    }
+
+    // Unsaved-changes guard: if the user touched anything (trim window, crop, rotation,
+    // audio overlay), the back press / Close button should ask for confirmation so they
+    // don't lose work. Reset state (everything at defaults) → back navigates immediately.
+    val hasUnsavedChanges = state.trimStartMs != 0L ||
+        (state.durationMs > 0L && state.trimEndMs != state.durationMs) ||
+        state.cropRect != null ||
+        state.rotationDegrees != 0 ||
+        state.audioOverlayUri != null
+    var showDiscardDialog by remember { mutableStateOf(false) }
+    val confirmedOnBack: () -> Unit = remember(hasUnsavedChanges, onBack) {
+        {
+            if (hasUnsavedChanges) showDiscardDialog = true else onBack()
+        }
+    }
+    androidx.activity.compose.BackHandler(enabled = hasUnsavedChanges) {
+        showDiscardDialog = true
+    }
 
     Column(
         Modifier.fillMaxSize().background(Bg0).statusBarsPadding(),
@@ -205,7 +420,7 @@ fun VideoEditorScreen(
         VideoTopBar(
             title = state.displayName.ifBlank { "" },
             isSaving = state.isSaving,
-            onBack = onBack,
+            onBack = confirmedOnBack,
             onSave = { if (hasSource) showSaveSheet = true },
         )
 
@@ -219,19 +434,34 @@ fun VideoEditorScreen(
         ) {
             when {
                 state.isLoading -> CircularProgressIndicator(color = Accent)
-                state.errorMessage != null -> Text(state.errorMessage!!, color = FgMute)
-                activeTool == VideoTool.Crop && state.sourceWidth > 0 && state.sourceHeight > 0 ->
-                    CropFrameOverlay(
-                        sourceUri = Uri.parse(state.sourceUri!!),
+                state.errorMessage != null -> {
+                    // Match PhotoEditorScreen: surface load / decode / save errors in
+                    // the unified [ErrorPopup] so the user can copy the failure for
+                    // a bug report. VM has no clearError hook today — the scrim still
+                    // consumes outside-taps, and the existing top-bar Back is the
+                    // explicit recovery path.
+                    ErrorPopup(
+                        title = "Video editor error",
+                        message = state.errorMessage!!,
+                        onDismiss = {},
+                        onCopy = {},
+                    )
+                }
+                activeTool == VideoTool.Crop && state.sourceWidth > 0 && state.sourceHeight > 0 && previewPlayer != null ->
+                    CropOverPlayer(
+                        player = previewPlayer,
                         sourceWidth = state.sourceWidth,
                         sourceHeight = state.sourceHeight,
+                        rotationDegrees = state.rotationDegrees,
                         currentCrop = state.cropRect,
                         onCropChange = { vm.setCropRect(it) },
                     )
-                else -> VideoPreview(
-                    uri = Uri.parse(state.sourceUri!!),
+                else -> if (previewPlayer != null) VideoPreview(
+                    player = previewPlayer,
+                    initialAspect = if (state.sourceWidth > 0 && state.sourceHeight > 0)
+                        state.sourceWidth.toFloat() / state.sourceHeight
+                    else 16f / 9f,
                     rotationDegrees = state.rotationDegrees,
-                    onPlayerReady = { previewPlayer = it },
                 )
             }
         }
@@ -248,35 +478,30 @@ fun VideoEditorScreen(
             }
         }
 
-        // ── Bottom panel ────────────────────────────────────────────────────
+        // ── Bottom area ──────────────────────────────────────────────────────
+        // Independent pill containers floating over Bg0, matching PhotoEditor's
+        // recipe. No outer panel wrapper — each row stands on its own with 8dp
+        // spacing. The tool panel uses its own pill recipes inside; the tab dock
+        // is a single PillBgOpaque capsule with circle icon tabs.
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp))
-                .background(PanelBg)
                 .navigationBarsPadding()
-                .padding(top = 14.dp, bottom = 14.dp),
+                .padding(bottom = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly,
-            ) {
-                VideoTool.entries.forEach { tool ->
-                    VideoToolTab(
-                        tool = tool,
-                        selected = tool == activeTool,
-                        onClick = { activeTool = tool },
-                    )
-                }
-            }
-
-            Spacer(Modifier.height(14.dp))
-
+            // Tool panel — horizontal-padding only, no outer pill. The Trim /
+            // Crop / Rotate / Audio composables render their own pill recipes.
             Box(
                 Modifier.fillMaxWidth().padding(horizontal = 18.dp).wrapContentHeight(),
             ) {
                 when (activeTool) {
-                    VideoTool.Trim -> TrimPanel(state = state, vm = vm, previewPlayer = previewPlayer)
+                    VideoTool.Trim -> TrimPanel(
+                        state = state,
+                        vm = vm,
+                        previewPlayer = previewPlayer,
+                        thumbnails = filmstripThumbnails,
+                    )
                     VideoTool.Crop -> CropPanel(state = state, vm = vm)
                     VideoTool.Rotate -> RotatePanel(state = state, vm = vm)
                     VideoTool.Audio -> AudioPanel(state = state, vm = vm, previewPlayer = previewPlayer)
@@ -289,12 +514,49 @@ fun VideoEditorScreen(
                     text = saveResult.message,
                     color = Color(0xFFFF3B30),
                     fontSize = 13.sp,
-                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp, start = 18.dp, end = 18.dp),
+                    modifier = Modifier.fillMaxWidth().padding(start = 18.dp, end = 18.dp),
                 )
+            }
+
+            // Bottom tab bar — single capsule pill with 44dp circle tabs inside.
+            // Matches PhotoEditor's tab bar + GalleryScreen.BottomDock.
+            Row(
+                modifier = Modifier
+                    .padding(horizontal = 18.dp)
+                    .fillMaxWidth()
+                    .background(PillBgOpaque, RoundedCornerShape(999.dp))
+                    .border(0.5.dp, PillBorder, RoundedCornerShape(999.dp))
+                    .padding(4.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                VideoTool.entries.forEach { tool ->
+                    VideoToolTab(
+                        tool = tool,
+                        selected = tool == activeTool,
+                        onClick = { activeTool = tool },
+                    )
+                }
             }
         }
     }
 
+    if (showDiscardDialog) {
+        ConfirmDialog(
+            title = stringResource(R.string.editor_discard_changes_title),
+            message = stringResource(R.string.editor_discard_changes_message),
+            confirmLabel = stringResource(R.string.editor_discard_changes_confirm),
+            dismissLabel = stringResource(R.string.editor_discard_changes_keep),
+            onConfirm = {
+                showDiscardDialog = false
+                onBack()
+            },
+            onDismiss = { showDiscardDialog = false },
+            destructive = true,
+        )
+    }
+
+    val hasCloudCounterpart by vm.hasCloudCounterpart.collectAsStateWithLifecycle()
     if (showSaveSheet && hasSource) {
         ModalBottomSheet(
             onDismissRequest = { if (!state.isSaving) showSaveSheet = false },
@@ -305,7 +567,9 @@ fun VideoEditorScreen(
             VideoSaveSheet(
                 isSaving = state.isSaving,
                 progress = state.saveProgress,
+                stage = state.saveStage,
                 isCloud = cloudPhoto != null,
+                hasCloudCounterpart = hasCloudCounterpart,
                 onPicked = { mode -> vm.save(mode) },
                 onCancel = { if (!state.isSaving) showSaveSheet = false },
             )
@@ -389,12 +653,15 @@ private fun IconBubble(onClick: () -> Unit, content: @Composable () -> Unit) {
 @Composable
 private fun VideoToolTab(tool: VideoTool, selected: Boolean, onClick: () -> Unit) {
     val label = LocalContext.current.getString(tool.labelRes)
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
+    Box(
         modifier = Modifier
-            .clip(RoundedCornerShape(14.dp))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 6.dp),
+            .size(44.dp)
+            .background(
+                if (selected) Accent.copy(alpha = 0.22f) else Color.Transparent,
+                CircleShape,
+            )
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
     ) {
         Icon(
             imageVector = tool.icon,
@@ -402,66 +669,121 @@ private fun VideoToolTab(tool: VideoTool, selected: Boolean, onClick: () -> Unit
             tint = if (selected) Accent else FgDim,
             modifier = Modifier.size(22.dp),
         )
-        Spacer(Modifier.height(4.dp))
-        Text(
-            label,
-            color = if (selected) Accent else FgDim,
-            fontSize = 11.sp,
-            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-        )
     }
 }
 
 // ─── Video preview (ExoPlayer) ───────────────────────────────────────────────
 
-@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 @Composable
 private fun VideoPreview(
-    uri: Uri,
-    /** Editor-applied rotation in 90° steps; the player view is rotated client-side via
-     *  graphicsLayer so the user sees the effect immediately (the muxer's orientation hint
-     *  applies on save, not in the live preview surface). */
+    /** Owned by the screen (NOT this composable) so it survives tab swaps to/from Crop —
+     *  the previous self-owned remember(uri) released the player on Crop entry and the
+     *  user lost their playback position. */
+    player: ExoPlayer,
+    /** Initial video aspect ratio from the VM. Without this seed, the preview defaults to
+     *  16:9 until ExoPlayer's onVideoSizeChanged fires (~200-500 ms later) — the user sees
+     *  a "video collapsed → expanded" jump on open. The VM already swaps encoded dims by
+     *  the source rotation metadata, so initialAspect matches what the player will report. */
+    initialAspect: Float,
+    /** Editor-applied rotation in 90° steps; the TextureView is rotated client-side via
+     *  graphicsLayer so the user sees the effect immediately (the muxer's orientation
+     *  hint applies on save, not in the live preview). TextureView (not SurfaceView) is
+     *  used so graphicsLayer rotations actually affect the rendered frames — SurfaceView
+     *  renders on its own compositor layer and ignores parent transforms. */
     rotationDegrees: Int = 0,
-    /** Bubbled up to the screen so the trim slider can seek the live preview as the user
-     *  drags handles — without this hand-off the slider just updates state numbers while
-     *  the on-screen frame stays stuck on whatever was playing. */
-    onPlayerReady: (ExoPlayer) -> Unit = {},
 ) {
-    val context = LocalContext.current
-    val player = remember(uri) {
-        ExoPlayer.Builder(context).build().apply {
-            setMediaItem(MediaItem.fromUri(uri))
-            prepare()
-            playWhenReady = false
-            repeatMode = ExoPlayer.REPEAT_MODE_ONE
-        }.also { onPlayerReady(it) }
+    // Track the displayed video aspect ratio. Seed with the VM-provided dims so the
+    // preview's layout is correct from the first frame. ExoPlayer's onVideoSizeChanged
+    // refines once the demuxer reports the post-auto-rotation video size.
+    var videoAspect by remember(player, initialAspect) {
+        androidx.compose.runtime.mutableFloatStateOf(initialAspect.coerceAtLeast(0.01f))
     }
     DisposableEffect(player) {
-        onDispose { player.release() }
-    }
-    AndroidView(
-        factory = { ctx ->
-            PlayerView(ctx).apply {
-                this.player = player
-                // Our trim slider acts as the editor's playhead — the native PlayerView
-                // controls (play/pause overlay + seekbar) just duplicated that and ate
-                // touches that were meant for the crop overlay. The Compose layer below
-                // handles tap-to-pause and trim-scrub explicitly.
-                useController = false
-                setShowBuffering(PlayerView.SHOW_BUFFERING_NEVER)
-                hideController()
-                controllerAutoShow = false
-                setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
-                setKeepContentOnPlayerReset(true)
-                useArtwork = false
-                setDefaultArtwork(null)
+        // The player was created with playWhenReady=true so the renderer paints frame 0
+        // to the surface immediately on STATE_READY (no black void during prepare). We
+        // pause AT that first transition and seek back to 0 — by then frame 0 is already
+        // visible. Subsequent STATE_READY transitions (re-buffer mid-playback) are
+        // ignored so we don't yank the playhead back to start during normal playback.
+        var didFirstPause = false
+        val listener = object : androidx.media3.common.Player.Listener {
+            override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) {
+                if (videoSize.width > 0 && videoSize.height > 0) {
+                    videoAspect = videoSize.width.toFloat() / videoSize.height.toFloat()
+                }
             }
-        },
-        update = { view -> view.player = player },
-        modifier = Modifier
-            .fillMaxSize()
-            .graphicsLayer(rotationZ = rotationDegrees.toFloat()),
-    )
+
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                if (playbackState == androidx.media3.common.Player.STATE_READY && !didFirstPause) {
+                    didFirstPause = true
+                    runCatching {
+                        player.pause()
+                        player.seekTo(0L)
+                    }
+                }
+            }
+        }
+        player.addListener(listener)
+        onDispose { player.removeListener(listener) }
+    }
+
+    val sideways = ((rotationDegrees % 360) + 360) % 360 % 180 != 0
+    val visibleAspect = if (sideways) 1f / videoAspect else videoAspect
+
+    BoxWithConstraints(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center,
+    ) {
+        val containerW = constraints.maxWidth.toFloat()
+        val containerH = constraints.maxHeight.toFloat().coerceAtLeast(1f)
+        val containerAspect = containerW / containerH
+        // Outer box dimensions in dp, sized to fit the POST-rotation aspect inside the
+        // available container. For sideways rotations the inner gets swapped dims so
+        // graphicsLayer's rotation lands its visual footprint exactly on the outer.
+        val (outerWidthDp, outerHeightDp) = with(LocalDensity.current) {
+            if (visibleAspect > containerAspect) {
+                val w = containerW; val h = w / visibleAspect
+                Pair(w.toDp(), h.toDp())
+            } else {
+                val h = containerH; val w = h * visibleAspect
+                Pair(w.toDp(), h.toDp())
+            }
+        }
+        Box(
+            modifier = Modifier.width(outerWidthDp).height(outerHeightDp),
+            contentAlignment = Alignment.Center,
+        ) {
+            val (innerWidthDp, innerHeightDp) = if (sideways) {
+                Pair(outerHeightDp, outerWidthDp)
+            } else {
+                Pair(outerWidthDp, outerHeightDp)
+            }
+            // Inflate PlayerView from XML where surface_type="texture_view" is set —
+            // gives us PlayerView's mature surface lifecycle (the raw-TextureView
+            // experiments dropped frames / failed to attach on some devices, leaving
+            // the play button silently no-op) AND a TextureView backing so Compose's
+            // graphicsLayer rotation propagates to the rendered frames.
+            //
+            // requiredWidth/Height so the inner sizes at PRE-rotation dims even
+            // though the parent's bounds are the POST-rotation footprint — sideways
+            // rotations need the inner to extend past parent edges (narrower-but-
+            // taller or wider-but-shorter) before graphicsLayer pulls the rendered
+            // bbox back inside the footprint.
+            AndroidView(
+                factory = { ctx ->
+                    val view = android.view.LayoutInflater.from(ctx)
+                        .inflate(R.layout.video_editor_player, null) as androidx.media3.ui.PlayerView
+                    view.player = player
+                    view.setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
+                    view
+                },
+                update = { view -> view.player = player },
+                modifier = Modifier
+                    .requiredWidth(innerWidthDp)
+                    .requiredHeight(innerHeightDp)
+                    .graphicsLayer(rotationZ = rotationDegrees.toFloat()),
+            )
+        }
+    }
 }
 
 // ─── Crop overlay ────────────────────────────────────────────────────────────
@@ -475,55 +797,118 @@ private fun VideoPreview(
  * handle while preserving a minimum size. The dark semi-opaque mask paints everything
  * OUTSIDE the crop rect to make the focus clear.
  */
+/**
+ * Crop tab content — the same live ExoPlayer as the other tabs PLUS the crop handle
+ * overlay layered on top. Both the PlayerView and the crop Canvas live inside a single
+ * graphicsLayer-rotated inner box so user rotation propagates to both at once and the
+ * Canvas's pointer events get auto-untransformed by Compose into the unrotated crop
+ * coord space — no manual handle-coord rotation needed.
+ *
+ * Mirrors [VideoPreview]'s outer/inner sizing pattern for the rotated-aspect fit. Crop
+ * math runs in POST-source-rotation coords (srcW × srcH) — same as before; [VideoEditorViewModel.cropInSourcePixels]
+ * still inverts only the source's baked rotation when handing the rect to VideoReencoder.
+ */
 @Composable
-private fun CropFrameOverlay(
-    sourceUri: Uri,
+private fun CropOverPlayer(
+    player: ExoPlayer,
     sourceWidth: Int,
     sourceHeight: Int,
+    rotationDegrees: Int = 0,
     currentCrop: AndroidRect?,
     onCropChange: (AndroidRect) -> Unit,
 ) {
-    val context = LocalContext.current
-    val firstFrame: Bitmap? = remember(sourceUri) {
-        val retriever = MediaMetadataRetriever()
-        val bmp = runCatching {
-            retriever.setDataSource(context, sourceUri)
-            retriever.getFrameAtTime(0L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
-        }.getOrNull()
-        runCatching { retriever.release() }
-        bmp
-    }
-
     val srcW = sourceWidth.coerceAtLeast(1)
     val srcH = sourceHeight.coerceAtLeast(1)
 
-    // Local pending crop — the panel "Apply" button commits to the VM; while the user
-    // is fine-tuning, we keep gestures snappy without hammering the StateFlow.
+    // Local pending crop — drag commits live to the VM, the local copy keeps the
+    // pointer math snappy without round-tripping the StateFlow on every frame.
     var pending by remember(currentCrop, srcW, srcH) {
         mutableStateOf(currentCrop ?: AndroidRect(0, 0, srcW, srcH))
     }
-    LaunchedEffect(pending, currentCrop) {
-        // Re-derive when external state changes (e.g. reset).
+    LaunchedEffect(currentCrop, srcW, srcH) {
         if (currentCrop != null && currentCrop != pending) pending = currentCrop
+        if (currentCrop == null) pending = AndroidRect(0, 0, srcW, srcH)
     }
 
-    var containerSize by remember { mutableStateOf(IntSize.Zero) }
+    val sideways = ((rotationDegrees % 360) + 360) % 360 % 180 != 0
+    val videoAspect = srcW.toFloat() / srcH.toFloat()
+    val visibleAspect = if (sideways) 1f / videoAspect else videoAspect
 
-    Box(
-        modifier = Modifier.fillMaxSize().onSizeChanged { containerSize = it },
+    BoxWithConstraints(
+        modifier = Modifier.fillMaxSize(),
         contentAlignment = Alignment.Center,
     ) {
-        if (firstFrame != null) {
-            Image(
-                bitmap = firstFrame.asImageBitmap(),
-                contentDescription = null,
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Fit,
-            )
+        val containerW = constraints.maxWidth.toFloat()
+        val containerH = constraints.maxHeight.toFloat().coerceAtLeast(1f)
+        val containerAspect = containerW / containerH
+        // Outer fits the POST-user-rotation visible aspect inside the available area.
+        val (outerWidthDp, outerHeightDp) = with(LocalDensity.current) {
+            if (visibleAspect > containerAspect) {
+                val w = containerW; val h = w / visibleAspect
+                Pair(w.toDp(), h.toDp())
+            } else {
+                val h = containerH; val w = h * visibleAspect
+                Pair(w.toDp(), h.toDp())
+            }
         }
-        // Compute the fit-rect of the source frame inside the container. All crop math
-        // happens via this transform so the handles stay anchored to the video frame
-        // even when the container resizes.
+        Box(
+            modifier = Modifier.width(outerWidthDp).height(outerHeightDp),
+            contentAlignment = Alignment.Center,
+        ) {
+            // Inner = pre-rotation aspect. For sideways rotations its layout dims swap
+            // vs the outer, then graphicsLayer pulls the rendered footprint back to the
+            // outer's bounds. Same trick VideoPreview uses.
+            val (innerWidthDp, innerHeightDp) = if (sideways) {
+                Pair(outerHeightDp, outerWidthDp)
+            } else {
+                Pair(outerWidthDp, outerHeightDp)
+            }
+            Box(
+                modifier = Modifier
+                    .requiredWidth(innerWidthDp)
+                    .requiredHeight(innerHeightDp)
+                    .graphicsLayer(rotationZ = rotationDegrees.toFloat()),
+            ) {
+                AndroidView(
+                    factory = { ctx ->
+                        val view = android.view.LayoutInflater.from(ctx)
+                            .inflate(R.layout.video_editor_player, null) as androidx.media3.ui.PlayerView
+                        view.player = player
+                        view.setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
+                        view
+                    },
+                    update = { view -> view.player = player },
+                    modifier = Modifier.fillMaxSize(),
+                )
+                CropHandleCanvas(
+                    srcW = srcW, srcH = srcH,
+                    pending = pending,
+                    onPendingChange = { rect ->
+                        pending = rect
+                        onCropChange(rect)
+                    },
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Just the crop handles + mask, rendered as a Canvas sibling to the player surface.
+ * Lives inside CropOverPlayer's rotated inner box so the same graphicsLayer rotation
+ * applies. Coord math operates in source-rotation pixels (srcW × srcH) — Compose remaps
+ * pointer events through the parent graphicsLayer for us, so we never have to rotate
+ * handle positions by hand.
+ */
+@Composable
+private fun CropHandleCanvas(
+    srcW: Int,
+    srcH: Int,
+    pending: AndroidRect,
+    onPendingChange: (AndroidRect) -> Unit,
+) {
+    var containerSize by remember { mutableStateOf(IntSize.Zero) }
+    Box(modifier = Modifier.fillMaxSize().onSizeChanged { containerSize = it }) {
         val fit = remember(srcW, srcH, containerSize) {
             fitRectFor(srcW.toFloat(), srcH.toFloat(),
                 containerSize.width.toFloat().coerceAtLeast(1f),
@@ -532,11 +917,12 @@ private fun CropFrameOverlay(
 
         val density = LocalDensity.current
         val handleRadiusPx = with(density) { 14.dp.toPx() }
-        // Same widening as the photo crop tool — 28.dp was tighter than a fingertip so
-        // most touches that aimed at the top/bottom edge fell outside the hit-circle and
-        // failed to grab any handle, leaving the user able to drag only inside the rect
-        // (no resize). 56.dp gives a comfortable slop while keeping the marker compact.
-        val touchRadiusPx = with(density) { 56.dp.toPx() }
+        // Tighter than the old 56dp so corners get picked only when the touch sits
+        // close to an edge. The edge-buffer logic in pickClosestHandle does the heavy
+        // lifting — corner candidates only arise when the touch is near TWO adjacent
+        // edges. Touches anywhere else inside the rect translate the rect bodily,
+        // which fixes the "can drag horizontally but not vertically on portrait" bug.
+        val touchRadiusPx = with(density) { 36.dp.toPx() }
 
         val accent = Accent
         Canvas(
@@ -544,11 +930,24 @@ private fun CropFrameOverlay(
                 .fillMaxSize()
                 .pointerInput(srcW, srcH, fit) {
                     // Track which handle is being dragged so a fast move past another
-                    // corner doesn't snap to the wrong one.
+                    // corner doesn't snap to the wrong one. Inside-the-rect drags
+                    // translate the rect; we remember the touch's source-pixel offset
+                    // from the rect's top-left so the translation stays anchored to the
+                    // finger position instead of snapping the corner under it.
                     var grabbedHandle: Handle? = null
+                    var insideOffsetSrcX = 0
+                    var insideOffsetSrcY = 0
                     detectDragGestures(
                         onDragStart = { offset ->
                             grabbedHandle = pickClosestHandle(pending, fit, offset, touchRadiusPx)
+                            if (grabbedHandle == Handle.Inside) {
+                                val srcX = ((offset.x - fit.offsetX) / fit.scale)
+                                    .coerceIn(0f, srcW.toFloat()).toInt()
+                                val srcY = ((offset.y - fit.offsetY) / fit.scale)
+                                    .coerceIn(0f, srcH.toFloat()).toInt()
+                                insideOffsetSrcX = srcX - pending.left
+                                insideOffsetSrcY = srcY - pending.top
+                            }
                         },
                         onDrag = { change, _ ->
                             val h = grabbedHandle ?: return@detectDragGestures
@@ -581,9 +980,20 @@ private fun CropFrameOverlay(
                                     srcX.coerceAtLeast(pending.left + minSize),
                                     srcY.coerceAtLeast(pending.top + minSize),
                                 )
+                                Handle.Inside -> {
+                                    // Bodily translate the rect — preserve W×H, clamp
+                                    // to source bounds so the rect doesn't leave the
+                                    // frame on either axis.
+                                    val w = pending.width()
+                                    val hgt = pending.height()
+                                    val newLeft = (srcX - insideOffsetSrcX)
+                                        .coerceIn(0, srcW - w)
+                                    val newTop = (srcY - insideOffsetSrcY)
+                                        .coerceIn(0, srcH - hgt)
+                                    AndroidRect(newLeft, newTop, newLeft + w, newTop + hgt)
+                                }
                             }
-                            pending = newRect
-                            onCropChange(newRect)
+                            onPendingChange(newRect)
                             change.consume()
                         },
                         onDragEnd = { grabbedHandle = null },
@@ -633,8 +1043,19 @@ private fun CropFrameOverlay(
     }
 }
 
-private enum class Handle { TopLeft, TopRight, BottomLeft, BottomRight }
+private enum class Handle { TopLeft, TopRight, BottomLeft, BottomRight, Inside }
 
+/**
+ * Edge-buffer handle picker. A touch is assigned to a corner ONLY when it sits within a
+ * tight buffer (`edgeBufferPx`) of two adjacent edges of the rect — top+left, top+right,
+ * bottom+left, bottom+right. Touches well inside the rect become Inside (translate).
+ * Touches well outside the rect return null.
+ *
+ * The old "closest corner within touchRadius" heuristic broke on portrait crops because
+ * every touch above the rect's vertical midpoint fell closer to a top corner than the
+ * bottom — claiming the gesture for resize and giving the user the perception that
+ * vertical drags did nothing.
+ */
 private fun pickClosestHandle(
     rect: AndroidRect,
     fit: VideoFit,
@@ -645,22 +1066,28 @@ private fun pickClosestHandle(
     val t = fit.offsetY + rect.top * fit.scale
     val r = fit.offsetX + rect.right * fit.scale
     val b = fit.offsetY + rect.bottom * fit.scale
-    data class Candidate(val handle: Handle, val pos: Offset)
-    val candidates = listOf(
-        Candidate(Handle.TopLeft, Offset(l, t)),
-        Candidate(Handle.TopRight, Offset(r, t)),
-        Candidate(Handle.BottomLeft, Offset(l, b)),
-        Candidate(Handle.BottomRight, Offset(r, b)),
-    )
-    val nearest = candidates.minByOrNull { c ->
-        val dx = c.pos.x - point.x
-        val dy = c.pos.y - point.y
-        dx * dx + dy * dy
-    } ?: return null
-    val dx = nearest.pos.x - point.x
-    val dy = nearest.pos.y - point.y
-    val dist = kotlin.math.sqrt(dx * dx + dy * dy)
-    return if (dist <= touchRadiusPx * 1.5f) nearest.handle else null
+    // Edge buffer is tighter than the slop — corner zone shouldn't gobble the whole
+    // rect on small/portrait crops. 0.45× gives roughly 16dp of corner reach at the
+    // 36dp slop, which is still a comfortable fingertip target.
+    val edgeBufferPx = touchRadiusPx * 0.45f
+    val nearTop = (point.y - t) in -touchRadiusPx..edgeBufferPx
+    val nearBottom = (b - point.y) in -touchRadiusPx..edgeBufferPx
+    val nearLeft = (point.x - l) in -touchRadiusPx..edgeBufferPx
+    val nearRight = (r - point.x) in -touchRadiusPx..edgeBufferPx
+
+    val corner = when {
+        nearTop && nearLeft -> Handle.TopLeft
+        nearTop && nearRight -> Handle.TopRight
+        nearBottom && nearLeft -> Handle.BottomLeft
+        nearBottom && nearRight -> Handle.BottomRight
+        else -> null
+    }
+    if (corner != null) return corner
+
+    // Inside the rect (with a small grace margin) → translate.
+    val insideRect = point.x in (l - touchRadiusPx)..(r + touchRadiusPx) &&
+        point.y in (t - touchRadiusPx)..(b + touchRadiusPx)
+    return if (insideRect) Handle.Inside else null
 }
 
 /**
@@ -680,92 +1107,108 @@ private fun fitRectFor(srcW: Float, srcH: Float, boxW: Float, boxH: Float): Vide
 // ─── Tool panels ─────────────────────────────────────────────────────────────
 
 @Composable
-private fun TrimPanel(state: VideoEditorUiState, vm: VideoEditorViewModel, previewPlayer: ExoPlayer?) {
+private fun TrimPanel(
+    state: VideoEditorUiState,
+    vm: VideoEditorViewModel,
+    previewPlayer: ExoPlayer?,
+    thumbnails: List<android.graphics.Bitmap>,
+) {
     val duration = state.durationMs.coerceAtLeast(1L)
     // Poll the ExoPlayer's currentPosition at ~30 fps so the playhead line on the
     // filmstrip tracks playback smoothly. The remember key includes the player so a new
     // load (URI change) restarts the polling against the fresh instance.
+    //
+    // LaunchedEffect's closure captures `duration` ONCE per key change — if we'd keyed
+    // on the player only, the coerce upper-bound would freeze at the initial duration
+    // (1 L from the coerceAtLeast fallback while state.durationMs is 0 during early
+    // load). That's how the playhead got stuck pinned to x=0: `currentPosition.coerceIn(
+    // 0L, 1L)` is always 0 or 1, no matter how far playback actually advanced. Drop the
+    // coerceIn — the Canvas's `playheadMs / durationMs` already clips into [0, w].
     var playheadMs by remember(previewPlayer) { mutableStateOf(0L) }
     androidx.compose.runtime.LaunchedEffect(previewPlayer) {
         while (true) {
             val p = previewPlayer ?: break
-            playheadMs = p.currentPosition.coerceIn(0L, duration)
+            playheadMs = p.currentPosition
             kotlinx.coroutines.delay(33)
         }
     }
     val sourceUriString = state.sourceUri
     val sourceUri = remember(sourceUriString) { sourceUriString?.let { Uri.parse(it) } }
 
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        // Start / duration / end pills sit ABOVE the filmstrip — start pinned to the left
+        // edge of the strip, end pinned to the right, duration centered. The old layout
+        // put bare labels under the strip which read as detached from the timeline; the
+        // pill row anchors the numbers to the same horizontal extents as the trim handles.
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TimePill(formatVideoTime(withTenths = true, ms =state.trimStartMs))
+            TimePill(formatVideoTime(withTenths = true, ms =(state.trimEndMs - state.trimStartMs).coerceAtLeast(0L)), highlight = true)
+            TimePill(formatVideoTime(withTenths = true, ms =state.trimEndMs))
+        }
         VideoFilmstripTrimmer(
             sourceUri = sourceUri,
             durationMs = duration,
             trimStartMs = state.trimStartMs,
             trimEndMs = state.trimEndMs,
             playheadMs = playheadMs,
+            thumbnails = thumbnails,
             onTrimChange = { start, end -> vm.setTrimRange(start, end) },
             onScrubMs = { ms ->
                 playheadMs = ms
                 previewPlayer?.seekTo(ms)
             },
         )
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Column {
-                Text(
-                    LocalContext.current.getString(R.string.video_editor_start),
-                    color = FgMute, fontSize = 11.sp,
-                )
-                Text(
-                    formatMs(state.trimStartMs),
-                    color = FgPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium,
-                )
-            }
-            Column(horizontalAlignment = Alignment.End) {
-                Text(
-                    LocalContext.current.getString(R.string.video_editor_end),
-                    color = FgMute, fontSize = 11.sp,
-                )
-                Text(
-                    formatMs(state.trimEndMs),
-                    color = FgPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium,
-                )
-            }
-        }
+    }
+}
+
+/**
+ * Time-readout pill above the filmstrip. Two-tone treatment: regular start/end pills
+ * use the dim panel-chip background; the centered duration pill uses the accent tint so
+ * the eye lands on the trimmed clip's length at a glance.
+ */
+@Composable
+private fun TimePill(text: String, highlight: Boolean = false) {
+    Box(
+        modifier = Modifier
+            .background(
+                if (highlight) Accent.copy(alpha = 0.22f) else PillBgOpaque,
+                RoundedCornerShape(999.dp),
+            )
+            .border(
+                0.5.dp,
+                if (highlight) Accent.copy(alpha = 0.45f) else PillBorder,
+                RoundedCornerShape(999.dp),
+            )
+            .padding(horizontal = 12.dp, vertical = 5.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = text,
+            color = if (highlight) Accent else FgPrimary,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+        )
     }
 }
 
 @Composable
 private fun CropPanel(state: VideoEditorUiState, vm: VideoEditorViewModel) {
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text(
-            "Drag the corners on the preview to set the crop.",
-            color = FgMute, fontSize = 12.sp,
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        EditorPill(
+            label = LocalContext.current.getString(R.string.video_editor_reset_crop),
+            icon = Icons.Default.Restore,
+            selected = false,
+            onClick = { vm.setCropRect(null) },
+            enabled = state.cropRect != null,
         )
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
-            ActionChip(
-                label = LocalContext.current.getString(R.string.video_editor_reset_crop),
-                icon = Icons.Default.Restore,
-                enabled = state.cropRect != null,
-                onClick = { vm.setCropRect(null) },
-                modifier = Modifier.weight(1f),
-            )
-            ActionChip(
-                label = LocalContext.current.getString(R.string.video_editor_apply_crop),
-                icon = Icons.Default.Check,
-                enabled = state.cropRect != null,
-                onClick = { /* Drag already commits; this chip is a visual confirm. */ },
-                modifier = Modifier.weight(1f),
-            )
-        }
-        if (state.cropRect != null) {
-            Text(
-                "${state.cropRect.width()} × ${state.cropRect.height()} px",
-                color = FgDim, fontSize = 11.sp,
-            )
-        }
     }
 }
 
@@ -774,20 +1217,24 @@ private fun RotatePanel(state: VideoEditorUiState, vm: VideoEditorViewModel) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(
             Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceEvenly,
+            horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            ActionTile(
+            EditorPill(
                 label = LocalContext.current.getString(R.string.video_editor_rotate),
                 icon = Icons.AutoMirrored.Filled.RotateRight,
+                selected = false,
                 onClick = { vm.rotate90Cw() },
             )
+            // Non-clickable degrees readout pill — same shape, no interaction.
+            EditorPill(
+                label = "${state.rotationDegrees}°",
+                icon = null,
+                selected = false,
+                onClick = {},
+                clickable = false,
+            )
         }
-        Text(
-            text = "${state.rotationDegrees}°",
-            color = FgMute, fontSize = 12.sp,
-            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-        )
     }
 }
 
@@ -811,101 +1258,53 @@ private fun AudioPanel(state: VideoEditorUiState, vm: VideoEditorViewModel, prev
         vm.setAudioOverlay(uri.toString(), displayName)
     }
 
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        // ── Row 1: original audio track (always shown, with mute toggle) ──
-        // Sits above the overlay row so the user reads "original" first — matches the
-        // order audio engineers think of mixers in. The toggle's effect at save time is
-        // documented on VideoEditorUiState.muteOriginalAudio.
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Icon(
-                if (state.muteOriginalAudio) Icons.AutoMirrored.Filled.VolumeOff
-                else Icons.AutoMirrored.Filled.VolumeUp,
-                null,
-                tint = if (state.muteOriginalAudio) FgMute else Accent,
-                modifier = Modifier.size(20.dp),
-            )
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    context.getString(R.string.video_editor_audio_original),
-                    color = FgPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium,
-                )
-                Text(
-                    if (state.muteOriginalAudio)
-                        context.getString(R.string.video_editor_audio_original_muted)
-                    else
-                        context.getString(R.string.video_editor_audio_original_on),
-                    color = FgMute, fontSize = 11.sp,
-                )
-            }
-            // Pill toggle — clicking flips the mute state.
-            Row(
-                modifier = Modifier
-                    .height(32.dp)
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(if (state.muteOriginalAudio) Accent.copy(alpha = 0.25f) else PanelChip)
-                    .clickable { vm.setMuteOriginalAudio(!state.muteOriginalAudio) }
-                    .padding(horizontal = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    context.getString(
-                        if (state.muteOriginalAudio) R.string.video_editor_audio_muted
-                        else R.string.video_editor_audio_mute
-                    ),
-                    color = FgPrimary, fontSize = 12.sp,
-                )
-            }
-        }
+    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        // ── Row 1: original audio track, with a volume slider ─────────────────
+        // Row 1: original audio with a 0-100% gain slider. Save pipeline mixes
+        // source + overlay sample-by-sample; gain=0 omits the track.
+        AudioTrackRow(
+            label = context.getString(R.string.video_editor_audio_original),
+            gain = state.originalAudioGain,
+            onGainChange = vm::setOriginalAudioGain,
+            trailing = null,
+        )
 
-        // ── Row 2: overlay music (add when empty, edit + remove when set) ──
+        // ── Row 2: overlay music — pick or show + volume + trim slider ──
         if (state.audioOverlayUri == null) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
-                ActionTile(
+                EditorPill(
                     label = context.getString(R.string.video_editor_add_music),
                     icon = Icons.Default.MusicNote,
+                    selected = false,
                     onClick = { pickAudio.launch("audio/*") },
                 )
             }
-            Text(
-                context.getString(R.string.video_editor_audio_overlay_hint),
-                color = FgMute, fontSize = 12.sp,
-                modifier = Modifier.fillMaxWidth(),
-            )
         } else {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Icon(Icons.Default.MusicNote, null, tint = Accent, modifier = Modifier.size(20.dp))
-                Text(
-                    state.audioOverlayDisplayName ?: "music",
-                    color = FgPrimary, fontSize = 13.sp,
-                    fontWeight = FontWeight.Medium,
-                    modifier = Modifier.weight(1f),
-                    maxLines = 1,
-                )
-                Row(
-                    modifier = Modifier
-                        .height(32.dp)
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(PanelChip)
-                        .clickable { vm.clearAudioOverlay() }
-                        .padding(horizontal = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    Icon(Icons.Default.Close, null, tint = FgPrimary, modifier = Modifier.size(14.dp))
-                    Text(
-                        context.getString(R.string.video_editor_remove_music),
-                        color = FgPrimary, fontSize = 12.sp,
-                    )
-                }
-            }
+            AudioTrackRow(
+                label = state.audioOverlayDisplayName ?: "music",
+                gain = state.musicAudioGain,
+                onGainChange = vm::setMusicAudioGain,
+                trailing = {
+                    // Compact X button — the explicit "Remove music" label was visual
+                    // weight in a row that already names the file; an icon-only target is
+                    // enough and matches the dismiss bubbles elsewhere in the editor.
+                    Box(
+                        modifier = Modifier
+                            .size(28.dp)
+                            .clip(CircleShape)
+                            .background(PanelChip)
+                            .clickable { vm.clearAudioOverlay() },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            Icons.Default.Close,
+                            contentDescription = context.getString(R.string.video_editor_remove_music),
+                            tint = FgPrimary,
+                            modifier = Modifier.size(14.dp),
+                        )
+                    }
+                },
+            )
 
             val totalAudio = state.audioOverlayDurationMs.coerceAtLeast(1L)
             RangeTrimSlider(
@@ -913,10 +1312,6 @@ private fun AudioPanel(state: VideoEditorUiState, vm: VideoEditorViewModel, prev
                 startMs = state.audioTrimStartMs,
                 endMs = state.audioTrimEndMs,
                 onChange = { start, end -> vm.setAudioTrimRange(start, end) },
-                // Audio scrubbing maps the music's own timeline (0..audioDuration) onto
-                // the video's playback head — for now scrub to the video's trim start
-                // plus the audio offset so the user hears the slice they're picking in
-                // context of where it lands in the final clip.
                 onScrubMs = { audioMs ->
                     val videoOffset = state.trimStartMs + (audioMs - state.audioTrimStartMs).coerceAtLeast(0L)
                     previewPlayer?.seekTo(videoOffset.coerceIn(0L, state.durationMs))
@@ -929,17 +1324,71 @@ private fun AudioPanel(state: VideoEditorUiState, vm: VideoEditorViewModel, prev
                 Column {
                     Text(context.getString(R.string.video_editor_music_start),
                         color = FgMute, fontSize = 11.sp)
-                    Text(formatMs(state.audioTrimStartMs),
+                    Text(formatVideoTime(withTenths = true, ms =state.audioTrimStartMs),
                         color = FgPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
                 }
                 Column(horizontalAlignment = Alignment.End) {
                     Text(context.getString(R.string.video_editor_music_end),
                         color = FgMute, fontSize = 11.sp)
-                    Text(formatMs(state.audioTrimEndMs),
+                    Text(formatVideoTime(withTenths = true, ms =state.audioTrimEndMs),
                         color = FgPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
                 }
             }
         }
+    }
+}
+
+/**
+ * Single row of the audio panel: speaker icon, label, gain slider, current percent, and
+ * an optional trailing slot (used for the "Remove music" pill on the overlay row).
+ * Mute and full are the natural endpoints of the slider — at 0 the icon dims and the
+ * pipeline drops that track from the mix.
+ */
+@Composable
+private fun AudioTrackRow(
+    label: String,
+    gain: Float,
+    onGainChange: (Float) -> Unit,
+    trailing: (@Composable () -> Unit)?,
+) {
+    val muted = gain <= 0.001f
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Icon(
+                if (muted) Icons.AutoMirrored.Filled.VolumeOff
+                else Icons.AutoMirrored.Filled.VolumeUp,
+                null,
+                tint = if (muted) FgMute else Accent,
+                modifier = Modifier.size(20.dp),
+            )
+            Text(
+                label,
+                color = FgPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium,
+                modifier = Modifier.weight(1f),
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            )
+            Text(
+                "${(gain * 100f).toInt()}%",
+                color = if (muted) FgMute else FgPrimary,
+                fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+            )
+            if (trailing != null) trailing()
+        }
+        androidx.compose.material3.Slider(
+            value = gain,
+            onValueChange = onGainChange,
+            valueRange = 0f..1f,
+            colors = androidx.compose.material3.SliderDefaults.colors(
+                thumbColor = Accent,
+                activeTrackColor = Accent,
+                inactiveTrackColor = PanelChip,
+            ),
+        )
     }
 }
 
@@ -1156,10 +1605,13 @@ private fun VideoFilmstripTrimmer(
     trimStartMs: Long,
     trimEndMs: Long,
     playheadMs: Long,
+    /** Hoisted at the screen scope; this composable just renders. Hoisting prevents the
+     *  strip from resetting on a tab-switch round trip since the extraction state no longer
+     *  dies with this composable. */
+    thumbnails: List<android.graphics.Bitmap>,
     onTrimChange: (start: Long, end: Long) -> Unit,
     onScrubMs: (Long) -> Unit,
 ) {
-    val context = LocalContext.current
     val density = LocalDensity.current
     val handleWidthPx = with(density) { 14.dp.toPx() }
     // Generous hit-slop around each trim bar — 48dp is the platform minimum touch target
@@ -1169,50 +1621,25 @@ private fun VideoFilmstripTrimmer(
     val touchSlopPx = with(density) { 48.dp.toPx() }
     val stripHeight = 64.dp
 
-    // Frame thumbnail extraction. Runs once per source — keeps the strip stable while
-    // the user fine-tunes the trim window. 12 evenly-spaced frames balances detail with
-    // extraction cost on mid-range devices.
-    var thumbnails by remember(sourceUri) { mutableStateOf<List<android.graphics.Bitmap>>(emptyList()) }
-    androidx.compose.runtime.LaunchedEffect(sourceUri, durationMs) {
-        if (sourceUri == null || durationMs <= 0L) return@LaunchedEffect
-        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-            val retriever = MediaMetadataRetriever()
-            val frames = mutableListOf<android.graphics.Bitmap>()
-            runCatching { retriever.setDataSource(context, sourceUri) }
-                .onFailure { runCatching { retriever.release() }; return@withContext }
-            val count = 12
-            for (i in 0 until count) {
-                // Sample at the middle of each segment so the first/last frames aren't
-                // black (some clips have a fade-in that yields an empty preview).
-                val ratio = (i.toFloat() + 0.5f) / count
-                val tUs = (ratio * durationMs * 1000L).toLong()
-                val bmp = runCatching {
-                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O_MR1) {
-                        retriever.getScaledFrameAtTime(
-                            tUs,
-                            MediaMetadataRetriever.OPTION_CLOSEST_SYNC,
-                            96, 96,
-                        )
-                    } else {
-                        // Android 8.0 path — getScaledFrameAtTime arrived in API 27. Pull the
-                        // full frame and downscale to 96×96 ourselves so the filmstrip still
-                        // populates instead of falling through to a blank row.
-                        val full = retriever.getFrameAtTime(tUs, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
-                        full?.let { android.graphics.Bitmap.createScaledBitmap(it, 96, 96, true) }
-                    }
-                }.getOrNull()
-                if (bmp != null) frames += bmp
-            }
-            runCatching { retriever.release() }
-            thumbnails = frames
-        }
-    }
+    // Thumbnails are passed in from the screen scope so they survive activeTool tab
+    // swaps — extracting them inside this composable means switching to Crop/Rotate/
+    // Audio and back re-runs the 12-frame MediaMetadataRetriever pass every time.
 
     var grabbed by remember { mutableStateOf<Grabbed?>(null) }
     var canvasWidthPx by remember { mutableFloatStateOf(1f) }
     // Capture composable colors out of the Canvas draw scope (Canvas's body is *not*
     // composable, so we can't read Accent there).
     val accentColor = Accent
+
+    // pointerInput's lambda captures its closure ONCE per key change — recompositions
+    // don't refresh the captured props. Without these State proxies the gesture handlers
+    // see stale `trimStartMs`/`trimEndMs` after the first drag: the user trims start to
+    // 5 s, releases, then taps the bar to drag it back — but the picker still thinks
+    // start is at x=0 (stale) and routes the touch to Playhead instead of Start. Using
+    // a State<Long> reference whose `value` is always the latest snapshot fixes that
+    // without re-keying the gesture loop (which would restart drags mid-motion).
+    val latestTrimStart by androidx.compose.runtime.rememberUpdatedState(trimStartMs)
+    val latestTrimEnd by androidx.compose.runtime.rememberUpdatedState(trimEndMs)
 
     Box(
         modifier = Modifier
@@ -1221,18 +1648,22 @@ private fun VideoFilmstripTrimmer(
             .clip(RoundedCornerShape(10.dp))
             .background(TrackBg)
             .onSizeChanged { canvasWidthPx = it.width.toFloat().coerceAtLeast(1f) }
-            .pointerInput(durationMs, trimStartMs, trimEndMs) {
+            // Key on `durationMs` only — including the trim values here would restart
+            // the gesture pipeline on every drag step (the user types a tiny drag →
+            // onTrimChange fires → trim* updates → pointerInput resets → user has to
+            // release-and-regrab to keep dragging). The handlers read latestTrimStart /
+            // latestTrimEnd via rememberUpdatedState so they always see fresh values
+            // without restarting the gesture loop.
+            .pointerInput(durationMs) {
                 detectDragGestures(
                     onDragStart = { offset ->
                         val w = size.width.toFloat().coerceAtLeast(1f)
-                        val startX = trimStartMs.toFloat() / durationMs * w
-                        val endX = trimEndMs.toFloat() / durationMs * w
+                        val startX = latestTrimStart.toFloat() / durationMs * w
+                        val endX = latestTrimEnd.toFloat() / durationMs * w
                         val dStart = kotlin.math.abs(offset.x - startX)
                         val dEnd = kotlin.math.abs(offset.x - endX)
-                        // Edge bars always win when the touch is anywhere within their
-                        // hit-slop, including from inside the active range — this fixes
-                        // the "I'm trying to drag the bar but it scrubs instead" feel.
-                        // Whichever bar is closer takes the gesture.
+                        // Edge bars win inside their hit-slop even from within the active
+                        // range. Whichever bar is closer takes the gesture.
                         grabbed = when {
                             dStart < touchSlopPx && dStart <= dEnd -> Grabbed.Start
                             dEnd < touchSlopPx && dEnd < dStart -> Grabbed.End
@@ -1243,7 +1674,7 @@ private fun VideoFilmstripTrimmer(
                         }
                         if (grabbed == Grabbed.Playhead) {
                             val pct = (offset.x / w).coerceIn(0f, 1f)
-                            onScrubMs((pct * durationMs).toLong().coerceIn(trimStartMs, trimEndMs))
+                            onScrubMs((pct * durationMs).toLong().coerceIn(latestTrimStart, latestTrimEnd))
                         }
                     },
                     onDrag = { change, _ ->
@@ -1251,9 +1682,9 @@ private fun VideoFilmstripTrimmer(
                         val pct = (change.position.x / w).coerceIn(0f, 1f)
                         val ms = (pct * durationMs).toLong()
                         when (grabbed) {
-                            Grabbed.Start -> onTrimChange(ms, trimEndMs)
-                            Grabbed.End -> onTrimChange(trimStartMs, ms)
-                            Grabbed.Playhead -> onScrubMs(ms.coerceIn(trimStartMs, trimEndMs))
+                            Grabbed.Start -> onTrimChange(ms, latestTrimEnd)
+                            Grabbed.End -> onTrimChange(latestTrimStart, ms)
+                            Grabbed.Playhead -> onScrubMs(ms.coerceIn(latestTrimStart, latestTrimEnd))
                             null -> Unit
                         }
                         change.consume()
@@ -1263,17 +1694,25 @@ private fun VideoFilmstripTrimmer(
                 )
             },
     ) {
-        // Filmstrip — divide the available width into N slots and draw each thumbnail
-        // into its slot. A small horizontal padding gap mirrors a real-world editor.
-        if (thumbnails.isNotEmpty()) {
-            Row(modifier = Modifier.fillMaxSize()) {
-                thumbnails.forEach { bmp ->
+        // Filmstrip — always render the full set of 12 slots; arriving thumbnails fill
+        // their slot, the rest stay as track-coloured placeholders. The earlier "render
+        // nothing until any frame arrives, then re-layout as each frame is appended"
+        // produced the chunky feel — slot widths jumped from full-width-of-one to
+        // half-width-each as the second frame landed, then thirds, etc. With a fixed
+        // 12-slot row the layout never moves; only the bitmap inside each slot pops in.
+        val slotCount = 12
+        Row(modifier = Modifier.fillMaxSize()) {
+            for (i in 0 until slotCount) {
+                val bmp = thumbnails.getOrNull(i)
+                if (bmp != null) {
                     androidx.compose.foundation.Image(
                         bitmap = bmp.asImageBitmap(),
                         contentDescription = null,
                         modifier = Modifier.weight(1f).fillMaxSize(),
                         contentScale = ContentScale.Crop,
                     )
+                } else {
+                    Box(modifier = Modifier.weight(1f).fillMaxSize().background(TrackBg))
                 }
             }
         }
@@ -1308,58 +1747,21 @@ private fun VideoFilmstripTrimmer(
 
 private enum class Grabbed { Start, End, Playhead }
 
-// ─── Reusable bits ───────────────────────────────────────────────────────────
-
-@Composable
-private fun ActionTile(label: String, icon: ImageVector, onClick: () -> Unit) {
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier
-            .clip(RoundedCornerShape(14.dp))
-            .clickable(onClick = onClick)
-            .background(PanelChip)
-            .padding(horizontal = 20.dp, vertical = 14.dp),
-    ) {
-        Icon(icon, label, tint = FgPrimary, modifier = Modifier.size(26.dp))
-        Spacer(Modifier.height(6.dp))
-        Text(label, color = FgPrimary, fontSize = 12.sp)
-    }
-}
-
-@Composable
-private fun ActionChip(
-    label: String,
-    icon: ImageVector,
-    enabled: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Row(
-        modifier = modifier
-            .height(44.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .background(PanelChip)
-            .clickable(enabled = enabled, onClick = onClick)
-            .padding(horizontal = 14.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Icon(icon, null, tint = if (enabled) FgPrimary else FgDim.copy(alpha = 0.4f),
-            modifier = Modifier.size(18.dp))
-        Text(label, color = if (enabled) FgPrimary else FgDim.copy(alpha = 0.4f), fontSize = 13.sp)
-    }
-}
-
 // ─── Save sheet ──────────────────────────────────────────────────────────────
 
 @Composable
 private fun VideoSaveSheet(
     isSaving: Boolean,
     progress: Float?,
+    stage: VideoSaveStage,
     isCloud: Boolean,
+    hasCloudCounterpart: Boolean,
     onPicked: (VideoSaveMode) -> Unit,
     onCancel: () -> Unit,
 ) {
+    // Synced video = device-source + cloud counterpart. The edit fans out to both sides
+    // on save, so the subtitle mentions both instead of the device-only phrasing.
+    val isSynced = !isCloud && hasCloudCounterpart
     Column(
         Modifier.fillMaxWidth().padding(horizontal = 22.dp).padding(bottom = 24.dp),
     ) {
@@ -1371,17 +1773,29 @@ private fun VideoSaveSheet(
         Text(
             // Cloud edits upload back to Proton Drive; local edits save to the device's
             // MediaStore. The subtitle here orients the user before they pick a mode.
-            if (isCloud) "Choose how the edit lands back in your Proton Drive."
-            else "Choose how to save the edited video to your device.",
+            when {
+                isCloud  -> "Choose how the edit lands back in your Proton Drive."
+                isSynced -> "Choose how to save the edited video. Backed-up originals stay in Drive."
+                else     -> "Choose how to save the edited video to your device."
+            },
             color = FgMute, fontSize = 13.sp,
         )
         Spacer(Modifier.height(18.dp))
 
-        // While saving with a re-encode we hide the option rows behind a progress bar so
-        // the user can't accidentally pick the other mode mid-encode.
-        if (isSaving && progress != null) {
+        // Both Encoding and Uploading phases get a progress bar now — the upload leg has
+        // per-block byte progress wired through from PhotoUploadService so the sheet shows
+        // a live count instead of a silent 100 % sit during the (sometimes long) cloud
+        // upload. Two sequential 0→100 % runs is clearer than mystery latency.
+        if (isSaving && progress != null && stage != VideoSaveStage.Idle) {
             Text(
-                LocalContext.current.getString(R.string.video_editor_reencoding),
+                LocalContext.current.getString(
+                    when (stage) {
+                        VideoSaveStage.Encoding -> R.string.video_editor_reencoding
+                        VideoSaveStage.Encrypting -> R.string.video_editor_encrypting
+                        VideoSaveStage.Uploading -> R.string.video_editor_uploading
+                        VideoSaveStage.Idle -> R.string.video_editor_reencoding // never reached
+                    }
+                ),
                 color = FgPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium,
             )
             Spacer(Modifier.height(10.dp))
@@ -1397,14 +1811,22 @@ private fun VideoSaveSheet(
                 color = FgMute, fontSize = 12.sp,
             )
         } else if (isSaving) {
-            // Stream-copy path — fast enough that a spinner suffices.
+            // Either pure stream-copy save (no progress reported) or the cloud upload
+            // leg after a re-encode completed. Show a spinner with a context-aware
+            // label so the user always sees what's currently happening.
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 CircularProgressIndicator(color = Accent, strokeWidth = 2.dp, modifier = Modifier.size(18.dp))
-                Text("Saving…", color = FgPrimary, fontSize = 14.sp)
+                Text(
+                    when (stage) {
+                        VideoSaveStage.Uploading -> "Uploading to Drive…"
+                        else -> "Saving…"
+                    },
+                    color = FgPrimary, fontSize = 14.sp,
+                )
             }
         } else {
             // Per user request: videos only support Save-as-Copy. The Overwrite path
@@ -1416,10 +1838,11 @@ private fun VideoSaveSheet(
             SaveOptionRow(
                 icon = Icons.Default.ContentCopy,
                 title = LocalContext.current.getString(R.string.video_editor_save_copy),
-                subtitle = if (isCloud)
-                    "Uploads as a new file in Proton Drive — keeps the original."
-                else
-                    "Creates a new file in Pictures/Proton Photos.",
+                subtitle = when {
+                    isCloud  -> "Uploads as a new file in Proton Drive — keeps the original."
+                    isSynced -> "Creates a new file in Pictures/Proton Photos AND uploads a paired copy to Drive."
+                    else     -> "Creates a new file in Pictures/Proton Photos."
+                },
                 onClick = { onPicked(VideoSaveMode.Copy) },
             )
         }
@@ -1444,45 +1867,54 @@ private fun VideoSaveSheet(
     }
 }
 
+// ─── Unified editor pill ─────────────────────────────────────────────────────
+
+/**
+ * Single horizontal pill — 38dp tall, icon + text in one row, optional accent fill when
+ * selected. The canonical pill shape across every video editor panel. Pass
+ * `clickable = false` for read-only readouts (e.g. the degrees indicator next to the
+ * Rotate button) so the pill stays decorative.
+ */
 @Composable
-private fun SaveOptionRow(
-    icon: ImageVector,
-    title: String,
-    subtitle: String,
+private fun EditorPill(
+    label: String,
+    icon: ImageVector?,
+    selected: Boolean,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    clickable: Boolean = true,
 ) {
+    // Palette-aware background — `PillBg` follows the user's theme tokens; the previous
+    // `PanelChip` was a fixed dark color that ignored light theme / non-default palettes.
+    val bg = if (selected) Accent.copy(alpha = 0.18f) else PillBg
+    val fg = when {
+        !enabled -> FgDim.copy(alpha = 0.4f)
+        selected -> Accent
+        else -> FgPrimary
+    }
+    val borderMod = if (!selected) {
+        Modifier.border(0.5.dp, PillBorder, RoundedCornerShape(999.dp))
+    } else {
+        Modifier
+    }
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(PanelChip)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 14.dp),
+        modifier = modifier
+            .height(38.dp)
+            .background(bg, RoundedCornerShape(999.dp))
+            .then(borderMod)
+            .then(
+                if (clickable) Modifier.clickable(enabled = enabled, onClick = onClick)
+                else Modifier
+            )
+            .padding(horizontal = 14.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        Box(
-            modifier = Modifier
-                .size(38.dp)
-                .clip(CircleShape)
-                .background(Accent.copy(alpha = 0.20f)),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(icon, null, tint = Accent, modifier = Modifier.size(20.dp))
+        if (icon != null) {
+            Icon(icon, null, tint = fg, modifier = Modifier.size(16.dp))
         }
-        Column(Modifier.weight(1f)) {
-            Text(title, color = FgPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-            Text(subtitle, color = FgMute, fontSize = 12.sp)
-        }
+        Text(label, color = fg, fontSize = 13.sp, fontWeight = FontWeight.Medium)
     }
 }
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
-private fun formatMs(ms: Long): String {
-    val total = (ms / 1000).coerceAtLeast(0)
-    val m = total / 60
-    val s = total % 60
-    val tenths = (ms % 1000) / 100
-    return "%d:%02d.%d".format(m, s, tenths)
-}

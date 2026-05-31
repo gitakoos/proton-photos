@@ -1,7 +1,28 @@
+/*
+ * Photos for Proton
+ * Copyright (C) 2026 Akoos <https://akoos.eu>
+ *
+ * Source:  https://github.com/gitakoos/proton-photos
+ * Website: https://photos.akoos.eu
+ *
+ * This file is part of Photos for Proton.
+ *
+ * Photos for Proton is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 3 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 package eu.akoos.photos.data.api
 
 import me.proton.core.network.data.protonApi.BaseRetrofitApi
-import me.proton.core.network.domain.TimeoutOverride
 import eu.akoos.photos.data.api.dto.BaseResponse
 import eu.akoos.photos.data.api.dto.CommitRevisionRequest
 import eu.akoos.photos.data.api.dto.CommitRevisionV2Request
@@ -29,14 +50,11 @@ import eu.akoos.photos.data.api.dto.CreatePhotoRequest
 import eu.akoos.photos.data.api.dto.CreatePhotoResponse
 import eu.akoos.photos.data.api.dto.CreatePhotosVolumeRequest
 import eu.akoos.photos.data.api.dto.CreatePhotosVolumeResponse
-import eu.akoos.photos.data.api.dto.PhotoTrashResponse
 import eu.akoos.photos.data.api.dto.VolumeTrashResponse
 import eu.akoos.photos.data.api.dto.PhotosShareResponse
-import eu.akoos.photos.data.api.dto.CreateLinkShareResponse
 import eu.akoos.photos.data.api.dto.CreateShareUrlRequest
 import eu.akoos.photos.data.api.dto.CreateShareUrlResponse
 import eu.akoos.photos.data.api.dto.ShareUrlsResponse
-import eu.akoos.photos.data.api.dto.ShareInvitationRequest
 import eu.akoos.photos.data.api.dto.FullLinkResponse
 import eu.akoos.photos.data.api.dto.ShareInvitationsResponse
 import eu.akoos.photos.data.api.dto.SharedWithMeResponse
@@ -50,7 +68,6 @@ import eu.akoos.photos.data.api.dto.RevisionResponse
 import eu.akoos.photos.data.api.dto.VerificationDataResponse
 import eu.akoos.photos.data.api.dto.VolumesResponse
 import okhttp3.MultipartBody
-import okhttp3.RequestBody
 import retrofit2.http.Body
 import retrofit2.http.DELETE
 import retrofit2.http.GET

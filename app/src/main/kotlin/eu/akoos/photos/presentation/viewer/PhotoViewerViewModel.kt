@@ -1,3 +1,25 @@
+/*
+ * Photos for Proton
+ * Copyright (C) 2026 Akoos <https://akoos.eu>
+ *
+ * Source:  https://github.com/gitakoos/proton-photos
+ * Website: https://photos.akoos.eu
+ *
+ * This file is part of Photos for Proton.
+ *
+ * Photos for Proton is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 3 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 package eu.akoos.photos.presentation.viewer
 
 import android.content.Context
@@ -50,7 +72,21 @@ class PhotoViewerViewModel @Inject constructor(
     private val hiddenStorage: HiddenStorageManager,
     private val localMediaRepo: LocalMediaRepository,
     private val syncStateRepo: eu.akoos.photos.domain.repository.SyncStateRepository,
+    private val networkObserver: eu.akoos.photos.util.NetworkObserver,
 ) : ViewModel() {
+
+    override fun onCleared() {
+        super.onCleared()
+        // TTL prune for the long-lived fullres cache. Files older than the configured
+        // window are reclaimed only while the network is up — going offline pauses
+        // eviction so cached photos stay viewable until connectivity returns.
+        runCatching {
+            eu.akoos.photos.data.repository.drive.PhotoDownloadService.pruneStaleFullResCache(
+                context = context,
+                networkAvailable = networkObserver.isOnline.value,
+            )
+        }
+    }
 
     sealed class ViewerState {
         /**
@@ -114,6 +150,24 @@ class PhotoViewerViewModel @Inject constructor(
 
     private val _metadata = MutableStateFlow<PhotoMetadata?>(null)
     val metadata: StateFlow<PhotoMetadata?> = _metadata.asStateFlow()
+
+    /** Resolved on-disk size of the currently-loaded cloud full-res blob. The server
+     *  batch API often returns `link.size = null` for video uploads, so [CloudPhoto.sizeBytes]
+     *  is 0 and the details sheet would otherwise show a blank Size row. Once the download
+     *  pipeline finishes, the local `File.length()` is the authoritative byte count; we
+     *  expose it here for the metadata UI fallback. Reset to null on every [loadCloud] /
+     *  [loadLocal] entry so a stale value doesn't leak across swipes. */
+    private val _cloudFullResSize = MutableStateFlow<Long?>(null)
+    val cloudFullResSize: StateFlow<Long?> = _cloudFullResSize.asStateFlow()
+
+    /**
+     * True when the viewer skipped the auto full-res download because the user has the
+     * Wi-Fi-only-for-fullres setting enabled and the device is on a metered network.
+     * The screen uses this to surface a small "Connect to Wi-Fi for full quality" hint
+     * instead of leaving the user staring at a thumbnail with no explanation.
+     */
+    private val _fullResBlockedByMetered = MutableStateFlow(false)
+    val fullResBlockedByMetered: StateFlow<Boolean> = _fullResBlockedByMetered.asStateFlow()
 
     private val _isStrippingMetadata = MutableStateFlow(false)
     val isStrippingMetadata: StateFlow<Boolean> = _isStrippingMetadata.asStateFlow()
@@ -244,7 +298,7 @@ class PhotoViewerViewModel @Inject constructor(
         }
     }
 
-    /** Called after the system trash dialog is confirmed by the user. */
+    /** Called after the system trash dialog returns RESULT_OK. */
     fun onDeletePermissionGranted() {
         val pending = pendingPermissionResult
         pendingPermissionResult = null
@@ -541,8 +595,31 @@ class PhotoViewerViewModel @Inject constructor(
 
     fun resetRenameState() { _renameState.value = RenameState.Idle }
 
-    private fun renameLocal(uri: String, newName: String, replaceOriginal: Boolean) {
+    private suspend fun renameLocal(uri: String, newName: String, replaceOriginal: Boolean) {
         val parsed = android.net.Uri.parse(uri)
+        // Hidden vault rename — the URI is a `file://` path under the app's private
+        // storage, NOT a MediaStore content URI. ContentResolver.update would throw
+        // "Unknown URI" (the user's reported bug). Route to the dedicated hidden-storage
+        // rename which preserves the __<captureMs>__ tag the unhide flow relies on.
+        if (hiddenStorage.isHiddenUri(uri)) {
+            val newUri = hiddenStorage.rename(uri, newName)
+                ?: error("Hidden rename failed (file may already exist with that name)")
+            // Update the DataStore sets so the new URI replaces the old in the hidden
+            // index AND in the optional cloud-id mapping. Without this the gallery would
+            // still know the old URI as "hidden" and the new URI as "not hidden", which
+            // would leak the renamed file back into the main listing.
+            context.settingsDataStore.edit { prefs ->
+                val current = prefs[SettingsKeys.HIDDEN_PHOTO_URIS] ?: emptySet()
+                prefs[SettingsKeys.HIDDEN_PHOTO_URIS] = (current - uri) + newUri
+                val mapping = prefs[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] ?: emptySet()
+                val updatedMapping = mapping.map { entry ->
+                    if (entry.startsWith("$uri|")) "$newUri|${entry.substringAfter('|')}"
+                    else entry
+                }.toSet()
+                prefs[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] = updatedMapping
+            }
+            return
+        }
         if (replaceOriginal) {
             // Q+ MediaStore allows DISPLAY_NAME update directly; the file is renamed in place.
             val values = android.content.ContentValues().apply {
@@ -854,6 +931,11 @@ class PhotoViewerViewModel @Inject constructor(
         val isVideo = photo.mimeType.startsWith("video/")
         val itemKey = photo.linkId
 
+        // Reset the resolved-size fallback so the details sheet doesn't show last item's
+        // size while the new page is still downloading.
+        _cloudFullResSize.value = null
+        _fullResBlockedByMetered.value = false
+
         if (photo.thumbnailUrl != null) {
             // Show thumbnail as placeholder while downloading full resolution.
             // For videos we still show the thumbnail image while downloading.
@@ -865,6 +947,22 @@ class PhotoViewerViewModel @Inject constructor(
         viewModelScope.launch {
             val userId = accountManager.getPrimaryUserId().first() ?: run {
                 if (photo.thumbnailUrl == null) _state.value = ViewerState.Error("Not logged in")
+                return@launch
+            }
+            // Wi-Fi-only-for-fullres gate. When enabled (default) and the device is on a
+            // metered network, hold off the auto-download and let the thumbnail stand in.
+            // Explicit user actions (Save to device, Edit) bypass this gate elsewhere —
+            // those are deliberate and shouldn't be silently blocked.
+            val wifiOnlyFullres = context.settingsDataStore.data
+                .map { it[SettingsKeys.FULLRES_WIFI_ONLY] }
+                .first() != false
+            if (wifiOnlyFullres && !networkObserver.isUnmetered.value) {
+                _fullResBlockedByMetered.value = true
+                _isDownloading.value = false
+                _downloadProgress.value = null
+                if (photo.thumbnailUrl == null && _state.value.itemKey == itemKey) {
+                    _state.value = ViewerState.Error("Connect to Wi-Fi for full quality")
+                }
                 return@launch
             }
             _isDownloading.value = true
@@ -879,6 +977,9 @@ class PhotoViewerViewModel @Inject constructor(
             result.fold(
                 onSuccess = { file ->
                     val fileUri = Uri.fromFile(file)
+                    // Publish the resolved on-disk size so the details sheet can fall back
+                    // to it when CloudPhoto.sizeBytes is 0 (server-side gap for videos).
+                    _cloudFullResSize.value = file.length()
                     // Only commit the full-res state if the user is still on this item — they
                     // may have swiped to another page during the download. Without this guard
                     // the late-arriving full-res blob would overwrite whatever the *new* page

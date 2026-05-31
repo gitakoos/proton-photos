@@ -1,18 +1,37 @@
+/*
+ * Photos for Proton
+ * Copyright (C) 2026 Akoos <https://akoos.eu>
+ *
+ * Source:  https://github.com/gitakoos/proton-photos
+ * Website: https://photos.akoos.eu
+ *
+ * This file is part of Photos for Proton.
+ *
+ * Photos for Proton is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 3 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 package eu.akoos.photos.presentation.albums
 
 import android.net.Uri
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -30,20 +49,18 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.People
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ModalBottomSheet
+import eu.akoos.photos.presentation.common.ConfirmDialog
 import eu.akoos.photos.presentation.theme.ErrorColor
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
-import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -60,7 +77,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
@@ -69,7 +85,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import coil.compose.AsyncImage
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -79,7 +94,6 @@ import androidx.compose.ui.res.stringResource
 import eu.akoos.photos.R
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.AppColors
-import eu.akoos.photos.presentation.theme.Bg2
 import eu.akoos.photos.presentation.theme.FgDim
 import eu.akoos.photos.presentation.theme.FgMute
 import eu.akoos.photos.presentation.theme.FgPrimary
@@ -124,6 +138,11 @@ fun AlbumsScreen(
     var localAlbumSheetFor by remember { mutableStateOf<LocalAlbum?>(null) }
     var localAlbumRenameFor by remember { mutableStateOf<LocalAlbum?>(null) }
     var localAlbumDeleteFor by remember { mutableStateOf<LocalAlbum?>(null) }
+    // Cloud-album long-press surfaces the same Rename + Delete bottom sheet
+    // that local albums get. Holding the in-flight Album object directly so we
+    // can read the current name + linkId without a second lookup.
+    var cloudAlbumSheetFor by remember { mutableStateOf<Album?>(null) }
+    var cloudAlbumRenameFor by remember { mutableStateOf<Album?>(null) }
     var pendingCloudDelete by remember {
         mutableStateOf<LocalAlbumActionResult.DoneWithCloudPending?>(null)
     }
@@ -278,7 +297,7 @@ fun AlbumsScreen(
                                 is AlbumEntry.Cloud -> CloudAlbumCard(
                                     album       = entry.album,
                                     onClick     = { onAlbumClick(entry.album) },
-                                    onLongClick = { albumToDelete = entry.album },
+                                    onLongClick = { cloudAlbumSheetFor = entry.album },
                                 )
                                 is AlbumEntry.Local -> {
                                     val bucketGuardMsg = stringResource(
@@ -311,7 +330,7 @@ fun AlbumsScreen(
                                         // when a local bucket and a cloud album share a name.
                                         onMergedAlbumClick(entry.local, entry.cloud)
                                     },
-                                    onLongClick = { albumToDelete = entry.cloud },
+                                    onLongClick = { cloudAlbumSheetFor = entry.cloud },
                                 )
                             }
                         }
@@ -319,30 +338,24 @@ fun AlbumsScreen(
             }
         }
 
-        SnackbarHost(snackbarHostState, modifier = Modifier.align(Alignment.BottomCenter))
+        eu.akoos.photos.presentation.common.ThemedSnackbarHost(snackbarHostState, modifier = Modifier.align(Alignment.BottomCenter))
     }
 
     // ── Delete Album confirmation dialog ──────────────────────────────────────
+    // AlbumService.deleteAlbum passes deleteAlbumPhotos=0, so only the album container
+    // is removed — the photos themselves stay in Proton Drive. Uses a dedicated string
+    // (not the in-album multi-delete confirmation, which IS destructive) so the copy
+    // accurately describes the container-only delete instead of promising to
+    // "permanently delete the original".
     albumToDelete?.let { album ->
-        AlertDialog(
-            onDismissRequest = { albumToDelete = null },
-            containerColor   = AppColors.current.cardBg,
-            titleContentColor = AppColors.current.fgPrimary,
-            title = { Text("\"${album.name}\"", fontWeight = FontWeight.SemiBold) },
-            // AlbumService.deleteAlbum passes deleteAlbumPhotos=0, so only the album container
-            // is removed — the photos themselves stay in Proton Drive. Uses a dedicated string
-            // (not the in-album multi-delete confirmation, which IS destructive) so the copy
-            // accurately describes the container-only delete instead of promising to
-            // "permanently delete the original".
-            text  = { Text(stringResource(R.string.delete_album_container_warning), color = AppColors.current.fgDim, fontSize = 13.sp) },
-            confirmButton = {
-                TextButton(onClick = { viewModel.deleteAlbum(album.linkId); albumToDelete = null }) {
-                    Text(stringResource(R.string.delete_button_permanently), color = ErrorColor, fontWeight = FontWeight.SemiBold)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { albumToDelete = null }) { Text(stringResource(R.string.cancel), color = AppColors.current.fgDim) }
-            },
+        ConfirmDialog(
+            title = "\"${album.name}\"",
+            message = stringResource(R.string.delete_album_container_warning),
+            confirmLabel = stringResource(R.string.delete_button_permanently),
+            dismissLabel = stringResource(R.string.cancel),
+            onConfirm = { viewModel.deleteAlbum(album.linkId); albumToDelete = null },
+            onDismiss = { albumToDelete = null },
+            destructive = true,
         )
     }
 
@@ -439,6 +452,82 @@ fun AlbumsScreen(
         )
     }
 
+    // ── Cloud-album long-press action sheet (parity with local) ──────────────
+    // Same Rename + Delete sheet shape — delete maps to the existing
+    // albumToDelete confirm path (already wired), rename opens the new dialog
+    // below which calls renameCloudAlbum via the shared action-flow helper.
+    cloudAlbumSheetFor?.let { album ->
+        CloudAlbumActionSheet(
+            album = album,
+            onDismiss = { cloudAlbumSheetFor = null },
+            onRename = {
+                cloudAlbumSheetFor = null
+                cloudAlbumRenameFor = album
+            },
+            onDelete = {
+                cloudAlbumSheetFor = null
+                albumToDelete = album
+            },
+        )
+    }
+
+    // ── Cloud-album rename dialog ────────────────────────────────────────────
+    cloudAlbumRenameFor?.let { album ->
+        var newName by remember(album.linkId) { mutableStateOf(album.name) }
+        AlertDialog(
+            onDismissRequest = { cloudAlbumRenameFor = null },
+            containerColor = AppColors.current.cardBg,
+            titleContentColor = AppColors.current.fgPrimary,
+            title = { Text(stringResource(R.string.album_rename), fontWeight = FontWeight.SemiBold) },
+            text = {
+                OutlinedTextField(
+                    value = newName,
+                    onValueChange = { newName = it },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = {
+                        val target = newName.trim()
+                        cloudAlbumRenameFor = null
+                        scope.launch {
+                            handleLocalAlbumActionFlow(
+                                actionFlow = viewModel.renameCloudAlbum(album.linkId, album.name, target),
+                                doneMessage = "Renamed to \"$target\"",
+                            )
+                        }
+                    }),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = AppColors.current.fgPrimary,
+                        unfocusedTextColor = AppColors.current.fgPrimary,
+                        cursorColor = Accent,
+                        focusedBorderColor = Accent,
+                        unfocusedBorderColor = AppColors.current.fgDim,
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = newName.isNotBlank() && newName.trim() != album.name,
+                    onClick = {
+                        val target = newName.trim()
+                        cloudAlbumRenameFor = null
+                        scope.launch {
+                            handleLocalAlbumActionFlow(
+                                actionFlow = viewModel.renameCloudAlbum(album.linkId, album.name, target),
+                                doneMessage = "Renamed to \"$target\"",
+                            )
+                        }
+                    },
+                ) { Text(stringResource(R.string.album_rename_confirm), color = Accent, fontWeight = FontWeight.SemiBold) }
+            },
+            dismissButton = {
+                TextButton(onClick = { cloudAlbumRenameFor = null }) {
+                    Text(stringResource(R.string.cancel), color = AppColors.current.fgDim)
+                }
+            },
+        )
+    }
+
     // ── Rename local-album dialog ────────────────────────────────────────────
     localAlbumRenameFor?.let { album ->
         var newName by remember(album.name) { mutableStateOf(album.name) }
@@ -497,81 +586,107 @@ fun AlbumsScreen(
     }
 
     // ── Delete local-album confirmation ──────────────────────────────────────
+    // Virtual-only delete: we only drop the album marker + membership entries.
+    // The underlying photos stay in their original device folders.
     localAlbumDeleteFor?.let { album ->
-        AlertDialog(
-            onDismissRequest = { localAlbumDeleteFor = null },
-            containerColor    = AppColors.current.cardBg,
-            titleContentColor = AppColors.current.fgPrimary,
-            title = { Text("\"${album.name}\"", fontWeight = FontWeight.SemiBold) },
-            text  = {
-                // Virtual-only delete: we only drop the album marker + membership entries.
-                // The underlying photos stay in their original device folders.
-                val msg = if (album.itemCount > 0) {
-                    "This will remove the album. Your ${album.itemCount} photo" +
-                        (if (album.itemCount != 1) "s" else "") +
-                        " stay on your device in their original folders."
-                } else stringResource(R.string.albums_no_photos)
-                Text(msg, color = AppColors.current.fgDim, fontSize = 13.sp)
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    localAlbumDeleteFor = null
-                    scope.launch {
-                        handleLocalAlbumActionFlow(
-                            actionFlow = viewModel.deleteLocalAlbum(album.name),
-                            doneMessage = "Deleted \"${album.name}\"",
-                        )
-                    }
-                }) {
-                    Text(stringResource(R.string.delete_button_permanently), color = ErrorColor, fontWeight = FontWeight.SemiBold)
+        val msg = if (album.itemCount > 0) {
+            "This will remove the album. Your ${album.itemCount} photo" +
+                (if (album.itemCount != 1) "s" else "") +
+                " stay on your device in their original folders."
+        } else stringResource(R.string.albums_no_photos)
+        ConfirmDialog(
+            title = "\"${album.name}\"",
+            message = msg,
+            confirmLabel = stringResource(R.string.delete_button_permanently),
+            dismissLabel = stringResource(R.string.cancel),
+            onConfirm = {
+                localAlbumDeleteFor = null
+                scope.launch {
+                    handleLocalAlbumActionFlow(
+                        actionFlow = viewModel.deleteLocalAlbum(album.name),
+                        doneMessage = "Deleted \"${album.name}\"",
+                    )
                 }
             },
-            dismissButton = {
-                TextButton(onClick = { localAlbumDeleteFor = null }) {
-                    Text(stringResource(R.string.cancel), color = AppColors.current.fgDim)
-                }
-            },
+            onDismiss = { localAlbumDeleteFor = null },
+            destructive = true,
         )
     }
 
     // ── "Also delete on Drive?" follow-up after a virtual-only delete ───────
     pendingCloudDelete?.let { pending ->
-        AlertDialog(
-            onDismissRequest = {
+        ConfirmDialog(
+            title = "Also delete on Drive?",
+            message = "A cloud album named \"${pending.albumName}\" exists too. Delete it from " +
+                "Proton Drive as well? Photos in it stay on Drive — only the album " +
+                "reference is removed.",
+            confirmLabel = stringResource(R.string.delete_button_permanently),
+            dismissLabel = "Keep on Drive",
+            onConfirm = {
+                viewModel.confirmCloudDeleteForLocalAlbum(pending.cloudLinkId)
+                pendingCloudDelete = null
+            },
+            onDismiss = {
                 viewModel.cancelCloudDeleteForLocalAlbum()
                 pendingCloudDelete = null
             },
-            containerColor    = AppColors.current.cardBg,
-            titleContentColor = AppColors.current.fgPrimary,
-            title = { Text("Also delete on Drive?", fontWeight = FontWeight.SemiBold) },
-            text  = {
-                Text(
-                    "A cloud album named \"${pending.albumName}\" exists too. Delete it from " +
-                        "Proton Drive as well? Photos in it stay on Drive — only the album " +
-                        "reference is removed.",
-                    color = AppColors.current.fgDim, fontSize = 13.sp,
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    viewModel.confirmCloudDeleteForLocalAlbum(pending.cloudLinkId)
-                    pendingCloudDelete = null
-                }) {
-                    Text(
-                        stringResource(R.string.delete_button_permanently),
-                        color = ErrorColor, fontWeight = FontWeight.SemiBold,
-                    )
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = {
-                    viewModel.cancelCloudDeleteForLocalAlbum()
-                    pendingCloudDelete = null
-                }) {
-                    Text("Keep on Drive", color = AppColors.current.fgDim)
-                }
-            },
+            destructive = true,
         )
+    }
+}
+
+/**
+ * Bottom sheet that opens on long-press of a cloud album card. Parity with the
+ * local equivalent below — same shape, same Rename + Delete rows. Cloud rename
+ * is wired through `AlbumsViewModel.renameCloudAlbum` which round-trips through
+ * `DrivePhotoRepository.renameAlbum`.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CloudAlbumActionSheet(
+    album: Album,
+    onDismiss: () -> Unit,
+    onRename: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    val colors = AppColors.current
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = colors.cardBg,
+        scrimColor = Color.Black.copy(alpha = 0.5f),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text(
+                "\"${album.name}\"",
+                color = colors.fgPrimary,
+                fontSize = 17.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(top = 8.dp, bottom = 4.dp),
+            )
+            Spacer(Modifier.height(16.dp))
+            LocalAlbumActionRow(
+                icon = Icons.Default.Edit,
+                label = stringResource(R.string.album_rename),
+                tint = Accent,
+                onClick = onRename,
+            )
+            Spacer(Modifier.height(8.dp))
+            LocalAlbumActionRow(
+                icon = Icons.Default.DeleteOutline,
+                label = stringResource(R.string.delete_button_permanently),
+                tint = ErrorColor,
+                onClick = onDelete,
+            )
+        }
     }
 }
 

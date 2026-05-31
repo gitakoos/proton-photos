@@ -22,7 +22,12 @@ keystore.properties
 AGENT_*.md
 AUDIT_*.md
 .release_notes_v*.md
+photosforproton.md
 *.har
+*.log
+
+# Sample-photo seeding helper — dev-only.
+/tools/
 
 # Scratch + test artefacts under build/ that crept into commits.
 /build/release_notes_*.md

@@ -1,3 +1,25 @@
+/*
+ * Photos for Proton
+ * Copyright (C) 2026 Akoos <https://akoos.eu>
+ *
+ * Source:  https://github.com/gitakoos/proton-photos
+ * Website: https://photos.akoos.eu
+ *
+ * This file is part of Photos for Proton.
+ *
+ * Photos for Proton is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 3 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 package eu.akoos.photos.data.repository.drive
 
 import android.util.Log
@@ -23,7 +45,7 @@ private const val TAG = "PhotoEntityBuilder"
  *     encrypted thumbnail blob during the sync pass, writing its on-disk URL into
  *     [PhotoListingEntity.thumbnailUrl]. Used by paths that still want eager thumbnails
  *     (e.g. album cover prefetch).
- *   • `decryptThumbnail = false` (v1.3 lazy path): decrypts cheap metadata only
+ *   • `decryptThumbnail = false` (lazy path): decrypts cheap metadata only
  *     (displayName, revision id) and persists the ENCRYPTED material needed to do the
  *     thumbnail later (`serverThumbnailUrl`, `contentKeyPacket`, `encNodeKey`,
  *     `encNodePassphrase`, `parentLinkId`). [PhotoListingEntity.thumbnailUrl] stays

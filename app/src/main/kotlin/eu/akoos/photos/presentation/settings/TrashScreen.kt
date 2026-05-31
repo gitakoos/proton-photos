@@ -1,3 +1,25 @@
+/*
+ * Photos for Proton
+ * Copyright (C) 2026 Akoos <https://akoos.eu>
+ *
+ * Source:  https://github.com/gitakoos/proton-photos
+ * Website: https://photos.akoos.eu
+ *
+ * This file is part of Photos for Proton.
+ *
+ * Photos for Proton is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 3 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 package eu.akoos.photos.presentation.settings
 
 import android.app.Activity
@@ -33,10 +55,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -53,16 +73,13 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
-import eu.akoos.photos.presentation.theme.Accent
+import eu.akoos.photos.presentation.common.ConfirmDialog
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.AppColorsTokens
-import eu.akoos.photos.presentation.theme.ErrorColor
 import eu.akoos.photos.presentation.theme.FgDim
 import eu.akoos.photos.presentation.theme.FgMute
 import eu.akoos.photos.presentation.theme.FgPrimary
 import eu.akoos.photos.presentation.theme.PillBorder
-
-private val cardShape = RoundedCornerShape(12.dp)
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -218,40 +235,26 @@ fun TrashScreen(
 
     if (showDeviceRestoreDialog) {
         val n = if (state.isDeviceSelectionMode) state.deviceSelectedCount else state.deviceItems.size
-        AlertDialog(
-            onDismissRequest = { showDeviceRestoreDialog = false },
-            containerColor = colors.cardBg,
-            titleContentColor = colors.fgPrimary,
-            title = { Text("Restore $n photo${if (n != 1) "s" else ""}?", fontWeight = FontWeight.SemiBold) },
-            text = { Text("They will be restored to your device gallery.", color = colors.fgDim, fontSize = 13.sp) },
-            confirmButton = {
-                TextButton(onClick = { showDeviceRestoreDialog = false; launchDeviceRestore() }) {
-                    Text("Restore", color = colors.accent, fontWeight = FontWeight.SemiBold)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDeviceRestoreDialog = false }) { Text("Cancel", color = colors.fgDim) }
-            },
+        ConfirmDialog(
+            title = "Restore $n photo${if (n != 1) "s" else ""}?",
+            message = "They will be restored to your device gallery.",
+            confirmLabel = "Restore",
+            dismissLabel = "Cancel",
+            onConfirm = { showDeviceRestoreDialog = false; launchDeviceRestore() },
+            onDismiss = { showDeviceRestoreDialog = false },
         )
     }
 
     if (showDeviceEmptyDialog) {
         val n = if (state.isDeviceSelectionMode) state.deviceSelectedCount else state.deviceItems.size
-        AlertDialog(
-            onDismissRequest = { showDeviceEmptyDialog = false },
-            containerColor = colors.cardBg,
-            titleContentColor = colors.fgPrimary,
-            title = { Text("Delete $n photo${if (n != 1) "s" else ""} forever?", fontWeight = FontWeight.SemiBold) },
-            text = { Text("Cannot be undone. Photos will be permanently removed from this device.",
-                color = colors.fgDim, fontSize = 13.sp) },
-            confirmButton = {
-                TextButton(onClick = { showDeviceEmptyDialog = false; launchDeviceDeleteForever() }) {
-                    Text("Delete forever", color = ErrorColor, fontWeight = FontWeight.SemiBold)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDeviceEmptyDialog = false }) { Text("Cancel", color = colors.fgDim) }
-            },
+        ConfirmDialog(
+            title = "Delete $n photo${if (n != 1) "s" else ""} forever?",
+            message = "Cannot be undone. Photos will be permanently removed from this device.",
+            confirmLabel = "Delete forever",
+            dismissLabel = "Cancel",
+            onConfirm = { showDeviceEmptyDialog = false; launchDeviceDeleteForever() },
+            onDismiss = { showDeviceEmptyDialog = false },
+            destructive = true,
         )
     }
 

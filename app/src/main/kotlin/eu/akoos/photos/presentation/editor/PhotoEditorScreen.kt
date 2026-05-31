@@ -1,6 +1,31 @@
+/*
+ * Photos for Proton
+ * Copyright (C) 2026 Akoos <https://akoos.eu>
+ *
+ * Source:  https://github.com/gitakoos/proton-photos
+ * Website: https://photos.akoos.eu
+ *
+ * This file is part of Photos for Proton.
+ *
+ * Photos for Proton is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 3 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 package eu.akoos.photos.presentation.editor
 
 import eu.akoos.photos.R
+import eu.akoos.photos.presentation.common.ConfirmDialog
+import eu.akoos.photos.presentation.common.ErrorPopup
+import eu.akoos.photos.presentation.editor.components.SaveOptionRow
 
 import android.graphics.Bitmap
 import android.graphics.PointF
@@ -47,7 +72,6 @@ import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.SaveAlt
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -79,6 +103,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -247,12 +272,23 @@ fun PhotoEditorScreen(
     val canUndo by vm.canUndo.collectAsStateWithLifecycle()
     val canRedo by vm.canRedo.collectAsStateWithLifecycle()
 
+    // Unsaved-changes guard: canUndo == true means the user has applied at least one
+    // edit that's not yet saved. Back press / Close goes through a confirmation dialog
+    // so an accidental swipe doesn't lose the work.
+    var showDiscardDialog by remember { mutableStateOf(false) }
+    val confirmedOnBack: () -> Unit = remember(canUndo, onBack) {
+        { if (canUndo) showDiscardDialog = true else onBack() }
+    }
+    androidx.activity.compose.BackHandler(enabled = canUndo) {
+        showDiscardDialog = true
+    }
+
     Column(Modifier.fillMaxSize().background(Bg0).statusBarsPadding()) {
         TopBar(
             isSaving = state.isSaving,
             canUndo = canUndo,
             canRedo = canRedo,
-            onBack = onBack,
+            onBack = confirmedOnBack,
             onReset = { vm.resetAll() },
             onUndo = { vm.undo() },
             onRedo = { vm.redo() },
@@ -270,7 +306,21 @@ fun PhotoEditorScreen(
         ) {
             when {
                 state.isLoading -> CircularProgressIndicator(color = Accent)
-                state.errorMessage != null -> Text(state.errorMessage!!, color = FgMute)
+                state.errorMessage != null -> {
+                    // Surface load / decode failures in the unified [ErrorPopup] so
+                    // the message is copyable and explicitly dismissable. The VM
+                    // doesn't expose a clearError hook today; the dialog's scrim
+                    // still consumes outside-taps so the user can dismiss it (state
+                    // remains until they navigate back via the top-bar Back button).
+                    // Message already comes pre-sanitized for save errors and as
+                    // localized error strings for load errors — safe to pass as-is.
+                    ErrorPopup(
+                        title = "Editor error",
+                        message = state.errorMessage!!,
+                        onDismiss = {},
+                        onCopy = {},
+                    )
+                }
                 activeTool == Tool.Crop && state.originalBitmap != null -> CropPreview(
                     // Use originalBitmap because the crop rect coordinates are in the
                     // ORIGINAL image's pixel space. previewBitmap has the user's existing
@@ -409,6 +459,21 @@ fun PhotoEditorScreen(
         }
     }
 
+    if (showDiscardDialog) {
+        ConfirmDialog(
+            title = stringResource(R.string.editor_discard_changes_title),
+            message = stringResource(R.string.editor_discard_changes_message),
+            confirmLabel = stringResource(R.string.editor_discard_changes_confirm),
+            dismissLabel = stringResource(R.string.editor_discard_changes_keep),
+            onConfirm = {
+                showDiscardDialog = false
+                onBack()
+            },
+            onDismiss = { showDiscardDialog = false },
+            destructive = true,
+        )
+    }
+
     val hasCloudCounterpart by vm.hasCloudCounterpart.collectAsStateWithLifecycle()
     if (showSaveSheet && state.source != null) {
         ModalBottomSheet(
@@ -488,31 +553,6 @@ private fun SaveSheet(
             horizontalArrangement = Arrangement.Center,
         ) {
             Text("Cancel", color = FgPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
-        }
-    }
-}
-
-@Composable
-private fun SaveOptionRow(icon: ImageVector, title: String, subtitle: String, onClick: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(PanelChip)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(14.dp),
-    ) {
-        Box(
-            modifier = Modifier.size(38.dp).clip(CircleShape).background(Accent.copy(alpha = 0.20f)),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(icon, null, tint = Accent, modifier = Modifier.size(20.dp))
-        }
-        Column(Modifier.weight(1f)) {
-            Text(title, color = FgPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-            Text(subtitle, color = FgMute, fontSize = 12.sp)
         }
     }
 }

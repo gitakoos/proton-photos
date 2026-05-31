@@ -1,3 +1,25 @@
+/*
+ * Photos for Proton
+ * Copyright (C) 2026 Akoos <https://akoos.eu>
+ *
+ * Source:  https://github.com/gitakoos/proton-photos
+ * Website: https://photos.akoos.eu
+ *
+ * This file is part of Photos for Proton.
+ *
+ * Photos for Proton is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 3 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 package eu.akoos.photos.presentation.albums
 
 import android.net.Uri
@@ -10,6 +32,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
@@ -31,16 +54,20 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Photo
 import androidx.compose.material.icons.filled.RemoveCircleOutline
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -56,6 +83,7 @@ import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.entity.LocalAlbum
 import eu.akoos.photos.presentation.theme.Accent
+import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.Bg0
 import eu.akoos.photos.presentation.theme.Bg2
 import eu.akoos.photos.presentation.theme.FgDim
@@ -74,6 +102,10 @@ fun LocalAlbumDetailScreen(
      *  too. Null for purely local albums — preserves the legacy "local-only" behavior. */
     cloudAlbumLinkId: String? = null,
     viewModel: LocalAlbumDetailViewModel = hiltViewModel(),
+    // Shared with AlbumsScreen — the rename Flow lives on AlbumsViewModel which
+    // already orchestrates the cloud mirror + collision check. We borrow it here
+    // so the in-album rename and the long-press rename hit the same code path.
+    albumsViewModel: AlbumsViewModel = hiltViewModel(),
 ) {
     LaunchedEffect(localAlbum.name, cloudAlbumLinkId) {
         viewModel.loadAlbum(localAlbum.name, cloudAlbumLinkId)
@@ -84,6 +116,13 @@ fun LocalAlbumDetailScreen(
     val isRefreshing by viewModel.isRefreshing.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
     val pullRefreshState = androidx.compose.material3.pulltorefresh.rememberPullToRefreshState()
+    val scope = rememberCoroutineScope()
+    // Rename dialog state. Bucket-derived (virtual-only=false) folders aren't
+    // renameable because they map to a real device folder we don't own — the
+    // pencil is hidden in that case via the `isVirtualOnly` guard below.
+    var showRenameDialog by remember { mutableStateOf(false) }
+    var renameInProgress by remember { mutableStateOf(false) }
+    var currentAlbumName by remember(localAlbum.name) { mutableStateOf(localAlbum.name) }
 
     // Surface the remove-from-album result so the user knows what happened — bucket members
     // can't be removed and we want to tell them why, not silently no-op.
@@ -99,6 +138,11 @@ fun LocalAlbumDetailScreen(
 
     val coverUri = localAlbum.items.firstOrNull()?.uri
     val isSelectionMode = selectedUris.isNotEmpty()
+    // Back-button intercept in selection mode: cancel selection instead of popping the
+    // screen. Mirrors the gallery + cloud album-detail behaviour.
+    androidx.activity.compose.BackHandler(enabled = isSelectionMode) {
+        viewModel.clearSelection()
+    }
 
     Box(
         modifier = Modifier
@@ -124,10 +168,12 @@ fun LocalAlbumDetailScreen(
         ) {
             // Hero header — full width, scrolls with content
             item(span = { GridItemSpan(maxLineSpan) }) {
-                LocalAlbumHeroHeader(
-                    coverUri = coverUri,
-                    albumName = localAlbum.name,
-                    photoCount = displayItems.size,
+                eu.akoos.photos.presentation.albums.components.AlbumHeroHeader(
+                    coverModel = coverUri?.let { Uri.parse(it) },
+                    title = currentAlbumName,
+                    photoCountText = "${displayItems.size} photos",
+                    canRename = localAlbum.isVirtualOnly,
+                    onRenameClick = { showRenameDialog = true },
                 )
             }
 
@@ -356,44 +402,77 @@ fun LocalAlbumDetailScreen(
             }
         }
 
-        SnackbarHost(snackbarHostState, modifier = Modifier.align(Alignment.BottomCenter))
+        eu.akoos.photos.presentation.common.ThemedSnackbarHost(snackbarHostState, modifier = Modifier.align(Alignment.BottomCenter))
     }
-}
 
-@Composable
-private fun LocalAlbumHeroHeader(
-    coverUri: String?,
-    albumName: String,
-    photoCount: Int,
-) {
-    Column {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .aspectRatio(4f / 3f)
-                .background(Bg2),
-        ) {
-            if (coverUri != null) {
-                AsyncImage(
-                    model = Uri.parse(coverUri),
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize(),
+    if (showRenameDialog) {
+        var newName by remember(currentAlbumName) { mutableStateOf(currentAlbumName) }
+        AlertDialog(
+            onDismissRequest = { if (!renameInProgress) showRenameDialog = false },
+            containerColor = AppColors.current.cardBg,
+            titleContentColor = AppColors.current.fgPrimary,
+            title = { Text(stringResource(R.string.album_rename), fontWeight = FontWeight.SemiBold) },
+            text = {
+                androidx.compose.material3.OutlinedTextField(
+                    value = newName,
+                    onValueChange = { newName = it },
+                    singleLine = true,
+                    enabled = !renameInProgress,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = AppColors.current.fgPrimary,
+                        unfocusedTextColor = AppColors.current.fgPrimary,
+                        cursorColor = Accent,
+                        focusedBorderColor = Accent,
+                        unfocusedBorderColor = AppColors.current.fgDim,
+                    ),
                 )
-            }
-        }
-
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp)
-                .padding(top = 20.dp, bottom = 16.dp),
-        ) {
-            Text(albumName, color = FgPrimary, fontSize = 24.sp, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(4.dp))
-            Text("$photoCount photos", color = FgMute, fontSize = 14.sp)
-        }
-
-        HorizontalDivider(color = PillBorder, thickness = 0.5.dp)
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(
+                    enabled = !renameInProgress && newName.isNotBlank() && newName.trim() != currentAlbumName,
+                    onClick = {
+                        val target = newName.trim()
+                        renameInProgress = true
+                        scope.launch {
+                            albumsViewModel.renameLocalAlbum(currentAlbumName, target).collect { result ->
+                                when (result) {
+                                    is LocalAlbumActionResult.Done -> {
+                                        currentAlbumName = target
+                                        renameInProgress = false
+                                        showRenameDialog = false
+                                        snackbarHostState.showSnackbar("Renamed to \"$target\"")
+                                        viewModel.loadAlbum(target, cloudAlbumLinkId)
+                                    }
+                                    is LocalAlbumActionResult.Failed -> {
+                                        renameInProgress = false
+                                        snackbarHostState.showSnackbar(result.message)
+                                    }
+                                    is LocalAlbumActionResult.DoneWithCloudPending -> {
+                                        // Cloud counterpart had a matching name — for the
+                                        // in-album rename we leave the cloud mirror alone
+                                        // (rename happened locally only). User can rename
+                                        // the cloud counterpart from Albums → long-press.
+                                        currentAlbumName = target
+                                        renameInProgress = false
+                                        showRenameDialog = false
+                                        snackbarHostState.showSnackbar("Renamed to \"$target\"")
+                                        viewModel.loadAlbum(target, cloudAlbumLinkId)
+                                    }
+                                }
+                            }
+                        }
+                    },
+                ) {
+                    Text(stringResource(R.string.album_rename_confirm), color = Accent, fontWeight = FontWeight.SemiBold)
+                }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(
+                    onClick = { if (!renameInProgress) showRenameDialog = false },
+                ) { Text(stringResource(R.string.cancel), color = AppColors.current.fgDim) }
+            },
+        )
     }
 }
+

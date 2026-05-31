@@ -1,6 +1,72 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Proton Photos</string>
+    <string name="app_name">Photos for Proton</string>
+
+    <!-- Onboarding wizard (first-launch, post-sign-in) -->
+    <string name="onboarding_back">Back</string>
+    <string name="onboarding_continue">Continue</string>
+    <string name="onboarding_skip">Skip for now</string>
+    <string name="onboarding_allow">Allow</string>
+    <string name="onboarding_open_settings">Open settings</string>
+    <string name="onboarding_permission_granted">Granted</string>
+    <string name="onboarding_finish">Open my gallery</string>
+    <string name="onboarding_recommended">Recommended</string>
+
+    <string name="onboarding_welcome_title">Welcome to Photos for Proton</string>
+    <string name="onboarding_welcome_subtitle">Your photos and videos, end-to-end encrypted on Proton Drive. Let\'s set up a few preferences so the app fits how you want to use it.</string>
+
+    <string name="onboarding_backup_title">What should we back up?</string>
+    <string name="onboarding_backup_subtitle">You can change this any time in Settings.</string>
+    <string name="onboarding_backup_everything">Back up everything</string>
+    <string name="onboarding_backup_everything_desc">All photos and videos on your device, with any folders you exclude later.</string>
+    <string name="onboarding_backup_folders">Choose specific folders</string>
+    <string name="onboarding_backup_folders_desc">Pick which folders to back up from Settings. Nothing uploads until you choose.</string>
+    <string name="onboarding_backup_nothing">Nothing for now</string>
+    <string name="onboarding_backup_nothing_desc">Browse what\'s already on Proton Drive without backing up new photos.</string>
+
+    <string name="onboarding_privacy_title">Privacy controls</string>
+    <string name="onboarding_privacy_subtitle">Choose how your photos travel from device to Drive. Everything is encrypted on top of these.</string>
+    <string name="onboarding_privacy_strip">Strip metadata on upload</string>
+    <string name="onboarding_privacy_strip_desc">Remove GPS coordinates and camera details from photos before they reach the cloud. Recommended.</string>
+    <string name="onboarding_privacy_rename">Rename to capture date</string>
+    <string name="onboarding_privacy_rename_desc">Upload files as 2026-05-30_14-32-08.jpg instead of IMG_2841.jpg. The on-device file stays as it is.</string>
+    <string name="onboarding_privacy_delete">Remove from device after backup</string>
+    <string name="onboarding_privacy_delete_desc">Once a photo is safely on Drive, take it off this device to save space. Other gallery apps stop seeing it.</string>
+
+    <string name="onboarding_notif_title">Stay informed</string>
+    <string name="onboarding_notif_subtitle">Allow notifications so you can see backup progress and cleanup prompts, even when the app is closed.</string>
+
+    <string name="onboarding_photos_title">Access your photos</string>
+    <string name="onboarding_photos_subtitle">We need read access to your photos and videos so we can encrypt them and back them up to Drive.</string>
+
+    <string name="onboarding_manage_media_title">Manage media</string>
+    <string name="onboarding_manage_media_subtitle">Strongly recommended. Lets the app edit, delete and rename photos and videos on your device without a system confirmation dialog every single time — used for in app editing, save back to device, the trash flow, and Delete after backup. Tap to open system settings.</string>
+    <string name="onboarding_folders_include_title">Folders to back up</string>
+    <string name="onboarding_folders_include_subtitle">Pick which folders should be uploaded to Drive. Items in other folders stay on this device only.</string>
+    <string name="onboarding_folders_exclude_title">Folders to skip</string>
+    <string name="onboarding_folders_exclude_subtitle">Tick folders you do NOT want uploaded. Anything else gets backed up automatically.</string>
+    <string name="onboarding_folders_needs_perm">Allow access to photos first to see your folders.</string>
+    <string name="onboarding_folders_empty">No photo folders found on this device.</string>
+
+    <string name="onboarding_about_title">Independent third party client</string>
+    <string name="onboarding_about_subtitle">Made by one developer. Not affiliated with Proton AG. Source available, GPL licensed, no telemetry of our own.</string>
+    <string name="onboarding_about_author_subtitle">Personal site of the developer.</string>
+    <string name="onboarding_about_github_subtitle">Full source code on GitHub.</string>
+    <string name="onboarding_about_license_title">GPL 3.0 license</string>
+    <string name="onboarding_about_license_subtitle">Free software. You can read, modify, and redistribute the source.</string>
+    <string name="onboarding_about_disclaimer">Unofficial third party app. Talks to Proton Drive through the public API. Not endorsed by or affiliated with Proton AG.</string>
+
+    <string name="onboarding_appearance_title">Make it yours</string>
+    <string name="onboarding_appearance_subtitle">Pick theme, accent color and language. All adjustable later from Settings.</string>
+
+    <string name="onboarding_lock_title">App lock</string>
+    <string name="onboarding_lock_subtitle">Use biometrics or device credentials to unlock the app each time it returns to the foreground.</string>
+    <string name="onboarding_lock_enable">Enable app lock</string>
+    <string name="onboarding_lock_enable_desc">Asks for biometrics or device PIN every time the app opens or returns from the background.</string>
+    <string name="onboarding_lock_timeout_label">Re-lock after</string>
+
+    <string name="onboarding_done_title">You\'re all set</string>
+    <string name="onboarding_done_subtitle">Your settings are saved. Anything here is adjustable from the Settings page later.</string>
 
     <!-- Auth / Sign-in landing -->
     <string name="sign_in_subtitle">Private, end-to-end encrypted photo backup.</string>
@@ -8,26 +74,13 @@
     <string name="sign_in_button">Sign in</string>
     <string name="sign_in_footer">Secure login with your Proton account</string>
 
-    <!-- Auth -->
-    <string name="auth_login_title">Sign in to Proton</string>
-    <string name="auth_error_network">No internet connection. Please check your network.</string>
-    <string name="auth_error_invalid_credentials">Incorrect username or password.</string>
-    <string name="auth_error_generic">Sign-in failed. Please try again.</string>
-
     <!-- Gallery -->
-    <string name="gallery_title">Photos</string>
     <string name="gallery_empty_title">No photos yet</string>
     <string name="gallery_empty_subtitle">Your photos will appear here once synced.</string>
     <string name="gallery_filter_all">All</string>
-    <string name="gallery_filter_local">Local only</string>
-    <string name="gallery_filter_backed_up">Backed up</string>
-    <string name="gallery_pull_refresh">Refreshing…</string>
-    <string name="gallery_loading">Loading photos…</string>
     <string name="gallery_tab_photos">Photos</string>
     <string name="gallery_tab_albums">Albums</string>
     <string name="gallery_tab_shared">Shared</string>
-    <string name="gallery_count_photos">%d photos</string>
-    <string name="gallery_selected_count">%d selected</string>
     <!-- Selection counter variants split by media type. The toolbar uses these instead of
          gallery_selected_count when the selection contains a non-trivial mix, so the user
          sees at a glance how many photos vs videos they're about to act on. -->
@@ -67,11 +120,12 @@
     <string name="gallery_download_done_singular">Downloaded 1 photo</string>
     <string name="gallery_download_partial">Downloaded %1$d, failed %2$d</string>
     <string name="gallery_add_to_album">Add to album</string>
+    <string name="gallery_add_to_album_mixed_hint">Mixed device and cloud only selection can\'t share an album cleanly. Pick one type.</string>
+    <string name="gallery_add_to_album_partial">Added %1$d to %2$s, %3$d item(s) couldn\'t be saved (mixed selection)</string>
     <string name="gallery_strip_metadata">Strip metadata</string>
     <string name="gallery_added_to_album">Added %1$d photos to %2$s</string>
     <string name="gallery_stripped_metadata">Stripped metadata from %1$d photos</string>
     <string name="gallery_stripped_with_skipped">Stripped %1$d, skipped %2$d (foreign)</string>
-    <string name="gallery_new_album">New album</string>
     <string name="gallery_filter_favorites">Favorites</string>
     <string name="gallery_filter_hidden">Hidden</string>
     <string name="gallery_filter_categories">Categories</string>
@@ -86,19 +140,12 @@
     <string name="gallery_filter_photos">Photos</string>
 
     <!-- Permission -->
-    <string name="permission_media_rationale">Allow Proton Photos to access your photos and videos.</string>
     <string name="permission_grant_button">Grant access</string>
     <string name="permission_open_settings">Open Settings</string>
     <string name="permission_denied_banner">Allow access to show local photos.</string>
     <string name="permission_permanently_denied_banner">Media access denied. Open Settings to allow it.</string>
 
     <!-- Sync -->
-    <string name="sync_in_progress">Syncing…</string>
-    <string name="sync_last_synced">Last synced: %1$s</string>
-    <string name="sync_never">Never synced</string>
-    <string name="sync_now">Sync now</string>
-    <string name="sync_error_network">Sync failed: no internet connection.</string>
-    <string name="sync_error_storage_full">Proton storage full. Upgrade at proton.me.</string>
     <string name="sync_section">Sync</string>
     <string name="sync_backed_up">Backed up</string>
     <string name="sync_pending">Pending</string>
@@ -110,6 +157,12 @@
     <string name="sync_progress_x_of_n">%1$d of %2$d</string>
     <string name="sync_progress_show_files">Show files</string>
     <string name="sync_progress_hide_files">Hide files</string>
+    <!-- Delete after backup consent notification -->
+    <string name="delete_consent_channel_name">Photo cleanup</string>
+    <string name="delete_consent_channel_desc">Asks for permission to remove backed up photos from this device.</string>
+    <string name="delete_consent_title">%1$d backed up photos ready to remove</string>
+    <string name="delete_consent_text">Tap to clear them from this device.</string>
+
     <!-- Sync worker foreground notification -->
     <string name="sync_worker_channel_name">Photo backup</string>
     <string name="sync_worker_channel_desc">Shows progress while backing up photos to Proton Drive.</string>
@@ -126,11 +179,6 @@
     <string name="bg_sync_service_text">Watching for new photos</string>
 
     <!-- Delete bottom sheet -->
-    <string name="delete_title">Delete %1$d photo(s)?</string>
-    <string name="delete_free_up_space_label">FREE UP SPACE</string>
-    <string name="delete_free_up_space_description">Remove from this device. Stays encrypted in Proton backup.</string>
-    <string name="delete_also_cloud_label">ALSO DELETE FROM BACKUP</string>
-    <string name="delete_also_cloud_description">Permanently removes it everywhere.</string>
     <string name="delete_also_cloud_warning">This will permanently delete the original. Proton cannot recover it.</string>
     <string name="delete_album_container_warning">This deletes the album but keeps your photos in Proton Drive.</string>
     <string name="bucket_album_readonly_msg">%s is a device folder. Use \'Add to album\' from Photos to organize photos.</string>
@@ -140,13 +188,7 @@
          devices, can be shared. "Local" is an in-app reference list only on this device. -->
     <string name="albums_new_kind_cloud">Cloud</string>
     <string name="albums_new_kind_local">Local</string>
-    <string name="delete_cancel">Cancel</string>
-    <string name="delete_button_free_up">Free up space</string>
     <string name="delete_button_permanently">Delete permanently</string>
-    <string name="delete_snackbar_no_backup">Deleted. No backup existed.</string>
-    <string name="delete_snackbar_freed_up">Freed up space. Backup kept.</string>
-    <string name="delete_snackbar_cloud_error">Could not delete from backup. Try again.</string>
-    <string name="delete_cloud_only_not_on_device">Not on this device</string>
     <string name="delete_multi_mixed_msg">Some of these photos are backed up to Proton Drive. Choose how to delete them.</string>
     <string name="delete_multi_remove_device">Remove from device</string>
     <string name="delete_multi_remove_device_desc">Proton Drive backup is kept</string>
@@ -161,17 +203,10 @@
 
     <!-- Settings -->
     <string name="settings_title">Settings</string>
-    <string name="settings_sync_section">Sync</string>
     <string name="settings_sync_wifi_only">Sync on Wi‑Fi only</string>
-    <string name="settings_last_sync">Last sync</string>
     <string name="settings_sync_now">Sync now</string>
     <string name="settings_storage_section">Storage</string>
     <string name="settings_storage_nav_desc">Drive quota, device space, app cache, recently deleted</string>
-    <string name="settings_auto_free_up">Auto free-up space</string>
-    <string name="settings_free_up_after">Free up after</string>
-    <string name="settings_free_up_wifi_only">Only on Wi‑Fi</string>
-    <string name="settings_device_storage">Device storage used</string>
-    <string name="settings_backed_up_only">Backed up only</string>
     <string name="settings_free_up_now">Free up space now</string>
     <string name="settings_free_up_interval_after_backup">After backup</string>
     <string name="settings_free_up_interval_1_day">1 day</string>
@@ -179,19 +214,30 @@
     <string name="settings_free_up_interval_1_month">1 month</string>
     <string name="settings_account_section">Account</string>
     <string name="settings_sign_out">Sign out</string>
+    <string name="settings_sign_out_desc">End this session on this device.</string>
     <string name="sign_out_dialog_title">Sign out?</string>
     <string name="sign_out_dialog_message">Are you sure you want to sign out of your Proton account?</string>
+    <string name="sign_out_dialog_confirm">Sign out</string>
+    <string name="sign_out_dialog_cancel">Cancel</string>
+    <string name="settings_account_storage">Drive storage</string>
+    <string name="settings_account_links">Quick links</string>
+    <string name="settings_account_link_manage">Manage account</string>
+    <string name="settings_account_link_manage_desc">Plan, billing, privacy and telemetry controls on proton.me.</string>
+    <string name="settings_account_link_drive_web">Open Proton Drive on web</string>
+    <string name="settings_account_link_drive_web_desc">Browse your photos and files at drive.proton.me.</string>
     <string name="cancel">Cancel</string>
-    <string name="settings_language">Language</string>
     <string name="settings_language_system">System default</string>
-    <string name="settings_storage">Storage</string>
     <string name="settings_sync_wifi_desc">Pause upload on mobile network</string>
+    <string name="settings_fullres_wifi_only">Full-res over Wi‑Fi only</string>
+    <string name="settings_fullres_wifi_only_desc">Download cloud full-res photos and videos on Wi‑Fi only. Thumbnails always load.</string>
+    <string name="viewer_wifi_for_full_quality">Connect to Wi‑Fi for full quality</string>
     <string name="settings_sync_now_action">Sync →</string>
     <string name="settings_backup_folders">Backup folders</string>
     <string name="settings_backup_folders_desc">Choose which folders to back up</string>
     <!-- Sync settings reorganisation (v1.3.2): two grouped sections. -->
     <string name="settings_what_backed_up_section">What gets backed up</string>
     <string name="settings_when_section">When it happens</string>
+    <string name="settings_network_section">Network usage</string>
     <string name="settings_continuous_backup">Continuous backup</string>
     <string name="settings_continuous_backup_desc">Photos and videos upload within seconds of capture.</string>
     <string name="settings_backup_everything">Back up everything</string>
@@ -208,13 +254,13 @@
     <string name="settings_excluded_folders_select_all">Exclude all</string>
     <string name="settings_excluded_folders_deselect_all">Include all</string>
     <string name="settings_recently_deleted">Recently Deleted</string>
-    <string name="settings_recently_deleted_desc">Restore or permanently delete trashed photos</string>
     <string name="settings_recently_deleted_subtitle">%1$d photos · deleted within 30 days</string>
     <string name="settings_recently_deleted_subtitle_singular">1 photo · deleted within 30 days</string>
     <string name="settings_recently_deleted_empty">Empty</string>
     <string name="settings_free_up_desc">Delete already backed up files from device</string>
     <string name="settings_free_up_action">Delete</string>
-    <string name="settings_storage_used_pct">%d%% used</string>
+    <string name="settings_free_up_confirm_title">Free up device space?</string>
+    <string name="settings_free_up_confirm_message">Every photo and video that\'s already backed up to Proton Drive will be deleted from this device. Drive copies stay intact and can be downloaded again later.</string>
     <string name="settings_backup_size">%s synced from this device</string>
     <!-- Storage card, Proton / Device / App-cache sub-sections -->
     <string name="settings_storage_proton">Proton Drive</string>
@@ -226,8 +272,6 @@
     <string name="settings_storage_clear_cache_dialog_title">Clear app cache?</string>
     <string name="settings_storage_clear_cache_dialog_message">This will delete %s of cached files. They’ll be re-downloaded as needed.</string>
     <string name="settings_storage_refresh">Refresh storage</string>
-    <string name="settings_auto_backup_new_folders">Auto-backup new folders</string>
-    <string name="settings_auto_backup_new_folders_desc">Automatically back up photos from new camera-roll folders as they appear</string>
     <string name="settings_section_settings">Settings</string>
     <string name="settings_privacy_metadata">Privacy &amp; Metadata</string>
     <string name="settings_privacy_metadata_desc">Strip EXIF, GPS, camera info from uploads</string>
@@ -235,6 +279,10 @@
     <string name="settings_security_desc">App lock, hidden photos</string>
     <string name="settings_strip_metadata_upload">Strip metadata on upload</string>
     <string name="settings_strip_metadata_upload_desc">Remove personal data from photos before uploading to Drive</string>
+    <string name="settings_rename_on_upload">Rename to capture date on upload</string>
+    <string name="settings_rename_on_upload_desc">Use the photo or video\'s metadata to set the filename to its capture date and time before upload. Original device file is untouched.</string>
+    <string name="settings_delete_after_backup">Delete device file after backup</string>
+    <string name="settings_delete_after_backup_desc">Removes the local copy from your device after Drive has the upload — keeps the file only in your encrypted Proton Drive.</string>
     <string name="settings_strip_gps">Remove GPS location</string>
     <string name="settings_strip_gps_desc">Strip GPS coordinates and location data</string>
     <string name="settings_strip_camera">Remove camera info</string>
@@ -253,39 +301,42 @@
     <string name="settings_app_lock_timeout_10min">10 minutes</string>
     <string name="settings_app_lock_timeout_15min">15 minutes</string>
     <string name="settings_app_lock_timeout_1h">1 hour</string>
+    <string name="settings_clear_cache_on_close">Clear cache on app close</string>
+    <string name="settings_clear_cache_on_close_desc">Wipe local copies of viewed cloud photos when the app is backgrounded. Re-downloads on next open.</string>
+    <string name="settings_telemetry">Telemetry</string>
+    <string name="settings_telemetry_desc">Controlled by your Proton account settings. Open account.proton.me to change.</string>
     <string name="settings_hidden_photos">Hidden Photos</string>
     <string name="settings_hidden_photos_desc">Photos hidden from main gallery, protected by biometrics</string>
     <string name="settings_media_management">Media Management</string>
     <string name="settings_media_management_granted">Granted, deleting photos won\'t ask every time</string>
     <string name="settings_media_management_grant_desc">Grant once to skip the per-delete confirmation</string>
     <string name="settings_media_management_grant_action">Grant</string>
-    <string name="settings_appearance">Appearance</string>
-    <string name="settings_appearance_section">Display</string>
-    <string name="settings_appearance_desc">Light, dark, or system</string>
+    <string name="settings_appearance">Appearance &amp; Language</string>
+    <string name="settings_appearance_desc">Theme, palette, app language</string>
+    <string name="settings_strip_customize">Customize what gets stripped</string>
     <string name="settings_about_desc">Version, credits and licenses</string>
 
-    <string name="gallery_count_photos_resource">%d photos</string>
     <string name="albums_empty_title">No albums yet</string>
     <string name="albums_empty_subtitle">Albums created in Drive will appear here</string>
-    <string name="album_photo_count">%d photos</string>
     <string name="album_rename">Rename album</string>
     <string name="album_rename_confirm">Rename</string>
     <string name="album_remove_from_album">Remove from album</string>
     <string name="album_set_as_cover">Set as cover</string>
+    <string name="gallery_action_select">Select</string>
     <string name="album_cover_updated">Cover updated</string>
     <string name="album_set_as_album_cover">Set as album cover</string>
-    <string name="month_photo_count">%d photos</string>
-    <string name="language_label">Language</string>
     <string name="close">Close</string>
 
     <!-- Theme mode -->
-    <string name="theme_mode_system">System default</string>
+    <string name="theme_mode_system">System</string>
     <string name="theme_mode_light">Light</string>
     <string name="theme_mode_dark">Dark</string>
     <string name="theme_mode_section">Theme</string>
-    <string name="theme_mode_desc_system">Follow device settings</string>
-    <string name="theme_mode_desc_light">Always use light theme</string>
-    <string name="theme_mode_desc_dark">Always use dark theme</string>
+    <!-- Settings page section headings (used by CollapsibleSection wrappers) -->
+    <string name="settings_privacy_section_metadata">Metadata</string>
+    <string name="settings_privacy_section_device">On this device</string>
+    <string name="settings_security_section_lock">App lock</string>
+    <string name="settings_security_section_media">Media access</string>
 
     <!-- Palette -->
     <string name="settings_palette_section">Palette</string>
@@ -304,18 +355,17 @@
     <string name="language_hu">Hungarian, Magyar</string>
     <string name="language_it">Italian, Italiano</string>
     <string name="language_section">Display language</string>
-    <string name="language_section_desc">Restart not required, UI updates immediately</string>
 
     <!-- About -->
     <string name="about_title">About</string>
-    <string name="about_app_title_quoted">\"Proton\" Photos</string>
+    <string name="about_app_title_quoted">Photos for Proton</string>
     <string name="about_section_author">Author</string>
     <string name="about_section_source">Source code</string>
     <string name="about_section_built_with">Built with</string>
     <string name="about_section_disclaimer">Disclaimer</string>
     <string name="about_version">Version %1$s (build %2$d)</string>
-    <string name="about_description">Unofficial Proton Drive Photos client for Android. Open-source, community-built, end-to-end encrypted.</string>
-    <string name="about_disclaimer">Not affiliated with Proton AG. Proton, Proton Drive and Proton Photos are trademarks of Proton AG. This is an unofficial third-party client built against the publicly documented Drive API.</string>
+    <string name="about_description">Unofficial Proton Drive Photos client for Android. Open source and end to end encrypted.</string>
+    <string name="about_disclaimer">Not affiliated with Proton AG. Proton, Proton Drive and Proton Photos are trademarks of Proton AG. Photos for Proton is an unofficial third-party client built against the publicly documented Drive API.</string>
     <string name="about_author_subtitle">Creator and maintainer</string>
     <string name="about_source_subtitle">View source on GitHub</string>
     <string name="about_section_license">License</string>
@@ -350,11 +400,6 @@
     <string name="album_link_copied">Link copied to clipboard</string>
 
     <!-- Share -->
-    <string name="share_title">Share album</string>
-    <string name="share_copy_link">Copy public link</string>
-    <string name="share_invite">Invite by email</string>
-    <string name="share_email_hint">name@example.com</string>
-    <string name="share_invite_button">Invite</string>
     <string name="share_remove_member">Remove</string>
     <string name="share_shared_with">Shared with</string>
     <string name="share_filter_by_person">Filter by person</string>
@@ -366,7 +411,6 @@
 
     <!-- Share sheet, redesigned to mirror the Drive web dialog -->
     <string name="share_sheet_title">Share %1$s</string>
-    <string name="share_add_people_hint">Add people or groups to share</string>
     <string name="share_who_has_access">Who has access</string>
     <string name="share_role_owner">owner</string>
     <string name="share_role_can_view">can view</string>
@@ -415,12 +459,6 @@
     <string name="filter_any">Any</string>
     <string name="filter_month_label">Month</string>
     <string name="filter_reset">Reset</string>
-    <string name="filter_apply">Apply</string>
-    <string name="filter_group_by">Group by</string>
-    <string name="filter_group_day">Day</string>
-    <string name="filter_group_month">Month</string>
-    <string name="filter_group_year">Year</string>
-    <string name="filter_timeline_grouping">Timeline grouping</string>
 
     <!-- Notification permission rationale -->
     <string name="notifications_blocked_snackbar">Notifications are off. You won\'t see upload or download progress.</string>
@@ -437,24 +475,16 @@
     <string name="search_section_jump_to_month">Jump to month</string>
     <string name="search_section_recent">Recent</string>
 
-    <!-- Errors -->
-    <string name="error_http_network">Network error. Please check your connection.</string>
-    <string name="error_http_storage_full">Storage quota exceeded. Upgrade your Proton plan.</string>
-    <string name="error_http_rate_limited">Too many requests. Retrying in %1$d seconds.</string>
-    <string name="error_http_server">Server error. Please try again later.</string>
-    <string name="error_http_client">Request failed. Please try again.</string>
-    <string name="error_photo_load_failed">Failed to load photo.</string>
-
-    <!-- Photo viewer, cloud-download progress label. %1$d = percent (0..100),
-         %2$s = bytes-done formatted, %3$s = total-bytes formatted. -->
-    <string name="viewer_downloading_progress">Downloading %1$d%%, %2$s / %3$s</string>
     <!-- Photo viewer slideshow controls -->
     <string name="viewer_play_slideshow">Play slideshow</string>
     <string name="viewer_pause_slideshow">Pause slideshow</string>
 
     <!-- Widget -->
-    <string name="widget_description">Proton Photos, displays your photos on the home screen</string>
+    <string name="widget_description">Photos for Proton, displays your photos on the home screen</string>
     <string name="widget_setup_title">Photo Widget</string>
+    <string name="widget_setup_subtitle">Configure how photos are displayed on your home screen.</string>
+    <string name="widget_change_selection">Change selection</string>
+    <string name="widget_section_choose_album">Choose album</string>
     <string name="widget_mode_section">Display mode</string>
     <string name="widget_mode_all">All photos</string>
     <string name="widget_mode_all_desc">Picks a random photo each cycle</string>
@@ -462,6 +492,11 @@
     <string name="widget_mode_selected_desc">Cycle through photos you choose</string>
     <string name="widget_mode_album">From album</string>
     <string name="widget_mode_album_desc">Cycle through a specific album</string>
+    <string name="widget_mode_cloud">Cloud photos</string>
+    <string name="widget_mode_cloud_desc">Show photos from your encrypted cloud cache without exposing them to other apps</string>
+    <string name="widget_section_choose_cloud_photos">Choose cloud photos</string>
+    <string name="widget_cloud_photos_selected">%d cloud photos selected</string>
+    <string name="widget_no_cloud_photos">No cloud photos yet</string>
     <string name="widget_interval_section">Change photo every</string>
     <string name="widget_interval_30min">30 min</string>
     <string name="widget_interval_1hr">1 hour</string>
@@ -472,7 +507,6 @@
     <string name="widget_select_photos">+ Select photos</string>
     <string name="widget_photos_selected">%d photos selected</string>
     <string name="widget_no_photos">No photos found</string>
-    <string name="widget_loading">Loading…</string>
 
     <plurals name="delete_title_plural">
         <item quantity="one">Delete 1 photo?</item>
@@ -506,29 +540,24 @@
     <string name="viewer_hidden_label">Hidden on this device</string>
 
     <!-- Video editor -->
-    <string name="video_editor_title">Edit video</string>
     <string name="video_editor_trim">Trim</string>
     <string name="video_editor_rotate">Rotate</string>
-    <string name="video_editor_start">Start</string>
-    <string name="video_editor_end">End</string>
-    <string name="video_editor_save_overwrite">Save</string>
     <string name="video_editor_save_copy">Save as copy</string>
-    <string name="video_editor_unsupported_cloud">Editing cloud videos isn\'t supported yet</string>
     <string name="video_editor_crop">Crop</string>
     <string name="video_editor_audio">Music</string>
     <string name="video_editor_add_music">Add music</string>
     <string name="video_editor_remove_music">Remove</string>
     <string name="video_editor_music_start">Music start</string>
     <string name="video_editor_music_end">Music end</string>
-    <string name="video_editor_apply_crop">Apply crop</string>
     <string name="video_editor_reset_crop">Reset crop</string>
     <string name="video_editor_reencoding">Re-encoding video…</string>
+    <string name="video_editor_encrypting">Encrypting…</string>
+    <string name="video_editor_uploading">Uploading to Drive…</string>
     <string name="video_editor_audio_original">Original audio</string>
-    <string name="video_editor_audio_original_on">Kept in the saved video</string>
-    <string name="video_editor_audio_original_muted">Will be removed on save</string>
-    <string name="video_editor_audio_mute">Mute</string>
-    <string name="video_editor_audio_muted">Muted</string>
-    <string name="video_editor_audio_overlay_hint">Music replaces the original soundtrack in the saved video.</string>
+    <string name="editor_discard_changes_title">Discard changes?</string>
+    <string name="editor_discard_changes_message">Your unsaved edits will be lost.</string>
+    <string name="editor_discard_changes_confirm">Discard</string>
+    <string name="editor_discard_changes_keep">Keep editing</string>
 
     <!-- Calendar view -->
     <string name="calendar_title">Calendar</string>

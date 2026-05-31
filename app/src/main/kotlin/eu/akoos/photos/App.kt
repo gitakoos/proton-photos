@@ -1,3 +1,25 @@
+/*
+ * Photos for Proton
+ * Copyright (C) 2026 Akoos <https://akoos.eu>
+ *
+ * Source:  https://github.com/gitakoos/proton-photos
+ * Website: https://photos.akoos.eu
+ *
+ * This file is part of Photos for Proton.
+ *
+ * Photos for Proton is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 3 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 package eu.akoos.photos
 
 import android.app.Application
@@ -11,6 +33,7 @@ import androidx.appcompat.app.AppCompatDelegate
 import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.Configuration
 import androidx.work.DelegatingWorkerFactory
+import androidx.work.WorkManager
 import coil.ImageLoader
 import coil.ImageLoaderFactory
 import coil.decode.VideoFrameDecoder
@@ -21,6 +44,7 @@ import dagger.hilt.android.HiltAndroidApp
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -28,6 +52,7 @@ import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.ThemePrefsBoot
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.worker.AlbumDownloadWorker
+import eu.akoos.photos.worker.CachePruneWorker
 import eu.akoos.photos.worker.SyncWorker
 import javax.inject.Inject
 
@@ -36,6 +61,9 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
 
     @Inject
     lateinit var workerFactory: HiltWorkerFactory
+
+    @Inject
+    lateinit var networkObserver: eu.akoos.photos.util.NetworkObserver
 
     // Initialized in constructor so getWorkManagerConfiguration() never crashes even
     // when called by startup initializers before Hilt injects workerFactory.
@@ -52,6 +80,21 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
     override fun onCreate() {
         super.onCreate() // Hilt injects workerFactory here
         delegatingFactory.addFactory(workerFactory)
+        // StrictMode in debug only. detectCleartextNetwork() trips a violation the
+        // moment any plain HTTP socket opens - belt and suspenders to the manifest
+        // network security config which rejects cleartext at the TLS layer. Other
+        // VM detectors catch resource leaks during development. Release builds skip
+        // this entirely to avoid the perf hit.
+        if (BuildConfig.DEBUG) {
+            android.os.StrictMode.setVmPolicy(
+                android.os.StrictMode.VmPolicy.Builder()
+                    .detectCleartextNetwork()
+                    .detectLeakedClosableObjects()
+                    .detectLeakedSqlLiteObjects()
+                    .penaltyLog()
+                    .build()
+            )
+        }
         // Apply the user's theme to AppCompatDelegate so externally-launched Activities
         // (ProtonCore login/payment screens with their own DayNight XML theme) honour it too.
         applyStoredThemeMode()
@@ -60,6 +103,30 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
         // every cold start.
         AlbumDownloadWorker.ensureChannel(this)
         registerUserPresentReceiver()
+        scheduleFullResCachePrune()
+        // Background sweeper covering the "process killed for days, cache still on disk"
+        // gap that the one-shot prune in scheduleFullResCachePrune() (only runs on cold
+        // start) cannot reach. Idempotent — ExistingPeriodicWorkPolicy.UPDATE means safe
+        // to call on every launch.
+        CachePruneWorker.schedule(WorkManager.getInstance(this))
+        registerCacheCleanupOnBackground()
+    }
+
+    /**
+     * One-shot TTL prune for the full-res cache, deferred ~5 s so cold-start IO budget
+     * goes to the gallery first. The sweeper is a no-op when offline so cached photos
+     * stay viewable until the network returns.
+     */
+    private fun scheduleFullResCachePrune() {
+        appScope.launch {
+            delay(5_000L)
+            runCatching {
+                eu.akoos.photos.data.repository.drive.PhotoDownloadService.pruneStaleFullResCache(
+                    context = this@App,
+                    networkAvailable = networkObserver.isOnline.value,
+                )
+            }
+        }
     }
 
     /**
@@ -67,8 +134,9 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
      * unlocks the device. Lock-screen photos (camera with quick-launch, screenshots taken
      * while locked) flow into MediaStore but the per-Activity ContentObserver in
      * LocalMediaRepositoryImpl is only registered while the gallery is open. Without this
-     * receiver the user has to open the app to kick a sync after unlock — exactly the
-     * "I unlocked but nothing uploaded until I opened the app" symptom users reported.
+     * receiver the user has to open the app to kick a sync after unlock — the
+     * observable symptom is that captures taken on the lock screen sit on the device
+     * until the next manual app launch.
      * Static manifest receivers can't observe ACTION_USER_PRESENT on Android 8+, so this
      * has to be a runtime registration on the Application context.
      */
@@ -146,6 +214,48 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
                 // current visible theme stays; the corrected value will apply on next cold start.
             }
         }
+    }
+
+    /**
+     * Privacy opt-in — when [SettingsKeys.CLEAR_CACHE_ON_APP_CLOSE] is on, wipe every
+     * disk cache the app maintains as soon as the whole process backgrounds. Users
+     * who flip this on are explicitly choosing zero on-disk traces over fast-restart
+     * UX; the cost is a fresh thumbnail + full-res pull on the next open. Lifecycle
+     * .Event.ON_STOP on the process-level lifecycle fires after the last Activity
+     * moves out of the started state (all activities backgrounded or destroyed), so
+     * this is the correct hook — single-Activity transitions (rotation, photo picker
+     * round-trips) do not trigger it.
+     *
+     * Wipe targets:
+     *  - `fullres/`, `fullres-session/` — full-res photo + video blob caches
+     *  - `thumbnails/` — decrypted photo thumbnails written by the gallery
+     *  - `coil_cache/` — Coil's bounded LRU disk cache (still leaks otherwise)
+     *
+     * Off-limits (would corrupt in-flight work or break next launch):
+     *  - `upload_<id>/` — in-flight encrypted upload block dirs
+     *  - `code_cache/` and other OS-managed subdirs
+     *  - the DataStore preferences themselves
+     */
+    private fun registerCacheCleanupOnBackground() {
+        androidx.lifecycle.ProcessLifecycleOwner.get().lifecycle.addObserver(
+            object : androidx.lifecycle.DefaultLifecycleObserver {
+                override fun onStop(owner: androidx.lifecycle.LifecycleOwner) {
+                    appScope.launch {
+                        val enabled = runCatching {
+                            settingsDataStore.data.first()[SettingsKeys.CLEAR_CACHE_ON_APP_CLOSE] == true
+                        }.getOrDefault(false)
+                        if (!enabled) return@launch
+                        runCatching {
+                            listOf(
+                                "fullres", "fullres-session", "thumbnails", "coil_cache",
+                            ).forEach { sub ->
+                                java.io.File(cacheDir, sub).deleteRecursively()
+                            }
+                        }
+                    }
+                }
+            }
+        )
     }
 
     // Coil ImageLoader. VideoFrameDecoder for video posters. Memory cache capped at 12%

@@ -1,13 +1,30 @@
+/*
+ * Photos for Proton
+ * Copyright (C) 2026 Akoos <https://akoos.eu>
+ *
+ * Source:  https://github.com/gitakoos/proton-photos
+ * Website: https://photos.akoos.eu
+ *
+ * This file is part of Photos for Proton.
+ *
+ * Photos for Proton is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 3 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 package eu.akoos.photos.data.repository.drive
 
 import android.util.Log
-import kotlinx.coroutines.delay
 import me.proton.core.crypto.common.pgp.SessionKey
 import eu.akoos.photos.data.crypto.DriveCryptoHelper
-import eu.akoos.photos.util.retryAfterMs
-import eu.akoos.photos.util.retryWithBackoff
-import okhttp3.OkHttpClient
-import okhttp3.Request
 import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -18,15 +35,15 @@ private const val TAG = "ThumbnailHelpers"
  * Thumbnail download + on-disk cache management, shared by [PhotoStreamService],
  * `AlbumService`, and `PhotoDownloadService`.
  *
- * Owns its own [OkHttpClient] — the thumbnail CDN call needs the `pm-storage-token`
- * header instead of the standard Drive `Authorization: Bearer ...`, so it bypasses the
- * ApiProvider stack entirely.
+ * Delegates the raw CDN GET to [CdnBlockFetcher] — the thumbnail CDN call needs the
+ * `pm-storage-token` header instead of the standard Drive `Authorization: Bearer ...`,
+ * so it bypasses the ApiProvider stack entirely.
  */
 @Singleton
 class ThumbnailHelpers @Inject constructor(
     private val cryptoHelper: DriveCryptoHelper,
+    private val cdnBlockFetcher: CdnBlockFetcher,
 ) {
-    private val httpClient = OkHttpClient()
 
     /**
      * True when the DB-cached [thumbnailUrl] still resolves to a real file on disk (or is
@@ -63,22 +80,16 @@ class ThumbnailHelpers @Inject constructor(
             val decFile = File(cacheDir, "thumb_$linkId.jpg")
             if (decFile.exists() && decFile.length() > 0) return "file://${decFile.absolutePath}"
 
-            val reqBuilder = Request.Builder().url(info.bareUrl)
             // Thumbnail CDN uses pm-storage-token (same as block CDN), not Authorization: Bearer.
-            if (info.token != null) reqBuilder.header("pm-storage-token", info.token)
-            val encryptedBytes: ByteArray = retryWithBackoff(maxAttempts = 3) { attempt ->
-                httpClient.newCall(reqBuilder.build()).execute().use { resp ->
-                    if (resp.code == 429 || resp.code == 503) {
-                        val ra = resp.retryAfterMs()
-                        if (ra != null) delay(ra)
-                        error("HTTP ${resp.code} on thumbnail download (attempt ${attempt + 1})")
-                    }
-                    if (!resp.isSuccessful) {
-                        Log.w(TAG, "thumbnail download failed HTTP ${resp.code} for linkId=$linkId")
-                        return@retryWithBackoff ByteArray(0)
-                    }
-                    resp.body?.bytes() ?: ByteArray(0)
-                }
+            val encryptedBytes: ByteArray = try {
+                cdnBlockFetcher.fetchBlock(url = info.bareUrl, token = info.token, maxAttempts = 3)
+            } catch (e: Exception) {
+                // Thumbnails are best-effort — a non-2xx after retries means no thumbnail,
+                // not a failed photo. Log and fall through to the empty-bytes short-circuit
+                // below so the upper layer surfaces null (and the gallery falls back to a
+                // placeholder) instead of bubbling the error to the user.
+                Log.w(TAG, "thumbnail download failed for linkId=$linkId: ${e.message}")
+                ByteArray(0)
             }
             if (encryptedBytes.isEmpty()) return null
 

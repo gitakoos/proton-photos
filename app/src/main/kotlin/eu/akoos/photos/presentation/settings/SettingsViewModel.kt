@@ -1,3 +1,25 @@
+/*
+ * Photos for Proton
+ * Copyright (C) 2026 Akoos <https://akoos.eu>
+ *
+ * Source:  https://github.com/gitakoos/proton-photos
+ * Website: https://photos.akoos.eu
+ *
+ * This file is part of Photos for Proton.
+ *
+ * Photos for Proton is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 3 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 @file:OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 
 package eu.akoos.photos.presentation.settings
@@ -149,7 +171,7 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
                 val cache = context.cacheDir
-                listOf("thumbnails", "fullres").forEach { name ->
+                listOf("thumbnails", "fullres", "fullres-session").forEach { name ->
                     val sub = File(cache, name)
                     if (sub.exists()) sub.deleteRecursively()
                 }
@@ -184,31 +206,106 @@ class SettingsViewModel @Inject constructor(
      */
     private fun observeUploadProgress() {
         viewModelScope.launch {
-            upload.progress.collectLatest { evt ->
+            // Local batch-window state — only the observer touches it, so plain
+            // vals are fine. Reset on Idle, accumulated as files progress.
+            var batchStartMs = 0L
+            // Live per-URI byte counter — Stage 3 plumbed `evt.doneBytes` via the
+            // per-block onProgress callback. Tracking each file's *current* upload
+            // bytes (not just file-completion totals) means the MB/s read-out
+            // tracks the real network throughput LIVE during one large upload
+            // instead of bumping in jumps at each Done event. A small photo batch
+            // no longer reads as "150 KB/s" just because the per-file overhead
+            // dominates the cumulative average.
+            val uploadedBytesByUri = mutableMapOf<String, Long>()
+            // Use `collect` (NOT `collectLatest`) — with parallel uploads two or
+            // three events can arrive in the same millisecond, and `collectLatest`
+            // would cancel the in-flight `_uiState.update` block before its copy()
+            // returned, leaving the Sync card stuck on a stale row.
+            upload.progress.collect { evt ->
                 _uiState.update { current ->
                     when (evt.status) {
-                        UploadStatus.Idle -> current.copy(
-                            uploadDoneCount = 0,
-                            uploadTotalCount = 0,
-                            uploadEvents = emptyList(),
-                        )
+                        UploadStatus.Idle -> {
+                            // End-of-batch: KEEP the events list visible so the user can
+                            // re-enter Settings and see what was just uploaded. Clear only
+                            // the live counters (bytes/sec, in-flight tally). The next
+                            // Uploading event with doneIdx=0 will reset the panel for a
+                            // fresh batch.
+                            batchStartMs = 0L
+                            uploadedBytesByUri.clear()
+                            current.copy(uploadBytesPerSecond = null)
+                        }
                         else -> {
                             val uiStatus = when (evt.status) {
                                 UploadStatus.Uploading -> UploadEventStatus.Uploading
+                                UploadStatus.Encrypting -> UploadEventStatus.Encrypting
                                 UploadStatus.Done -> UploadEventStatus.Done
                                 UploadStatus.Failed -> UploadEventStatus.Failed
                                 UploadStatus.Queued -> UploadEventStatus.Queued
                                 UploadStatus.Idle -> UploadEventStatus.Done // unreachable
                             }
+                            // New-batch detection: a fresh Uploading/Encrypting event that
+                            // arrives when the previous batch fully completed (done == total > 0)
+                            // signals the start of a new run. Wipe the stale events + bytes map
+                            // so the panel doesn't merge two batches into one row list.
+                            val firstPerFileStatus = evt.status == UploadStatus.Uploading ||
+                                evt.status == UploadStatus.Encrypting
+                            val isNewBatch = firstPerFileStatus &&
+                                current.uploadTotalCount > 0 &&
+                                current.uploadDoneCount >= current.uploadTotalCount
+                            val carryEvents = if (isNewBatch) emptyList() else current.uploadEvents
+                            if (isNewBatch) uploadedBytesByUri.clear()
+
                             // Replace the prior entry for this URI (so an "Uploading" row
                             // becomes "Done" instead of accumulating dupes), then trim head.
-                            val withoutPrev = current.uploadEvents.filter { it.uri != evt.uri }
-                            val nextEvents = (withoutPrev + UploadEvent(evt.uri, evt.displayName, uiStatus))
-                                .takeLast(30)
+                            val withoutPrev = carryEvents.filter { it.uri != evt.uri }
+                            val nextEvents = (withoutPrev + UploadEvent(
+                                uri = evt.uri,
+                                displayName = evt.displayName,
+                                status = uiStatus,
+                                sizeBytes = evt.sizeBytes,
+                            )).takeLast(30)
+
+                            // Start the batch timer on the FIRST per-file signal of the run
+                            // — Encrypting fires before Uploading so a CPU-bound first phase
+                            // doesn't get hidden from the bytes/sec window.
+                            if (batchStartMs == 0L && firstPerFileStatus) {
+                                batchStartMs = System.currentTimeMillis()
+                            }
+
+                            // Live byte counter — only Uploading + Done contribute to the
+                            // NETWORK byte count. Encrypting is CPU-only work; counting its
+                            // doneBytes would inflate the speed during the pre-network phase.
+                            // Done overrides the live counter with the full file size so a
+                            // file's contribution is exact at completion.
+                            when (evt.status) {
+                                UploadStatus.Uploading -> {
+                                    val live = evt.doneBytes.coerceAtLeast(0L)
+                                    // Don't go backwards if a late throttled tick reports an
+                                    // older value than the previous one.
+                                    val prev = uploadedBytesByUri[evt.uri] ?: 0L
+                                    uploadedBytesByUri[evt.uri] = maxOf(prev, live)
+                                }
+                                UploadStatus.Done -> {
+                                    uploadedBytesByUri[evt.uri] = evt.sizeBytes.coerceAtLeast(0L)
+                                }
+                                UploadStatus.Failed -> {
+                                    // Leave the partial count — bytes that already left the
+                                    // wire still count toward the realised speed.
+                                }
+                                else -> Unit
+                            }
+
+                            val totalLiveBytes = uploadedBytesByUri.values.sum()
+                            val bps: Long? = if (batchStartMs > 0L && totalLiveBytes > 0L) {
+                                val elapsedMs = (System.currentTimeMillis() - batchStartMs).coerceAtLeast(1L)
+                                (totalLiveBytes * 1000L / elapsedMs)
+                            } else null
+
                             current.copy(
                                 uploadDoneCount = evt.doneIdx,
                                 uploadTotalCount = evt.totalCount,
                                 uploadEvents = nextEvents,
+                                uploadBytesPerSecond = bps,
                             )
                         }
                     }
@@ -320,6 +417,7 @@ class SettingsViewModel @Inject constructor(
                 it.copy(
                     autoSync = migratedPrefs[SettingsKeys.AUTO_SYNC] ?: true,
                     syncWifiOnly = migratedPrefs[SettingsKeys.SYNC_WIFI_ONLY] ?: true,
+                    fullresWifiOnly = migratedPrefs[SettingsKeys.FULLRES_WIFI_ONLY] ?: true,
                     backupEverything = migratedPrefs[SettingsKeys.BACKUP_EVERYTHING] ?: false,
                     excludedFolderNames = migratedPrefs[SettingsKeys.EXCLUDED_FOLDER_NAMES] ?: emptySet(),
                     autoFreeUp = migratedPrefs[SettingsKeys.AUTO_FREE_UP] ?: false,
@@ -332,12 +430,15 @@ class SettingsViewModel @Inject constructor(
                     lastSyncMs = migratedPrefs[SettingsKeys.LAST_SYNC_MS],
                     language = migratedPrefs[SettingsKeys.LANGUAGE] ?: "system",
                     stripOnUpload = migratedPrefs[SettingsKeys.STRIP_ON_UPLOAD] ?: true,
+                    renameToCaptureDate = migratedPrefs[SettingsKeys.RENAME_TO_CAPTURE_DATE] ?: false,
+                    deleteLocalAfterBackup = migratedPrefs[SettingsKeys.DELETE_LOCAL_AFTER_BACKUP] ?: false,
                     stripGps = migratedPrefs[SettingsKeys.STRIP_GPS] ?: true,
                     stripCameraInfo = migratedPrefs[SettingsKeys.STRIP_CAMERA_INFO] ?: false,
                     stripTimestamp = migratedPrefs[SettingsKeys.STRIP_TIMESTAMP] ?: false,
                     stripSoftwareInfo = migratedPrefs[SettingsKeys.STRIP_SOFTWARE_INFO] ?: false,
                     appLockEnabled = migratedPrefs[SettingsKeys.APP_LOCK_ENABLED] ?: false,
                     appLockTimeoutMinutes = migratedPrefs[SettingsKeys.APP_LOCK_TIMEOUT_MINUTES] ?: 0,
+                    clearCacheOnAppClose = migratedPrefs[SettingsKeys.CLEAR_CACHE_ON_APP_CLOSE] ?: false,
                 )
             }
         }
@@ -390,6 +491,15 @@ class SettingsViewModel @Inject constructor(
             if (_uiState.value.autoSync) {
                 SyncWorker.schedule(workManager, wifiOnly, SyncWorker.MIN_INTERVAL_MINUTES)
             }
+        }
+    }
+
+    /** Persist the Wi-Fi-only-for-fullres preference. Affects only the viewer's auto
+     *  download — explicit user actions (Save to device, Edit) ignore this setting. */
+    fun setFullresWifiOnly(wifiOnly: Boolean) {
+        viewModelScope.launch {
+            context.settingsDataStore.edit { it[SettingsKeys.FULLRES_WIFI_ONLY] = wifiOnly }
+            _uiState.update { it.copy(fullresWifiOnly = wifiOnly) }
         }
     }
 
@@ -483,7 +593,7 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    /** Called when the system delete dialog is confirmed by the user. */
+    /** Called when the system delete dialog returns RESULT_OK. */
     fun onFreeUpPermissionGranted() {
         viewModelScope.launch {
             // System already deleted the files; update DB accordingly
@@ -560,6 +670,29 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    fun setRenameToCaptureDate(enabled: Boolean) {
+        viewModelScope.launch {
+            context.settingsDataStore.edit { it[SettingsKeys.RENAME_TO_CAPTURE_DATE] = enabled }
+            _uiState.update { it.copy(renameToCaptureDate = enabled) }
+        }
+    }
+
+    fun setDeleteLocalAfterBackup(enabled: Boolean) {
+        viewModelScope.launch {
+            context.settingsDataStore.edit { it[SettingsKeys.DELETE_LOCAL_AFTER_BACKUP] = enabled }
+            _uiState.update { it.copy(deleteLocalAfterBackup = enabled) }
+            // Kick off an immediate sync run when the user just turned the toggle on,
+            // so the post upload sweep evicts every already SYNCED file without
+            // waiting for the next periodic tick. Mirrors how Save now reacts to a
+            // user request: the user expects "Delete after backup" to take visible
+            // effect the moment they enable it.
+            if (enabled) {
+                val wifiOnly = context.settingsDataStore.data.first()[SettingsKeys.SYNC_WIFI_ONLY] != false
+                SyncWorker.runNow(context, wifiOnly)
+            }
+        }
+    }
+
     fun setStripGps(enabled: Boolean) {
         viewModelScope.launch {
             context.settingsDataStore.edit { it[SettingsKeys.STRIP_GPS] = enabled }
@@ -599,6 +732,16 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             appLockManager.setLockTimeoutMinutes(minutes)
             _uiState.update { it.copy(appLockTimeoutMinutes = minutes) }
+        }
+    }
+
+    /** Persist the "clear full-res cache on app close" privacy switch. The actual
+     *  wipe is performed by the ProcessLifecycleOwner observer registered in App.kt,
+     *  which reads this flag at ON_STOP. */
+    fun setClearCacheOnAppClose(enabled: Boolean) {
+        viewModelScope.launch {
+            context.settingsDataStore.edit { it[SettingsKeys.CLEAR_CACHE_ON_APP_CLOSE] = enabled }
+            _uiState.update { it.copy(clearCacheOnAppClose = enabled) }
         }
     }
 

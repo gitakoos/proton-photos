@@ -1,3 +1,25 @@
+/*
+ * Photos for Proton
+ * Copyright (C) 2026 Akoos <https://akoos.eu>
+ *
+ * Source:  https://github.com/gitakoos/proton-photos
+ * Website: https://photos.akoos.eu
+ *
+ * This file is part of Photos for Proton.
+ *
+ * Photos for Proton is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 3 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 package eu.akoos.photos.presentation.albums
 
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -33,16 +55,13 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.PersonAdd
-import androidx.compose.material.icons.filled.PersonRemove
 import androidx.compose.material.icons.filled.Photo
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.ArrowDropDown
@@ -50,6 +69,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.RemoveCircleOutline
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
+import eu.akoos.photos.presentation.common.ConfirmDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -59,7 +79,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
-import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
@@ -132,6 +151,13 @@ fun AlbumDetailScreen(
     val shareSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scope = rememberCoroutineScope()
     val clipboard = LocalClipboardManager.current
+
+    // Back-button intercept in selection mode: cancel selection instead of popping back
+    // to the albums grid. Without this, the user accidentally exits the album every
+    // time they reach for the system back button to dismiss the multi-select bar.
+    androidx.activity.compose.BackHandler(enabled = state.isSelectionMode) {
+        viewModel.clearSelection()
+    }
 
     LaunchedEffect(state.error) {
         state.error?.let {
@@ -240,22 +266,83 @@ fun AlbumDetailScreen(
             item(span = { GridItemSpan(maxLineSpan) }) {
                 val headerVideoCount = state.photos.count { it.mimeType.startsWith("video/") }
                 val headerPhotoCount = state.photos.size - headerVideoCount
-                AlbumHeroHeader(
-                    coverUrl = coverUrl,
-                    albumName = state.albumName.ifBlank { albumName },
-                    photoCount = headerPhotoCount,
-                    videoCount = headerVideoCount,
-                    isLoading = state.isLoading,
-                    invitations = state.invitations,
-                    members = state.members,
-                    isSharedWithMe = state.isSharedWithMe,
-                    sharedByEmail = state.sharedByEmail,
-                    downloadState = state.downloadState,
-                    onShareClick = { showShareSheet = true },
-                    onDownloadAll = { viewModel.downloadAllPhotos() },
+                val photosTextRes = androidx.compose.ui.res.pluralStringResource(
+                    R.plurals.count_photos_plural, headerPhotoCount, headerPhotoCount,
+                )
+                val videosTextRes = androidx.compose.ui.res.pluralStringResource(
+                    R.plurals.count_videos_plural, headerVideoCount, headerVideoCount,
+                )
+                val countLabel = if (state.isLoading) "" else when {
+                    headerPhotoCount > 0 && headerVideoCount > 0 -> "$photosTextRes, $videosTextRes"
+                    headerVideoCount > 0 -> videosTextRes
+                    else -> photosTextRes
+                }
+                eu.akoos.photos.presentation.albums.components.AlbumHeroHeader(
+                    coverModel = coverUrl,
+                    title = state.albumName.ifBlank { albumName },
+                    photoCountText = countLabel,
                     // Rename is owner-only — receivers of a shared album can't change its name.
-                    onRenameClick = if (state.isSharedWithMe) null else { -> showRenameDialog = true },
-                    downloadedOnDeviceCount = state.localUriByLinkId.size,
+                    canRename = !state.isSharedWithMe,
+                    onRenameClick = { showRenameDialog = true },
+                    extraSlot = {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            // Sharer avatar (shared-with-me) or accepted members + pending invitees (own album)
+                            val sharerEmail = state.sharedByEmail
+                            if (state.isSharedWithMe && sharerEmail != null) {
+                                AvatarCircle(letter = sharerEmail.first().uppercase(), tint = Color(0xFFB0A0FF))
+                            } else {
+                                val allEmails = (state.members.map { it.email } + state.invitations.map { it.email }).distinct()
+                                allEmails.take(4).forEach { email ->
+                                    AvatarCircle(letter = email.first().uppercase(), tint = Accent)
+                                }
+                            }
+
+                            Spacer(Modifier.weight(1f))
+
+                            // Download all icon button
+                            val isDownloading = state.downloadState is AlbumDownloadState.Working
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .background(PillBg, CircleShape)
+                                    .border(0.5.dp, PillBorder, CircleShape)
+                                    .clickable(enabled = !isDownloading, onClick = { viewModel.downloadAllPhotos() }),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                if (isDownloading) {
+                                    val progress = state.downloadState as AlbumDownloadState.Working
+                                    CircularProgressIndicator(
+                                        progress = { if (progress.total > 0) progress.done.toFloat() / progress.total else 0f },
+                                        color = Accent, strokeWidth = 2.dp,
+                                        modifier = Modifier.size(18.dp),
+                                    )
+                                } else {
+                                    Icon(Icons.Default.FileDownload, stringResource(R.string.albums_download_all), tint = Accent, modifier = Modifier.size(18.dp))
+                                }
+                            }
+
+                            // Share / Info icon button
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .background(PillBg, CircleShape)
+                                    .border(0.5.dp, PillBorder, CircleShape)
+                                    .clickable(onClick = { showShareSheet = true }),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(
+                                    if (state.isSharedWithMe) Icons.Default.Info else Icons.Default.Share,
+                                    contentDescription = if (state.isSharedWithMe) stringResource(R.string.share_shared_with) else stringResource(R.string.albums_share_button),
+                                    tint = Accent,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                            }
+                        }
+                    },
                 )
             }
 
@@ -441,7 +528,7 @@ fun AlbumDetailScreen(
             }
         }
 
-        SnackbarHost(snackbarHostState, modifier = Modifier.align(Alignment.BottomCenter))
+        eu.akoos.photos.presentation.common.ThemedSnackbarHost(snackbarHostState, modifier = Modifier.align(Alignment.BottomCenter))
     }
 
     if (showShareSheet) {
@@ -481,25 +568,14 @@ fun AlbumDetailScreen(
 
     if (showDeleteConfirm) {
         val n = state.selectedCount
-        AlertDialog(
-            onDismissRequest = { showDeleteConfirm = false },
-            containerColor = appColors.cardBg,
-            titleContentColor = appColors.fgPrimary,
-            title = {
-                Text(
-                    androidx.compose.ui.res.pluralStringResource(R.plurals.delete_title_plural, n, n),
-                    fontWeight = FontWeight.SemiBold,
-                )
-            },
-            text = { Text(stringResource(R.string.delete_also_cloud_warning), color = appColors.fgDim, fontSize = 13.sp) },
-            confirmButton = {
-                TextButton(onClick = { showDeleteConfirm = false; viewModel.deleteSelectedPhotos() }) {
-                    Text(stringResource(R.string.delete_button_permanently), color = ErrorColor, fontWeight = FontWeight.SemiBold)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDeleteConfirm = false }) { Text(stringResource(R.string.cancel), color = appColors.fgDim) }
-            },
+        ConfirmDialog(
+            title = androidx.compose.ui.res.pluralStringResource(R.plurals.delete_title_plural, n, n),
+            message = stringResource(R.string.delete_also_cloud_warning),
+            confirmLabel = stringResource(R.string.delete_button_permanently),
+            dismissLabel = stringResource(R.string.cancel),
+            onConfirm = { showDeleteConfirm = false; viewModel.deleteSelectedPhotos() },
+            onDismiss = { showDeleteConfirm = false },
+            destructive = true,
         )
     }
 
@@ -550,156 +626,6 @@ fun AlbumDetailScreen(
 // ── Hero header ────────────────────────────────────────────────────────────────
 
 @Composable
-private fun AlbumHeroHeader(
-    coverUrl: String?,
-    albumName: String,
-    photoCount: Int,
-    /** Number of videos in this album — header subtitle splits "X photos, Y videos" when both > 0. */
-    videoCount: Int,
-    isLoading: Boolean,
-    invitations: List<ShareInvitation>,
-    members: List<ShareMember>,
-    isSharedWithMe: Boolean,
-    sharedByEmail: String?,
-    downloadState: AlbumDownloadState,
-    onShareClick: () -> Unit,
-    onDownloadAll: () -> Unit,
-    /** Null when the user can't rename this album (shared-with-me) — hides the pencil icon. */
-    onRenameClick: (() -> Unit)? = null,
-    downloadedOnDeviceCount: Int = 0,
-) {
-    Column {
-        // Cover image — extends to top of screen (behind status bar)
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .aspectRatio(4f / 3f)
-                .background(Bg2),
-        ) {
-            if (coverUrl != null) {
-                AsyncImage(
-                    model = coverUrl,
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize(),
-                )
-            }
-        }
-
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp)
-                .padding(top = 20.dp, bottom = 16.dp),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    albumName,
-                    color = AppColors.current.fgPrimary,
-                    fontSize = 24.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.weight(1f, fill = false),
-                )
-                if (onRenameClick != null) {
-                    Spacer(Modifier.size(8.dp))
-                    Box(
-                        modifier = Modifier
-                            .size(32.dp)
-                            .clip(CircleShape)
-                            .clickable(onClick = onRenameClick),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(
-                            Icons.Default.Edit,
-                            contentDescription = stringResource(R.string.album_rename),
-                            tint = AppColors.current.fgDim,
-                            modifier = Modifier.size(18.dp),
-                        )
-                    }
-                }
-            }
-            Spacer(Modifier.height(4.dp))
-            if (!isLoading) {
-                // Hybrid count display — matches gallery date-headers and the multi-select counter.
-                val photosText = androidx.compose.ui.res.pluralStringResource(
-                    R.plurals.count_photos_plural, photoCount, photoCount,
-                )
-                val videosText = androidx.compose.ui.res.pluralStringResource(
-                    R.plurals.count_videos_plural, videoCount, videoCount,
-                )
-                val countLabel = when {
-                    photoCount > 0 && videoCount > 0 -> "$photosText, $videosText"
-                    videoCount > 0 -> videosText
-                    else -> photosText
-                }
-                Text(countLabel, color = AppColors.current.fgMute, fontSize = 14.sp)
-            }
-
-            Spacer(Modifier.height(16.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                // Sharer avatar (shared-with-me) or accepted members + pending invitees (own album)
-                if (isSharedWithMe && sharedByEmail != null) {
-                    AvatarCircle(letter = sharedByEmail.first().uppercase(), tint = Color(0xFFB0A0FF))
-                } else {
-                    val allEmails = (members.map { it.email } + invitations.map { it.email }).distinct()
-                    allEmails.take(4).forEach { email ->
-                        AvatarCircle(letter = email.first().uppercase(), tint = Accent)
-                    }
-                }
-
-                Spacer(Modifier.weight(1f))
-
-                // Download all icon button
-                val isDownloading = downloadState is AlbumDownloadState.Working
-                Box(
-                    modifier = Modifier
-                        .size(36.dp)
-                        .background(PillBg, CircleShape)
-                        .border(0.5.dp, PillBorder, CircleShape)
-                        .clickable(enabled = !isDownloading, onClick = onDownloadAll),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    if (isDownloading) {
-                        val progress = downloadState as AlbumDownloadState.Working
-                        CircularProgressIndicator(
-                            progress = { if (progress.total > 0) progress.done.toFloat() / progress.total else 0f },
-                            color = Accent, strokeWidth = 2.dp,
-                            modifier = Modifier.size(18.dp),
-                        )
-                    } else {
-                        Icon(Icons.Default.FileDownload, stringResource(R.string.albums_download_all), tint = Accent, modifier = Modifier.size(18.dp))
-                    }
-                }
-
-                // Share / Info icon button
-                Box(
-                    modifier = Modifier
-                        .size(36.dp)
-                        .background(PillBg, CircleShape)
-                        .border(0.5.dp, PillBorder, CircleShape)
-                        .clickable(onClick = onShareClick),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        if (isSharedWithMe) Icons.Default.Info else Icons.Default.Share,
-                        contentDescription = if (isSharedWithMe) stringResource(R.string.share_shared_with) else stringResource(R.string.albums_share_button),
-                        tint = Accent,
-                        modifier = Modifier.size(18.dp),
-                    )
-                }
-            }
-        }
-
-        HorizontalDivider(color = PillBorder, thickness = 0.5.dp)
-    }
-}
-
-@Composable
 private fun AvatarCircle(letter: String, tint: Color) {
     Box(
         modifier = Modifier
@@ -709,58 +635,6 @@ private fun AvatarCircle(letter: String, tint: Color) {
         contentAlignment = Alignment.Center,
     ) {
         Text(letter, color = tint, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-    }
-}
-
-/** Small icon-and-text pill — used in the album hero header to label cloud / shared / device state. */
-@Composable
-private fun AlbumStatusPill(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    text: String,
-    color: Color,
-) {
-    Row(
-        modifier = Modifier
-            .background(Color(0x33FFFFFF), androidx.compose.foundation.shape.RoundedCornerShape(10.dp))
-            .padding(horizontal = 8.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        Icon(icon, null, tint = color, modifier = Modifier.size(13.dp))
-        Text(text, color = color, fontSize = 11.sp, fontWeight = FontWeight.Medium)
-    }
-}
-
-/** One row in the "People with access" list — email + status chip + revoke icon. */
-@Composable
-private fun AccessRow(
-    email: String,
-    label: String,
-    labelColor: Color,
-    onRevoke: () -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        AvatarCircle(letter = email.first().uppercase(), tint = Accent)
-        Column(modifier = Modifier.weight(1f)) {
-            Text(email, color = FgPrimary, fontSize = 14.sp)
-            Text(label, color = labelColor, fontSize = 11.sp, fontWeight = FontWeight.Medium)
-        }
-        Box(
-            modifier = Modifier
-                .size(30.dp)
-                .background(Color(0x33FF3B30), CircleShape)
-                .clickable(onClick = onRevoke),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(Icons.Default.PersonRemove, "Remove access",
-                tint = ErrorColor, modifier = Modifier.size(15.dp))
-        }
     }
 }
 
@@ -915,6 +789,23 @@ private fun PhotoCell(
                 containerColor = appColors.cardBg,
                 border = androidx.compose.foundation.BorderStroke(0.5.dp, appColors.pillBorder),
             ) {
+                // Select is the first menu item so long-press has a discoverable path
+                // into multi-select.
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.gallery_action_select), color = appColors.fgPrimary) },
+                    leadingIcon = {
+                        Icon(
+                            Icons.Default.Check,
+                            contentDescription = null,
+                            tint = Accent,
+                            modifier = Modifier.size(20.dp),
+                        )
+                    },
+                    onClick = {
+                        menuExpanded = false
+                        onLongPress()
+                    },
+                )
                 DropdownMenuItem(
                     text = { Text(stringResource(R.string.album_set_as_cover), color = appColors.fgPrimary) },
                     leadingIcon = {
@@ -1173,8 +1064,7 @@ private fun ShareAlbumSheet(
                             keyboardType = KeyboardType.Email,
                             // Done over Send — the IME action only adds to the chip list, not
                             // submits the whole invite, so Done is more intention-matching and
-                            // avoids the "I hit enter and lost the input but no chip showed up"
-                            // footgun if the email was invalid.
+                            // avoids losing the input on invalid emails.
                             imeAction = ImeAction.Done,
                         ),
                         keyboardActions = KeyboardActions(onDone = {

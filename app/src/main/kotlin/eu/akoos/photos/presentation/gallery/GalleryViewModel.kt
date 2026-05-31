@@ -1,3 +1,25 @@
+/*
+ * Photos for Proton
+ * Copyright (C) 2026 Akoos <https://akoos.eu>
+ *
+ * Source:  https://github.com/gitakoos/proton-photos
+ * Website: https://photos.akoos.eu
+ *
+ * This file is part of Photos for Proton.
+ *
+ * Photos for Proton is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 3 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 @file:OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 
 package eu.akoos.photos.presentation.gallery
@@ -147,8 +169,19 @@ class GalleryViewModel @Inject constructor(
     private fun observeBackgroundUploadProgress() {
         viewModelScope.launch {
             upload.progress.collect { evt ->
-                val syncing = evt.status == eu.akoos.photos.domain.usecase.UploadStatus.Uploading ||
-                    evt.status == eu.akoos.photos.domain.usecase.UploadStatus.Queued
+                // isSyncing should stay true for the WHOLE upload lifecycle the user can
+                // observe — not just the on-CDN Uploading phase. The Encrypting phase can
+                // take several seconds on a large clip, and excluding it dropped the
+                // gallery spinner mid-pipeline, making users think the sync stalled.
+                // Idle / Done / Failed all flip it back off.
+                val syncing = when (evt.status) {
+                    eu.akoos.photos.domain.usecase.UploadStatus.Queued -> true
+                    eu.akoos.photos.domain.usecase.UploadStatus.Encrypting -> true
+                    eu.akoos.photos.domain.usecase.UploadStatus.Uploading -> true
+                    eu.akoos.photos.domain.usecase.UploadStatus.Done -> false
+                    eu.akoos.photos.domain.usecase.UploadStatus.Failed -> false
+                    eu.akoos.photos.domain.usecase.UploadStatus.Idle -> false
+                }
                 if (_uiState.value.isSyncing != syncing) {
                     _uiState.update { it.copy(isSyncing = syncing) }
                 }
@@ -274,12 +307,11 @@ class GalleryViewModel @Inject constructor(
                             is GalleryItem.Synced -> item.local.uri
                             is GalleryItem.CloudOnly -> null
                         }
-                        // Only filter by LOCAL-side hide: the cloud counterpart of a
-                        // Synced→hidden photo stays in the listing so "this photo is on
-                        // Drive even though I hid the device copy" remains visible —
-                        // surfaced via a dim overlay + eye badge in PhotoCell (see
-                        // hiddenCloudLinkIds usage in the cell). CloudOnly items
-                        // intentionally pass through; the dim overlay is enough.
+                        // Only filter by local-side hide; the cloud counterpart stays in
+                        // the listing with a dim overlay. Surfaced via a dim overlay + eye
+                        // badge in PhotoCell (see hiddenCloudLinkIds usage in the cell).
+                        // CloudOnly items intentionally pass through; the dim overlay is
+                        // enough.
                         uri == null || uri !in hiddenUris
                     }
                     val pending = items.count { it is GalleryItem.LocalOnly }
@@ -738,6 +770,19 @@ class GalleryViewModel @Inject constructor(
                     }
                 }
 
+            // Count items the chosen target can't accept so the UI can surface a partial-success
+            // warning instead of silently dropping them.
+            //   - Target is a local bucket (albumLinkId == null) → CloudOnly items are skipped
+            //     because they have no MediaStore URI to fold into the virtual-membership map.
+            //   - Target is a Drive album (albumLinkId != null) → LocalOnly items are skipped
+            //     because they have no Drive linkId to attach. (LocalOnly items with a backed-up
+            //     twin would surface as Synced instead, so they don't fall into this bucket.)
+            val skipped = if (albumLinkId == null) {
+                items.count { it is GalleryItem.CloudOnly }
+            } else {
+                items.count { it is GalleryItem.LocalOnly }
+            }
+
             // If a cloud add is needed but we don't have a userId or albumLinkId, fail early.
             if (cloudLinkIds.isNotEmpty() && albumLinkId != null && userId == null) {
                 _uiState.update { it.copy(addToAlbumState = AddToAlbumState.Failed("Not signed in")) }
@@ -750,6 +795,7 @@ class GalleryViewModel @Inject constructor(
                 albumName = sanitizedName,
                 cloudLinkIds = cloudLinkIds,
                 localUris = localUris,
+                skipped = skipped,
             )
             _uiState.update { it.copy(
                 selectedItems    = emptySet(),
@@ -763,13 +809,16 @@ class GalleryViewModel @Inject constructor(
     }
 
     /** Cloud-add + local-bucket-move helper used by both the immediate path and the post-consent
-     *  resume. Returns the terminal state for the UI. */
+     *  resume. Returns the terminal state for the UI. [skipped] is the pre-computed count of
+     *  items the chosen target couldn't accept (see caller); it's passed through to the
+     *  terminal [AddToAlbumState.Done] so the UI can show a partial-success snackbar. */
     private suspend fun runAddToAlbum(
         userId: me.proton.core.domain.entity.UserId?,
         albumLinkId: String?,
         albumName: String,
         cloudLinkIds: List<String>,
         localUris: List<Pair<Uri, String>>,
+        skipped: Int = 0,
     ): AddToAlbumState {
         // Cloud leg
         var cloudAdded = 0
@@ -841,7 +890,7 @@ class GalleryViewModel @Inject constructor(
         if (nothingHappened) {
             return AddToAlbumState.Failed("Could not add to album")
         }
-        return AddToAlbumState.Done(cloudAdded, localMoved, albumName)
+        return AddToAlbumState.Done(cloudAdded, localMoved, skipped, albumName)
     }
 
     /**
@@ -939,8 +988,8 @@ class GalleryViewModel @Inject constructor(
     // ── Batch EXIF strip ──────────────────────────────────────────────────────
     //
     // Re-uses the in-place strip path the per-photo metadata sheet drives via
-    // [ExifHelper.stripFieldsInPlace]. Cloud-only items in the selection are skipped — we'd need
-    // a re-upload pipeline to mutate cloud bytes. Local files the OS refuses to write in-place
+    // [ExifHelper.stripFieldsInPlace]. Cloud-only items in the selection are skipped — mutating
+    // cloud bytes needs a re-upload pipeline. Local files the OS refuses to write in-place
     // (foreign owner under scoped storage on Android 10+) are also skipped and surfaced as the
     // "skipped" count in the snackbar so the user knows some files were untouched.
     //

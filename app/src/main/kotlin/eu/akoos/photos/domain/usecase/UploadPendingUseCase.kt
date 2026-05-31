@@ -1,3 +1,25 @@
+/*
+ * Photos for Proton
+ * Copyright (C) 2026 Akoos <https://akoos.eu>
+ *
+ * Source:  https://github.com/gitakoos/proton-photos
+ * Website: https://photos.akoos.eu
+ *
+ * This file is part of Photos for Proton.
+ *
+ * Photos for Proton is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 3 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 package eu.akoos.photos.domain.usecase
 
 import android.content.Context
@@ -32,8 +54,12 @@ import eu.akoos.photos.util.ExifHelper
 import eu.akoos.photos.util.MetadataStripConfig
 import java.io.File
 import java.security.MessageDigest
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.coroutines.coroutineContext
@@ -52,13 +78,18 @@ private const val UPLOAD_PARALLELISM = 3
 /**
  * Per-file upload event surfaced to UI (Settings sync progress).
  *
- * Status transitions per file: `Queued` → `Uploading` → (`Done` | `Failed`). `done` and `total`
- * are batch-level counters so the UI can render a single linear bar without keeping its own state.
+ * Status transitions per file: `Queued` → `Encrypting` → `Uploading` → (`Done` | `Failed`).
+ * `done` and `total` are batch-level counters so the UI can render a single linear bar without
+ * keeping its own state.
+ *
+ * `Encrypting` was split out from `Uploading` so the user sees the pre-network phase distinctly
+ * — multi-hundred-MB videos can spend minutes in encrypt/sign/spill before the first byte hits
+ * the CDN, and folding that into "Uploading" was the most common cause of "stuck at 0 %" reports.
  *
  * `Idle` is a synthetic frame the use-case emits when it finishes (or finds nothing to upload)
  * so observers can clear any in-flight view without watching a separate signal.
  */
-enum class UploadStatus { Queued, Uploading, Done, Failed, Idle }
+enum class UploadStatus { Queued, Encrypting, Uploading, Done, Failed, Idle }
 
 data class UploadProgress(
     val uri: String,
@@ -66,6 +97,15 @@ data class UploadProgress(
     val status: UploadStatus,
     val doneIdx: Int,
     val totalCount: Int,
+    /** Plaintext byte count of the file this event is about. Used by the Sync card
+     *  to compute a running bytes/sec speed. 0 for non-per-file events (Idle frames). */
+    val sizeBytes: Long = 0L,
+    /**
+     * Live byte counter for the current file's phase (Encrypting or Uploading). 0 outside
+     * those phases. SettingsViewModel reads this for the live MB/s speed read-out so the
+     * meter updates DURING a single large upload instead of only ticking on file completion.
+     */
+    val doneBytes: Long = 0L,
 )
 
 @Singleton
@@ -73,6 +113,7 @@ class UploadPendingUseCase @Inject constructor(
     private val syncStateRepo: SyncStateRepository,
     private val localRepo: LocalMediaRepository,
     private val cloudRepo: DrivePhotoRepository,
+    private val pendingDeleteNotif: PendingDeleteNotificationUseCase,
     @ApplicationContext private val context: Context,
 ) {
     private val mutex = Mutex()
@@ -90,9 +131,9 @@ class UploadPendingUseCase @Inject constructor(
 
     /**
      * Returned to the worker so it can distinguish "0 to upload" (success) from "tried N,
-     * 0 succeeded" (stale-success bug — used to silently mark sync as done even when every
-     * item failed). [SyncWorker] downgrades the verdict when [successCount] is 0 but
-     * [attempted] is non-zero so WorkManager retries instead of writing LAST_SYNC_MS.
+     * 0 succeeded" (the latter must not silently mark sync as done when every item failed).
+     * [SyncWorker] downgrades the verdict when [successCount] is 0 but [attempted] is
+     * non-zero so WorkManager retries instead of writing LAST_SYNC_MS.
      */
     data class Result(val attempted: Int, val successCount: Int) {
         val allFailed: Boolean get() = attempted > 0 && successCount == 0
@@ -125,6 +166,8 @@ class UploadPendingUseCase @Inject constructor(
         val excludedFolders: Set<String> = prefs[SettingsKeys.EXCLUDED_FOLDER_NAMES] ?: emptySet()
 
         val stripOnUpload = prefs[SettingsKeys.STRIP_ON_UPLOAD] ?: true
+        val renameToCaptureDate = prefs[SettingsKeys.RENAME_TO_CAPTURE_DATE] ?: false
+        val deleteLocalAfterBackup = prefs[SettingsKeys.DELETE_LOCAL_AFTER_BACKUP] ?: false
         val stripConfig = MetadataStripConfig(
             stripGps = prefs[SettingsKeys.STRIP_GPS] ?: true,
             stripCameraInfo = prefs[SettingsKeys.STRIP_CAMERA_INFO] ?: false,
@@ -257,6 +300,8 @@ class UploadPendingUseCase @Inject constructor(
                                 backupEverything = backupEverything,
                                 selectedFolders = selectedFolders,
                                 stripOnUpload = stripOnUpload,
+                                renameToCaptureDate = renameToCaptureDate,
+                                deleteLocalAfterBackup = deleteLocalAfterBackup,
                                 stripConfig = stripConfig,
                                 virtualMembershipByUri = virtualMembershipByUri,
                                 existingAlbumsByName = existingAlbumsByName,
@@ -282,6 +327,12 @@ class UploadPendingUseCase @Inject constructor(
 
         val finalSuccess = successCount.get()
         Log.d(UPLOAD_TAG, "Upload complete: $finalSuccess/${pending.size} succeeded")
+        // Refresh the consent notification with the latest pending queue. Same
+        // call MainActivity.onResume fires so an externally deleted file (file
+        // manager, OS trash flush) gets reconciled the moment the user opens the
+        // app even without a worker run.
+        pendingDeleteNotif()
+
         // Final "Idle" frame so the UI clears any in-flight panel.
         _progress.tryEmit(UploadProgress("", "", UploadStatus.Idle, totalCount, totalCount))
         Result(attempted = pending.size, successCount = finalSuccess)
@@ -304,6 +355,8 @@ class UploadPendingUseCase @Inject constructor(
         backupEverything: Boolean,
         selectedFolders: Set<String>?,
         stripOnUpload: Boolean,
+        renameToCaptureDate: Boolean,
+        deleteLocalAfterBackup: Boolean,
         stripConfig: MetadataStripConfig,
         virtualMembershipByUri: Map<String, List<String>>,
         existingAlbumsByName: MutableMap<String, String>,
@@ -315,8 +368,8 @@ class UploadPendingUseCase @Inject constructor(
     ) {
         var strippedFile: File? = null
         try {
-            val localItem = localRepo.queryByUri(state.localUri)
-            if (localItem == null) {
+            val rawLocalItem = localRepo.queryByUri(state.localUri)
+            if (rawLocalItem == null) {
                 Log.w(UPLOAD_TAG, "Local item not found for URI: ${state.localUri}")
                 return
             }
@@ -325,19 +378,38 @@ class UploadPendingUseCase @Inject constructor(
             // in case a stale LOCAL_ONLY entry survives (e.g. after import / app restart).
             // backupEverything skips this defense-in-depth folder check too —
             // there's no folder filter to compare against.
-            if (!backupEverything && localItem.bucketName != null && selectedFolders != null && localItem.bucketName !in selectedFolders) {
-                Log.d(UPLOAD_TAG, "Skipping ${localItem.displayName}: folder '${localItem.bucketName}' not selected for backup")
+            if (!backupEverything && rawLocalItem.bucketName != null && selectedFolders != null && rawLocalItem.bucketName !in selectedFolders) {
+                Log.d(UPLOAD_TAG, "Skipping ${rawLocalItem.displayName}: folder '${rawLocalItem.bucketName}' not selected for backup")
                 return
             }
+            // Optional rename: derive cloud displayName from the source's capture timestamp
+            // (MediaStore DATE_TAKEN). The on-device file is NOT touched — only the name we
+            // send to Drive changes. Strip-on-upload runs against the bytes of the original
+            // (or stripped temp) file independently, so a stripped + renamed photo still gets
+            // its EXIF erased before the cloud name lands.
+            val localItem = if (renameToCaptureDate) {
+                val ext = rawLocalItem.displayName.substringAfterLast('.', "")
+                val captureMs = rawLocalItem.dateTaken.takeIf { it > 0L } ?: System.currentTimeMillis()
+                val newBase = SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", Locale.US).format(Date(captureMs))
+                val newName = if (ext.isNotEmpty()) "$newBase.$ext" else newBase
+                Log.d(UPLOAD_TAG, "Rename-on-upload: '${rawLocalItem.displayName}' → '$newName'")
+                rawLocalItem.copy(displayName = newName)
+            } else {
+                rawLocalItem
+            }
             Log.d(UPLOAD_TAG, "Uploading: ${localItem.displayName} (${localItem.mimeType}, ${localItem.sizeBytes} bytes)")
+            // First UI signal: this file has entered the pipeline at the Encrypting phase.
+            // The bar's per-file colour shifts to the dimmer "pre-network" tint until the
+            // first onProgress(Uploading) callback fires. doneIdx uses the running-finished
+            // tally so the bar reflects completions, not phase transitions of any one file.
             _progress.tryEmit(
                 UploadProgress(
                     uri = state.localUri,
                     displayName = localItem.displayName,
-                    status = UploadStatus.Uploading,
-                    // Use the running-completed tally so the bar tracks finishes, not list order.
+                    status = UploadStatus.Encrypting,
                     doneIdx = finishedCount.get(),
                     totalCount = totalCount,
+                    sizeBytes = localItem.sizeBytes,
                 )
             )
 
@@ -359,7 +431,50 @@ class UploadPendingUseCase @Inject constructor(
                 localItem.copy(sizeBytes = strippedFile.length())
             else
                 localItem
-            val cloudId = cloudRepo.uploadFile(userId, uploadItem, hash, uploadUri)
+
+            // Throttled progress relay. PhotoUploadService already debounces to ~250 ms per
+            // phase, but a single batch can have multiple uploads in flight (UPLOAD_PARALLELISM
+            // permits), each with its own meter. We re-throttle per-uri here so the SharedFlow
+            // can't be flooded by ~30 callbacks/s × N concurrent uploads. Phase TRANSITIONS
+            // always emit (even if inside the throttle window) so the UI sees the Encrypting →
+            // Uploading switch the moment the first CDN PUT lands.
+            val lastEmitMsByPhase = AtomicLong(0L)
+            // Phase tracked via AtomicReference because PhotoUploadService invokes onProgress
+            // from multiple coroutines: parallel encrypt tasks during the encrypt phase, then
+            // parallel CDN PUTs during the upload phase. The phase boundary itself is sequential
+            // (encrypt awaitAll → 100 % tick → uploads start), but within a phase the lambda
+            // sees concurrent calls and the captured var would otherwise need explicit syncing.
+            val lastPhase = java.util.concurrent.atomic.AtomicReference<
+                eu.akoos.photos.data.repository.drive.UploadPhase?>(null)
+            val onProgressForFile: (
+                eu.akoos.photos.data.repository.drive.UploadPhase,
+                Long,
+                Long,
+            ) -> Unit = { phase, doneBytes, _ ->
+                val nowMs = System.currentTimeMillis()
+                val prev = lastEmitMsByPhase.get()
+                val phaseChanged = lastPhase.getAndSet(phase) != phase
+                if (phaseChanged || nowMs - prev >= 250L) {
+                    lastEmitMsByPhase.set(nowMs)
+                    val statusForUi = when (phase) {
+                        eu.akoos.photos.data.repository.drive.UploadPhase.Encrypting ->
+                            UploadStatus.Encrypting
+                        eu.akoos.photos.data.repository.drive.UploadPhase.Uploading ->
+                            UploadStatus.Uploading
+                    }
+                    _progress.tryEmit(
+                        UploadProgress(
+                            uri = state.localUri,
+                            displayName = localItem.displayName,
+                            status = statusForUi,
+                            doneIdx = finishedCount.get(),
+                            totalCount = totalCount,
+                            doneBytes = doneBytes,
+                        )
+                    )
+                }
+            }
+            val cloudId = cloudRepo.uploadFile(userId, uploadItem, hash, uploadUri, onProgressForFile)
 
             strippedFile?.delete()
             strippedFile = null
@@ -374,6 +489,38 @@ class UploadPendingUseCase @Inject constructor(
                 ),
                 userId,
             )
+
+            // Delete-after-backup: only the ORIGINAL MediaStore URI, never the strip
+            // temp. Runs AFTER the SYNCED upsert so a crash here cannot leave the
+            // user with a deleted local file and no Drive record. The direct call
+            // throws RecoverableSecurityException on Samsung Gallery owned items
+            // even with Manage Media granted — the OS still wants an explicit
+            // consent gesture. We queue refused URIs into PENDING_DELETE_URIS and
+            // the batched foreground sweep at the end of the upload run sends a
+            // single createDeleteRequest IntentSender that lets the user accept N
+            // files at once instead of one dialog per file.
+            if (deleteLocalAfterBackup) {
+                val uri = runCatching { Uri.parse(state.localUri) }.getOrNull()
+                if (uri == null) {
+                    Log.w(UPLOAD_TAG, "Delete after backup: invalid URI ${state.localUri}")
+                } else {
+                    val rows = runCatching { context.contentResolver.delete(uri, null, null) }
+                        .getOrElse { e ->
+                            Log.w(UPLOAD_TAG, "Delete after backup threw for ${localItem.displayName}: ${e::class.simpleName} ${e.message}")
+                            0
+                        }
+                    if (rows > 0) {
+                        Log.d(UPLOAD_TAG, "Delete after backup: removed ${localItem.displayName} from MediaStore")
+                    } else {
+                        context.settingsDataStore.edit { p ->
+                            val existing = p[SettingsKeys.PENDING_DELETE_URIS] ?: emptySet()
+                            p[SettingsKeys.PENDING_DELETE_URIS] = existing + state.localUri
+                        }
+                        Log.d(UPLOAD_TAG, "Delete after backup: queued ${localItem.displayName} for batched consent dialog")
+                    }
+                }
+            }
+
             successCount.incrementAndGet()
             val doneNow = finishedCount.incrementAndGet()
             Log.d(UPLOAD_TAG, "Upload OK: ${localItem.displayName} → cloudId=$cloudId")
@@ -387,6 +534,7 @@ class UploadPendingUseCase @Inject constructor(
                     // signal when photo #5 finishes before photo #3.
                     doneIdx = doneNow,
                     totalCount = totalCount,
+                    sizeBytes = uploadItem.sizeBytes,
                 )
             )
 

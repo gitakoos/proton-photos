@@ -1,3 +1,25 @@
+/*
+ * Photos for Proton
+ * Copyright (C) 2026 Akoos <https://akoos.eu>
+ *
+ * Source:  https://github.com/gitakoos/proton-photos
+ * Website: https://photos.akoos.eu
+ *
+ * This file is part of Photos for Proton.
+ *
+ * Photos for Proton is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 3 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 package eu.akoos.photos.data.repository.drive
 
 import android.content.Context
@@ -5,6 +27,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
 import android.net.Uri
+import android.os.ParcelFileDescriptor
 import android.util.Base64
 import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -43,13 +66,42 @@ import okhttp3.RequestBody.Companion.asRequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.FileInputStream
+import java.nio.ByteBuffer
+import java.nio.channels.FileChannel
 import java.time.Instant
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
+import java.util.concurrent.atomic.AtomicLong
 import javax.inject.Inject
 import javax.inject.Singleton
 
 private const val TAG = "PhotoUploadSvc"
+
+/**
+ * Source-bytes-consumed phase reported via `uploadFile`'s `onProgress` callback. UI maps
+ * `Encrypting` to a dimmer spinner so the user sees the pre-network stage distinctly from
+ * the CDN PUT stage. Each phase emits its own progress curve from 0 → totalBytes; a final
+ * 100 % tick is guaranteed at every phase transition so the bar always settles cleanly.
+ */
+enum class UploadPhase { Encrypting, Uploading }
+
+/**
+ * Concurrent block encrypt+sign+spill slots. Three is the sweet spot:
+ * - On a 6-core phone, three CPU cores stay busy on PGP/AES while one handles UI and one
+ *   handles the parallel CDN PUTs (cdnUploadSemaphore=2). Above 3 the cores spend more
+ *   time on context switches than on the cipher.
+ * - Each in-flight block keeps a 4 MB plaintext buffer + the encrypted output in RAM until
+ *   it spills, so 3 × ~9 MB ≈ 27 MB of heap headroom. Stays well under the 256 MB largeHeap
+ *   ceiling even on a 2 GB Pixel 6a.
+ *
+ * Increased above 1 reduces the wall-clock between "Save" tap and the first CDN PUT for
+ * multi-block uploads — the dominant cost on long videos.
+ */
+private const val ENCRYPT_PARALLELISM = 3
+
+/** Throttle window for [PhotoUploadService.uploadFile]'s onProgress callback (per phase). */
+private const val PROGRESS_THROTTLE_MS = 250L
 
 /**
  * Per-call retry tuned for upload-side metadata endpoints. The default
@@ -117,16 +169,37 @@ class PhotoUploadService @Inject constructor(
 ) {
     private val semaphore get() = shareService.networkSemaphore
 
-    /**
-     * Bounded pool for raw block + thumbnail CDN PUTs. Sized to 2: enough to saturate
-     * most consumer uplinks without overwhelming the CDN. Kept SEPARATE from
-     * [PhotosShareService.networkSemaphore] so a multi-block upload's CDN traffic doesn't
-     * starve regular Proton API calls (metadata refresh, heartbeat, etc.).
-     */
-    private val cdnUploadSemaphore = Semaphore(2)
+    // NOTE: Per-file Semaphores are allocated INSIDE `uploadFile()` below — see
+    // the `cdnUploadSlots` and `encryptSlots` locals. This is a deliberate
+    // departure from the previous design where both lived as instance fields on
+    // the Singleton service. Instance-level pools meant a single in-flight 150
+    // MB video could hold all of the CDN slots and starve sibling photo uploads
+    // running in parallel through `UploadPendingUseCase.UPLOAD_PARALLELISM=3`.
+    // Photos waiting on a video's encrypt+upload cycle is what the user saw as
+    // "sync stuck after one photo" with backup-everything turned on. With
+    // per-file allocation each `uploadFile` invocation gets its own fresh pool
+    // and big videos no longer block the photo pipeline.
+    //
+    // The global `cryptoLock` in DriveCryptoHelper still serialises PGP work
+    // (necessary for libgojni single-thread invariant), but that's a CPU lock —
+    // it doesn't tie up CDN or filesystem resources.
 
-    suspend fun uploadFile(userId: UserId, item: LocalMediaItem, hash: String, uploadUri: String): String =
+    suspend fun uploadFile(
+        userId: UserId,
+        item: LocalMediaItem,
+        hash: String,
+        uploadUri: String,
+        onProgress: ((phase: UploadPhase, doneBytes: Long, totalBytes: Long) -> Unit)? = null,
+    ): String =
         withContext(Dispatchers.IO) {
+            // Per-file slot pools — each upload owns its own. With instance-level
+            // pools a single 150 MB video would hold all 2 CDN slots for several
+            // minutes, starving sibling photo uploads scheduled in parallel by
+            // UploadPendingUseCase. Per-file pools let every concurrent file
+            // make progress on its own CDN / encrypt budget.
+            val cdnUploadSlots = Semaphore(2)
+            val encryptSlots = Semaphore(ENCRYPT_PARALLELISM)
+
             val volumeId = shareService.getVolumeId(userId)
             val shareId = shareService.getShareId(userId, volumeId)
             val rootLinkId = shareService.photosRootLinkId() ?: error("Root link ID not loaded")
@@ -287,39 +360,129 @@ class PhotoUploadService @Inject constructor(
                  */
                 val plaintextSize: Long,
             )
-            val blockInfos = mutableListOf<BlockSpill>()
-            val inputStream = context.contentResolver.openInputStream(Uri.parse(uploadUri))
-                ?: error("Cannot read file: $uploadUri")
-            inputStream.use { stream ->
-                val buf = ByteArray(blockSize)
-                var idx = 0
-                while (true) {
-                    val read = stream.read(buf)
-                    if (read == -1) break
-                    val chunk = if (read == blockSize) buf else buf.copyOf(read)
-                    val encBlock = cryptoHelper.encryptBlock(chunk, sessionKey)
-                    val encSig = cryptoHelper.signBlockEncrypted(chunk, signingKey.unlockedKeyBytes, nodeKey.publicKeyArmored)
-                    val hashBytes = cryptoHelper.sha256(encBlock)
-                    val xorLen = minOf(verificationCodeBytes.size, encBlock.size)
-                    val tokenBytes = ByteArray(verificationCodeBytes.size) { i ->
-                        if (i < xorLen) (verificationCodeBytes[i].toInt() xor encBlock[i].toInt()).toByte()
-                        else verificationCodeBytes[i]
+            // Parallel encrypt pipeline. Source is opened once via openFileDescriptor —
+            // FileChannel.read(buffer, position) is documented thread-safe for the position
+            // argument and doesn't disturb the channel's own position state, so multiple
+            // coroutines can pread independently into their own buffers.
+            //
+            // Each in-flight permit:
+            //   1. pread(offset, BLOCK_SIZE) from the shared FileChannel
+            //   2. PGP encrypt + detached sign (serialized through DriveCryptoHelper.withCryptoLock
+            //      to match the libgojni single-thread invariant — concurrent JNI entries into
+            //      the Go runtime race the GC's signal handlers and SIGABRT under sustained load;
+            //      see DriveCryptoHelper.cryptoLock doc)
+            //   3. SHA-256 + verifier-token XOR (pure JVM, no JNI)
+            //   4. Spill to tempDir/block_$idx.enc
+            //   5. Emit phase progress through the throttled callback
+            //
+            // BlockSpill list MUST stay in index order — manifest signature is computed over
+            // hash concatenation in that order. Pre-allocate an array and fill by idx so we
+            // can convert to list before passing on.
+            val totalBytes = item.sizeBytes
+            val numBlocks = if (totalBytes <= 0L) 1
+                else ((totalBytes + blockSize - 1L) / blockSize).toInt().coerceAtLeast(1)
+            val blockArr = arrayOfNulls<BlockSpill>(numBlocks)
+
+            val doneEncryptedBytes = AtomicLong(0L)
+            val lastEncryptEmitMs = AtomicLong(0L)
+            // Open the source PFD once; share the channel across the parallel encrypt tasks.
+            val sourcePfd: ParcelFileDescriptor = context.contentResolver
+                .openFileDescriptor(Uri.parse(uploadUri), "r")
+                ?: error("Cannot openFileDescriptor: $uploadUri")
+            try {
+                FileInputStream(sourcePfd.fileDescriptor).use { fis ->
+                    val sourceChannel: FileChannel = fis.channel
+                    coroutineScope {
+                        (0 until numBlocks).map { idx ->
+                            async(Dispatchers.IO) {
+                                encryptSlots.withPermit {
+                                    val offset = idx.toLong() * blockSize
+                                    // pread into a fresh ByteBuffer. We size the buffer to the
+                                    // EXPECTED remaining bytes for this block — the final block
+                                    // may be shorter than blockSize. If the source under-reports
+                                    // sizeBytes (rare with MediaStore deletes mid-upload), the
+                                    // read returns -1 and we treat the block as empty (skipped).
+                                    // When totalBytes is known we cap the request to the exact
+                                    // remaining bytes so the final block isn't over-allocated;
+                                    // when sizeBytes is missing (totalBytes <= 0) we ask for a
+                                    // full block and let the channel return whatever's actually
+                                    // there. This safety branch covers the rare case where the
+                                    // OS hasn't published MediaStore SIZE yet for a freshly-saved
+                                    // photo — we'd rather read more than zero than truncate.
+                                    val want = if (totalBytes > 0L)
+                                        minOf(blockSize.toLong(), totalBytes - offset).toInt()
+                                            .coerceAtLeast(0)
+                                    else blockSize
+                                    if (want == 0) {
+                                        // Zero-length tail block (last-block offset == file size).
+                                        // Skip; blockInfos.filterNotNull() drops this slot.
+                                        return@withPermit
+                                    }
+                                    val buf = ByteBuffer.allocate(want)
+                                    var totalRead = 0
+                                    while (totalRead < want) {
+                                        val n = sourceChannel.read(buf, offset + totalRead)
+                                        if (n <= 0) break
+                                        totalRead += n
+                                    }
+                                    if (totalRead == 0) return@withPermit
+                                    val chunk = if (totalRead == buf.array().size) buf.array()
+                                        else buf.array().copyOf(totalRead)
+
+                                    // PGP encrypt + detached sign must serialize through the
+                                    // single global cryptoLock — see DriveCryptoHelper. Pre/post
+                                    // work (pread, sha256, verifier XOR, spill) stays parallel.
+                                    val (encBlock, encSig) = cryptoHelper.withCryptoLock {
+                                        val eb = cryptoHelper.encryptBlock(chunk, sessionKey)
+                                        val es = cryptoHelper.signBlockEncrypted(
+                                            chunk, signingKey.unlockedKeyBytes, nodeKey.publicKeyArmored,
+                                        )
+                                        eb to es
+                                    }
+                                    val hashBytes = cryptoHelper.sha256(encBlock)
+                                    val xorLen = minOf(verificationCodeBytes.size, encBlock.size)
+                                    val tokenBytes = ByteArray(verificationCodeBytes.size) { i ->
+                                        if (i < xorLen) (verificationCodeBytes[i].toInt() xor encBlock[i].toInt()).toByte()
+                                        else verificationCodeBytes[i]
+                                    }
+                                    val tokenBase64 = Base64.encodeToString(tokenBytes, Base64.NO_WRAP)
+                                    val blockFile = File(tempDir, "block_$idx.enc")
+                                    blockFile.writeBytes(encBlock)
+                                    blockArr[idx] = BlockSpill(
+                                        file = blockFile,
+                                        encSignature = encSig,
+                                        hashBytes = hashBytes,
+                                        verifierTokenBase64 = tokenBase64,
+                                        encSize = encBlock.size.toLong(),
+                                        plaintextSize = chunk.size.toLong(),
+                                    )
+                                    if (onProgress != null) {
+                                        val done = doneEncryptedBytes.addAndGet(chunk.size.toLong())
+                                        val denom = if (totalBytes > 0L) totalBytes else done
+                                        val nowMs = System.currentTimeMillis()
+                                        val prev = lastEncryptEmitMs.get()
+                                        if (nowMs - prev >= PROGRESS_THROTTLE_MS &&
+                                            lastEncryptEmitMs.compareAndSet(prev, nowMs)
+                                        ) {
+                                            onProgress(UploadPhase.Encrypting, done, denom)
+                                        }
+                                    }
+                                }
+                            }
+                        }.awaitAll()
                     }
-                    val tokenBase64 = Base64.encodeToString(tokenBytes, Base64.NO_WRAP)
-                    val blockFile = File(tempDir, "block_$idx.enc")
-                    blockFile.writeBytes(encBlock)
-                    blockInfos += BlockSpill(
-                        file = blockFile,
-                        encSignature = encSig,
-                        hashBytes = hashBytes,
-                        verifierTokenBase64 = tokenBase64,
-                        encSize = encBlock.size.toLong(),
-                        plaintextSize = chunk.size.toLong(),
-                    )
-                    idx++
-                    // chunk + encBlock + tokenBytes now orphaned; only `buf` is reused.
                 }
+            } finally {
+                runCatching { sourcePfd.close() }
             }
+            // Guarantee a final 100 % Encrypting tick so the UI lands cleanly at the phase
+            // boundary, regardless of where the last throttled tick fell.
+            if (onProgress != null) {
+                val finalDone = doneEncryptedBytes.get()
+                val denom = if (totalBytes > 0L) totalBytes else finalDone
+                onProgress(UploadPhase.Encrypting, denom, denom)
+            }
+            val blockInfos: List<BlockSpill> = blockArr.filterNotNull()
             Log.d(TAG, "uploadFile: spilled ${blockInfos.size} block(s) to ${tempDir.absolutePath}")
 
             // Generate and encrypt a thumbnail for supported image formats.
@@ -404,6 +567,10 @@ class PhotoUploadService @Inject constructor(
             // and rethrows from coroutineScope — matches the previous "first failure aborts the
             // whole upload" semantics of the serial for-loop.
             val sortedUploadLinks = uploadLinksResp.uploadLinks.sortedBy { it.index }
+            // Per-block upload-phase progress counter. Reused atomic pattern from the
+            // encrypt phase so the same throttle math drives both meters.
+            val doneUploadedBytes = AtomicLong(0L)
+            val lastUploadEmitMs = AtomicLong(0L)
             coroutineScope {
                 sortedUploadLinks.mapIndexed { idx, uploadLink ->
                     async {
@@ -420,7 +587,7 @@ class PhotoUploadService @Inject constructor(
                                 "Block", "blob",
                                 info.file.asRequestBody("application/octet-stream".toMediaType()),
                             )
-                            cdnUploadSemaphore.withPermit {
+                            cdnUploadSlots.withPermit {
                                 manager.invoke {
                                     uploadBlockCdn(
                                         url = uploadLink.bareUrl,
@@ -431,8 +598,29 @@ class PhotoUploadService @Inject constructor(
                             }
                         }
                         info.file.delete()  // free disk eagerly; the data is now in the CDN
+                        // Per-block upload progress emission. Counted in plaintext bytes so the
+                        // bar's denominator matches the Encrypting phase's denominator (totalBytes
+                        // = item.sizeBytes). Encrypted overhead would skew the percentage by a few
+                        // hundred bytes per block — invisible at typical block counts but tidier.
+                        if (onProgress != null) {
+                            val done = doneUploadedBytes.addAndGet(info.plaintextSize)
+                            val denom = if (totalBytes > 0L) totalBytes else done
+                            val nowMs = System.currentTimeMillis()
+                            val prev = lastUploadEmitMs.get()
+                            if (nowMs - prev >= PROGRESS_THROTTLE_MS &&
+                                lastUploadEmitMs.compareAndSet(prev, nowMs)
+                            ) {
+                                onProgress(UploadPhase.Uploading, done, denom)
+                            }
+                        }
                     }
                 }.awaitAll()
+            }
+            // Guarantee a final 100 % Uploading tick.
+            if (onProgress != null) {
+                val finalDone = doneUploadedBytes.get()
+                val denom = if (totalBytes > 0L) totalBytes else finalDone
+                onProgress(UploadPhase.Uploading, denom, denom)
             }
 
             // Upload thumbnail if one was generated and the server returned a thumbnail CDN link.
@@ -453,7 +641,7 @@ class PhotoUploadService @Inject constructor(
                             "Block", "blob",
                             capturedEncThumbnail.toRequestBody("application/octet-stream".toMediaType()),
                         )
-                        cdnUploadSemaphore.withPermit {
+                        cdnUploadSlots.withPermit {
                             manager.invoke {
                                 uploadBlockCdn(
                                     url = thumbUploadLink.bareUrl,
@@ -662,7 +850,7 @@ class PhotoUploadService @Inject constructor(
                 BitmapFactory.decodeStream(it, null, decodeOpts)
             } ?: return null
 
-            val bitmap = if (sampled.width > maxPx || sampled.height > maxPx) {
+            val scaledBitmap = if (sampled.width > maxPx || sampled.height > maxPx) {
                 val scale = maxPx.toFloat() / maxOf(sampled.width, sampled.height)
                 val scaled = Bitmap.createScaledBitmap(
                     sampled,
@@ -674,6 +862,23 @@ class PhotoUploadService @Inject constructor(
                 scaled
             } else sampled
 
+            // EXIF orientation rebake. BitmapFactory.decodeStream returns RAW byte pixels
+            // (pre-rotation). The compressed thumbnail JPEG below carries no EXIF tag so
+            // viewers can't recover the orientation later — the saved blob would render
+            // as landscape on Drive Web / Coil / any consumer for a portrait phone photo
+            // whose source had EXIF 90°. Apply the rotation directly to the pixels so
+            // the saved bytes are already in display orientation.
+            val orientation = runCatching {
+                context.contentResolver.openInputStream(androidUri)?.use {
+                    androidx.exifinterface.media.ExifInterface(it).getAttributeInt(
+                        androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION,
+                        androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL,
+                    )
+                } ?: androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL
+            }.getOrDefault(androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL)
+
+            val bitmap = applyExifRotationToBitmap(scaledBitmap, orientation)
+
             ByteArrayOutputStream().use { out ->
                 bitmap.compress(Bitmap.CompressFormat.JPEG, 80, out)
                 bitmap.recycle()
@@ -683,5 +888,29 @@ class PhotoUploadService @Inject constructor(
             Log.w(TAG, "generateThumbnailBytes: failed for $uri — ${e.message}")
             null
         }
+    }
+
+    /** Returns [bitmap] rotated/mirrored to its display orientation. Recycles the input
+     *  when a new bitmap is allocated. Covers the 8 standard EXIF orientation tags. */
+    private fun applyExifRotationToBitmap(bitmap: Bitmap, orientation: Int): Bitmap {
+        val matrix = android.graphics.Matrix()
+        when (orientation) {
+            androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL -> return bitmap
+            androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
+            androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
+            androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
+            androidx.exifinterface.media.ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.preScale(-1f, 1f)
+            androidx.exifinterface.media.ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.preScale(1f, -1f)
+            androidx.exifinterface.media.ExifInterface.ORIENTATION_TRANSPOSE -> {
+                matrix.postRotate(90f); matrix.preScale(-1f, 1f)
+            }
+            androidx.exifinterface.media.ExifInterface.ORIENTATION_TRANSVERSE -> {
+                matrix.postRotate(270f); matrix.preScale(-1f, 1f)
+            }
+            else -> return bitmap
+        }
+        val rotated = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+        if (rotated !== bitmap) bitmap.recycle()
+        return rotated
     }
 }

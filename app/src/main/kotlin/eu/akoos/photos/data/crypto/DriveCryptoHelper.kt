@@ -1,3 +1,25 @@
+/*
+ * Photos for Proton
+ * Copyright (C) 2026 Akoos <https://akoos.eu>
+ *
+ * Source:  https://github.com/gitakoos/proton-photos
+ * Website: https://photos.akoos.eu
+ *
+ * This file is part of Photos for Proton.
+ *
+ * Photos for Proton is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 3 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 package eu.akoos.photos.data.crypto
 
 import android.util.Base64
@@ -77,15 +99,22 @@ class DriveCryptoHelper @Inject constructor(
     // The existing chunk-pacing inside PhotoStreamService is necessary but not sufficient
     // because AlbumService + thumbnail fetchers add their own parallel pressure. A global
     // lock yields ~2x slower throughput but eliminates the crash.
-    private val cryptoLock = java.util.concurrent.locks.ReentrantLock()
+    // Fair-FIFO so an in-flight upload's encrypt phase (which may hold the lock for
+    // several seconds while it churns through a video's blocks) can't starve viewer
+    // thumbnail / fullres decrypts. Without fairness, the next encrypt block can re-grab
+    // the lock before a queued decrypt gets a turn — and the gallery visibly freezes for
+    // the duration of the upload. Fair locks have a small throughput cost (a few percent
+    // of mutex acquisitions go through the queue) but eliminate the starvation pathology.
+    private val cryptoLock = java.util.concurrent.locks.ReentrantLock(true)
 
     /**
      * Wrap any direct pgpCrypto.* call site (anything not already routed through this helper)
      * with this guard so the same ReentrantLock serializes the call into libgojni. Without it,
      * services that decrypt names / unlock keys / generate keys in parallel can race the same
      * Go signal handlers that the in-class methods are already protected against. Targets:
-     * PhotoEntityBuilder, AlbumService, PhotosShareService, PhotosVolumeBootstrap,
-     * PhotoUploadService — the five remaining bypassers identified by the Pixel 9 audit.
+     * PhotoEntityBuilder, AlbumService, PhotosShareService, PhotosVolumeBootstrap, and
+     * PhotoUploadService — call sites that decrypt or generate keys outside this helper and
+     * must be wrapped to serialize libgojni access.
      */
     fun <T> withCryptoLock(block: () -> T): T = cryptoLock.withLock(block)
 

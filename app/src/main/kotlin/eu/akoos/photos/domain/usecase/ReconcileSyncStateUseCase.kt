@@ -1,9 +1,30 @@
+/*
+ * Photos for Proton
+ * Copyright (C) 2026 Akoos <https://akoos.eu>
+ *
+ * Source:  https://github.com/gitakoos/proton-photos
+ * Website: https://photos.akoos.eu
+ *
+ * This file is part of Photos for Proton.
+ *
+ * Photos for Proton is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 3 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 package eu.akoos.photos.domain.usecase
 
 import android.content.Context
 import android.util.Log
 import androidx.datastore.preferences.core.Preferences
-import androidx.datastore.preferences.core.edit
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -103,11 +124,9 @@ class ReconcileSyncStateUseCase @Inject constructor(
             .filter { it.captureTime > 0 }
             .associateBy { it.displayName to it.captureTime }
         val cloudByNameSize = cloudItems.associateBy { it.displayName to it.sizeBytes }
-        // Last-resort: displayName-only index. Used to pair photos through a reinstall
-        // when (1) no SyncState carries forward, (2) EXIF-strip-on-upload made cloud's
-        // sizeBytes diverge from local's, and (3) captureTime drift (or the photo was
-        // uploaded via Drive Web with a different captureTime convention) defeats the
-        // byNameAndDate match. Accepts the first cloud photo per displayName — cross-
+        // Last-resort displayName-only index — pairs photos across reinstalls when
+        // SyncState is gone, EXIF strip diverged sizeBytes, and captureTime drift
+        // defeats byNameAndDate. Accepts the first cloud photo per displayName — cross-
         // folder filename collisions are rare for camera-roll content and the
         // alternative (re-upload as a duplicate) is much worse UX.
         val cloudByName = cloudItems.associateBy { it.displayName }
@@ -125,6 +144,14 @@ class ReconcileSyncStateUseCase @Inject constructor(
             // regular cloud entry and the hidden marker would be lost (manifesting as the
             // hidden photo reappearing as cloud-only after a refresh).
             if (existingSync?.status == SyncStatus.HIDDEN) {
+                done++
+                if (done % 50 == 0) emit(SyncProgress(total, done, true))
+                continue
+            }
+            // UPLOADING means an editor save's cloud-fanout is in flight against this URI.
+            // The editor owns the row until its upload finishes — touching it here would
+            // race the editor and produce a duplicate Drive entry. Same skip shape as HIDDEN.
+            if (existingSync?.status == SyncStatus.UPLOADING) {
                 done++
                 if (done % 50 == 0) emit(SyncProgress(total, done, true))
                 continue

@@ -1,3 +1,25 @@
+/*
+ * Photos for Proton
+ * Copyright (C) 2026 Akoos <https://akoos.eu>
+ *
+ * Source:  https://github.com/gitakoos/proton-photos
+ * Website: https://photos.akoos.eu
+ *
+ * This file is part of Photos for Proton.
+ *
+ * Photos for Proton is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 3 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 package eu.akoos.photos.domain.usecase
 
 import android.content.ContentValues
@@ -14,7 +36,6 @@ import eu.akoos.photos.domain.entity.SyncState
 import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.SyncStateRepository
-import eu.akoos.photos.util.ProtonPhotosStorage
 import java.io.File
 import java.io.IOException
 import javax.inject.Inject
@@ -241,6 +262,20 @@ class DownloadPhotosUseCase @Inject constructor(
             return existingUri
         }
 
+        // Resolve the timestamp once so the insert + post-publish UPDATE use the same
+        // value. Always write something — leaving DATE_TAKEN unset lets MediaStore drop
+        // the photo at "now" which the user perceives as "the gallery shows my Drive
+        // photo as taken today". When the cloud row has no captureTime we deliberately
+        // fall back to the file's last-modified time on disk (the download time stamped
+        // at decrypt) — still better than the insert-time MediaStore would pick, which
+        // is the same instant but minus the few-second decrypt window, so the photo
+        // wouldn't even sort alongside other recent downloads.
+        val timestampMs = when {
+            captureTimeSeconds > 0L -> captureTimeSeconds * 1000L
+            file.lastModified() > 0L -> file.lastModified()
+            else -> System.currentTimeMillis()
+        }
+
         val cv = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
             put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
@@ -248,16 +283,12 @@ class DownloadPhotosUseCase @Inject constructor(
                 put(MediaStore.MediaColumns.RELATIVE_PATH, relPath)
                 put(MediaStore.MediaColumns.IS_PENDING, 1)
             }
-            if (captureTimeSeconds > 0L) {
-                // DATE_TAKEN is the primary "when was this photo/video shot" column the
-                // device gallery sorts by. Stored in MILLISECONDS since epoch.
-                put(MediaStore.MediaColumns.DATE_TAKEN, captureTimeSeconds * 1000L)
-                // DATE_MODIFIED is SECONDS since epoch and acts as a fallback for galleries
-                // that don't read DATE_TAKEN. Match the capture time so both sorts agree.
-                put(MediaStore.MediaColumns.DATE_MODIFIED, captureTimeSeconds)
-                // Note: don't set DATE_ADDED — MediaStore manages it as "when was this row
-                // inserted" and overriding can break some gallery apps' "Recently added".
-            }
+            // DATE_TAKEN is MILLISECONDS, DATE_MODIFIED is SECONDS — keep them in sync so
+            // galleries that read either column sort the photo to the right place.
+            put(MediaStore.MediaColumns.DATE_TAKEN, timestampMs)
+            put(MediaStore.MediaColumns.DATE_MODIFIED, timestampMs / 1000L)
+            // Don't set DATE_ADDED — MediaStore manages it as "when was this row inserted"
+            // and overriding can break some gallery apps' "Recently added" sort.
         }
 
         // Always insert through the "external" alias (EXTERNAL_CONTENT_URI) so the returned
@@ -279,9 +310,28 @@ class DownloadPhotosUseCase @Inject constructor(
                 file.inputStream().use { it.copyTo(out) }
             } ?: throw IOException("openOutputStream returned null for $uri")
 
+            // EXIF write removed by request — modifying the file's EXIF block changes its
+            // byte content and would break hash-based cloud↔local matching (the cloud's
+            // contentHash was computed over the original bytes). We rely on MediaStore's
+            // DATE_TAKEN column instead; the split-update below makes that write reliable
+            // on the Android 13+ versions that were dropping single-update timestamps.
+
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                // Flip IS_PENDING in a FIRST update — committing the row makes it visible
+                // to MediaStore's EXIF scanner so the column is now backed by the file's
+                // EXIF block (above). On Pixel + Samsung Android 13+ the IS_PENDING flip
+                // alone triggers a media scan that overrides any column values we tried
+                // to set during insert, which is why we write EXIF directly above instead.
                 val pending = ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }
                 context.contentResolver.update(uri, pending, null, null)
+                // SECOND update — explicitly re-write DATE_TAKEN + DATE_MODIFIED AFTER the
+                // pending flip. Some Android 13+ versions drop timestamp updates when
+                // combined with the IS_PENDING flip, so split this into two updates.
+                val dates = ContentValues().apply {
+                    put(MediaStore.MediaColumns.DATE_TAKEN, timestampMs)
+                    put(MediaStore.MediaColumns.DATE_MODIFIED, timestampMs / 1000L)
+                }
+                context.contentResolver.update(uri, dates, null, null)
             }
             uri
         } catch (e: Exception) {

@@ -1,3 +1,25 @@
+/*
+ * Photos for Proton
+ * Copyright (C) 2026 Akoos <https://akoos.eu>
+ *
+ * Source:  https://github.com/gitakoos/proton-photos
+ * Website: https://photos.akoos.eu
+ *
+ * This file is part of Photos for Proton.
+ *
+ * Photos for Proton is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 3 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 package eu.akoos.photos.presentation.editor
 
 import android.content.ContentValues
@@ -14,7 +36,6 @@ import android.net.Uri
 import android.os.Build
 import coil.imageLoader
 import coil.memory.MemoryCache
-import android.os.Environment
 import android.provider.MediaStore
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -139,6 +160,7 @@ class PhotoEditorViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val accountManager: AccountManager,
     private val cloudRepo: DrivePhotoRepository,
+    private val syncStateRepo: eu.akoos.photos.domain.repository.SyncStateRepository,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(EditorUiState())
@@ -788,13 +810,53 @@ class PhotoEditorViewModel @Inject constructor(
                     invalidateImageCache(uri)
                 }
                 // Synced photo path: if a cloud counterpart was registered, also push the
-                // edited bitmap up so the cloud version doesn't stay stale. Failure here
-                // doesn't fail the whole save — the device file is already on disk; we
-                // just couldn't sync. Best-effort, logged for diagnostics only.
+                // edited bitmap up so the cloud version doesn't stay stale. The MediaStore
+                // insert above already fired BackgroundSyncService's content observer —
+                // without the UPLOADING placeholder row below, SyncWorker would race this
+                // fanout and upload the same edited bytes a second time (duplicate Drive
+                // entry). Reconcile and SyncWorker both skip rows in UPLOADING state, so
+                // the editor owns the row until the fanout completes (or fails and demotes).
                 val counterpart = cloudCounterpart
                 if (source is EditorSource.Local && counterpart != null && uri != null) {
-                    runCatching {
-                        uploadEditAsCloudReplacement(bitmap, counterpart, mode, quality, editTimestampMs)
+                    val userId = accountManager.getPrimaryUserId().first()
+                    if (userId != null) {
+                        val savedUriStr = uri.toString()
+                        val placeholderState = eu.akoos.photos.domain.entity.SyncState(
+                            localUri = savedUriStr,
+                            cloudFileId = null,
+                            localHash = "",
+                            cloudHash = null,
+                            status = eu.akoos.photos.domain.entity.SyncStatus.UPLOADING,
+                            lastSyncAttemptMs = System.currentTimeMillis(),
+                            lastSyncSuccessMs = null,
+                            backedUpAtMs = null,
+                            sizeBytes = 0L,
+                        )
+                        runCatching { syncStateRepo.upsert(placeholderState, userId) }
+                        val fanoutResult = runCatching {
+                            uploadEditAsCloudReplacement(bitmap, counterpart, mode, quality, editTimestampMs, userId)
+                        }
+                        val newLinkId = fanoutResult.getOrNull()
+                        if (fanoutResult.isSuccess && newLinkId != null) {
+                            runCatching {
+                                syncStateRepo.upsert(
+                                    placeholderState.copy(
+                                        cloudFileId = newLinkId,
+                                        status = eu.akoos.photos.domain.entity.SyncStatus.SYNCED,
+                                        lastSyncSuccessMs = System.currentTimeMillis(),
+                                        backedUpAtMs = System.currentTimeMillis(),
+                                    ),
+                                    userId,
+                                )
+                            }
+                        } else {
+                            runCatching {
+                                syncStateRepo.upsert(
+                                    placeholderState.copy(status = eu.akoos.photos.domain.entity.SyncStatus.LOCAL_ONLY),
+                                    userId,
+                                )
+                            }
+                        }
                     }
                 }
                 SaveResult.Success(uri)
@@ -1057,14 +1119,14 @@ class PhotoEditorViewModel @Inject constructor(
          *  — the user gets the green-cloud Synced badge without having to download the
          *  cloud copy back first. */
         editTimestampMs: Long,
-    ) {
+        userId: me.proton.core.domain.entity.UserId,
+    ): String {
         val cacheDir = File(context.cacheDir, "editor").also { it.mkdirs() }
         val tempFile = File(cacheDir, "synced_${editTimestampMs}.jpg")
         FileOutputStream(tempFile).use { out ->
             bitmap.compress(Bitmap.CompressFormat.JPEG, quality, out)
         }
         try {
-            val userId = accountManager.getPrimaryUserId().first() ?: return
             val tempUri = Uri.fromFile(tempFile)
             val displayName = when (mode) {
                 SaveMode.Overwrite -> cloud.displayName
@@ -1089,6 +1151,7 @@ class PhotoEditorViewModel @Inject constructor(
             if (mode == SaveMode.Overwrite) {
                 runCatching { cloudRepo.deleteFiles(userId, listOf(cloud.linkId)) }
             }
+            return newLinkId
         } finally {
             tempFile.delete()
         }

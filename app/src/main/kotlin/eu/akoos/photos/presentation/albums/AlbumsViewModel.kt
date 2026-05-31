@@ -1,3 +1,25 @@
+/*
+ * Photos for Proton
+ * Copyright (C) 2026 Akoos <https://akoos.eu>
+ *
+ * Source:  https://github.com/gitakoos/proton-photos
+ * Website: https://photos.akoos.eu
+ *
+ * This file is part of Photos for Proton.
+ *
+ * Photos for Proton is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 3 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 package eu.akoos.photos.presentation.albums
 
 import android.content.Context
@@ -275,26 +297,6 @@ class AlbumsViewModel @Inject constructor(
         }
     }
 
-    /**
-     * Removes a manual-album marker from DataStore — the user-facing entry for empty manual
-     * albums (no photos in the bucket yet). Auto-discovered buckets are unaffected by this.
-     * Called as a follow-up after [deleteLocalAlbum] succeeds, since the bucket can carry both
-     * a marker and physical files.
-     */
-    private suspend fun removeManualAlbumMarker(name: String) {
-        context.settingsDataStore.edit { prefs ->
-            val current = prefs[SettingsKeys.MANUAL_LOCAL_ALBUMS] ?: emptySet()
-            prefs[SettingsKeys.MANUAL_LOCAL_ALBUMS] = current - name
-            // Also drop any virtual-membership entries pointing at this album so a freshly
-            // created album with the same name doesn't inherit stale URIs.
-            val virtual = prefs[SettingsKeys.LOCAL_ALBUM_VIRTUAL_MEMBERSHIP] ?: emptySet()
-            val kept = virtual.filterNot { it.startsWith("$name||") }.toSet()
-            if (kept.size != virtual.size) {
-                prefs[SettingsKeys.LOCAL_ALBUM_VIRTUAL_MEMBERSHIP] = kept
-            }
-        }
-    }
-
     // ── Pure-virtual local-album rename + delete ─────────────────────────────
     //
     // Album operations no longer move files on disk. The bucket-derived "albums" (Camera,
@@ -340,6 +342,38 @@ class AlbumsViewModel @Inject constructor(
      *
      * Also mirrors the rename to the matching cloud album (best-effort, silent on failure).
      */
+    /**
+     * Rename a cloud album by [linkId]. Same API the AlbumDetail header pencil
+     * uses internally — exposed here as a Flow<LocalAlbumActionResult> so the
+     * AlbumsScreen long-press sheet can share the same in flight + snackbar
+     * machinery as the local rename path. Validation rules match: trim, refuse
+     * empty, refuse identical name.
+     */
+    fun renameCloudAlbum(linkId: String, currentName: String, newName: String): Flow<LocalAlbumActionResult> = flow {
+        val trimmed = newName.trim()
+        if (trimmed.isEmpty()) {
+            emit(LocalAlbumActionResult.Failed("Album name cannot be empty"))
+            return@flow
+        }
+        if (trimmed == currentName) {
+            emit(LocalAlbumActionResult.Failed("New name is the same as the current name"))
+            return@flow
+        }
+        try {
+            val userId = accountManager.getPrimaryUserId().first()
+                ?: throw IllegalStateException("Not signed in")
+            driveRepo.renameAlbum(userId, linkId, trimmed)
+            _uiState.update { state ->
+                state.copy(albums = state.albums.map {
+                    if (it.linkId == linkId) it.copy(name = trimmed) else it
+                })
+            }
+            emit(LocalAlbumActionResult.Done)
+        } catch (e: Exception) {
+            emit(LocalAlbumActionResult.Failed(e.message ?: "Rename failed"))
+        }
+    }
+
     fun renameLocalAlbum(currentName: String, newName: String): Flow<LocalAlbumActionResult> = flow {
         val sanitized = ProtonPhotosStorage.sanitize(newName)
         if (sanitized.isEmpty()) {

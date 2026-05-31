@@ -1,3 +1,25 @@
+/*
+ * Photos for Proton
+ * Copyright (C) 2026 Akoos <https://akoos.eu>
+ *
+ * Source:  https://github.com/gitakoos/proton-photos
+ * Website: https://photos.akoos.eu
+ *
+ * This file is part of Photos for Proton.
+ *
+ * Photos for Proton is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 3 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 package eu.akoos.photos.data.repository.drive
 
 import android.content.Context
@@ -60,7 +82,6 @@ class PhotoStreamService @Inject constructor(
     private val photoEntityBuilder: PhotoEntityBuilder,
     private val thumbnailHelpers: ThumbnailHelpers,
     private val recentUploadsTracker: RecentUploadsTracker,
-    private val photosVolumeBootstrap: PhotosVolumeBootstrap,
     private val thumbnailDecryptScheduler: ThumbnailDecryptScheduler,
     @ApplicationContext private val context: Context,
 ) {
@@ -93,9 +114,9 @@ class PhotoStreamService @Inject constructor(
      * without thrashing the network. Pull-to-refresh bypasses this entirely because it
      * goes through [refreshCloudPhotos] directly, not the incremental path.
      *
-     * AtomicLong (not @Volatile var) so the read-then-write CAS below is one atomic op
-     * — two callers racing on the same stale value used to both pass the cooldown gate
-     * and fire parallel full refreshes (the Mutex would then serialize them but the
+     * AtomicLong (not @Volatile var) so the read-then-write CAS below is one atomic op —
+     * without CAS, two callers racing on the same stale value can both pass the cooldown
+     * gate and fire parallel full refreshes (the Mutex would then serialize them but the
      * extra network round-trip already went out).
      */
     private val lastFallbackFullRefreshMs = java.util.concurrent.atomic.AtomicLong(0L)
@@ -284,7 +305,7 @@ class PhotoStreamService @Inject constructor(
                         .firstOrNull { it.value == stub.linkId }
                         ?.key
                         ?.let { thumbnailUrlMap[it] }
-                    // v1.3 lazy-thumbnail: skip the eager thumbnail download+decrypt for
+                    // Lazy-thumbnail: skip the eager thumbnail download+decrypt for
                     // cache-miss items. We persist the encrypted material into the row;
                     // [ThumbnailDecryptScheduler] consumes it when the cell scrolls into
                     // view. This is what trades cold-start "minutes-of-libgojni-burn" for

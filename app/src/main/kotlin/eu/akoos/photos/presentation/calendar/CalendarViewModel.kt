@@ -1,10 +1,34 @@
+/*
+ * Photos for Proton
+ * Copyright (C) 2026 Akoos <https://akoos.eu>
+ *
+ * Source:  https://github.com/gitakoos/proton-photos
+ * Website: https://photos.akoos.eu
+ *
+ * This file is part of Photos for Proton.
+ *
+ * Photos for Proton is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 3 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 @file:OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class, kotlinx.coroutines.FlowPreview::class)
 
 package eu.akoos.photos.presentation.calendar
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -19,6 +43,8 @@ import kotlinx.coroutines.launch
 import me.proton.core.accountmanager.domain.AccountManager
 import eu.akoos.photos.data.db.dao.DayMetaDao
 import eu.akoos.photos.data.db.entity.DayMetaEntity
+import eu.akoos.photos.data.preferences.SettingsKeys
+import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
 import java.text.SimpleDateFormat
@@ -50,7 +76,14 @@ class CalendarViewModel @Inject constructor(
     private val getGalleryItems: GetGalleryItemsUseCase,
     private val accountManager: AccountManager,
     private val dayMetaDao: DayMetaDao,
+    @ApplicationContext private val context: Context,
 ) : ViewModel() {
+
+    /** Hidden vault filter — Calendar grid was leaking days that contained only hidden
+     *  photos. Same DataStore key the gallery uses. */
+    private val hiddenUrisFlow = context.settingsDataStore.data.map {
+        it[SettingsKeys.HIDDEN_PHOTO_URIS] ?: emptySet()
+    }
 
     private val _uiState = MutableStateFlow(CalendarUiState())
     val uiState: StateFlow<CalendarUiState> = _uiState.asStateFlow()
@@ -69,16 +102,25 @@ class CalendarViewModel @Inject constructor(
                 .flatMapLatest { userId ->
                     primaryUserId = userId?.id
                     if (userId == null) {
-                        flowOf(emptyList<GalleryItem>() to emptyList<DayMetaEntity>())
+                        flowOf(Triple(emptyList<GalleryItem>(), emptyList<DayMetaEntity>(), emptySet<String>()))
                     } else {
                         combine(
                             getGalleryItems.invoke(userId),
                             dayMetaDao.observeAll(userId.id),
-                        ) { items, metas -> items to metas }
+                            hiddenUrisFlow,
+                        ) { items, metas, hidden -> Triple(items, metas, hidden) }
                     }
                 }
-                .collect { (items, metas) ->
-                    val months = buildMonths(items, metas)
+                .collect { (items, metas, hiddenUris) ->
+                    val visible = items.filter { item ->
+                        val uri = when (item) {
+                            is GalleryItem.LocalOnly -> item.local.uri
+                            is GalleryItem.Synced -> item.local.uri
+                            is GalleryItem.CloudOnly -> null
+                        }
+                        uri == null || uri !in hiddenUris
+                    }
+                    val months = buildMonths(visible, metas)
                     _uiState.update { it.copy(
                         isLoading = false,
                         months = months,

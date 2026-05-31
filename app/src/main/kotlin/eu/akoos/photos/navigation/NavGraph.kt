@@ -1,3 +1,25 @@
+/*
+ * Photos for Proton
+ * Copyright (C) 2026 Akoos <https://akoos.eu>
+ *
+ * Source:  https://github.com/gitakoos/proton-photos
+ * Website: https://photos.akoos.eu
+ *
+ * This file is part of Photos for Proton.
+ *
+ * Photos for Proton is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 3 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 package eu.akoos.photos.navigation
 
 import androidx.compose.animation.core.tween
@@ -24,11 +46,16 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
+import android.content.Context
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import me.proton.core.accountmanager.domain.AccountManager
+import eu.akoos.photos.data.preferences.SettingsKeys
+import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.GalleryItem
@@ -43,9 +70,12 @@ import eu.akoos.photos.presentation.editor.PhotoEditorScreen
 import eu.akoos.photos.presentation.editor.VideoEditorScreen
 import eu.akoos.photos.presentation.gallery.GalleryScreen
 import eu.akoos.photos.presentation.hidden.HiddenAlbumScreen
+import eu.akoos.photos.presentation.onboarding.OnboardingScreen
 import eu.akoos.photos.presentation.settings.AboutScreen
+import eu.akoos.photos.presentation.settings.AccountScreen
 import eu.akoos.photos.presentation.settings.AppearanceSettingsScreen
 import eu.akoos.photos.presentation.settings.LanguageSettingsScreen
+import eu.akoos.photos.presentation.settings.PendingDeleteHandler
 import eu.akoos.photos.presentation.settings.PrivacySettingsScreen
 import eu.akoos.photos.presentation.settings.SecuritySettingsScreen
 import eu.akoos.photos.presentation.settings.SettingsScreen
@@ -75,6 +105,8 @@ sealed class Screen(val route: String) {
     data object Loading : Screen("loading")
     data object Login : Screen("login")
     data object About : Screen("about")
+    data object Account : Screen("account_settings")
+    data object Onboarding : Screen("onboarding")
     data object AppearanceSettings : Screen("appearance_settings")
     data object LanguageSettings : Screen("language_settings")
     data object Search : Screen("search")
@@ -82,18 +114,44 @@ sealed class Screen(val route: String) {
     data object DayDetail : Screen("day_detail")
 }
 
+enum class StartupRoute { Unknown, NotLoggedIn, NeedsOnboarding, Ready }
+
 @HiltViewModel
 class NavViewModel @Inject constructor(
     accountManager: AccountManager,
+    @ApplicationContext context: Context,
 ) : ViewModel() {
     val isLoggedIn: StateFlow<Boolean?> = accountManager.getPrimaryUserId()
         .map { it != null }
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    /**
+     * Combined router signal: whether the user has authenticated AND finished the
+     * post login onboarding wizard. NavGraph reads this once to land them on the
+     * right destination after the Loading splash. `Unknown` is the cold start
+     * value before either signal has emitted, so the LaunchedEffect can wait
+     * before issuing the first navigate.
+     */
+    val startupRoute: StateFlow<StartupRoute> = combine(
+        accountManager.getPrimaryUserId().map { it != null },
+        context.settingsDataStore.data.map { it[SettingsKeys.ONBOARDING_COMPLETE] == true },
+    ) { loggedIn, onboarded ->
+        when {
+            !loggedIn -> StartupRoute.NotLoggedIn
+            !onboarded -> StartupRoute.NeedsOnboarding
+            else -> StartupRoute.Ready
+        }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, StartupRoute.Unknown)
 }
 
 @Composable
 fun NavGraph(
     onStartLogin: () -> Unit = {},
+    /** Set by MainActivity when the user taps the home-screen photo widget. The Gallery
+     *  composable receives this and (once the items flow has populated) navigates straight
+     *  to the viewer for the matching photo. Null on regular cold starts. */
+    widgetPhotoUri: String? = null,
+    onWidgetPhotoConsumed: () -> Unit = {},
     navViewModel: NavViewModel = hiltViewModel(),
 ) {
     val navController = rememberNavController()
@@ -126,16 +184,29 @@ fun NavGraph(
 
     val isLoggedIn = navViewModel.isLoggedIn
 
+    // Combined Loading → (Login | Onboarding | Gallery) router. Waits for both the
+    // session and onboarding flags to emit before navigating so we don't briefly
+    // flash the Gallery for users who still need the wizard. popUpTo Loading with
+    // inclusive=true keeps the back stack clean — pressing back from Login /
+    // Onboarding / Gallery cannot land on the Loading spinner.
     LaunchedEffect(Unit) {
-        isLoggedIn.collect { loggedIn ->
-            if (loggedIn == null) return@collect
-            if (loggedIn) {
-                navController.navigate(Screen.Gallery.route) {
-                    popUpTo(Screen.Loading.route) { inclusive = true }
+        navViewModel.startupRoute.collect { route ->
+            when (route) {
+                StartupRoute.Unknown -> return@collect
+                StartupRoute.NotLoggedIn -> {
+                    navController.navigate(Screen.Login.route) {
+                        popUpTo(Screen.Loading.route) { inclusive = true }
+                    }
                 }
-            } else {
-                navController.navigate(Screen.Login.route) {
-                    popUpTo(Screen.Loading.route) { inclusive = true }
+                StartupRoute.NeedsOnboarding -> {
+                    navController.navigate(Screen.Onboarding.route) {
+                        popUpTo(Screen.Loading.route) { inclusive = true }
+                    }
+                }
+                StartupRoute.Ready -> {
+                    navController.navigate(Screen.Gallery.route) {
+                        popUpTo(Screen.Loading.route) { inclusive = true }
+                    }
                 }
             }
         }
@@ -160,7 +231,28 @@ fun NavGraph(
             SignInScreen(onSignInClick = onStartLogin)
         }
 
+        composable(Screen.Onboarding.route) {
+            OnboardingScreen(
+                onComplete = {
+                    // ONBOARDING_COMPLETE write inside the wizard re-fires the
+                    // startupRoute combine downstream, which navigates to Gallery
+                    // automatically via the top-level LaunchedEffect. We still
+                    // popUpTo here as belt-and-suspenders for the rare case where
+                    // the user back-presses out of Gallery — they should not land
+                    // back on the wizard.
+                    navController.navigate(Screen.Gallery.route) {
+                        popUpTo(Screen.Onboarding.route) { inclusive = true }
+                    }
+                },
+            )
+        }
+
         composable(Screen.Gallery.route) {
+            // Foreground drain for the upload worker's pending delete queue. Mounted
+            // here on the Gallery route so it lives for the entire authenticated
+            // session and renders nothing of its own until there is actually a queue
+            // to surface to the user.
+            PendingDeleteHandler()
             GalleryScreen(
                 onPhotoClick = { items, index, hiddenCloudLinkIds ->
                     selectedViewerItems = items
@@ -193,6 +285,8 @@ fun NavGraph(
                 onHiddenAlbumClick = { navController.navigate(Screen.HiddenAlbum.route) },
                 onSearchClick = { navController.navigate(Screen.Search.route) },
                 onCalendarClick = { navController.navigate(Screen.Calendar.route) },
+                pendingWidgetPhotoUri = widgetPhotoUri,
+                onPendingWidgetPhotoConsumed = onWidgetPhotoConsumed,
             )
         }
 
@@ -296,6 +390,13 @@ fun NavGraph(
                             localUri         = item.local.uri,
                             localDisplayName = item.local.displayName,
                             localMimeType    = item.local.mimeType,
+                            // Edit source is the device file — cloudPhoto stays null so
+                            // bytes come from MediaStore, NOT a fresh download. The cloud
+                            // counterpart is wired separately so save() also propagates
+                            // the edit to Drive.
+                            cloudPhoto       = null,
+                            sourceAlbumLinkId = sourceAlbumLinkId,
+                            syncedCloudCounterpart = item.cloud,
                             onBack           = { navController.popBackStack() },
                             onSaved          = {
                                 // Tell the viewer behind us to drop its bitmap cache + reload —
@@ -428,6 +529,7 @@ fun NavGraph(
                 onAppearanceClick         = { navController.navigate(Screen.AppearanceSettings.route) },
                 onLanguageClick           = { navController.navigate(Screen.LanguageSettings.route) },
                 onAboutClick              = { navController.navigate(Screen.About.route) },
+                onAccountClick            = { navController.navigate(Screen.Account.route) },
             )
         }
 
@@ -460,7 +562,19 @@ fun NavGraph(
         }
 
         composable(Screen.PrivacySettings.route) {
-            PrivacySettingsScreen(onBack = { navController.popBackStack() })
+            PrivacySettingsScreen(
+                onBack = { navController.popBackStack() },
+                onHiddenAlbumClick = { navController.navigate(Screen.HiddenAlbum.route) },
+            )
+        }
+
+        composable(Screen.Account.route) {
+            val settingsVm: eu.akoos.photos.presentation.settings.SettingsViewModel = hiltViewModel()
+            AccountScreen(
+                onBack = { navController.popBackStack() },
+                onSignOut = { settingsVm.signOut() },
+                viewModel = settingsVm,
+            )
         }
 
         composable(Screen.SecuritySettings.route) {

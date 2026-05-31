@@ -1,16 +1,36 @@
+/*
+ * Photos for Proton
+ * Copyright (C) 2026 Akoos <https://akoos.eu>
+ *
+ * Source:  https://github.com/gitakoos/proton-photos
+ * Website: https://photos.akoos.eu
+ *
+ * This file is part of Photos for Proton.
+ *
+ * Photos for Proton is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 3 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 package eu.akoos.photos.data.hidden
 
 import android.content.ContentValues
 import android.content.Context
 import android.net.Uri
 import android.os.Build
-import android.os.Environment
 import android.provider.MediaStore
 import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import eu.akoos.photos.util.ProtonPhotosStorage
 import java.io.File
 import java.util.UUID
 import javax.inject.Inject
@@ -203,6 +223,44 @@ class HiddenStorageManager @Inject constructor(
         val parsed = runCatching { Uri.parse(hiddenUri) }.getOrNull() ?: return false
         val file = parsed.path?.let { File(it) } ?: return false
         return file.exists() && file.delete()
+    }
+
+    /**
+     * Rename a hidden file on disk. Returns the new file:// URI string on success.
+     *
+     * Preserves the `__<captureMs>.<ext>` suffix [store] embeds so a later [restore] still
+     * recovers DATE_TAKEN — only the stem (the part before `__`) gets the user's name.
+     * If the existing file has no suffix (older entries from before capture-time was
+     * embedded), the new name keeps the original extension.
+     *
+     * The user-supplied [newName] is sanitised: filesystem-illegal characters become `_`,
+     * extension stripped (we always reuse the original file's extension to keep the MIME
+     * lookup in [LocalMediaRepositoryImpl.queryByUri] working).
+     */
+    suspend fun rename(hiddenUri: String, newName: String): String? = withContext(Dispatchers.IO) {
+        val parsed = runCatching { Uri.parse(hiddenUri) }.getOrNull() ?: return@withContext null
+        val srcFile = parsed.path?.let { File(it) }?.takeIf { it.exists() } ?: return@withContext null
+        val ext = srcFile.extension
+        // Pull the "__<ms>" capture-time tag out of the OLD stem so we can re-attach it
+        // to the new name. Without this the renamed file loses its capture-time hint and
+        // restore falls back to "now".
+        val oldStem = srcFile.nameWithoutExtension
+        val captureSuffix = oldStem.indexOf("__").let { if (it >= 0) oldStem.substring(it) else "" }
+        // Strip extension if the user accidentally typed it, sanitise the rest.
+        val userStem = newName.trim().substringBeforeLast('.', newName.trim())
+            .replace(Regex("[\\\\/:*?\"<>|]"), "_")
+            .ifBlank { "renamed_${System.currentTimeMillis()}" }
+        val newFileName = if (ext.isNotEmpty()) "$userStem$captureSuffix.$ext" else "$userStem$captureSuffix"
+        val dest = File(srcFile.parentFile, newFileName)
+        if (dest.exists()) {
+            Log.w(TAG, "rename: target $newFileName already exists, refusing")
+            return@withContext null
+        }
+        if (!srcFile.renameTo(dest)) {
+            Log.w(TAG, "rename: srcFile.renameTo() returned false for $srcFile → $dest")
+            return@withContext null
+        }
+        Uri.fromFile(dest).toString()
     }
 
     private companion object {

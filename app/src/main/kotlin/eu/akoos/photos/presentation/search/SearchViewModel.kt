@@ -1,10 +1,34 @@
+/*
+ * Photos for Proton
+ * Copyright (C) 2026 Akoos <https://akoos.eu>
+ *
+ * Source:  https://github.com/gitakoos/proton-photos
+ * Website: https://photos.akoos.eu
+ *
+ * This file is part of Photos for Proton.
+ *
+ * Photos for Proton is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 3 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 @file:OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 
 package eu.akoos.photos.presentation.search
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -12,8 +36,11 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import me.proton.core.accountmanager.domain.AccountManager
+import eu.akoos.photos.data.preferences.SettingsKeys
+import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
 import eu.akoos.photos.presentation.gallery.ContentFilter
@@ -27,7 +54,25 @@ import javax.inject.Inject
 class SearchViewModel @Inject constructor(
     private val getGalleryItems: GetGalleryItemsUseCase,
     private val accountManager: AccountManager,
+    @ApplicationContext private val context: Context,
 ) : ViewModel() {
+
+    /** Hidden vault filter — same DataStore key the gallery uses. Without this the
+     *  search page surfaces hidden photos via name / date / content-filter matches,
+     *  defeating the point of the Hidden vault. */
+    private val hiddenUrisFlow = context.settingsDataStore.data.map {
+        it[SettingsKeys.HIDDEN_PHOTO_URIS] ?: emptySet()
+    }
+
+    private fun List<GalleryItem>.dropHidden(hiddenUris: Set<String>): List<GalleryItem> =
+        filter { item ->
+            val uri = when (item) {
+                is GalleryItem.LocalOnly -> item.local.uri
+                is GalleryItem.Synced -> item.local.uri
+                is GalleryItem.CloudOnly -> null
+            }
+            uri == null || uri !in hiddenUris
+        }
 
     private val _query = MutableStateFlow("")
     val query: StateFlow<String> = _query.asStateFlow()
@@ -45,7 +90,9 @@ class SearchViewModel @Inject constructor(
     val allItems: StateFlow<List<GalleryItem>> = accountManager.getPrimaryUserId()
         .flatMapLatest { userId ->
             if (userId == null) flowOf(emptyList())
-            else getGalleryItems.invoke(userId)
+            else combine(getGalleryItems.invoke(userId), hiddenUrisFlow) { all, hidden ->
+                all.dropHidden(hidden)
+            }
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
@@ -56,7 +103,8 @@ class SearchViewModel @Inject constructor(
                 getGalleryItems.invoke(userId),
                 _query,
                 _contentFilter,
-            ) { all, q, filter -> applyAll(all, q, filter) }
+                hiddenUrisFlow,
+            ) { all, q, filter, hidden -> applyAll(all.dropHidden(hidden), q, filter) }
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 

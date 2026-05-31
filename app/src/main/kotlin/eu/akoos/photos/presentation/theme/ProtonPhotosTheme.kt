@@ -1,3 +1,25 @@
+/*
+ * Photos for Proton
+ * Copyright (C) 2026 Akoos <https://akoos.eu>
+ *
+ * Source:  https://github.com/gitakoos/proton-photos
+ * Website: https://photos.akoos.eu
+ *
+ * This file is part of Photos for Proton.
+ *
+ * Photos for Proton is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 3 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 package eu.akoos.photos.presentation.theme
 
 import androidx.compose.foundation.IndicationNodeFactory
@@ -35,7 +57,6 @@ private val FgMuteDark = Color(0xFF6B6880)
 private val AccentDark = Color(0xFF8B7CFF)
 private val Accent2Dark = Color(0xFF6957D7)
 // ── Palette accents (dark mode) — only `accent`/`accent2` shift between palettes. ──
-// Default keeps the historical purple (callers still using AccentStatic stay unchanged).
 private val AccentDarkForest  = Color(0xFF7BC47F); private val Accent2DarkForest  = Color(0xFF3F8C44)
 private val AccentDarkSunset  = Color(0xFFFF8A65); private val Accent2DarkSunset  = Color(0xFFE64A19)
 private val AccentDarkSea     = Color(0xFF4FC3F7); private val Accent2DarkSea     = Color(0xFF0288D1)
@@ -372,19 +393,6 @@ val ErrorChipBg: Color
 val ArcTrack: Color
     @Composable @ReadOnlyComposable
     get() = LocalAppColors.current.arcTrack
-
-// ── Non-composable constants kept for places that need a stable Color outside
-// compose (drawing canvases, RemoteViews, widgets, etc.). These resolve to the
-// dark palette and are intentionally NOT theme-aware. Use AppColors.current
-// instead inside composables.
-val Bg0Static = Bg0Dark
-val Bg1Static = Bg1Dark
-val Bg2Static = Bg2Dark
-val FgPrimaryStatic = FgPrimaryDark
-// TODO: widgets currently stay on the historical default purple regardless of the
-// active ThemePalette. Wire RemoteViews drawables to the user's palette in a future
-// pass (requires palette key access from the widget update path).
-val AccentStatic = AccentDark
 
 @Composable
 fun ProtonPhotosTheme(

@@ -18,11 +18,11 @@ val keystoreProps: Properties? = if (keystorePropsFile.exists()) {
 } else null
 
 // APK base name — picked up by the AGP packager so the produced files are
-// named protonphotos-<ABI>-<buildType>.apk instead of the default app-*.apk.
+// named photosforproton-<ABI>-<buildType>.apk instead of the default app-*.apk.
 // Keeps the GitHub release assets self-describing for end users who download
 // them directly without context.
 base {
-    archivesName.set("protonphotos")
+    archivesName.set("photosforproton")
 }
 
 android {
@@ -33,16 +33,15 @@ android {
         // applicationId is intentionally OUTSIDE the me.proton.* namespace — this is an
         // unofficial third-party client, not built or endorsed by Proton AG. Using a
         // me.proton.* applicationId would imply association the project doesn't have.
-        // The Kotlin/Java package namespace below stays at me.proton.photos to avoid a
-        // full source-tree rename; that's only visible to people decompiling the APK.
+        // The Kotlin/Java package namespace is eu.akoos.photos to match the applicationId.
         applicationId = "eu.akoos.photos"
         minSdk = 26
         targetSdk = 35
         // versionCode bumped per release tag — keep monotonically increasing.
-        // versionName mirrors the GitHub release tag (e.g. v0.9.1 → "0.9.1") so the About
+        // versionName mirrors the GitHub release tag (e.g. v2.0.0 → "2.0.0") so the About
         // screen and the published APK report the same version the user downloaded.
-        versionCode = 132
-        versionName = "1.3.2-beta"
+        versionCode = 200
+        versionName = "2.0.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -210,6 +209,7 @@ dependencies {
     implementation(libs.compose.icons.extended)
     implementation(libs.lifecycle.viewmodel.compose)
     implementation(libs.lifecycle.runtime.compose)
+    implementation(libs.lifecycle.process)
     implementation(libs.navigation.compose)
     debugImplementation(libs.compose.ui.tooling)
 
@@ -223,7 +223,6 @@ dependencies {
 
     // Networking
     implementation(libs.retrofit)
-    implementation(libs.okhttp.logging)
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
 
     // WorkManager

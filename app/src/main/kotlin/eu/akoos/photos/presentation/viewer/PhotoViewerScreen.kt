@@ -1,3 +1,25 @@
+/*
+ * Photos for Proton
+ * Copyright (C) 2026 Akoos <https://akoos.eu>
+ *
+ * Source:  https://github.com/gitakoos/proton-photos
+ * Website: https://photos.akoos.eu
+ *
+ * This file is part of Photos for Proton.
+ *
+ * Photos for Proton is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 3 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 package eu.akoos.photos.presentation.viewer
 
 import android.app.Activity
@@ -46,7 +68,6 @@ import android.os.Build
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.ui.draw.blur
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -86,6 +107,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.res.stringResource
 import eu.akoos.photos.R
+import eu.akoos.photos.presentation.common.ConfirmDialog
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -125,6 +147,7 @@ import eu.akoos.photos.presentation.theme.Line2
 import eu.akoos.photos.presentation.theme.PanelChip
 import eu.akoos.photos.presentation.theme.PillBg
 import eu.akoos.photos.presentation.theme.PillBorder
+import eu.akoos.photos.presentation.util.formatVideoTime
 import eu.akoos.photos.util.MetadataStripConfig
 import eu.akoos.photos.util.PhotoMetadata
 import java.text.SimpleDateFormat
@@ -160,7 +183,9 @@ fun PhotoViewerScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val isDownloading by viewModel.isDownloading.collectAsStateWithLifecycle()
     val downloadProgress by viewModel.downloadProgress.collectAsStateWithLifecycle()
+    val fullResBlockedByMetered by viewModel.fullResBlockedByMetered.collectAsStateWithLifecycle()
     val metadata by viewModel.metadata.collectAsStateWithLifecycle()
+    val cloudFullResSize by viewModel.cloudFullResSize.collectAsStateWithLifecycle()
     val isStrippingMetadata by viewModel.isStrippingMetadata.collectAsStateWithLifecycle()
     val isHidden by viewModel.isHidden.collectAsStateWithLifecycle()
     val isFavorite by viewModel.isFavorite.collectAsStateWithLifecycle()
@@ -400,6 +425,19 @@ fun PhotoViewerScreen(
                     IntentSenderRequest.Builder(ds.pendingIntent.intentSender).build()
                 )
             }
+            is PhotoViewerViewModel.DeleteState.Failed -> {
+                // Surface the failure as a snackbar/toast and reset the state so the
+                // delete-overlay spinner doesn't get pinned to the screen forever (the
+                // "Not signed in" case in particular ended up with a permanent Failed
+                // overlay that the user couldn't dismiss). The reset moves us back to
+                // Idle so the next user action can proceed.
+                android.widget.Toast.makeText(
+                    context,
+                    ds.message,
+                    android.widget.Toast.LENGTH_LONG,
+                ).show()
+                viewModel.resetDeleteState()
+            }
             else -> {}
         }
     }
@@ -634,8 +672,32 @@ fun PhotoViewerScreen(
                                 strokeWidth = 2.dp,
                                 modifier = Modifier.size(14.dp),
                             )
+                            // "Downloading…" only when there's a cloud download in flight;
+                            // otherwise it's the player decoding a local file, where the right
+                            // word is "Loading". Otherwise the user sees a Downloading flash
+                            // on every device-local video which is misleading.
                             Text(
-                                if (pct != null) "Downloading $pct%" else "Downloading…",
+                                when {
+                                    pct != null -> "Downloading $pct%"
+                                    isDownloading -> "Downloading…"
+                                    else -> "Loading…"
+                                },
+                                color = FgPrimary, fontSize = 12.sp,
+                            )
+                        }
+                    } else if (fullResBlockedByMetered && stateMatchesPage) {
+                        // Hint the user when the viewer skipped auto-download because the
+                        // Wi-Fi-only-for-fullres preference is on and the device is metered.
+                        // Thumbnail stays in place; explicit actions (Save / Edit) still work.
+                        Row(
+                            modifier = Modifier
+                                .background(PillBg, RoundedCornerShape(999.dp))
+                                .border(0.5.dp, PillBorder, RoundedCornerShape(999.dp))
+                                .padding(horizontal = 14.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                stringResource(R.string.viewer_wifi_for_full_quality),
                                 color = FgPrimary, fontSize = 12.sp,
                             )
                         }
@@ -798,7 +860,14 @@ fun PhotoViewerScreen(
                                     },
                                 )
                             }
-                            if (isLocalItem) {
+                            // Hide is only offered for LocalOnly items — Synced photos
+                            // already have a Drive copy that hiding the local file alone
+                            // wouldn't protect, and CloudOnly has no local file to move.
+                            // Unhide stays available for any already-hidden item so the
+                            // user can recover regardless of how it was hidden originally.
+                            val canShowHideToggle = (!isHidden && settledItem is GalleryItem.LocalOnly) ||
+                                (isHidden && isLocalItem)
+                            if (canShowHideToggle) {
                                 androidx.compose.material3.DropdownMenuItem(
                                     text = { Text(stringResource(
                                         if (isHidden) R.string.viewer_menu_unhide
@@ -968,6 +1037,7 @@ fun PhotoViewerScreen(
                 item = item,
                 exif = metadata,
                 isStripping = isStrippingMetadata,
+                cloudSizeFallback = cloudFullResSize,
                 onStripFields = { config ->
                     val uri = when (item) {
                         is GalleryItem.LocalOnly -> item.local.uri
@@ -1162,11 +1232,36 @@ private fun PhotoMetadataSheet(
     item: GalleryItem?,
     exif: PhotoMetadata?,
     isStripping: Boolean,
+    /** On-disk size of the resolved full-res blob. The server batch API sometimes returns
+     *  `link.size = null` for video uploads, leaving [CloudPhoto.sizeBytes] at 0 — this
+     *  fallback fills the Size row with the real byte count once the viewer's background
+     *  download finishes. Null when the item is local-only or the download hasn't landed. */
+    cloudSizeFallback: Long? = null,
     onStripFields: (MetadataStripConfig) -> Unit,
     onRenameClick: () -> Unit = {},
 ) {
     if (item == null) return
     val isLocal = item is GalleryItem.LocalOnly || item is GalleryItem.Synced
+    // Per-section Strip actions only apply to device-only photos. Synced items already
+    // went through Settings → Privacy & Metadata's "Strip on upload" toggle, so the
+    // local file's EXIF is the right copy and we don't want to teach users that a
+    // post-upload strip changes anything visible on Drive (it doesn't — Drive holds
+    // the already-stripped version). CloudOnly has no on-device EXIF to touch at all.
+    val isDeviceOnly = item is GalleryItem.LocalOnly
+    // Hidden-vault photos live under file:// in app-private storage and aren't safe to
+    // rename via the normal MediaStore path. The dedicated rename function does work
+    // but the underlying file's `__<captureMs>.ext` suffix bleeds back into the visible
+    // display-name (the file's name IS the display-name for hidden items) and produces
+    // confusing artifacts on re-rename ("file with that name already exists" hits when
+    // the user un-knowingly tries to rename to the same stem + suffix combination).
+    // Cleanest UX: hide the rename affordance entirely for hidden items.
+    val itemUri = when (item) {
+        is GalleryItem.LocalOnly -> item.local.uri
+        is GalleryItem.Synced -> item.local.uri
+        is GalleryItem.CloudOnly -> null
+    }
+    val isHiddenItem = itemUri?.startsWith("file://") == true
+    val effectiveRenameClick: (() -> Unit)? = if (isHiddenItem) null else onRenameClick
     var showStripConfirm by remember { mutableStateOf(false) }
     var pendingStripConfig by remember { mutableStateOf<MetadataStripConfig?>(null) }
 
@@ -1188,7 +1283,7 @@ private fun PhotoMetadataSheet(
             MetadataSection("File Info") {
                 when (item) {
                     is GalleryItem.LocalOnly -> {
-                        MetaRow("File", item.local.displayName, onEdit = onRenameClick)
+                        MetaRow("File", item.local.displayName, onEdit = effectiveRenameClick)
                         MetaRow("Date", formatMs(item.local.dateTaken))
                         MetaRow("Size", formatBytes(item.local.sizeBytes))
                         MetaRow("Type", item.local.mimeType)
@@ -1196,8 +1291,16 @@ private fun PhotoMetadataSheet(
                         MetaRow("Source", "On device only")
                     }
                     is GalleryItem.Synced -> {
-                        MetaRow("File", item.local.displayName, onEdit = onRenameClick)
-                        MetaRow("Date", formatMs(item.local.dateTaken))
+                        MetaRow("File", item.local.displayName, onEdit = effectiveRenameClick)
+                        // Date sourced from the CLOUD captureTime — Drive stores the original
+                        // upload-time consistently while MediaStore's DATE_TAKEN can drift to
+                        // the download moment on devices where the column gets silently reset
+                        // (Samsung One UI is the worst offender). Falls back to the local
+                        // dateTaken only when the cloud side has no captureTime (rare).
+                        val displayDateMs = if (item.cloud.captureTime > 0L)
+                            item.cloud.captureTime * 1000L
+                        else item.local.dateTaken
+                        MetaRow("Date", formatMs(displayDateMs))
                         MetaRow("Size", formatBytes(item.local.sizeBytes))
                         MetaRow("Type", item.local.mimeType)
                         item.local.bucketName?.let { MetaRow("Album", it) }
@@ -1206,7 +1309,8 @@ private fun PhotoMetadataSheet(
                     is GalleryItem.CloudOnly -> {
                         MetaRow("File", item.cloud.displayName, onEdit = onRenameClick)
                         MetaRow("Date", formatMs(item.cloud.captureTime * 1000L))
-                        MetaRow("Size", formatBytes(item.cloud.sizeBytes))
+                        val displaySize = item.cloud.sizeBytes.takeIf { it > 0 } ?: cloudSizeFallback ?: 0L
+                        MetaRow("Size", if (displaySize > 0) formatBytes(displaySize) else "—")
                         MetaRow("Type", item.cloud.mimeType)
                         MetaRow("Source", "Proton Drive")
                     }
@@ -1217,7 +1321,7 @@ private fun PhotoMetadataSheet(
             if (exif != null && (exif.make != null || exif.model != null || exif.focalLength != null)) {
                 MetadataSection(
                     label = "Camera",
-                    actionLabel = if (isLocal) "Strip" else null,
+                    actionLabel = if (isDeviceOnly) "Strip" else null,
                     actionEnabled = !isStripping,
                     onAction = {
                         pendingStripConfig = MetadataStripConfig(stripCameraInfo = true)
@@ -1240,7 +1344,7 @@ private fun PhotoMetadataSheet(
             if (exif != null && (exif.gpsLatitude != null || exif.gpsLongitude != null)) {
                 MetadataSection(
                     label = "Location",
-                    actionLabel = if (isLocal) "Strip" else null,
+                    actionLabel = if (isDeviceOnly) "Strip" else null,
                     actionEnabled = !isStripping,
                     onAction = {
                         pendingStripConfig = MetadataStripConfig(stripGps = true)
@@ -1263,7 +1367,7 @@ private fun PhotoMetadataSheet(
             if (exif != null && (exif.dateTime != null || exif.dateTimeOriginal != null)) {
                 MetadataSection(
                     label = "Date & Time",
-                    actionLabel = if (isLocal) "Strip" else null,
+                    actionLabel = if (isDeviceOnly) "Strip" else null,
                     actionEnabled = !isStripping,
                     onAction = {
                         pendingStripConfig = MetadataStripConfig(stripTimestamp = true)
@@ -1279,7 +1383,7 @@ private fun PhotoMetadataSheet(
             if (exif != null && (exif.software != null || exif.artist != null || exif.copyright != null)) {
                 MetadataSection(
                     label = "Software & Author",
-                    actionLabel = if (isLocal) "Strip" else null,
+                    actionLabel = if (isDeviceOnly) "Strip" else null,
                     actionEnabled = !isStripping,
                     onAction = {
                         pendingStripConfig = MetadataStripConfig(stripSoftwareInfo = true)
@@ -1359,27 +1463,18 @@ private fun PhotoMetadataSheet(
             if (config.stripTimestamp) add("timestamps")
             if (config.stripSoftwareInfo) add("software info")
         }.joinToString(", ")
-        androidx.compose.material3.AlertDialog(
-            onDismissRequest = { showStripConfirm = false },
-            containerColor = Bg2,
-            titleContentColor = FgPrimary,
-            textContentColor = FgDim,
-            title = { Text("Strip metadata?") },
-            text = { Text("This will permanently remove $what from the file on your device. This cannot be undone.") },
-            confirmButton = {
-                androidx.compose.material3.TextButton(onClick = {
-                    showStripConfirm = false
-                    onStripFields(config)
-                    pendingStripConfig = null
-                }) {
-                    Text("Strip", color = ErrorColor, fontWeight = FontWeight.SemiBold)
-                }
+        ConfirmDialog(
+            title = "Strip metadata?",
+            message = "This will permanently remove $what from the file on your device. This cannot be undone.",
+            confirmLabel = "Strip",
+            dismissLabel = "Cancel",
+            onConfirm = {
+                showStripConfirm = false
+                onStripFields(config)
+                pendingStripConfig = null
             },
-            dismissButton = {
-                androidx.compose.material3.TextButton(onClick = { showStripConfirm = false }) {
-                    Text("Cancel", color = FgDim)
-                }
-            },
+            onDismiss = { showStripConfirm = false },
+            destructive = true,
         )
     }
 }
@@ -1792,19 +1887,32 @@ private fun VideoPlayer(
     AndroidView(
         factory = { ctx ->
             PlayerView(ctx).apply {
-                player = exoPlayer
-                useController = false   // custom controls in VideoControlPill
-                // useController=false alone still leaves the buffering spinner and the
-                // brief play/pause flash on tap visible. Disable both so the surface
-                // shows the video frame and nothing else — our own pill is the only UI.
+                // Disable the built-in controller BEFORE attaching the player. Setting
+                // `player = ...` first lets PlayerView observe the initial Player.STATE_*
+                // transition with the default controller still enabled — on some devices
+                // that paints a one-frame play/pause/seek bar overlay before our explicit
+                // useController=false takes effect. Setting it false first prevents that
+                // first-paint leak.
+                useController = false
+                controllerAutoShow = false
+                controllerHideOnTouch = false
+                controllerShowTimeoutMs = 0
+                // setShowBuffering NEVER also kills the spinner that ExoPlayer briefly
+                // shows when buffering — our own download/loading pill is the source of
+                // truth for "video is loading".
                 setShowBuffering(PlayerView.SHOW_BUFFERING_NEVER)
                 hideController()
-                controllerAutoShow = false
                 // The PlayerView's "shutter" view is a solid background that covers the
                 // surface until the first frame renders — and on some devices it stays
                 // up during pause / seek, looking like an unwanted overlay. Make it
                 // transparent so users only ever see the video itself.
                 setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
+                // The default artwork (a centered placeholder) shows when audio-only
+                // metadata is detected — irrelevant for our case but kill it explicitly.
+                useArtwork = false
+                setDefaultArtwork(null)
+                // Player attach AFTER the controller is fully suppressed.
+                player = exoPlayer
                 // Restored to true once single-flight download per linkId landed and
                 // eliminated the swipe-back-rebuilds-player path. The cached video now
                 // reuses the same ExoPlayer instance, so there's no "kept old frame"
@@ -1812,13 +1920,14 @@ private fun VideoPlayer(
                 // surface would briefly clear to transparent and the page background
                 // would bleed through.
                 setKeepContentOnPlayerReset(true)
-                // The default artwork (a centered placeholder) shows when audio-only
-                // metadata is detected — irrelevant for our case but kill it explicitly.
-                useArtwork = false
-                setDefaultArtwork(null)
             }
         },
-        update = { view -> view.player = exoPlayer },
+        update = { view ->
+            view.player = exoPlayer
+            // Defensive: if any code path flips useController back on (e.g. another
+            // PlayerView util we add later), keep the suppression invariant on update.
+            view.useController = false
+        },
         modifier = modifier,
     )
 }
@@ -1947,13 +2056,6 @@ private fun VideoControlPill(
             )
         }
     }
-}
-
-private fun formatVideoTime(ms: Long): String {
-    val totalSec = (ms / 1000).coerceAtLeast(0)
-    val m = totalSec / 60
-    val s = totalSec % 60
-    return "%d:%02d".format(m, s)
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────

@@ -1,3 +1,25 @@
+/*
+ * Photos for Proton
+ * Copyright (C) 2026 Akoos <https://akoos.eu>
+ *
+ * Source:  https://github.com/gitakoos/proton-photos
+ * Website: https://photos.akoos.eu
+ *
+ * This file is part of Photos for Proton.
+ *
+ * Photos for Proton is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 3 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 package eu.akoos.photos.data.preferences
 
 import android.content.Context
@@ -15,6 +37,12 @@ val Context.settingsDataStore: DataStore<Preferences> by preferencesDataStore(na
 object SettingsKeys {
     val AUTO_SYNC = booleanPreferencesKey("auto_sync")
     val SYNC_WIFI_ONLY = booleanPreferencesKey("sync_wifi_only")
+
+    /** When true (default), the viewer + editor will NOT auto-download cloud full-res
+     *  blobs on metered networks. Wifi-only is the data-conscious default; users on
+     *  unlimited mobile plans can flip it off in Settings → Sync. Does not affect the
+     *  thumbnail layer (those are tiny and load freely). */
+    val FULLRES_WIFI_ONLY = booleanPreferencesKey("fullres_wifi_only")
     /**
      * App-lock timeout in minutes — how long the app can be in the background before re-locking
      * on resume. 0 = lock immediately (the default before this option existed). Larger values mean the
@@ -103,6 +131,28 @@ object SettingsKeys {
     val STRIP_TIMESTAMP = booleanPreferencesKey("strip_timestamp")
     val STRIP_SOFTWARE_INFO = booleanPreferencesKey("strip_software_info")
     val STRIP_ON_UPLOAD = booleanPreferencesKey("strip_on_upload")
+    /** When true, the upload pipeline derives a new filename from the source's capture
+     *  timestamp before sending bytes to Drive — e.g. `IMG_2841.jpg` → `2026-05-29_14-32-08.jpg`.
+     *  Cloud-side `displayName` reflects the new name; the on-device file is untouched.
+     *  Useful for users who want a consistent, sortable naming scheme on Drive Web
+     *  regardless of which camera app captured the file. */
+    val RENAME_TO_CAPTURE_DATE = booleanPreferencesKey("rename_to_capture_date")
+    /** When true, the upload pipeline deletes the original MediaStore file as soon as
+     *  Drive has the upload (SyncState marked SYNCED). Off by default — most users want
+     *  the local copy to remain until Auto-free-up reclaims it on the next pass. Users
+     *  who treat Drive as the primary store flip this on. Foreign-owned files on
+     *  Android 11+ may refuse the delete without RecoverableSecurityException consent;
+     *  the local copy then survives until the OS Manage-Media flow grants broader access. */
+    val DELETE_LOCAL_AFTER_BACKUP = booleanPreferencesKey("delete_local_after_backup")
+
+    /**
+     * MediaStore URIs that the upload worker wanted to delete after a successful backup
+     * but could not — typically Android 11+ foreign owned items where the worker has no
+     * Activity to drive `MediaStore.createDeleteRequest` consent. The next time the
+     * user is in the foreground we drain this set through a batched delete request so
+     * the device file actually goes away instead of silently surviving.
+     */
+    val PENDING_DELETE_URIS = stringSetPreferencesKey("pending_delete_uris")
 
     // Hidden album — stores URIs of photos hidden from main gallery
     val HIDDEN_PHOTO_URIS = stringSetPreferencesKey("hidden_photo_uris")
@@ -114,6 +164,23 @@ object SettingsKeys {
     val APP_LOCK_ENABLED = booleanPreferencesKey("app_lock_enabled")
 
     val MANAGE_MEDIA_PROMPTED = booleanPreferencesKey("manage_media_prompted")
+
+    /**
+     * Set to true the moment the user finishes the post login onboarding wizard
+     * (welcome → backup mode → privacy → notifications → photo access → manage
+     * media → done). NavGraph reads this after authentication and routes back
+     * to the wizard if it's false so the user can never accidentally land on an
+     * empty Gallery without the explanation step. Persists per install — a sign
+     * out / sign back in by the same user does NOT replay the wizard.
+     */
+    val ONBOARDING_COMPLETE = booleanPreferencesKey("onboarding_complete")
+
+    /** Privacy opt-in: when true, wipe the full-res blob cache every time the app
+     *  process is backgrounded. Off by default — most users prefer the 30-min TTL
+     *  + offline grace behaviour. Security-conscious users who want zero on-disk
+     *  traces of viewed cloud photos can flip this on. Does NOT touch the encrypted
+     *  Drive backups on Proton's side, only the local viewing cache. */
+    val CLEAR_CACHE_ON_APP_CLOSE = booleanPreferencesKey("clear_cache_on_app_close")
 
     // Favorites — stores URIs (local) or linkIds (cloud) of favorited photos
     val FAVORITE_IDS = stringSetPreferencesKey("favorite_ids")

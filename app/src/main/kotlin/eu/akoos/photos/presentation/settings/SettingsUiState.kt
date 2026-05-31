@@ -1,8 +1,34 @@
+/*
+ * Photos for Proton
+ * Copyright (C) 2026 Akoos <https://akoos.eu>
+ *
+ * Source:  https://github.com/gitakoos/proton-photos
+ * Website: https://photos.akoos.eu
+ *
+ * This file is part of Photos for Proton.
+ *
+ * Photos for Proton is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 3 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 package eu.akoos.photos.presentation.settings
 
 data class SettingsUiState(
     val autoSync: Boolean = true,
     val syncWifiOnly: Boolean = true,
+    /** When true (default), the viewer holds off auto full-res downloads while the
+     *  device is on a metered network. Thumbnails always load. Independent from
+     *  [syncWifiOnly] which governs upload. */
+    val fullresWifiOnly: Boolean = true,
     val autoBackupNewFolders: Boolean = false,
     /** Backup-everything mode: when true, every MediaStore image/video is auto-uploaded,
      *  regardless of which folders the user picked. Folder picker becomes informational
@@ -42,6 +68,10 @@ data class SettingsUiState(
     val language: String = "system",
     // Metadata stripping
     val stripOnUpload: Boolean = true,
+    val renameToCaptureDate: Boolean = false,
+    /** When true, the upload pipeline removes the local MediaStore copy once Drive has
+     *  the upload. Off by default — opting in delegates "long-term storage" to Proton Drive. */
+    val deleteLocalAfterBackup: Boolean = false,
     val stripGps: Boolean = true,
     val stripCameraInfo: Boolean = false,
     val stripTimestamp: Boolean = false,
@@ -50,6 +80,9 @@ data class SettingsUiState(
     val appLockEnabled: Boolean = false,
     /** Lock-on-return timeout in minutes. 0 = immediate; common picks: 5 / 10 / 15 / 60. */
     val appLockTimeoutMinutes: Int = 0,
+    /** Privacy opt-in: wipe `cacheDir/fullres/` on every process backgrounding. Off by
+     *  default — the 30-min TTL + offline-grace sweeper is the regular behaviour. */
+    val clearCacheOnAppClose: Boolean = false,
     // Trash
     val trashedCount: Int = 0,
     // Free-up space: non-null when system delete dialog should be launched
@@ -61,6 +94,10 @@ data class SettingsUiState(
     val uploadTotalCount: Int = 0,
     /** Per-file status feed for the expandable list. Most recent activity last. */
     val uploadEvents: List<UploadEvent> = emptyList(),
+    /** Running bytes-per-second for the current batch. Null when no batch is active
+     *  or the first file hasn't completed yet. Computed as cumulative-done-bytes /
+     *  elapsed-since-batch-start so it's stable across parallel uploads. */
+    val uploadBytesPerSecond: Long? = null,
 )
 
 /**
@@ -72,9 +109,13 @@ data class UploadEvent(
     val uri: String,
     val displayName: String,
     val status: UploadEventStatus,
+    /** Plaintext file size of the item this event is about — surfaced in the per-file
+     *  row so the user can tell a 4 GB video from a 4 MB photo at a glance, and gets
+     *  *some* feedback while a video upload sits in the row for minutes. */
+    val sizeBytes: Long = 0L,
 )
 
-enum class UploadEventStatus { Uploading, Queued, Done, Failed }
+enum class UploadEventStatus { Uploading, Queued, Encrypting, Done, Failed }
 
 enum class ThemeMode(val storageKey: String, val labelRes: Int) {
     System("system", eu.akoos.photos.R.string.theme_mode_system),

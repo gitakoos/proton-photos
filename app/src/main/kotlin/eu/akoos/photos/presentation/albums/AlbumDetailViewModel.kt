@@ -1,3 +1,25 @@
+/*
+ * Photos for Proton
+ * Copyright (C) 2026 Akoos <https://akoos.eu>
+ *
+ * Source:  https://github.com/gitakoos/proton-photos
+ * Website: https://photos.akoos.eu
+ *
+ * This file is part of Photos for Proton.
+ *
+ * Photos for Proton is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 3 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 package eu.akoos.photos.presentation.albums
 
 import android.content.Context
@@ -269,9 +291,19 @@ class AlbumDetailViewModel @Inject constructor(
         viewModelScope.launch {
             val userId = accountManager.getPrimaryUserId().first() ?: return@launch
             _uiState.update { it.copy(isLoadingInvitations = true) }
-            val invitations = runCatching { driveRepo.loadShareInvitations(userId, shareId) }.getOrElse { emptyList() }
-            val members = runCatching { driveRepo.loadShareMembers(userId, shareId) }.getOrElse { emptyList() }
-            _uiState.update { it.copy(isLoadingInvitations = false, invitations = invitations, members = members) }
+            // Surface load failures via state.error so a network drop renders an
+            // error snackbar instead of an empty members list.
+            val invitationsResult = runCatching { driveRepo.loadShareInvitations(userId, shareId) }
+            val membersResult = runCatching { driveRepo.loadShareMembers(userId, shareId) }
+            val firstError = invitationsResult.exceptionOrNull() ?: membersResult.exceptionOrNull()
+            _uiState.update {
+                it.copy(
+                    isLoadingInvitations = false,
+                    invitations = invitationsResult.getOrDefault(emptyList()),
+                    members = membersResult.getOrDefault(emptyList()),
+                    error = firstError?.message ?: it.error,
+                )
+            }
         }
     }
 

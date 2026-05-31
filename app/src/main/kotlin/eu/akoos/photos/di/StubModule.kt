@@ -1,3 +1,25 @@
+/*
+ * Photos for Proton
+ * Copyright (C) 2026 Akoos <https://akoos.eu>
+ *
+ * Source:  https://github.com/gitakoos/proton-photos
+ * Website: https://photos.akoos.eu
+ *
+ * This file is part of Photos for Proton.
+ *
+ * Photos for Proton is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 3 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 package eu.akoos.photos.di
 
 import dagger.Module
@@ -23,7 +45,6 @@ import me.proton.core.payment.domain.entity.GooglePurchaseToken
 import me.proton.core.payment.domain.entity.ProductId
 import me.proton.core.payment.domain.entity.ProtonPaymentToken
 import me.proton.core.payment.domain.entity.Purchase
-import me.proton.core.payment.domain.entity.PurchaseState
 import me.proton.core.payment.domain.features.IsMobileUpgradesEnabled
 import me.proton.core.payment.domain.features.IsOmnichannelEnabled
 import me.proton.core.payment.domain.features.IsPaymentsV5Enabled
@@ -228,4 +249,14 @@ object StubModule {
 
     @Provides @Singleton
     fun provideGoogleServicesUtils(): Optional<GoogleServicesUtils> = Optional.empty()
+
+    // Telemetry + Observability — NOT overridden at the DI layer because the
+    // ProtonCore telemetry-dagger module hard-binds IsTelemetryEnabledImpl
+    // (which itself reads the user's server side Telemetry pref through
+    // GetUserSettings). Attempting an app side @Provides for IsTelemetryEnabled
+    // produces a Dagger DuplicateBindings build break. The remaining defenses
+    // (we never emit a telemetry event ourselves; the user can disable Telemetry
+    // in their Proton account settings to suppress library emits) are documented
+    // for the user in SettingsScreen. Future: ship a TestInstallIn style
+    // replacement module if ProtonCore opens up the binding.
 }

@@ -1,3 +1,25 @@
+/*
+ * Photos for Proton
+ * Copyright (C) 2026 Akoos <https://akoos.eu>
+ *
+ * Source:  https://github.com/gitakoos/proton-photos
+ * Website: https://photos.akoos.eu
+ *
+ * This file is part of Photos for Proton.
+ *
+ * Photos for Proton is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 3 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 package eu.akoos.photos.data.repository.drive
 
 import android.util.Log
@@ -298,9 +320,9 @@ class PhotosShareService @Inject constructor(
             } catch (e: Exception) {
                 Log.w(TAG, "ensurePhotosVolumeReady: createOrGetPhotosVolume failed: ${e.message}")
                 // ALREADY_EXISTS (Proton error code 2500 / HTTP 409) is the expected response
-                // when the account's Photos volume was created in a previous session: the
-                // server refuses re-creation but the existing volume still has the LinkID +
-                // ShareID we need. Mirror the official Android client's recovery path
+                // when the account's Photos volume already exists: the server refuses
+                // re-creation but the existing volume still carries the LinkID + ShareID
+                // we need. Mirror the official Android client's recovery path
                 // (CreatePhotoShare.kt → onFailure if `hasProtonErrorCode(ALREADY_EXISTS)`):
                 // call getVolumes, filter for Type=2 (PHOTO), and pull ShareID + root LinkID
                 // from the nested Volume.Share object. See VolumeDto in DriveDto.kt for the

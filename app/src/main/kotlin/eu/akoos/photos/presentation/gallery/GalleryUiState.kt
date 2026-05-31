@@ -1,3 +1,25 @@
+/*
+ * Photos for Proton
+ * Copyright (C) 2026 Akoos <https://akoos.eu>
+ *
+ * Source:  https://github.com/gitakoos/proton-photos
+ * Website: https://photos.akoos.eu
+ *
+ * This file is part of Photos for Proton.
+ *
+ * Photos for Proton is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 3 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 package eu.akoos.photos.presentation.gallery
 
 import eu.akoos.photos.domain.entity.GalleryItem
@@ -58,8 +80,12 @@ sealed class MultiDownloadState {
 sealed class AddToAlbumState {
     data object Idle : AddToAlbumState()
     data object Working : AddToAlbumState()
-    /** [cloudAdded] = photos attached to a cloud album; [localMoved] = files moved to a bucket. */
-    data class Done(val cloudAdded: Int, val localMoved: Int, val albumName: String) : AddToAlbumState()
+    /** [cloudAdded] = photos attached to a cloud album; [localMoved] = files moved to a bucket.
+     *  [skipped] = items the picked target couldn't accept (cloud-only items when target is a
+     *  local bucket; local-only items with no cloud counterpart when target is a Drive album).
+     *  Surfaced as a partial-success snackbar so a mixed selection no longer drops items
+     *  silently. */
+    data class Done(val cloudAdded: Int, val localMoved: Int, val skipped: Int, val albumName: String) : AddToAlbumState()
     data class Failed(val message: String) : AddToAlbumState()
 }
 

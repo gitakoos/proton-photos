@@ -11,6 +11,7 @@
     android:resizeMode="horizontal|vertical"
     android:widgetCategory="home_screen"
     android:configure="eu.akoos.photos.widget.PhotoWidgetConfigActivity"
+    android:widgetFeatures="reconfigurable"
     android:updatePeriodMillis="0"
     android:previewImage="@mipmap/ic_launcher"
     android:description="@string/widget_description" />

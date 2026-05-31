@@ -1,3 +1,25 @@
+/*
+ * Photos for Proton
+ * Copyright (C) 2026 Akoos <https://akoos.eu>
+ *
+ * Source:  https://github.com/gitakoos/proton-photos
+ * Website: https://photos.akoos.eu
+ *
+ * This file is part of Photos for Proton.
+ *
+ * Photos for Proton is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 3 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 package eu.akoos.photos.presentation.gallery
 
 import android.Manifest
@@ -20,8 +42,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.rememberTransformableState
-import androidx.compose.foundation.gestures.transformable
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -76,7 +96,6 @@ import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
-import androidx.compose.material.icons.filled.VideoLibrary
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -84,7 +103,6 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
-import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -92,7 +110,6 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
-import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -138,6 +155,10 @@ import coil.compose.AsyncImage
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.entity.GalleryItem
+import eu.akoos.photos.presentation.common.EmptyState
+import eu.akoos.photos.presentation.common.ErrorPopup
+import eu.akoos.photos.util.computeOnThisDay
+import eu.akoos.photos.util.sanitizeErrorMessage
 import eu.akoos.photos.presentation.albums.AlbumsFilter
 import eu.akoos.photos.presentation.albums.AlbumsScreen
 import eu.akoos.photos.presentation.albums.AlbumsViewModel
@@ -149,7 +170,6 @@ import eu.akoos.photos.presentation.theme.Accent2
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.ArcTrack
 import eu.akoos.photos.presentation.theme.Bg0
-import eu.akoos.photos.presentation.theme.Bg1
 import eu.akoos.photos.presentation.theme.Bg2
 import eu.akoos.photos.presentation.theme.DeleteTint
 import eu.akoos.photos.presentation.theme.ErrorChipBg
@@ -161,12 +181,10 @@ import eu.akoos.photos.presentation.theme.Line2
 import eu.akoos.photos.presentation.theme.PillBg
 import eu.akoos.photos.presentation.theme.PillBgOpaque
 import eu.akoos.photos.presentation.theme.PillBorder
-import eu.akoos.photos.presentation.theme.StatusSynced
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
-import kotlin.math.roundToInt
 
 private val pillShape = RoundedCornerShape(999.dp)
 
@@ -223,6 +241,12 @@ fun GalleryScreen(
     onHiddenAlbumClick: () -> Unit = {},
     onSearchClick: () -> Unit = {},
     onCalendarClick: () -> Unit = {},
+    /** Non-null when the user tapped the home-screen photo widget. The screen waits for
+     *  the items flow to populate, finds the matching item, and forwards to
+     *  [onPhotoClick]. [onPendingWidgetPhotoConsumed] is invoked exactly once after
+     *  navigation so a back-pop doesn't re-trigger the viewer. */
+    pendingWidgetPhotoUri: String? = null,
+    onPendingWidgetPhotoConsumed: () -> Unit = {},
     viewModel: GalleryViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -264,6 +288,15 @@ fun GalleryScreen(
     }
     val notificationsBlockedMsg = stringResource(R.string.notifications_blocked_snackbar)
     val openSettingsAction = stringResource(R.string.notifications_blocked_open_settings)
+    // Back-button intercept in selection mode: clear the selection instead of letting
+    // the OS pop the screen out of the gallery. Without this guard the user lost their
+    // multi-select work every time they hit the system back button looking for a
+    // "cancel selection" affordance (the actual cancel pill is in the selection header
+    // but isn't discoverable for a back-press user).
+    androidx.activity.compose.BackHandler(enabled = state.isSelectionMode) {
+        viewModel.clearSelection()
+    }
+
     LaunchedEffect(showNotificationRationale) {
         if (!showNotificationRationale) return@LaunchedEffect
         val result = snackbarHostState.showSnackbar(
@@ -287,6 +320,27 @@ fun GalleryScreen(
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
+    }
+
+    // Widget-tap routing: once the items flow has populated and there's a pending widget
+    // URI to open, find the matching item in the full list and forward to the viewer.
+    // Falls back to a single-item viewer if the URI isn't in the list (e.g. the photo is
+    // outside the current filter or was deleted between tap and resolution). Cleared
+    // exactly once so back-popping doesn't re-trigger.
+    LaunchedEffect(pendingWidgetPhotoUri, state.items.size) {
+        val uri = pendingWidgetPhotoUri ?: return@LaunchedEffect
+        if (state.items.isEmpty()) return@LaunchedEffect
+        val idx = state.items.indexOfFirst { item ->
+            when (item) {
+                is GalleryItem.LocalOnly -> item.local.uri == uri
+                is GalleryItem.Synced    -> item.local.uri == uri
+                is GalleryItem.CloudOnly -> false
+            }
+        }
+        if (idx >= 0) {
+            onPhotoClick(state.items, idx, state.hiddenCloudLinkIds)
+        }
+        onPendingWidgetPhotoConsumed()
     }
     // Trigger a sync/refresh immediately after the user grants photo permission so
     // photos appear without requiring an app restart.
@@ -312,11 +366,18 @@ fun GalleryScreen(
             context.settingsDataStore.edit { it[SettingsKeys.MANAGE_MEDIA_PROMPTED] = true }
         }
     }
-    LaunchedEffect(state.error) {
-        state.error?.let {
-            snackbarHostState.showSnackbar(it)
-            viewModel.clearError()
-        }
+    // Upload / download / delete failures originate as raw exception messages —
+    // route them through the unified [ErrorPopup] so the user can read multi-line
+    // backend payloads, copy them out for a bug report, and dismiss explicitly
+    // (not via a 4-second auto-snackbar). Snackbars below stay for transient
+    // confirmations like "Photo added to album".
+    if (state.error != null) {
+        ErrorPopup(
+            title = "Error",
+            message = sanitizeErrorMessage(state.error),
+            onDismiss = viewModel::clearError,
+            onCopy = {},
+        )
     }
 
     var headerHeightPx by remember { mutableStateOf(0) }
@@ -415,13 +476,22 @@ fun GalleryScreen(
         when (addToAlbumState) {
             is AddToAlbumState.Done -> {
                 val totalAdded = addToAlbumState.cloudAdded + addToAlbumState.localMoved
-                val msg = if (totalAdded > 0) {
-                    context.getString(R.string.gallery_added_to_album, totalAdded, addToAlbumState.albumName)
-                } else {
+                val msg = when {
+                    // Partial success — some items in the selection couldn't be saved to the
+                    // chosen target (cloud-only items picked into a local bucket, or local-only
+                    // items picked into a Drive album). Disclose the skip count explicitly so
+                    // the user doesn't think the missing items disappeared.
+                    addToAlbumState.skipped > 0 -> context.getString(
+                        R.string.gallery_add_to_album_partial,
+                        totalAdded, addToAlbumState.albumName, addToAlbumState.skipped,
+                    )
+                    totalAdded > 0 -> context.getString(
+                        R.string.gallery_added_to_album, totalAdded, addToAlbumState.albumName,
+                    )
                     // Edge case: both legs reported 0 added but the operation still "succeeded"
                     // (e.g. user picked an existing album the photos were already in). Fall back
                     // to the localised "added to" template with 0 so we still surface a snackbar.
-                    context.getString(R.string.gallery_added_to_album, 0, addToAlbumState.albumName)
+                    else -> context.getString(R.string.gallery_added_to_album, 0, addToAlbumState.albumName)
                 }
                 snackbarHostState.showSnackbar(msg)
                 viewModel.resetAddToAlbumState()
@@ -490,7 +560,13 @@ fun GalleryScreen(
                                 }
                             }
                         state.filteredItems.isEmpty() ->
-                            EmptyState(topPadding = headerHeightDp)
+                            EmptyState(
+                                title = stringResource(R.string.gallery_empty_title),
+                                subtitle = stringResource(R.string.gallery_empty_subtitle),
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(top = headerHeightDp),
+                            )
                         else ->
                             PhotoGrid(
                                 items              = state.filteredItems,
@@ -693,26 +769,12 @@ fun GalleryScreen(
                             }
                         }
                     }
-                    // Add to album — opens picker bottom sheet
+                    // Add to album moved into the More dropdown so the bar fits when the
+                    // selection counter text is long ("12 photos, 4 videos"). The previous
+                    // outer pill collided with the title on portrait phones for >9-char
+                    // counters. Still rendered when the More-menu spinner is needed for
+                    // the in-flight Add-to-album action (handled below).
                     val isAddingToAlbum = addToAlbumState is AddToAlbumState.Working
-                    Box(
-                        modifier = Modifier
-                            .size(40.dp)
-                            .background(PillBg, CircleShape)
-                            .border(0.5.dp, PillBorder, CircleShape)
-                            .clickable(enabled = !isAddingToAlbum) { showAddToAlbumSheet = true },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        if (isAddingToAlbum) {
-                            CircularProgressIndicator(
-                                color = Accent, strokeWidth = 2.dp,
-                                modifier = Modifier.size(16.dp),
-                            )
-                        } else {
-                            Icon(Icons.Default.PhotoAlbum, stringResource(R.string.gallery_add_to_album),
-                                tint = appColors.accent, modifier = Modifier.size(20.dp))
-                        }
-                    }
                     // Delete
                     val isWorking = multiDeleteState is MultiDeleteState.Working
                     Box(
@@ -747,7 +809,7 @@ fun GalleryScreen(
                                 .clickable { moreExpanded = true },
                             contentAlignment = Alignment.Center,
                         ) {
-                            if (isStripping || isHiding) {
+                            if (isStripping || isHiding || isAddingToAlbum) {
                                 CircularProgressIndicator(
                                     color = Accent, strokeWidth = 2.dp,
                                     modifier = Modifier.size(16.dp),
@@ -764,7 +826,57 @@ fun GalleryScreen(
                             containerColor = appColors.cardBg,
                             border = androidx.compose.foundation.BorderStroke(0.5.dp, appColors.pillBorder),
                         ) {
+                            // Add to album — moved into the More menu so the toolbar fits
+                            // long mixed-media selection counters. Disabled while a previous
+                            // add is in flight; the spinner replaces the More-icon above too.
+                            //
+                            // Gating: any selection that mixes LocalOnly + CloudOnly items has
+                            // no shared album semantics (LocalOnly goes into a local bucket
+                            // album, CloudOnly goes into a Drive album — different stores,
+                            // different IDs) so we surface the entry as disabled with a
+                            // tooltip-style hint text rather than letting the picker open
+                            // and silently dropping items. This covers BOTH the 2-way
+                            // (LocalOnly + CloudOnly) and 3-way (LocalOnly + CloudOnly + Synced)
+                            // cases — Synced presence does NOT make the mix safe, because the
+                            // LocalOnly + CloudOnly halves still get dropped per leg regardless
+                            // of how many Synced items are along for the ride.
+                            val hasLocalOnly = state.selectedItems.any { it is GalleryItem.LocalOnly }
+                            val hasCloudOnly = state.selectedItems.any { it is GalleryItem.CloudOnly }
+                            val mixedHasSilentDrop = hasLocalOnly && hasCloudOnly
                             androidx.compose.material3.DropdownMenuItem(
+                                text = {
+                                    Column {
+                                        Text(
+                                            stringResource(R.string.gallery_add_to_album),
+                                            color = if (mixedHasSilentDrop) appColors.fgDim else appColors.fgPrimary,
+                                        )
+                                        if (mixedHasSilentDrop) {
+                                            Text(
+                                                stringResource(R.string.gallery_add_to_album_mixed_hint),
+                                                color = appColors.fgMute,
+                                                fontSize = 11.sp,
+                                            )
+                                        }
+                                    }
+                                },
+                                leadingIcon = { Icon(Icons.Default.PhotoAlbum, null,
+                                    tint = if (mixedHasSilentDrop) appColors.fgMute else appColors.accent, modifier = Modifier.size(20.dp)) },
+                                enabled = !isAddingToAlbum && !mixedHasSilentDrop,
+                                onClick = {
+                                    moreExpanded = false
+                                    showAddToAlbumSheet = true
+                                },
+                            )
+                            // "Strip metadata" only fits device-only (LocalOnly) photos —
+                            // backed-up + cloud-only items already went through the upload
+                            // pipeline's strip toggle (Settings → Privacy & Metadata) and
+                            // re-stripping post-upload is a no-op on Drive. Hiding the entry
+                            // for mixed / cloud-leaning selections matches the user's mental
+                            // model of "this action prepares my device file" — same gating
+                            // pattern as the hide-selected entry above.
+                            val allDeviceOnly = state.selectedItems.isNotEmpty() &&
+                                state.selectedItems.all { it is GalleryItem.LocalOnly }
+                            if (allDeviceOnly) androidx.compose.material3.DropdownMenuItem(
                                 text = { Text(stringResource(R.string.gallery_strip_metadata),
                                     color = appColors.fgPrimary) },
                                 leadingIcon = { Icon(Icons.Default.PrivacyTip, null,
@@ -775,17 +887,24 @@ fun GalleryScreen(
                                     viewModel.stripMetadataSelected()
                                 },
                             )
-                            androidx.compose.material3.DropdownMenuItem(
-                                text = { Text("Hide selected",
-                                    color = appColors.fgPrimary) },
-                                leadingIcon = { Icon(Icons.Default.VisibilityOff, null,
-                                    tint = appColors.fgPrimary, modifier = Modifier.size(20.dp)) },
-                                enabled = !isHiding,
-                                onClick = {
-                                    moreExpanded = false
-                                    viewModel.hideSelected()
-                                },
-                            )
+                            // Hide selected applies only to LocalOnly/Synced — CloudOnly
+                            // items have no device counterpart. Same gating as the
+                            // per-section Strip action in the viewer Details.
+                            val hasHideable = state.selectedItems.isNotEmpty() &&
+                                state.selectedItems.all { it is GalleryItem.LocalOnly }
+                            if (hasHideable) {
+                                androidx.compose.material3.DropdownMenuItem(
+                                    text = { Text("Hide selected",
+                                        color = appColors.fgPrimary) },
+                                    leadingIcon = { Icon(Icons.Default.VisibilityOff, null,
+                                        tint = appColors.fgPrimary, modifier = Modifier.size(20.dp)) },
+                                    enabled = !isHiding,
+                                    onClick = {
+                                        moreExpanded = false
+                                        viewModel.hideSelected()
+                                    },
+                                )
+                            }
                         }
                     }
                 }
@@ -808,7 +927,7 @@ fun GalleryScreen(
             )
         }
 
-        SnackbarHost(
+        eu.akoos.photos.presentation.common.ThemedSnackbarHost(
             snackbarHostState,
             modifier = Modifier
                 .align(Alignment.BottomCenter)
@@ -1670,15 +1789,17 @@ private fun PhotoGrid(
             1 to TimelineGrouping.Day,     // L5 — 1 col, biggest tile + day headers
         )
     }
-    // Initial level is derived from the persisted grouping. For the ambiguous "None"
-    // case we pick the middle of the three flat levels (4 cols) so pinching in either
-    // direction is symmetric.
+    // Initial level is derived from the persisted grouping. Default for Month is L3
+    // (3 cols + month headers) — that's the "monthly browsing" baseline the user
+    // expects on first launch. None → 4 cols flat, Year → 5 cols year-headers,
+    // Day → 2 cols big-tile day-headers — picked so pinch in either direction is
+    // symmetric from the most-common starting point.
     val initialLevel = remember(grouping) {
         when (grouping) {
             TimelineGrouping.None  -> 2
-            TimelineGrouping.Day   -> 3
-            TimelineGrouping.Month -> 4
-            TimelineGrouping.Year  -> 5
+            TimelineGrouping.Year  -> 1
+            TimelineGrouping.Month -> 3
+            TimelineGrouping.Day   -> 4
         }
     }
     var levelIndex by rememberSaveable { mutableIntStateOf(initialLevel) }
@@ -1895,35 +2016,6 @@ private fun PhotoGrid(
     }
 }
 
-// ── "On this day" memories ───────────────────────────────────────────────────
-//
-// Groups items whose capture date falls on TODAY's month + day in a PREVIOUS year
-// (current year excluded). Returns a list of (year, items) pairs sorted most-recent-first.
-// Returning an empty list signals "no memories today" — caller hides the carousel entirely.
-private fun computeOnThisDay(items: List<GalleryItem>): List<Pair<Int, List<GalleryItem>>> {
-    if (items.isEmpty()) return emptyList()
-    val today = Calendar.getInstance()
-    val todayMonth = today.get(Calendar.MONTH)
-    val todayDay = today.get(Calendar.DAY_OF_MONTH)
-    val todayYear = today.get(Calendar.YEAR)
-    val cal = Calendar.getInstance()
-    val matches = items.filter { item ->
-        cal.timeInMillis = item.captureTimeMs
-        cal.get(Calendar.MONTH) == todayMonth &&
-            cal.get(Calendar.DAY_OF_MONTH) == todayDay &&
-            cal.get(Calendar.YEAR) != todayYear
-    }
-    if (matches.isEmpty()) return emptyList()
-    return matches
-        .groupBy { item ->
-            cal.timeInMillis = item.captureTimeMs
-            cal.get(Calendar.YEAR)
-        }
-        .entries
-        .sortedByDescending { it.key }
-        .map { it.key to it.value }
-}
-
 @Composable
 private fun OnThisDayCarousel(
     yearGroups: List<Pair<Int, List<GalleryItem>>>,
@@ -2135,11 +2227,11 @@ internal fun PhotoCell(
     // ── Lazy thumbnail wiring ────────────────────────────────────────────────
     //
     // Cloud-only and Synced cells whose thumbnailUrl is missing represent rows
-    // that the sync pass populated in metadata-only mode (v1.3 lazy decrypt).
-    // Becoming visible enqueues an on-demand decrypt; leaving the viewport
-    // cancels it. The DAO updates the row when the decrypt completes and the
-    // Flow-based observation re-emits the new thumbnailUrl into [item], which
-    // triggers recomposition and AsyncImage renders the freshly-cached file.
+    // that the sync pass populated in metadata-only mode: rows decrypt on
+    // visibility, cancel on leave. The DAO updates the row when the decrypt
+    // completes and the Flow-based observation re-emits the new thumbnailUrl
+    // into [item], which triggers recomposition and AsyncImage renders the
+    // freshly-cached file.
     //
     // Synced cells already render the local file URI, so a missing thumbnailUrl
     // is invisible to the user — we still queue the decrypt though, so the
@@ -2368,32 +2460,6 @@ private fun BoxScope.DeviceBadge() {
     }
 }
 
-// ── Empty state ───────────────────────────────────────────────────────────────
-
-@Composable
-private fun EmptyState(topPadding: Dp = 0.dp) {
-    Box(
-        Modifier
-            .fillMaxSize()
-            .padding(top = topPadding),
-        contentAlignment = Alignment.Center,
-    ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(
-                stringResource(R.string.gallery_empty_title),
-                color = FgPrimary,
-                fontSize = 17.sp,
-                fontWeight = FontWeight.SemiBold,
-            )
-            Spacer(Modifier.height(8.dp))
-            Text(
-                stringResource(R.string.gallery_empty_subtitle),
-                color = FgDim,
-                fontSize = 14.sp,
-            )
-        }
-    }
-}
 
 // ── Multi-select delete sheet ─────────────────────────────────────────────────
 

@@ -1,3 +1,25 @@
+/*
+ * Photos for Proton
+ * Copyright (C) 2026 Akoos <https://akoos.eu>
+ *
+ * Source:  https://github.com/gitakoos/proton-photos
+ * Website: https://photos.akoos.eu
+ *
+ * This file is part of Photos for Proton.
+ *
+ * Photos for Proton is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 3 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 package eu.akoos.photos.presentation.hidden
 
 import androidx.biometric.BiometricManager
@@ -30,9 +52,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.VisibilityOff
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.ui.res.stringResource
@@ -61,7 +81,6 @@ import eu.akoos.photos.domain.entity.LocalMediaItem
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.Bg0
 import eu.akoos.photos.presentation.theme.Bg2
-import eu.akoos.photos.presentation.theme.ErrorColor
 import eu.akoos.photos.presentation.theme.FgDim
 import eu.akoos.photos.presentation.theme.FgMute
 import eu.akoos.photos.presentation.theme.FgPrimary
@@ -85,9 +104,15 @@ fun HiddenAlbumScreen(
         }
     }
 
-    // Trigger biometric on first composition
+    // Trigger biometric on first composition. Guarded by `promptShown` so a rapid
+    // re-enter (user cancels the prompt → onBack pops the screen → user immediately
+    // taps Hidden again) doesn't double-fire two prompts that race each other and
+    // either stack or fail one after the other. Reset isn't needed — composables
+    // start a fresh remember{} state on every entry.
+    var promptShown by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
-        if (!state.isAuthenticated) {
+        if (!state.isAuthenticated && !promptShown) {
+            promptShown = true
             showBiometricPrompt(
                 activity = context as FragmentActivity,
                 onSuccess = { viewModel.onAuthenticationSuccess() },
@@ -244,7 +269,7 @@ fun HiddenAlbumScreen(
             }
         }
 
-        SnackbarHost(
+        eu.akoos.photos.presentation.common.ThemedSnackbarHost(
             snackbarHostState,
             modifier = Modifier
                 .align(Alignment.BottomCenter)

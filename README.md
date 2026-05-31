@@ -1,8 +1,8 @@
-# Proton Photos for Android
+# Photos for Proton
 
 > **Unofficial** open-source Proton Drive Photos client for Android. Built against the publicly documented Drive API.
 
-[![Release](https://img.shields.io/badge/release-beta-blue)](https://github.com/gitakoos/proton-photos/releases/latest)
+[![Release](https://img.shields.io/badge/release-v2.0.0-blue)](https://github.com/gitakoos/proton-photos/releases/latest)
 [![License](https://img.shields.io/badge/license-GPL--3.0-green)](LICENSE)
 [![Min SDK](https://img.shields.io/badge/minSdk-26-orange)](https://developer.android.com/about/dashboards)
 
@@ -13,9 +13,11 @@ End-to-end encrypted photo backup and browsing for your Proton Drive Photos libr
 ## Features
 
 - End-to-end encryption via ProtonCore + GoOpenPGP.
+- First-launch onboarding wizard — guides through backup mode, folder selection, metadata privacy, app lock, appearance, language, and permissions in a single step-through flow.
 - Background sync — per-folder selection or "back up everything" with a per-folder exclude list, Wi-Fi-only toggle, continuous backup (uploads start within seconds of capture and resume after device reboot), three-photo parallel uploads.
 - Reinstall pairing — previously backed-up photos rejoin Synced state automatically after a clean install.
-- Albums — create, rename, add / remove photos, quick-set cover via long-press on any photo.
+- Delete after backup — optional toggle that removes the device copy as soon as the cloud upload succeeds, with a system trash consent notification that drains on unlock.
+- Albums — create, rename (cloud + local parity), add / remove photos, quick-set cover via long-press on any photo.
 - Multi-step share dialog — email chips, viewer / editor permissions, optional invite message.
 - Built-in photo editor — eight adjustments (brightness, exposure, contrast, highlights, shadows, saturation, tone, temperature), filter, redact, rotate, free-form crop, undo / redo.
 - Built-in video editor — trim, crop, rotate, music overlay with audio trim. Works on both device and cloud-hosted videos.
@@ -24,14 +26,15 @@ End-to-end encrypted photo backup and browsing for your Proton Drive Photos libr
 - Calendar view — every day on a calendar, with a hero photo per day, an editable place + description, and the full grid of that day's photos and videos.
 - Search — filename, media type, sync state, year and month filters; the empty-state shows recent photos, an "On this day" carousel and a jump-to-month grid.
 - Timeline scrubber on the photos grid for fast year-jump navigation.
-- Multi-select bulk actions — download, add to album, delete, hide, strip metadata.
+- Multi-select bulk actions — download, add to album, delete, hide, strip metadata. Mixed device + cloud selection is guarded so nothing is silently dropped.
 - Hidden vault behind biometric / PIN. Heavy blur overlay on cells and viewer.
 - Per-field metadata stripping (GPS, camera, timestamps, software) on upload or in bulk.
 - Offline browsing — cached photos and videos work without a network connection.
 - Lazy thumbnail decryption — gallery populates instantly, thumbnails resolve as cells scroll into view.
 - One-tap bulk free-up of already-backed-up device copies.
 - Configurable app lock with timeout.
-- Home-screen widget.
+- Home-screen widget — four modes including a Cloud Photos mode that pulls thumbnails from the encrypted on-disk cache, so the source bytes never enter the device's photo index or any other app's view.
+- Sandbox hardening — TLS cert pinning on every Proton call (API + CDN), network allowlist (only proton.me, quad9.net, cloudflare-dns.com reachable; cleartext blocked), `allowBackup="false"` + empty `dataExtractionRules` (no state migrates via Google Drive auto-backup or device transfer), all `Log.*` stripped in release builds, StrictMode cleartext detector in debug.
 - 6 languages (en, hu, de, fr, es, it), light / dark / system theme, 6 colour palettes (Default, Forest, Sunset, Sea, Sepia, Mono).
 
 ## Install
@@ -44,14 +47,19 @@ Download the latest APK from the [releases page](https://github.com/gitakoos/pro
 app/src/main/kotlin/eu/akoos/photos/
 ├── presentation/     UI — Composables + ViewModels
 │   ├── auth/         Sign-in
+│   ├── onboarding/   First-launch wizard (about, backup mode, folder pick, privacy, lock, appearance, permissions)
 │   ├── gallery/      Photos tab + multi-select
 │   ├── albums/       Albums tab + detail + sharing
+│   ├── shared/       Shared-with-me albums tab
+│   ├── calendar/     Calendar view + per-day metadata editor
 │   ├── viewer/       Full-screen photo / video viewer
 │   ├── editor/       Photo + video editor
 │   ├── search/       Search with filename + content filters
 │   ├── hidden/       Hidden vault (PIN / biometric)
 │   ├── settings/     Settings, About, Privacy, Language, Theme, Palette
 │   ├── lock/         App lock
+│   ├── common/       Shared composables (ErrorPopup, ConfirmDialog, EmptyState, ThemedSnackbar)
+│   ├── util/         Presentation-layer helpers (formatters, focus helpers)
 │   └── theme/        Colour tokens + palette factories
 ├── domain/           Pure domain layer
 │   ├── entity/
@@ -66,9 +74,12 @@ app/src/main/kotlin/eu/akoos/photos/
 │   │                 Stream, Album, AlbumSharing, CloudTrash, …)
 │   ├── preferences/  DataStore
 │   └── hidden/       Hidden-vault storage
+├── di/               Hilt modules (Core, Network, Database, Repository, Stub)
+├── navigation/       Single NavGraph
+├── util/             Cross-cutting helpers (Exif, NetworkObserver, ErrorMessageSanitizer)
 ├── worker/           WorkManager workers
 ├── service/          Foreground service + boot receiver for continuous backup
-├── widget/           Home-screen widget
+├── widget/           Home-screen widget (4 modes incl. Cloud Photos from encrypted cache)
 └── App.kt + MainActivity.kt
 ```
 

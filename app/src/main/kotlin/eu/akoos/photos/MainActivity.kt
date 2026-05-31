@@ -1,5 +1,28 @@
+/*
+ * Photos for Proton
+ * Copyright (C) 2026 Akoos <https://akoos.eu>
+ *
+ * Source:  https://github.com/gitakoos/proton-photos
+ * Website: https://photos.akoos.eu
+ *
+ * This file is part of Photos for Proton.
+ *
+ * Photos for Proton is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 3 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 package eu.akoos.photos
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -7,9 +30,6 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -46,6 +66,8 @@ import eu.akoos.photos.data.api.FORCE_UPDATE_REQUIRED
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
+import eu.akoos.photos.domain.usecase.PendingDeleteNotificationUseCase
+import eu.akoos.photos.presentation.common.ConfirmDialog
 import eu.akoos.photos.domain.usecase.ReconcileSyncStateUseCase
 import eu.akoos.photos.navigation.NavGraph
 import eu.akoos.photos.presentation.lock.AppLockManager
@@ -65,17 +87,23 @@ class MainActivity : AppCompatActivity() {
     @Inject lateinit var accountManager: AccountManager
     @Inject lateinit var driveRepo: DrivePhotoRepository
     @Inject lateinit var reconcile: ReconcileSyncStateUseCase
+    @Inject lateinit var pendingDeleteNotif: PendingDeleteNotificationUseCase
 
     private var isLocked by mutableStateOf(false)
     private var lockEnabled = false
+    /** Set when the user taps the home-screen photo widget — carries the URI of the photo
+     *  the widget was showing at tap time. The NavGraph reads + clears this so the gallery
+     *  can route straight to the viewer for that photo. `null` for regular cold starts. */
+    private var widgetPhotoUri by mutableStateOf<String?>(null)
     /** Wall-clock timestamp of the last ON_STOP (real backgrounding). Compared against the
      *  user-configured timeout (read from DataStore inside the lifecycle check) to decide
      *  whether enough time has elapsed to re-lock the app. */
     private var lastBackgroundMs = 0L
     /** Timestamp of the last successful unlock. Used to gate the re-lock check below: the
      *  Android BiometricPrompt internally cycles the host activity through ON_STOP / ON_RESTART
-     *  on success, which used to re-fire the lock guard and lock the app right after the user
-     *  unlocked. A short grace window after [onUnlocked] suppresses that re-entry. */
+     *  on success, which would re-fire the lock guard and lock the app right after unlock
+     *  without this grace window. A short grace window after [onUnlocked] suppresses the
+     *  re-entry. */
     private var lastUnlockMs = 0L
     private val unlockGraceMs = 2000L
 
@@ -87,6 +115,11 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         authOrchestrator.register(this)
         enableEdgeToEdge()
+
+        // Pull the widget-tap photo URI out of the launching intent (if any). The same
+        // path is mirrored in onNewIntent so a re-tap while the app is foregrounded also
+        // routes correctly.
+        widgetPhotoUri = intent?.getStringExtra(EXTRA_WIDGET_PHOTO_URI)
 
         // ProtonCore account-state handler. Without this, accounts with 2FA or two-pass mode
         // enabled get stuck after entering the password: the LoginActivity closes (because
@@ -255,6 +288,8 @@ class MainActivity : AppCompatActivity() {
                     })
                     else -> NavGraph(
                         onStartLogin = { authOrchestrator.startLoginWorkflow(null) },
+                        widgetPhotoUri = widgetPhotoUri,
+                        onWidgetPhotoConsumed = { widgetPhotoUri = null },
                     )
                 }
             }
@@ -264,22 +299,29 @@ class MainActivity : AppCompatActivity() {
     @androidx.compose.runtime.Composable
     private fun ForceUpdateDialog() {
         Box(Modifier.fillMaxSize()) {
-            AlertDialog(
-                onDismissRequest = { /* non-dismissible */ },
-                title = { Text("Update required") },
-                text = { Text("This version is no longer supported. Please update to continue.") },
-                confirmButton = {
-                    TextButton(onClick = {
-                        val intent = android.content.Intent(
-                            android.content.Intent.ACTION_VIEW,
-                            "market://details?id=$packageName".toUri(),
-                        )
-                        runCatching { startActivity(intent) }
-                        finish()
-                    }) { Text("Update") }
+            ConfirmDialog(
+                title = "Update required",
+                message = "This version is no longer supported. Please update to continue.",
+                confirmLabel = "Update",
+                dismissLabel = null,
+                onConfirm = {
+                    val intent = android.content.Intent(
+                        android.content.Intent.ACTION_VIEW,
+                        "market://details?id=$packageName".toUri(),
+                    )
+                    runCatching { startActivity(intent) }
+                    finish()
                 },
+                onDismiss = { /* non-dismissible */ },
             )
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        // Widget re-tap while the app is foregrounded → grab the new photo URI so the
+        // NavGraph LaunchedEffect picks it up and forwards to the viewer.
+        intent.getStringExtra(EXTRA_WIDGET_PHOTO_URI)?.let { widgetPhotoUri = it }
     }
 
     override fun onStop() {
@@ -294,6 +336,17 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        // Reconcile the delete-after-backup pending queue against MediaStore the
+        // moment the user opens the app. Covers the offline scenario where the
+        // user deleted a queued file via the file manager: the worker's content
+        // URI trigger needs network to fire, but a foreground resume always runs.
+        // The prune drops stale URIs from the queue, collapses their SyncState to
+        // CLOUD_ONLY, and refreshes or cancels the consent notification — so the
+        // user never sees a stale "X photos ready to remove" banner or trips the
+        // createDeleteRequest stale URI bug.
+        lifecycleScope.launch {
+            runCatching { pendingDeleteNotif() }
+        }
         // Auto-refresh on foreground resume when the last sync is stale. Silent (no spinner,
         // no error toasts) — purely background work that the gallery's DB observer picks up.
         //
@@ -322,5 +375,11 @@ class MainActivity : AppCompatActivity() {
                 // refresh (or the next SyncWorker tick) will retry.
             }
         }
+    }
+
+    companion object {
+        /** Intent extra key — carries a MediaStore URI string when the user taps the
+         *  home-screen photo widget. NavGraph + GalleryScreen route to the viewer. */
+        const val EXTRA_WIDGET_PHOTO_URI = "widget_photo_uri"
     }
 }

@@ -1,3 +1,25 @@
+/*
+ * Photos for Proton
+ * Copyright (C) 2026 Akoos <https://akoos.eu>
+ *
+ * Source:  https://github.com/gitakoos/proton-photos
+ * Website: https://photos.akoos.eu
+ *
+ * This file is part of Photos for Proton.
+ *
+ * Photos for Proton is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 3 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 package eu.akoos.photos.data.repository.drive
 
 import android.util.Log
@@ -161,13 +183,11 @@ class CloudTrashService @Inject constructor(
                 )
             }
         } catch (e: Exception) {
-            // TODO(api-surface): currently returns empty list on EVERY error path so callers
-            // cannot distinguish "truly empty trash" from "network/auth/parse failure". When a
-            // cloud-trash UI surface lands, switch this to throw or return Result so the screen
-            // can show a retry button. For now elevate to ERROR-level log instead of WARN so
-            // the failure is at least obvious in production logs.
+            // Propagate so the UI can show a retry surface instead of silently rendering an
+            // empty trash list. A successful call with a genuinely empty server-side trash
+            // already returns the empty list naturally, so callers can distinguish the two.
             Log.e(TAG, "getCloudTrash: failed — ${e.message}", e)
-            emptyList()
+            throw e
         }
     }
 

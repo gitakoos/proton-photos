@@ -1,3 +1,25 @@
+/*
+ * Photos for Proton
+ * Copyright (C) 2026 Akoos <https://akoos.eu>
+ *
+ * Source:  https://github.com/gitakoos/proton-photos
+ * Website: https://photos.akoos.eu
+ *
+ * This file is part of Photos for Proton.
+ *
+ * Photos for Proton is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 3 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 package eu.akoos.photos.presentation.settings
 
 import android.app.Activity
@@ -9,7 +31,6 @@ import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -37,7 +58,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
 import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.ErrorOutline
@@ -45,18 +65,10 @@ import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Schedule
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -77,6 +89,19 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import eu.akoos.photos.R
+import eu.akoos.photos.presentation.common.ConfirmDialog
+import eu.akoos.photos.presentation.common.ErrorPopup
+import eu.akoos.photos.util.sanitizeErrorMessage
+import eu.akoos.photos.presentation.settings.components.AppLockTimeoutRow
+import eu.akoos.photos.presentation.settings.components.CollapsibleSection
+import eu.akoos.photos.presentation.settings.components.ExpandableHeaderRow
+import eu.akoos.photos.presentation.settings.components.IndentedNavRow
+import eu.akoos.photos.presentation.settings.components.NavRow
+import eu.akoos.photos.presentation.settings.components.RowDivider
+import eu.akoos.photos.presentation.settings.components.SectionLabel
+import eu.akoos.photos.presentation.settings.components.SettingsCard
+import eu.akoos.photos.presentation.settings.components.ToggleRow
+import eu.akoos.photos.presentation.settings.components.rememberDebouncedAction
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.StatusError
 import eu.akoos.photos.presentation.theme.StatusPending
@@ -104,15 +129,26 @@ fun SettingsScreen(
     onAppearanceClick: () -> Unit = {},
     onLanguageClick: () -> Unit = {},
     onAboutClick: () -> Unit = {},
+    onAccountClick: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val colors = AppColors.current
     val snackbarHostState = remember { SnackbarHostState() }
-    var showSignOutDialog by remember { mutableStateOf(false) }
 
-    LaunchedEffect(state.syncError) {
-        state.syncError?.let { snackbarHostState.showSnackbar(it); viewModel.clearSyncError() }
+    // Sync errors render in a copyable [ErrorPopup] now instead of a transient
+    // snackbar — `state.syncError` is set from raw exception messages whose payload
+    // can be a multi-line backend response (and previously included the user's
+    // filename / linkId before sanitisation), so a 4-second auto-dismiss snackbar
+    // wasn't enough time to read or act on it. We keep the snackbarHost mounted
+    // below for other transient confirmations.
+    if (state.syncError != null) {
+        ErrorPopup(
+            title = "Sync failed",
+            message = sanitizeErrorMessage(state.syncError),
+            onDismiss = viewModel::clearSyncError,
+            onCopy = {},
+        )
     }
 
     // System delete dialog for "Free up space now" on Android 11+
@@ -145,9 +181,10 @@ fun SettingsScreen(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(stringResource(R.string.settings_title), color = colors.fgPrimary, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
+                val debouncedBack = rememberDebouncedAction { onBack() }
                 Box(
                     modifier = Modifier.size(36.dp).background(colors.surfaceWeak, CircleShape)
-                        .border(0.5.dp, colors.pillBorder, CircleShape).clickable(onClick = onBack),
+                        .border(0.5.dp, colors.pillBorder, CircleShape).clickable(onClick = debouncedBack),
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(Icons.Default.Close, null, tint = colors.fgDim, modifier = Modifier.size(16.dp))
@@ -155,11 +192,18 @@ fun SettingsScreen(
             }
 
             // ── Account ───────────────────────────────────────────────────────
-            SectionLabel(stringResource(R.string.settings_account_section))
-            Spacer(Modifier.height(8.dp))
+            // The whole row is now a tap target — opens AccountScreen with avatar,
+            // storage, web links, and sign out. Sign out moved out of the row to
+            // avoid the cramped triple hit area (avatar / text / sign out) we had
+            // before, and to keep the destructive action behind one more deliberate
+            // step.
+            CollapsibleSection(label = stringResource(R.string.settings_account_section)) {
             SettingsCard {
+                val debouncedAccountClick = rememberDebouncedAction { onAccountClick() }
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
+                    modifier = Modifier.fillMaxWidth()
+                        .clickable(onClick = debouncedAccountClick)
+                        .padding(horizontal = 16.dp, vertical = 14.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Box(
@@ -182,19 +226,20 @@ fun SettingsScreen(
                             Text(state.userEmail, color = colors.fgMute, fontSize = 12.sp)
                         }
                     }
-                    Text(
-                        stringResource(R.string.settings_sign_out), color = colors.errorColor, fontSize = 13.sp,
-                        fontWeight = FontWeight.Medium,
-                        modifier = Modifier.clickable { showSignOutDialog = true },
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowForwardIos,
+                        contentDescription = null,
+                        tint = colors.fgMute,
+                        modifier = Modifier.size(13.dp),
                     )
                 }
             }
+            }
 
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(20.dp))
 
             // ── Sync (backup status, realtime) ────────────────────────────────
-            SectionLabel(stringResource(R.string.sync_section))
-            Spacer(Modifier.height(8.dp))
+            CollapsibleSection(label = stringResource(R.string.sync_section)) {
             SettingsCard {
                 Row(
                     modifier = Modifier
@@ -253,7 +298,11 @@ fun SettingsScreen(
                 // the user would see "Pending: 5" with no progress bar for the first second or
                 // two until the worker spins up.
                 val pending = state.notSyncedCount
-                val showPanel = state.isSyncing || (pending > 0 && state.uploadTotalCount > 0)
+                // Show the panel while a batch is live OR while the last batch's events
+                // are still meaningful to the user (sticky log of recent activity).
+                val showPanel = state.isSyncing ||
+                    (pending > 0 && state.uploadTotalCount > 0) ||
+                    state.uploadEvents.isNotEmpty()
                 if (showPanel) {
                     // Fall back to pending count if we don't have a live upload total yet so
                     // the user sees "0 / N" before the first per-file event arrives.
@@ -262,15 +311,19 @@ fun SettingsScreen(
                         done = state.uploadDoneCount,
                         total = displayTotal,
                         events = state.uploadEvents,
+                        bytesPerSecond = state.uploadBytesPerSecond,
                     )
                 }
             }
+            }
 
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(20.dp))
 
-            // ── Settings nav rows ─────────────────────────────────────────────
-            SectionLabel(stringResource(R.string.settings_section_settings))
-            Spacer(Modifier.height(8.dp))
+            // ── Storage section ───────────────────────────────────────────────
+            // Recently Deleted + Storage nav grouped together — both are about
+            // "where my data lives on device + Drive". Kept above the device-config
+            // section so the user finds disk-space related controls without scrolling.
+            CollapsibleSection(label = stringResource(R.string.settings_storage_section)) {
             SettingsCard {
                 NavRow(
                     label = stringResource(R.string.settings_storage_section),
@@ -278,6 +331,23 @@ fun SettingsScreen(
                     onClick = onStorageClick,
                 )
                 RowDivider()
+                NavRow(
+                    label = stringResource(R.string.settings_recently_deleted),
+                    description = when {
+                        state.trashedCount == 0 -> stringResource(R.string.settings_recently_deleted_empty)
+                        state.trashedCount == 1 -> stringResource(R.string.settings_recently_deleted_subtitle_singular)
+                        else -> stringResource(R.string.settings_recently_deleted_subtitle, state.trashedCount)
+                    },
+                    onClick = onRecentlyDeletedClick,
+                )
+            }
+            }
+
+            Spacer(Modifier.height(20.dp))
+
+            // ── Settings nav rows ─────────────────────────────────────────────
+            CollapsibleSection(label = stringResource(R.string.settings_section_settings)) {
+            SettingsCard {
                 NavRow(
                     label = stringResource(R.string.settings_privacy_metadata),
                     description = stringResource(R.string.settings_privacy_metadata_desc),
@@ -290,16 +360,13 @@ fun SettingsScreen(
                     onClick = onSecuritySettingsClick,
                 )
                 RowDivider()
+                // Appearance + Language merged into one entry — the destination is the
+                // unified appearance screen which now hosts theme + palette + language
+                // in a single scroll. Cuts an entire row from the Settings list.
                 NavRow(
                     label = stringResource(R.string.settings_appearance),
                     description = stringResource(R.string.settings_appearance_desc),
                     onClick = onAppearanceClick,
-                )
-                RowDivider()
-                NavRow(
-                    label = stringResource(R.string.settings_language),
-                    description = stringResource(R.string.language_section_desc),
-                    onClick = onLanguageClick,
                 )
                 RowDivider()
                 NavRow(
@@ -308,29 +375,12 @@ fun SettingsScreen(
                     onClick = onAboutClick,
                 )
             }
+            }
         }
 
-        SnackbarHost(snackbarHostState, modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding())
+        eu.akoos.photos.presentation.common.ThemedSnackbarHost(snackbarHostState, modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding())
     }
 
-    if (showSignOutDialog) {
-        AlertDialog(
-            onDismissRequest = { showSignOutDialog = false },
-            containerColor = colors.bg2, titleContentColor = colors.fgPrimary, textContentColor = colors.fgDim,
-            title = { Text(stringResource(R.string.sign_out_dialog_title)) },
-            text  = { Text(stringResource(R.string.sign_out_dialog_message)) },
-            confirmButton = {
-                TextButton(onClick = { showSignOutDialog = false; viewModel.signOut() }) {
-                    Text(stringResource(R.string.settings_sign_out), color = colors.errorColor, fontWeight = FontWeight.SemiBold)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showSignOutDialog = false }) {
-                    Text(stringResource(R.string.cancel), color = colors.fgDim)
-                }
-            },
-        )
-    }
 }
 
 // ── Sync Settings sub-page ────────────────────────────────────────────────────
@@ -349,10 +399,9 @@ fun SyncSettingsScreen(
         // ── WHAT GETS BACKED UP ───────────────────────────────────────────────
         // Backup-scope decisions live here: the everything-toggle and either the
         // include drilldown (off) or the exclude drilldown (on). Sync cadence /
-        // network gating moved to the WHEN section below — keeping "what" and
-        // "when" separate makes the screen scannable.
-        SectionLabel(stringResource(R.string.settings_what_backed_up_section))
-        Spacer(Modifier.height(8.dp))
+        // network gating live in the WHEN section below. Sections open by default;
+        // user can collapse via the animated chevron.
+        CollapsibleSection(label = stringResource(R.string.settings_what_backed_up_section)) {
         SettingsCard {
             ToggleRow(
                 label = stringResource(R.string.settings_backup_everything),
@@ -388,17 +437,18 @@ fun SyncSettingsScreen(
                 )
             }
         }
+        }
 
-        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.height(20.dp))
 
         // ── WHEN IT HAPPENS ───────────────────────────────────────────────────
-        // Continuous backup is the only top-level cadence knob now — the periodic
-        // interval picker is gone because the OS-level content-URI trigger +
-        // BackgroundSyncService observer already kick the upload pipeline within
-        // seconds of a new photo, so the interval was misleading UI: it suggested
-        // "we only check every N hours" when in reality we check immediately.
-        SectionLabel(stringResource(R.string.settings_when_section))
-        Spacer(Modifier.height(8.dp))
+        // Continuous backup is the only top-level cadence knob now: the periodic
+        // interval picker is gone because the OS content-URI trigger plus
+        // BackgroundSyncService observer kick the upload pipeline within seconds of
+        // a new photo, so the interval was misleading. Sync Wi-Fi only and Delete
+        // after backup live as children here because they're meaningless when
+        // continuous backup is off.
+        CollapsibleSection(label = stringResource(R.string.settings_when_section)) {
         SettingsCard {
             ToggleRow(
                 label = stringResource(R.string.settings_continuous_backup),
@@ -416,51 +466,71 @@ fun SyncSettingsScreen(
                 enabled = state.autoSync,
             )
             RowDivider()
+            ToggleRow(
+                label = stringResource(R.string.settings_delete_after_backup),
+                description = stringResource(R.string.settings_delete_after_backup_desc),
+                checked = state.deleteLocalAfterBackup,
+                onCheckedChange = viewModel::setDeleteLocalAfterBackup,
+                indented = true,
+                enabled = state.autoSync,
+            )
+        }
+        }
+
+        Spacer(Modifier.height(20.dp))
+
+        // ── Sync now action row ──────────────────────────────────────────────
+        // Separated from the When card because it's an imperative one-tap action
+        // rather than a setting: putting it alongside persistent toggles confused
+        // users into thinking the button was a "saved" state. Standalone card +
+        // accent label reads as a button now.
+        CollapsibleSection(label = stringResource(R.string.settings_sync_now)) {
+        SettingsCard {
             Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(enabled = !state.isSyncing) { viewModel.syncNow() }
+                    .padding(horizontal = 16.dp, vertical = 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(stringResource(R.string.settings_sync_now), color = colors.fgPrimary, fontSize = 13.5.sp, modifier = Modifier.weight(1f))
+                Text(
+                    stringResource(R.string.settings_sync_now),
+                    color = colors.fgPrimary,
+                    fontSize = 13.5.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.weight(1f),
+                )
                 if (state.isSyncing) {
                     CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = colors.accent)
                 } else {
                     Text(
-                        stringResource(R.string.settings_sync_now_action), color = colors.accent, fontSize = 13.sp,
-                        fontWeight = FontWeight.Medium,
-                        modifier = Modifier.clickable(enabled = !state.isSyncing) { viewModel.syncNow() },
+                        stringResource(R.string.settings_sync_now_action),
+                        color = colors.accent,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
                     )
                 }
             }
         }
-    }
-}
-
-/**
- * Drilldown row that sits underneath a parent toggle. Visually the same as [NavRow]
- * but indented (28.dp start) so the user reads it as a child of the toggle above.
- * Greys out when the parent is disabled — same alpha treatment as [ToggleRow] for
- * consistency.
- */
-@Composable
-private fun IndentedNavRow(
-    label: String,
-    description: String? = null,
-    onClick: () -> Unit,
-    enabled: Boolean = true,
-) {
-    val colors = AppColors.current
-    val alpha = if (enabled) 1f else 0.4f
-    Row(
-        modifier = Modifier.fillMaxWidth()
-            .clickable(enabled = enabled, onClick = onClick)
-            .padding(start = 28.dp, end = 16.dp, top = 12.dp, bottom = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(label, color = colors.fgPrimary.copy(alpha = alpha), fontSize = 13.5.sp, fontWeight = FontWeight.Medium)
-            if (description != null) Text(description, color = colors.fgMute.copy(alpha = alpha), fontSize = 11.5.sp)
         }
-        Icon(Icons.AutoMirrored.Filled.ArrowForwardIos, null, tint = colors.fgMute.copy(alpha = alpha), modifier = Modifier.size(13.dp))
+
+        Spacer(Modifier.height(20.dp))
+
+        // ── NETWORK USAGE ────────────────────────────────────────────────────
+        // Full-res Wi-Fi only is about CONSUMING Drive (downloading full-resolution
+        // photos for the viewer) rather than backing up to it, so it doesn't belong
+        // under "When backup happens". Promoted to its own section so users don't
+        // assume disabling continuous backup also stops full-res viewer downloads.
+        CollapsibleSection(label = stringResource(R.string.settings_network_section)) {
+            SettingsCard {
+                ToggleRow(
+                    label = stringResource(R.string.settings_fullres_wifi_only),
+                    description = stringResource(R.string.settings_fullres_wifi_only_desc),
+                    checked = state.fullresWifiOnly,
+                    onCheckedChange = viewModel::setFullresWifiOnly,
+                )
+            }
+        }
     }
 }
 
@@ -533,53 +603,119 @@ fun StorageSettingsScreen(
 @Composable
 fun PrivacySettingsScreen(
     onBack: () -> Unit,
+    onHiddenAlbumClick: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     SubPageScaffold(title = stringResource(R.string.settings_privacy_metadata), onBack = onBack) {
+        // ── Metadata card ───────────────────────────────────────────────────
+        // Strip sub-toggles collapse under the main strip-on-upload switch — they
+        // only exist to attenuate WHICH metadata categories get stripped, so showing
+        // them while strip is off was pure noise. Rename stays at the top because
+        // it modifies displayName (a separate decision from EXIF stripping).
+        CollapsibleSection(label = stringResource(R.string.settings_privacy_section_metadata)) {
         SettingsCard {
+            ToggleRow(
+                label = stringResource(R.string.settings_rename_on_upload),
+                description = stringResource(R.string.settings_rename_on_upload_desc),
+                checked = state.renameToCaptureDate,
+                onCheckedChange = viewModel::setRenameToCaptureDate,
+            )
+            RowDivider()
             ToggleRow(
                 label = stringResource(R.string.settings_strip_metadata_upload),
                 description = stringResource(R.string.settings_strip_metadata_upload_desc),
                 checked = state.stripOnUpload,
                 onCheckedChange = viewModel::setStripOnUpload,
             )
-            RowDivider()
+            // Sub-toggles live behind a collapsed "Customize" row by default — even
+            // with strip enabled they're rarely tweaked, so they were eating screen
+            // real estate every time the user opened Privacy & Metadata. Pressing the
+            // chevron row expands the four GPS / Camera / Timestamp / Software
+            // overrides; defaults match what the upload pipeline actually does when
+            // none of them are explicitly set.
+            if (state.stripOnUpload) {
+                RowDivider()
+                var showStripDetails by remember { mutableStateOf(false) }
+                ExpandableHeaderRow(
+                    label = stringResource(R.string.settings_strip_customize),
+                    expanded = showStripDetails,
+                    onClick = { showStripDetails = !showStripDetails },
+                )
+                if (showStripDetails) {
+                    RowDivider()
+                    ToggleRow(
+                        label = stringResource(R.string.settings_strip_gps),
+                        description = stringResource(R.string.settings_strip_gps_desc),
+                        checked = state.stripGps,
+                        onCheckedChange = viewModel::setStripGps,
+                        indented = true,
+                    )
+                    RowDivider()
+                    ToggleRow(
+                        label = stringResource(R.string.settings_strip_camera),
+                        description = stringResource(R.string.settings_strip_camera_desc),
+                        checked = state.stripCameraInfo,
+                        onCheckedChange = viewModel::setStripCameraInfo,
+                        indented = true,
+                    )
+                    RowDivider()
+                    ToggleRow(
+                        label = stringResource(R.string.settings_strip_timestamp),
+                        description = stringResource(R.string.settings_strip_timestamp_desc),
+                        checked = state.stripTimestamp,
+                        onCheckedChange = viewModel::setStripTimestamp,
+                        indented = true,
+                    )
+                    RowDivider()
+                    ToggleRow(
+                        label = stringResource(R.string.settings_strip_software),
+                        description = stringResource(R.string.settings_strip_software_desc),
+                        checked = state.stripSoftwareInfo,
+                        onCheckedChange = viewModel::setStripSoftwareInfo,
+                        indented = true,
+                    )
+                }
+            }
+        }
+        }
+
+        Spacer(Modifier.height(20.dp))
+
+        // ── Device-side privacy card ─────────────────────────────────────────
+        // Clear-cache-on-close + Hidden vault — what stays on this device after
+        // close.
+        CollapsibleSection(label = stringResource(R.string.settings_privacy_section_device)) {
+        SettingsCard {
             ToggleRow(
-                label = stringResource(R.string.settings_strip_gps),
-                description = stringResource(R.string.settings_strip_gps_desc),
-                checked = state.stripGps,
-                onCheckedChange = viewModel::setStripGps,
-                indented = true,
-                enabled = state.stripOnUpload,
+                label = stringResource(R.string.settings_clear_cache_on_close),
+                description = stringResource(R.string.settings_clear_cache_on_close_desc),
+                checked = state.clearCacheOnAppClose,
+                onCheckedChange = viewModel::setClearCacheOnAppClose,
             )
             RowDivider()
-            ToggleRow(
-                label = stringResource(R.string.settings_strip_camera),
-                description = stringResource(R.string.settings_strip_camera_desc),
-                checked = state.stripCameraInfo,
-                onCheckedChange = viewModel::setStripCameraInfo,
-                indented = true,
-                enabled = state.stripOnUpload,
+            NavRow(
+                label = stringResource(R.string.settings_hidden_photos),
+                description = stringResource(R.string.settings_hidden_photos_desc),
+                onClick = onHiddenAlbumClick,
             )
             RowDivider()
+            // Telemetry visibility row. Telemetry events fired by the embedded
+            // ProtonCore stack are gated by IsTelemetryEnabledImpl, which reads
+            // the user's server side `Telemetry` preference. We surface this here
+            // as a read only row so the user knows the control exists and where
+            // it lives — overriding the binding locally would conflict with
+            // ProtonCore's own @Binds and ripple into the auth flow. A future
+            // iteration can move this to a dedicated Diagnostics section once
+            // we add more such "follow your Proton account" rows.
             ToggleRow(
-                label = stringResource(R.string.settings_strip_timestamp),
-                description = stringResource(R.string.settings_strip_timestamp_desc),
-                checked = state.stripTimestamp,
-                onCheckedChange = viewModel::setStripTimestamp,
-                indented = true,
-                enabled = state.stripOnUpload,
+                label = stringResource(R.string.settings_telemetry),
+                description = stringResource(R.string.settings_telemetry_desc),
+                checked = false,
+                onCheckedChange = {},
+                enabled = false,
             )
-            RowDivider()
-            ToggleRow(
-                label = stringResource(R.string.settings_strip_software),
-                description = stringResource(R.string.settings_strip_software_desc),
-                checked = state.stripSoftwareInfo,
-                onCheckedChange = viewModel::setStripSoftwareInfo,
-                indented = true,
-                enabled = state.stripOnUpload,
-            )
+        }
         }
     }
 }
@@ -589,62 +725,59 @@ fun PrivacySettingsScreen(
 @Composable
 fun SecuritySettingsScreen(
     onBack: () -> Unit,
-    onHiddenAlbumClick: () -> Unit = {},
+    @Suppress("UNUSED_PARAMETER") onHiddenAlbumClick: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val colors = AppColors.current
     SubPageScaffold(title = stringResource(R.string.settings_security), onBack = onBack) {
-        SettingsCard {
-            ToggleRow(
-                label = stringResource(R.string.settings_app_lock),
-                description = stringResource(R.string.settings_app_lock_desc),
-                checked = state.appLockEnabled,
-                onCheckedChange = { viewModel.setAppLockEnabled(it) },
-            )
-            if (state.appLockEnabled) {
-                RowDivider()
-                AppLockTimeoutRow(
-                    label = stringResource(R.string.settings_app_lock_timeout),
-                    description = stringResource(R.string.settings_app_lock_timeout_desc),
-                    selectedMinutes = state.appLockTimeoutMinutes,
-                    onSelected = viewModel::setAppLockTimeoutMinutes,
+        CollapsibleSection(label = stringResource(R.string.settings_security_section_lock)) {
+            SettingsCard {
+                ToggleRow(
+                    label = stringResource(R.string.settings_app_lock),
+                    description = stringResource(R.string.settings_app_lock_desc),
+                    checked = state.appLockEnabled,
+                    onCheckedChange = { viewModel.setAppLockEnabled(it) },
                 )
+                if (state.appLockEnabled) {
+                    RowDivider()
+                    AppLockTimeoutRow(
+                        label = stringResource(R.string.settings_app_lock_timeout),
+                        description = stringResource(R.string.settings_app_lock_timeout_desc),
+                        selectedMinutes = state.appLockTimeoutMinutes,
+                        onSelected = viewModel::setAppLockTimeoutMinutes,
+                    )
+                }
             }
-            RowDivider()
-            NavRow(
-                label = stringResource(R.string.settings_hidden_photos),
-                description = stringResource(R.string.settings_hidden_photos_desc),
-                onClick = onHiddenAlbumClick,
-            )
         }
-
-        Spacer(Modifier.height(20.dp))
 
         // OS-level media management permission (Android 12+)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            Spacer(Modifier.height(20.dp))
             val context = LocalContext.current
             val canManage = remember { MediaStore.canManageMedia(context) }
-            SettingsCard {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(stringResource(R.string.settings_media_management), color = colors.fgPrimary, fontSize = 13.5.sp)
-                        Text(
-                            if (canManage) stringResource(R.string.settings_media_management_granted)
-                            else stringResource(R.string.settings_media_management_grant_desc),
-                            color = if (canManage) StatusSynced else colors.fgMute, fontSize = 11.5.sp,
-                        )
-                    }
-                    if (!canManage) {
-                        Text(
-                            stringResource(R.string.settings_media_management_grant_action), color = colors.accent, fontSize = 13.sp, fontWeight = FontWeight.Medium,
-                            modifier = Modifier.clickable {
-                                context.startActivity(Intent(android.provider.Settings.ACTION_REQUEST_MANAGE_MEDIA))
-                            },
-                        )
+            CollapsibleSection(label = stringResource(R.string.settings_security_section_media)) {
+                SettingsCard {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(stringResource(R.string.settings_media_management), color = colors.fgPrimary, fontSize = 13.5.sp)
+                            Text(
+                                if (canManage) stringResource(R.string.settings_media_management_granted)
+                                else stringResource(R.string.settings_media_management_grant_desc),
+                                color = if (canManage) StatusSynced else colors.fgMute, fontSize = 11.5.sp,
+                            )
+                        }
+                        if (!canManage) {
+                            Text(
+                                stringResource(R.string.settings_media_management_grant_action), color = colors.accent, fontSize = 13.sp, fontWeight = FontWeight.Medium,
+                                modifier = Modifier.clickable {
+                                    context.startActivity(Intent(android.provider.Settings.ACTION_REQUEST_MANAGE_MEDIA))
+                                },
+                            )
+                        }
                     }
                 }
             }
@@ -661,6 +794,7 @@ private fun SubPageScaffold(
     content: @Composable () -> Unit,
 ) {
     val colors = AppColors.current
+    val debouncedBack = rememberDebouncedAction { onBack() }
     Box(modifier = Modifier.fillMaxSize().background(colors.pageBg)) {
         Column(
             modifier = Modifier
@@ -678,7 +812,7 @@ private fun SubPageScaffold(
             ) {
                 Box(
                     modifier = Modifier.size(36.dp).background(colors.surfaceWeak, CircleShape)
-                        .border(0.5.dp, colors.pillBorder, CircleShape).clickable(onClick = onBack),
+                        .border(0.5.dp, colors.pillBorder, CircleShape).clickable(onClick = debouncedBack),
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = colors.fgDim, modifier = Modifier.size(16.dp))
@@ -697,6 +831,7 @@ private fun SyncProgressPanel(
     done: Int,
     total: Int,
     events: List<UploadEvent>,
+    bytesPerSecond: Long?,
 ) {
     val colors = AppColors.current
     val fraction = if (total > 0) (done.toFloat() / total).coerceIn(0f, 1f) else 0f
@@ -743,6 +878,13 @@ private fun SyncProgressPanel(
                 stringResource(R.string.sync_progress_x_of_n, done, total),
                 color = colors.fgMute, fontSize = 11.5.sp,
             )
+            if (bytesPerSecond != null && bytesPerSecond > 0L) {
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    "${formatBytes(bytesPerSecond)}/s",
+                    color = colors.fgMute, fontSize = 11.5.sp,
+                )
+            }
             Spacer(Modifier.weight(1f))
             Icon(
                 imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
@@ -805,6 +947,19 @@ private fun UploadEventRow(evt: UploadEvent) {
                     color = colors.accent,
                 )
             }
+            UploadEventStatus.Encrypting -> Box(
+                // Same spinner shape as Uploading but rendered in the dimmer fgDim tint —
+                // signals "pre-network work in progress" without competing visually with the
+                // active CDN-PUT spinner. Keeps the row height stable across phase swaps.
+                modifier = Modifier.size(18.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(16.dp),
+                    strokeWidth = 1.8.dp,
+                    color = colors.fgDim,
+                )
+            }
             UploadEventStatus.Queued -> Icon(
                 imageVector = Icons.Default.Schedule,
                 contentDescription = null,
@@ -825,20 +980,29 @@ private fun UploadEventRow(evt: UploadEvent) {
             )
         }
         Spacer(Modifier.width(10.dp))
-        Text(
-            text = evt.displayName,
-            color = colors.fgPrimary,
-            fontSize = 12.5.sp,
-            fontWeight = FontWeight.Medium,
-            maxLines = 1,
-            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
-        )
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = evt.displayName,
+                color = colors.fgPrimary,
+                fontSize = 12.5.sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            )
+            if (evt.sizeBytes > 0L) {
+                Text(
+                    text = formatBytes(evt.sizeBytes),
+                    color = colors.fgMute,
+                    fontSize = 10.5.sp,
+                )
+            }
+        }
         Spacer(Modifier.width(10.dp))
         // Trailing status label — kept English: status copy not yet localized. The label
         // colour mirrors the icon so the eye reads icon + label as a single status token.
         val (label, labelColor) = when (evt.status) {
             UploadEventStatus.Uploading -> "Uploading…" to colors.accent
+            UploadEventStatus.Encrypting -> "Encrypting…" to colors.fgDim
             UploadEventStatus.Queued -> "Queued" to colors.fgMute
             UploadEventStatus.Done -> "Done" to StatusSynced
             UploadEventStatus.Failed -> "Failed" to colors.errorColor
@@ -884,6 +1048,7 @@ private fun StorageContent(
 
     // ── 4. Free up space now (existing) ─────────────────────────────────────────
     RowDivider()
+    var showFreeUpConfirm by remember { mutableStateOf(false) }
     Row(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -897,14 +1062,14 @@ private fun StorageContent(
         if (isFreeingUp) {
             CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = colors.accent)
         } else {
-            // Pill-style destructive button — same red-tint + thin border as the Trash screen's
-            // "Delete" action. Drops the legacy "Delete →" arrow which the Material guidelines
-            // discourage for destructive actions.
+            // Pill-style destructive button — confirm dialog gates the actual delete so
+            // an accidental tap doesn't immediately wipe device copies of every
+            // backed-up file. The dialog text spells out the irreversible scope.
             Box(
                 modifier = Modifier
                     .background(colors.deleteTint, RoundedCornerShape(10.dp))
                     .border(0.5.dp, colors.errorColor.copy(alpha = 0.3f), RoundedCornerShape(10.dp))
-                    .clickable(enabled = !isFreeingUp, onClick = onFreeUp)
+                    .clickable(enabled = !isFreeingUp) { showFreeUpConfirm = true }
                     .padding(horizontal = 14.dp, vertical = 7.dp),
                 contentAlignment = Alignment.Center,
             ) {
@@ -923,10 +1088,21 @@ private fun StorageContent(
             }
         }
     }
+    if (showFreeUpConfirm) {
+        ConfirmDialog(
+            title = stringResource(R.string.settings_free_up_confirm_title),
+            message = stringResource(R.string.settings_free_up_confirm_message),
+            confirmLabel = stringResource(R.string.settings_free_up_action),
+            dismissLabel = stringResource(R.string.cancel),
+            onConfirm = { showFreeUpConfirm = false; onFreeUp() },
+            onDismiss = { showFreeUpConfirm = false },
+            destructive = true,
+        )
+    }
 }
 
 @Composable
-private fun ProtonStorageRow(state: SettingsUiState) {
+internal fun ProtonStorageRow(state: SettingsUiState) {
     val colors = AppColors.current
     Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
         val hasCloud = state.cloudMaxBytes > 0L
@@ -1060,26 +1236,16 @@ private fun AppCacheRow(state: SettingsUiState, onClearCache: () -> Unit) {
         }
     }
     if (showConfirm) {
-        AlertDialog(
-            onDismissRequest = { showConfirm = false },
-            containerColor = colors.bg2, titleContentColor = colors.fgPrimary, textContentColor = colors.fgDim,
-            title = { Text(stringResource(R.string.settings_storage_clear_cache_dialog_title)) },
-            text  = {
-                Text(stringResource(
-                    R.string.settings_storage_clear_cache_dialog_message,
-                    formatBytes(state.appCacheBytes),
-                ))
-            },
-            confirmButton = {
-                TextButton(onClick = { showConfirm = false; onClearCache() }) {
-                    Text(stringResource(R.string.settings_storage_clear_cache), color = colors.accent, fontWeight = FontWeight.SemiBold)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showConfirm = false }) {
-                    Text(stringResource(R.string.cancel), color = colors.fgDim)
-                }
-            },
+        ConfirmDialog(
+            title = stringResource(R.string.settings_storage_clear_cache_dialog_title),
+            message = stringResource(
+                R.string.settings_storage_clear_cache_dialog_message,
+                formatBytes(state.appCacheBytes),
+            ),
+            confirmLabel = stringResource(R.string.settings_storage_clear_cache),
+            dismissLabel = stringResource(R.string.cancel),
+            onConfirm = { showConfirm = false; onClearCache() },
+            onDismiss = { showConfirm = false },
         )
     }
 }
@@ -1145,191 +1311,4 @@ private fun RecentlyDeletedCard(
     }
 }
 
-@Composable
-internal fun SectionLabel(text: String) {
-    val colors = AppColors.current
-    Text(text.uppercase(), color = colors.fgMute, fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 1.sp)
-}
-
-@Composable
-internal fun SettingsCard(content: @Composable () -> Unit) {
-    val colors = AppColors.current
-    Column(
-        modifier = Modifier.fillMaxWidth().background(colors.cardBg, cardShape).border(0.5.dp, colors.cardBorder, cardShape),
-    ) { content() }
-}
-
-@Composable
-internal fun NavRow(label: String, description: String? = null, onClick: () -> Unit) {
-    val colors = AppColors.current
-    Row(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(label, color = colors.fgPrimary, fontSize = 13.5.sp, fontWeight = FontWeight.Medium)
-            if (description != null) Text(description, color = colors.fgMute, fontSize = 11.5.sp)
-        }
-        Icon(Icons.AutoMirrored.Filled.ArrowForwardIos, null, tint = colors.fgMute, modifier = Modifier.size(13.dp))
-    }
-}
-
-@Composable
-internal fun RowDivider() {
-    val colors = AppColors.current
-    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), thickness = 0.5.dp, color = colors.cardBorder)
-}
-
-@Composable
-internal fun ToggleRow(
-    label: String,
-    description: String? = null,
-    checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit,
-    indented: Boolean = false,
-    enabled: Boolean = true,
-) {
-    val colors = AppColors.current
-    val alpha = if (enabled) 1f else 0.4f
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(
-            start = if (indented) 28.dp else 16.dp,
-            end = 16.dp, top = 11.dp, bottom = 11.dp,
-        ),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        if (indented) {
-            Box(modifier = Modifier.width(6.dp).height(1.dp).background(colors.line2).padding(end = 8.dp))
-        }
-        Column(modifier = Modifier.weight(1f)) {
-            Text(label, color = colors.fgPrimary.copy(alpha = alpha), fontSize = 13.5.sp, fontWeight = FontWeight.Medium)
-            if (description != null) Text(description, color = colors.fgMute.copy(alpha = alpha), fontSize = 11.5.sp)
-        }
-        Spacer(Modifier.width(12.dp))
-        Switch(
-            checked = checked,
-            onCheckedChange = onCheckedChange,
-            enabled = enabled,
-            colors = SwitchDefaults.colors(
-                checkedTrackColor   = colors.accent,
-                checkedThumbColor   = Color.White,
-                uncheckedTrackColor = colors.line2,
-                uncheckedThumbColor = colors.fgMute,
-                disabledCheckedTrackColor   = colors.accent.copy(alpha = 0.5f),
-                disabledUncheckedTrackColor = colors.line2.copy(alpha = 0.5f),
-            ),
-        )
-    }
-}
-
-@Composable
-internal fun SelectRow(
-    label: String,
-    description: String? = null,
-    selected: FreeUpInterval,
-    onSelected: (FreeUpInterval) -> Unit,
-    indented: Boolean = false,
-    enabled: Boolean = true,
-) {
-    val colors = AppColors.current
-    var expanded by remember { mutableStateOf(false) }
-    val alpha = if (enabled) 1f else 0.4f
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(
-            start = if (indented) 28.dp else 16.dp,
-            end = 16.dp, top = 11.dp, bottom = 11.dp,
-        ),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(label, color = colors.fgPrimary.copy(alpha = alpha), fontSize = 13.5.sp, fontWeight = FontWeight.Medium)
-            if (description != null) Text(description, color = colors.fgMute.copy(alpha = alpha), fontSize = 11.5.sp)
-        }
-        Box {
-            Text(
-                stringResource(selected.labelRes), color = if (enabled) colors.fgDim else colors.fgMute, fontSize = 12.5.sp,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(colors.surfaceWeak)
-                    .border(0.5.dp, colors.line2, RoundedCornerShape(8.dp))
-                    .clickable(enabled = enabled) { expanded = true }
-                    .padding(horizontal = 10.dp, vertical = 5.dp),
-            )
-            DropdownMenu(
-                expanded = expanded,
-                onDismissRequest = { expanded = false },
-                shape = RoundedCornerShape(16.dp),
-                containerColor = colors.cardBg,
-                border = BorderStroke(0.5.dp, colors.pillBorder),
-            ) {
-                FreeUpInterval.entries.forEach { interval ->
-                    DropdownMenuItem(
-                        text = { Text(stringResource(interval.labelRes), color = colors.fgPrimary) },
-                        onClick = { onSelected(interval); expanded = false },
-                    )
-                }
-            }
-        }
-    }
-}
-
-/**
- * App-lock timeout picker. 0 = lock immediately on background; non-zero values mean the
- * lock only kicks in after that many minutes in the background, so a quick app-switch
- * doesn't re-prompt for biometrics every time.
- */
-@Composable
-internal fun AppLockTimeoutRow(
-    label: String,
-    description: String? = null,
-    selectedMinutes: Int,
-    onSelected: (Int) -> Unit,
-) {
-    val colors = AppColors.current
-    var expanded by remember { mutableStateOf(false) }
-    val options: List<Pair<Int, Int>> = listOf(
-        0   to R.string.settings_app_lock_timeout_immediate,
-        1   to R.string.settings_app_lock_timeout_1min,
-        5   to R.string.settings_app_lock_timeout_5min,
-        10  to R.string.settings_app_lock_timeout_10min,
-        15  to R.string.settings_app_lock_timeout_15min,
-        60  to R.string.settings_app_lock_timeout_1h,
-    )
-    val selectedLabel = options.firstOrNull { it.first == selectedMinutes }?.second
-        ?: R.string.settings_app_lock_timeout_immediate
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 11.dp, bottom = 11.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(label, color = colors.fgPrimary, fontSize = 13.5.sp, fontWeight = FontWeight.Medium)
-            if (description != null) Text(description, color = colors.fgMute, fontSize = 11.5.sp)
-        }
-        Box {
-            Text(
-                stringResource(selectedLabel), color = colors.fgDim, fontSize = 12.5.sp,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(colors.surfaceWeak)
-                    .border(0.5.dp, colors.line2, RoundedCornerShape(8.dp))
-                    .clickable { expanded = true }
-                    .padding(horizontal = 10.dp, vertical = 5.dp),
-            )
-            DropdownMenu(
-                expanded = expanded,
-                onDismissRequest = { expanded = false },
-                shape = RoundedCornerShape(16.dp),
-                containerColor = colors.cardBg,
-                border = BorderStroke(0.5.dp, colors.pillBorder),
-            ) {
-                options.forEach { (minutes, labelRes) ->
-                    DropdownMenuItem(
-                        text = { Text(stringResource(labelRes), color = colors.fgPrimary) },
-                        onClick = { onSelected(minutes); expanded = false },
-                    )
-                }
-            }
-        }
-    }
-}
 

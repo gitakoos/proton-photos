@@ -1,3 +1,25 @@
+/*
+ * Photos for Proton
+ * Copyright (C) 2026 Akoos <https://akoos.eu>
+ *
+ * Source:  https://github.com/gitakoos/proton-photos
+ * Website: https://photos.akoos.eu
+ *
+ * This file is part of Photos for Proton.
+ *
+ * Photos for Proton is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 3 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 package eu.akoos.photos.util
 
 import android.os.Environment
@@ -32,20 +54,6 @@ object ProtonPhotosStorage {
     /** Default download/copy folder for videos. Flat: just "Movies". */
     val DEFAULT_MOVIES: String
         get() = Environment.DIRECTORY_MOVIES
-
-    /** Recovered (un-hidden) files land here so the user can find them easily. */
-    val RECOVERED_PICTURES: String
-        get() = "$DEFAULT_PICTURES/Recovered"
-    val RECOVERED_MOVIES: String
-        get() = "$DEFAULT_MOVIES/Recovered"
-
-    /**
-     * Returns the MediaStore `RELATIVE_PATH` for an image inside a user-created local album.
-     * e.g. `albumPicturesPath("Trip 2026")` → `"Pictures/Trip 2026"` (flat layout, no
-     * Proton-Photos prefix). Matches how DownloadPhotosUseCase routes album downloads.
-     */
-    fun albumPicturesPath(albumName: String): String = "$DEFAULT_PICTURES/${sanitize(albumName)}"
-    fun albumMoviesPath(albumName: String): String = "$DEFAULT_MOVIES/${sanitize(albumName)}"
 
     /** Strips path separators and trims so an album name can be used as a folder segment. */
     fun sanitize(name: String): String = name

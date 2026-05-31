@@ -1,3 +1,25 @@
+/*
+ * Photos for Proton
+ * Copyright (C) 2026 Akoos <https://akoos.eu>
+ *
+ * Source:  https://github.com/gitakoos/proton-photos
+ * Website: https://photos.akoos.eu
+ *
+ * This file is part of Photos for Proton.
+ *
+ * Photos for Proton is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 3 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 package eu.akoos.photos.presentation.editor
 
 import android.content.ContentValues
@@ -13,6 +35,9 @@ import android.os.ParcelFileDescriptor
 import android.provider.MediaStore
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import eu.akoos.photos.domain.entity.SyncState
+import eu.akoos.photos.domain.entity.SyncStatus
+import coil.imageLoader
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -76,15 +101,19 @@ data class VideoEditorUiState(
     val audioTrimStartMs: Long = 0L,
     val audioTrimEndMs: Long = 0L,
     /**
-     * When true the source video's audio track is dropped from the output. Independent
-     * of [audioOverlayUri] — the UI shows the original track and the overlay as two
-     * separate rows so the user can mute the original, add music, or do both.
-     *  - mute = true, overlay = null  → silent video (audio track removed)
-     *  - mute = true, overlay != null → overlay replaces original (current behaviour)
-     *  - mute = false, overlay != null → overlay still replaces (no mixer in pipeline yet)
-     *  - mute = false, overlay = null → source audio preserved
+     * Source audio gain in [0..1]. 0 = silent (original track effectively dropped from
+     * output), 1 = original loudness, intermediate = attenuation. Replaces the old
+     * boolean mute toggle with a slider so the user can balance an overlay music track
+     * against the source audio instead of an all-or-nothing choice.
      */
-    val muteOriginalAudio: Boolean = false,
+    val originalAudioGain: Float = 1.0f,
+    /**
+     * Overlay music gain in [0..1]. Same semantics as [originalAudioGain] but applied
+     * to the picked music file. Ignored when [audioOverlayUri] is null. When BOTH gains
+     * are > 0 the save pipeline mixes the two PCM streams sample-by-sample with the
+     * specified attenuations; when only one is > 0 the other is omitted.
+     */
+    val musicAudioGain: Float = 1.0f,
     val isSaving: Boolean = false,
     val isLoading: Boolean = true,
     val saveResult: VideoSaveResult? = null,
@@ -92,6 +121,11 @@ data class VideoEditorUiState(
     /** 0..1 progress during a re-encode save; null when the save is a stream-copy
      *  (which is fast enough that a spinner suffices). */
     val saveProgress: Float? = null,
+    /** Phase the save is in so the sheet's label can distinguish the local re-encode
+     *  step (where saveProgress ticks 0→1) from the cloud upload step (no progress
+     *  available — best we can do is a spinner with a "Uploading…" caption so the user
+     *  doesn't think the screen has frozen between 100 % and dismissal). */
+    val saveStage: VideoSaveStage = VideoSaveStage.Idle,
     /**
      * On Android 11+ a foreign MediaStore URI cannot be opened for write without an
      * explicit user-consent intent. When the first save attempt throws SecurityException
@@ -102,6 +136,13 @@ data class VideoEditorUiState(
      * instead of silently falling through to a "Save as Copy".
      */
     val pendingWriteIntent: android.app.PendingIntent? = null,
+    /**
+     * Surfaces the OS consent dialog produced by [MediaStore.createDeleteRequest] when a
+     * Synced video's Overwrite-mode save falls back to "save as copy" — without it the
+     * original device file orphans next to the edit. Mirrors [pendingWriteIntent]
+     * end-to-end (launcher in the screen, resolved by [onDeletePermissionResolved]).
+     */
+    val pendingDeleteIntent: android.app.PendingIntent? = null,
 )
 
 sealed class VideoSaveResult {
@@ -112,11 +153,20 @@ sealed class VideoSaveResult {
 
 enum class VideoSaveMode { Overwrite, Copy }
 
+/**
+ * High-level phase the save flow is in. Drives the bottom sheet's progress copy so the
+ * user always knows what the editor is doing — the previous flow went silent between
+ * "re-encode 100 %" and "screen pops back" while the cloud upload was running, leading
+ * users to wonder whether the save had finished or stalled.
+ */
+enum class VideoSaveStage { Idle, Encoding, Encrypting, Uploading }
+
 @HiltViewModel
 class VideoEditorViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val accountManager: AccountManager,
     private val cloudRepo: DrivePhotoRepository,
+    private val syncStateRepo: eu.akoos.photos.domain.repository.SyncStateRepository,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(VideoEditorUiState())
@@ -135,6 +185,32 @@ class VideoEditorViewModel @Inject constructor(
     /** Optional album linkId the cloud video lives in. Used to re-attach the re-uploaded
      *  edit to the same album so it doesn't disappear from the album view. */
     private var sourceCloudAlbumLinkId: String? = null
+    /** Settable from the screen so a Synced-video edit can re-attach its newly-uploaded
+     *  cloud copy to the same album the source lived in. Mirrors PhotoEditor's path. */
+    fun setSourceAlbumLinkId(linkId: String?) {
+        if (linkId != null) sourceCloudAlbumLinkId = linkId
+    }
+
+    /**
+     * The Drive twin of a Synced device video. When set, [save]'s local paths consult
+     * this on success to ALSO upload a paired copy / replacement to Drive — without
+     * that, an edit on a Synced item would only update the device file and the cloud
+     * counterpart stays stale.
+     */
+    private var cloudCounterpart: CloudPhoto? = null
+
+    /** Mirrored into a StateFlow so the save sheet's subtitle can adjust when a Synced
+     *  edit will fan out to both device and cloud. */
+    private val _hasCloudCounterpart = MutableStateFlow(false)
+
+    fun setCloudCounterpart(photo: CloudPhoto?) {
+        cloudCounterpart = photo
+        _hasCloudCounterpart.value = photo != null
+    }
+
+    /** Exposed for VideoEditorScreen.SaveSheet so it can show a "both device + cloud"
+     *  subtitle for Synced videos. */
+    val hasCloudCounterpart: StateFlow<Boolean> = _hasCloudCounterpart.asStateFlow()
 
     fun loadLocal(uri: String, displayName: String, mimeType: String) {
         _state.update {
@@ -177,6 +253,14 @@ class VideoEditorViewModel @Inject constructor(
                 return@launch
             }
             sourceRotationDegrees = ((meta.rotation % 360) + 360) % 360
+            // MediaMetadataRetriever reports the ENCODED dimensions, ignoring the
+            // VIDEO_ROTATION tag — so a portrait clip recorded by the camera (encoded
+            // landscape, rotation=90) reports 1920×1080 instead of 1080×1920. The
+            // crop overlay clamps against these dims, so without the swap the user
+            // can't drag the rect taller than the encoded height. Swap into effective
+            // (post-rotation) dimensions before publishing to state.
+            val effW = if (sourceRotationDegrees % 180 != 0) meta.height else meta.width
+            val effH = if (sourceRotationDegrees % 180 != 0) meta.width else meta.height
             _state.update {
                 it.copy(
                     durationMs = meta.duration,
@@ -184,13 +268,15 @@ class VideoEditorViewModel @Inject constructor(
                     trimEndMs = meta.duration,
                     rotationDegrees = 0,
                     cropRect = null,
-                    sourceWidth = meta.width,
-                    sourceHeight = meta.height,
+                    sourceWidth = effW,
+                    sourceHeight = effH,
                     audioOverlayUri = null,
                     audioOverlayDisplayName = null,
                     audioOverlayDurationMs = 0L,
                     audioTrimStartMs = 0L,
                     audioTrimEndMs = 0L,
+                    originalAudioGain = 1.0f,
+                    musicAudioGain = 1.0f,
                     isLoading = false,
                 )
             }
@@ -260,6 +346,10 @@ class VideoEditorViewModel @Inject constructor(
             }
             runCatching { retriever.release() }
             sourceRotationDegrees = ((meta.rotation % 360) + 360) % 360
+            // See the loadLocal counterpart — encoded dims swap to effective dims so
+            // the crop overlay clamps to the orientation the user sees.
+            val effW = if (sourceRotationDegrees % 180 != 0) meta.height else meta.width
+            val effH = if (sourceRotationDegrees % 180 != 0) meta.width else meta.height
             _state.update {
                 it.copy(
                     sourceUri = parsed.toString(),
@@ -268,14 +358,15 @@ class VideoEditorViewModel @Inject constructor(
                     trimEndMs = meta.duration,
                     rotationDegrees = 0,
                     cropRect = null,
-                    sourceWidth = meta.width,
-                    sourceHeight = meta.height,
+                    sourceWidth = effW,
+                    sourceHeight = effH,
                     audioOverlayUri = null,
                     audioOverlayDisplayName = null,
                     audioOverlayDurationMs = 0L,
                     audioTrimStartMs = 0L,
                     audioTrimEndMs = 0L,
-                    muteOriginalAudio = false,
+                    originalAudioGain = 1.0f,
+                    musicAudioGain = 1.0f,
                     isLoading = false,
                 )
             }
@@ -328,6 +419,40 @@ class VideoEditorViewModel @Inject constructor(
      * Passing null clears the crop (re-enables the cheap stream-copy save path when no
      * other re-encode-only feature is active).
      */
+    /**
+     * Convert the user's crop rect (which lives in POST-rotation display coordinates —
+     * what they see in the editor) into PRE-rotation source-pixel coordinates that
+     * [VideoReencoder] / [CropMatrix] expect.
+     *
+     * Without this conversion the saved video crops the wrong region. Concretely, for a
+     * portrait phone clip the source stream is 1920×1080 landscape with an orientation
+     * tag of 90°; the editor shows it as 1080×1920 portrait and the user drags handles
+     * in that 1080×1920 space. VideoReencoder decodes the raw 1920×1080 stream and
+     * applies the crop rect against THOSE dimensions, so a crop of (100, 200, 300, 400)
+     * in display coords cuts an entirely different region of the source — or coerces to
+     * an invalid rect and the encoder spits out garbage. The observable symptom is that
+     * the crop has no visible effect on the saved video.
+     *
+     * The rotation transforms below are derived from "post = source rotated `sourceRotation`
+     * CW", so to invert we rotate `sourceRotation` CCW. Only 0/90/180/270 are valid
+     * MediaStore orientation tags.
+     */
+    private fun cropInSourcePixels(s: VideoEditorUiState): Rect {
+        val effRect = s.cropRect ?: Rect(
+            0, 0,
+            s.sourceWidth.coerceAtLeast(2),
+            s.sourceHeight.coerceAtLeast(2),
+        )
+        val postW = s.sourceWidth.coerceAtLeast(1)
+        val postH = s.sourceHeight.coerceAtLeast(1)
+        return when (((sourceRotationDegrees % 360) + 360) % 360) {
+            90  -> Rect(effRect.top, postW - effRect.right, effRect.bottom, postW - effRect.left)
+            180 -> Rect(postW - effRect.right, postH - effRect.bottom, postW - effRect.left, postH - effRect.top)
+            270 -> Rect(postH - effRect.bottom, effRect.left, postH - effRect.top, effRect.right)
+            else -> effRect
+        }
+    }
+
     fun setCropRect(rect: Rect?) {
         _state.update { s ->
             if (rect == null) return@update s.copy(cropRect = null)
@@ -385,11 +510,16 @@ class VideoEditorViewModel @Inject constructor(
         }
     }
 
-    /** Toggles whether the source video's audio survives the save. UI calls this from
-     *  the "Original audio" row's mute switch. Strip is honoured by both save paths
-     *  (stream-copy drops the audio MediaFormat; re-encode skips the audio extractor). */
-    fun setMuteOriginalAudio(muted: Boolean) {
-        _state.update { it.copy(muteOriginalAudio = muted) }
+    /** Source-audio loudness. 0 = drop original, 1 = unattenuated, intermediate = scaled
+     *  via PCM gain at save time (forces re-encode if not exactly 0 or 1). */
+    fun setOriginalAudioGain(gain: Float) {
+        _state.update { it.copy(originalAudioGain = gain.coerceIn(0f, 1f)) }
+    }
+
+    /** Overlay-music loudness, same semantics as [setOriginalAudioGain]. When both gains
+     *  are > 0 and an overlay is picked the save pipeline mixes the two PCM streams. */
+    fun setMusicAudioGain(gain: Float) {
+        _state.update { it.copy(musicAudioGain = gain.coerceIn(0f, 1f)) }
     }
 
     fun setAudioTrimStart(ms: Long) {
@@ -442,35 +572,302 @@ class VideoEditorViewModel @Inject constructor(
             // payload that the stream-copy path treats as immutable. Pixel rotation falls
             // through into the muxer's orientation hint, so it does NOT force a re-encode
             // on its own.
-            val needsReencode = s.cropRect != null || s.audioOverlayUri != null
+            // Partial source-audio gain (anything other than full-on or full-off) requires
+            // PCM-level processing — stream-copy mux can't attenuate samples on its own.
+            val partialOriginalGain = s.originalAudioGain > 0.001f && s.originalAudioGain < 0.999f
+            val needsReencode = s.cropRect != null || s.audioOverlayUri != null || partialOriginalGain
             _state.update {
                 it.copy(
                     isSaving = true,
                     saveResult = null,
                     saveProgress = if (needsReencode) 0f else null,
+                    // Re-encode → Encoding; pure stream-copy → straight to Uploading-ish
+                    // (it'll be over fast enough that even Idle would be defensible, but
+                    // labelling it consistently keeps the sheet copy stable).
+                    saveStage = if (needsReencode) VideoSaveStage.Encoding else VideoSaveStage.Uploading,
                 )
             }
             val finalRotation = ((sourceRotationDegrees + s.rotationDegrees) % 360 + 360) % 360
             val cloudPhoto = sourceCloudPhoto
+            val counterpart = cloudCounterpart
+            // Synced video edit = device file + cloud sibling, both need the edited bytes.
+            // For this case we build the muxed tempFile ONCE up front and feed it to BOTH
+            // the local MediaStore write and the cloud upload. The previous flow ran the
+            // transcode (or stream-copy mux) twice — once inside the local save path, once
+            // inside the cloud-fanout path — which doubled CPU + battery on every save AND
+            // doubled the cryptoLock-holding encrypt phase that starves gallery decrypts.
+            val isSynced = cloudPhoto == null && counterpart != null
+            // Single timestamp shared across the device save AND any cloud-counterpart
+            // upload for Synced videos. Used to derive both the stamped filename and the
+            // DATE_TAKEN / captureTime metadata so ReconcileSyncStateUseCase.byNameAndDate
+            // pairs the two fresh copies as Synced without needing a re-download.
+            // Computing System.currentTimeMillis() independently per save path would drift
+            // by a few ms — different filenames, different captureTime seconds, no match.
+            val editTimestampMs = System.currentTimeMillis()
+            val syncedTempFile: File? = if (isSynced) createTempMuxFile() else null
             val saveResult: VideoSaveResult = try {
-                when {
+                if (syncedTempFile != null) {
+                    produceEditedTempFile(s, syncedTempFile, finalRotation, needsReencode)
+                }
+                val result = when {
                     // Cloud video edit: produce the muxed .mp4 in cache, then upload as a
                     // new linkId. Mirrors PhotoEditor.saveCloud — Overwrite trashes the
                     // original after the new linkId is committed, Copy keeps both.
-                    cloudPhoto != null -> saveCloud(s, mode, finalRotation, cloudPhoto, needsReencode)
-                    needsReencode -> saveReencoded(s, mode, finalRotation)
-                    else -> saveStreamCopy(s, mode, finalRotation, allowWriteRequestRecovery)
+                    cloudPhoto != null -> saveCloud(s, mode, finalRotation, cloudPhoto, needsReencode, editTimestampMs)
+                    syncedTempFile != null -> saveLocalFromExistingFile(
+                        s, mode, editTimestampMs, allowWriteRequestRecovery, syncedTempFile,
+                    )
+                    needsReencode -> saveReencoded(s, mode, finalRotation, editTimestampMs, allowWriteRequestRecovery)
+                    else -> saveStreamCopy(s, mode, finalRotation, editTimestampMs, allowWriteRequestRecovery)
                 }
+                val savedUri: Uri? = when (result) {
+                    is VideoSaveResult.Success -> result.uri
+                    is VideoSaveResult.SuccessAsCopy -> result.uri
+                    is VideoSaveResult.Failed -> null
+                }
+                // Synced video path: push the SAME bytes that just landed locally up to
+                // the cloud counterpart. The MediaStore insert above fired the OS-level
+                // content observer that BackgroundSyncService listens on — without the
+                // UPLOADING placeholder row below, SyncWorker would race this fanout and
+                // upload the same edited bytes a second time (duplicate Drive entry).
+                // Reconcile and SyncWorker both skip rows in UPLOADING state so the
+                // editor owns the row until the fanout completes (or fails and demotes).
+                if (syncedTempFile != null && counterpart != null && savedUri != null &&
+                    result !is VideoSaveResult.Failed) {
+                    val userId = accountManager.getPrimaryUserId().first()
+                    if (userId != null) {
+                        val savedUriStr = savedUri.toString()
+                        val placeholderState = SyncState(
+                            localUri = savedUriStr,
+                            cloudFileId = null,
+                            localHash = "",
+                            cloudHash = null,
+                            status = SyncStatus.UPLOADING,
+                            lastSyncAttemptMs = System.currentTimeMillis(),
+                            lastSyncSuccessMs = null,
+                            backedUpAtMs = null,
+                            sizeBytes = syncedTempFile.length(),
+                        )
+                        runCatching { syncStateRepo.upsert(placeholderState, userId) }
+                        // Sheet label transitions from "Encoding…" to "Uploading…" so the
+                        // user knows we've moved past the local re-encode into the cloud
+                        // leg (which has no progress bar). Without this flip the sheet
+                        // sat at 100 % silently for the upload duration and users thought
+                        // the save had stalled.
+                        _state.update { it.copy(saveStage = VideoSaveStage.Uploading, saveProgress = null) }
+                        val fanoutResult = runCatching {
+                            uploadExistingFileToCloud(s, mode, counterpart, editTimestampMs, syncedTempFile, userId)
+                        }
+                        val newLinkId = fanoutResult.getOrNull()
+                        if (fanoutResult.isSuccess && newLinkId != null) {
+                            runCatching {
+                                syncStateRepo.upsert(
+                                    placeholderState.copy(
+                                        cloudFileId = newLinkId,
+                                        status = SyncStatus.SYNCED,
+                                        lastSyncSuccessMs = System.currentTimeMillis(),
+                                        backedUpAtMs = System.currentTimeMillis(),
+                                    ),
+                                    userId,
+                                )
+                            }
+                        } else {
+                            // Upload failed — demote so SyncWorker eventually retries.
+                            runCatching {
+                                syncStateRepo.upsert(
+                                    placeholderState.copy(status = SyncStatus.LOCAL_ONLY),
+                                    userId,
+                                )
+                            }
+                        }
+                    }
+                }
+                // Defensive Coil invalidation — the saved URI may not actually be in the
+                // image cache for videos (thumbnails live under MediaStore URIs that may
+                // or may not match), but the call is a safe no-op when the key is absent
+                // and unifies the post-save state with the photo path.
+                if (savedUri != null && cloudPhoto == null) {
+                    invalidateImageCache(savedUri)
+                }
+                result
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 VideoSaveResult.Failed(eu.akoos.photos.util.sanitizeErrorMessage(e.message ?: "Save failed"))
+            } finally {
+                syncedTempFile?.delete()
             }
             // pendingWriteIntent suspended the save until the user reacts to the consent
             // dialog — leave isSaving on the state from that branch alone.
             if (_state.value.pendingWriteIntent == null) {
-                _state.update { it.copy(isSaving = false, saveResult = saveResult, saveProgress = null) }
+                _state.update { it.copy(isSaving = false, saveResult = saveResult, saveProgress = null, saveStage = VideoSaveStage.Idle) }
             }
         }
+    }
+
+    /**
+     * Runs the edit pipeline (transcode for re-encode, mux for stream-copy) into the
+     * supplied [outputFile]. Extracted so the Synced video path can build the edited
+     * bytes ONCE and reuse them for both the local MediaStore write and the cloud upload.
+     */
+    private suspend fun produceEditedTempFile(
+        s: VideoEditorUiState,
+        outputFile: File,
+        finalRotation: Int,
+        needsReencode: Boolean,
+    ) = withContext(Dispatchers.IO) {
+        val sourceUri = Uri.parse(s.sourceUri ?: error("No source URI"))
+        // Three-way dispatch:
+        //   • No re-encode at all (trim + rotate only) → muxTrimmed (existing fast path)
+        //   • Audio edits but no crop → video stream-copy + audio mix-encode
+        //     This preserves HDR (the 8-bit GL pipeline downsamples BT.2020/PQ source
+        //     to washed-out SDR), keeps the video lossless, and only re-encodes audio.
+        //   • Crop set → full GL re-encode (loses HDR — unavoidable without a 10-bit
+        //     RGBA pipeline + HEVC main10 encoder).
+        val hasCrop = s.cropRect != null
+        when {
+            needsReencode && hasCrop -> {
+                val crop = cropInSourcePixels(s)
+                VideoReencoder(context).transcode(
+                    sourceUri = sourceUri,
+                    outputFile = outputFile,
+                    trimStartUs = s.trimStartMs * 1000L,
+                    trimEndUs = s.trimEndMs * 1000L,
+                    cropLeft = crop.left,
+                    cropTop = crop.top,
+                    cropWidth = crop.width(),
+                    cropHeight = crop.height(),
+                    rotationDegrees = finalRotation,
+                    audioOverlayUri = s.audioOverlayUri?.let { Uri.parse(it) },
+                    audioTrimStartUs = s.audioTrimStartMs * 1000L,
+                    audioTrimEndUs = s.audioTrimEndMs * 1000L,
+                    originalAudioGain = s.originalAudioGain,
+                    musicAudioGain = s.musicAudioGain,
+                    onProgress = { p -> _state.update { it.copy(saveProgress = p) } },
+                )
+            }
+            needsReencode -> {
+                VideoReencoder(context).streamCopyVideoWithMixedAudio(
+                    sourceUri = sourceUri,
+                    outputFile = outputFile,
+                    trimStartUs = s.trimStartMs * 1000L,
+                    trimEndUs = s.trimEndMs * 1000L,
+                    rotationDegrees = finalRotation,
+                    audioOverlayUri = s.audioOverlayUri?.let { Uri.parse(it) },
+                    audioTrimStartUs = s.audioTrimStartMs * 1000L,
+                    audioTrimEndUs = s.audioTrimEndMs * 1000L,
+                    originalAudioGain = s.originalAudioGain,
+                    musicAudioGain = s.musicAudioGain,
+                    onProgress = { p -> _state.update { it.copy(saveProgress = p) } },
+                )
+            }
+            else -> muxTrimmed(
+                sourceUri = sourceUri,
+                outputFile = outputFile,
+                trimStartMs = s.trimStartMs,
+                trimEndMs = s.trimEndMs,
+                orientationDegrees = finalRotation,
+                // Stream-copy strips source audio entirely when the gain slider is at 0
+                // and there's no overlay to bring in. Partial gain / overlay cases force
+                // re-encode (handled by needsReencode) so they never reach this branch.
+                stripAudio = s.originalAudioGain <= 0.001f,
+            )
+        }
+    }
+
+    /**
+     * Synced video local-save path that reads from a pre-built [tempFile] (no second
+     * encode). Mirrors [saveStreamCopy] / [saveReencoded] for MediaStore semantics:
+     * Overwrite tries to write to the source URI (with R+ consent-prompt fallback),
+     * Copy inserts a fresh entry under Pictures/Proton Photos.
+     */
+    private suspend fun saveLocalFromExistingFile(
+        s: VideoEditorUiState,
+        mode: VideoSaveMode,
+        editTimestampMs: Long,
+        allowWriteRequestRecovery: Boolean,
+        tempFile: File,
+    ): VideoSaveResult = withContext(Dispatchers.IO) {
+        val sourceUri = Uri.parse(s.sourceUri ?: error("No source URI"))
+        when (mode) {
+            VideoSaveMode.Overwrite -> try {
+                context.contentResolver.openOutputStream(sourceUri, "wt")?.use { out ->
+                    tempFile.inputStream().use { it.copyTo(out) }
+                } ?: error("openOutputStream returned null for $sourceUri")
+                VideoSaveResult.Success(sourceUri)
+            } catch (se: SecurityException) {
+                if (allowWriteRequestRecovery &&
+                    Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
+                    tryRequestWritePermission(sourceUri, mode)) {
+                    return@withContext VideoSaveResult.Success(null)
+                }
+                val uri = insertReencodedCopy(
+                    tempFile, s.displayName, s.mimeType,
+                    useOriginalName = true, editTimestampMs = editTimestampMs,
+                )
+                if (cloudCounterpart != null) {
+                    maybeSurfaceOrphanDeleteIntent(sourceUri)
+                }
+                VideoSaveResult.SuccessAsCopy(uri)
+            }
+            VideoSaveMode.Copy -> {
+                val uri = insertReencodedCopy(
+                    tempFile, s.displayName, s.mimeType,
+                    useOriginalName = false, editTimestampMs = editTimestampMs,
+                )
+                VideoSaveResult.Success(uri)
+            }
+        }
+    }
+
+    /**
+     * Synced video cloud-fanout that uploads from a pre-built [tempFile] (no second
+     * encode). Returns the new Drive linkId so the caller can pin the local URI's
+     * SyncState row to it, preventing reconcile from racing and uploading a duplicate.
+     */
+    private suspend fun uploadExistingFileToCloud(
+        s: VideoEditorUiState,
+        mode: VideoSaveMode,
+        cloud: CloudPhoto,
+        editTimestampMs: Long,
+        tempFile: File,
+        userId: me.proton.core.domain.entity.UserId,
+    ): String = withContext(Dispatchers.IO) {
+        val displayName = when (mode) {
+            VideoSaveMode.Overwrite -> cloud.displayName
+            VideoSaveMode.Copy -> stamp(cloud.displayName, editTimestampMs)
+        }
+        val outMime = if (s.mimeType.startsWith("video/")) s.mimeType else "video/mp4"
+        val uploadUri = Uri.fromFile(tempFile).toString()
+        val item = LocalMediaItem(
+            uri = uploadUri,
+            dateTaken = if (mode == VideoSaveMode.Overwrite) cloud.captureTime * 1000L else editTimestampMs,
+            displayName = displayName,
+            mimeType = outMime,
+            sizeBytes = tempFile.length(),
+            bucketName = null,
+            width = s.sourceWidth,
+            height = s.sourceHeight,
+            duration = (s.trimEndMs - s.trimStartMs).coerceAtLeast(0L),
+        )
+        val hash = sha256(tempFile)
+        val newLinkId = cloudRepo.uploadFile(userId, item, hash, uploadUri) { phase, doneBytes, totalBytes ->
+            // Distinguish the encrypt and CDN-PUT phases on the sheet so the user sees
+            // two distinct progress bars (Encrypting → Uploading) instead of a single
+            // mystery "0% sit then 100% race" cycle that happened to share a label.
+            val frac = (doneBytes.toFloat() / totalBytes.coerceAtLeast(1L).toFloat()).coerceIn(0f, 1f)
+            val newStage = when (phase) {
+                eu.akoos.photos.data.repository.drive.UploadPhase.Encrypting -> VideoSaveStage.Encrypting
+                eu.akoos.photos.data.repository.drive.UploadPhase.Uploading -> VideoSaveStage.Uploading
+            }
+            _state.update { it.copy(saveProgress = frac, saveStage = newStage) }
+        }
+        sourceCloudAlbumLinkId?.let { albumId ->
+            runCatching { cloudRepo.addPhotosToAlbum(userId, albumId, listOf(newLinkId)) }
+        }
+        if (mode == VideoSaveMode.Overwrite) {
+            runCatching { cloudRepo.deleteFiles(userId, listOf(cloud.linkId)) }
+        }
+        newLinkId
     }
 
     fun onWritePermissionGranted() {
@@ -490,6 +887,13 @@ class VideoEditorViewModel @Inject constructor(
                 saveProgress = null,
             )
         }
+    }
+
+    /** Called once the OS delete-consent dialog closes (regardless of Allow/Deny — the
+     *  system has already actioned the choice by then). Clears the pending intent so the
+     *  screen's saveResult Effect proceeds with toast + navigation. */
+    fun onDeletePermissionResolved() {
+        _state.update { it.copy(pendingDeleteIntent = null) }
     }
 
     /**
@@ -532,14 +936,14 @@ class VideoEditorViewModel @Inject constructor(
         finalRotation: Int,
         cloudPhoto: CloudPhoto,
         needsReencode: Boolean,
+        editTimestampMs: Long,
     ): VideoSaveResult = withContext(Dispatchers.IO) {
         val sourceUriStr = s.sourceUri ?: error("No cached video URI")
         val sourceUri = Uri.parse(sourceUriStr)
         val tempFile = createTempMuxFile()
         try {
             if (needsReencode) {
-                val crop = s.cropRect
-                    ?: Rect(0, 0, s.sourceWidth.coerceAtLeast(2), s.sourceHeight.coerceAtLeast(2))
+                val crop = cropInSourcePixels(s)
                 VideoReencoder(context).transcode(
                     sourceUri = sourceUri,
                     outputFile = tempFile,
@@ -553,7 +957,8 @@ class VideoEditorViewModel @Inject constructor(
                     audioOverlayUri = s.audioOverlayUri?.let { Uri.parse(it) },
                     audioTrimStartUs = s.audioTrimStartMs * 1000L,
                     audioTrimEndUs = s.audioTrimEndMs * 1000L,
-                    muteOriginalAudio = s.muteOriginalAudio,
+                    originalAudioGain = s.originalAudioGain,
+                musicAudioGain = s.musicAudioGain,
                     onProgress = { p -> _state.update { it.copy(saveProgress = p) } },
                 )
             } else {
@@ -563,21 +968,23 @@ class VideoEditorViewModel @Inject constructor(
                     trimStartMs = s.trimStartMs,
                     trimEndMs = s.trimEndMs,
                     orientationDegrees = finalRotation,
-                    stripAudio = s.muteOriginalAudio,
+                    // Stream-copy strips source audio entirely when the gain slider is at 0
+                // and there's no overlay to bring in. Partial gain / overlay cases force
+                // re-encode (handled by needsReencode) so they never reach this branch.
+                stripAudio = s.originalAudioGain <= 0.001f,
                 )
             }
             val userId = accountManager.getPrimaryUserId().first()
                 ?: error("Not signed in")
             val displayName = when (mode) {
                 VideoSaveMode.Overwrite -> cloudPhoto.displayName
-                VideoSaveMode.Copy -> stamp(cloudPhoto.displayName)
+                VideoSaveMode.Copy -> stamp(cloudPhoto.displayName, editTimestampMs)
             }
-            val now = System.currentTimeMillis()
             val outMime = if (s.mimeType.startsWith("video/")) s.mimeType else "video/mp4"
             val uploadUri = Uri.fromFile(tempFile).toString()
             val item = LocalMediaItem(
                 uri = uploadUri,
-                dateTaken = if (mode == VideoSaveMode.Overwrite) cloudPhoto.captureTime * 1000L else now,
+                dateTaken = if (mode == VideoSaveMode.Overwrite) cloudPhoto.captureTime * 1000L else editTimestampMs,
                 displayName = displayName,
                 mimeType = outMime,
                 sizeBytes = tempFile.length(),
@@ -587,7 +994,17 @@ class VideoEditorViewModel @Inject constructor(
                 duration = (s.trimEndMs - s.trimStartMs).coerceAtLeast(0L),
             )
             val hash = sha256(tempFile)
-            val newLinkId = cloudRepo.uploadFile(userId, item, hash, uploadUri)
+            // Flip to Uploading just before the upload starts so the sheet stops sitting
+            // at 100 % silently while the cloud leg runs.
+            _state.update { it.copy(saveStage = VideoSaveStage.Encrypting, saveProgress = 0f) }
+            val newLinkId = cloudRepo.uploadFile(userId, item, hash, uploadUri) { phase, doneBytes, totalBytes ->
+                val frac = (doneBytes.toFloat() / totalBytes.coerceAtLeast(1L).toFloat()).coerceIn(0f, 1f)
+                val newStage = when (phase) {
+                    eu.akoos.photos.data.repository.drive.UploadPhase.Encrypting -> VideoSaveStage.Encrypting
+                    eu.akoos.photos.data.repository.drive.UploadPhase.Uploading -> VideoSaveStage.Uploading
+                }
+                _state.update { it.copy(saveProgress = frac, saveStage = newStage) }
+            }
 
             sourceCloudAlbumLinkId?.let { albumId ->
                 runCatching { cloudRepo.addPhotosToAlbum(userId, albumId, listOf(newLinkId)) }
@@ -617,13 +1034,14 @@ class VideoEditorViewModel @Inject constructor(
         s: VideoEditorUiState,
         mode: VideoSaveMode,
         finalRotation: Int,
+        editTimestampMs: Long,
         allowWriteRequestRecovery: Boolean = true,
     ): VideoSaveResult {
         val sourceUriStr = s.sourceUri ?: error("No source URI")
         // Stream-copy supports the "remove audio track" toggle by simply not registering
         // the audio MediaFormat on the muxer. (Overlay audio always forces the re-encode
         // path, so we only need to honour mute here.)
-        val stripAudio = s.muteOriginalAudio
+        val stripAudio = s.originalAudioGain <= 0.001f
         return when (mode) {
             VideoSaveMode.Overwrite -> {
                 try {
@@ -643,10 +1061,10 @@ class VideoEditorViewModel @Inject constructor(
                     if (allowWriteRequestRecovery &&
                         Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
                         tryRequestWritePermission(srcUri, mode)) {
-                        // Pending intent surfaced — leave state untouched and return a
-                        // sentinel; the outer save() leaves isSaving on so the screen sees
-                        // the spinner until the user reacts to the system dialog.
-                        return VideoSaveResult.Failed("__pending_write_permission__")
+                        // Pending intent already attached via state — leave isSaving on so
+                        // the screen sees the spinner until the user reacts to the system
+                        // dialog. The outer save() short-circuits on pendingWriteIntent.
+                        return VideoSaveResult.Success(null)
                     }
                     val copyUri = insertLocalCopy(
                         sourceUri = srcUri,
@@ -657,7 +1075,15 @@ class VideoEditorViewModel @Inject constructor(
                         orientationDegrees = finalRotation,
                         useOriginalName = true,
                         stripAudio = stripAudio,
+                        editTimestampMs = editTimestampMs,
                     )
+                    // Synced + Overwrite + fallback-to-Copy: the original device file is
+                    // otherwise stranded next to the edit. Mirrors PhotoEditorViewModel —
+                    // quiet delete first (works for app-owned files), createDeleteRequest
+                    // otherwise (camera roll, screenshots).
+                    if (cloudCounterpart != null) {
+                        maybeSurfaceOrphanDeleteIntent(srcUri)
+                    }
                     VideoSaveResult.SuccessAsCopy(copyUri)
                 }
             }
@@ -671,8 +1097,28 @@ class VideoEditorViewModel @Inject constructor(
                     orientationDegrees = finalRotation,
                     useOriginalName = false,
                     stripAudio = stripAudio,
+                    editTimestampMs = editTimestampMs,
                 )
                 VideoSaveResult.Success(uri)
+            }
+        }
+    }
+
+    /**
+     * Synced-only orphan cleanup. Tries a quiet delete first (works for files this app
+     * owns); falls back to [MediaStore.createDeleteRequest] on R+ for foreign-owner URIs,
+     * surfacing the consent intent through state for the screen to launch.
+     */
+    private fun maybeSurfaceOrphanDeleteIntent(srcUri: Uri) {
+        val rowsDeleted = runCatching {
+            context.contentResolver.delete(srcUri, null, null)
+        }.getOrDefault(0)
+        if (rowsDeleted == 0 && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val deleteRequest = runCatching {
+                MediaStore.createDeleteRequest(context.contentResolver, listOf(srcUri))
+            }.getOrNull()
+            if (deleteRequest != null) {
+                _state.update { it.copy(pendingDeleteIntent = deleteRequest) }
             }
         }
     }
@@ -687,12 +1133,14 @@ class VideoEditorViewModel @Inject constructor(
         s: VideoEditorUiState,
         mode: VideoSaveMode,
         finalRotation: Int,
+        editTimestampMs: Long,
+        allowWriteRequestRecovery: Boolean = true,
     ): VideoSaveResult = withContext(Dispatchers.IO) {
         val sourceUriStr = s.sourceUri ?: error("No source URI")
         val sourceUri = Uri.parse(sourceUriStr)
         val tempFile = createTempMuxFile()
         try {
-            val crop = s.cropRect ?: Rect(0, 0, s.sourceWidth.coerceAtLeast(2), s.sourceHeight.coerceAtLeast(2))
+            val crop = cropInSourcePixels(s)
             VideoReencoder(context).transcode(
                 sourceUri = sourceUri,
                 outputFile = tempFile,
@@ -706,7 +1154,8 @@ class VideoEditorViewModel @Inject constructor(
                 audioOverlayUri = s.audioOverlayUri?.let { Uri.parse(it) },
                 audioTrimStartUs = s.audioTrimStartMs * 1000L,
                 audioTrimEndUs = s.audioTrimEndMs * 1000L,
-                muteOriginalAudio = s.muteOriginalAudio,
+                originalAudioGain = s.originalAudioGain,
+                musicAudioGain = s.musicAudioGain,
                 onProgress = { p ->
                     _state.update { it.copy(saveProgress = p) }
                 },
@@ -720,15 +1169,29 @@ class VideoEditorViewModel @Inject constructor(
                 } catch (se: SecurityException) {
                     // Same write-consent dance as the stream-copy path — for own-camera videos
                     // the source URI is foreign to us, so Overwrite needs explicit consent.
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
+                    if (allowWriteRequestRecovery &&
+                        Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
                         tryRequestWritePermission(sourceUri, mode)) {
-                        return@withContext VideoSaveResult.Failed("__pending_write_permission__")
+                        // Pending intent attached to state — short-circuit out so the screen
+                        // can launch the system prompt.
+                        return@withContext VideoSaveResult.Success(null)
                     }
-                    val uri = insertReencodedCopy(tempFile, s.displayName, s.mimeType, useOriginalName = true)
+                    val uri = insertReencodedCopy(
+                        tempFile, s.displayName, s.mimeType,
+                        useOriginalName = true, editTimestampMs = editTimestampMs,
+                    )
+                    // Synced + Overwrite + fallback-to-Copy: surface delete consent for
+                    // the orphaned original device file so it doesn't sit next to the edit.
+                    if (cloudCounterpart != null) {
+                        maybeSurfaceOrphanDeleteIntent(sourceUri)
+                    }
                     VideoSaveResult.SuccessAsCopy(uri)
                 }
                 VideoSaveMode.Copy -> {
-                    val uri = insertReencodedCopy(tempFile, s.displayName, s.mimeType, useOriginalName = false)
+                    val uri = insertReencodedCopy(
+                        tempFile, s.displayName, s.mimeType,
+                        useOriginalName = false, editTimestampMs = editTimestampMs,
+                    )
                     VideoSaveResult.Success(uri)
                 }
             }
@@ -743,13 +1206,19 @@ class VideoEditorViewModel @Inject constructor(
         displayName: String,
         mimeType: String,
         useOriginalName: Boolean,
+        editTimestampMs: Long = System.currentTimeMillis(),
     ): Uri? {
         val collection = MediaStore.Video.Media.EXTERNAL_CONTENT_URI
-        val outName = if (useOriginalName) displayName else stamp(displayName)
+        val outName = if (useOriginalName) displayName else stamp(displayName, editTimestampMs)
         val outMime = if (mimeType.startsWith("video/")) mimeType else "video/mp4"
         val values = ContentValues().apply {
             put(MediaStore.Video.Media.DISPLAY_NAME, outName)
             put(MediaStore.Video.Media.MIME_TYPE, outMime)
+            // Explicit DATE_TAKEN so reconcile.byNameAndDate finds the cloud sibling —
+            // see the editTimestampMs doc-comment in [save]. DATE_MODIFIED is in seconds
+            // (the MediaStore legacy unit); DATE_TAKEN is in milliseconds.
+            put(MediaStore.Video.Media.DATE_TAKEN, editTimestampMs)
+            put(MediaStore.Video.Media.DATE_MODIFIED, editTimestampMs / 1000L)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 put(MediaStore.Video.Media.RELATIVE_PATH, ProtonPhotosStorage.DEFAULT_PICTURES)
                 put(MediaStore.Video.Media.IS_PENDING, 1)
@@ -818,6 +1287,7 @@ class VideoEditorViewModel @Inject constructor(
         orientationDegrees: Int,
         useOriginalName: Boolean,
         stripAudio: Boolean = false,
+        editTimestampMs: Long = System.currentTimeMillis(),
     ): Uri? = withContext(Dispatchers.IO) {
         val tempFile = createTempMuxFile()
         try {
@@ -830,11 +1300,16 @@ class VideoEditorViewModel @Inject constructor(
                 stripAudio = stripAudio,
             )
             val collection = MediaStore.Video.Media.EXTERNAL_CONTENT_URI
-            val outName = if (useOriginalName) displayName else stamp(displayName)
+            val outName = if (useOriginalName) displayName else stamp(displayName, editTimestampMs)
             val outMime = if (mimeType.startsWith("video/")) mimeType else "video/mp4"
             val values = ContentValues().apply {
                 put(MediaStore.Video.Media.DISPLAY_NAME, outName)
                 put(MediaStore.Video.Media.MIME_TYPE, outMime)
+                // Explicit DATE_TAKEN so reconcile.byNameAndDate pairs this with the
+                // freshly-uploaded cloud counterpart on the next sync pass — same trick
+                // as PhotoEditorViewModel.insertLocalCopy. DATE_MODIFIED is in seconds.
+                put(MediaStore.Video.Media.DATE_TAKEN, editTimestampMs)
+                put(MediaStore.Video.Media.DATE_MODIFIED, editTimestampMs / 1000L)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     put(MediaStore.Video.Media.RELATIVE_PATH, ProtonPhotosStorage.DEFAULT_PICTURES)
                     put(MediaStore.Video.Media.IS_PENDING, 1)
@@ -978,11 +1453,125 @@ class VideoEditorViewModel @Inject constructor(
         return File.createTempFile("vmux_", ".mp4", dir)
     }
 
-    private fun stamp(displayName: String): String {
+    /**
+     * Synced-video helper. After a successful local save, ALSO write the muxed file up to
+     * Drive as a new linkId so the cloud counterpart of the Synced item reflects the
+     * change. Mirrors PhotoEditorViewModel.uploadEditAsCloudReplacement; the mode semantics
+     * are:
+     *   • Overwrite — upload + trash the old linkId (cloud "replace original")
+     *   • Copy      — upload as a new linkId, leave the old one alone (cloud "keep both")
+     */
+    private suspend fun uploadEditAsCloudReplacement(
+        s: VideoEditorUiState,
+        mode: VideoSaveMode,
+        finalRotation: Int,
+        cloud: CloudPhoto,
+        editTimestampMs: Long,
+    ) = withContext(Dispatchers.IO) {
+        val sourceUriStr = s.sourceUri ?: return@withContext
+        val sourceUri = Uri.parse(sourceUriStr)
+        val needsReencode = s.cropRect != null || s.audioOverlayUri != null
+        val tempFile = createTempMuxFile()
+        try {
+            // Re-mux the same edits the local save just applied so the cloud copy stays
+            // byte-equivalent to the device file. Stream-copy when possible, re-encode when
+            // a crop or audio swap requires it.
+            if (needsReencode) {
+                val crop = cropInSourcePixels(s)
+                VideoReencoder(context).transcode(
+                    sourceUri = sourceUri,
+                    outputFile = tempFile,
+                    trimStartUs = s.trimStartMs * 1000L,
+                    trimEndUs = s.trimEndMs * 1000L,
+                    cropLeft = crop.left,
+                    cropTop = crop.top,
+                    cropWidth = crop.width(),
+                    cropHeight = crop.height(),
+                    rotationDegrees = finalRotation,
+                    audioOverlayUri = s.audioOverlayUri?.let { Uri.parse(it) },
+                    audioTrimStartUs = s.audioTrimStartMs * 1000L,
+                    audioTrimEndUs = s.audioTrimEndMs * 1000L,
+                    originalAudioGain = s.originalAudioGain,
+                musicAudioGain = s.musicAudioGain,
+                    onProgress = { /* Cloud-fanout progress not surfaced — local save already
+                                      finished and the user sees a "Saved" state. */ },
+                )
+            } else {
+                muxTrimmed(
+                    sourceUri = sourceUri,
+                    outputFile = tempFile,
+                    trimStartMs = s.trimStartMs,
+                    trimEndMs = s.trimEndMs,
+                    orientationDegrees = finalRotation,
+                    // Stream-copy strips source audio entirely when the gain slider is at 0
+                // and there's no overlay to bring in. Partial gain / overlay cases force
+                // re-encode (handled by needsReencode) so they never reach this branch.
+                stripAudio = s.originalAudioGain <= 0.001f,
+                )
+            }
+            val userId = accountManager.getPrimaryUserId().first() ?: return@withContext
+            val displayName = when (mode) {
+                VideoSaveMode.Overwrite -> cloud.displayName
+                VideoSaveMode.Copy -> stamp(cloud.displayName, editTimestampMs)
+            }
+            val outMime = if (s.mimeType.startsWith("video/")) s.mimeType else "video/mp4"
+            val uploadUri = Uri.fromFile(tempFile).toString()
+            val item = LocalMediaItem(
+                uri = uploadUri,
+                dateTaken = if (mode == VideoSaveMode.Overwrite) cloud.captureTime * 1000L else editTimestampMs,
+                displayName = displayName,
+                mimeType = outMime,
+                sizeBytes = tempFile.length(),
+                bucketName = null,
+                width = s.sourceWidth,
+                height = s.sourceHeight,
+                duration = (s.trimEndMs - s.trimStartMs).coerceAtLeast(0L),
+            )
+            val hash = sha256(tempFile)
+            _state.update { it.copy(saveStage = VideoSaveStage.Encrypting, saveProgress = 0f) }
+            val newLinkId = cloudRepo.uploadFile(userId, item, hash, uploadUri) { phase, doneBytes, totalBytes ->
+                val frac = (doneBytes.toFloat() / totalBytes.coerceAtLeast(1L).toFloat()).coerceIn(0f, 1f)
+                val newStage = when (phase) {
+                    eu.akoos.photos.data.repository.drive.UploadPhase.Encrypting -> VideoSaveStage.Encrypting
+                    eu.akoos.photos.data.repository.drive.UploadPhase.Uploading -> VideoSaveStage.Uploading
+                }
+                _state.update { it.copy(saveProgress = frac, saveStage = newStage) }
+            }
+            sourceCloudAlbumLinkId?.let { albumId ->
+                runCatching { cloudRepo.addPhotosToAlbum(userId, albumId, listOf(newLinkId)) }
+            }
+            if (mode == VideoSaveMode.Overwrite) {
+                runCatching { cloudRepo.deleteFiles(userId, listOf(cloud.linkId)) }
+            }
+        } finally {
+            tempFile.delete()
+        }
+    }
+
+    @OptIn(coil.annotation.ExperimentalCoilApi::class)
+    private fun invalidateImageCache(uri: Uri) {
+        // Mirrors PhotoEditorViewModel.invalidateImageCache — same Coil 2 cache key dance.
+        // For videos this is mostly a no-op (the video bytes themselves aren't decoded by
+        // Coil) but any thumbnail entry that hit the cache under the saved URI is purged
+        // here too, and the notifyChange wakes MediaStore observers up immediately.
+        val key = uri.toString()
+        val loader = context.imageLoader
+        val mc = loader.memoryCache
+        if (mc != null) {
+            runCatching {
+                val toRemove = mc.keys.filter { it.key == key }
+                toRemove.forEach { mc.remove(it) }
+            }
+        }
+        runCatching { loader.diskCache?.remove(key) }
+        runCatching { context.contentResolver.notifyChange(uri, null) }
+    }
+
+    private fun stamp(displayName: String, atMs: Long = System.currentTimeMillis()): String {
         val dotIdx = displayName.lastIndexOf('.')
         val base = if (dotIdx > 0) displayName.substring(0, dotIdx) else displayName
         val ts = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.ROOT)
-            .format(java.util.Date())
+            .format(java.util.Date(atMs))
         return "${base}_edit_$ts.mp4"
     }
 }

@@ -1,7 +1,73 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- machine-translated -->
 <resources>
-    <string name="app_name">Proton Photos</string>
+    <string name="app_name">Photos for Proton</string>
+
+    <!-- Asistente de incorporación -->
+    <string name="onboarding_back">Atrás</string>
+    <string name="onboarding_continue">Continuar</string>
+    <string name="onboarding_skip">Omitir por ahora</string>
+    <string name="onboarding_allow">Permitir</string>
+    <string name="onboarding_open_settings">Abrir ajustes</string>
+    <string name="onboarding_permission_granted">Concedido</string>
+    <string name="onboarding_finish">Abrir mi galería</string>
+    <string name="onboarding_recommended">Recomendado</string>
+
+    <string name="onboarding_welcome_title">Bienvenido a Photos for Proton</string>
+    <string name="onboarding_welcome_subtitle">Tus fotos y videos, cifrados de extremo a extremo en Proton Drive. Configuremos algunas preferencias para que la app se adapte a ti.</string>
+
+    <string name="onboarding_backup_title">¿Qué hay que respaldar?</string>
+    <string name="onboarding_backup_subtitle">Lo puedes cambiar cuando quieras desde Ajustes.</string>
+    <string name="onboarding_backup_everything">Respaldar todo</string>
+    <string name="onboarding_backup_everything_desc">Todas las fotos y videos del dispositivo, salvo las carpetas que excluyas después.</string>
+    <string name="onboarding_backup_folders">Elegir carpetas concretas</string>
+    <string name="onboarding_backup_folders_desc">Selecciona carpetas en Ajustes. No se sube nada hasta que elijas.</string>
+    <string name="onboarding_backup_nothing">Nada por ahora</string>
+    <string name="onboarding_backup_nothing_desc">Explora lo que ya tienes en Proton Drive sin subir nuevas fotos.</string>
+
+    <string name="onboarding_privacy_title">Controles de privacidad</string>
+    <string name="onboarding_privacy_subtitle">Decide cómo viajan tus fotos del dispositivo a Drive. Todo va cifrado por encima de esto.</string>
+    <string name="onboarding_privacy_strip">Quitar metadatos al subir</string>
+    <string name="onboarding_privacy_strip_desc">Elimina coordenadas GPS y datos de cámara de las fotos antes de subirlas. Recomendado.</string>
+    <string name="onboarding_privacy_rename">Renombrar a fecha de captura</string>
+    <string name="onboarding_privacy_rename_desc">Sube los archivos como 2026-05-30_14-32-08.jpg en lugar de IMG_2841.jpg. El archivo del dispositivo no cambia.</string>
+    <string name="onboarding_privacy_delete">Quitar del dispositivo tras respaldar</string>
+    <string name="onboarding_privacy_delete_desc">Cuando la foto esté a salvo en Drive, quítala del dispositivo para liberar espacio. Otras apps de galería dejan de verla.</string>
+
+    <string name="onboarding_notif_title">Mantente al tanto</string>
+    <string name="onboarding_notif_subtitle">Permite notificaciones para ver el progreso de la copia y las solicitudes de limpieza, incluso con la app cerrada.</string>
+
+    <string name="onboarding_photos_title">Acceso a tus fotos</string>
+    <string name="onboarding_photos_subtitle">Necesitamos permiso de lectura de tus fotos y videos para cifrarlos y respaldarlos en Drive.</string>
+
+    <string name="onboarding_manage_media_title">Gestionar medios</string>
+    <string name="onboarding_manage_media_subtitle">Muy recomendado. Permite a la app editar, eliminar y renombrar fotos y videos del dispositivo sin un diálogo del sistema cada vez — se usa para editar en la app, guardar al dispositivo, la papelera y Eliminar tras respaldar. Toca para abrir los ajustes del sistema.</string>
+    <string name="onboarding_folders_include_title">Carpetas a respaldar</string>
+    <string name="onboarding_folders_include_subtitle">Elige qué carpetas subir a Drive. El resto se queda solo en este dispositivo.</string>
+    <string name="onboarding_folders_exclude_title">Carpetas a omitir</string>
+    <string name="onboarding_folders_exclude_subtitle">Marca las carpetas que NO quieres subir. Lo demás se respalda automáticamente.</string>
+    <string name="onboarding_folders_needs_perm">Concede acceso a las fotos primero para ver tus carpetas.</string>
+    <string name="onboarding_folders_empty">No se encontraron carpetas de fotos en este dispositivo.</string>
+
+    <string name="onboarding_about_title">Cliente independiente de terceros</string>
+    <string name="onboarding_about_subtitle">Hecho por una sola persona. Sin relación con Proton AG. Código abierto, licencia GPL, sin telemetría propia.</string>
+    <string name="onboarding_about_author_subtitle">Sitio personal del desarrollador.</string>
+    <string name="onboarding_about_github_subtitle">Código fuente completo en GitHub.</string>
+    <string name="onboarding_about_license_title">Licencia GPL 3.0</string>
+    <string name="onboarding_about_license_subtitle">Software libre. Puedes leer, modificar y redistribuir el código.</string>
+    <string name="onboarding_about_disclaimer">App no oficial de terceros. Habla con Proton Drive mediante la API pública. Sin respaldo ni relación con Proton AG.</string>
+
+    <string name="onboarding_appearance_title">Hazlo tuyo</string>
+    <string name="onboarding_appearance_subtitle">Elige tema, color de acento e idioma. Todo modificable después desde Ajustes.</string>
+
+    <string name="onboarding_lock_title">Bloqueo de la app</string>
+    <string name="onboarding_lock_subtitle">Biometría o PIN del dispositivo cada vez que la app pase a primer plano.</string>
+    <string name="onboarding_lock_enable">Activar bloqueo de la app</string>
+    <string name="onboarding_lock_enable_desc">Pide biometría o PIN del dispositivo cada vez que la app se abre o vuelve del segundo plano.</string>
+    <string name="onboarding_lock_timeout_label">Volver a bloquear tras</string>
+
+    <string name="onboarding_done_title">Todo listo</string>
+    <string name="onboarding_done_subtitle">Tus ajustes están guardados. Todo lo de aquí se puede modificar después desde Ajustes.</string>
 
     <!-- Auth / Sign-in landing -->
     <string name="sign_in_subtitle">Copia de seguridad de fotos privada y cifrada de extremo a extremo.</string>
@@ -9,26 +75,13 @@
     <string name="sign_in_button">Iniciar sesión</string>
     <string name="sign_in_footer">Inicio de sesión seguro con tu cuenta de Proton</string>
 
-    <!-- Auth -->
-    <string name="auth_login_title">Iniciar sesión en Proton</string>
-    <string name="auth_error_network">Sin conexión a Internet. Comprueba tu red.</string>
-    <string name="auth_error_invalid_credentials">Usuario o contraseña incorrectos.</string>
-    <string name="auth_error_generic">Error al iniciar sesión. Inténtalo de nuevo.</string>
-
     <!-- Gallery -->
-    <string name="gallery_title">Fotos</string>
     <string name="gallery_empty_title">Aún no hay fotos</string>
     <string name="gallery_empty_subtitle">Tus fotos aparecerán aquí tras la sincronización.</string>
     <string name="gallery_filter_all">Todas</string>
-    <string name="gallery_filter_local">Solo locales</string>
-    <string name="gallery_filter_backed_up">Respaldadas</string>
-    <string name="gallery_pull_refresh">Actualizando…</string>
-    <string name="gallery_loading">Cargando fotos…</string>
     <string name="gallery_tab_photos">Fotos</string>
     <string name="gallery_tab_albums">Álbumes</string>
     <string name="gallery_tab_shared">Compartidos</string>
-    <string name="gallery_count_photos">%d fotos</string>
-    <string name="gallery_selected_count">%d seleccionadas</string>
     <string name="gallery_cancel_selection">Cancelar selección</string>
     <string name="gallery_download_selected">Descargar selección</string>
     <string name="gallery_delete_selected">Eliminar selección</string>
@@ -36,11 +89,12 @@
     <string name="gallery_download_done_singular">1 foto descargada</string>
     <string name="gallery_download_partial">%1$d descargadas, %2$d fallidas</string>
     <string name="gallery_add_to_album">Añadir al álbum</string>
+    <string name="gallery_add_to_album_mixed_hint">Elementos solo en el dispositivo y solo en la nube no pueden compartir álbum</string>
+    <string name="gallery_add_to_album_partial">%1$d añadidas a %2$s, %3$d elemento(s) no se pudieron guardar (selección mixta)</string>
     <string name="gallery_strip_metadata">Quitar metadatos</string>
     <string name="gallery_added_to_album">%1$d fotos añadidas a %2$s</string>
     <string name="gallery_stripped_metadata">Metadatos eliminados de %1$d fotos</string>
     <string name="gallery_stripped_with_skipped">%1$d eliminadas, %2$d omitidas (externas)</string>
-    <string name="gallery_new_album">Nuevo álbum</string>
     <string name="gallery_filter_favorites">Favoritos</string>
     <string name="gallery_filter_hidden">Ocultos</string>
     <string name="gallery_filter_categories">Categorías</string>
@@ -55,19 +109,12 @@
     <string name="gallery_filter_photos">Fotos</string>
 
     <!-- Permission -->
-    <string name="permission_media_rationale">Permite que Proton Photos acceda a tus fotos y vídeos.</string>
     <string name="permission_grant_button">Conceder acceso</string>
     <string name="permission_open_settings">Abrir ajustes</string>
     <string name="permission_denied_banner">Permite el acceso para mostrar fotos locales.</string>
     <string name="permission_permanently_denied_banner">Acceso a medios denegado. Abre ajustes para permitirlo.</string>
 
     <!-- Sync -->
-    <string name="sync_in_progress">Sincronizando…</string>
-    <string name="sync_last_synced">Última sincronización: %1$s</string>
-    <string name="sync_never">Nunca sincronizado</string>
-    <string name="sync_now">Sincronizar ahora</string>
-    <string name="sync_error_network">Sincronización fallida: sin conexión.</string>
-    <string name="sync_error_storage_full">Almacenamiento de Proton lleno. Mejora en proton.me.</string>
     <string name="sync_section">Sincronización</string>
     <string name="sync_backed_up">Respaldadas</string>
     <string name="sync_pending">Pendientes</string>
@@ -80,23 +127,12 @@
     <string name="sync_progress_hide_files">Ocultar archivos</string>
 
     <!-- Delete bottom sheet -->
-    <string name="delete_title">¿Eliminar %1$d foto(s)?</string>
-    <string name="delete_free_up_space_label">LIBERAR ESPACIO</string>
-    <string name="delete_free_up_space_description">Quitar del dispositivo. Permanece cifrada en la copia de Proton.</string>
-    <string name="delete_also_cloud_label">ELIMINAR TAMBIÉN DE LA COPIA</string>
-    <string name="delete_also_cloud_description">Lo elimina permanentemente en todas partes.</string>
     <string name="delete_also_cloud_warning">El original se eliminará para siempre. Proton no podrá recuperarlo.</string>
     <string name="delete_album_container_warning">Esto elimina el álbum pero mantiene tus fotos en Proton Drive.</string>
     <string name="bucket_album_readonly_msg">%s es una carpeta del dispositivo. Usa \'Añadir al álbum\' desde Fotos para organizar fotos.</string>
     <string name="albums_new_kind_cloud">Nube</string>
     <string name="albums_new_kind_local">Local</string>
-    <string name="delete_cancel">Cancelar</string>
-    <string name="delete_button_free_up">Liberar espacio</string>
     <string name="delete_button_permanently">Eliminar permanentemente</string>
-    <string name="delete_snackbar_no_backup">Eliminado. No había copia.</string>
-    <string name="delete_snackbar_freed_up">Espacio liberado. Copia conservada.</string>
-    <string name="delete_snackbar_cloud_error">No se pudo eliminar de la copia. Reintenta.</string>
-    <string name="delete_cloud_only_not_on_device">No está en este dispositivo</string>
     <string name="delete_multi_mixed_msg">Algunas de estas fotos están respaldadas en Proton Drive. Elige cómo eliminarlas.</string>
     <string name="delete_multi_remove_device">Quitar del dispositivo</string>
     <string name="delete_multi_remove_device_desc">La copia de Proton Drive se conserva</string>
@@ -111,37 +147,45 @@
 
     <!-- Settings -->
     <string name="settings_title">Ajustes</string>
-    <string name="settings_sync_section">Sincronización</string>
     <string name="settings_sync_wifi_only">Sincronizar solo por Wi-Fi</string>
-    <string name="settings_last_sync">Última sincronización</string>
     <string name="settings_sync_now">Sincronizar ahora</string>
     <string name="settings_storage_section">Almacenamiento</string>
     <string name="settings_storage_nav_desc">Cuota Drive, dispositivo, caché, papelera</string>
-    <string name="settings_auto_free_up">Liberar espacio automáticamente</string>
-    <string name="settings_free_up_after">Liberar tras</string>
-    <string name="settings_free_up_wifi_only">Solo por Wi-Fi</string>
-    <string name="settings_device_storage">Almacenamiento del dispositivo usado</string>
-    <string name="settings_backed_up_only">Solo respaldadas</string>
     <string name="settings_free_up_now">Liberar espacio ahora</string>
     <string name="settings_free_up_interval_after_backup">Tras la copia</string>
     <string name="settings_free_up_interval_1_day">1 día</string>
     <string name="settings_free_up_interval_1_week">1 semana</string>
     <string name="settings_free_up_interval_1_month">1 mes</string>
+    <string name="settings_free_up_confirm_title">¿Liberar espacio del dispositivo?</string>
+    <string name="settings_free_up_confirm_message">Todas las fotos y vídeos que ya estén respaldados en Proton Drive se eliminarán de este dispositivo. Las copias en Drive permanecerán intactas y podrán descargarse de nuevo más adelante.</string>
+    <string name="settings_delete_after_backup">Eliminar el archivo del dispositivo tras la copia</string>
+    <string name="settings_delete_after_backup_desc">Elimina la copia local del dispositivo cuando Drive ya tiene la subida — el archivo queda solo en tu Proton Drive cifrado.</string>
     <string name="settings_account_section">Cuenta</string>
     <string name="settings_sign_out">Cerrar sesión</string>
+    <string name="settings_sign_out_desc">Finalizar la sesión en este dispositivo.</string>
     <string name="sign_out_dialog_title">¿Cerrar sesión?</string>
     <string name="sign_out_dialog_message">¿Seguro que quieres cerrar sesión en tu cuenta de Proton?</string>
+    <string name="sign_out_dialog_confirm">Cerrar sesión</string>
+    <string name="sign_out_dialog_cancel">Cancelar</string>
+    <string name="settings_account_storage">Almacenamiento de Drive</string>
+    <string name="settings_account_links">Accesos rápidos</string>
+    <string name="settings_account_link_manage">Gestionar cuenta</string>
+    <string name="settings_account_link_manage_desc">Plan, facturación, privacidad y telemetría en proton.me.</string>
+    <string name="settings_account_link_drive_web">Abrir Proton Drive en la web</string>
+    <string name="settings_account_link_drive_web_desc">Explora tus fotos y archivos en drive.proton.me.</string>
     <string name="cancel">Cancelar</string>
-    <string name="settings_language">Idioma</string>
     <string name="settings_language_system">Predeterminado del sistema</string>
-    <string name="settings_storage">Almacenamiento</string>
     <string name="settings_sync_wifi_desc">Pausar subida en red móvil</string>
+    <string name="settings_fullres_wifi_only">Resolución completa solo por Wi-Fi</string>
+    <string name="settings_fullres_wifi_only_desc">Descarga fotos y videos en resolución completa solo por Wi-Fi. Las miniaturas siempre se cargan.</string>
+    <string name="viewer_wifi_for_full_quality">Conéctate a Wi-Fi para calidad completa</string>
     <string name="settings_sync_now_action">Sincronizar →</string>
     <string name="settings_backup_folders">Carpetas a respaldar</string>
     <string name="settings_backup_folders_desc">Elige qué carpetas respaldar</string>
     <!-- Sync settings reorganisation (v1.3.2): two grouped sections. -->
     <string name="settings_what_backed_up_section">Qué se respalda</string>
     <string name="settings_when_section">Cuándo ocurre</string>
+    <string name="settings_network_section">Uso de red</string>
     <string name="settings_continuous_backup">Respaldo continuo</string>
     <string name="settings_continuous_backup_desc">Las fotos y vídeos se suben pocos segundos después de capturarse.</string>
     <string name="settings_backup_everything">Respaldar todo</string>
@@ -158,13 +202,11 @@
     <string name="settings_excluded_folders_select_all">Excluir todo</string>
     <string name="settings_excluded_folders_deselect_all">Incluir todo</string>
     <string name="settings_recently_deleted">Eliminados recientemente</string>
-    <string name="settings_recently_deleted_desc">Restaurar o eliminar permanentemente</string>
     <string name="settings_recently_deleted_subtitle">%1$d fotos · eliminadas en los últimos 30 días</string>
     <string name="settings_recently_deleted_subtitle_singular">1 foto · eliminada en los últimos 30 días</string>
     <string name="settings_recently_deleted_empty">Vacío</string>
     <string name="settings_free_up_desc">Eliminar del dispositivo archivos ya respaldados</string>
     <string name="settings_free_up_action">Eliminar</string>
-    <string name="settings_storage_used_pct">%d%% usado</string>
     <string name="settings_backup_size">%s sincronizados desde este dispositivo</string>
     <!-- Storage card, Proton / Device / App-cache sub-sections -->
     <string name="settings_storage_proton">Proton Drive</string>
@@ -176,8 +218,6 @@
     <string name="settings_storage_clear_cache_dialog_title">¿Vaciar la caché de la app?</string>
     <string name="settings_storage_clear_cache_dialog_message">Se eliminarán %s de archivos en caché. Se volverán a descargar cuando se necesiten.</string>
     <string name="settings_storage_refresh">Actualizar almacenamiento</string>
-    <string name="settings_auto_backup_new_folders">Respaldar nuevas carpetas automáticamente</string>
-    <string name="settings_auto_backup_new_folders_desc">Respaldar automáticamente fotos de nuevas carpetas de la cámara cuando aparezcan</string>
     <string name="settings_section_settings">Ajustes</string>
     <string name="settings_privacy_metadata">Privacidad y metadatos</string>
     <string name="settings_privacy_metadata_desc">Quitar EXIF, GPS, info de cámara antes de subir</string>
@@ -185,6 +225,8 @@
     <string name="settings_security_desc">Bloqueo de app, fotos ocultas</string>
     <string name="settings_strip_metadata_upload">Quitar metadatos al subir</string>
     <string name="settings_strip_metadata_upload_desc">Eliminar datos personales de las fotos antes de subirlas a Drive</string>
+    <string name="settings_rename_on_upload">Renombrar a la fecha de captura al subir</string>
+    <string name="settings_rename_on_upload_desc">Usa los metadatos de la foto o el vídeo para establecer el nombre del archivo con la fecha y hora de captura antes de subirlo. El archivo original en el dispositivo no se modifica.</string>
     <string name="settings_strip_gps">Quitar ubicación GPS</string>
     <string name="settings_strip_gps_desc">Eliminar coordenadas GPS y datos de ubicación</string>
     <string name="settings_strip_camera">Quitar info de cámara</string>
@@ -203,21 +245,23 @@
     <string name="settings_app_lock_timeout_10min">10 minutos</string>
     <string name="settings_app_lock_timeout_15min">15 minutos</string>
     <string name="settings_app_lock_timeout_1h">1 hora</string>
+    <string name="settings_clear_cache_on_close">Vaciar caché al cerrar la app</string>
+    <string name="settings_clear_cache_on_close_desc">Borra las copias locales de las fotos en la nube vistas cuando la app pasa a segundo plano. Se vuelven a descargar al abrirla de nuevo.</string>
+    <string name="settings_telemetry">Telemetría</string>
+    <string name="settings_telemetry_desc">Se controla desde la configuración de tu cuenta Proton. Abre account.proton.me para cambiarla.</string>
     <string name="settings_hidden_photos">Fotos ocultas</string>
     <string name="settings_hidden_photos_desc">Fotos ocultas de la galería principal, protegidas con biometría</string>
     <string name="settings_media_management">Gestión de medios</string>
     <string name="settings_media_management_granted">Concedido, eliminar no preguntará cada vez</string>
     <string name="settings_media_management_grant_desc">Concede una vez para evitar la confirmación en cada eliminación</string>
     <string name="settings_media_management_grant_action">Conceder</string>
-    <string name="settings_appearance">Apariencia</string>
-    <string name="settings_appearance_section">Pantalla</string>
-    <string name="settings_appearance_desc">Claro, oscuro o sistema</string>
+    <string name="settings_appearance">Apariencia e idioma</string>
+    <string name="settings_appearance_desc">Tema, paleta, idioma de la app</string>
+    <string name="settings_strip_customize">Qué metadatos eliminar</string>
     <string name="settings_about_desc">Versión, créditos y licencias</string>
 
-    <string name="gallery_count_photos_resource">%d fotos</string>
     <string name="albums_empty_title">Aún no hay álbumes</string>
     <string name="albums_empty_subtitle">Los álbumes creados en Drive aparecerán aquí</string>
-    <string name="album_photo_count">%d fotos</string>
     <string name="selection_photos_only">%d fotos</string>
     <string name="selection_videos_only">%d vídeos</string>
     <string name="selection_mixed">%1$d fotos, %2$d vídeos</string>
@@ -246,19 +290,21 @@
     <string name="album_remove_from_album">Quitar del álbum</string>
     <string name="album_set_as_cover">Establecer como portada</string>
     <string name="album_set_as_album_cover">Establecer como portada del álbum</string>
+    <string name="gallery_action_select">Seleccionar</string>
     <string name="album_cover_updated">Portada actualizada</string>
-    <string name="month_photo_count">%d fotos</string>
-    <string name="language_label">Idioma</string>
     <string name="close">Cerrar</string>
 
     <!-- Theme mode -->
-    <string name="theme_mode_system">Predeterminado del sistema</string>
+    <string name="theme_mode_system">Sistema</string>
     <string name="theme_mode_light">Claro</string>
     <string name="theme_mode_dark">Oscuro</string>
     <string name="theme_mode_section">Tema</string>
-    <string name="theme_mode_desc_system">Seguir ajustes del dispositivo</string>
-    <string name="theme_mode_desc_light">Usar siempre tema claro</string>
-    <string name="theme_mode_desc_dark">Usar siempre tema oscuro</string>
+
+    <!-- Encabezados de secciones de ajustes (usados por CollapsibleSection) -->
+    <string name="settings_privacy_section_metadata">Metadatos</string>
+    <string name="settings_privacy_section_device">En este dispositivo</string>
+    <string name="settings_security_section_lock">Bloqueo de la app</string>
+    <string name="settings_security_section_media">Acceso a medios</string>
 
     <!-- Themed palettes -->
     <string name="settings_palette_section">Paleta</string>
@@ -277,18 +323,17 @@
     <string name="language_hu">Húngaro, Magyar</string>
     <string name="language_it">Italiano</string>
     <string name="language_section">Idioma de visualización</string>
-    <string name="language_section_desc">No es necesario reiniciar, la interfaz se actualiza al instante</string>
 
     <!-- About -->
     <string name="about_title">Acerca de</string>
-    <string name="about_app_title_quoted">\"Proton\" Photos</string>
+    <string name="about_app_title_quoted">Photos for Proton</string>
     <string name="about_section_author">Autor</string>
     <string name="about_section_source">Código fuente</string>
     <string name="about_section_built_with">Construido con</string>
     <string name="about_section_disclaimer">Aviso legal</string>
     <string name="about_version">Versión %1$s (build %2$d)</string>
-    <string name="about_description">Cliente no oficial de Proton Drive Photos para Android. Código abierto, construido por la comunidad, cifrado de extremo a extremo.</string>
-    <string name="about_disclaimer">No afiliado con Proton AG. Proton, Proton Drive y Proton Photos son marcas registradas de Proton AG. Este es un cliente no oficial de terceros construido sobre la API de Drive documentada públicamente.</string>
+    <string name="about_description">Cliente no oficial de Proton Drive Photos para Android. Código abierto, cifrado de extremo a extremo.</string>
+    <string name="about_disclaimer">No afiliado con Proton AG. Proton, Proton Drive y Proton Photos son marcas registradas de Proton AG. Photos for Proton es un cliente no oficial de terceros construido sobre la API de Drive documentada públicamente.</string>
     <string name="about_author_subtitle">Creador y mantenedor</string>
     <string name="about_source_subtitle">Ver el código fuente en GitHub</string>
     <string name="about_section_license">Licencia</string>
@@ -318,6 +363,12 @@
     <string name="album_download_notification_progress">%1$d de %2$d</string>
     <string name="album_download_notification_cancel">Cancelar</string>
     <string name="album_download_enqueued">Descargando en segundo plano, consulta las notificaciones</string>
+    <!-- Notificación de consentimiento de eliminación tras la copia -->
+    <string name="delete_consent_channel_name">Limpieza de fotos</string>
+    <string name="delete_consent_channel_desc">Solicita permiso para quitar de este dispositivo las fotos ya respaldadas.</string>
+    <string name="delete_consent_title">%1$d fotos respaldadas listas para quitar</string>
+    <string name="delete_consent_text">Toca para eliminarlas de este dispositivo.</string>
+
     <!-- Sync worker foreground notification -->
     <string name="sync_worker_channel_name">Copia de fotos</string>
     <string name="sync_worker_channel_desc">Muestra el progreso al copiar fotos a Proton Drive.</string>
@@ -328,11 +379,6 @@
     <string name="album_link_copied">Enlace copiado al portapapeles</string>
 
     <!-- Share -->
-    <string name="share_title">Compartir álbum</string>
-    <string name="share_copy_link">Copiar enlace público</string>
-    <string name="share_invite">Invitar por correo</string>
-    <string name="share_email_hint">nombre@ejemplo.com</string>
-    <string name="share_invite_button">Invitar</string>
     <string name="share_remove_member">Quitar</string>
     <string name="share_shared_with">Compartido con</string>
     <string name="share_filter_by_person">Filtrar por persona</string>
@@ -344,7 +390,6 @@
 
     <!-- Share sheet, redesigned to mirror the Drive web dialog -->
     <string name="share_sheet_title">Compartir %1$s</string>
-    <string name="share_add_people_hint">Añadir personas o grupos para compartir</string>
     <string name="share_who_has_access">Quién tiene acceso</string>
     <string name="share_role_owner">propietario</string>
     <string name="share_role_can_view">puede ver</string>
@@ -381,12 +426,6 @@
     <string name="filter_any">Cualquiera</string>
     <string name="filter_month_label">Mes</string>
     <string name="filter_reset">Reiniciar</string>
-    <string name="filter_apply">Aplicar</string>
-    <string name="filter_group_by">Agrupar por</string>
-    <string name="filter_group_day">Día</string>
-    <string name="filter_group_month">Mes</string>
-    <string name="filter_group_year">Año</string>
-    <string name="filter_timeline_grouping">Agrupación temporal</string>
 
     <!-- Álbumes compartidos -->
     <string name="shared_pending_invitations">Invitaciones pendientes</string>
@@ -410,20 +449,15 @@
     <string name="search_empty_idle">Escribe un nombre para empezar</string>
     <string name="search_empty_no_results">Sin resultados</string>
 
-    <!-- Errors -->
-    <string name="error_http_network">Error de red. Comprueba tu conexión.</string>
-    <string name="error_http_storage_full">Cuota de almacenamiento superada. Mejora tu plan Proton.</string>
-    <string name="error_http_rate_limited">Demasiadas solicitudes. Reintentando en %1$d segundos.</string>
-    <string name="error_http_server">Error del servidor. Inténtalo más tarde.</string>
-    <string name="error_http_client">Solicitud fallida. Inténtalo de nuevo.</string>
-    <string name="error_photo_load_failed">No se pudo cargar la foto.</string>
-    <string name="viewer_downloading_progress">Descargando %1$d %%, %2$s / %3$s</string>
     <string name="viewer_play_slideshow">Iniciar pase de diapositivas</string>
     <string name="viewer_pause_slideshow">Pausar pase de diapositivas</string>
 
     <!-- Widget -->
-    <string name="widget_description">Proton Photos, muestra tus fotos en la pantalla de inicio</string>
+    <string name="widget_description">Photos for Proton, muestra tus fotos en la pantalla de inicio</string>
     <string name="widget_setup_title">Widget de fotos</string>
+    <string name="widget_setup_subtitle">Configura cómo se muestran las fotos en tu pantalla de inicio.</string>
+    <string name="widget_change_selection">Cambiar selección</string>
+    <string name="widget_section_choose_album">Elegir álbum</string>
     <string name="widget_mode_section">Modo de visualización</string>
     <string name="widget_mode_all">Todas las fotos</string>
     <string name="widget_mode_all_desc">Elige una foto aleatoria en cada ciclo</string>
@@ -431,6 +465,11 @@
     <string name="widget_mode_selected_desc">Pasar por las fotos que elijas</string>
     <string name="widget_mode_album">Desde álbum</string>
     <string name="widget_mode_album_desc">Pasar por un álbum específico</string>
+    <string name="widget_mode_cloud">Fotos de la nube</string>
+    <string name="widget_mode_cloud_desc">Mostrar fotos de tu caché cifrada en la nube sin exponerlas a otras apps</string>
+    <string name="widget_section_choose_cloud_photos">Elegir fotos de la nube</string>
+    <string name="widget_cloud_photos_selected">%d fotos de la nube seleccionadas</string>
+    <string name="widget_no_cloud_photos">Aún no hay fotos en la nube</string>
     <string name="widget_interval_section">Cambiar foto cada</string>
     <string name="widget_interval_30min">30 min</string>
     <string name="widget_interval_1hr">1 hora</string>
@@ -441,7 +480,6 @@
     <string name="widget_select_photos">+ Seleccionar fotos</string>
     <string name="widget_photos_selected">%d fotos seleccionadas</string>
     <string name="widget_no_photos">No hay fotos</string>
-    <string name="widget_loading">Cargando…</string>
 
     <plurals name="delete_title_plural">
         <item quantity="one">¿Eliminar 1 foto?</item>
@@ -477,29 +515,24 @@
     <string name="viewer_hidden_label">Oculto en este dispositivo</string>
 
     <!-- Editor de vídeo -->
-    <string name="video_editor_title">Editar vídeo</string>
     <string name="video_editor_trim">Recortar</string>
     <string name="video_editor_rotate">Rotar</string>
-    <string name="video_editor_start">Inicio</string>
-    <string name="video_editor_end">Fin</string>
-    <string name="video_editor_save_overwrite">Guardar</string>
     <string name="video_editor_save_copy">Guardar como copia</string>
-    <string name="video_editor_unsupported_cloud">La edición de vídeos en la nube aún no es compatible</string>
     <string name="video_editor_crop">Cortar</string>
     <string name="video_editor_audio">Música</string>
     <string name="video_editor_add_music">Añadir música</string>
     <string name="video_editor_remove_music">Quitar</string>
     <string name="video_editor_music_start">Inicio música</string>
     <string name="video_editor_music_end">Fin música</string>
-    <string name="video_editor_apply_crop">Aplicar recorte</string>
     <string name="video_editor_reset_crop">Restablecer recorte</string>
     <string name="video_editor_reencoding">Recodificando vídeo…</string>
+    <string name="video_editor_encrypting">Cifrando…</string>
+    <string name="video_editor_uploading">Subiendo a Drive…</string>
     <string name="video_editor_audio_original">Audio original</string>
-    <string name="video_editor_audio_original_on">Se conserva en el vídeo guardado</string>
-    <string name="video_editor_audio_original_muted">Se eliminará al guardar</string>
-    <string name="video_editor_audio_mute">Silenciar</string>
-    <string name="video_editor_audio_muted">Silenciado</string>
-    <string name="video_editor_audio_overlay_hint">La música reemplaza la pista original en el vídeo guardado.</string>
+    <string name="editor_discard_changes_title">¿Descartar los cambios?</string>
+    <string name="editor_discard_changes_message">Las ediciones no guardadas se perderán.</string>
+    <string name="editor_discard_changes_confirm">Descartar</string>
+    <string name="editor_discard_changes_keep">Seguir editando</string>
 
     <!-- v1.3.2 missing-translation backfill -->
     <string name="sync_worker_notification_checking">Buscando fotos nuevas…</string>

@@ -1,3 +1,25 @@
+/*
+ * Photos for Proton
+ * Copyright (C) 2026 Akoos <https://akoos.eu>
+ *
+ * Source:  https://github.com/gitakoos/proton-photos
+ * Website: https://photos.akoos.eu
+ *
+ * This file is part of Photos for Proton.
+ *
+ * Photos for Proton is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 3 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 package eu.akoos.photos.presentation.hidden
 
 import android.content.Context
@@ -6,9 +28,14 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -18,7 +45,6 @@ import me.proton.core.accountmanager.domain.AccountManager
 import eu.akoos.photos.data.hidden.HiddenStorageManager
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
-import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.entity.LocalMediaItem
 import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.domain.repository.LocalMediaRepository
@@ -49,37 +75,59 @@ class HiddenAlbumViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(HiddenAlbumUiState())
     val uiState: StateFlow<HiddenAlbumUiState> = _uiState.asStateFlow()
 
+    /** Tracks the active DataStore observer so a re-authentication (rare but possible
+     *  if the user fails biometrics then retries) cancels the previous collector before
+     *  a second one starts — avoids two parallel resolvers racing into [_uiState]. */
+    private var observeJob: Job? = null
+
     fun onAuthenticationSuccess() {
         _uiState.value = _uiState.value.copy(isAuthenticated = true)
-        loadHiddenPhotos()
+        observeHiddenPhotos()
     }
 
     fun onAuthenticationFailed() {
         _uiState.value = _uiState.value.copy(isAuthenticated = false)
     }
 
-    private fun loadHiddenPhotos() {
-        viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isLoading = true)
-            try {
-                val prefs = context.settingsDataStore.data.first()
-                val hiddenUris = prefs[SettingsKeys.HIDDEN_PHOTO_URIS] ?: emptySet()
-                // Pull the hiddenUri → cloudLinkId tokens we stashed at hide time. The
-                // keys of that map = the hidden items that are also backed up to Drive.
-                val backedUpUris = (prefs[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] ?: emptySet())
-                    .map { it.substringBefore('|') }
-                    .toSet()
-                val items = hiddenUris.mapNotNull { uri ->
-                    localMediaRepo.queryByUri(uri)
+    /**
+     * Reactive observation of the hidden set. Every edit to [SettingsKeys.HIDDEN_PHOTO_URIS]
+     * or [SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] — whether from this VM's [hidePhoto] /
+     * [unhidePhoto], or from another VM (e.g. PhotoViewerViewModel's renameLocal which
+     * swaps the URI in the set when a hidden file is renamed) — re-runs the resolution
+     * pipeline and pushes a fresh list into [_uiState]. Kills the "stale until close +
+     * re-open" symptom on rename / add / remove.
+     *
+     * [collectLatest] cancels an in-flight queryByUri batch if a new emission lands
+     * mid-resolution, so the StateFlow can't be overwritten by a slower previous run.
+     */
+    private fun observeHiddenPhotos() {
+        observeJob?.cancel()
+        _uiState.value = _uiState.value.copy(isLoading = true)
+        observeJob = viewModelScope.launch {
+            val urisFlow = context.settingsDataStore.data
+                .map { it[SettingsKeys.HIDDEN_PHOTO_URIS] ?: emptySet() }
+                .distinctUntilChanged()
+            val backedUpFlow = context.settingsDataStore.data
+                .map { prefs ->
+                    (prefs[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] ?: emptySet())
+                        .map { it.substringBefore('|') }
+                        .toSet()
                 }
-                _uiState.value = _uiState.value.copy(
-                    items = items,
-                    backedUpUris = backedUpUris,
-                    isLoading = false,
-                )
-            } catch (e: Exception) {
-                _uiState.value = _uiState.value.copy(error = e.message, isLoading = false)
-            }
+                .distinctUntilChanged()
+            combine(urisFlow, backedUpFlow) { uris, backedUp -> uris to backedUp }
+                .catch { e ->
+                    _uiState.value = _uiState.value.copy(error = e.message, isLoading = false)
+                }
+                .collectLatest { (hiddenUris, backedUpUris) ->
+                    val items = hiddenUris.mapNotNull { uri ->
+                        localMediaRepo.queryByUri(uri)
+                    }
+                    _uiState.value = _uiState.value.copy(
+                        items = items,
+                        backedUpUris = backedUpUris,
+                        isLoading = false,
+                    )
+                }
         }
     }
 
@@ -89,8 +137,8 @@ class HiddenAlbumViewModel @Inject constructor(
                 val current = prefs[SettingsKeys.HIDDEN_PHOTO_URIS] ?: emptySet()
                 prefs[SettingsKeys.HIDDEN_PHOTO_URIS] = current + uri
             }
-            // Reload
-            loadHiddenPhotos()
+            // No explicit reload — observeHiddenPhotos() is watching the set Flow and
+            // re-emits on the edit above.
         }
     }
 
@@ -149,12 +197,10 @@ class HiddenAlbumViewModel @Inject constructor(
                     }
                 }
             }
-            // Belt-and-suspenders refresh: the in-place filter sometimes missed when the
-            // item's stored URI didn't match the hidden-set key (queryByUri normalises
-            // the URI in some content-provider stacks), so the cell stayed on screen
-            // until the user left and re-entered the album. Always reload from the
-            // freshly-edited DataStore so the visible list = the persistent state.
-            loadHiddenPhotos()
+            // No explicit reload — the edit{} above triggers observeHiddenPhotos()'s
+            // combine to re-emit, which re-resolves the items list from the freshly
+            // persisted set. The previous in-place-filter / stale-cell race is gone
+            // because the recompute walks the persisted set every time.
         }
     }
 
