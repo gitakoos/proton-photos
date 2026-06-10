@@ -7,6 +7,7 @@ plugins {
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.hilt)
+    alias(libs.plugins.baselineprofile)
 }
 
 // Load the gitignored keystore.properties so the password never lands in the
@@ -40,18 +41,24 @@ android {
         // versionCode bumped per release tag — keep monotonically increasing.
         // versionName mirrors the GitHub release tag (e.g. v2.0.0 → "2.0.0") so the About
         // screen and the published APK report the same version the user downloaded.
-        versionCode = 200
-        versionName = "2.0.0"
+        versionCode = 210
+        versionName = "2.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
-    // Extract libgojni.so (Proton's Go-based OpenPGP) onto the filesystem at install time
-    // instead of keeping it inside the APK as a memory-mapped page. Android 16's new
-    // userfaultfd-based CMC garbage collector races against Go's signal handlers when
-    // the Go runtime is reading code pages straight out of the APK, producing SIGABRT
-    // on the DefaultDispatch thread (verified on Samsung S22 / Pixel 9 with Android 16
-    // BP2A — S23 on Android 15 doesn't crash). Extracted .so files have their own pages
-    // managed by the linker, which sidesteps the userfaultfd contention.
+    // Extract libgojni.so (Proton's Go-based OpenPGP) onto the filesystem at install
+    // time instead of keeping it inside the APK as a memory-mapped page. Android 16's
+    // new userfaultfd-based CMC garbage collector races against Go's runtime signal
+    // handlers when the Go runtime is reading code pages straight out of the APK,
+    // producing SIGABRT on the DefaultDispatch thread (verified on multiple Android 16
+    // builds, both OEM and custom ROM — Android 15 devices don't crash).
+    // Extracted .so files have their own pages managed by the linker, which sidesteps
+    // the userfaultfd contention. We tried removing this in commit 009a76e thinking
+    // it would unlock 16 KB-page Pixel devices, but the SIGABRT returned within
+    // 43-87 s of first sign-in — the original race is still live on Android 16
+    // userfaultfd kernels and our cryptoLock wrap only serialises OUR calls, not
+    // Go's internal scheduler. The 16 KB Pixel concern was never verified by an
+    // actual user report so it stays speculative.
     packaging {
         jniLibs {
             useLegacyPackaging = true
@@ -168,6 +175,19 @@ dependencies {
     implementation(libs.proton.country.data)
     implementation(libs.proton.push.data)
 
+    // Override the transitively-pulled gopenpgp JNI artifact to the latest stable
+    // build on Maven Central. ProtonCore 36.6.0 pins `me.proton.crypto:android-golib`
+    // at the 2.9.0-2 build, whose gopenpgp Go runtime defaults to SHA-256 for the
+    // self-cert and subkey-binding signatures emitted by `generateNewPrivateKey`.
+    // Drive web's recipient-side `openpgp.js` rejects SHA-256 binding signatures,
+    // which makes every NodeKey we generate fail subkey verification for share
+    // members ("Failed to decrypt node ..."). `2.10.0-2` defaults to SHA-512
+    // (matching the hashAlgo=10 on Drive-web-generated album NodeKeys), so this
+    // strict version constraint is load-bearing for cross-client album sharing.
+    implementation("me.proton.crypto:android-golib") {
+        version { strictly("2.10.0-2") }
+    }
+
     // Proton Core dagger/hilt bindings
     implementation(libs.proton.network.dagger)
     implementation(libs.proton.auth.dagger)
@@ -223,6 +243,8 @@ dependencies {
 
     // Networking
     implementation(libs.retrofit)
+    implementation(libs.retrofit.kotlinx.serialization)
+    implementation(libs.okhttp)
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
 
     // WorkManager
@@ -255,4 +277,22 @@ dependencies {
     testImplementation(libs.robolectric)
     testImplementation(libs.androidx.test.core)
     androidTestImplementation(libs.androidx.test.ext)
+
+    // Loads the AOT-compilable Baseline Profile shipped inside the APK on every
+    // process start. Without this dependency the generated baseline-prof.txt sits
+    // in assets unused; ProfileInstaller is what hands it off to ART.
+    implementation(libs.profileinstaller)
+
+    // Wires :baseline-profile as the producer of the profile this APK consumes.
+    // The AGP Baseline Profile plugin reads from this configuration during release
+    // builds and bakes the captured trace into the packaged APK.
+    "baselineProfile"(project(":baseline-profile"))
+}
+
+baselineProfile {
+    // Don't fire the generator on every release build — the profile is regenerated
+    // explicitly via `./gradlew :app:generateBaselineProfile` when we actually
+    // want a refreshed trace. Routine release builds reuse the last-committed
+    // baseline-prof.txt instead of standing up an emulator on every CI run.
+    automaticGenerationDuringBuild = false
 }

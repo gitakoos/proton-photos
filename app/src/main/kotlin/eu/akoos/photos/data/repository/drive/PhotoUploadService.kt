@@ -35,7 +35,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import me.proton.core.crypto.common.context.CryptoContext
@@ -60,13 +62,16 @@ import eu.akoos.photos.data.db.dao.PhotoListingDao
 import eu.akoos.photos.data.db.entity.PhotoListingEntity
 import eu.akoos.photos.domain.entity.LocalMediaItem
 import eu.akoos.photos.util.retryWithBackoff
+import kotlinx.coroutines.CancellationException
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
 import okhttp3.RequestBody.Companion.asRequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
+import me.proton.core.crypto.common.pgp.SessionKey
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileInputStream
+import java.io.IOException
 import java.nio.ByteBuffer
 import java.nio.channels.FileChannel
 import java.time.Instant
@@ -124,14 +129,18 @@ private suspend fun <T> retryUploadCall(block: suspend (attempt: Int) -> T): T =
         shouldRetry = { e ->
             // Walk the cause chain — ProtonCore wraps IOExceptions inside ApiException
             // wrappers, so message-only matching on `e.message` misses the real reason.
-            // Concatenating up to 4 levels covers the common Drive backend exceptions
-            // (UnknownHostException, SSLException, SSL_PROTOCOL_ERROR, read errors
-            // mid-handshake, mobile-radio reattach timeouts).
-            val msgs = generateSequence<Throwable>(e) { it.cause }
-                .take(4)
-                .mapNotNull { it.message }
-                .joinToString(" ")
-                .lowercase()
+            // First check class names (locale-independent — survives Chinese/German vendor
+            // JVM error messages that the substring list would miss); fall through to
+            // substring matching for wrapper paths where Throwable.cause is dropped.
+            val chain = generateSequence<Throwable>(e) { it.cause }.take(4).toList()
+            val classMatches = chain.any { t ->
+                val n = t.javaClass.name
+                n.contains("UnknownHost") || n.contains("SocketTimeout") ||
+                    n.contains("SocketException") || n.contains("SSLException") ||
+                    n.contains("InterruptedIOException") || n.contains("ConnectException")
+            }
+            if (classMatches) return@retryWithBackoff true
+            val msgs = chain.mapNotNull { it.message }.joinToString(" ").lowercase()
             msgs.contains("unable to resolve") ||
                 msgs.contains("host") ||
                 msgs.contains("dns") ||
@@ -147,6 +156,44 @@ private suspend fun <T> retryUploadCall(block: suspend (attempt: Int) -> T): T =
         },
         block = block,
     )
+
+/**
+ * True when [e] looks like a transient network / I/O failure that the caller's batch
+ * loop will plausibly retry on the next sync pass. Matches the same heuristics as
+ * [retryUploadCall]'s `shouldRetry` predicate so the finally-block exit decision and
+ * the inner per-call retry decision stay aligned.
+ *
+ * Returning true is the signal to KEEP the encrypted-blocks tempDir so the next
+ * attempt can resume from where this one stopped. Auth failures, quota errors,
+ * malformed-content errors and similar non-retryable problems return false and the
+ * finally block then wipes the tempDir — no point hoarding ~hundreds of MB of cached
+ * blocks for a failure that's not coming back.
+ */
+private fun isRetryableUploadFailure(e: Throwable): Boolean {
+    // IOExceptions and the explicit HTTP-status substrings 429/502/503/504 are the
+    // base case the shared retryWithBackoff helper already retries on; mirror them
+    // here so a non-message-bearing IOException still keeps the cache around.
+    if (e is IOException) return true
+    val msgs = generateSequence<Throwable>(e) { it.cause }
+        .take(4)
+        .mapNotNull { it.message }
+        .joinToString(" ")
+        .lowercase()
+    if (msgs.contains("429") || msgs.contains("502") ||
+        msgs.contains("503") || msgs.contains("504")) return true
+    return msgs.contains("unable to resolve") ||
+        msgs.contains("host") ||
+        msgs.contains("dns") ||
+        msgs.contains("timeout") ||
+        msgs.contains("connection") ||
+        msgs.contains("network") ||
+        msgs.contains("ssl") ||
+        msgs.contains("tls") ||
+        msgs.contains("read error") ||
+        msgs.contains("broken pipe") ||
+        msgs.contains("reset by peer") ||
+        msgs.contains("socket closed")
+}
 
 /**
  * Per-file streaming upload pipeline.
@@ -184,14 +231,22 @@ class PhotoUploadService @Inject constructor(
     // (necessary for libgojni single-thread invariant), but that's a CPU lock —
     // it doesn't tie up CDN or filesystem resources.
 
+    /**
+     * Encrypts and uploads [item] to the Photos volume. [sha1HexContentDigest]
+     * MUST be the lowercase SHA-1 hex of the plaintext file's bytes — see
+     * [DrivePhotoRepository.uploadFile]'s Kdoc for the cross-client rationale.
+     * Aliased to the local `hash` value below for readability inside the long
+     * upload pipeline.
+     */
     suspend fun uploadFile(
         userId: UserId,
         item: LocalMediaItem,
-        hash: String,
+        sha1HexContentDigest: String,
         uploadUri: String,
         onProgress: ((phase: UploadPhase, doneBytes: Long, totalBytes: Long) -> Unit)? = null,
     ): String =
         withContext(Dispatchers.IO) {
+            val hash = sha1HexContentDigest
             // Per-file slot pools — each upload owns its own. With instance-level
             // pools a single 150 MB video would hold all 2 CDN slots for several
             // minutes, starving sibling photo uploads scheduled in parallel by
@@ -200,75 +255,131 @@ class PhotoUploadService @Inject constructor(
             val cdnUploadSlots = Semaphore(2)
             val encryptSlots = Semaphore(ENCRYPT_PARALLELISM)
 
+            // Stable tempDir name keyed on the source URI + plaintext size — so a
+            // subsequent retry-eligible failure leaves the encrypted blocks here for
+            // the NEXT uploadFile() call to find via UploadResumeManifest.load().
+            // Previously this was `upload_$fileId` and a new fileId on every attempt
+            // meant resume could never find prior work.
+            val tempDir = File(
+                context.cacheDir,
+                UploadResumeManifest.stableTempDirName(uploadUri, item.sizeBytes),
+            ).also { it.mkdirs() }
+
+            // The finally block at the END of this withContext needs to inspect the
+            // failure category to decide between wipe-and-forget vs preserve-for-resume.
+            // Catch the exception, do the categorisation, then rethrow.
+            try {
             val volumeId = shareService.getVolumeId(userId)
             val shareId = shareService.getShareId(userId, volumeId)
             val rootLinkId = shareService.photosRootLinkId() ?: error("Root link ID not loaded")
 
             val signingKey = cryptoHelper.getAddressSigningKey(userId)
-
-            // Generate per-file node key
-            // NodePassphrase must be encrypted to the PARENT link's public key.
-            // The parent is the root link (photos root), so we use the root link's armored key.
-            val nodeKey = cryptoHelper.generateNodeKey()
-            val rootLinkArmoredKey = shareService.rootLinkArmoredKey()
-                ?: run { shareService.getRootLinkKeyBytes(userId); shareService.rootLinkArmoredKey() }
-                ?: error("Root link armored key not available")
-            val rootLinkPublicKey = cryptoHelper.withCryptoLock {
-                cryptoContext.pgpCrypto.getPublicKey(rootLinkArmoredKey)
-            }
-            val nodePassphraseEncrypted = cryptoHelper.encryptDataToPgpMessage(nodeKey.passphraseBytes, rootLinkPublicKey)
-            // Detached PGP signature — the Drive API requires plain signData here (same as web client).
-            val nodePassphraseSignature = cryptoHelper.signData(nodeKey.passphraseBytes, signingKey.unlockedKeyBytes)
-
-            // Name must be encrypted to the PARENT's public key (root link), not the file's own node key.
-            // Must also be signed so the web client can verify nameAuthor.
-            val encryptedName = cryptoHelper.encryptName(item.displayName, rootLinkPublicKey, signingKey.unlockedKeyBytes)
-
-            // The Hash field is HMAC-SHA256(plaintextName, parentNodeHashKey) — used by the server
-            // for name-collision detection.  Fall back to file content hash if the root NodeHashKey
-            // isn't available (server may reject this but we avoid crashing).
-            val nameHashForCreate = shareService.rootNodeHashKeyBytes()?.let {
-                cryptoHelper.computeNameHash(item.displayName, it)
-            } ?: hash.also { Log.w(TAG, "uploadFile: rootNodeHashKey not cached — using content hash as fallback") }
-
-            // Generate session key for content
-            val sessionKey = cryptoHelper.generateSessionKey()
-            val contentKeyPacketBytes = cryptoHelper.encryptSessionKeyToNode(sessionKey, nodeKey.publicKeyArmored)
-            val contentKeyPacketBase64 = cryptoHelper.base64Encode(contentKeyPacketBytes)
-            // ContentKeyPacketSignature must be a detached signature of the RAW SESSION KEY BYTES
-            // (sessionKey.key — the plaintext symmetric key, e.g. 32 bytes for AES-256), NOT the
-            // encrypted key packet.  The Drive web client decrypts the ContentKeyPacket first to
-            // recover the session key bytes, then verifies the signature against those bytes.
-            // Signing the PKESK bytes causes "Signed digest did not match" because the verifier
-            // presents the decrypted session key while we signed the encrypted packet.
-            // Reference: android-drive GenerateContentKey.kt — signData(nodeKey, sessionKey.key)
-            val contentKeyPacketSignature = cryptoHelper.signData(sessionKey.key, signingKey.unlockedKeyBytes)
-
             val manager = apiProvider.get<DriveApiService>(userId)
 
-            // Create photo file record.
-            // Try the Photos-stream endpoint first; fall back to the volume-based v2 path.
-            val fileRequest = CreateFileRequest(
-                name = encryptedName,
-                hash = nameHashForCreate,
-                parentLinkId = rootLinkId,
-                mimeType = item.mimeType,
-                nodeKey = nodeKey.armoredPrivateKey,
-                nodePassphrase = nodePassphraseEncrypted,
-                nodePassphraseSignature = nodePassphraseSignature,
-                signatureAddress = signingKey.email,
-                contentKeyPacket = contentKeyPacketBase64,
-                contentKeyPacketSignature = contentKeyPacketSignature,
-            )
-            val photoRequest = CreatePhotoRequest(
-                photo = CreatePhotoMetadata(
-                    captureTime = item.dateTaken / 1000L,
-                    // ContentKeyPacket belongs in the Photo field — the server stores it at
-                    // Photo.ContentKeyPacket which is where the web client reads it from.
-                    contentKeyPacket = contentKeyPacketBase64,
-                    contentKeyPacketSignature = contentKeyPacketSignature,
-                ),
-                link = CreatePhotoLinkData(
+            // Block size MUST match the value used when previously-cached blocks were
+            // produced. Hardcoded here today; the manifest also persists it so a future
+            // change to the constant invalidates stale manifests automatically.
+            val blockSize = 4 * 1024 * 1024
+            val totalBytes = item.sizeBytes
+            val numBlocks = if (totalBytes <= 0L) 1
+                else ((totalBytes + blockSize - 1L) / blockSize).toInt().coerceAtLeast(1)
+
+            // ---------------------------------------------------------------------
+            // Resume path detection.
+            //
+            // If a manifest is present AND it agrees with the current source (same
+            // total block count, same blockSize, same sizeBytes) we trust the cached
+            // metadata and skip the create-photo + getVerificationData server calls.
+            // Otherwise (no manifest, or stale layout) we wipe and start fresh.
+            // ---------------------------------------------------------------------
+            val priorManifest = UploadResumeManifest.load(tempDir)?.takeIf { m ->
+                m.totalBlocks == numBlocks &&
+                    m.blockSize == blockSize &&
+                    m.sizeBytes == totalBytes
+            }
+            if (priorManifest == null && tempDir.listFiles()?.isNotEmpty() == true) {
+                // Tempdir exists but no usable manifest — could be an older format from
+                // a previous app version, or a directory whose source changed under us.
+                // Conservative: wipe and start over rather than trust mystery files.
+                Log.d(TAG, "uploadFile: tempDir ${tempDir.name} present without valid manifest — wiping")
+                tempDir.deleteRecursively()
+                tempDir.mkdirs()
+            }
+            val resuming = priorManifest != null
+            if (resuming) {
+                Log.d(TAG, "uploadFile: resuming from manifest — ${priorManifest!!.completedBlocks}/$numBlocks blocks already encrypted")
+            }
+
+            // Per-file crypto state — either restored from the manifest (resume) or
+            // freshly generated (new upload). On resume we reuse the SAME session key
+            // so the cached blocks decrypt correctly server-side.
+            val sessionKey: SessionKey
+            val verificationCodeBase64: String
+            val verificationCodeBytes: ByteArray
+            val fileId: String
+            val revisionId: String
+            var useVolumeEndpoints: Boolean
+            val contentKeyPacketBase64: String
+            val contentKeyPacketSignature: String
+            val nodePublicKeyArmored: String
+
+            if (resuming) {
+                val m = priorManifest!!
+                sessionKey = SessionKey(UploadResumeManifest.decodeB64(m.sessionKeyB64))
+                verificationCodeBase64 = m.verificationCodeB64
+                verificationCodeBytes = UploadResumeManifest.decodeB64(verificationCodeBase64)
+                fileId = m.fileId
+                revisionId = m.revisionId
+                useVolumeEndpoints = m.useVolumeEndpoints
+                contentKeyPacketBase64 = m.contentKeyPacketB64
+                contentKeyPacketSignature = m.contentKeyPacketSignature
+                nodePublicKeyArmored = m.nodePublicKeyArmored
+            } else {
+                // Generate per-file node key
+                // NodePassphrase must be encrypted to the PARENT link's public key.
+                // The parent is the root link (photos root), so we use the root link's armored key.
+                val nodeKey = cryptoHelper.generateNodeKey()
+                val rootLinkArmoredKey = shareService.rootLinkArmoredKey()
+                    ?: run { shareService.getRootLinkKeyBytes(userId); shareService.rootLinkArmoredKey() }
+                    ?: error("Root link armored key not available")
+                val rootLinkPublicKey = cryptoHelper.withCryptoLock {
+                    cryptoContext.pgpCrypto.getPublicKey(rootLinkArmoredKey)
+                }
+                val nodePassphraseEncrypted = cryptoHelper.encryptDataToPgpMessage(nodeKey.passphraseBytes, rootLinkPublicKey)
+                // Detached PGP signature — the Drive API requires plain signData here (same as web client).
+                val nodePassphraseSignature = cryptoHelper.signData(nodeKey.passphraseBytes, signingKey.unlockedKeyBytes)
+
+                // Name must be encrypted to the PARENT's public key (root link), not the file's own node key.
+                // Must also be signed so the web client can verify nameAuthor.
+                val encryptedName = cryptoHelper.encryptName(item.displayName, rootLinkPublicKey, signingKey.unlockedKeyBytes)
+
+                // The Hash field is HMAC-SHA256(plaintextName, parentNodeHashKey) — the
+                // server uses it for name-collision detection. The cold-start path used
+                // to fall back to the SHA-1 content hex here, but the server then
+                // rejected the request with a Hash format error AND the now-orphaned
+                // upload sat in the local DB as half-completed. Aborting early surfaces
+                // the misconfiguration to logcat instead of producing zombie uploads.
+                val nameHashForCreate = shareService.rootNodeHashKeyBytes()?.let {
+                    cryptoHelper.computeNameHash(item.displayName, it)
+                } ?: error("uploadFile: rootNodeHashKey not cached — refusing to upload with a garbage name hash")
+
+                // Generate session key for content
+                sessionKey = cryptoHelper.generateSessionKey()
+                nodePublicKeyArmored = nodeKey.publicKeyArmored
+                val contentKeyPacketBytes = cryptoHelper.encryptSessionKeyToNode(sessionKey, nodePublicKeyArmored)
+                contentKeyPacketBase64 = cryptoHelper.base64Encode(contentKeyPacketBytes)
+                // ContentKeyPacketSignature must be a detached signature of the RAW SESSION KEY BYTES
+                // (sessionKey.key — the plaintext symmetric key, e.g. 32 bytes for AES-256), NOT the
+                // encrypted key packet.  The Drive web client decrypts the ContentKeyPacket first to
+                // recover the session key bytes, then verifies the signature against those bytes.
+                // Signing the PKESK bytes causes "Signed digest did not match" because the verifier
+                // presents the decrypted session key while we signed the encrypted packet.
+                // Reference: android-drive GenerateContentKey.kt — signData(nodeKey, sessionKey.key)
+                contentKeyPacketSignature = cryptoHelper.signData(sessionKey.key, signingKey.unlockedKeyBytes)
+
+                // Create photo file record.
+                // Try the Photos-stream endpoint first; fall back to the volume-based v2 path.
+                val fileRequest = CreateFileRequest(
                     name = encryptedName,
                     hash = nameHashForCreate,
                     parentLinkId = rootLinkId,
@@ -276,70 +387,85 @@ class PhotoUploadService @Inject constructor(
                     nodeKey = nodeKey.armoredPrivateKey,
                     nodePassphrase = nodePassphraseEncrypted,
                     nodePassphraseSignature = nodePassphraseSignature,
-                    signatureEmail = signingKey.email,
-                    // Also send CKP at the link level so the server populates
-                    // FileProperties.ContentKeyPacket (read by the Proton web client).
+                    signatureAddress = signingKey.email,
                     contentKeyPacket = contentKeyPacketBase64,
                     contentKeyPacketSignature = contentKeyPacketSignature,
-                ),
-            )
+                )
+                val photoRequest = CreatePhotoRequest(
+                    photo = CreatePhotoMetadata(
+                        captureTime = item.dateTaken / 1000L,
+                        // ContentKeyPacket belongs in the Photo field — the server stores it at
+                        // Photo.ContentKeyPacket which is where the web client reads it from.
+                        contentKeyPacket = contentKeyPacketBase64,
+                        contentKeyPacketSignature = contentKeyPacketSignature,
+                    ),
+                    link = CreatePhotoLinkData(
+                        name = encryptedName,
+                        hash = nameHashForCreate,
+                        parentLinkId = rootLinkId,
+                        mimeType = item.mimeType,
+                        nodeKey = nodeKey.armoredPrivateKey,
+                        nodePassphrase = nodePassphraseEncrypted,
+                        nodePassphraseSignature = nodePassphraseSignature,
+                        signatureEmail = signingKey.email,
+                        // Also send CKP at the link level so the server populates
+                        // FileProperties.ContentKeyPacket (read by the Proton web client).
+                        contentKeyPacket = contentKeyPacketBase64,
+                        contentKeyPacketSignature = contentKeyPacketSignature,
+                    ),
+                )
 
-            // Try Photos stream endpoint first, fall back to v2/volumes path.
-            // useVolumeEndpoints = true means we must also use volume-based upload/commit paths.
-            // Both create paths run through retryWithBackoff — without retry on the metadata
-            // endpoints, a single DNS hiccup at the start of upload surfaces as a hard failure
-            // and requires a manual retry of the whole edit-and-save.
-            var useVolumeEndpoints = false
-            val streamResult = runCatching {
-                val resp = retryUploadCall { _ ->
-                    semaphore.withPermit {
-                        manager.invoke { createPhoto(volumeId, photoRequest) }.valueOrThrow
-                    }
-                }
-                val linkId = resp.photo.link.linkId
-                val revId = resp.photo.link.revisionId
-                    ?: retryUploadCall { _ ->
+                // Try Photos stream endpoint first, fall back to v2/volumes path.
+                // useVolumeEndpoints = true means we must also use volume-based upload/commit paths.
+                // Both create paths run through retryWithBackoff — without retry on the metadata
+                // endpoints, a single DNS hiccup at the start of upload surfaces as a hard failure
+                // and requires a manual retry of the whole edit-and-save.
+                useVolumeEndpoints = false
+                val streamResult = runCatching {
+                    val resp = retryUploadCall { _ ->
                         semaphore.withPermit {
-                            manager.invoke { createRevision(shareId, linkId) }.valueOrThrow
+                            manager.invoke { createPhoto(volumeId, photoRequest) }.valueOrThrow
                         }
-                    }.revision.id
-                Log.d(TAG, "uploadFile: created via Photos stream endpoint fileId=$linkId")
-                linkId to revId
-            }
-            val (fileId, revisionId) = if (streamResult.isSuccess) {
-                streamResult.getOrThrow()
-            } else {
-                Log.w(TAG, "uploadFile: stream endpoint failed (${streamResult.exceptionOrNull()?.message}), trying v2/volumes fallback")
-                val resp = retryUploadCall { _ ->
-                    semaphore.withPermit {
-                        manager.invoke { createFileByVolume(volumeId, fileRequest) }.valueOrThrow
                     }
+                    val linkId = resp.photo.link.linkId
+                    val revId = resp.photo.link.revisionId
+                        ?: retryUploadCall { _ ->
+                            semaphore.withPermit {
+                                manager.invoke { createRevision(shareId, linkId) }.valueOrThrow
+                            }
+                        }.revision.id
+                    Log.d(TAG, "uploadFile: created via Photos stream endpoint fileId=$linkId")
+                    linkId to revId
                 }
-                useVolumeEndpoints = true
-                Log.d(TAG, "uploadFile: created via v2/volumes fileId=${resp.file.id}")
-                resp.file.id to resp.file.revisionId
+                val createdIds = if (streamResult.isSuccess) {
+                    streamResult.getOrThrow()
+                } else {
+                    Log.w(TAG, "uploadFile: stream endpoint failed (${streamResult.exceptionOrNull()?.message}), trying v2/volumes fallback")
+                    val resp = retryUploadCall { _ ->
+                        semaphore.withPermit {
+                            manager.invoke { createFileByVolume(volumeId, fileRequest) }.valueOrThrow
+                        }
+                    }
+                    useVolumeEndpoints = true
+                    Log.d(TAG, "uploadFile: created via v2/volumes fileId=${resp.file.id}")
+                    resp.file.id to resp.file.revisionId
+                }
+                fileId = createdIds.first
+                revisionId = createdIds.second
+
+                // Fetch the server-issued verification code BEFORE the stream loop so we can compute
+                // per-block verifier tokens inline (no second pass over spilled blocks).
+                // Per-block verifier token = base64( verificationCodeBytes XOR encBlock[0..N] )
+                // The CDN verifies server-side without decrypting since it knows the session key.
+                verificationCodeBase64 = retryUploadCall { _ ->
+                    semaphore.withPermit {
+                        manager.invoke {
+                            getVerificationData(shareId, fileId, revisionId)
+                        }.valueOrThrow
+                    }
+                }.verificationCode
+                verificationCodeBytes = Base64.decode(verificationCodeBase64, Base64.DEFAULT)
             }
-
-            // Stream file into 4 MB blocks; spill each encrypted block to disk so the live
-            // heap stays ~4 MB regardless of source-file size. Per-block metadata (file ref,
-            // signature, hash, verifier token, encrypted size) lives in heap as O(N × ~256 B).
-            // tempDir is wiped in the finally at the end of uploadFile().
-            val blockSize = 4 * 1024 * 1024
-            val tempDir = File(context.cacheDir, "upload_$fileId").also { it.mkdirs() }
-            try {
-
-            // Fetch the server-issued verification code BEFORE the stream loop so we can compute
-            // per-block verifier tokens inline (no second pass over spilled blocks).
-            // Per-block verifier token = base64( verificationCodeBytes XOR encBlock[0..N] )
-            // The CDN verifies server-side without decrypting since it knows the session key.
-            val verificationCodeBase64 = retryUploadCall { _ ->
-                semaphore.withPermit {
-                    manager.invoke {
-                        getVerificationData(shareId, fileId, revisionId)
-                    }.valueOrThrow
-                }
-            }.verificationCode
-            val verificationCodeBytes = Base64.decode(verificationCodeBase64, Base64.DEFAULT)
 
             data class BlockSpill(
                 val file: File,
@@ -378,102 +504,187 @@ class PhotoUploadService @Inject constructor(
             // BlockSpill list MUST stay in index order — manifest signature is computed over
             // hash concatenation in that order. Pre-allocate an array and fill by idx so we
             // can convert to list before passing on.
-            val totalBytes = item.sizeBytes
-            val numBlocks = if (totalBytes <= 0L) 1
-                else ((totalBytes + blockSize - 1L) / blockSize).toInt().coerceAtLeast(1)
             val blockArr = arrayOfNulls<BlockSpill>(numBlocks)
 
-            val doneEncryptedBytes = AtomicLong(0L)
+            // On resume: pre-populate the slots whose data already sits on disk so the
+            // encrypt loop below skips them entirely. The block file on disk + the
+            // metadata in the manifest together let us reconstruct a BlockSpill without
+            // touching the source file.
+            if (resuming) {
+                val m = priorManifest!!
+                m.blocks.forEach { bm ->
+                    val cachedFile = File(tempDir, "block_${bm.index}.enc")
+                    blockArr[bm.index] = BlockSpill(
+                        file = cachedFile,
+                        encSignature = bm.encSignature,
+                        hashBytes = UploadResumeManifest.decodeB64(bm.hashB64),
+                        verifierTokenBase64 = bm.verifierTokenB64,
+                        encSize = bm.encSize,
+                        plaintextSize = bm.plaintextSize,
+                    )
+                }
+            }
+
+            // Manifest snapshot guard. The encrypt coroutines update the array in parallel,
+            // then call this helper to atomically rewrite progress.json. A small mutex keeps
+            // the encode-and-rename pair indivisible so two concurrent newly-finished blocks
+            // can't trash the on-disk JSON.
+            val manifestMutex = Mutex()
+            suspend fun persistManifestSnapshot() {
+                manifestMutex.withLock {
+                    val completedList = blockArr.filterNotNull().sortedBy { spill ->
+                        // index isn't stored directly; recover it from the filename so the
+                        // sort is deterministic across the parallel-encrypt finish order.
+                        spill.file.nameWithoutExtension.substringAfter("block_").toInt()
+                    }
+                    val perBlock = completedList.map { spill ->
+                        val idx = spill.file.nameWithoutExtension.substringAfter("block_").toInt()
+                        UploadResumeManifest.BlockManifest(
+                            index = idx,
+                            encSignature = spill.encSignature,
+                            hashB64 = UploadResumeManifest.encodeB64(spill.hashBytes),
+                            verifierTokenB64 = spill.verifierTokenBase64,
+                            encSize = spill.encSize,
+                            plaintextSize = spill.plaintextSize,
+                        )
+                    }
+                    UploadResumeManifest.save(
+                        tempDir,
+                        UploadResumeManifest(
+                            completedBlocks = perBlock.size,
+                            totalBlocks = numBlocks,
+                            blockSize = blockSize,
+                            sizeBytes = totalBytes,
+                            fileId = fileId,
+                            revisionId = revisionId,
+                            useVolumeEndpoints = useVolumeEndpoints,
+                            sessionKeyB64 = UploadResumeManifest.encodeB64(sessionKey.key),
+                            verificationCodeB64 = verificationCodeBase64,
+                            contentKeyPacketB64 = contentKeyPacketBase64,
+                            contentKeyPacketSignature = contentKeyPacketSignature,
+                            nodePublicKeyArmored = nodePublicKeyArmored,
+                            blocks = perBlock,
+                        ),
+                    )
+                }
+            }
+
+            // Fresh uploads start with an empty manifest so a later resume from this
+            // point (e.g. failure during block 0's encrypt) finds the header metadata
+            // and can reuse `fileId`. Resume runs already have a manifest on disk;
+            // we leave it in place and just append to it as new blocks complete.
+            if (!resuming) {
+                persistManifestSnapshot()
+            }
+
+            val doneEncryptedBytes = AtomicLong(
+                blockArr.filterNotNull().sumOf { it.plaintextSize }
+            )
             val lastEncryptEmitMs = AtomicLong(0L)
             // Open the source PFD once; share the channel across the parallel encrypt tasks.
-            val sourcePfd: ParcelFileDescriptor = context.contentResolver
-                .openFileDescriptor(Uri.parse(uploadUri), "r")
-                ?: error("Cannot openFileDescriptor: $uploadUri")
-            try {
-                FileInputStream(sourcePfd.fileDescriptor).use { fis ->
-                    val sourceChannel: FileChannel = fis.channel
-                    coroutineScope {
-                        (0 until numBlocks).map { idx ->
-                            async(Dispatchers.IO) {
-                                encryptSlots.withPermit {
-                                    val offset = idx.toLong() * blockSize
-                                    // pread into a fresh ByteBuffer. We size the buffer to the
-                                    // EXPECTED remaining bytes for this block — the final block
-                                    // may be shorter than blockSize. If the source under-reports
-                                    // sizeBytes (rare with MediaStore deletes mid-upload), the
-                                    // read returns -1 and we treat the block as empty (skipped).
-                                    // When totalBytes is known we cap the request to the exact
-                                    // remaining bytes so the final block isn't over-allocated;
-                                    // when sizeBytes is missing (totalBytes <= 0) we ask for a
-                                    // full block and let the channel return whatever's actually
-                                    // there. This safety branch covers the rare case where the
-                                    // OS hasn't published MediaStore SIZE yet for a freshly-saved
-                                    // photo — we'd rather read more than zero than truncate.
-                                    val want = if (totalBytes > 0L)
-                                        minOf(blockSize.toLong(), totalBytes - offset).toInt()
-                                            .coerceAtLeast(0)
-                                    else blockSize
-                                    if (want == 0) {
-                                        // Zero-length tail block (last-block offset == file size).
-                                        // Skip; blockInfos.filterNotNull() drops this slot.
-                                        return@withPermit
-                                    }
-                                    val buf = ByteBuffer.allocate(want)
-                                    var totalRead = 0
-                                    while (totalRead < want) {
-                                        val n = sourceChannel.read(buf, offset + totalRead)
-                                        if (n <= 0) break
-                                        totalRead += n
-                                    }
-                                    if (totalRead == 0) return@withPermit
-                                    val chunk = if (totalRead == buf.array().size) buf.array()
-                                        else buf.array().copyOf(totalRead)
+            // Skip when every block is already encrypted (last attempt's encrypt phase
+            // completed but a later step blew up — no need to touch the source file).
+            val remainingIndices = (0 until numBlocks).filter { blockArr[it] == null }
+            if (remainingIndices.isNotEmpty()) {
+                val sourcePfd: ParcelFileDescriptor = context.contentResolver
+                    .openFileDescriptor(Uri.parse(uploadUri), "r")
+                    ?: error("Cannot openFileDescriptor: $uploadUri")
+                try {
+                    FileInputStream(sourcePfd.fileDescriptor).use { fis ->
+                        val sourceChannel: FileChannel = fis.channel
+                        coroutineScope {
+                            remainingIndices.map { idx ->
+                                async(Dispatchers.IO) {
+                                    encryptSlots.withPermit {
+                                        val offset = idx.toLong() * blockSize
+                                        // pread into a fresh ByteBuffer. We size the buffer to the
+                                        // EXPECTED remaining bytes for this block — the final block
+                                        // may be shorter than blockSize. If the source under-reports
+                                        // sizeBytes (rare with MediaStore deletes mid-upload), the
+                                        // read returns -1 and we treat the block as empty (skipped).
+                                        // When totalBytes is known we cap the request to the exact
+                                        // remaining bytes so the final block isn't over-allocated;
+                                        // when sizeBytes is missing (totalBytes <= 0) we ask for a
+                                        // full block and let the channel return whatever's actually
+                                        // there. This safety branch covers the rare case where the
+                                        // OS hasn't published MediaStore SIZE yet for a freshly-saved
+                                        // photo — we'd rather read more than zero than truncate.
+                                        val want = if (totalBytes > 0L)
+                                            minOf(blockSize.toLong(), totalBytes - offset).toInt()
+                                                .coerceAtLeast(0)
+                                        else blockSize
+                                        if (want == 0) {
+                                            // Zero-length tail block (last-block offset == file size).
+                                            // Skip; blockInfos.filterNotNull() drops this slot.
+                                            return@withPermit
+                                        }
+                                        val buf = ByteBuffer.allocate(want)
+                                        var totalRead = 0
+                                        while (totalRead < want) {
+                                            val n = sourceChannel.read(buf, offset + totalRead)
+                                            if (n <= 0) break
+                                            totalRead += n
+                                        }
+                                        if (totalRead == 0) return@withPermit
+                                        val chunk = if (totalRead == buf.array().size) buf.array()
+                                            else buf.array().copyOf(totalRead)
 
-                                    // PGP encrypt + detached sign must serialize through the
-                                    // single global cryptoLock — see DriveCryptoHelper. Pre/post
-                                    // work (pread, sha256, verifier XOR, spill) stays parallel.
-                                    val (encBlock, encSig) = cryptoHelper.withCryptoLock {
-                                        val eb = cryptoHelper.encryptBlock(chunk, sessionKey)
-                                        val es = cryptoHelper.signBlockEncrypted(
-                                            chunk, signingKey.unlockedKeyBytes, nodeKey.publicKeyArmored,
+                                        // PGP encrypt + detached sign must serialize through the
+                                        // single global cryptoLock — see DriveCryptoHelper. Pre/post
+                                        // work (pread, sha256, verifier XOR, spill) stays parallel.
+                                        val (encBlock, encSig) = cryptoHelper.withCryptoLock {
+                                            val eb = cryptoHelper.encryptBlock(chunk, sessionKey)
+                                            val es = cryptoHelper.signBlockEncrypted(
+                                                chunk, signingKey.unlockedKeyBytes, nodePublicKeyArmored,
+                                            )
+                                            eb to es
+                                        }
+                                        val hashBytes = cryptoHelper.sha256(encBlock)
+                                        val xorLen = minOf(verificationCodeBytes.size, encBlock.size)
+                                        val tokenBytes = ByteArray(verificationCodeBytes.size) { i ->
+                                            if (i < xorLen) (verificationCodeBytes[i].toInt() xor encBlock[i].toInt()).toByte()
+                                            else verificationCodeBytes[i]
+                                        }
+                                        val tokenBase64 = Base64.encodeToString(tokenBytes, Base64.NO_WRAP)
+                                        val blockFile = File(tempDir, "block_$idx.enc")
+                                        // Write the block bytes FIRST; only then update the manifest
+                                        // and the in-memory array. The manifest must never claim a
+                                        // block exists before its bytes are on disk — load() checks
+                                        // both and discards manifests whose claim is unbacked.
+                                        blockFile.writeBytes(encBlock)
+                                        blockArr[idx] = BlockSpill(
+                                            file = blockFile,
+                                            encSignature = encSig,
+                                            hashBytes = hashBytes,
+                                            verifierTokenBase64 = tokenBase64,
+                                            encSize = encBlock.size.toLong(),
+                                            plaintextSize = chunk.size.toLong(),
                                         )
-                                        eb to es
-                                    }
-                                    val hashBytes = cryptoHelper.sha256(encBlock)
-                                    val xorLen = minOf(verificationCodeBytes.size, encBlock.size)
-                                    val tokenBytes = ByteArray(verificationCodeBytes.size) { i ->
-                                        if (i < xorLen) (verificationCodeBytes[i].toInt() xor encBlock[i].toInt()).toByte()
-                                        else verificationCodeBytes[i]
-                                    }
-                                    val tokenBase64 = Base64.encodeToString(tokenBytes, Base64.NO_WRAP)
-                                    val blockFile = File(tempDir, "block_$idx.enc")
-                                    blockFile.writeBytes(encBlock)
-                                    blockArr[idx] = BlockSpill(
-                                        file = blockFile,
-                                        encSignature = encSig,
-                                        hashBytes = hashBytes,
-                                        verifierTokenBase64 = tokenBase64,
-                                        encSize = encBlock.size.toLong(),
-                                        plaintextSize = chunk.size.toLong(),
-                                    )
-                                    if (onProgress != null) {
-                                        val done = doneEncryptedBytes.addAndGet(chunk.size.toLong())
-                                        val denom = if (totalBytes > 0L) totalBytes else done
-                                        val nowMs = System.currentTimeMillis()
-                                        val prev = lastEncryptEmitMs.get()
-                                        if (nowMs - prev >= PROGRESS_THROTTLE_MS &&
-                                            lastEncryptEmitMs.compareAndSet(prev, nowMs)
-                                        ) {
-                                            onProgress(UploadPhase.Encrypting, done, denom)
+                                        // Atomic manifest rewrite. The mutex inside
+                                        // persistManifestSnapshot serialises concurrent writers;
+                                        // any failure here is non-fatal — the block bytes are on
+                                        // disk and the worst case is the next resume re-encrypts
+                                        // a few blocks (functional but slower than ideal).
+                                        runCatching { persistManifestSnapshot() }
+                                        if (onProgress != null) {
+                                            val done = doneEncryptedBytes.addAndGet(chunk.size.toLong())
+                                            val denom = if (totalBytes > 0L) totalBytes else done
+                                            val nowMs = System.currentTimeMillis()
+                                            val prev = lastEncryptEmitMs.get()
+                                            if (nowMs - prev >= PROGRESS_THROTTLE_MS &&
+                                                lastEncryptEmitMs.compareAndSet(prev, nowMs)
+                                            ) {
+                                                onProgress(UploadPhase.Encrypting, done, denom)
+                                            }
                                         }
                                     }
                                 }
-                            }
-                        }.awaitAll()
+                            }.awaitAll()
+                        }
                     }
+                } finally {
+                    runCatching { sourcePfd.close() }
                 }
-            } finally {
-                runCatching { sourcePfd.close() }
             }
             // Guarantee a final 100 % Encrypting tick so the UI lands cleanly at the phase
             // boundary, regardless of where the last throttled tick fell.
@@ -686,9 +897,10 @@ class PhotoUploadService @Inject constructor(
                 blockSizes           = plaintextBlockSizes,
                 width                = item.width,
                 height               = item.height,
-                duration             = item.duration,
-                nodePublicKeyArmored = nodeKey.publicKeyArmored,
+                durationMillis       = item.duration,
+                nodePublicKeyArmored = nodePublicKeyArmored,
                 signerKeyBytes       = signingKey.unlockedKeyBytes,
+                sha1HexDigest        = hash,
             )
 
             // Use the correct commit endpoint based on how the file was created:
@@ -697,12 +909,23 @@ class PhotoUploadService @Inject constructor(
             //     No BlockList or ThumbnailList needed in the request body.
             //   • createPhoto / stream path (useVolumeEndpoints=false) → legacy share-based commit
             //     Requires explicit BlockList, ThumbnailList, ContentKeyPacket in the request.
+            // Drive's wire ContentHash on a photo upload is HMAC-SHA256(rootNodeHashKey, sha256-hex-of-content),
+            // NOT the bare SHA-256 of the content. Drive web's `photosTransferPayloadBuilder` rejects
+            // payloads whose ContentHash doesn't verify against the photos-root NodeHashKey with the
+            // misleading error "Cannot build photo payload without a content hash". Fall back to the bare
+            // SHA-256 only when the root NodeHashKey isn't available (cold start) — at that point the
+            // upload was already going to fail other consistency checks anyway, so logging is fine.
+            val photoContentHash = shareService.rootNodeHashKeyBytes()?.let { rootHashKey ->
+                cryptoHelper.computeNameHash(hash, rootHashKey)
+            } ?: hash.also {
+                Log.w(TAG, "uploadFile: photos root NodeHashKey unavailable — falling back to bare SHA-256 for ContentHash; expect Drive web rejection")
+            }
             if (useVolumeEndpoints) {
                 val v2Request = CommitRevisionV2Request(
                     manifestSignature = manifestSignature,
                     signatureAddress  = signingKey.email,
                     xAttr             = xAttr,
-                    photo             = PhotoMetaDto(captureTime = item.dateTaken / 1000L, contentHash = hash),
+                    photo             = PhotoMetaDto(captureTime = item.dateTaken / 1000L, contentHash = photoContentHash),
                 )
                 retryUploadCall { _ ->
                     semaphore.withPermit {
@@ -720,7 +943,7 @@ class PhotoUploadService @Inject constructor(
                     manifestSignature = manifestSignature,
                     signatureAddress  = signingKey.email,
                     xAttr             = xAttr,
-                    photo             = PhotoMetaDto(captureTime = item.dateTaken / 1000L, contentHash = hash),
+                    photo             = PhotoMetaDto(captureTime = item.dateTaken / 1000L, contentHash = photoContentHash),
                     contentKeyPacket  = contentKeyPacketBase64,
                     contentKeyPacketSignature = contentKeyPacketSignature,
                     thumbnailList     = if (capturedEncThumbnail != null && capturedEncThumbnailHash != null && thumbToken != null)
@@ -779,10 +1002,36 @@ class PhotoUploadService @Inject constructor(
                 )
             ))
             Log.d(TAG, "uploadFile: completed fileId=$fileId, persisted to DB")
+            // Success: wipe tempDir now that the bytes are committed to the CDN. Done
+            // INSIDE the success branch (not a finally) so the failure branches below
+            // can hold the wipe back when the failure is retry-eligible.
+            runCatching { tempDir.deleteRecursively() }
+                .onFailure { Log.w(TAG, "uploadFile: success cleanup of ${tempDir.absolutePath} failed: ${it.message}") }
             fileId
-            } finally {
+            } catch (e: CancellationException) {
+                // User-initiated cancel (back-out of the editor, app being closed, parent
+                // batch being torn down). No point hoarding a partial upload's blocks
+                // since the user explicitly walked away. Wipe and rethrow so structured
+                // concurrency tears down cleanly.
                 runCatching { tempDir.deleteRecursively() }
-                    .onFailure { Log.w(TAG, "uploadFile: cleanup of ${tempDir.absolutePath} failed: ${it.message}") }
+                    .onFailure { Log.w(TAG, "uploadFile: cancel cleanup of ${tempDir.absolutePath} failed: ${it.message}") }
+                throw e
+            } catch (e: Throwable) {
+                // Non-cancel failure. Split by retry-eligibility:
+                //  - retryable (network / IO / transient) → KEEP tempDir so the caller's
+                //    next batch run resumes from the manifest instead of restarting from
+                //    block 0. For a 100 MB photo at 4 MB blocks this saves up to 25
+                //    redundant Go-runtime encrypt + SHA-256 + verifier-XOR passes.
+                //  - non-retryable (auth, quota, malformed input, anything we won't redo)
+                //    → wipe, since no future attempt will benefit from the cached state.
+                if (isRetryableUploadFailure(e)) {
+                    Log.d(TAG, "uploadFile: retryable failure (${e.javaClass.simpleName}: ${e.message}) — preserving tempDir ${tempDir.name} for resume")
+                } else {
+                    Log.d(TAG, "uploadFile: non-retryable failure (${e.javaClass.simpleName}: ${e.message}) — wiping tempDir ${tempDir.name}")
+                    runCatching { tempDir.deleteRecursively() }
+                        .onFailure { Log.w(TAG, "uploadFile: failure cleanup of ${tempDir.absolutePath} failed: ${it.message}") }
+                }
+                throw e
             }
         }
 

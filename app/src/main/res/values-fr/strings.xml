@@ -48,14 +48,14 @@
     <string name="onboarding_folders_exclude_subtitle">Cochez les dossiers que vous NE voulez pas téléverser. Tout le reste est sauvegardé automatiquement.</string>
     <string name="onboarding_folders_needs_perm">Autorisez d\'abord l\'accès aux photos pour voir vos dossiers.</string>
     <string name="onboarding_folders_empty">Aucun dossier photo trouvé sur cet appareil.</string>
+    <string name="onboarding_album_mirror_title">Refléter les dossiers de l\'appareil comme albums Drive ?</string>
+    <string name="onboarding_album_mirror_subtitle">Choisissez les dossiers dont les photos doivent aussi apparaître dans des albums Drive correspondants. Passer pour garder tout uniquement dans votre flux photo.</string>
+    <string name="onboarding_album_mirror_add_custom">Ajouter un nom personnalisé</string>
 
     <string name="onboarding_about_title">Client tiers indépendant</string>
     <string name="onboarding_about_subtitle">Fait par un seul développeur. Sans lien avec Proton AG. Code source ouvert, sous licence GPL, aucune télémétrie de notre côté.</string>
     <string name="onboarding_about_author_subtitle">Site personnel du développeur.</string>
     <string name="onboarding_about_github_subtitle">Code source complet sur GitHub.</string>
-    <string name="onboarding_about_license_title">Licence GPL 3.0</string>
-    <string name="onboarding_about_license_subtitle">Logiciel libre. Vous pouvez lire, modifier et redistribuer le code.</string>
-    <string name="onboarding_about_disclaimer">App tierce non officielle. Communique avec Proton Drive via l\'API publique. Sans approbation ni lien avec Proton AG.</string>
 
     <string name="onboarding_appearance_title">À votre image</string>
     <string name="onboarding_appearance_subtitle">Choisissez thème, couleur d\'accent et langue. Tout est modifiable plus tard dans les Paramètres.</string>
@@ -95,6 +95,7 @@
     <string name="gallery_added_to_album">%1$d photos ajoutées à %2$s</string>
     <string name="gallery_stripped_metadata">Métadonnées supprimées de %1$d photos</string>
     <string name="gallery_stripped_with_skipped">%1$d supprimées, %2$d ignorées (externes)</string>
+    <string name="strip_metadata_failed">Impossible de supprimer les métadonnées de ce fichier.</string>
     <string name="gallery_filter_favorites">Favoris</string>
     <string name="gallery_filter_hidden">Masqués</string>
     <string name="gallery_filter_categories">Catégories</string>
@@ -129,9 +130,6 @@
     <!-- Delete bottom sheet -->
     <string name="delete_also_cloud_warning">L\'original sera supprimé définitivement. Proton ne peut pas le récupérer.</string>
     <string name="delete_album_container_warning">Cela supprime l\'album mais conserve vos photos dans Proton Drive.</string>
-    <string name="bucket_album_readonly_msg">%s est un dossier de l\'appareil. Utilisez \'Ajouter à l\'album\' depuis Photos pour organiser vos photos.</string>
-    <string name="albums_new_kind_cloud">Cloud</string>
-    <string name="albums_new_kind_local">Local</string>
     <string name="delete_button_permanently">Supprimer définitivement</string>
     <string name="delete_multi_mixed_msg">Certaines de ces photos sont sauvegardées sur Proton Drive. Choisissez le mode de suppression.</string>
     <string name="delete_multi_remove_device">Retirer de l\'appareil</string>
@@ -201,10 +199,35 @@
     <string name="settings_excluded_folders_count_label">%1$d sur %2$d dossiers exclus</string>
     <string name="settings_excluded_folders_select_all">Tout exclure</string>
     <string name="settings_excluded_folders_deselect_all">Tout inclure</string>
+    <!-- Album mirror -->
+    <string name="settings_album_mirror_folders">Refléter les dossiers de l\'appareil comme albums Drive</string>
+    <string name="settings_album_mirror_folders_desc">Choisissez quels dossiers de l\'appareil apparaissent aussi comme albums Drive lors de l\'envoi</string>
+    <string name="album_mirror_folders_title">Refléter les dossiers comme albums Drive</string>
+    <string name="album_mirror_folders_subtitle">Les photos des dossiers cochés apparaissent aussi dans les albums Drive correspondants. Les photos sont envoyées dans votre flux dans tous les cas.</string>
+    <string name="album_mirror_add_custom">Ajouter un nom de dossier</string>
+    <string name="album_mirror_custom_dialog_title">Ajouter un nom de dossier</string>
+    <string name="album_mirror_custom_dialog_hint">Nom du dossier (ex. Voyage 2026)</string>
     <string name="settings_recently_deleted">Récemment supprimés</string>
     <string name="settings_recently_deleted_subtitle">%1$d photos · supprimées au cours des 30 derniers jours</string>
     <string name="settings_recently_deleted_subtitle_singular">1 photo · supprimée au cours des 30 derniers jours</string>
     <string name="settings_recently_deleted_empty">Vide</string>
+    <!-- Cloud trash -->
+    <string name="trash_section_device">Sur cet appareil</string>
+    <string name="trash_section_cloud">Sur Proton Drive</string>
+    <string name="trash_cloud_empty">La corbeille cloud est vide</string>
+    <string name="trash_cloud_error">Impossible de charger la corbeille</string>
+    <string name="trash_cloud_retry">Réessayer</string>
+    <string name="trash_cloud_empty_confirm_title">Vider la corbeille cloud ?</string>
+    <string name="trash_cloud_empty_confirm_message">%1$d photo(s) seront supprimées définitivement de Proton Drive. Action irréversible.</string>
+    <string name="trash_cloud_empty_confirm_action">Vider</string>
+    <string name="trash_cloud_restore_done">%1$d photo(s) restaurée(s)</string>
+    <string name="trash_cloud_restore_partial">%1$d restaurée(s), %2$d n\'ont pas pu l\'être</string>
+    <string name="trash_cloud_restore_refresh_failed">Restaurées — tirez vers le bas dans votre galerie pour actualiser</string>
+    <string name="trash_cloud_restore_failed">Échec de la restauration</string>
+    <string name="trash_cloud_emptied">Corbeille cloud vidée</string>
+    <string name="trash_cloud_empty_partial">%1$d supprimées, %2$d n\'ont pas pu l\'être</string>
+    <string name="trash_cloud_empty_failed">Impossible de vider la corbeille cloud</string>
+    <string name="settings_recently_deleted_subtitle_device_cloud">%1$d sur l\'appareil · %2$d sur Drive</string>
     <string name="settings_free_up_desc">Supprimer de l\'appareil les fichiers déjà sauvegardés</string>
     <string name="settings_free_up_action">Supprimer</string>
     <string name="settings_backup_size">%s synchronisé depuis cet appareil</string>
@@ -247,6 +270,10 @@
     <string name="settings_app_lock_timeout_1h">1 heure</string>
     <string name="settings_clear_cache_on_close">Vider le cache à la fermeture</string>
     <string name="settings_clear_cache_on_close_desc">Supprime les copies locales des photos cloud consultées dès que l\'app passe en arrière-plan. Elles sont retéléchargées à la prochaine ouverture.</string>
+    <string name="viewer_added_to_album">Ajoutée à %1$s</string>
+    <string name="settings_photos_timeline_section">Fil Photos</string>
+    <string name="settings_hide_album_photos">Masquer les photos dans les albums</string>
+    <string name="settings_hide_album_photos_desc">Ne plus afficher dans l\'onglet Photos les images déjà rangées dans un album. Les onglets Albums et Partagés ne sont pas affectés.</string>
     <string name="settings_telemetry">Télémétrie</string>
     <string name="settings_telemetry_desc">Contrôlée par les paramètres de votre compte Proton. Ouvrez account.proton.me pour la modifier.</string>
     <string name="settings_hidden_photos">Photos masquées</string>
@@ -266,7 +293,9 @@
     <string name="selection_videos_only">%d vidéos</string>
     <string name="selection_mixed">%1$d photos, %2$d vidéos</string>
     <string name="editor_error_load_local">Impossible de charger l\'image</string>
-    <string name="editor_saved_as_copy_toast">L\'original est en lecture seule, enregistré comme copie dans Pictures/Proton Photos</string>
+    <string name="editor_saved_as_copy">Une copie a été enregistrée dans Photos for Proton</string>
+    <string name="editor_external_load_error">Impossible d\'ouvrir ce fichier</string>
+    <string name="editor_saved_as_copy_toast">L\'original est en lecture seule, enregistré comme copie dans votre galerie</string>
     <string name="editor_error_not_signed_in">Vous n\'êtes pas connecté</string>
     <string name="editor_error_download_failed">Impossible de télécharger l\'image</string>
     <string name="editor_error_decode_failed">Impossible de décoder l\'image</string>
@@ -280,11 +309,14 @@
     <string name="editor_adj_saturation">Saturation</string>
     <string name="editor_adj_tone">Teinte</string>
     <string name="editor_adj_temperature">Température</string>
-    <string name="editor_crop_apply">Appliquer</string>
     <string name="editor_crop_reset">Réinitialiser</string>
     <string name="hidden_photos_title">Photos masquées</string>
     <string name="hidden_photos_auth_prompt">Authentifiez-vous pour voir vos photos masquées</string>
     <string name="hidden_photos_unlock">Déverrouiller</string>
+    <string name="hidden_no_device_lock_notice">Aucun verrouillage d\'écran — le dossier masqué n\'est pas protégé.</string>
+    <string name="hidden_auth_title">Photos masquées</string>
+    <string name="hidden_auth_description">Authentifiez-vous pour voir vos photos masquées</string>
+    <string name="hide_cloud_copy_notice">Les photos sauvegardées restent dans votre Proton Drive — les masquer les retire seulement de la galerie de cet appareil.</string>
     <string name="album_rename">Renommer l\'album</string>
     <string name="album_rename_confirm">Renommer</string>
     <string name="album_remove_from_album">Retirer de l\'album</string>
@@ -348,7 +380,6 @@
     <string name="about_lib_gopenpgp">Implémentation OpenPGP</string>
 
     <!-- Albums -->
-    <string name="albums_filter_local">Local</string>
     <string name="albums_filter_backed_up">Sauvegardés</string>
     <string name="albums_filter_title">Filtrer les albums</string>
     <string name="albums_filter_type">Type</string>
@@ -395,11 +426,6 @@
     <string name="share_role_can_view">peut consulter</string>
     <string name="share_role_can_edit">peut modifier</string>
     <string name="share_role_pending">en attente</string>
-    <string name="share_public_link">Lien public</string>
-    <string name="share_public_link_active">Actif</string>
-    <string name="share_public_link_inactive">Inactif</string>
-    <string name="share_public_link_audience">Toute personne sur Internet disposant du lien</string>
-    <string name="share_copy_link_button">Copier le lien</string>
     <string name="share_stop_sharing">Arrêter le partage</string>
     <string name="share_close">Fermer</string>
     <!-- Drive-web-style invite popup (multi-chip flow) -->
@@ -411,9 +437,24 @@
     <string name="share_invite_cancel">Annuler</string>
     <string name="share_invite_email_invalid">Adresse e-mail invalide</string>
     <string name="share_invite_email_duplicate">Déjà ajoutée</string>
-    <string name="share_invite_summary_success">%1$d invités</string>
-    <string name="share_invite_summary_partial">%1$d invités, %2$d échoués</string>
-    <string name="share_invite_summary_all_failed">Échec de l\'invitation de %1$d</string>
+    <string name="share_invite_summary_partial">%1$d envoyées, %2$d non envoyées</string>
+    <string name="share_invite_summary_all_failed">Les invitations n\'ont pas pu être envoyées</string>
+    <!-- Album-sharing + album action error fallbacks (raw exception text stays in the log) -->
+    <string name="share_revoke_failed">Impossible de retirer l\'invitation</string>
+    <string name="share_remove_member_failed">Impossible de retirer le membre</string>
+    <string name="share_permission_change_failed">Impossible de modifier le rôle</string>
+    <string name="share_invite_failed">Impossible d\'envoyer l\'invitation</string>
+    <string name="share_stop_failed">Impossible d\'arrêter le partage</string>
+    <string name="share_create_link_failed">Impossible de créer le lien de partage</string>
+    <string name="share_disable_link_failed">Impossible de désactiver le lien</string>
+    <string name="album_leave_failed">Impossible de quitter l\'album</string>
+    <string name="album_leave_missing_details">Impossible de quitter cet album pour l\'instant</string>
+    <string name="album_delete_photos_failed">Impossible de supprimer les photos</string>
+    <string name="album_remove_photos_failed">Impossible de retirer les photos</string>
+    <string name="album_remove_partial">%1$d sur %2$d retirées — certaines n\'ont pas pu l\'être</string>
+    <string name="album_rename_failed">Impossible de renommer l\'album</string>
+    <string name="album_set_cover_failed">Impossible de définir la couverture de l\'album</string>
+    <string name="shared_save_failed">Impossible d\'enregistrer l\'album dans votre bibliothèque</string>
 
     <!-- Content filter sheet -->
     <string name="filter_title">Filtrer</string>
@@ -486,6 +527,11 @@
         <item quantity="many">Supprimer %1$d de photos ?</item>
         <item quantity="other">Supprimer %1$d photos ?</item>
     </plurals>
+    <plurals name="count_items_plural">
+        <item quantity="one">%d élément</item>
+        <item quantity="many">%d éléments</item>
+        <item quantity="other">%d éléments</item>
+    </plurals>
 
     <plurals name="count_photos_plural">
         <item quantity="one">%d photo</item>
@@ -496,6 +542,11 @@
         <item quantity="one">%d vidéo</item>
         <item quantity="many">%d de vidéos</item>
         <item quantity="other">%d vidéos</item>
+    </plurals>
+    <plurals name="share_invite_sent">
+        <item quantity="one">%1$d invitation envoyée</item>
+        <item quantity="many">%1$d invitations envoyées</item>
+        <item quantity="other">%1$d invitations envoyées</item>
     </plurals>
 
     <string name="gallery_on_this_day">Ce jour-là</string>
@@ -559,4 +610,83 @@
     <string name="day_detail_edit_description_title">Modifier la description</string>
     <string name="day_detail_save">Enregistrer</string>
     <string name="day_detail_photos_count">%1$d photos</string>
+
+    <!-- Programme de mise à jour intégré -->
+    <string name="update_available_title">Mise à jour disponible</string>
+    <string name="update_available_message">Une nouvelle version (%1$s) est prête à installer (%2$d Mo).</string>
+    <string name="update_action_update">Mettre à jour</string>
+    <string name="update_action_later">Plus tard</string>
+    <string name="update_downloading">Téléchargement… %1$d%%</string>
+    <string name="update_install_prompt">Téléchargement terminé. Installer maintenant ?</string>
+    <string name="update_check_settings_row">Rechercher des mises à jour</string>
+    <string name="update_check_settings_summary">Vous utilisez la version %1$s</string>
+    <string name="update_no_update">Vous avez la dernière version.</string>
+    <string name="update_check_failed">Impossible de vérifier les mises à jour. Réessayez plus tard.</string>
+    <string name="update_permission_required">Autorisez l\'installation d\'applications inconnues dans les paramètres système.</string>
+    <string name="offline_banner_message">Vous êtes hors ligne. Certaines fonctionnalités seront indisponibles jusqu\'à la reconnexion.</string>
+    <string name="offline_banner_dismiss_cd">Fermer la notification</string>
+    <string name="network_error_offline">Vous êtes hors ligne. Réessayez une fois reconnecté.</string>
+    <string name="network_error_transient">Échec de la connexion. Réessayez plus tard.</string>
+    <string name="cd_status_backed_up_device">Sauvegardée sur Drive et sur l\'appareil</string>
+    <string name="cd_status_cloud_only">Uniquement sur Proton Drive</string>
+    <string name="cd_status_hidden_local">Masquée sur cet appareil</string>
+    <string name="cd_status_device_only">Uniquement sur cet appareil</string>
+    <string name="cd_status_backed_up">Sauvegardée</string>
+    <string name="cd_status_in_album">Dans cet album</string>
+    <string name="cd_status_excluded">Exclue</string>
+    <string name="cd_status_selected">Sélectionnée</string>
+    <string name="cd_favorite_add">Ajouter aux favoris</string>
+    <string name="cd_favorite_remove">Retirer des favoris</string>
+    <string name="cd_editor_undo">Annuler</string>
+    <string name="cd_editor_redo">Rétablir</string>
+    <string name="cd_editor_reset">Réinitialiser</string>
+    <string name="cd_viewer_edit">Modifier</string>
+    <string name="cd_viewer_metadata_edit">Modifier le champ</string>
+    <string name="cd_clear_search">Effacer la recherche</string>
+
+    <string name="shared_save_to_library">Enregistrer dans ma bibliothèque</string>
+    <string name="shared_save_success_fmt">%1$d photos enregistrées dans votre bibliothèque</string>
+    <string name="shared_save_partial_fmt">%1$d sur %2$d photos enregistrées dans votre bibliothèque</string>
+    <string name="shared_save_progress_fmt">Enregistrement %1$d / %2$d dans votre bibliothèque…</string>
+    <string name="viewer_delete_subtitle_synced">Cette photo est sauvegardée sur Proton Drive. Choisissez :</string>
+    <string name="viewer_delete_remove_from_device">Retirer de l\'appareil</string>
+    <string name="viewer_delete_remove_from_device_desc">Conserver la sauvegarde sur Proton Drive</string>
+    <string name="viewer_delete_remove_from_cloud">Retirer du cloud</string>
+    <string name="viewer_delete_remove_from_cloud_desc">Garder la photo sur cet appareil, déplacer la sauvegarde dans la corbeille Drive</string>
+    <string name="viewer_delete_everywhere">Supprimer partout</string>
+    <string name="viewer_delete_everywhere_desc">Déplace vers la corbeille de l\'appareil ET vers la corbeille Proton Drive</string>
+    <string name="viewer_delete_subtitle_cloud_only">La photo sera déplacée dans la corbeille de Proton Drive. Vous pouvez la récupérer depuis Supprimés récemment.</string>
+    <string name="viewer_delete_move_to_drive_trash">Déplacer vers la corbeille Drive</string>
+    <string name="action_save">Enregistrer</string>
+    <string name="gallery_picker_drive_albums">Albums Drive</string>
+    <string name="album_card_folder_badge">Dossier</string>
+    <string name="sync_folders_add_dialog_title">Ajouter un dossier</string>
+    <string name="sync_folders_add_row_title">Ajouter un dossier par nom</string>
+    <string name="sync_folders_add_dialog_name_hint">Nom du dossier</string>
+    <string name="rename_sheet_title">Renommer le fichier</string>
+    <string name="rename_sheet_subtitle_cloud">Choisissez comment appliquer le nouveau nom à votre photo cloud.</string>
+    <string name="rename_sheet_subtitle_local">Choisissez comment appliquer le nouveau nom sur cet appareil.</string>
+    <string name="rename_sheet_name_label">Nom du fichier</string>
+    <string name="rename_sheet_option_cloud_title">Renommer dans le cloud</string>
+    <string name="rename_sheet_option_cloud_subtitle">Téléverse sous le nouveau nom, puis déplace l\'original vers Supprimés récemment.</string>
+    <string name="rename_sheet_option_local_title">Renommer l\'original</string>
+    <string name="rename_sheet_option_local_subtitle">Met à jour le fichier directement sur votre appareil.</string>
+    <string name="rename_sheet_option_copy_title">Enregistrer comme copie</string>
+    <string name="rename_sheet_option_copy_subtitle_cloud">Téléverse comme nouvelle photo. L\'original reste dans Drive.</string>
+    <string name="rename_sheet_option_copy_subtitle_local">Crée un nouveau fichier dans Pictures/Proton Photos.</string>
+    <string name="save_to_library_confirm_title">Enregistrer dans ma bibliothèque</string>
+    <string name="save_to_library_confirm_body_fmt">Nous copierons %1$d éléments dans votre bibliothèque. Ils apparaîtront dans vos Photos dès que la copie sera terminée.</string>
+    <string name="save_to_library_action_cancel">Annuler l\'enregistrement</string>
+    <string name="save_to_library_cancelled_fmt">Enregistrement annulé à %1$d / %2$d</string>
+    <string name="albums_more_actions">Plus d\'actions</string>
+    <string name="leave_album">Quitter l\'album</string>
+    <string name="leave_album_confirm_title">Quitter cet album ?</string>
+    <string name="leave_album_confirm_body">L\'album disparaîtra de votre bibliothèque. La copie du propriétaire et l\'accès des autres restent intacts. Vous pourrez être invité à nouveau plus tard.</string>
+    <string name="leave_album_confirm_action">Quitter</string>
+    <string name="share_shared_by">Partagé par</string>
+    <string name="share_invite_sending">Envoi de l\'invitation…</string>
+    <string name="gallery_deselect_all">Tout désélectionner</string>
+    <string name="force_update_title">Mise à jour requise</string>
+    <string name="force_update_body">Cette version n\'est plus prise en charge. Veuillez mettre à jour pour continuer.</string>
+    <string name="force_update_action">Mettre à jour</string>
 </resources>

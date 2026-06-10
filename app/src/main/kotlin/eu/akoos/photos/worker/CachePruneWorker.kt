@@ -65,6 +65,14 @@ class CachePruneWorker @AssistedInject constructor(
             context,
             networkAvailable = true,
         )
+        // Sweep abandoned upload-resume tempDirs whose last-touch is older than the
+        // STALE_TTL. The resume manifest itself preserves blocks indefinitely after a
+        // retry-eligible failure, but if the user closes the app and doesn't come back
+        // for a week we'd rather reclaim the ~hundreds of MB than keep waiting for a
+        // resume that's no longer coming.
+        eu.akoos.photos.data.repository.drive.UploadResumeManifest.pruneStaleTempDirs(
+            context.cacheDir,
+        )
         return Result.success()
     }
 

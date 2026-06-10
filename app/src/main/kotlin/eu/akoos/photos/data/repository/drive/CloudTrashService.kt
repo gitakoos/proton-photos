@@ -29,6 +29,7 @@ import kotlinx.coroutines.withContext
 import me.proton.core.domain.entity.UserId
 import me.proton.core.network.data.ApiProvider
 import eu.akoos.photos.data.api.DriveApiService
+import eu.akoos.photos.data.api.dto.BatchLinksRequest
 import eu.akoos.photos.data.api.dto.DeleteLinksRequest
 import eu.akoos.photos.data.api.dto.FavoriteRequest
 import eu.akoos.photos.data.api.dto.LinkCoreDto
@@ -45,6 +46,24 @@ import javax.inject.Singleton
 
 private const val TAG = "CloudTrashSvc"
 
+/** Per-link result of a restore-from-trash batch. [failedLinkIds] are the links the
+ *  server rejected (per-item code != 1000) and that therefore stayed in trash.
+ *  [galleryRefreshFailed] is true when the restore itself succeeded but the follow-up
+ *  stream refresh couldn't run — the restored photos are back on the server but won't
+ *  reappear in the gallery until a manual pull-to-refresh. */
+data class CloudRestoreOutcome(
+    val restoredLinkIds: Set<String>,
+    val failedLinkIds: Set<String>,
+    val galleryRefreshFailed: Boolean,
+)
+
+/** Per-link result of a permanent-delete batch. [failedLinkIds] are the links the
+ *  server rejected (per-item code != 1000) and that therefore remain in trash. */
+data class CloudDeleteOutcome(
+    val deletedLinkIds: Set<String>,
+    val failedLinkIds: Set<String>,
+)
+
 /**
  * Drive trash + favorite + rename operations.
  *
@@ -60,6 +79,8 @@ class CloudTrashService @Inject constructor(
     private val photoListingDao: PhotoListingDao,
     private val downloadService: PhotoDownloadService,
     private val uploadService: PhotoUploadService,
+    private val linkDetailHelpers: LinkDetailHelpers,
+    private val photoStreamService: PhotoStreamService,
 ) {
     suspend fun deleteFiles(userId: UserId, linkIds: List<String>): Unit = withContext(Dispatchers.IO) {
         if (linkIds.isEmpty()) return@withContext
@@ -126,29 +147,61 @@ class CloudTrashService @Inject constructor(
             val volumeId = shareService.getVolumeId(userId)
             val manager = apiProvider.get<DriveApiService>(userId)
 
-            // GET drive/volumes/{volumeId}/trash?Page=N — full Drive trash, page-based (1-indexed).
-            // Stop when the server returns an empty Links list.
-            // Filter client-side: only image/* and video/* links belong in the photo trash UI.
-            val allLinks = mutableListOf<LinkCoreDto>()
-            var page = 1
+            // GET drive/volumes/{volumeId}/trash?Page=N — paginated grouping response.
+            // The server returns trashed items grouped by ShareID with only LinkIDs +
+            // ParentIDs — no mime, no thumbnails, no crypto keys. We hydrate per-link
+            // details below. Pagination is 0-indexed (matches Drive web's request
+            // pattern); the first empty Trash list signals the end.
+            data class TrashGroup(val shareId: String, val linkIds: List<String>)
+            val groups = mutableListOf<TrashGroup>()
+            var page = 0
             while (true) {
                 val resp = shareService.networkSemaphore.withPermit {
                     manager.invoke { getVolumeTrash(volumeId, page) }.valueOrThrow
                 }
-                if (resp.links.isEmpty()) break
-                allLinks.addAll(resp.links)
+                if (resp.trash.isEmpty()) break
+                resp.trash.forEach { g -> groups += TrashGroup(g.shareId, g.linkIds) }
                 page++
             }
 
-            val photoLinks = allLinks.filter { link ->
+            val totalLinkIds = groups.sumOf { it.linkIds.size }
+            if (totalLinkIds == 0) return@withContext emptyList()
+            Log.d(TAG, "getCloudTrash: $totalLinkIds link IDs across ${groups.size} trash group(s); hydrating details")
+
+            // Hydrate the link metadata via the share-based fetch endpoint
+            // (drive/shares/{shareId}/links/fetch_metadata). The volume-based batch
+            // endpoint is photos-share-only — trashed items may live in any share on
+            // the volume, so we walk per group and use the matching shareId for each.
+            val linksById = mutableMapOf<String, LinkCoreDto>()
+            for (group in groups) {
+                for (chunk in group.linkIds.chunked(150)) {
+                    val resp = runCatching {
+                        shareService.networkSemaphore.withPermit {
+                            manager.invoke {
+                                fetchLinkMetadata(group.shareId, BatchLinksRequest(chunk))
+                            }.valueOrThrow
+                        }
+                    }
+                    resp.fold(
+                        onSuccess = { r -> r.links.forEach { linksById[it.linkId] = it } },
+                        onFailure = { e -> Log.w(TAG, "getCloudTrash: fetch_metadata chunk failed for share ${group.shareId}: ${e.message}") },
+                    )
+                }
+            }
+            Log.d(TAG, "getCloudTrash: hydrated ${linksById.size} / $totalLinkIds link details")
+
+            // Filter to photo / video media. Mime lives on link.mimeType; entries without
+            // a mime (folders, share roots that surface in trash unexpectedly) are dropped.
+            val photoLinks = linksById.values.filter { link ->
                 val mime = link.mimeType ?: return@filter false
                 mime.startsWith("image/") || mime.startsWith("video/")
             }
 
             if (photoLinks.isEmpty()) return@withContext emptyList()
-            Log.d(TAG, "getCloudTrash: ${photoLinks.size} photo/video items in trash (${allLinks.size} total)")
+            Log.d(TAG, "getCloudTrash: ${photoLinks.size} photo/video items after mime filter")
 
-            // Collect thumbnail IDs from ActiveRevision so we can batch-fetch CDN URLs.
+            // Collect thumbnail IDs from FileProperties.ActiveRevision (primary) or top-level
+            // ActiveRevision (fallback for older link shapes).
             val thumbnailIds = photoLinks.mapNotNull { link ->
                 link.fileProperties?.activeRevision?.thumbnails?.firstOrNull()?.thumbnailId
                     ?: link.activeRevision?.thumbnails?.firstOrNull()?.thumbnailId
@@ -173,13 +226,20 @@ class CloudTrashService @Inject constructor(
                 val thumbId = link.fileProperties?.activeRevision?.thumbnails?.firstOrNull()?.thumbnailId
                     ?: link.activeRevision?.thumbnails?.firstOrNull()?.thumbnailId
                 val (thumbUrl, thumbToken) = thumbId?.let { thumbMap[it] } ?: (null to null)
-                // Use modifyTime as a proxy for captureTime (volume trash doesn't return photo metadata).
                 val captureTime = link.modifyTime ?: link.createTime
+                // CKP can live in fileProperties or activeRevision depending on link era.
+                val ckp = link.fileProperties?.contentKeyPacket
+                    ?: link.activeRevision?.contentKeyPacket
                 CloudTrashItem(
-                    linkId        = link.linkId,
-                    captureTime   = captureTime,
-                    thumbnailUrl  = thumbUrl,
-                    thumbnailToken = thumbToken,
+                    linkId            = link.linkId,
+                    captureTime       = captureTime,
+                    thumbnailUrl      = thumbUrl,
+                    thumbnailToken    = thumbToken,
+                    encNodeKey        = link.nodeKey,
+                    encNodePassphrase = link.nodePassphrase,
+                    contentKeyPacket  = ckp,
+                    parentLinkId      = link.parentLinkId,
+                    volumeId          = volumeId,
                 )
             }
         } catch (e: Exception) {
@@ -191,43 +251,85 @@ class CloudTrashService @Inject constructor(
         }
     }
 
-    suspend fun restoreFromCloudTrash(userId: UserId, linkIds: List<String>): Unit = withContext(Dispatchers.IO) {
-        if (linkIds.isEmpty()) return@withContext
-        try {
-            val volumeId = shareService.getVolumeId(userId)
-            val manager = apiProvider.get<DriveApiService>(userId)
-            linkIds.chunked(150).forEach { chunk ->
-                shareService.networkSemaphore.withPermit {
-                    manager.invoke {
-                        restoreFromTrash(volumeId, DeleteLinksRequest(chunk))
-                    }.valueOrThrow
+    suspend fun restoreFromCloudTrash(userId: UserId, linkIds: List<String>): CloudRestoreOutcome =
+        withContext(Dispatchers.IO) {
+            if (linkIds.isEmpty()) return@withContext CloudRestoreOutcome(emptySet(), emptySet(), false)
+            try {
+                val volumeId = shareService.getVolumeId(userId)
+                val manager = apiProvider.get<DriveApiService>(userId)
+                val failed = mutableSetOf<String>()
+                linkIds.chunked(150).forEach { chunk ->
+                    val resp = shareService.networkSemaphore.withPermit {
+                        manager.invoke {
+                            restoreFromTrash(volumeId, DeleteLinksRequest(chunk))
+                        }.valueOrThrow
+                    }
+                    // The multi-endpoint returns one Response per link; collect the link IDs
+                    // the server rejected (code != 1000) so they can stay selected for retry.
+                    // An empty Responses list (older server shape) means the top-level Code
+                    // already vouched for the whole chunk.
+                    resp.responses.forEach { entry ->
+                        if (entry.response.code != 1000) failed += entry.linkId
+                    }
                 }
+                val restored = linkIds.toSet() - failed
+                Log.d(TAG, "restoreFromCloudTrash: restored ${restored.size}/${linkIds.size} items (${failed.size} failed)")
+
+                // Drive moves restored items out of trash on the server, but our local
+                // photo_listing was emptied of those rows when they were trashed. Without a
+                // follow-up refresh the gallery Flow has no way to know the items are back —
+                // even pull-to-refresh in the gallery races with the post-restore server
+                // index and frequently misses them on the first attempt. Trigger a full
+                // refresh here so the restored linkIds flow back into the listing DB and the
+                // gallery Flow observers re-emit with them. Retry once on failure; if it still
+                // fails, report it so the caller can prompt a manual pull-to-refresh instead
+                // of leaving the gallery silently stale.
+                val refreshFailed = restored.isNotEmpty() && !refreshCloudPhotosWithRetry(userId)
+                CloudRestoreOutcome(restored, failed, refreshFailed)
+            } catch (e: Exception) {
+                Log.w(TAG, "restoreFromCloudTrash: failed — ${e.message}")
+                throw e
             }
-            Log.d(TAG, "restoreFromCloudTrash: restored ${linkIds.size} items")
-        } catch (e: Exception) {
-            Log.w(TAG, "restoreFromCloudTrash: failed — ${e.message}")
-            throw e
         }
+
+    /** Refreshes the cloud photo stream, retrying once. Returns true on success. */
+    private suspend fun refreshCloudPhotosWithRetry(userId: UserId): Boolean {
+        repeat(2) { attempt ->
+            val ok = runCatching { photoStreamService.refreshCloudPhotos(userId) }
+                .onFailure { e -> Log.w(TAG, "restoreFromCloudTrash: stream refresh attempt ${attempt + 1} failed — ${e.message}") }
+                .isSuccess
+            if (ok) return true
+        }
+        return false
     }
 
-    suspend fun deleteFromCloudForever(userId: UserId, linkIds: List<String>): Unit = withContext(Dispatchers.IO) {
-        if (linkIds.isEmpty()) return@withContext
-        try {
-            val volumeId = shareService.getVolumeId(userId)
-            val manager = apiProvider.get<DriveApiService>(userId)
-            linkIds.chunked(150).forEach { chunk ->
-                shareService.networkSemaphore.withPermit {
-                    manager.invoke {
-                        deleteForever(volumeId, DeleteLinksRequest(chunk))
-                    }.valueOrThrow
+    suspend fun deleteFromCloudForever(userId: UserId, linkIds: List<String>): CloudDeleteOutcome =
+        withContext(Dispatchers.IO) {
+            if (linkIds.isEmpty()) return@withContext CloudDeleteOutcome(emptySet(), emptySet())
+            try {
+                val volumeId = shareService.getVolumeId(userId)
+                val manager = apiProvider.get<DriveApiService>(userId)
+                val failed = mutableSetOf<String>()
+                linkIds.chunked(150).forEach { chunk ->
+                    val resp = shareService.networkSemaphore.withPermit {
+                        manager.invoke {
+                            deleteForever(volumeId, DeleteLinksRequest(chunk))
+                        }.valueOrThrow
+                    }
+                    // Same per-link parsing as restore: links the server rejected stay in
+                    // trash and must remain selected so the user can retry the delete.
+                    resp.responses.forEach { entry ->
+                        if (entry.response.code != 1000) failed += entry.linkId
+                    }
                 }
+                val deleted = linkIds.toSet() - failed
+                Log.d(TAG, "deleteFromCloudForever: permanently deleted ${deleted.size}/${linkIds.size} items (${failed.size} failed)")
+                CloudDeleteOutcome(deleted, failed)
+            } catch (e: Exception) {
+                Log.w(TAG, "deleteFromCloudForever: failed — ${e.message}")
+                throw e
             }
-            Log.d(TAG, "deleteFromCloudForever: permanently deleted ${linkIds.size} items")
-        } catch (e: Exception) {
-            Log.w(TAG, "deleteFromCloudForever: failed — ${e.message}")
-            throw e
         }
-    }
 
     /**
      * Drive Photos has no server-side rename endpoint; emulate it by re-uploading the
@@ -242,8 +344,15 @@ class CloudTrashService @Inject constructor(
         val fullResFile = downloadService.downloadFullResPhoto(userId, photo)
         if (!fullResFile.exists() || fullResFile.length() == 0L) error("Full-res download failed for ${photo.linkId}")
 
+        // SHA-1 hex of the plaintext file. Drive Android pins
+        // ConfigurationProvider.contentDigestAlgorithm to SHA-1 and Drive web's
+        // photosTransferPayloadBuilder rejects ContentHash payloads derived from
+        // any other algorithm with "Cannot build photo payload without a content
+        // hash". The hex string is what PhotoUploadService passes into both
+        // `Common.Digests.SHA1` of the xAttr blob and the HMAC that produces the
+        // wire ContentHash.
         val hash = run {
-            val digest = MessageDigest.getInstance("SHA-256")
+            val digest = MessageDigest.getInstance("SHA-1")
             fullResFile.inputStream().use { stream ->
                 val buf = ByteArray(8192)
                 var read: Int

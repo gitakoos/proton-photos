@@ -49,8 +49,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.res.stringResource
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
+import eu.akoos.photos.R
+import eu.akoos.photos.presentation.util.findFragmentActivity
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.Bg0
 import eu.akoos.photos.presentation.theme.FgDim
@@ -63,7 +66,7 @@ fun AppLockScreen(onUnlocked: () -> Unit) {
     val context = LocalContext.current
 
     LaunchedEffect(Unit) {
-        showBiometricPrompt(context as FragmentActivity, onSuccess = onUnlocked)
+        showBiometricPrompt(context.findFragmentActivity()!!, onSuccess = onUnlocked)
     }
 
     Box(
@@ -109,12 +112,12 @@ fun AppLockScreen(onUnlocked: () -> Unit) {
                     .background(Accent.copy(alpha = 0.12f), RoundedCornerShape(14.dp))
                     .border(0.5.dp, Accent.copy(alpha = 0.3f), RoundedCornerShape(14.dp))
                     .clickable {
-                        showBiometricPrompt(context as FragmentActivity, onSuccess = onUnlocked)
+                        showBiometricPrompt(context.findFragmentActivity()!!, onSuccess = onUnlocked)
                     }
                     .padding(horizontal = 32.dp, vertical = 14.dp),
                 contentAlignment = Alignment.Center,
             ) {
-                Text("Unlock", color = Accent, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                Text(stringResource(R.string.hidden_photos_unlock), color = Accent, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
             }
         }
     }

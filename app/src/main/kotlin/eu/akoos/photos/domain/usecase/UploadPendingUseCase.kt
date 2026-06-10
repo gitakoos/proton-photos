@@ -164,6 +164,10 @@ class UploadPendingUseCase @Inject constructor(
         // LOCAL_ONLY rows, or during an in-flight upload batch. Without the filter we'd
         // ship the excluded bucket's photos to Drive on the way out.
         val excludedFolders: Set<String> = prefs[SettingsKeys.EXCLUDED_FOLDER_NAMES] ?: emptySet()
+        // Per-folder cloud-album mirror opt-in. Photos always upload to the photostream
+        // regardless; this set decides whether the upload path also adds the photo to
+        // an auto-named album matching its source bucket (Camera, Screenshots, …).
+        val albumOptInFolders: Set<String> = prefs[SettingsKeys.ALBUM_OPT_IN_FOLDER_NAMES] ?: emptySet()
 
         val stripOnUpload = prefs[SettingsKeys.STRIP_ON_UPLOAD] ?: true
         val renameToCaptureDate = prefs[SettingsKeys.RENAME_TO_CAPTURE_DATE] ?: false
@@ -218,19 +222,6 @@ class UploadPendingUseCase @Inject constructor(
         } catch (e: Exception) {
             Log.w(UPLOAD_TAG, "Could not load existing albums for name matching: ${e.message}")
             mutableMapOf()
-        }
-
-        // Virtual-album membership: Map<localContentUri, List<albumName>>. A single photo can
-        // sit in multiple virtual albums simultaneously (the user added it to "Italy" AND
-        // "Favorites" from inside the app). Each upload below routes to ALL of these cloud
-        // albums on top of the bucket-name fallback.
-        val virtualMembershipByUri: Map<String, List<String>> = run {
-            val raw = prefs[SettingsKeys.LOCAL_ALBUM_VIRTUAL_MEMBERSHIP] ?: emptySet()
-            raw.mapNotNull { entry ->
-                val sep = entry.indexOf("||")
-                if (sep <= 0 || sep == entry.length - 2) null
-                else entry.substring(0, sep) to entry.substring(sep + 2)
-            }.groupBy({ it.second }, { it.first })
         }
 
         // Rebuild the in-memory bucket→albumLinkId cache from DataStore, but validate each entry
@@ -299,11 +290,11 @@ class UploadPendingUseCase @Inject constructor(
                                 totalCount = totalCount,
                                 backupEverything = backupEverything,
                                 selectedFolders = selectedFolders,
+                                albumOptInFolders = albumOptInFolders,
                                 stripOnUpload = stripOnUpload,
                                 renameToCaptureDate = renameToCaptureDate,
                                 deleteLocalAfterBackup = deleteLocalAfterBackup,
                                 stripConfig = stripConfig,
-                                virtualMembershipByUri = virtualMembershipByUri,
                                 existingAlbumsByName = existingAlbumsByName,
                                 albumCache = albumCache,
                                 albumCacheMutex = albumCacheMutex,
@@ -354,11 +345,11 @@ class UploadPendingUseCase @Inject constructor(
         totalCount: Int,
         backupEverything: Boolean,
         selectedFolders: Set<String>?,
+        albumOptInFolders: Set<String>,
         stripOnUpload: Boolean,
         renameToCaptureDate: Boolean,
         deleteLocalAfterBackup: Boolean,
         stripConfig: MetadataStripConfig,
-        virtualMembershipByUri: Map<String, List<String>>,
         existingAlbumsByName: MutableMap<String, String>,
         albumCache: MutableMap<String, String>,
         albumCacheMutex: Mutex,
@@ -387,7 +378,7 @@ class UploadPendingUseCase @Inject constructor(
             // send to Drive changes. Strip-on-upload runs against the bytes of the original
             // (or stripped temp) file independently, so a stripped + renamed photo still gets
             // its EXIF erased before the cloud name lands.
-            val localItem = if (renameToCaptureDate) {
+            val renamedItem = if (renameToCaptureDate) {
                 val ext = rawLocalItem.displayName.substringAfterLast('.', "")
                 val captureMs = rawLocalItem.dateTaken.takeIf { it > 0L } ?: System.currentTimeMillis()
                 val newBase = SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", Locale.US).format(Date(captureMs))
@@ -396,6 +387,15 @@ class UploadPendingUseCase @Inject constructor(
                 rawLocalItem.copy(displayName = newName)
             } else {
                 rawLocalItem
+            }
+            // Strip-timestamp promises capture-time removal, but dateTaken also feeds the
+            // Drive captureTime and the xAttr ModificationTime (PhotoUploadService). Floor
+            // it to upload time here so the cloud metadata can't reconstruct when the shot
+            // was actually taken. The on-device MediaStore row is untouched.
+            val localItem = if (stripOnUpload && stripConfig.stripTimestamp) {
+                renamedItem.copy(dateTaken = System.currentTimeMillis())
+            } else {
+                renamedItem
             }
             Log.d(UPLOAD_TAG, "Uploading: ${localItem.displayName} (${localItem.mimeType}, ${localItem.sizeBytes} bytes)")
             // First UI signal: this file has entered the pipeline at the Encrypting phase.
@@ -413,7 +413,11 @@ class UploadPendingUseCase @Inject constructor(
                 )
             )
 
-            // Strip metadata into a temp file if configured and this is a JPEG/HEIC image
+            // Strip metadata into a temp file if configured. Images go through EXIF tag
+            // wiping; videos through a stream-copy re-mux that drops the container's GPS
+            // location atom (EXIF wiping can't reach an MP4/MOV moov/udta). Both paths
+            // fall back to the original URI when the temp couldn't be produced — a strip
+            // failure must never block the backup of the file itself.
             val uploadUri: String = if (stripOnUpload && localItem.mimeType.startsWith("image/")) {
                 strippedFile = ExifHelper.stripToTempFile(context, state.localUri, stripConfig)
                 if (strippedFile != null) {
@@ -422,11 +426,24 @@ class UploadPendingUseCase @Inject constructor(
                 } else {
                     state.localUri
                 }
+            } else if (stripOnUpload && stripConfig.stripGps && localItem.mimeType.startsWith("video/")) {
+                val tmp = File.createTempFile("stripped_", ".mp4", context.cacheDir)
+                if (eu.akoos.photos.presentation.editor.VideoMetadataStripper
+                        .remuxWithoutLocation(context, state.localUri, tmp)) {
+                    strippedFile = tmp
+                    Log.d(UPLOAD_TAG, "Video location atom stripped for ${localItem.displayName}")
+                    android.net.Uri.fromFile(tmp).toString()
+                } else {
+                    // Re-mux failed — the temp is already cleaned up by the stripper; upload
+                    // the untouched original so the file still reaches Drive.
+                    Log.w(UPLOAD_TAG, "Video location strip failed for ${localItem.displayName}; uploading original")
+                    state.localUri
+                }
             } else {
                 state.localUri
             }
 
-            val hash = computeSha256(uploadUri)
+            val hash = computeSha1(uploadUri)
             val uploadItem = if (strippedFile != null)
                 localItem.copy(sizeBytes = strippedFile.length())
             else
@@ -538,18 +555,11 @@ class UploadPendingUseCase @Inject constructor(
                 )
             )
 
-            // Auto-sync to one or more Drive albums. A single uploaded photo can land in
-            // multiple cloud albums simultaneously:
-            //
-            //   - Every virtual-membership album that references its URI (the user added it
-            //     to "Italy 2025" / "Favorites" from inside the app).
-            //   - The bucket-name album (Camera, Screenshots, …) — same as before.
-            //
-            // Deduplication is by album name so a virtual-membership entry whose name
-            // happens to equal the bucket doesn't get added twice.
+            // Auto-sync to the bucket-name Drive album (Camera, Screenshots, …) for folders
+            // the user opted into mirroring. Bucket-name-album mirror is opt-in per folder;
+            // photos still upload either way — only the album mirror step is gated.
             val targetAlbumNames = buildSet {
-                addAll(virtualMembershipByUri[state.localUri].orEmpty())
-                localItem.bucketName?.let { add(it) }
+                localItem.bucketName?.takeIf { it in albumOptInFolders }?.let { add(it) }
             }
             for (albumName in targetAlbumNames) {
                 try {
@@ -620,8 +630,18 @@ class UploadPendingUseCase @Inject constructor(
         }
     }
 
-    private fun computeSha256(uri: String): String {
-        val digest = MessageDigest.getInstance("SHA-256")
+    /**
+     * Hex-encodes the SHA-1 of the file's plaintext content. Drive's `ContentHash`
+     * wire field is `HMAC-SHA256(rootNodeHashKey, sha1Hex.utf8Bytes())` and Drive
+     * web's `photosTransferPayloadBuilder` rejects any payload whose photo content
+     * hash was derived from a SHA-256 input with the misleading error
+     * "Cannot build photo payload without a content hash". Drive Android picks SHA-1
+     * via `ConfigurationProvider.contentDigestAlgorithm = "SHA1"` (tempandroid-drive
+     * `drive/base/domain/.../ConfigurationProvider.kt:73`). The xAttr Common.Digests
+     * map carries the same SHA-1 hex so a later cross-client xAttr verify lines up.
+     */
+    private fun computeSha1(uri: String): String {
+        val digest = MessageDigest.getInstance("SHA-1")
         try {
             context.contentResolver.openInputStream(Uri.parse(uri))?.use { stream ->
                 val buffer = ByteArray(8192)

@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.presentation.hidden
 
+import android.app.KeyguardManager
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.compose.foundation.background
@@ -57,7 +58,9 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.ui.res.stringResource
 import eu.akoos.photos.R
+import eu.akoos.photos.presentation.common.IconBubble
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -74,9 +77,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
+import eu.akoos.photos.presentation.util.findFragmentActivity
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
+import coil.request.CachePolicy
+import coil.request.ImageRequest
 import eu.akoos.photos.domain.entity.LocalMediaItem
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.Bg0
@@ -97,6 +103,14 @@ fun HiddenAlbumScreen(
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
 
+    // When the device has no screen lock at all, the vault opens ungated (there is nothing
+    // to authenticate against). Surface that on the lock screen so the user understands the
+    // hidden area isn't actually protected on this device, rather than assuming biometrics
+    // silently passed.
+    val deviceHasNoLock = remember {
+        context.getSystemService(KeyguardManager::class.java)?.isDeviceSecure != true
+    }
+
     LaunchedEffect(state.error) {
         state.error?.let {
             snackbarHostState.showSnackbar(it)
@@ -107,14 +121,47 @@ fun HiddenAlbumScreen(
     // Trigger biometric on first composition. Guarded by `promptShown` so a rapid
     // re-enter (user cancels the prompt → onBack pops the screen → user immediately
     // taps Hidden again) doesn't double-fire two prompts that race each other and
-    // either stack or fail one after the other. Reset isn't needed — composables
-    // start a fresh remember{} state on every entry.
+    // either stack or fail one after the other.
     var promptShown by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) {
+
+    // Re-lock whenever the screen leaves the foreground. The authenticated flag lives in
+    // the ViewModel (so list state survives configuration changes), which means without
+    // this it would also survive backgrounding the app or navigating away — leaving the
+    // vault unlocked. Resetting on ON_STOP forces a fresh biometric/credential check on
+    // the next return, and clears promptShown so the entry prompt re-arms.
+    // ON_STOP also fires during a configuration change (rotation recreates the
+    // activity) — skip those, otherwise every rotation forces a re-auth.
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_STOP) {
+                val changingConfig = context.findFragmentActivity()?.isChangingConfigurations == true
+                if (!changingConfig) {
+                    viewModel.lock()
+                    promptShown = false
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    // Keyed on the authenticated flag so that when the screen re-locks on returning from
+    // the background (ON_STOP cleared it), the prompt fires again automatically instead of
+    // leaving the user on a static lock screen.
+    LaunchedEffect(state.isAuthenticated) {
         if (!state.isAuthenticated && !promptShown) {
+            // LocaleOverride wraps LocalContext in a ContextWrapper, so a direct cast
+            // to FragmentActivity throws ClassCastException. findFragmentActivity()
+            // walks the baseContext chain to reach the underlying MainActivity.
+            val fragmentActivity = context.findFragmentActivity()
+            if (fragmentActivity == null) {
+                onBack()
+                return@LaunchedEffect
+            }
             promptShown = true
             showBiometricPrompt(
-                activity = context as FragmentActivity,
+                activity = fragmentActivity,
                 onSuccess = { viewModel.onAuthenticationSuccess() },
                 onError = { onBack() },
             )
@@ -157,14 +204,27 @@ fun HiddenAlbumScreen(
                     stringResource(R.string.hidden_photos_auth_prompt),
                     color = FgDim, fontSize = 14.sp,
                 )
+                if (deviceHasNoLock) {
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        stringResource(R.string.hidden_no_device_lock_notice),
+                        color = FgMute, fontSize = 13.sp,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        modifier = Modifier.padding(horizontal = 32.dp),
+                    )
+                }
                 Spacer(Modifier.height(32.dp))
                 Box(
                     modifier = Modifier
                         .background(Accent.copy(alpha = 0.12f), RoundedCornerShape(14.dp))
                         .border(0.5.dp, Accent.copy(alpha = 0.3f), RoundedCornerShape(14.dp))
                         .clickable {
+                            // LocaleOverride wraps LocalContext in a ContextWrapper, so a
+                            // direct cast to FragmentActivity throws ClassCastException.
+                            // findFragmentActivity() walks the baseContext chain instead.
+                            val fragmentActivity = context.findFragmentActivity() ?: return@clickable
                             showBiometricPrompt(
-                                activity = context as FragmentActivity,
+                                activity = fragmentActivity,
                                 onSuccess = { viewModel.onAuthenticationSuccess() },
                                 onError = { onBack() },
                             )
@@ -190,19 +250,16 @@ fun HiddenAlbumScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(40.dp)
-                            .background(PillBg, CircleShape)
-                            .border(0.5.dp, PillBorder, CircleShape)
-                            .clickable(onClick = onBack),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.ArrowBack, "Back",
-                            tint = FgPrimary, modifier = Modifier.size(20.dp),
-                        )
-                    }
+                    IconBubble(
+                        icon = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = stringResource(R.string.onboarding_back),
+                        onClick = onBack,
+                        diameter = 40.dp,
+                        iconSize = 20.dp,
+                        background = PillBg,
+                        borderColor = PillBorder,
+                        tint = FgPrimary,
+                    )
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             "Hidden Photos",
@@ -294,7 +351,14 @@ private fun HiddenPhotoCell(
             .clickable { onClick() },
     ) {
         AsyncImage(
-            model = android.net.Uri.parse(item.uri),
+            // Hidden previews must never persist in Coil's caches: a cached thumbnail
+            // would let any other surface (or a cache dump) reconstruct a hidden image
+            // by URI. Decode straight from the source on every draw instead.
+            model = ImageRequest.Builder(LocalContext.current)
+                .data(android.net.Uri.parse(item.uri))
+                .memoryCachePolicy(CachePolicy.DISABLED)
+                .diskCachePolicy(CachePolicy.DISABLED)
+                .build(),
             contentDescription = null,
             contentScale = ContentScale.Crop,
             modifier = Modifier.fillMaxSize(),
@@ -313,7 +377,7 @@ private fun HiddenPhotoCell(
             ) {
                 Icon(
                     androidx.compose.material.icons.Icons.Default.Cloud,
-                    contentDescription = "Backed up",
+                    contentDescription = stringResource(R.string.cd_status_backed_up),
                     // Same green as the gallery's SyncedCloudBadge so the visual language
                     // for "this photo is on Drive" stays consistent between Hidden and the
                     // regular timeline. Using the brand Accent (purple) here instead would
@@ -338,8 +402,18 @@ private fun showBiometricPrompt(
             BiometricManager.Authenticators.DEVICE_CREDENTIAL,
     )
     if (canAuth != BiometricManager.BIOMETRIC_SUCCESS) {
-        onSuccess()
-        return
+        // No biometric/credential authenticator is currently usable. Only open the vault
+        // ungated when the device has no screen lock at all — there is simply nothing to
+        // authenticate against, and refusing would lock the user out of their own files
+        // with no recovery. If the device IS secured (PIN/pattern/password) but biometrics
+        // are merely unavailable or unenrolled, fall through to the prompt below, which
+        // allows DEVICE_CREDENTIAL and so can still gate on the device lock.
+        val keyguard = activity.getSystemService(KeyguardManager::class.java)
+        val deviceSecure = keyguard?.isDeviceSecure == true
+        if (!deviceSecure) {
+            onSuccess()
+            return
+        }
     }
     val prompt = BiometricPrompt(
         activity,
@@ -356,14 +430,26 @@ private fun showBiometricPrompt(
             }
         },
     )
-    prompt.authenticate(
-        BiometricPrompt.PromptInfo.Builder()
-            .setTitle("Hidden Photos")
-            .setDescription("Authenticate to view your hidden photos")
-            .setAllowedAuthenticators(
+    // Building/authenticating can throw if the platform rejects the authenticator
+    // combination. Fail closed (stay locked) rather than open in that case — the user can
+    // retry or back out.
+    runCatching {
+        val builder = BiometricPrompt.PromptInfo.Builder()
+            .setTitle(activity.getString(R.string.hidden_auth_title))
+            .setDescription(activity.getString(R.string.hidden_auth_description))
+        // BIOMETRIC_STRONG | DEVICE_CREDENTIAL is rejected by PromptInfo.build() on
+        // API 28-29 — the combined-authenticators API only exists from 30. The
+        // deprecated setDeviceCredentialAllowed is the supported pre-30 mechanism
+        // for the same PIN/pattern fallback.
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+            builder.setAllowedAuthenticators(
                 BiometricManager.Authenticators.BIOMETRIC_STRONG or
                     BiometricManager.Authenticators.DEVICE_CREDENTIAL,
             )
-            .build(),
-    )
+        } else {
+            @Suppress("DEPRECATION")
+            builder.setDeviceCredentialAllowed(true)
+        }
+        prompt.authenticate(builder.build())
+    }.onFailure { onError() }
 }

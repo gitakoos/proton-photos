@@ -54,7 +54,17 @@ class FreeUpSpaceWorker @AssistedInject constructor(
             freeUpSpace(userId, olderThanMs)
             Result.success()
         } catch (e: Exception) {
-            if (runAttemptCount < 3) Result.retry() else Result.failure()
+            // Categorise failures so we only burn the retry budget on transient ones.
+            // Permanent failures (file disappeared mid-sweep, MediaStore revoked write
+            // access for a foreign-owned URI, the SAF tree we picked got abandoned by
+            // the OS) won't fix themselves on the next attempt — three retries against
+            // a permanent error just chews battery and timer slots for nothing.
+            // Transient failures (IO error, network blip during a cloud-status check,
+            // database lock contention) get the existing 3-attempt budget.
+            val isPermanent = e is SecurityException ||
+                e is IllegalStateException ||
+                e is java.io.FileNotFoundException
+            if (isPermanent || runAttemptCount >= 3) Result.failure() else Result.retry()
         }
     }
 

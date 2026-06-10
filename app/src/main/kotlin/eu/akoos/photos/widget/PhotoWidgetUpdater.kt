@@ -42,6 +42,8 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import me.proton.core.accountmanager.domain.AccountManager
 import eu.akoos.photos.data.db.dao.PhotoListingDao
+import eu.akoos.photos.data.preferences.SettingsKeys
+import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.data.repository.drive.ThumbnailDecryptScheduler
 import java.io.File
 import java.io.FileOutputStream
@@ -166,7 +168,7 @@ object PhotoWidgetUpdater {
         PhotoWidget().update(context, glanceId)
     }
 
-    private fun resolvePhotos(
+    private suspend fun resolvePhotos(
         context: Context,
         mode: WidgetMode,
         selectedUris: List<String>,
@@ -176,8 +178,28 @@ object PhotoWidgetUpdater {
         WidgetMode.SELECTED        -> selectedUris.ifEmpty { queryAllImages(context) }
         WidgetMode.ALBUM           -> albumName?.let { queryAlbumImages(context, it) } ?: queryAllImages(context)
         WidgetMode.ALL_PHOTOS      -> queryAllImages(context)
-        WidgetMode.CLOUD_SELECTED  -> selectedLinkIds
+        // Exclude the cloud copies of photos the user has hidden on this device. A hidden
+        // photo's Drive copy stays in the account, and its linkId can still be in the
+        // widget's selection list — surfacing it here would leak the hidden image onto the
+        // home screen. The hidden→cloudId map persists each hidden item as a
+        // "hiddenUri|cloudLinkId" token; we strip any selected linkId that appears there.
+        WidgetMode.CLOUD_SELECTED  -> {
+            val hiddenCloudIds = hiddenCloudLinkIds(context)
+            selectedLinkIds.filterNot { it in hiddenCloudIds }
+        }
     }
+
+    /**
+     * Cloud linkIds belonging to photos the user has hidden on this device, read from the
+     * hidden→cloudId map (each entry encoded as "hiddenUri|cloudLinkId"). Used to keep
+     * hidden items' Drive copies out of every widget mode that renders by cloud linkId.
+     */
+    private suspend fun hiddenCloudLinkIds(context: Context): Set<String> = runCatching {
+        context.settingsDataStore.data.first()[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP]
+            ?.map { it.substringAfter('|') }
+            ?.toSet()
+            ?: emptySet()
+    }.getOrDefault(emptySet())
 
     private fun queryAllImages(context: Context): List<String> {
         val result = mutableListOf<String>()

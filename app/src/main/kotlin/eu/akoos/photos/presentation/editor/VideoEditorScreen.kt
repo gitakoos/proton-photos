@@ -154,6 +154,13 @@ fun VideoEditorScreen(
      *  stay stale. cloudPhoto remains null in this case because the EDIT SOURCE is the
      *  device file — the cloud counterpart is just a side-effect target. */
     syncedCloudCounterpart: eu.akoos.photos.domain.entity.CloudPhoto? = null,
+    /** Non-null when the editor was launched via Intent.ACTION_EDIT / ACTION_VIEW from
+     *  outside the app (system "Open with" / "Edit with" chooser). Routes the load
+     *  through [VideoEditorViewModel.loadExternal] so the save flow forces a fresh
+     *  MediaStore copy in the editor's default video output directory — the foreign URI
+     *  is never overwritten. Defaulted to null so the existing internal call sites
+     *  compile unchanged. */
+    externalRequest: eu.akoos.photos.navigation.ExternalEditRequest? = null,
     onBack: () -> Unit,
     onSaved: () -> Unit,
     vm: VideoEditorViewModel = hiltViewModel(),
@@ -164,8 +171,14 @@ fun VideoEditorScreen(
     val saveSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val context = LocalContext.current
 
-    androidx.compose.runtime.LaunchedEffect(localUri, cloudPhoto?.linkId) {
+    androidx.compose.runtime.LaunchedEffect(localUri, cloudPhoto?.linkId, externalRequest?.uri) {
         when {
+            // External entries (system "Open with" / "Edit with" chooser) take priority
+            // over the local path so a caller passing both an externalRequest and stale
+            // local* params still routes through the always-copy save flow.
+            externalRequest != null -> vm.loadExternal(
+                externalRequest.uri, externalRequest.displayName, externalRequest.mimeType,
+            )
             cloudPhoto != null -> vm.loadCloud(cloudPhoto, sourceAlbumLinkId)
             localUri != null   -> vm.loadLocal(localUri, localDisplayName ?: "video.mp4", localMimeType ?: "video/mp4")
         }
@@ -224,6 +237,22 @@ fun VideoEditorScreen(
                 showSaveSheet = false
             }
             null -> Unit
+        }
+    }
+
+    // External-entry "Saved a copy" feedback. For Intent.ACTION_EDIT / ACTION_VIEW
+    // entries the save flow is forced to a fresh MediaStore copy in the editor's default
+    // video output directory (the foreign URI is never overwritten); the user needs to
+    // know that's what just happened. The flag is set inside the VM after a successful
+    // External save and consumed here so it raises the Toast exactly once.
+    androidx.compose.runtime.LaunchedEffect(state.savedAsCopy) {
+        if (state.savedAsCopy) {
+            android.widget.Toast.makeText(
+                context,
+                context.getString(R.string.editor_saved_as_copy),
+                android.widget.Toast.LENGTH_LONG,
+            ).show()
+            vm.consumeSavedAsCopy()
         }
     }
 
@@ -593,7 +622,8 @@ private fun VideoTopBar(
     ) {
         IconBubble(onClick = onBack) {
             Icon(
-                Icons.AutoMirrored.Filled.ArrowBack, null,
+                Icons.AutoMirrored.Filled.ArrowBack,
+                stringResource(R.string.onboarding_back),
                 tint = FgPrimary, modifier = Modifier.size(20.dp),
             )
         }
@@ -634,7 +664,7 @@ private fun VideoSavePill(isSaving: Boolean, onClick: () -> Unit) {
         } else {
             Icon(Icons.Default.Check, null, tint = Color.White, modifier = Modifier.size(16.dp))
         }
-        Text("Save", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+        Text(stringResource(R.string.action_save), color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
     }
 }
 
@@ -1840,8 +1870,8 @@ private fun VideoSaveSheet(
                 title = LocalContext.current.getString(R.string.video_editor_save_copy),
                 subtitle = when {
                     isCloud  -> "Uploads as a new file in Proton Drive — keeps the original."
-                    isSynced -> "Creates a new file in Pictures/Proton Photos AND uploads a paired copy to Drive."
-                    else     -> "Creates a new file in Pictures/Proton Photos."
+                    isSynced -> "Creates a new file in your gallery AND uploads a paired copy to Drive."
+                    else     -> "Creates a new file in your gallery."
                 },
                 onClick = { onPicked(VideoSaveMode.Copy) },
             )

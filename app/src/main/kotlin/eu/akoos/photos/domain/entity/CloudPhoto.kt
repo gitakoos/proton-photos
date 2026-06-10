@@ -38,4 +38,12 @@ data class CloudPhoto(
     val tags: Set<Int> = emptySet(),
 ) {
     val isFavoriteOnCloud: Boolean get() = 0 in tags
+
+    /**
+     * captureTime (epoch SECONDS) promoted to ms, treated as valid only when it clears
+     * [TimestampSanity.FLOOR_MS]. Drive returns 0 for photos uploaded with no capture
+     * timestamp, which would otherwise pin them to the epoch at the list tail. Callers
+     * with a local twin (see [GalleryItem.Synced]) substitute the local DATE_TAKEN here.
+     */
+    val captureTimeMs: Long get() = captureTime * 1000L
 }

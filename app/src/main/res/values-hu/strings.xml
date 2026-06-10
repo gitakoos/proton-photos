@@ -47,14 +47,14 @@
     <string name="onboarding_folders_exclude_subtitle">Pipáld ki a mappákat amiket NEM szeretnél feltölteni. Bármi más automatikusan mentődik.</string>
     <string name="onboarding_folders_needs_perm">Először engedélyezd a fotó hozzáférést, hogy lásd a mappákat.</string>
     <string name="onboarding_folders_empty">Nem található fénykép mappa az eszközön.</string>
+    <string name="onboarding_album_mirror_title">Tükrözzük a mappáidat Drive albumként?</string>
+    <string name="onboarding_album_mirror_subtitle">Válaszd ki a mappákat, amelyek képei Drive albumként is megjelenjenek. Az átugrással minden képed csak a fotó-folyamodban lesz.</string>
+    <string name="onboarding_album_mirror_add_custom">Egyéni mappanév</string>
 
     <string name="onboarding_about_title">Független, harmadik fél által készített kliens</string>
     <string name="onboarding_about_subtitle">Egy fejlesztő készíti. Nincs kapcsolatban a Proton AG-vel. Nyílt forráskódú, GPL licenc, semmilyen saját telemetriát nem küldünk.</string>
     <string name="onboarding_about_author_subtitle">A fejlesztő személyes oldala.</string>
     <string name="onboarding_about_github_subtitle">Teljes forráskód a GitHubon.</string>
-    <string name="onboarding_about_license_title">GPL 3.0 licenc</string>
-    <string name="onboarding_about_license_subtitle">Szabad szoftver. Megnézheted, módosíthatod és továbbadhatod a forráskódot.</string>
-    <string name="onboarding_about_disclaimer">Nem hivatalos, harmadik fél által készített app. A Proton Drive nyilvános API-jával kommunikál. A Proton AG nem támogatja és nincs kapcsolatban vele.</string>
 
     <string name="onboarding_appearance_title">Tedd a sajátoddá</string>
     <string name="onboarding_appearance_subtitle">Válassz témát, kiemelő színt és nyelvet. Bármikor módosítható a Beállításokban.</string>
@@ -94,6 +94,7 @@
     <string name="gallery_added_to_album">%1$d fotó hozzáadva ehhez: %2$s</string>
     <string name="gallery_stripped_metadata">%1$d fotó metaadata törölve</string>
     <string name="gallery_stripped_with_skipped">Törölve: %1$d, kihagyva: %2$d (idegen)</string>
+    <string name="strip_metadata_failed">Nem sikerült eltávolítani a metaadatokat erről a fájlról.</string>
     <string name="gallery_filter_favorites">Kedvencek</string>
     <string name="gallery_filter_hidden">Rejtett</string>
     <string name="gallery_filter_categories">Kategóriák</string>
@@ -128,9 +129,6 @@
     <!-- Delete bottom sheet -->
     <string name="delete_also_cloud_warning">Ez véglegesen törli az eredetit. A Proton nem tudja visszaállítani.</string>
     <string name="delete_album_container_warning">Ez törli az albumot, de a fényképeid megmaradnak a Proton Drive-ban.</string>
-    <string name="bucket_album_readonly_msg">A(z) %s eszközmappa. A fényképek rendezéséhez használd a Fényképek \'Hozzáadás albumhoz\' funkcióját.</string>
-    <string name="albums_new_kind_cloud">Felhő</string>
-    <string name="albums_new_kind_local">Helyi</string>
     <string name="delete_button_permanently">Végleges törlés</string>
     <string name="delete_multi_mixed_msg">Néhány fotó már fel van mentve a Proton Drive-ra. Válaszd ki, hogyan töröljük őket.</string>
     <string name="delete_multi_remove_device">Eltávolítás az eszközről</string>
@@ -196,10 +194,35 @@
     <string name="settings_excluded_folders_count_label">%1$d / %2$d mappa kizárva</string>
     <string name="settings_excluded_folders_select_all">Mind kizárása</string>
     <string name="settings_excluded_folders_deselect_all">Mind visszavétele</string>
+    <!-- Album mirror -->
+    <string name="settings_album_mirror_folders">Mappák tükrözése Drive albumként</string>
+    <string name="settings_album_mirror_folders_desc">Válaszd ki, mely eszközmappák jelenjenek meg Drive albumként a képek feltöltésekor</string>
+    <string name="album_mirror_folders_title">Mappák tükrözése Drive albumként</string>
+    <string name="album_mirror_folders_subtitle">A bejelölt mappák képei a hozzájuk tartozó Drive albumokba is bekerülnek. A képek mindenképp felkerülnek a stream-re.</string>
+    <string name="album_mirror_add_custom">Mappanév hozzáadása</string>
+    <string name="album_mirror_custom_dialog_title">Mappanév hozzáadása</string>
+    <string name="album_mirror_custom_dialog_hint">Mappa neve (pl. Olaszország 2026)</string>
     <string name="settings_recently_deleted">Nemrég törölt</string>
     <string name="settings_recently_deleted_subtitle">%1$d kép · 30 napon belül törölt</string>
     <string name="settings_recently_deleted_subtitle_singular">1 kép · 30 napon belül törölt</string>
     <string name="settings_recently_deleted_empty">Üres</string>
+    <!-- Cloud trash -->
+    <string name="trash_section_device">Ezen az eszközön</string>
+    <string name="trash_section_cloud">Proton Drive-on</string>
+    <string name="trash_cloud_empty">A felhő kuka üres</string>
+    <string name="trash_cloud_error">Nem sikerült betölteni a felhő kukát</string>
+    <string name="trash_cloud_retry">Újra</string>
+    <string name="trash_cloud_empty_confirm_title">Ürítsük a felhő kukát?</string>
+    <string name="trash_cloud_empty_confirm_message">%1$d kép véglegesen törlődik a Proton Drive-ról. Nem visszavonható.</string>
+    <string name="trash_cloud_empty_confirm_action">Ürítés</string>
+    <string name="trash_cloud_restore_done">%1$d kép visszaállítva</string>
+    <string name="trash_cloud_restore_partial">%1$d visszaállítva, %2$d nem sikerült</string>
+    <string name="trash_cloud_restore_refresh_failed">Visszaállítva — húzd le a galériában a frissítéshez</string>
+    <string name="trash_cloud_restore_failed">A visszaállítás nem sikerült</string>
+    <string name="trash_cloud_emptied">Felhőkuka kiürítve</string>
+    <string name="trash_cloud_empty_partial">%1$d eltávolítva, %2$d nem sikerült</string>
+    <string name="trash_cloud_empty_failed">A felhőkuka kiürítése nem sikerült</string>
+    <string name="settings_recently_deleted_subtitle_device_cloud">%1$d eszközön · %2$d Drive-on</string>
     <string name="settings_free_up_desc">Már mentett fájlok törlése az eszközről</string>
     <string name="settings_free_up_action">Törlés</string>
     <string name="settings_free_up_confirm_title">Helyfelszabadítás?</string>
@@ -246,6 +269,10 @@
     <string name="settings_app_lock_timeout_1h">1 óra</string>
     <string name="settings_clear_cache_on_close">Gyorsítótár ürítése bezáráskor</string>
     <string name="settings_clear_cache_on_close_desc">A megnézett felhős fotók helyi másolatainak törlése, amikor az alkalmazás a háttérbe kerül. Következő megnyitáskor újra letölti őket.</string>
+    <string name="viewer_added_to_album">Hozzáadva: %1$s</string>
+    <string name="settings_photos_timeline_section">Fotók idővonala</string>
+    <string name="settings_hide_album_photos">Albumba rakott fotók elrejtése</string>
+    <string name="settings_hide_album_photos_desc">Ne jelenjen meg a Fotók oldalon az a kép, amit már egy albumba soroltál. Az Albumok és Megosztott fülek változatlanok maradnak.</string>
     <string name="settings_telemetry">Telemetria</string>
     <string name="settings_telemetry_desc">A Proton fiókod beállításai vezérlik. A módosításhoz nyisd meg az account.proton.me oldalt.</string>
     <string name="settings_hidden_photos">Rejtett fotók</string>
@@ -265,7 +292,9 @@
     <string name="selection_videos_only">%d videó</string>
     <string name="selection_mixed">%1$d kép, %2$d videó</string>
     <string name="editor_error_load_local">Nem sikerült betölteni a képet</string>
-    <string name="editor_saved_as_copy_toast">Az eredeti csak olvasható, másolatként mentve a Pictures/Proton Photos mappába</string>
+    <string name="editor_saved_as_copy">Egy másolat elmentve a Photos for Proton mappába</string>
+    <string name="editor_external_load_error">A fájl megnyitása sikertelen</string>
+    <string name="editor_saved_as_copy_toast">Az eredeti csak olvasható, másolatként mentve a galériába</string>
     <string name="editor_error_not_signed_in">Nem vagy bejelentkezve</string>
     <string name="editor_error_download_failed">Nem sikerült letölteni a képet</string>
     <string name="editor_error_decode_failed">Nem sikerült dekódolni a képet</string>
@@ -279,11 +308,14 @@
     <string name="editor_adj_saturation">Telítettség</string>
     <string name="editor_adj_tone">Tónus</string>
     <string name="editor_adj_temperature">Hőmérséklet</string>
-    <string name="editor_crop_apply">Alkalmaz</string>
     <string name="editor_crop_reset">Visszaállít</string>
     <string name="hidden_photos_title">Rejtett képek</string>
     <string name="hidden_photos_auth_prompt">Hitelesítsd magad a rejtett képek megtekintéséhez</string>
     <string name="hidden_photos_unlock">Feloldás</string>
+    <string name="hidden_no_device_lock_notice">Nincs képernyőzár beállítva — a rejtett mappa nincs védve.</string>
+    <string name="hidden_auth_title">Rejtett fotók</string>
+    <string name="hidden_auth_description">Azonosítsd magad a rejtett fotók megtekintéséhez</string>
+    <string name="hide_cloud_copy_notice">A mentett fotók a Proton Drive-ban megmaradnak — az elrejtés csak az eszköz galériájából távolítja el őket.</string>
     <string name="album_rename">Album átnevezése</string>
     <string name="album_rename_confirm">Átnevez</string>
     <string name="album_remove_from_album">Eltávolítás az albumból</string>
@@ -347,7 +379,6 @@
     <string name="about_lib_gopenpgp">OpenPGP implementáció</string>
 
     <!-- Albums -->
-    <string name="albums_filter_local">Helyi</string>
     <string name="albums_filter_backed_up">Mentett</string>
     <string name="albums_filter_title">Albumok szűrése</string>
     <string name="albums_filter_type">Típus</string>
@@ -394,11 +425,6 @@
     <string name="share_role_can_view">megtekintheti</string>
     <string name="share_role_can_edit">szerkesztheti</string>
     <string name="share_role_pending">függőben</string>
-    <string name="share_public_link">Nyilvános link</string>
-    <string name="share_public_link_active">Aktív</string>
-    <string name="share_public_link_inactive">Inaktív</string>
-    <string name="share_public_link_audience">Bárki az interneten, akinek megvan a link</string>
-    <string name="share_copy_link_button">Link másolása</string>
     <string name="share_stop_sharing">Megosztás leállítása</string>
     <string name="share_close">Bezárás</string>
     <!-- Drive-web-style invite popup (multi-chip flow) -->
@@ -410,9 +436,24 @@
     <string name="share_invite_cancel">Mégse</string>
     <string name="share_invite_email_invalid">Érvénytelen e-mail cím</string>
     <string name="share_invite_email_duplicate">Már hozzáadva</string>
-    <string name="share_invite_summary_success">%1$d meghíva</string>
-    <string name="share_invite_summary_partial">%1$d meghíva, %2$d sikertelen</string>
-    <string name="share_invite_summary_all_failed">%1$d meghívása sikertelen</string>
+    <string name="share_invite_summary_partial">%1$d elküldve, %2$d nem sikerült</string>
+    <string name="share_invite_summary_all_failed">A meghívókat nem sikerült elküldeni</string>
+    <!-- Album-sharing + album action error fallbacks (raw exception text stays in the log) -->
+    <string name="share_revoke_failed">Nem sikerült visszavonni a meghívót</string>
+    <string name="share_remove_member_failed">Nem sikerült eltávolítani a tagot</string>
+    <string name="share_permission_change_failed">Nem sikerült módosítani a szerepkört</string>
+    <string name="share_invite_failed">Nem sikerült elküldeni a meghívót</string>
+    <string name="share_stop_failed">Nem sikerült leállítani a megosztást</string>
+    <string name="share_create_link_failed">Nem sikerült létrehozni a megosztási hivatkozást</string>
+    <string name="share_disable_link_failed">Nem sikerült kikapcsolni a hivatkozást</string>
+    <string name="album_leave_failed">Nem sikerült elhagyni az albumot</string>
+    <string name="album_leave_missing_details">Most nem lehet elhagyni ezt az albumot</string>
+    <string name="album_delete_photos_failed">Nem sikerült törölni a fényképeket</string>
+    <string name="album_remove_photos_failed">Nem sikerült eltávolítani a fényképeket</string>
+    <string name="album_remove_partial">%1$d/%2$d eltávolítva — néhányat nem sikerült</string>
+    <string name="album_rename_failed">Nem sikerült átnevezni az albumot</string>
+    <string name="album_set_cover_failed">Nem sikerült beállítani az album borítóját</string>
+    <string name="shared_save_failed">Nem sikerült elmenteni az albumot a könyvtáradba</string>
 
     <!-- Content filter sheet -->
     <string name="filter_title">Szűrő</string>
@@ -484,6 +525,10 @@
         <item quantity="one">1 fotó törlése?</item>
         <item quantity="other">%1$d fotó törlése?</item>
     </plurals>
+    <plurals name="count_items_plural">
+        <item quantity="one">1 elem</item>
+        <item quantity="other">%d elem</item>
+    </plurals>
 
     <plurals name="count_photos_plural">
         <item quantity="one">1 kép</item>
@@ -492,6 +537,10 @@
     <plurals name="count_videos_plural">
         <item quantity="one">1 videó</item>
         <item quantity="other">%d videó</item>
+    </plurals>
+    <plurals name="share_invite_sent">
+        <item quantity="one">Meghívó elküldve</item>
+        <item quantity="other">%1$d meghívó elküldve</item>
     </plurals>
 
     <string name="gallery_on_this_day">Ezen a napon</string>
@@ -554,4 +603,83 @@
     <string name="day_detail_edit_description_title">Leírás szerkesztése</string>
     <string name="day_detail_save">Mentés</string>
     <string name="day_detail_photos_count">%1$d fotó</string>
+
+    <!-- Beépített frissítő -->
+    <string name="update_available_title">Frissítés elérhető</string>
+    <string name="update_available_message">Új verzió (%1$s) telepíthető (%2$d MB).</string>
+    <string name="update_action_update">Frissítés</string>
+    <string name="update_action_later">Később</string>
+    <string name="update_downloading">Letöltés… %1$d%%</string>
+    <string name="update_install_prompt">A letöltés kész. Telepíted?</string>
+    <string name="update_check_settings_row">Frissítések keresése</string>
+    <string name="update_check_settings_summary">Jelenlegi verzió: %1$s</string>
+    <string name="update_no_update">A legfrissebb verziót használod.</string>
+    <string name="update_check_failed">Nem sikerült ellenőrizni a frissítéseket. Próbáld újra később.</string>
+    <string name="update_permission_required">Engedélyezd az ismeretlen alkalmazások telepítését a rendszerbeállításokban.</string>
+    <string name="offline_banner_message">Nem vagy internethez csatlakozva. Néhány funkció nem érhető el, amíg vissza nem áll a kapcsolat.</string>
+    <string name="offline_banner_dismiss_cd">Értesítés bezárása</string>
+    <string name="network_error_offline">Nem vagy internethez csatlakozva. Próbáld újra, amint helyreáll a kapcsolat.</string>
+    <string name="network_error_transient">Sikertelen kapcsolat. Próbáld újra később.</string>
+    <string name="cd_status_backed_up_device">Drive-ra mentve és a készüléken is</string>
+    <string name="cd_status_cloud_only">Csak a Proton Drive-on</string>
+    <string name="cd_status_hidden_local">Elrejtve ezen a készüléken</string>
+    <string name="cd_status_device_only">Csak a készüléken</string>
+    <string name="cd_status_backed_up">Mentve</string>
+    <string name="cd_status_in_album">Ebben az albumban</string>
+    <string name="cd_status_excluded">Kizárva</string>
+    <string name="cd_status_selected">Kijelölve</string>
+    <string name="cd_favorite_add">Hozzáadás a kedvencekhez</string>
+    <string name="cd_favorite_remove">Eltávolítás a kedvencekből</string>
+    <string name="cd_editor_undo">Visszavonás</string>
+    <string name="cd_editor_redo">Újra</string>
+    <string name="cd_editor_reset">Visszaállítás</string>
+    <string name="cd_viewer_edit">Szerkesztés</string>
+    <string name="cd_viewer_metadata_edit">Mező szerkesztése</string>
+    <string name="cd_clear_search">Keresés törlése</string>
+
+    <string name="shared_save_to_library">Mentés a könyvtáramba</string>
+    <string name="shared_save_success_fmt">%1$d kép mentve a könyvtáradba</string>
+    <string name="shared_save_partial_fmt">%1$d/%2$d kép mentve a könyvtáradba</string>
+    <string name="shared_save_progress_fmt">Mentés %1$d / %2$d a könyvtáradba…</string>
+    <string name="viewer_delete_subtitle_synced">Ez a fotó már fent van a Proton Drive-on. Válassz, mit szeretnél:</string>
+    <string name="viewer_delete_remove_from_device">Törlés az eszközről</string>
+    <string name="viewer_delete_remove_from_device_desc">A biztonsági másolat marad a Proton Drive-on</string>
+    <string name="viewer_delete_remove_from_cloud">Törlés a felhőből</string>
+    <string name="viewer_delete_remove_from_cloud_desc">A fotó az eszközön marad, a felhős másolat a Drive kukájába kerül</string>
+    <string name="viewer_delete_everywhere">Törlés mindenhonnan</string>
+    <string name="viewer_delete_everywhere_desc">Az eszköz kukájába ÉS a Proton Drive kukájába kerül</string>
+    <string name="viewer_delete_subtitle_cloud_only">A fotó a Proton Drive kukájába kerül. A Nemrég törölt mappából visszaállítható.</string>
+    <string name="viewer_delete_move_to_drive_trash">Áthelyezés a Drive kukájába</string>
+    <string name="action_save">Mentés</string>
+    <string name="gallery_picker_drive_albums">Drive-albumok</string>
+    <string name="album_card_folder_badge">Mappa</string>
+    <string name="sync_folders_add_dialog_title">Mappa hozzáadása</string>
+    <string name="sync_folders_add_row_title">Mappa hozzáadása név szerint</string>
+    <string name="sync_folders_add_dialog_name_hint">Mappa neve</string>
+    <string name="rename_sheet_title">Fájl átnevezése</string>
+    <string name="rename_sheet_subtitle_cloud">Válaszd ki, hogyan kerüljön az új név a felhős fotódra.</string>
+    <string name="rename_sheet_subtitle_local">Válaszd ki, hogyan kerüljön az új név az eszközöd fájljára.</string>
+    <string name="rename_sheet_name_label">Fájlnév</string>
+    <string name="rename_sheet_option_cloud_title">Átnevezés a felhőben</string>
+    <string name="rename_sheet_option_cloud_subtitle">Az új névvel feltölti, az eredeti pedig a Nemrég törölt mappába kerül.</string>
+    <string name="rename_sheet_option_local_title">Eredeti átnevezése</string>
+    <string name="rename_sheet_option_local_subtitle">Helyben frissíti a fájlt az eszközödön.</string>
+    <string name="rename_sheet_option_copy_title">Mentés másolatként</string>
+    <string name="rename_sheet_option_copy_subtitle_cloud">Új fotóként tölti fel. Az eredeti a Drive-on marad.</string>
+    <string name="rename_sheet_option_copy_subtitle_local">Új fájlt hoz létre a Pictures/Proton Photos mappában.</string>
+    <string name="save_to_library_confirm_title">Mentés a könyvtáramba</string>
+    <string name="save_to_library_confirm_body_fmt">%1$d elemet másolunk a könyvtáradba. Amint a másolás befejeződik, megjelennek a Fotóid között.</string>
+    <string name="save_to_library_action_cancel">Mentés megszakítása</string>
+    <string name="save_to_library_cancelled_fmt">Mentés megszakítva %1$d / %2$d kópiánál</string>
+    <string name="albums_more_actions">További műveletek</string>
+    <string name="leave_album">Album elhagyása</string>
+    <string name="leave_album_confirm_title">Elhagyod ezt az albumot?</string>
+    <string name="leave_album_confirm_body">Az album eltűnik a könyvtáradból. A tulajdonos példánya és a többiek hozzáférése változatlan marad. Később újra meghívhatnak.</string>
+    <string name="leave_album_confirm_action">Elhagyás</string>
+    <string name="share_shared_by">Megosztotta</string>
+    <string name="share_invite_sending">Meghívó küldése…</string>
+    <string name="gallery_deselect_all">Kijelölés megszüntetése</string>
+    <string name="force_update_title">Frissítés szükséges</string>
+    <string name="force_update_body">Ez a verzió már nem támogatott. Kérjük frissíts a folytatáshoz.</string>
+    <string name="force_update_action">Frissítés</string>
 </resources>

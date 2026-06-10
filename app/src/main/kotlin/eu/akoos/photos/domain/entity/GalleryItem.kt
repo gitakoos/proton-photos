@@ -23,25 +23,37 @@
 package eu.akoos.photos.domain.entity
 
 sealed interface GalleryItem {
+    /**
+     * Effective capture timestamp in epoch-ms, the single sort + grouping key for every photo
+     * list. Derived through [TimestampSanity] so all three states resolve a sub-floor value the
+     * same way — see each subtype for which fallback applies.
+     */
     val captureTimeMs: Long
 
+    /** Stable per-item identity used as the sort tiebreak so equal-timestamp bursts keep a
+     *  total order across re-emissions (mirrors the album comparator's linkId tiebreak). */
+    val stableId: String
+
     data class CloudOnly(val cloud: CloudPhoto) : GalleryItem {
-        override val captureTimeMs get() = cloud.captureTime * 1000L
+        // No local twin to borrow a DATE_TAKEN from, so a sub-floor cloud captureTime stays
+        // as-is (a stripped upload already carries the upload-moment time, not 0).
+        override val captureTimeMs get() = cloud.captureTimeMs
+        override val stableId get() = cloud.linkId
     }
 
     data class LocalOnly(val local: LocalMediaItem) : GalleryItem {
+        // dateTaken already self-heals to DATE_ADDED at MediaStore query time, so it never
+        // arrives as a sub-floor sentinel here.
         override val captureTimeMs get() = local.dateTaken
+        override val stableId get() = local.uri
     }
 
     data class Synced(val cloud: CloudPhoto, val local: LocalMediaItem) : GalleryItem {
-        /**
-         * Cloud captureTime is authoritative — it's set at upload from the original local
-         * DATE_TAKEN and survives MediaStore quirks (some emulator builds + some Android
-         * versions silently drop a DATE_TAKEN write on a newly-inserted row, leaving the
-         * downloaded file dated "now"). Falling back to local.dateTaken only when the
-         * cloud carries no captureTime — rare for anything uploaded by our own app.
-         */
+        // Cloud captureTime is set at upload from the original DATE_TAKEN and survives the
+        // MediaStore quirk where a downloaded file is dated "now"; fall back to the local
+        // DATE_TAKEN only when the cloud value is sub-floor.
         override val captureTimeMs get() =
-            if (cloud.captureTime > 0) cloud.captureTime * 1000L else local.dateTaken
+            TimestampSanity.effectiveMs(cloud.captureTimeMs, local.dateTaken)
+        override val stableId get() = cloud.linkId
     }
 }

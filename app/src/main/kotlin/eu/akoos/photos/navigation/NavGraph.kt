@@ -59,8 +59,7 @@ import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.GalleryItem
-import eu.akoos.photos.domain.entity.LocalAlbum
-import eu.akoos.photos.presentation.albums.LocalAlbumDetailScreen
+import eu.akoos.photos.domain.entity.LocalMediaItem
 import androidx.compose.runtime.mutableIntStateOf
 import eu.akoos.photos.presentation.albums.AlbumDetailScreen
 import eu.akoos.photos.presentation.auth.SignInScreen
@@ -96,9 +95,9 @@ sealed class Screen(val route: String) {
     data object SecuritySettings : Screen("security_settings")
     data object Viewer : Screen("viewer")
     data object AlbumDetail : Screen("album_detail")
-    data object LocalAlbumDetail : Screen("local_album_detail")
     data object SyncFolders : Screen("sync_folders")
     data object ExcludedFolders : Screen("excluded_folders")
+    data object AlbumMirrorFolders : Screen("album_mirror_folders")
     data object Trash : Screen("trash")
     data object HiddenAlbum : Screen("hidden_album")
     data object PhotoEditor : Screen("photo_editor")
@@ -152,6 +151,16 @@ fun NavGraph(
      *  to the viewer for the matching photo. Null on regular cold starts. */
     widgetPhotoUri: String? = null,
     onWidgetPhotoConsumed: () -> Unit = {},
+    /** Forwarded to [SettingsScreen]'s "Check for updates" row. MainActivity owns the
+     *  call into the singleton UpdateOrchestrator + the Toast feedback so the UI layer
+     *  doesn't need to hold an Activity reference. */
+    onCheckForUpdates: () -> Unit = {},
+    /** Set by MainActivity when the user opens an external image/video via the system
+     *  "Open with" / "Edit with" chooser. After we reach the Ready startup state, the
+     *  request is captured into Nav-scope state and the editor route is pushed on top
+     *  of Gallery so the back press lands the user on their gallery. */
+    externalEditRequest: ExternalEditRequest? = null,
+    onExternalEditConsumed: () -> Unit = {},
     navViewModel: NavViewModel = hiltViewModel(),
 ) {
     val navController = rememberNavController()
@@ -164,18 +173,17 @@ fun NavGraph(
     // full-res image (a leak the user explicitly called out).
     var selectedViewerHiddenLinkIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     var selectedAlbum by remember { mutableStateOf<Album?>(null) }
-    var selectedLocalAlbum by remember { mutableStateOf<LocalAlbum?>(null) }
-    // When the user taps a Merged album card (a local bucket whose name matches a Drive
-    // album), this holds the matching cloud album's linkId so LocalAlbumDetailScreen can
-    // include CloudOnly photos from the Drive album alongside the local items. Cleared
-    // whenever the user opens a non-merged album so a stale linkId doesn't leak across.
-    var mergedCloudAlbumLinkId by remember { mutableStateOf<String?>(null) }
     // True when the viewer was opened from an album detail (not from the main gallery).
     // Suppresses the per-photo "Save to device" button — the album has its own "Download all".
     var viewerFromAlbum by remember { mutableStateOf(false) }
 
     // Selected item handed to the editor. Carries local URI + display name OR a CloudPhoto.
     var editorItem by remember { mutableStateOf<GalleryItem?>(null) }
+
+    // Captured from the MainActivity-owned request once we reach the Ready startup state.
+    // Held in Nav scope so the PhotoEditor composable can read it without piping the value
+    // through every screen on the back stack.
+    var pendingExternalEdit by remember { mutableStateOf<ExternalEditRequest?>(null) }
 
     // ISO date string (yyyy-MM-dd) handed from Calendar to DayDetail. Held here so the
     // composable-level rememberSaveable inside DayDetailScreen isn't the source of truth
@@ -209,6 +217,61 @@ fun NavGraph(
                     }
                 }
             }
+        }
+    }
+
+    // Mirror the MainActivity-held request into Nav scope, then clear the Activity-side
+    // reference so a re-creation (config change) doesn't replay it.
+    LaunchedEffect(externalEditRequest) {
+        val req = externalEditRequest ?: return@LaunchedEffect
+        pendingExternalEdit = req
+        onExternalEditConsumed()
+    }
+
+    // External deep route: once the startup gate clears (Ready) and a request is pending,
+    // push the right destination on top of Gallery. Gallery stays on the back stack so a
+    // back press from viewer/editor lands the user on their gallery rather than dropping
+    // them out of the app. Branch:
+    //   - ACTION_VIEW (system "Open with" chooser, file managers, gallery apps) → push
+    //     the photo viewer with a synthetic single-item list wrapping the foreign URI.
+    //   - ACTION_EDIT ("Edit with" chooser, edit affordances in other apps) → push the
+    //     editor, which handles the foreign URI and saves any edits as a new copy.
+    // Previously both actions routed to the editor — picking the
+    // app from "Open with" used to land on the editor instead of the viewer, which is
+    // jarring when the intent was only to view the image.
+    val startupRouteForExternal by navViewModel.startupRoute.collectAsStateWithLifecycle()
+    LaunchedEffect(pendingExternalEdit, startupRouteForExternal) {
+        val req = pendingExternalEdit ?: return@LaunchedEffect
+        if (startupRouteForExternal != StartupRoute.Ready) return@LaunchedEffect
+        if (req.isViewOnly) {
+            // Synthesise a one-item LocalOnly GalleryItem from the foreign URI so the
+            // viewer can render it through its existing local-uri path. The dateTaken
+            // defaults to "now" — we never see the original EXIF capture time on a
+            // content:// URI we don't own, and the viewer's info pill falls back to a
+            // sensible label rather than crashing on a missing field.
+            selectedViewerItems = listOf(
+                GalleryItem.LocalOnly(
+                    LocalMediaItem(
+                        uri = req.uri,
+                        dateTaken = System.currentTimeMillis(),
+                        displayName = req.displayName,
+                        mimeType = req.mimeType,
+                        sizeBytes = 0L,
+                        bucketName = null,
+                    ),
+                ),
+            )
+            selectedViewerIndex = 0
+            selectedViewerHiddenLinkIds = emptySet()
+            viewerFromAlbum = false
+            navController.navigate(Screen.Viewer.route)
+            // Viewer reads its data from `selectedViewerItems`, not pendingExternalEdit,
+            // so we can drop the request right here. Doing so keeps the LaunchedEffect
+            // from re-firing on a future recomposition that happens to land before the
+            // viewer is fully on the back stack.
+            pendingExternalEdit = null
+        } else {
+            navController.navigate(Screen.PhotoEditor.route)
         }
     }
 
@@ -263,23 +326,7 @@ fun NavGraph(
                 },
                 onAlbumClick = { album ->
                     selectedAlbum = album
-                    mergedCloudAlbumLinkId = null
                     navController.navigate(Screen.AlbumDetail.route)
-                },
-                onLocalAlbumClick = { album ->
-                    selectedLocalAlbum = album
-                    mergedCloudAlbumLinkId = null
-                    navController.navigate(Screen.LocalAlbumDetail.route)
-                },
-                onMergedAlbumClick = { local, cloud ->
-                    // Merged albums (local bucket + Drive album with matching name) route
-                    // through the local-album detail screen because it already speaks
-                    // GalleryItem.LocalOnly/Synced/CloudOnly natively. The cloud linkId is
-                    // passed alongside so the screen merges in the cloud-only entries too.
-                    selectedLocalAlbum = local
-                    selectedAlbum = cloud
-                    mergedCloudAlbumLinkId = cloud.linkId
-                    navController.navigate(Screen.LocalAlbumDetail.route)
                 },
                 onSettingsClick = { navController.navigate(Screen.Settings.route) },
                 onHiddenAlbumClick = { navController.navigate(Screen.HiddenAlbum.route) },
@@ -334,6 +381,11 @@ fun NavGraph(
                 onBack = { navController.popBackStack() },
                 showSaveToDevice = !viewerFromAlbum,
                 sourceAlbumLinkId = sourceAlbumLinkId,
+                // A non-null `sharedByEmail` on the album means the user is a guest
+                // on someone else's album — every mutating affordance in the viewer
+                // (delete / set-as-cover / favorite / rename / add-to-album / edit)
+                // collapses into a no-op + hides itself behind this flag.
+                isReadOnlyAlbum = viewerFromAlbum && selectedAlbum?.sharedByEmail != null,
                 editedAt = editedAt,
                 hiddenCloudLinkIds = selectedViewerHiddenLinkIds,
                 onEditItem = { item ->
@@ -344,6 +396,45 @@ fun NavGraph(
         }
 
         composable(Screen.PhotoEditor.route) {
+            val external = pendingExternalEdit
+            if (external != null) {
+                // External entry: route to the appropriate editor based on the request's mime
+                // type. Save flow inside the editor always lands as a new copy under
+                // Pictures/Photos for Proton (never overwrites the foreign URI).
+                //
+                // We deliberately do NOT clear pendingExternalEdit inside onBack / onSaved.
+                // Doing so triggers a recomposition that hits the editorItem == null branch
+                // below BEFORE NavHost finishes the back navigation, double-popping the back
+                // stack and leaving the user on an empty screen. Instead the DisposableEffect
+                // at the end of this branch clears the request once the composable actually
+                // leaves the back stack, so the next internal navigation (Gallery → Viewer →
+                // Edit) sees a clean state.
+                if (external.isVideo) {
+                    VideoEditorScreen(
+                        localUri         = external.uri,
+                        localDisplayName = external.displayName,
+                        localMimeType    = external.mimeType,
+                        externalRequest  = external,
+                        onBack           = { navController.popBackStack() },
+                        onSaved          = { navController.popBackStack() },
+                    )
+                } else {
+                    PhotoEditorScreen(
+                        localUri          = external.uri,
+                        localDisplayName  = external.displayName,
+                        localMimeType     = external.mimeType,
+                        cloudPhoto        = null,
+                        sourceAlbumLinkId = null,
+                        externalRequest   = external,
+                        onBack            = { navController.popBackStack() },
+                        onSaved           = { navController.popBackStack() },
+                    )
+                }
+                androidx.compose.runtime.DisposableEffect(Unit) {
+                    onDispose { pendingExternalEdit = null }
+                }
+                return@composable
+            }
             val item = editorItem
             val sourceAlbumLinkId = if (viewerFromAlbum) selectedAlbum?.linkId else null
             when (item) {
@@ -501,23 +592,6 @@ fun NavGraph(
             }
         }
 
-        composable(Screen.LocalAlbumDetail.route) {
-            val album = selectedLocalAlbum
-            if (album != null) {
-                LocalAlbumDetailScreen(
-                    localAlbum = album,
-                    onPhotoClick = { items, index ->
-                        selectedViewerItems = items
-                        selectedViewerIndex = index
-                        selectedViewerHiddenLinkIds = emptySet()
-                        navController.navigate(Screen.Viewer.route)
-                    },
-                    onBack = { navController.popBackStack() },
-                    cloudAlbumLinkId = mergedCloudAlbumLinkId,
-                )
-            }
-        }
-
         composable(Screen.Settings.route) {
             SettingsScreen(
                 onBack                    = { navController.popBackStack() },
@@ -530,6 +604,7 @@ fun NavGraph(
                 onLanguageClick           = { navController.navigate(Screen.LanguageSettings.route) },
                 onAboutClick              = { navController.navigate(Screen.About.route) },
                 onAccountClick            = { navController.navigate(Screen.Account.route) },
+                onCheckForUpdatesClick    = onCheckForUpdates,
             )
         }
 
@@ -547,10 +622,17 @@ fun NavGraph(
 
         composable(Screen.SyncSettings.route) {
             SyncSettingsScreen(
-                onBack                  = { navController.popBackStack() },
-                onBackupFoldersClick    = { navController.navigate(Screen.SyncFolders.route) },
-                onExcludedFoldersClick  = { navController.navigate(Screen.ExcludedFolders.route) },
-                onRecentlyDeletedClick  = { navController.navigate(Screen.Trash.route) },
+                onBack                       = { navController.popBackStack() },
+                onBackupFoldersClick         = { navController.navigate(Screen.SyncFolders.route) },
+                onExcludedFoldersClick       = { navController.navigate(Screen.ExcludedFolders.route) },
+                onAlbumMirrorFoldersClick    = { navController.navigate(Screen.AlbumMirrorFolders.route) },
+                onRecentlyDeletedClick       = { navController.navigate(Screen.Trash.route) },
+            )
+        }
+
+        composable(Screen.AlbumMirrorFolders.route) {
+            eu.akoos.photos.presentation.settings.AlbumMirrorFoldersScreen(
+                onBack = { navController.popBackStack() },
             )
         }
 

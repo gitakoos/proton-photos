@@ -55,6 +55,13 @@ class UploadPendingUseCaseTest {
         every { mockDataStore.data } returns flowOf(mockPrefs)
         // Non-empty folder set so the upload loop is not skipped.
         every { mockPrefs[SettingsKeys.SYNC_FOLDER_NAMES] } returns setOf("Camera")
+        every { mockPrefs[SettingsKeys.BACKUP_EVERYTHING] } returns false
+        every { mockPrefs[SettingsKeys.ALBUM_OPT_IN_FOLDER_NAMES] } returns emptySet()
+        every { mockPrefs[SettingsKeys.STRIP_ON_UPLOAD] } returns false
+        every { mockPrefs[SettingsKeys.RENAME_TO_CAPTURE_DATE] } returns false
+        every { mockPrefs[SettingsKeys.DELETE_LOCAL_AFTER_BACKUP] } returns false
+        every { mockPrefs[SettingsKeys.STRIP_GPS] } returns false
+        every { mockPrefs[SettingsKeys.EXCLUDED_FOLDER_NAMES] } returns emptySet()
         every { mockPrefs[SettingsKeys.STRIP_ON_UPLOAD] } returns false
         every { mockPrefs[SettingsKeys.STRIP_GPS] } returns false
         every { mockPrefs[SettingsKeys.STRIP_CAMERA_INFO] } returns false
@@ -62,7 +69,7 @@ class UploadPendingUseCaseTest {
         every { mockPrefs[SettingsKeys.STRIP_SOFTWARE_INFO] } returns false
         every { mockPrefs[SettingsKeys.ALBUM_BUCKET_MAP] } returns emptySet()
 
-        useCase = UploadPendingUseCase(syncStateRepo, localRepo, cloudRepo, context)
+        useCase = UploadPendingUseCase(syncStateRepo, localRepo, cloudRepo, mockk(relaxed = true), context)
     }
 
     private fun syncState(uri: String, status: SyncStatus) = SyncState(
@@ -96,11 +103,11 @@ class UploadPendingUseCaseTest {
         every { syncStateRepo.observeAll(userId) } returns flowOf(states)
         coEvery { localRepo.queryByUri("uri://1") } returns localItem("uri://1")
         coEvery { localRepo.queryByUri("uri://3") } returns localItem("uri://3")
-        coEvery { cloudRepo.uploadFile(userId, any(), any(), any()) } returns "cloud-id"
+        coEvery { cloudRepo.uploadFile(userId, any(), any(), any(), any()) } returns "cloud-id"
 
         useCase(userId)
 
-        coVerify(exactly = 2) { cloudRepo.uploadFile(userId, any(), any(), any()) }
+        coVerify(exactly = 2) { cloudRepo.uploadFile(userId, any(), any(), any(), any()) }
         coVerify(exactly = 0) { localRepo.queryByUri("uri://2") }
     }
 
@@ -109,7 +116,7 @@ class UploadPendingUseCaseTest {
         val state = syncState("uri://1", SyncStatus.LOCAL_ONLY)
         every { syncStateRepo.observeAll(userId) } returns flowOf(listOf(state))
         coEvery { localRepo.queryByUri("uri://1") } returns localItem("uri://1")
-        coEvery { cloudRepo.uploadFile(userId, any(), any(), any()) } returns "new-cloud-id"
+        coEvery { cloudRepo.uploadFile(userId, any(), any(), any(), any()) } returns "new-cloud-id"
 
         useCase(userId)
 
@@ -130,12 +137,12 @@ class UploadPendingUseCaseTest {
         every { syncStateRepo.observeAll(userId) } returns flowOf(states)
         coEvery { localRepo.queryByUri("uri://1") } returns localItem("uri://1")
         coEvery { localRepo.queryByUri("uri://2") } returns localItem("uri://2")
-        coEvery { cloudRepo.uploadFile(userId, any(), any(), any()) } throws StorageFullException()
+        coEvery { cloudRepo.uploadFile(userId, any(), any(), any(), any()) } throws StorageFullException()
 
         useCase(userId)
 
         // After StorageFullException, the second item must NOT be attempted
-        coVerify(exactly = 1) { cloudRepo.uploadFile(userId, any(), any(), any()) }
+        coVerify(exactly = 1) { cloudRepo.uploadFile(userId, any(), any(), any(), any()) }
     }
 
     @Test
@@ -147,13 +154,13 @@ class UploadPendingUseCaseTest {
         every { syncStateRepo.observeAll(userId) } returns flowOf(states)
         coEvery { localRepo.queryByUri("uri://1") } returns localItem("uri://1")
         coEvery { localRepo.queryByUri("uri://2") } returns localItem("uri://2")
-        coEvery { cloudRepo.uploadFile(userId, match { it.uri == "uri://1" }, any(), any()) } throws RuntimeException("network error")
-        coEvery { cloudRepo.uploadFile(userId, match { it.uri == "uri://2" }, any(), any()) } returns "cloud-id-2"
+        coEvery { cloudRepo.uploadFile(userId, match { it.uri == "uri://1" }, any(), any(), any()) } throws RuntimeException("network error")
+        coEvery { cloudRepo.uploadFile(userId, match { it.uri == "uri://2" }, any(), any(), any()) } returns "cloud-id-2"
 
         useCase(userId)
 
         // Both items were attempted; second one succeeded
-        coVerify(exactly = 2) { cloudRepo.uploadFile(userId, any(), any(), any()) }
+        coVerify(exactly = 2) { cloudRepo.uploadFile(userId, any(), any(), any(), any()) }
         coVerify {
             syncStateRepo.upsert(
                 match { it.localUri == "uri://2" && it.status == SyncStatus.SYNCED },
@@ -170,6 +177,6 @@ class UploadPendingUseCaseTest {
 
         useCase(userId)
 
-        coVerify(exactly = 0) { cloudRepo.uploadFile(any(), any(), any()) }
+        coVerify(exactly = 0) { cloudRepo.uploadFile(any(), any(), any(), any(), any()) }
     }
 }

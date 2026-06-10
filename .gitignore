@@ -7,6 +7,7 @@
 .DS_Store
 /build
 /app/build
+/baseline-profile/build
 /captures
 .externalNativeBuild
 .cxx
@@ -34,3 +35,6 @@ photosforproton.md
 /build/screen*.png
 /build/t*.png
 /build/ui.xml
+tempandroid-drive/
+sharing-log*.txt
+tempweb-drive/

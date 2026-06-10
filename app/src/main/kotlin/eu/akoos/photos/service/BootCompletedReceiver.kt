@@ -82,7 +82,11 @@ class BootCompletedReceiver : BroadcastReceiver() {
                     SyncWorker.MIN_INTERVAL_MINUTES,
                 )
                 SyncWorker.scheduleContentObserver(appContext, wifiOnly)
-                BackgroundSyncService.start(appContext)
+                // BackgroundSyncService.start would crash here on Android 14+ with
+                // ForegroundServiceStartNotAllowedException — dataSync FGS type is
+                // not allowed to start from BOOT_COMPLETED since Android 14. The
+                // service starts naturally on the next MainActivity launch, and the
+                // periodic SyncWorker scheduled above covers the gap until then.
                 Log.d(TAG, "boot: re-armed sync triggers (wifiOnly=$wifiOnly)")
             } catch (t: Throwable) {
                 Log.w(TAG, "boot re-arm failed: ${t.message}")

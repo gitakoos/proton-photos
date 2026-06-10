@@ -25,7 +25,11 @@ package eu.akoos.photos.data.repository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import me.proton.core.domain.entity.UserId
 import eu.akoos.photos.data.crypto.DriveCryptoHelper
@@ -101,6 +105,12 @@ class DrivePhotoRepositoryImpl @Inject constructor(
     override suspend fun loadAlbums(userId: UserId): List<Album> =
         albumService.loadAlbums(userId)
 
+    override suspend fun loadAlbumsCached(): List<Album> =
+        albumService.loadAlbumsCached()
+
+    override suspend fun prefetchAlbumsMembership(userId: UserId, albums: List<Album>) =
+        albumService.prefetchAlbumsMembership(userId, albums)
+
     override suspend fun createDriveAlbum(userId: UserId, name: String): Album =
         albumService.createDriveAlbum(userId, name)
 
@@ -111,9 +121,10 @@ class DrivePhotoRepositoryImpl @Inject constructor(
         userId: UserId,
         albumLinkId: String,
         volumeId: String?,
+        sharingShareId: String?,
         onLinkIdsResolved: ((List<String>) -> Unit)?,
     ): List<CloudPhoto> =
-        albumService.loadAlbumPhotos(userId, albumLinkId, volumeId, onLinkIdsResolved)
+        albumService.loadAlbumPhotos(userId, albumLinkId, volumeId, sharingShareId, onLinkIdsResolved)
 
     override suspend fun loadAlbumPhotosCached(albumLinkId: String): List<CloudPhoto> =
         albumService.loadAlbumPhotosCached(albumLinkId)
@@ -155,14 +166,14 @@ class DrivePhotoRepositoryImpl @Inject constructor(
     override suspend fun uploadFile(
         userId: UserId,
         item: LocalMediaItem,
-        hash: String,
+        sha1HexContentDigest: String,
         uploadUri: String,
         onProgress: ((
             phase: eu.akoos.photos.data.repository.drive.UploadPhase,
             doneBytes: Long,
             totalBytes: Long,
         ) -> Unit)?,
-    ): String = uploadService.uploadFile(userId, item, hash, uploadUri, onProgress)
+    ): String = uploadService.uploadFile(userId, item, sha1HexContentDigest, uploadUri, onProgress)
 
     override suspend fun renameOrCopyCloudPhoto(
         userId: UserId,
@@ -192,8 +203,112 @@ class DrivePhotoRepositoryImpl @Inject constructor(
     override suspend fun inviteToAlbum(userId: UserId, albumLinkId: String, email: String) =
         albumSharingService.inviteToAlbum(userId, albumLinkId, email)
 
+    override suspend fun saveSharedAlbumToOwnLibrary(
+        userId: UserId,
+        sharingShareId: String,
+        sourceAlbumLinkId: String,
+        sourceAlbumDecryptedName: String,
+        sourceVolumeId: String,
+    ): DrivePhotoRepository.SaveSharedAlbumOutcome {
+        val result = albumSharingService.saveSharedAlbumToOwnLibrary(
+            userId = userId,
+            sharingShareId = sharingShareId,
+            sourceAlbumLinkId = sourceAlbumLinkId,
+            sourceAlbumDecryptedName = sourceAlbumDecryptedName,
+            sourceVolumeId = sourceVolumeId,
+        )
+        return DrivePhotoRepository.SaveSharedAlbumOutcome(
+            newAlbumLinkId = result.newAlbumLinkId,
+            copiedCount = result.copiedCount,
+            failedCount = result.failedCount,
+            totalRequested = result.totalRequested,
+        )
+    }
+
+    override fun startSaveSharedAlbumToOwnLibrary(
+        userId: UserId,
+        sharingShareId: String,
+        sourceAlbumLinkId: String,
+        sourceAlbumDecryptedName: String,
+        sourceVolumeId: String,
+    ) {
+        albumSharingService.startSaveSharedAlbumToOwnLibrary(
+            userId = userId,
+            sharingShareId = sharingShareId,
+            sourceAlbumLinkId = sourceAlbumLinkId,
+            sourceAlbumDecryptedName = sourceAlbumDecryptedName,
+            sourceVolumeId = sourceVolumeId,
+        )
+    }
+
+    override val saveSharedAlbumState: kotlinx.coroutines.flow.StateFlow<DrivePhotoRepository.SaveSharedAlbumProgress> =
+        albumSharingService.saveToLibraryState
+            .map { state ->
+                when (state) {
+                    is AlbumSharingService.SaveToLibraryState.Idle -> DrivePhotoRepository.SaveSharedAlbumProgress.Idle
+                    is AlbumSharingService.SaveToLibraryState.Running -> DrivePhotoRepository.SaveSharedAlbumProgress.Running(
+                        sourceAlbumLinkId = state.sourceAlbumLinkId,
+                        copied = state.copied,
+                        total = state.total,
+                    )
+                    is AlbumSharingService.SaveToLibraryState.Done -> DrivePhotoRepository.SaveSharedAlbumProgress.Done(
+                        sourceAlbumLinkId = state.sourceAlbumLinkId,
+                        newAlbumLinkId = state.newAlbumLinkId,
+                        copiedCount = state.copiedCount,
+                        failedCount = state.failedCount,
+                        totalRequested = state.totalRequested,
+                    )
+                    is AlbumSharingService.SaveToLibraryState.Failed -> DrivePhotoRepository.SaveSharedAlbumProgress.Failed(
+                        sourceAlbumLinkId = state.sourceAlbumLinkId,
+                        reason = state.reason,
+                    )
+                    is AlbumSharingService.SaveToLibraryState.Cancelled -> DrivePhotoRepository.SaveSharedAlbumProgress.Cancelled(
+                        sourceAlbumLinkId = state.sourceAlbumLinkId,
+                        copied = state.copied,
+                        total = state.total,
+                    )
+                }
+            }
+            .let { flow ->
+                @OptIn(kotlinx.coroutines.DelicateCoroutinesApi::class)
+                flow.stateIn(
+                    scope = GlobalScope,
+                    started = SharingStarted.Eagerly,
+                    initialValue = DrivePhotoRepository.SaveSharedAlbumProgress.Idle,
+                )
+            }
+
+    override fun acknowledgeSaveSharedAlbumResult() {
+        albumSharingService.acknowledgeSaveToLibraryResult()
+    }
+
+    override fun cancelSaveSharedAlbumToOwnLibrary() {
+        albumSharingService.cancelSaveToLibrary()
+    }
+
+
     override suspend fun deleteShare(userId: UserId, shareId: String) =
         albumSharingService.deleteShare(userId, shareId)
+
+    override suspend fun leaveSharedAlbum(userId: UserId, shareId: String, albumLinkId: String) =
+        albumSharingService.leaveSharedAlbum(userId, shareId, albumLinkId)
+
+    override suspend fun revokeShareUrlOnly(userId: UserId, shareId: String) =
+        albumSharingService.revokeShareUrlOnly(userId, shareId)
+
+    override suspend fun changeMemberPermission(
+        userId: UserId,
+        shareId: String,
+        memberId: String,
+        permissions: Int,
+    ) = albumSharingService.changeMemberPermission(userId, shareId, memberId, permissions)
+
+    override suspend fun changeInvitationPermission(
+        userId: UserId,
+        shareId: String,
+        invitationId: String,
+        permissions: Int,
+    ) = albumSharingService.changeInvitationPermission(userId, shareId, invitationId, permissions)
 
     override suspend fun loadSharedWithMeAlbums(userId: UserId): List<Album> =
         albumSharingService.loadSharedWithMeAlbums(userId)
@@ -226,6 +341,15 @@ class DrivePhotoRepositoryImpl @Inject constructor(
         cryptoHelper.clearAllCaches()
         recentUploadsTracker.clearInMemory()
         thumbnailScheduler.clear()
+        // Cancel any in-flight Save-to-my-library copy and reset its state to Idle so a
+        // re-login by a different user doesn't pick up a stale Running banner against the
+        // old account's album linkId. The Job is rooted in a Singleton-scoped SupervisorJob
+        // that otherwise survives ViewModel teardown.
+        runCatching { albumSharingService.cancelSaveToLibrary() }
+        // Drop the cached cloud album list so the next signed-in user doesn't briefly see the
+        // previous account's albums on cold launch. Fire-and-forget — sign-out should not
+        // block on a Room write.
+        thumbnailRequestScope.launch { albumService.clearAlbumCache() }
     }
 
     override fun requestThumbnailDecrypt(userId: UserId, linkId: String) {
@@ -239,5 +363,21 @@ class DrivePhotoRepositoryImpl @Inject constructor(
 
     override fun cancelThumbnailDecrypt(linkId: String) {
         thumbnailScheduler.cancel(linkId)
+    }
+
+    override fun prefetchThumbnailDecrypt(userId: UserId, linkIds: List<String>) {
+        if (linkIds.isEmpty()) return
+        thumbnailRequestScope.launch {
+            val entities = photoListingDao.getByLinkIds(linkIds)
+            if (entities.isNotEmpty()) thumbnailScheduler.prefetch(userId, entities)
+        }
+    }
+
+    override fun requestThumbnailDecrypt(userId: UserId, linkIds: List<String>) {
+        if (linkIds.isEmpty()) return
+        thumbnailRequestScope.launch {
+            val entities = photoListingDao.getByLinkIds(linkIds)
+            entities.forEach { thumbnailScheduler.request(userId, it) }
+        }
     }
 }

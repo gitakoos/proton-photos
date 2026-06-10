@@ -38,7 +38,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -291,17 +290,6 @@ private fun DayCell(
                     .align(Alignment.BottomStart)
                     .padding(start = 4.dp, bottom = 2.dp),
             )
-            // Location pin badge when there's a location label on this day.
-            if (!dayBucket.locationText.isNullOrBlank()) {
-                Icon(
-                    Icons.Default.LocationOn,
-                    contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .padding(2.dp),
-                )
-            }
         } else {
             // Empty day — just the number on a flat surface.
             Text(

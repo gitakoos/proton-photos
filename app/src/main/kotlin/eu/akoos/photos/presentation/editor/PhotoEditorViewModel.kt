@@ -54,6 +54,7 @@ import me.proton.core.accountmanager.domain.AccountManager
 import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.LocalMediaItem
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
+import eu.akoos.photos.util.ExifHelper
 import java.io.File
 import java.io.FileOutputStream
 import javax.inject.Inject
@@ -62,6 +63,13 @@ import javax.inject.Inject
 sealed class EditorSource {
     data class Local(val uri: String, val displayName: String, val mimeType: String) : EditorSource()
     data class Cloud(val photo: CloudPhoto) : EditorSource()
+    /**
+     * Set when the photo arrived via an Intent.ACTION_EDIT or ACTION_VIEW from outside
+     * the app. Save flow is forced to copy-to-MediaStore (Pictures/Photos for Proton/)
+     * because the foreign URI may be read-only and we should not mutate files we
+     * didn't create.
+     */
+    data class External(val uri: String, val displayName: String, val mimeType: String) : EditorSource()
 }
 
 /** Built-in filter presets — each is a 4x5 ColorMatrix. */
@@ -107,7 +115,9 @@ data class EditorAdjustments(
     val flipHorizontal: Boolean = false,
     val flipVertical: Boolean = false,
     val filter: FilterPreset = FilterPreset.None,
-    /** Crop in source-bitmap coordinates; null = no crop. */
+    /** Crop in display-space coordinates — the rotated / flipped orientation the user sees
+     *  in the Crop tab, not the raw decoded bitmap. The pipeline rotates before it crops so
+     *  this rect is consumed in the same space it was authored in. null = no crop. */
     val cropRect: Rect? = null,
     /** Black-out / pixelate strokes applied AFTER all color and geometry transforms. */
     val redactStrokes: List<RedactionStroke> = emptyList(),
@@ -117,11 +127,28 @@ data class EditorUiState(
     val source: EditorSource? = null,
     val originalBitmap: Bitmap? = null,
     val previewBitmap: Bitmap? = null,
+    /**
+     * Original bitmap with brightness / contrast / saturation / exposure / highlights /
+     * shadows / temperature / tone / filter AND rotation / flip baked in, but WITHOUT crop
+     * or redact strokes. Pixel dimensions match the rotated orientation (width / height swap
+     * on the 90°/270° turns), which is the same display space the crop rect lives in.
+     *
+     * The Crop tool renders against this instead of [originalBitmap] so colour edits AND any
+     * rotation the user already applied stay visible while they pick a crop rectangle — the
+     * Crop tab then shows the very same picture the other tabs do. The full-pipeline
+     * [previewBitmap] is unsuitable here because it has crop already applied — handing it to
+     * the overlay would put the rect on the wrong canvas size and produce out-of-bounds reads.
+     */
+    val adjustedBitmapNoCrop: Bitmap? = null,
     val adjustments: EditorAdjustments = EditorAdjustments(),
     val isSaving: Boolean = false,
     val saveResult: SaveResult? = null,
     val isLoading: Boolean = true,
     val errorMessage: String? = null,
+    /** Latched true after an [EditorSource.External] save lands so the screen can
+     *  surface "Saved as copy" feedback without inspecting the result Uri scheme.
+     *  Reset implicitly when a fresh load clears [source]. */
+    val savedAsCopy: Boolean = false,
     val pendingWriteIntent: android.app.PendingIntent? = null,
     /**
      * Surfaces the OS consent dialog produced by [MediaStore.createDeleteRequest] when
@@ -215,7 +242,12 @@ class PhotoEditorViewModel @Inject constructor(
         _canRedo.value = redoStack.isNotEmpty()
         viewModelScope.launch(Dispatchers.Default) {
             val newPreview = applyAdjustments(orig, previous)
-            _state.update { it.copy(adjustments = previous, previewBitmap = newPreview) }
+            val noCropPreview = applyColorOnly(orig, previous)
+            _state.update { it.copy(
+                adjustments = previous,
+                previewBitmap = newPreview,
+                adjustedBitmapNoCrop = noCropPreview,
+            ) }
         }
     }
 
@@ -230,7 +262,12 @@ class PhotoEditorViewModel @Inject constructor(
         _canRedo.value = redoStack.isNotEmpty()
         viewModelScope.launch(Dispatchers.Default) {
             val newPreview = applyAdjustments(orig, next)
-            _state.update { it.copy(adjustments = next, previewBitmap = newPreview) }
+            val noCropPreview = applyColorOnly(orig, next)
+            _state.update { it.copy(
+                adjustments = next,
+                previewBitmap = newPreview,
+                adjustedBitmapNoCrop = noCropPreview,
+            ) }
         }
     }
 
@@ -283,7 +320,11 @@ class PhotoEditorViewModel @Inject constructor(
         if (snap != null && snap != adj) pushUndo(snap)
         viewModelScope.launch(Dispatchers.Default) {
             val full = applyAdjustments(orig, adj)
-            _state.update { it.copy(previewBitmap = full) }
+            val noCropFull = applyColorOnly(orig, adj)
+            _state.update { it.copy(
+                previewBitmap = full,
+                adjustedBitmapNoCrop = noCropFull,
+            ) }
         }
     }
 
@@ -326,7 +367,50 @@ class PhotoEditorViewModel @Inject constructor(
                     errorMessage = context.getString(R.string.editor_error_load_local)) }
                 return@launch
             }
-            _state.update { it.copy(originalBitmap = bmp, previewBitmap = bmp, isLoading = false) }
+            // BitmapFactory ignores EXIF orientation; bake it into the pixels so the editor
+            // shows the photo upright (matching the viewer). Save paths re-encode from this
+            // displayed bitmap with no EXIF, so baking here avoids a double-rotation.
+            val oriented = ExifHelper.applyOrientation(bmp, ExifHelper.readOrientation(context, uri))
+            _state.update { it.copy(
+                originalBitmap = oriented,
+                previewBitmap = oriented,
+                adjustedBitmapNoCrop = oriented,
+                isLoading = false,
+            ) }
+        }
+    }
+
+    /**
+     * Loads an externally-supplied image (system "Open with" / "Edit with" chooser entry).
+     * Identical to [loadLocal] except the source is tagged External so [save] always
+     * writes a fresh MediaStore copy under Pictures/Photos for Proton rather than
+     * attempting an in-place overwrite.
+     */
+    fun loadExternal(uri: String, displayName: String, mimeType: String) {
+        previewSourceSmall = null
+        clearUndoStacks()
+        _state.update { it.copy(
+            source = EditorSource.External(uri, displayName, mimeType),
+            isLoading = true,
+            errorMessage = null,
+            savedAsCopy = false,
+        ) }
+        viewModelScope.launch(Dispatchers.IO) {
+            val bmp = runCatching {
+                context.contentResolver.openInputStream(Uri.parse(uri))?.use {
+                    BitmapFactory.decodeStream(it)
+                }
+            }.getOrNull()
+            if (bmp == null) {
+                _state.update { it.copy(
+                    isLoading = false,
+                    errorMessage = context.getString(R.string.editor_external_load_error),
+                ) }
+                return@launch
+            }
+            // Honour EXIF orientation — see loadLocal.
+            val oriented = ExifHelper.applyOrientation(bmp, ExifHelper.readOrientation(context, uri))
+            _state.update { it.copy(originalBitmap = oriented, previewBitmap = oriented, isLoading = false) }
         }
     }
 
@@ -353,7 +437,14 @@ class PhotoEditorViewModel @Inject constructor(
                     errorMessage = context.getString(R.string.editor_error_decode_failed)) }
                 return@launch
             }
-            _state.update { it.copy(originalBitmap = bmp, previewBitmap = bmp, isLoading = false) }
+            // Honour EXIF orientation off the downloaded full-res file — see loadLocal.
+            val oriented = ExifHelper.applyOrientation(bmp, ExifHelper.readOrientation(file))
+            _state.update { it.copy(
+                originalBitmap = oriented,
+                previewBitmap = oriented,
+                adjustedBitmapNoCrop = oriented,
+                isLoading = false,
+            ) }
         }
     }
 
@@ -365,9 +456,47 @@ class PhotoEditorViewModel @Inject constructor(
     fun updateShadows(v: Int) = updateAdjustmentsFast { it.copy(shadows = v.coerceIn(-100, 100)) }
     fun updateTemperature(v: Int) = updateAdjustmentsFast { it.copy(temperature = v.coerceIn(-100, 100)) }
     fun updateTone(v: Int) = updateAdjustmentsFast { it.copy(tone = v.coerceIn(-100, 100)) }
-    fun rotate90Cw() = updateAdjustments { it.copy(rotationDegrees = (it.rotationDegrees + 90) % 360) }
-    fun toggleFlipH() = updateAdjustments { it.copy(flipHorizontal = !it.flipHorizontal) }
-    fun toggleFlipV() = updateAdjustments { it.copy(flipVertical = !it.flipVertical) }
+    /**
+     * Adds a 90° clockwise turn. Because the crop rect lives in display space (see
+     * [EditorAdjustments.cropRect]), the turn changes the canvas dimensions and the existing
+     * rect has to be carried into the new orientation so the same visual region stays
+     * selected — otherwise the next visit to the Crop tab would show the rect on a transposed
+     * canvas and save would cut the wrong area. A pixel at old display (x, y) lands at
+     * (oldDisplayH - 1 - y, x) after a CW turn, which sends rect (L,T,R,B) to
+     * (oldDisplayH - B, L, oldDisplayH - T, R).
+     */
+    fun rotate90Cw() {
+        val orig = _state.value.originalBitmap
+        updateAdjustments { adj ->
+            val rotated = adj.copy(rotationDegrees = (adj.rotationDegrees + 90) % 360)
+            val rect = adj.cropRect
+            if (orig == null || rect == null) return@updateAdjustments rotated
+            val oldH = displayHeight(orig, adj)
+            rotated.copy(cropRect = Rect(oldH - rect.bottom, rect.left, oldH - rect.top, rect.right))
+        }
+    }
+    /** Mirrors the rect horizontally within the current display width — the flip is applied
+     *  in the rotated frame's axes, so display-space mirroring is correct at any rotation. */
+    fun toggleFlipH() {
+        val orig = _state.value.originalBitmap
+        updateAdjustments { adj ->
+            val flipped = adj.copy(flipHorizontal = !adj.flipHorizontal)
+            val rect = adj.cropRect
+            if (orig == null || rect == null) return@updateAdjustments flipped
+            val w = displayWidth(orig, adj)
+            flipped.copy(cropRect = Rect(w - rect.right, rect.top, w - rect.left, rect.bottom))
+        }
+    }
+    fun toggleFlipV() {
+        val orig = _state.value.originalBitmap
+        updateAdjustments { adj ->
+            val flipped = adj.copy(flipVertical = !adj.flipVertical)
+            val rect = adj.cropRect
+            if (orig == null || rect == null) return@updateAdjustments flipped
+            val h = displayHeight(orig, adj)
+            flipped.copy(cropRect = Rect(rect.left, h - rect.bottom, rect.right, h - rect.top))
+        }
+    }
     fun selectFilter(filter: FilterPreset) = updateAdjustments { it.copy(filter = filter) }
     fun applyCrop(rect: Rect?) = updateAdjustments { it.copy(cropRect = rect) }
 
@@ -382,6 +511,14 @@ class PhotoEditorViewModel @Inject constructor(
     fun resetAll() {
         clearUndoStacks()
         updateAdjustmentsNoUndo { EditorAdjustments() }
+    }
+
+    /** Clears the error popup state so the screen can hide it. Called from the
+     *  ErrorPopup's OK action — the screen itself usually pops the back stack right
+     *  after, but if the user lands here again (NavBackStackEntry reuse) the cleared
+     *  state ensures the popup doesn't re-appear without a new failure. */
+    fun clearError() {
+        _state.update { it.copy(errorMessage = null) }
     }
 
     /**
@@ -452,7 +589,12 @@ class PhotoEditorViewModel @Inject constructor(
         if (newAdj != previous) pushUndo(previous)
         viewModelScope.launch(Dispatchers.Default) {
             val newPreview = applyAdjustments(orig, newAdj)
-            _state.update { it.copy(adjustments = newAdj, previewBitmap = newPreview) }
+            val noCropPreview = applyColorOnly(orig, newAdj)
+            _state.update { it.copy(
+                adjustments = newAdj,
+                previewBitmap = newPreview,
+                adjustedBitmapNoCrop = noCropPreview,
+            ) }
             // No eager recycle on the previous previewBitmap: Compose's draw pipeline may
             // still hold a reference to it for one frame past the state update, and
             // recycling it then crashes the UI thread with "Canvas: trying to use a
@@ -467,7 +609,12 @@ class PhotoEditorViewModel @Inject constructor(
         val newAdj = transform(_state.value.adjustments)
         viewModelScope.launch(Dispatchers.Default) {
             val newPreview = applyAdjustments(orig, newAdj)
-            _state.update { it.copy(adjustments = newAdj, previewBitmap = newPreview) }
+            val noCropPreview = applyColorOnly(orig, newAdj)
+            _state.update { it.copy(
+                adjustments = newAdj,
+                previewBitmap = newPreview,
+                adjustedBitmapNoCrop = noCropPreview,
+            ) }
         }
     }
 
@@ -497,62 +644,117 @@ class PhotoEditorViewModel @Inject constructor(
         }
     }
 
-    /**
-     * Renders all current adjustments onto a fresh bitmap derived from [source].
-     * Heavy operation — always call from a background dispatcher.
-     *
-     * Intermediates (`cropped`, `rotated`, `colored`) are recycled before return when
-     * they're not aliases of [source] or the final result. A 12 MP edit goes through up
-     * to 3 intermediate bitmaps at ~48 MB each; leaking them shows up as native-heap
-     * pressure that the GC can't release.
-     */
-    private fun applyAdjustments(source: Bitmap, adj: EditorAdjustments): Bitmap {
-        // 1. crop
-        val cropped = adj.cropRect?.let {
-            val safe = Rect(
-                it.left.coerceIn(0, source.width - 1),
-                it.top.coerceIn(0, source.height - 1),
-                it.right.coerceIn(1, source.width),
-                it.bottom.coerceIn(1, source.height),
-            )
-            if (safe.width() > 0 && safe.height() > 0)
-                Bitmap.createBitmap(source, safe.left, safe.top, safe.width(), safe.height())
-            else source
-        } ?: source
+    /** Source bitmap dimensions after [adj]'s rotation is applied — width and height swap
+     *  for the 90°/270° quarter turns. The Crop tool's rect lives in this rotated display
+     *  space (the canvas the user sees and drags on), so chip seeds and bounds clamps read
+     *  these instead of the raw bitmap dimensions. */
+    private fun displayWidth(source: Bitmap, adj: EditorAdjustments): Int =
+        if (adj.rotationDegrees % 180 != 0) source.height else source.width
+    private fun displayHeight(source: Bitmap, adj: EditorAdjustments): Int =
+        if (adj.rotationDegrees % 180 != 0) source.width else source.height
 
-        // 2. rotate + flip
+    /** Applies [adj]'s rotation and flips to [source], returning a bitmap in display
+     *  orientation. Returns [source] unchanged when no geometry is active, so call-sites
+     *  must not treat the result as a fresh bitmap they own. */
+    private fun rotateAndFlip(source: Bitmap, adj: EditorAdjustments): Bitmap {
         val matrix = Matrix().apply {
             if (adj.rotationDegrees != 0) postRotate(adj.rotationDegrees.toFloat())
             val sx = if (adj.flipHorizontal) -1f else 1f
             val sy = if (adj.flipVertical) -1f else 1f
             if (sx != 1f || sy != 1f) postScale(sx, sy)
         }
-        val rotated = if (matrix.isIdentity) cropped
-            else Bitmap.createBitmap(cropped, 0, 0, cropped.width, cropped.height, matrix, true)
+        return if (matrix.isIdentity) source
+            else Bitmap.createBitmap(source, 0, 0, source.width, source.height, matrix, true)
+    }
+
+    /**
+     * Renders the colour-matrix adjustments (brightness / contrast / saturation / exposure /
+     * highlights / shadows / temperature / tone / filter) AND the rotation / flip geometry on
+     * top of [source] — skips only crop and redact strokes. The result is in display
+     * orientation (rotated / flipped) so the Crop overlay shows the same picture the rest of
+     * the editor does; the crop rect the user drags lives in this same rotated space and the
+     * full pipeline's crop step consumes it as-is.
+     *
+     * May return [source] itself when nothing is active, so call-sites must not treat the
+     * result as a fresh bitmap they own. Always run on a background dispatcher.
+     */
+    private fun applyColorOnly(source: Bitmap, adj: EditorAdjustments): Bitmap {
+        val oriented = rotateAndFlip(source, adj)
+        val colorMatrix = buildColorMatrix(adj) ?: return oriented
+        val out = Bitmap.createBitmap(oriented.width, oriented.height, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(out)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            colorFilter = ColorMatrixColorFilter(colorMatrix)
+        }
+        canvas.drawBitmap(oriented, 0f, 0f, paint)
+        return out
+    }
+
+    /**
+     * Renders all current adjustments onto a fresh bitmap derived from [source].
+     * Heavy operation — always call from a background dispatcher.
+     *
+     * [recycleIntermediates] frees each transient stage (`rotated`, `cropped`, `colored`)
+     * as soon as the next stage stops aliasing it. Only the save path may set it: those
+     * locals are produced and consumed entirely off-screen, so nothing in Compose's draw
+     * pipeline holds them. Preview callers leave it false — see the note below.
+     */
+    private fun applyAdjustments(
+        source: Bitmap,
+        adj: EditorAdjustments,
+        recycleIntermediates: Boolean = false,
+    ): Bitmap {
+        fun recycle(bmp: Bitmap, result: Bitmap) {
+            // Never recycle the shared source or a bitmap that survives as the result.
+            if (recycleIntermediates && bmp !== source && bmp !== result && !bmp.isRecycled) {
+                bmp.recycle()
+            }
+        }
+
+        // 1. rotate + flip — done BEFORE crop so the crop rect (which the user picked on the
+        //    rotated display canvas, the same orientation applyColorOnly feeds the Crop tab)
+        //    is consumed in the coordinate space it was authored in. Cropping first would put
+        //    the rect on the pre-rotation bitmap and cut a different region after the turn.
+        val rotated = rotateAndFlip(source, adj)
+        recycle(source, rotated)
+
+        // 2. crop — clamped against the ROTATED bitmap's dimensions (display space).
+        val cropped = adj.cropRect?.let {
+            val safe = Rect(
+                it.left.coerceIn(0, rotated.width - 1),
+                it.top.coerceIn(0, rotated.height - 1),
+                it.right.coerceIn(1, rotated.width),
+                it.bottom.coerceIn(1, rotated.height),
+            )
+            if (safe.width() > 0 && safe.height() > 0)
+                Bitmap.createBitmap(rotated, safe.left, safe.top, safe.width(), safe.height())
+            else rotated
+        } ?: rotated
+        recycle(rotated, cropped)
 
         // 3. color matrix (brightness, contrast, saturation, filter)
         val colorMatrix = buildColorMatrix(adj)
-        val colored = if (colorMatrix == null) rotated else {
-            val out = Bitmap.createBitmap(rotated.width, rotated.height, Bitmap.Config.ARGB_8888)
+        val colored = if (colorMatrix == null) cropped else {
+            val out = Bitmap.createBitmap(cropped.width, cropped.height, Bitmap.Config.ARGB_8888)
             val canvas = Canvas(out)
             val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 colorFilter = ColorMatrixColorFilter(colorMatrix)
             }
-            canvas.drawBitmap(rotated, 0f, 0f, paint)
+            canvas.drawBitmap(cropped, 0f, 0f, paint)
             out
         }
+        recycle(cropped, colored)
 
         // 4. redaction strokes — drawn LAST so they cover the final visible content
         val final = if (adj.redactStrokes.isEmpty()) colored
-            else applyRedactStrokes(colored, adj.redactStrokes)
+            else applyRedactStrokes(colored, adj.redactStrokes, recycleIntermediates)
+        recycle(colored, final)
 
-        // Intermediate bitmaps (cropped, rotated, colored when they differ from `final`) are
-        // intentionally NOT recycled here. Even though these locals leave scope when this
-        // function returns, Compose's draw pipeline can still hold a reference for one frame
-        // past a state update, and recycling an intermediate that's also referenced by the
-        // in-flight render crashes the UI thread with "Canvas: trying to use a recycled
-        // bitmap". Leaving them to GC costs a slug of native heap that the next mark-compact
-        // cycle cleans up — measurable but not painful for a single editor session.
+        // When [recycleIntermediates] is false (every preview call) the transient bitmaps are
+        // intentionally left to GC. Even though these locals leave scope when this function
+        // returns, Compose's draw pipeline can still hold a reference for one frame past a
+        // state update, and recycling an intermediate that's also referenced by the in-flight
+        // render crashes the UI thread with "Canvas: trying to use a recycled bitmap".
         return final
     }
 
@@ -563,7 +765,11 @@ class PhotoEditorViewModel @Inject constructor(
      * - [RedactMode.Pixelate]: builds a heavily downscaled+upscaled copy of the bitmap,
      *   then masks it through the stroke path so only the stroke area shows the mosaic.
      */
-    private fun applyRedactStrokes(src: Bitmap, strokes: List<RedactionStroke>): Bitmap {
+    private fun applyRedactStrokes(
+        src: Bitmap,
+        strokes: List<RedactionStroke>,
+        recycleIntermediates: Boolean = false,
+    ): Bitmap {
         val w = src.width
         val h = src.height
         val out = src.copy(Bitmap.Config.ARGB_8888, true)
@@ -573,10 +779,11 @@ class PhotoEditorViewModel @Inject constructor(
         val pixelated by lazy {
             val downscale = 24 // larger = chunkier mosaic
             val small = Bitmap.createScaledBitmap(src, (w / downscale).coerceAtLeast(1), (h / downscale).coerceAtLeast(1), false)
-            // The intermediate `small` is no longer recycled. See applyAdjustments() for the
-            // rationale: explicit Bitmap.recycle() in the editor render path can race with
-            // Compose's in-flight draw and crash with "trying to use a recycled bitmap".
-            Bitmap.createScaledBitmap(small, w, h, false)
+            val up = Bitmap.createScaledBitmap(small, w, h, false)
+            // `small` is fully consumed by the upscale above. Off the save path we leave it to
+            // GC (see applyAdjustments): an explicit recycle can race Compose's in-flight draw.
+            if (recycleIntermediates && small !== up && !small.isRecycled) small.recycle()
+            up
         }
 
         for (stroke in strokes) {
@@ -600,7 +807,9 @@ class PhotoEditorViewModel @Inject constructor(
                     val maskBmp = Bitmap.createBitmap(w, h, Bitmap.Config.ALPHA_8)
                     Canvas(maskBmp).drawCircle(p.x, p.y, stroke.brushSize / 2f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = android.graphics.Color.BLACK })
                     drawPixelatedThroughMask(canvas, pixelated, maskBmp)
-                    // No maskBmp.recycle() — see applyAdjustments() rationale; leaving to GC.
+                    // The mask is fully consumed by the masked draw above; off the save path
+                    // it's left to GC (see applyAdjustments) to avoid racing Compose's draw.
+                    if (recycleIntermediates && !maskBmp.isRecycled) maskBmp.recycle()
                 }
                 continue
             }
@@ -610,8 +819,15 @@ class PhotoEditorViewModel @Inject constructor(
                     val maskBmp = Bitmap.createBitmap(w, h, Bitmap.Config.ALPHA_8)
                     Canvas(maskBmp).drawPath(path, pathPaint)
                     drawPixelatedThroughMask(canvas, pixelated, maskBmp)
+                    if (recycleIntermediates && !maskBmp.isRecycled) maskBmp.recycle()
                 }
             }
+        }
+        // `pixelated` is a save-path local once strokes are burned in; free it when asked.
+        // Guard on a Pixelate stroke existing so we don't force the lazy to build here.
+        if (recycleIntermediates && strokes.any { it.mode == RedactMode.Pixelate } &&
+            pixelated !== out && !pixelated.isRecycled) {
+            pixelated.recycle()
         }
         return out
     }
@@ -786,8 +1002,9 @@ class PhotoEditorViewModel @Inject constructor(
             // Always re-render from the full-resolution original — the on-screen preview may
             // be a 720px downsampled bitmap from the fast slider path, and saving that would
             // silently degrade the user's photo. applyAdjustments is the same logic the live
-            // preview uses, so the saved bytes match what the user sees.
-            val bitmap = applyAdjustments(orig, s.adjustments)
+            // preview uses, so the saved bytes match what the user sees. Intermediates are
+            // safe to recycle here — this render is off-screen, so no Compose draw aliases them.
+            val bitmap = applyAdjustments(orig, s.adjustments, recycleIntermediates = true)
             // Single timestamp shared across the device save AND the cloud upload for
             // Synced photos. Used to derive both the stamped filename and the
             // DATE_TAKEN / captureTime metadata so ReconcileSyncStateUseCase's
@@ -800,6 +1017,24 @@ class PhotoEditorViewModel @Inject constructor(
                 val uri = when (source) {
                     is EditorSource.Local -> saveLocal(bitmap, source, mode, quality, editTimestampMs)
                     is EditorSource.Cloud -> saveCloud(bitmap, source, mode, quality, editTimestampMs)
+                    is EditorSource.External -> {
+                        // Always insert as a fresh MediaStore copy — we don't own the foreign
+                        // URI so an overwrite is forbidden, and external entry is a device-only
+                        // flow so no Drive upload either. Forge a Local-shaped value just so
+                        // [insertLocalCopy] can read displayName / uri without a second helper.
+                        val pseudoLocal = EditorSource.Local(source.uri, source.displayName, source.mimeType)
+                        val resultUri = insertLocalCopy(
+                            bitmap = bitmap,
+                            source = pseudoLocal,
+                            quality = quality,
+                            useOriginalName = false,
+                            editTimestampMs = editTimestampMs,
+                        )
+                        if (resultUri != null) {
+                            _state.update { it.copy(savedAsCopy = true) }
+                        }
+                        resultUri
+                    }
                 }
                 // Invalidate Coil caches for the saved URI on EVERY successful local save —
                 // Overwrite reuses the original URI (stale bytes in cache), Copy creates a
@@ -1082,7 +1317,7 @@ class PhotoEditorViewModel @Inject constructor(
                 height = bitmap.height,
                 duration = 0L,
             )
-            val hash = sha256(tempFile)
+            val hash = sha1(tempFile)
             val newLinkId = cloudRepo.uploadFile(userId, item, hash, tempUri.toString())
 
             // Re-attach the new linkId to the source album (when there is one) so the edited
@@ -1143,7 +1378,7 @@ class PhotoEditorViewModel @Inject constructor(
                 height = bitmap.height,
                 duration = 0L,
             )
-            val hash = sha256(tempFile)
+            val hash = sha1(tempFile)
             val newLinkId = cloudRepo.uploadFile(userId, item, hash, tempUri.toString())
             sourceAlbumLinkId?.let { albumId ->
                 runCatching { cloudRepo.addPhotosToAlbum(userId, albumId, listOf(newLinkId)) }
@@ -1157,8 +1392,20 @@ class PhotoEditorViewModel @Inject constructor(
         }
     }
 
-    private fun sha256(file: File): String {
-        val digest = java.security.MessageDigest.getInstance("SHA-256")
+    /**
+     * Hex-encodes the SHA-1 of the file's plaintext bytes. The upload pipeline
+     * feeds this into `Common.Digests.SHA1` of the encrypted xAttr blob AND into
+     * the `HMAC-SHA256(rootNodeHashKey, ...)` that produces the wire ContentHash.
+     * Drive Android pins the digest algorithm to SHA-1 in
+     * ConfigurationProvider.contentDigestAlgorithm, and Drive web's
+     * photosTransferPayloadBuilder rejects payloads whose ContentHash was
+     * derived from a different algorithm with the misleading
+     * "Cannot build photo payload without a content hash" message. Any SHA-256
+     * variant here would land an editor cloud-save that nothing else in the
+     * Drive ecosystem accepts.
+     */
+    private fun sha1(file: File): String {
+        val digest = java.security.MessageDigest.getInstance("SHA-1")
         file.inputStream().use { stream ->
             val buf = ByteArray(8192)
             var read: Int

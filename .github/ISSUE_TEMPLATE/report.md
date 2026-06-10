@@ -6,7 +6,7 @@ labels: ["triage"]
 assignees: []
 ---
 
-> Proton Photos is built by one person in spare time. The more concrete info you provide here, the faster I can act. Anything in *italics* is a hint — feel free to delete it.
+> Photos for Proton is built by one person in spare time. The more concrete info you provide here, the faster I can act. Anything in *italics* is a hint — feel free to delete it.
 
 ## What kind of report is this?
 

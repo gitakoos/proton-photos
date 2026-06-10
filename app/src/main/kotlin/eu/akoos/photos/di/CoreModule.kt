@@ -65,7 +65,15 @@ object CoreModule {
     @Provides
     @Singleton
     @BaseProtonApiUrl
-    fun provideBaseApiUrl(): HttpUrl = "https://drive.proton.me/api/".toHttpUrl()
+    // Use the dedicated API gateway (`drive-api.proton.me/`), not the web-frontend
+    // host (`drive.proton.me/api/`). The Drive web host proxies the Drive-specific
+    // paths transparently, BUT it returns its own HTML 404 page for Core endpoints
+    // like `/core/v4/keys/all` — which kotlinx-serialization then surfaces as
+    // "Unexpected JSON token at offset 0, had '<'". The gateway routes everything
+    // (drive + core + auth) and matches both the official Drive Android client
+    // (proton-environment apiPrefix = "drive-api") and the JS SDK
+    // (https://drive-api.proton.me).
+    fun provideBaseApiUrl(): HttpUrl = "https://drive-api.proton.me/".toHttpUrl()
 
     @Provides
     @Singleton

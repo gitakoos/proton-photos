@@ -28,7 +28,6 @@ import android.content.Context
 import android.os.Environment
 import android.os.StatFs
 import androidx.appcompat.app.AppCompatDelegate
-import androidx.core.os.LocaleListCompat
 import androidx.datastore.preferences.core.edit
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -83,6 +82,7 @@ class SettingsViewModel @Inject constructor(
     private val appLockManager: AppLockManager,
     private val localMediaRepo: LocalMediaRepository,
     private val cloudRepo: DrivePhotoRepository,
+    private val cloudTrashService: eu.akoos.photos.data.repository.drive.CloudTrashService,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SettingsUiState())
@@ -93,9 +93,11 @@ class SettingsViewModel @Inject constructor(
         observeCurrentUser()
         observeBackedUpBytes()
         observeTrashedCount()
+        observeCloudTrashOnSession()
         observeUploadProgress()
         observeExcludedFolders()
         refreshLocalStorage()
+        loadCloudTrashCount()
     }
 
     /**
@@ -194,7 +196,13 @@ class SettingsViewModel @Inject constructor(
         refreshLocalStorage()
         viewModelScope.launch {
             val userId = accountManager.getPrimaryUserId().firstOrNull() ?: return@launch
-            try { getUser(userId, refresh = true) } catch (_: Exception) { }
+            try {
+                getUser(userId, refresh = true)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                android.util.Log.w("SettingsViewModel", "refresh: getUser failed", e)
+            }
         }
     }
 
@@ -338,7 +346,13 @@ class SettingsViewModel @Inject constructor(
         // updates the local cache, so we don't need to feed the result back manually.
         viewModelScope.launch {
             val userId = accountManager.getPrimaryUserId().firstOrNull() ?: return@launch
-            try { getUser(userId, refresh = true) } catch (_: Exception) { /* offline ok */ }
+            try {
+                getUser(userId, refresh = true)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                android.util.Log.w("SettingsViewModel", "observeCurrentUser: getUser failed (offline ok)", e)
+            }
         }
     }
 
@@ -395,6 +409,58 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Reset the cached Drive trash count whenever the active account changes (sign-out
+     * emits null, sign-in or account switch emits a new UserId). Keeping the previous
+     * account's count around after a sign-out would surface a stale "N on Drive" subtitle
+     * for the next account that pairs the app. The companion [loadCloudTrashCount] is
+     * invoked for non-null transitions so the new account's count populates without
+     * waiting for the next manual entry into Sync settings.
+     */
+    private fun observeCloudTrashOnSession() {
+        viewModelScope.launch {
+            accountManager.getPrimaryUserId()
+                .distinctUntilChanged()
+                .collectLatest { userId ->
+                    _uiState.update {
+                        it.copy(cloudTrashCount = null, lastCloudTrashFetchMs = 0L)
+                    }
+                    if (userId != null) loadCloudTrashCount()
+                }
+        }
+    }
+
+    /**
+     * Pull the Drive trash list and surface its size in UiState. There's no count-only
+     * endpoint, so we fetch the full list and read `.size` — same approach the Trash
+     * screen takes. Failures (offline, network error) leave `cloudTrashCount` at its
+     * prior value or null; the UI then falls back to the device-only subtitle.
+     *
+     * Cached in memory with a 5-minute TTL via [SettingsUiState.lastCloudTrashFetchMs]
+     * so re-entering the Settings screen doesn't fire a Drive call on every navigation.
+     * Public [refreshCloudTrashCount] bypasses the TTL for pull-to-refresh use sites.
+     */
+    private fun loadCloudTrashCount(force: Boolean = false) {
+        viewModelScope.launch {
+            val now = System.currentTimeMillis()
+            val last = _uiState.value.lastCloudTrashFetchMs
+            if (!force && last > 0L && (now - last) < CLOUD_TRASH_TTL_MS) return@launch
+            val userId = accountManager.getPrimaryUserId().first() ?: return@launch
+            val result = runCatching { cloudTrashService.getCloudTrash(userId) }
+            _uiState.update {
+                it.copy(
+                    cloudTrashCount = result.getOrNull()?.size ?: it.cloudTrashCount,
+                    lastCloudTrashFetchMs = if (result.isSuccess) now else it.lastCloudTrashFetchMs,
+                )
+            }
+        }
+    }
+
+    /** Force-refresh the Drive trash count, bypassing the in-memory TTL. */
+    fun refreshCloudTrashCount() {
+        loadCloudTrashCount(force = true)
+    }
+
     private fun loadPrefs() {
         viewModelScope.launch {
             // One-shot migration: if THEME_MODE is absent but the legacy DARK_MODE bool is set,
@@ -439,6 +505,7 @@ class SettingsViewModel @Inject constructor(
                     appLockEnabled = migratedPrefs[SettingsKeys.APP_LOCK_ENABLED] ?: false,
                     appLockTimeoutMinutes = migratedPrefs[SettingsKeys.APP_LOCK_TIMEOUT_MINUTES] ?: 0,
                     clearCacheOnAppClose = migratedPrefs[SettingsKeys.CLEAR_CACHE_ON_APP_CLOSE] ?: false,
+                    hidePhotosInAlbums = migratedPrefs[SettingsKeys.HIDE_PHOTOS_IN_ALBUMS] ?: false,
                 )
             }
         }
@@ -513,7 +580,13 @@ class SettingsViewModel @Inject constructor(
                 //    subsequent reconcile would see stale SYNCED entries (cloud-deleted items
                 //    still mapped from a previous refresh) and keep them green in the UI.
                 //    Best-effort: a network failure here shouldn't abort the rest of sync.
-                try { cloudRepo.refreshCloudPhotos(userId) } catch (_: Exception) { }
+                try {
+                    cloudRepo.refreshCloudPhotos(userId)
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    android.util.Log.w("SettingsViewModel", "syncNow: refreshCloudPhotos failed (best-effort)", e)
+                }
                 // 1. Reconcile: refresh cloud DB + mark unsynced local photos as LOCAL_ONLY,
                 //    demote SYNCED → CLOUD_ONLY for cloud-deleted items.
                 reconcile(userId).collect {}
@@ -525,7 +598,13 @@ class SettingsViewModel @Inject constructor(
                 _uiState.update { it.copy(lastSyncMs = now) }
                 // 3. Force-refresh user data so storage bar reflects the new usage.
                 //    ObserveUser emits automatically once GetUser updates the local cache.
-                try { getUser(userId, refresh = true) } catch (_: Exception) { }
+                try {
+                    getUser(userId, refresh = true)
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    android.util.Log.w("SettingsViewModel", "syncNow: post-sync getUser failed", e)
+                }
             } catch (e: Exception) {
                 _uiState.update { it.copy(syncError = e.message ?: "Sync failed") }
             } finally {
@@ -622,15 +701,13 @@ class SettingsViewModel @Inject constructor(
             // can apply the theme without blocking on DataStore. See ThemePrefsBoot for
             // why we keep two stores in lockstep instead of relying on DataStore alone.
             eu.akoos.photos.data.preferences.ThemePrefsBoot.write(context, mode.storageKey)
-            // Apply the night-mode to AppCompatDelegate so externally-launched Activities
-            // (ProtonCore login/payment) flip immediately, not just our Compose UI.
-            AppCompatDelegate.setDefaultNightMode(
-                when (mode) {
-                    ThemeMode.Dark   -> AppCompatDelegate.MODE_NIGHT_YES
-                    ThemeMode.Light  -> AppCompatDelegate.MODE_NIGHT_NO
-                    ThemeMode.System -> AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM
-                }
-            )
+            // We DELIBERATELY skip AppCompatDelegate.setDefaultNightMode here. That call
+            // forces an Activity recreate (visible as a scale-from-center animation) any
+            // time the new mode differs from the currently-applied one. The Compose tree
+            // re-themes via the DataStore flow MainActivity collects, so the in-app
+            // surfaces flip instantly without a recreate. ProtonCore login Activities
+            // pick up the right theme at the next cold start through
+            // App.applyStoredThemeMode — they don't re-launch within the same session.
             _uiState.update { it.copy(themeMode = mode) }
         }
     }
@@ -650,16 +727,20 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Language switch — canonical DataStore write plus boot-mirror update so the
+     * next cold start hands the right locale to ProtonCore login Activities.
+     * Does NOT call `AppCompatDelegate.setApplicationLocales`: that triggers an
+     * Activity recreate which loses navigation state, bounces the user back to
+     * Gallery, and plays a reload animation. The in-app Compose tree re-resolves
+     * strings via `LocaleOverride` in `MainActivity` — DataStore change → flow
+     * re-emits → override key changes → recomposition picks up the new locale.
+     */
     fun setLanguage(lang: String) {
         viewModelScope.launch {
             context.settingsDataStore.edit { it[SettingsKeys.LANGUAGE] = lang }
+            eu.akoos.photos.data.preferences.LanguagePrefsBoot.write(context, lang)
             _uiState.update { it.copy(language = lang) }
-            val localeList = if (lang == "system") {
-                LocaleListCompat.getEmptyLocaleList()
-            } else {
-                LocaleListCompat.forLanguageTags(lang)
-            }
-            AppCompatDelegate.setApplicationLocales(localeList)
         }
     }
 
@@ -745,12 +826,54 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    /** Persist the "hide photos already in albums" Photos-tab filter. The gallery
+     *  observes the key directly via its combine chain; this setter is just for
+     *  immediate UI feedback in Settings. */
+    fun setHidePhotosInAlbums(enabled: Boolean) {
+        viewModelScope.launch {
+            context.settingsDataStore.edit { it[SettingsKeys.HIDE_PHOTOS_IN_ALBUMS] = enabled }
+            _uiState.update { it.copy(hidePhotosInAlbums = enabled) }
+        }
+    }
+
     fun signOut() {
         viewModelScope.launch {
             accountManager.getPrimaryUserId().firstOrNull()?.let { userId ->
                 // Wipe plaintext key material BEFORE the account token disappears so any process
                 // that survives the sign-out can't recover the keys from this Singleton's heap.
                 cloudRepo.clearCacheForSignOut()
+                // Explicitly clear every account-tied DataStore key so a sign-in as a different
+                // user can't inherit the previous account's sync state, folder selection, recent
+                // upload ids, or favourite list. We keep UI preferences (theme, palette,
+                // language) and machine-level flags (onboarding-complete, app-lock, update
+                // throttle) — those are user-of-device choices, not account-tied state.
+                runCatching {
+                    context.settingsDataStore.edit { prefs ->
+                        val accountTied = setOf<androidx.datastore.preferences.core.Preferences.Key<*>>(
+                            SettingsKeys.LAST_SYNC_MS,
+                            SettingsKeys.SYNC_FOLDER_NAMES,
+                            SettingsKeys.BACKUP_EVERYTHING,
+                            SettingsKeys.EXCLUDED_FOLDER_NAMES,
+                            SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP,
+                            SettingsKeys.MANUAL_LOCAL_FOLDER_NAMES,
+                            SettingsKeys.ALBUM_BUCKET_MAP,
+                            SettingsKeys.PENDING_DELETE_URIS,
+                            SettingsKeys.HIDDEN_PHOTO_URIS,
+                            SettingsKeys.FAVORITE_IDS,
+                            SettingsKeys.RECENT_UPLOAD_IDS,
+                            // Hide-photos-in-albums is a per-user view preference. Without
+                            // adding it here, a shared device that signs out → signs back in
+                            // as a different account inherits the previous user's choice.
+                            SettingsKeys.HIDE_PHOTOS_IN_ALBUMS,
+                        )
+                        accountTied.forEach { prefs.remove(it) }
+                    }
+                }
+                // Reset the MainActivity-held lock timestamps BEFORE disableAccount triggers
+                // the route change. A re-login by a different user inherits a fresh
+                // sinceBackground window so the next resume can't fire the previous user's
+                // re-lock check.
+                appLockManager.notifyResetLockTimestamps()
                 accountManager.disableAccount(userId)
             }
         }
@@ -768,3 +891,5 @@ private data class BackedUpSnapshot(
     val bytes: Long,
     val pending: Int,
 )
+
+private const val CLOUD_TRASH_TTL_MS = 5L * 60L * 1000L

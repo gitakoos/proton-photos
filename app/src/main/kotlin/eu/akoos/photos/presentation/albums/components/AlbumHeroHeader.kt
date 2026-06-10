@@ -24,9 +24,11 @@ package eu.akoos.photos.presentation.albums.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
@@ -38,6 +40,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -56,14 +59,15 @@ import eu.akoos.photos.presentation.theme.Bg2
 import eu.akoos.photos.presentation.theme.PillBorder
 
 /**
- * Shared hero header used by both the cloud [AlbumDetailScreen] and the device
- * [LocalAlbumDetailScreen]. Renders a 4:3 cover image, the album title with an
- * optional rename pencil, the photo/video count subtitle, an optional caller-
- * supplied [extraSlot] (used by the cloud variant for share avatars, download
- * and share buttons), and the bottom divider.
+ * Hero header used by the cloud [AlbumDetailScreen]. Renders a 4:3 cover image, a title
+ * row holding only the album name + optional rename pencil, and a meta row where
+ * [metaLeading] (share avatars) renders before the photo/video count with a dot
+ * separator and [titleActions] (download, share, save-to-library, overflow) sit at the
+ * far right. Keeping the actions on the meta row stops a long album name from shoving
+ * them around — the title gets the whole top line to itself and ellipsizes.
  *
- * [coverModel] accepts anything Coil can load — a download URL string for the
- * cloud variant or a content://`Uri` for the local variant.
+ * [coverModel] accepts anything Coil can load — typically a download URL string for the
+ * album cover thumbnail.
  */
 @Composable
 internal fun AlbumHeroHeader(
@@ -72,7 +76,8 @@ internal fun AlbumHeroHeader(
     photoCountText: String,
     canRename: Boolean = true,
     onRenameClick: () -> Unit = {},
-    extraSlot: @Composable (() -> Unit)? = null,
+    titleActions: @Composable (RowScope.() -> Unit)? = null,
+    metaLeading: @Composable (RowScope.() -> Unit)? = null,
 ) {
     Column {
         // Cover image — extends to top of screen (behind status bar)
@@ -104,6 +109,8 @@ internal fun AlbumHeroHeader(
                     color = AppColors.current.fgPrimary,
                     fontSize = 24.sp,
                     fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f, fill = false),
                 )
                 if (canRename) {
@@ -124,14 +131,35 @@ internal fun AlbumHeroHeader(
                     }
                 }
             }
-            Spacer(Modifier.height(4.dp))
-            if (photoCountText.isNotEmpty()) {
-                Text(photoCountText, color = AppColors.current.fgMute, fontSize = 14.sp)
-            }
-
-            if (extraSlot != null) {
-                Spacer(Modifier.height(16.dp))
-                extraSlot()
+            Spacer(Modifier.height(8.dp))
+            // Meta row: share avatars + dot + count on the left, then the trailing
+            // [titleActions] pushed to the far right by a weight-1 spacer. Height is fixed
+            // to fit the 36.dp action buttons (and so a late member fetch doesn't shift the
+            // layout); children stay vertically centered.
+            if (metaLeading != null || photoCountText.isNotEmpty() || titleActions != null) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.height(36.dp),
+                ) {
+                    if (metaLeading != null) {
+                        metaLeading()
+                        if (photoCountText.isNotEmpty()) {
+                            Text("·", color = AppColors.current.fgMute, fontSize = 14.sp)
+                        }
+                    }
+                    if (photoCountText.isNotEmpty()) {
+                        Text(photoCountText, color = AppColors.current.fgMute, fontSize = 14.sp)
+                    }
+                    if (titleActions != null) {
+                        Spacer(Modifier.weight(1f))
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            content = titleActions,
+                        )
+                    }
+                }
             }
         }
 

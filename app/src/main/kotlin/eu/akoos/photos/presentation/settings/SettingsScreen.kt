@@ -88,9 +88,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import eu.akoos.photos.BuildConfig
 import eu.akoos.photos.R
 import eu.akoos.photos.presentation.common.ConfirmDialog
 import eu.akoos.photos.presentation.common.ErrorPopup
+import eu.akoos.photos.presentation.common.IconBubble
 import eu.akoos.photos.util.sanitizeErrorMessage
 import eu.akoos.photos.presentation.settings.components.AppLockTimeoutRow
 import eu.akoos.photos.presentation.settings.components.CollapsibleSection
@@ -100,6 +102,7 @@ import eu.akoos.photos.presentation.settings.components.NavRow
 import eu.akoos.photos.presentation.settings.components.RowDivider
 import eu.akoos.photos.presentation.settings.components.SectionLabel
 import eu.akoos.photos.presentation.settings.components.SettingsCard
+import eu.akoos.photos.presentation.settings.components.SettingsSubPageScaffold
 import eu.akoos.photos.presentation.settings.components.ToggleRow
 import eu.akoos.photos.presentation.settings.components.rememberDebouncedAction
 import eu.akoos.photos.presentation.theme.AppColors
@@ -116,6 +119,23 @@ private fun storageColor(fraction: Float): Color = when {
     else             -> StatusError
 }
 
+/**
+ * Subtitle for the "Recently Deleted" entry — combines device-side count (known) with
+ * the Drive-side count (nullable). When cloud is known we surface both, otherwise we
+ * fall back to the device-only pluralised text.
+ */
+@Composable
+private fun recentlyDeletedSubtitle(deviceCount: Int, cloudCount: Int?): String = when {
+    cloudCount != null -> stringResource(
+        R.string.settings_recently_deleted_subtitle_device_cloud,
+        deviceCount,
+        cloudCount,
+    )
+    deviceCount == 0 -> stringResource(R.string.settings_recently_deleted_empty)
+    deviceCount == 1 -> stringResource(R.string.settings_recently_deleted_subtitle_singular)
+    else -> stringResource(R.string.settings_recently_deleted_subtitle, deviceCount)
+}
+
 // ── Main Settings screen ──────────────────────────────────────────────────────
 
 @Composable
@@ -130,6 +150,7 @@ fun SettingsScreen(
     onLanguageClick: () -> Unit = {},
     onAboutClick: () -> Unit = {},
     onAccountClick: () -> Unit = {},
+    onCheckForUpdatesClick: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -182,13 +203,16 @@ fun SettingsScreen(
             ) {
                 Text(stringResource(R.string.settings_title), color = colors.fgPrimary, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
                 val debouncedBack = rememberDebouncedAction { onBack() }
-                Box(
-                    modifier = Modifier.size(36.dp).background(colors.surfaceWeak, CircleShape)
-                        .border(0.5.dp, colors.pillBorder, CircleShape).clickable(onClick = debouncedBack),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(Icons.Default.Close, null, tint = colors.fgDim, modifier = Modifier.size(16.dp))
-                }
+                IconBubble(
+                    icon = Icons.Default.Close,
+                    contentDescription = null,
+                    onClick = debouncedBack,
+                    diameter = 36.dp,
+                    iconSize = 16.dp,
+                    background = colors.surfaceWeak,
+                    borderColor = colors.pillBorder,
+                    tint = colors.fgDim,
+                )
             }
 
             // ── Account ───────────────────────────────────────────────────────
@@ -333,11 +357,7 @@ fun SettingsScreen(
                 RowDivider()
                 NavRow(
                     label = stringResource(R.string.settings_recently_deleted),
-                    description = when {
-                        state.trashedCount == 0 -> stringResource(R.string.settings_recently_deleted_empty)
-                        state.trashedCount == 1 -> stringResource(R.string.settings_recently_deleted_subtitle_singular)
-                        else -> stringResource(R.string.settings_recently_deleted_subtitle, state.trashedCount)
-                    },
+                    description = recentlyDeletedSubtitle(state.trashedCount, state.cloudTrashCount),
                     onClick = onRecentlyDeletedClick,
                 )
             }
@@ -369,6 +389,20 @@ fun SettingsScreen(
                     onClick = onAppearanceClick,
                 )
                 RowDivider()
+                // Manual update check — taps fire a forced (cache-bypassing) GitHub
+                // Releases query. The orchestrator surfaces the result either through
+                // the UpdatePromptDialog (new version) or a Toast (no update / network
+                // flake). The current versionName lives in the row description so the
+                // user can sanity-check what they're on without opening About.
+                NavRow(
+                    label = stringResource(R.string.update_check_settings_row),
+                    description = stringResource(
+                        R.string.update_check_settings_summary,
+                        BuildConfig.VERSION_NAME,
+                    ),
+                    onClick = onCheckForUpdatesClick,
+                )
+                RowDivider()
                 NavRow(
                     label = stringResource(R.string.about_title),
                     description = stringResource(R.string.settings_about_desc),
@@ -390,12 +424,13 @@ fun SyncSettingsScreen(
     onBack: () -> Unit,
     onBackupFoldersClick: () -> Unit = {},
     onExcludedFoldersClick: () -> Unit = {},
+    onAlbumMirrorFoldersClick: () -> Unit = {},
     onRecentlyDeletedClick: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val colors = AppColors.current
-    SubPageScaffold(title = stringResource(R.string.sync_section), onBack = onBack) {
+    SettingsSubPageScaffold(title = stringResource(R.string.sync_section), onBack = onBack) {
         // ── WHAT GETS BACKED UP ───────────────────────────────────────────────
         // Backup-scope decisions live here: the everything-toggle and either the
         // include drilldown (off) or the exclude drilldown (on). Sync cadence /
@@ -436,6 +471,17 @@ fun SyncSettingsScreen(
                     enabled = state.autoSync,
                 )
             }
+            // Album-mirror drilldown sits alongside the include/exclude rows because
+            // it answers the related question "which device folders also surface as
+            // Drive albums when their photos upload?" — orthogonal to the everything
+            // toggle, so it stays visible in both branches.
+            RowDivider()
+            IndentedNavRow(
+                label = stringResource(R.string.settings_album_mirror_folders),
+                description = stringResource(R.string.settings_album_mirror_folders_desc),
+                onClick = onAlbumMirrorFoldersClick,
+                enabled = state.autoSync,
+            )
         }
         }
 
@@ -557,7 +603,7 @@ fun StorageSettingsScreen(
     }
     LaunchedEffect(Unit) { viewModel.refreshLocalStorage() }
 
-    SubPageScaffold(title = stringResource(R.string.settings_storage_section), onBack = onBack) {
+    SettingsSubPageScaffold(title = stringResource(R.string.settings_storage_section), onBack = onBack) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
@@ -593,6 +639,7 @@ fun StorageSettingsScreen(
         Spacer(Modifier.height(8.dp))
         RecentlyDeletedCard(
             count = state.trashedCount,
+            cloudCount = state.cloudTrashCount,
             onClick = onRecentlyDeletedClick,
         )
     }
@@ -607,7 +654,7 @@ fun PrivacySettingsScreen(
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
-    SubPageScaffold(title = stringResource(R.string.settings_privacy_metadata), onBack = onBack) {
+    SettingsSubPageScaffold(title = stringResource(R.string.settings_privacy_metadata), onBack = onBack) {
         // ── Metadata card ───────────────────────────────────────────────────
         // Strip sub-toggles collapse under the main strip-on-upload switch — they
         // only exist to attenuate WHICH metadata categories get stripped, so showing
@@ -730,7 +777,7 @@ fun SecuritySettingsScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val colors = AppColors.current
-    SubPageScaffold(title = stringResource(R.string.settings_security), onBack = onBack) {
+    SettingsSubPageScaffold(title = stringResource(R.string.settings_security), onBack = onBack) {
         CollapsibleSection(label = stringResource(R.string.settings_security_section_lock)) {
             SettingsCard {
                 ToggleRow(
@@ -787,42 +834,6 @@ fun SecuritySettingsScreen(
 
 // ── Shared scaffold ───────────────────────────────────────────────────────────
 
-@Composable
-private fun SubPageScaffold(
-    title: String,
-    onBack: () -> Unit,
-    content: @Composable () -> Unit,
-) {
-    val colors = AppColors.current
-    val debouncedBack = rememberDebouncedAction { onBack() }
-    Box(modifier = Modifier.fillMaxSize().background(colors.pageBg)) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .statusBarsPadding()
-                .navigationBarsPadding()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp)
-                .padding(bottom = 32.dp),
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(top = 16.dp, bottom = 24.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Box(
-                    modifier = Modifier.size(36.dp).background(colors.surfaceWeak, CircleShape)
-                        .border(0.5.dp, colors.pillBorder, CircleShape).clickable(onClick = debouncedBack),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = colors.fgDim, modifier = Modifier.size(16.dp))
-                }
-                Text(title, color = colors.fgPrimary, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
-            }
-            content()
-        }
-    }
-}
 
 // ── Sync progress panel (inside Sync card while syncing) ─────────────────────
 
@@ -1255,6 +1266,7 @@ private fun AppCacheRow(state: SettingsUiState, onClearCache: () -> Unit) {
 @Composable
 private fun RecentlyDeletedCard(
     count: Int,
+    cloudCount: Int?,
     onClick: () -> Unit,
 ) {
     val colors = AppColors.current
@@ -1292,12 +1304,10 @@ private fun RecentlyDeletedCard(
                     fontWeight = FontWeight.Medium,
                 )
                 Text(
-                    when {
-                        count == 0 -> stringResource(R.string.settings_recently_deleted_empty)
-                        count == 1 -> stringResource(R.string.settings_recently_deleted_subtitle_singular)
-                        else       -> stringResource(R.string.settings_recently_deleted_subtitle, count)
-                    },
-                    color = if (count > 0) colors.errorColor.copy(alpha = 0.75f) else colors.fgMute,
+                    recentlyDeletedSubtitle(count, cloudCount),
+                    color = if (count > 0 || (cloudCount ?: 0) > 0) {
+                        colors.errorColor.copy(alpha = 0.75f)
+                    } else colors.fgMute,
                     fontSize = 11.5.sp,
                 )
             }

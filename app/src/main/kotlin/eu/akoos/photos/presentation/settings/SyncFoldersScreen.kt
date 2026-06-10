@@ -61,12 +61,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
+import eu.akoos.photos.R
+import eu.akoos.photos.presentation.common.IconBubble
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.FgDim
@@ -98,19 +101,16 @@ fun SyncFoldersScreen(
                 .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Box(
-                modifier = Modifier
-                    .size(36.dp)
-                    .background(colors.surfaceWeak, CircleShape)
-                    .border(0.5.dp, PillBorder, CircleShape)
-                    .clickable(onClick = onBack),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    Icons.AutoMirrored.Filled.ArrowBack, "Back",
-                    tint = FgDim, modifier = Modifier.size(18.dp),
-                )
-            }
+            IconBubble(
+                icon = Icons.AutoMirrored.Filled.ArrowBack,
+                contentDescription = stringResource(R.string.onboarding_back),
+                onClick = onBack,
+                diameter = 36.dp,
+                iconSize = 18.dp,
+                background = colors.surfaceWeak,
+                borderColor = PillBorder,
+                tint = FgDim,
+            )
             Spacer(Modifier.weight(1f))
             Text(
                 "Backup Folders",
@@ -257,7 +257,7 @@ fun SyncFoldersScreen(
                             Icon(Icons.Default.Add, "Add folder", tint = Accent, modifier = Modifier.size(20.dp))
                         }
                         Column(Modifier.weight(1f)) {
-                            Text("Add folder by name", color = FgPrimary, fontSize = 14.sp)
+                            Text(stringResource(R.string.sync_folders_add_row_title), color = FgPrimary, fontSize = 14.sp)
                             Text(
                                 "Pre-declare a folder so future photos in it back up automatically",
                                 color = FgMute, fontSize = 11.sp,
@@ -268,7 +268,7 @@ fun SyncFoldersScreen(
                         var input by remember { mutableStateOf("") }
                         AlertDialog(
                             onDismissRequest = { showAddDialog = false },
-                            title = { Text("Add folder", color = FgPrimary) },
+                            title = { Text(stringResource(R.string.sync_folders_add_dialog_title), color = FgPrimary) },
                             text = {
                                 Column {
                                     Text(
@@ -282,7 +282,7 @@ fun SyncFoldersScreen(
                                         value = input,
                                         onValueChange = { input = it },
                                         singleLine = true,
-                                        placeholder = { Text("Folder name") },
+                                        placeholder = { Text(stringResource(R.string.sync_folders_add_dialog_name_hint)) },
                                     )
                                 }
                             },
@@ -292,11 +292,11 @@ fun SyncFoldersScreen(
                                         viewModel.addManualFolder(input)
                                         showAddDialog = false
                                     },
-                                ) { Text("Add", color = Accent) }
+                                ) { Text(stringResource(R.string.share_invite_add), color = Accent) }
                             },
                             dismissButton = {
                                 TextButton(onClick = { showAddDialog = false }) {
-                                    Text("Cancel", color = FgDim)
+                                    Text(stringResource(R.string.cancel), color = FgDim)
                                 }
                             },
                             containerColor = colors.cardBg,

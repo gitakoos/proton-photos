@@ -58,6 +58,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.net.toUri
 import eu.akoos.photos.BuildConfig
 import eu.akoos.photos.R
+import eu.akoos.photos.presentation.common.IconBubble
 import eu.akoos.photos.presentation.settings.components.RowDivider
 import eu.akoos.photos.presentation.settings.components.SectionLabel
 import eu.akoos.photos.presentation.theme.AppColors
@@ -90,21 +91,16 @@ fun AboutScreen(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(36.dp)
-                        .background(colors.surfaceWeak, CircleShape)
-                        .border(0.5.dp, colors.pillBorder, CircleShape)
-                        .clickable(onClick = onBack),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        Icons.AutoMirrored.Filled.ArrowBack,
-                        null,
-                        tint = colors.fgDim,
-                        modifier = Modifier.size(16.dp),
-                    )
-                }
+                IconBubble(
+                    icon = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = stringResource(R.string.onboarding_back),
+                    onClick = onBack,
+                    diameter = 36.dp,
+                    iconSize = 16.dp,
+                    background = colors.surfaceWeak,
+                    borderColor = colors.pillBorder,
+                    tint = colors.fgDim,
+                )
                 Text(
                     stringResource(R.string.about_title),
                     color = colors.fgPrimary,

@@ -82,9 +82,18 @@ class SyncWorker @AssistedInject constructor(
         // Promote to foreground IMMEDIATELY so the OS doesn't kill us partway through upload,
         // and the user sees the work is happening. We can't return early without first
         // showing the notification when the worker was enqueued as expedited / foreground.
+        // If the initial setForeground fails — happens on Android 14+ when the OS denies the
+        // foreground promotion in some contexts (e.g. immediately after BOOT_COMPLETED or
+        // during a low-priority background trigger) — explicitly cancel any partial channel
+        // notification so BackgroundSyncService's parallel notif doesn't stay paired with a
+        // ghost SyncWorker entry in the shade. Without this clean-up the user could see two
+        // overlapping "sync" notifications and think the upload stopped.
         runCatching {
             setForeground(buildForegroundInfo(doneCount, totalCount))
-        }.onFailure { Log.w(TAG, "setForeground initial failed: ${it.message}") }
+        }.onFailure { e ->
+            Log.w(TAG, "setForeground initial failed: ${e.message}")
+            runCatching { NotificationManagerCompat.from(context).cancel(NOTIFICATION_ID) }
+        }
 
         val userId = accountManager.getPrimaryUserId().first()
             ?: return@coroutineScope Result.failure()
@@ -280,15 +289,18 @@ class SyncWorker @AssistedInject constructor(
         fun ensureChannel(context: Context) {
             val nm = context.getSystemService(NotificationManager::class.java) ?: return
             if (nm.getNotificationChannel(CHANNEL_ID) != null) return
-            // IMPORTANCE_DEFAULT (not LOW) so the user actually sees the upload notification
-            // pop up in the status bar when an automatic background upload kicks off. LOW
-            // showed only a silent icon, making the sync look inactive even while it was
-            // running. DEFAULT still does NOT play a sound (setShowBadge(false) + default
-            // sound settings), but the heads-up banner gives a clear "upload started" signal.
+            // IMPORTANCE_LOW keeps the upload notification visible in the status bar but
+            // suppresses the heads-up popup banner. A privacy-focused user base expects
+            // background sync to be present-but-quiet; the earlier DEFAULT importance was
+            // intrusive on every automatic upload — and our own manual "Sync now" path
+            // already gives an immediate toast, so we don't need the heads-up for that
+            // either. Existing installs migrate when the channel is recreated post-uninstall;
+            // a user who wants the louder behaviour can flip it in system Settings → App
+            // notifications, which is the canonical Android pattern.
             val channel = NotificationChannel(
                 CHANNEL_ID,
                 context.getString(R.string.sync_worker_channel_name),
-                NotificationManager.IMPORTANCE_DEFAULT,
+                NotificationManager.IMPORTANCE_LOW,
             ).apply {
                 description = context.getString(R.string.sync_worker_channel_desc)
                 setShowBadge(false)
@@ -373,11 +385,21 @@ class SyncWorker @AssistedInject constructor(
          *     follow-up — a burst of 20 kicks doesn't queue 20 workers, it queues 1 that
          *     handles whatever pending state the burst left in MediaStore.
          */
-        fun runNow(context: Context, wifiOnly: Boolean = true) {
+        /**
+         * Enqueue a one-shot sync run. The default [allowLowBattery] = false matches the
+         * periodic schedule: don't drain the device when the OS already flagged battery
+         * pressure. Pass `true` ONLY when the user explicitly triggered the run (Settings
+         * → Sync now), where deferring to a higher battery state would feel broken.
+         */
+        fun runNow(context: Context, wifiOnly: Boolean = true, allowLowBattery: Boolean = false) {
             ensureChannel(context)
             val networkType = if (wifiOnly) NetworkType.UNMETERED else NetworkType.CONNECTED
+            val constraints = Constraints.Builder()
+                .setRequiredNetworkType(networkType)
+                .apply { if (!allowLowBattery) setRequiresBatteryNotLow(true) }
+                .build()
             val request = OneTimeWorkRequestBuilder<SyncWorker>()
-                .setConstraints(Constraints.Builder().setRequiredNetworkType(networkType).build())
+                .setConstraints(constraints)
                 .addTag(TAG_ONESHOT)
                 .build()
             WorkManager.getInstance(context).enqueueUniqueWork(

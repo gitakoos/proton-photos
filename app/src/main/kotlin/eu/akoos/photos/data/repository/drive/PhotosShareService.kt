@@ -66,6 +66,17 @@ class PhotosShareService @Inject constructor(
     @Volatile private var cachedRootLinkKeyBytes: ByteArray? = null
     @Volatile private var cachedRootLinkArmoredKey: String? = null
     @Volatile private var cachedRootNodeHashKeyBytes: ByteArray? = null
+    /**
+     * Address that owns the Photos volume — set at registration to the user's first
+     * primary address and STAYS THERE even if the user later promotes an alias to
+     * mail-primary. Drive web + Drive Android always sign with this address for any
+     * Drive-volume operation (album create, photo upload, add-to-album, share creation,
+     * invite). Using the current mail-primary instead produces signatures the recipient
+     * can't verify against the volume owner's public key → "Cannot decrypt" / verification
+     * failures on the recipient side. Cached separately from shareId because we want to
+     * avoid a network round-trip per signing call.
+     */
+    @Volatile private var cachedVolumeOwnerAddressId: String? = null
     /** UserId the current cache was populated for; mismatch triggers [wipeKeyCache]. */
     @Volatile private var cachedUserId: String? = null
 
@@ -77,6 +88,38 @@ class PhotosShareService @Inject constructor(
     fun volumeId(): String? = cachedPhotosVolumeId
     fun rootLinkArmoredKey(): String? = cachedRootLinkArmoredKey
     fun rootNodeHashKeyBytes(): ByteArray? = cachedRootNodeHashKeyBytes
+    /** Synchronous read of the cached volume-owner address id; null if [volumeOwnerAddressId]
+     *  hasn't run yet. Callers that need a guaranteed value should call the suspending
+     *  variant which round-trips through the share bootstrap when needed. */
+    fun cachedVolumeOwnerAddressIdOrNull(): String? = cachedVolumeOwnerAddressId
+
+    /**
+     * Returns the Photos volume owner address id, bootstrapping the cache from the v1
+     * share endpoint on first call. Drive crypto operations (signing, sharing, invitation)
+     * MUST use the address that owns the volume — that's whatever address was primary at
+     * the moment the user first signed in and the volume was provisioned. Switching the
+     * mail-primary later (alias promotion) does NOT migrate the volume owner, so signing
+     * with today's mail-primary leaves the recipient unable to verify the chain.
+     */
+    suspend fun volumeOwnerAddressId(userId: UserId): String? = withContext(Dispatchers.IO) {
+        cachedVolumeOwnerAddressId?.let { return@withContext it }
+        val shareId = cachedPhotosShareId ?: getVolumeId(userId).let { cachedPhotosShareId } ?: return@withContext null
+        networkSemaphore.withPermit {
+            cachedVolumeOwnerAddressId?.let { return@withPermit it }
+            runCatching {
+                val manager = apiProvider.get<DriveApiService>(userId)
+                val response = manager.invoke { getShareBootstrap(shareId) }.valueOrThrow
+                val ownerAddressId = response.addressId
+                if (ownerAddressId != null) {
+                    cachedVolumeOwnerAddressId = ownerAddressId
+                    Log.d(TAG, "volumeOwnerAddressId: cached $ownerAddressId for share $shareId")
+                }
+                ownerAddressId
+            }.onFailure {
+                Log.w(TAG, "volumeOwnerAddressId: bootstrap failed for $shareId: ${it.message}")
+            }.getOrNull()
+        }
+    }
 
     // ── Mutating operations ──────────────────────────────────────────────────
 
@@ -96,6 +139,7 @@ class PhotosShareService @Inject constructor(
         cachedPhotosVolumeId = null
         cachedPhotosShareId = null
         cachedPhotosRootLinkId = null
+        cachedVolumeOwnerAddressId = null
         cachedUserId = null
     }
 

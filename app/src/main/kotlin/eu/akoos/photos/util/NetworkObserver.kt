@@ -38,9 +38,16 @@ import javax.inject.Singleton
 /**
  * Single source of truth for network reachability. Hot StateFlow that ViewModels gate
  * cloud calls on. Initial value derived synchronously so cold-start reads in init {}
- * blocks get a correct answer before any callback fires. "Online" requires both
- * NET_CAPABILITY_INTERNET and NET_CAPABILITY_VALIDATED, so a captive-portal Wi-Fi
- * counts as offline.
+ * blocks get a correct answer before any callback fires.
+ *
+ * "Online" requires only `NET_CAPABILITY_INTERNET` on any attached network — we
+ * deliberately do NOT gate on `NET_CAPABILITY_VALIDATED`. The validated capability
+ * stays false on networks where Android's captive-portal probe endpoint
+ * (gstatic.com / samsung.com) is unreachable, even though Proton's transport is
+ * perfectly usable; gating on it would lock the offline indicator on for those
+ * users. We also enumerate `allNetworks` rather than reading `activeNetwork` so
+ * the indicator doesn't flicker during a wifi-to-cellular handover when the
+ * active assignment is momentarily null.
  */
 @Singleton
 class NetworkObserver @Inject constructor(
@@ -62,19 +69,32 @@ class NetworkObserver @Inject constructor(
     private val _isUnmetered = MutableStateFlow(currentlyUnmetered())
     val isUnmetered: StateFlow<Boolean> = _isUnmetered.asStateFlow()
 
+    private val callback = object : ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(network: Network) { refresh() }
+        override fun onLost(network: Network) { refresh() }
+        override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) { refresh() }
+    }
+
     init {
         cm?.let { manager ->
             val request = NetworkRequest.Builder()
                 .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
                 .build()
-            val callback = object : ConnectivityManager.NetworkCallback() {
-                override fun onAvailable(network: Network) { refresh() }
-                override fun onLost(network: Network) { refresh() }
-                override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) { refresh() }
-            }
             try { manager.registerNetworkCallback(request, callback) }
             catch (e: Exception) { Log.w(TAG, "registerNetworkCallback failed: ${e.message}", e) }
         }
+    }
+
+    /**
+     * Unregister the system network callback. Idempotent — re-calls after the OS has
+     * already torn the registration down are swallowed via runCatching. Not auto-wired
+     * to any production lifecycle hook (Application.onTerminate only fires in emulators);
+     * the singleton's registration is intended to live as long as the process. Exposed
+     * for instrumented tests and any future deliberate teardown path.
+     */
+    fun release() {
+        val manager = cm ?: return
+        runCatching { manager.unregisterNetworkCallback(callback) }
     }
 
     private fun refresh() {
@@ -84,10 +104,17 @@ class NetworkObserver @Inject constructor(
 
     private fun currentlyOnline(): Boolean {
         val manager = cm ?: return false
-        val active = manager.activeNetwork ?: return false
-        val caps = manager.getNetworkCapabilities(active) ?: return false
-        return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
-            caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+        // Enumerate ALL attached networks rather than just `activeNetwork`. During a
+        // wifi → cellular handover, activeNetwork briefly returns null even though
+        // one or both networks are still attached — leading the avatar dot to flicker
+        // between offline/online. allNetworks is stable across the transition.
+        // We only require NET_CAPABILITY_INTERNET (not VALIDATED), because the
+        // VALIDATED gate would never flip true on captive-portal-blocked networks
+        // even though Proton's transport works fine.
+        return manager.allNetworks.any { network ->
+            val caps = manager.getNetworkCapabilities(network) ?: return@any false
+            caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+        }
     }
 
     private fun currentlyUnmetered(): Boolean {

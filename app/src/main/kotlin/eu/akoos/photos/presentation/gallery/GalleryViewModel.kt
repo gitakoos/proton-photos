@@ -26,6 +26,8 @@ package eu.akoos.photos.presentation.gallery
 
 import android.content.Context
 import android.net.Uri
+import android.os.Build
+import android.provider.MediaStore
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -35,14 +37,19 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -65,9 +72,21 @@ import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
 import eu.akoos.photos.domain.usecase.ReconcileSyncStateUseCase
 import eu.akoos.photos.domain.usecase.UploadPendingUseCase
 import eu.akoos.photos.util.ExifHelper
+import eu.akoos.photos.util.StripResult
 import eu.akoos.photos.util.MetadataStripConfig
+import eu.akoos.photos.util.looksLikeNetworkError
+import eu.akoos.photos.util.sanitizeErrorMessage
 import eu.akoos.photos.worker.SyncWorker
 import javax.inject.Inject
+
+/** Internal bag for the flows the gallery `combine` chain produces. Lives at top
+ *  level so distinctUntilChanged downstream can do structural equality on it. */
+private data class GallerySources(
+    val items: List<GalleryItem>,
+    val hiddenUris: Set<String>,
+    val hiddenCloudLinkIds: Set<String>,
+    val cloudInAlbum: Set<String>,
+)
 
 @HiltViewModel
 class GalleryViewModel @Inject constructor(
@@ -84,6 +103,8 @@ class GalleryViewModel @Inject constructor(
     private val hiddenStorage: HiddenStorageManager,
     private val syncStateRepo: SyncStateRepository,
     private val networkObserver: eu.akoos.photos.util.NetworkObserver,
+    private val albumPhotoMembershipDao: eu.akoos.photos.data.db.dao.AlbumPhotoMembershipDao,
+    private val albumListEvents: eu.akoos.photos.util.AlbumListEventBus,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(GalleryUiState())
@@ -93,19 +114,23 @@ class GalleryViewModel @Inject constructor(
      *  offline badge in [GalleryScreen] and gates every cloud-side refresh below. */
     val isOnline: StateFlow<Boolean> = networkObserver.isOnline
 
-    /** Walks the Throwable cause chain looking for a network-layer failure so we can
-     *  swallow it silently instead of surfacing a useless error to the user. */
-    private fun looksLikeNetworkError(t: Throwable?): Boolean {
-        var cur: Throwable? = t
-        while (cur != null) {
-            val n = cur.javaClass.name
-            if (n.contains("UnknownHost") || n.contains("SocketTimeout") ||
-                n.contains("SocketException") || n.contains("SSLException") ||
-                n.contains("InterruptedIOException")) return true
-            cur = cur.cause
-        }
-        return false
-    }
+    /** Cloud linkIds that also have a SYNCED local copy on this device. A photo classified as
+     *  [GalleryItem.CloudOnly] in the static item snapshot can become locally available after the
+     *  user downloads it (the sync row updates, but the snapshot doesn't). This live set lets the
+     *  grid upgrade such a cell's badge to "backed up + on device", matching the viewer. */
+    val downloadedCloudLinkIds: StateFlow<Set<String>> = flow {
+        val userId = accountManager.getPrimaryUserId().first()
+        if (userId == null) { emit(emptySet()); return@flow }
+        emitAll(
+            syncStateRepo.observeAll(userId).map { states ->
+                states.asSequence()
+                    .filter { it.status == SyncStatus.SYNCED }
+                    .filter { it.cloudFileId != null && it.localUri.isNotBlank() }
+                    .map { it.cloudFileId!! }
+                    .toSet()
+            },
+        )
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
 
     /** Atomic guard against re-entry into [doSync]. Read+write on [_uiState.value.isSyncing] is
      *  not race-safe — two coroutines (init's syncOnLaunch and observeFolderSettings) could both
@@ -121,6 +146,7 @@ class GalleryViewModel @Inject constructor(
         observeFavorites()
         observeBackgroundUploadProgress()
         observePrimaryUserId()
+        observeHideInAlbums()
     }
 
     /**
@@ -156,6 +182,29 @@ class GalleryViewModel @Inject constructor(
      */
     fun cancelThumbnailDecrypt(linkId: String) {
         cloudRepo.cancelThumbnailDecrypt(linkId)
+    }
+
+    /**
+     * Look-ahead decrypt for the rows just past the viewport in the scroll direction.
+     * Fed by the grid scroll state in [GalleryScreen]; the scheduler queues these at
+     * prefetch priority so they never delay an on-screen cell. [linkIds] are the cloud
+     * link ids of the upcoming items — local-only rows carry none and are filtered out
+     * before this call.
+     */
+    fun prefetchThumbnails(linkIds: List<String>) {
+        val userId = primaryUserId ?: return
+        cloudRepo.prefetchThumbnailDecrypt(userId, linkIds)
+    }
+
+    /**
+     * Visible-priority decrypt for thumbnails that render off the scrolling grid and so
+     * never fire a per-cell request — the "On this day" memories row at the top of the
+     * timeline. Queued at the same priority as on-screen cells so the card fills as soon
+     * as it appears, independent of grid scroll position.
+     */
+    fun requestThumbnailsVisible(linkIds: List<String>) {
+        val userId = primaryUserId ?: return
+        cloudRepo.requestThumbnailDecrypt(userId, linkIds)
     }
 
     /**
@@ -290,39 +339,103 @@ class GalleryViewModel @Inject constructor(
                     .toSet()
             }
 
+            val hideInAlbumsFlow = context.settingsDataStore.data.map {
+                it[SettingsKeys.HIDE_PHOTOS_IN_ALBUMS] == true
+            }
+            // Cloud linkIds in any album, gated by the toggle. When OFF (default),
+            // short-circuit to emptySet() so users who don't enable the feature pay
+            // zero cost from the cross-table query.
+            val cloudAlbumHideSetFlow = hideInAlbumsFlow.flatMapLatest { hide ->
+                if (hide) albumPhotoMembershipDao.observeAllAssociatedPhotoLinkIds().map { it.toSet() }
+                else flowOf(emptySet())
+            }
+
+            // Coalesce bursts of single-row DAO mutations (e.g. 50 thumbnail decrypts
+            // landing during a Gallery first-load) into one emit per ~300 ms. Without this,
+            // every decrypt completion re-emits the full items list, invalidates the
+            // LazyVerticalGrid, and recomposes every cell — scroll stutters until decrypts
+            // quiet down. The debounce sits on the items flow ALONE, not the combined
+            // result: the hidden-vault, hide-in-albums toggle and album-membership flows
+            // must propagate immediately so flipping the toggle (either way) re-filters the
+            // grid in the very next pass instead of waiting on the items-coalescing window.
+            val itemsFlow = getGalleryItems.invoke(userId).debounce(300)
+
             combine(
-                getGalleryItems.invoke(userId),
+                itemsFlow,
                 hiddenUrisFlow,
                 hiddenCloudLinkIdsFlow,
-            ) { items, hiddenUris, hiddenCloudLinkIds ->
-                Triple(items, hiddenUris, hiddenCloudLinkIds)
+                cloudAlbumHideSetFlow,
+            ) { items, hiddenUris, hiddenCloudLinkIds, cloudInAlbum ->
+                GallerySources(items, hiddenUris, hiddenCloudLinkIds, cloudInAlbum)
             }
+                .distinctUntilChanged()
                 .catch { e ->
                     _uiState.update { it.copy(isLoading = false, error = e.message) }
                 }
-                .collect { (allItems, hiddenUris, hiddenCloudLinkIds) ->
-                    val items = allItems.filter { item ->
-                        val uri = when (item) {
+                .collect { sources ->
+                    // Hidden-vault filter (always applied) — items whose local URI is in the
+                    // Hidden vault are dropped from the gallery; cloud counterparts stay in
+                    // the listing with a dim overlay (see hiddenCloudLinkIds usage in
+                    // CloudPhotoCell). Album-hide is NOT applied here — it's applied inside
+                    // [applyFilter] so non-All tabs (Favorites, Screenshots, Videos, …) can
+                    // bypass it. When the user explicitly picks a tab they expect to see
+                    // every item that matches, album membership notwithstanding.
+                    val items = sources.items.filter { item ->
+                        val localUri = when (item) {
                             is GalleryItem.LocalOnly -> item.local.uri
                             is GalleryItem.Synced -> item.local.uri
                             is GalleryItem.CloudOnly -> null
                         }
-                        // Only filter by local-side hide; the cloud counterpart stays in
-                        // the listing with a dim overlay. Surfaced via a dim overlay + eye
-                        // badge in PhotoCell (see hiddenCloudLinkIds usage in the cell).
-                        // CloudOnly items intentionally pass through; the dim overlay is
-                        // enough.
-                        uri == null || uri !in hiddenUris
+                        localUri == null || localUri !in sources.hiddenUris
                     }
                     val pending = items.count { it is GalleryItem.LocalOnly }
                     _uiState.update { state ->
                         state.copy(
                             isLoading = false,
                             items = items,
-                            filteredItems = applyFilter(applyContentFilter(items, state.contentFilter), state.selectedFilter, state.favoriteIds),
+                            filteredItems = applyFilter(
+                                applyContentFilter(items, state.contentFilter),
+                                state.selectedFilter,
+                                state.favoriteIds,
+                                sources.cloudInAlbum,
+                            ),
                             pendingUploadCount = pending,
-                            hiddenCloudLinkIds = hiddenCloudLinkIds,
+                            hiddenCloudLinkIds = sources.hiddenCloudLinkIds,
+                            albumHideCloudIds = sources.cloudInAlbum,
                         )
+                    }
+                }
+        }
+    }
+
+    /**
+     * Keep the album-membership table populated whenever "Hide photos in albums" is on.
+     *
+     * The table only fills when an album is opened or the Albums tab's fire-and-forget
+     * prefetch runs. A user who enables the toggle without ever visiting Albums (or who
+     * added album members elsewhere since the last prefetch) would otherwise keep seeing
+     * those photos in the main grid, because the hide-set built from the table is still
+     * empty/stale. Triggering the prefetch here — on launch with the toggle already on,
+     * and on every off→on flip — makes the membership rows land, after which the DAO Flow
+     * in [observeGallery] re-emits and the grid drops the album photos on its own.
+     *
+     * The prefetch's own freshness gate skips albums whose cached row count already matches
+     * Drive's photoCount, so the steady-state cost is one cheap album-list read; only stale
+     * or never-fetched albums hit the network. Runs detached from the toggle write so the
+     * Settings switch flips instantly.
+     */
+    private fun observeHideInAlbums() {
+        viewModelScope.launch {
+            context.settingsDataStore.data
+                .map { it[SettingsKeys.HIDE_PHOTOS_IN_ALBUMS] == true }
+                .distinctUntilChanged()
+                .collect { hide ->
+                    if (!hide) return@collect
+                    if (!networkObserver.isOnline.value) return@collect
+                    val userId = accountManager.getPrimaryUserId().first() ?: return@collect
+                    runCatching {
+                        val albums = cloudRepo.loadAlbums(userId)
+                        cloudRepo.prefetchAlbumsMembership(userId, albums)
                     }
                 }
         }
@@ -393,7 +506,12 @@ class GalleryViewModel @Inject constructor(
         _uiState.update { state ->
             state.copy(
                 selectedFilter = filter,
-                filteredItems = applyFilter(applyContentFilter(state.items, state.contentFilter), filter, state.favoriteIds),
+                filteredItems = applyFilter(
+                    applyContentFilter(state.items, state.contentFilter),
+                    filter,
+                    state.favoriteIds,
+                    state.albumHideCloudIds,
+                ),
             )
         }
     }
@@ -409,7 +527,12 @@ class GalleryViewModel @Inject constructor(
         _uiState.update { state ->
             state.copy(
                 contentFilter = filter,
-                filteredItems = applyFilter(applyContentFilter(state.items, filter), state.selectedFilter, state.favoriteIds),
+                filteredItems = applyFilter(
+                    applyContentFilter(state.items, filter),
+                    state.selectedFilter,
+                    state.favoriteIds,
+                    state.albumHideCloudIds,
+                ),
             )
         }
     }
@@ -451,8 +574,14 @@ class GalleryViewModel @Inject constructor(
                 reconcile(userId).collect {}
                 upload(userId)
             }.onFailure { e ->
+                // Silent-swallow for network-shaped failures — the avatar offline dot
+                // and the dismissible offline banner already tell the user what's wrong;
+                // a popup on top would be redundant noise. Only non-network exceptions
+                // (e.g. crypto / DB / quota) reach the error sheet, and those go through
+                // sanitizeErrorMessage so a server HTML page or PII-bearing message can't
+                // leak into the UI.
                 if (!looksLikeNetworkError(e)) {
-                    _uiState.update { it.copy(error = e.message) }
+                    _uiState.update { it.copy(error = sanitizeErrorMessage(e.message)) }
                 }
             }
             _uiState.update { it.copy(isRefreshing = false, isSyncing = false) }
@@ -477,6 +606,19 @@ class GalleryViewModel @Inject constructor(
 
     fun clearSelection() {
         _uiState.update { it.copy(selectedItems = emptySet(), multiDeleteState = MultiDeleteState.Idle) }
+    }
+
+    /** Tri-state toggle for a date-header group: if every item in [items] is already selected,
+     *  drop the whole group; otherwise add the missing ones so a partially-selected group fills
+     *  to complete on the first tap. */
+    fun toggleGroup(items: List<GalleryItem>) {
+        if (items.isEmpty()) return
+        _uiState.update { state ->
+            val allSelected = items.all { it in state.selectedItems }
+            val newSet = if (allSelected) state.selectedItems - items.toSet()
+            else state.selectedItems + items
+            state.copy(selectedItems = newSet)
+        }
     }
 
     /** Holds the cloud-delete work that was deferred until the user confirms the Android 11+
@@ -583,10 +725,14 @@ class GalleryViewModel @Inject constructor(
         val items = _uiState.value.selectedItems.toList()
         if (items.isEmpty()) return
         viewModelScope.launch {
-            _uiState.update { it.copy(multiDeleteState = MultiDeleteState.Working) }
+            // Hide writes to its own multiHideState so the selection bar's Delete
+            // (trash) icon does not flash a spinner alongside the More-menu spinner.
+            // The two operations end with a destructive step but the bar surface
+            // should reflect "the action the user just tapped".
+            _uiState.update { it.copy(multiHideState = MultiDeleteState.Working) }
             val hideables = items.filter { it is GalleryItem.LocalOnly || it is GalleryItem.Synced }
             if (hideables.isEmpty()) {
-                _uiState.update { it.copy(multiDeleteState = MultiDeleteState.Failed("No local photos to hide")) }
+                _uiState.update { it.copy(multiHideState = MultiDeleteState.Failed("No local photos to hide")) }
                 return@launch
             }
             // Step 1: copy every local file into app-private hidden storage.
@@ -625,7 +771,7 @@ class GalleryViewModel @Inject constructor(
                 }
             }
             if (collected.isEmpty()) {
-                _uiState.update { it.copy(multiDeleteState = MultiDeleteState.Failed("Could not copy to Hidden")) }
+                _uiState.update { it.copy(multiHideState = MultiDeleteState.Failed("Could not copy to Hidden")) }
                 return@launch
             }
             pendingHidePrivateUris = collected
@@ -633,7 +779,7 @@ class GalleryViewModel @Inject constructor(
             // Step 2: delete the MediaStore originals (one system-trash dialog on Android 11+).
             val userId = accountManager.getPrimaryUserId().first() ?: run {
                 rollbackPendingHide()
-                _uiState.update { it.copy(multiDeleteState = MultiDeleteState.Failed("Not signed in")) }
+                _uiState.update { it.copy(multiHideState = MultiDeleteState.Failed("Not signed in")) }
                 return@launch
             }
             val result = deletePhotoUseCase(
@@ -647,8 +793,9 @@ class GalleryViewModel @Inject constructor(
                 is DeletePhotoUseCase.Result.Success -> {
                     commitPendingHide()
                     _uiState.update { it.copy(
-                        selectedItems    = emptySet(),
-                        multiDeleteState = MultiDeleteState.Done,
+                        selectedItems          = emptySet(),
+                        multiHideState         = MultiDeleteState.Done,
+                        hideCloudNoticePending = cloudIdMapping.isNotEmpty(),
                     ) }
                 }
                 is DeletePhotoUseCase.Result.NeedsMediaWritePermission -> {
@@ -656,17 +803,21 @@ class GalleryViewModel @Inject constructor(
                     // commits them once the user confirms the system dialog.
                     pendingPermissionResult = result
                     _uiState.update { it.copy(
-                        multiDeleteState    = MultiDeleteState.Idle,
+                        multiHideState      = MultiDeleteState.Idle,
                         pendingDeleteIntent = result.pendingIntent,
                     ) }
                 }
                 is DeletePhotoUseCase.Result.CloudDeleteFailed -> {
                     // Shouldn't happen with deleteFromCloud=false — undo the hide if it does.
                     rollbackPendingHide()
-                    _uiState.update { it.copy(multiDeleteState = MultiDeleteState.Failed("Could not move to Hidden")) }
+                    _uiState.update { it.copy(multiHideState = MultiDeleteState.Failed("Could not move to Hidden")) }
                 }
             }
         }
+    }
+
+    fun resetMultiHideState() {
+        _uiState.update { it.copy(multiHideState = MultiDeleteState.Idle, hideCloudNoticePending = false) }
     }
 
     /** Persist the pending hide-URIs into HIDDEN_PHOTO_URIS and clear the pending state. */
@@ -724,36 +875,27 @@ class GalleryViewModel @Inject constructor(
 
     // ── Add-to-album multi-action ──────────────────────────────────────────────
     //
-    // Routes a multi-select to an album. Selection items can be three types:
-    //   - CloudOnly   → cloud-album add only (DrivePhotoRepository.addPhotosToAlbum)
-    //   - LocalOnly   → virtual-membership append (DataStore only — no file movement)
-    //   - Synced      → both legs (cloud add + virtual-membership append)
-    //
-    // No MediaStore consent dialog: add-to-album is a DataStore append, not a file move.
+    // Routes a multi-select to a cloud album. Only Synced and CloudOnly items carry a Drive
+    // linkId, so LocalOnly items in the selection are reported as skipped. Albums are
+    // references-not-copies on Drive (the photo stays in the Photos root), so there is no
+    // file movement and no MediaStore consent dialog.
 
     /**
-     * Begin adding the current selection to an album.
+     * Begin adding the current selection to a cloud album.
      *
-     * @param albumLinkId Drive link ID when the target is a cloud (or merged) album, else null.
-     * @param albumName   Bucket name for the local-move leg. For a brand-new album this is the
-     *                    name the user just typed; for an existing target use the existing name.
-     * @param targetIsLocalBucket When true, every Synced/LocalOnly item also gets its MediaStore
-     *                            file moved into the bucket. False = "cloud-only target" — the
-     *                            local file stays where it is.
+     * @param albumLinkId Drive link ID of the target album.
+     * @param albumName   Album display name, used only for the success snackbar.
      */
     fun addSelectedToAlbum(
-        albumLinkId: String?,
+        albumLinkId: String,
         albumName: String,
-        targetIsLocalBucket: Boolean,
     ) {
         val items = _uiState.value.selectedItems.toList()
         if (items.isEmpty()) return
-        val sanitizedName = ProtonPhotosStorage.sanitize(albumName).ifEmpty { albumName }
         viewModelScope.launch {
             _uiState.update { it.copy(addToAlbumState = AddToAlbumState.Working) }
             val userId = accountManager.getPrimaryUserId().first()
 
-            // Split selection into cloud-side and local-side work.
             val cloudLinkIds = items.mapNotNull { item ->
                 when (item) {
                     is GalleryItem.Synced    -> item.cloud.linkId
@@ -761,30 +903,12 @@ class GalleryViewModel @Inject constructor(
                     is GalleryItem.LocalOnly -> null
                 }
             }
-            val localUris: List<Pair<Uri, String>> = if (!targetIsLocalBucket) emptyList() else
-                items.mapNotNull { item ->
-                    when (item) {
-                        is GalleryItem.Synced    -> Uri.parse(item.local.uri) to item.local.mimeType
-                        is GalleryItem.LocalOnly -> Uri.parse(item.local.uri) to item.local.mimeType
-                        is GalleryItem.CloudOnly -> null
-                    }
-                }
+            // LocalOnly items have no Drive linkId to attach, so they can't join a cloud album
+            // until they upload. Report them so the UI can show a partial-success snackbar.
+            // (LocalOnly items with a backed-up twin surface as Synced, not here.)
+            val skipped = items.count { it is GalleryItem.LocalOnly }
 
-            // Count items the chosen target can't accept so the UI can surface a partial-success
-            // warning instead of silently dropping them.
-            //   - Target is a local bucket (albumLinkId == null) → CloudOnly items are skipped
-            //     because they have no MediaStore URI to fold into the virtual-membership map.
-            //   - Target is a Drive album (albumLinkId != null) → LocalOnly items are skipped
-            //     because they have no Drive linkId to attach. (LocalOnly items with a backed-up
-            //     twin would surface as Synced instead, so they don't fall into this bucket.)
-            val skipped = if (albumLinkId == null) {
-                items.count { it is GalleryItem.CloudOnly }
-            } else {
-                items.count { it is GalleryItem.LocalOnly }
-            }
-
-            // If a cloud add is needed but we don't have a userId or albumLinkId, fail early.
-            if (cloudLinkIds.isNotEmpty() && albumLinkId != null && userId == null) {
+            if (cloudLinkIds.isNotEmpty() && userId == null) {
                 _uiState.update { it.copy(addToAlbumState = AddToAlbumState.Failed("Not signed in")) }
                 return@launch
             }
@@ -792,9 +916,8 @@ class GalleryViewModel @Inject constructor(
             val result = runAddToAlbum(
                 userId = userId,
                 albumLinkId = albumLinkId,
-                albumName = sanitizedName,
+                albumName = albumName,
                 cloudLinkIds = cloudLinkIds,
-                localUris = localUris,
                 skipped = skipped,
             )
             _uiState.update { it.copy(
@@ -808,136 +931,42 @@ class GalleryViewModel @Inject constructor(
         _uiState.update { it.copy(addToAlbumState = AddToAlbumState.Idle) }
     }
 
-    /** Cloud-add + local-bucket-move helper used by both the immediate path and the post-consent
-     *  resume. Returns the terminal state for the UI. [skipped] is the pre-computed count of
-     *  items the chosen target couldn't accept (see caller); it's passed through to the
-     *  terminal [AddToAlbumState.Done] so the UI can show a partial-success snackbar. */
+    /** Cloud-add helper. Returns the terminal state for the UI. [skipped] is the count of
+     *  selected items the album can't accept (local-only, not backed up yet); it flows
+     *  through to [AddToAlbumState.Done] so the UI can show a partial-success snackbar. */
     private suspend fun runAddToAlbum(
         userId: me.proton.core.domain.entity.UserId?,
-        albumLinkId: String?,
+        albumLinkId: String,
         albumName: String,
         cloudLinkIds: List<String>,
-        localUris: List<Pair<Uri, String>>,
         skipped: Int = 0,
     ): AddToAlbumState {
-        // Cloud leg
         var cloudAdded = 0
         var cloudFailed = 0
-        if (albumLinkId != null && cloudLinkIds.isNotEmpty()) {
+        if (cloudLinkIds.isNotEmpty()) {
             if (userId == null) return AddToAlbumState.Failed("Not signed in")
             try {
                 val r = cloudRepo.addPhotosToAlbum(userId, albumLinkId, cloudLinkIds)
                 cloudAdded = r.succeededLinkIds.size
                 cloudFailed = r.failedLinkIds.size
+                // Wake the Albums grid so the target album's cover + count refresh without a
+                // manual pull-to-refresh now that it gained photos.
+                if (cloudAdded > 0) albumListEvents.notifyChanged()
             } catch (e: Exception) {
                 return AddToAlbumState.Failed(e.message ?: "Could not add to cloud album")
             }
         }
 
-        // Local leg — *virtual* album membership only. We deliberately DO NOT move the file
-        // on disk anymore, because:
-        //
-        //   1. A RELATIVE_PATH update triggers MediaProvider to re-scan the file's metadata
-        //      from disk and overwrite DATE_TAKEN with the EXIF value (or NULL if missing).
-        //   2. MediaProvider on Q+ refuses to let an unprivileged app write DATE_TAKEN for a
-        //      file it doesn't own — it logs "W MediaProvider: Ignoring mutation of datetaken
-        //      from <pkg>" and silently drops that column from our ContentValues update.
-        //
-        // The combined effect was: every "Add to album" of an existing camera photo collapsed
-        // its capture date to today. Cloud albums already work as references-not-copies
-        // (photos stay in the Photos root), so we mirror that here: we append the URIs to a
-        // DataStore-backed virtual membership map and let `AlbumsViewModel.observeLocalAlbums`
-        // assemble the on-screen album by combining real buckets + virtual entries.
-        //
-        // The file stays in its original bucket (DCIM/Camera, etc.) with DATE_TAKEN intact.
-        var localMoved = 0
-        val localFailed = 0
-        if (localUris.isNotEmpty()) {
-            try {
-                context.settingsDataStore.edit { prefs ->
-                    val current = prefs[SettingsKeys.LOCAL_ALBUM_VIRTUAL_MEMBERSHIP] ?: emptySet()
-                    val additions = localUris.map { (uri, _) -> "$albumName||$uri" }
-                    prefs[SettingsKeys.LOCAL_ALBUM_VIRTUAL_MEMBERSHIP] = current + additions
-                }
-                localMoved = localUris.size
-            } catch (e: Exception) {
-                if (e is kotlinx.coroutines.CancellationException) throw e
-                // DataStore write failed — count as failed so the UI surfaces an error.
-                // (Caller still records the manual-album marker below so the album shows up.)
-            }
-        }
-
-        // Persist the bucket name as a manual local album marker so it shows up even if every
-        // file move failed (so the user still sees their newly-typed bucket).
-        if (localUris.isNotEmpty() || albumLinkId == null) {
-            context.settingsDataStore.edit { prefs ->
-                val current = prefs[SettingsKeys.MANUAL_LOCAL_ALBUMS] ?: emptySet()
-                prefs[SettingsKeys.MANUAL_LOCAL_ALBUMS] = current + albumName
-            }
-        }
-
-        // Cloud-mirror-by-name: if some of the local URIs are backed up (have a cloud
-        // counterpart in SyncStateRepository), also add them to the matching cloud album.
-        // Run *after* the local DataStore write so the local state is authoritative.
-        // Best-effort, silent on failure — the local virtual membership is what drives the UI.
-        if (userId != null && localUris.isNotEmpty()) {
-            mirrorLocalAddToCloudByName(userId, albumName, localUris, alreadyAddedLinkIds = cloudLinkIds.toSet())
-        }
-
-        // Failure summary — surface a string when nothing made it across either leg.
-        val nothingHappened = cloudAdded == 0 && localMoved == 0 &&
-            (cloudFailed > 0 || localFailed > 0)
-        if (nothingHappened) {
+        if (cloudAdded == 0 && cloudFailed > 0) {
             return AddToAlbumState.Failed("Could not add to album")
         }
-        return AddToAlbumState.Done(cloudAdded, localMoved, skipped, albumName)
+        return AddToAlbumState.Done(cloudAdded, 0, skipped, albumName)
     }
 
     /**
-     * For each local URI in [localUris], look up the backing cloud fileId via
-     * [SyncStateRepository.getByUri]. Photos that were already added via [albumLinkId] on the
-     * cloud leg ([alreadyAddedLinkIds]) are skipped to avoid double-add. If any cloud ids
-     * remain, find the matching cloud album by name (case-insensitive) or create it, then
-     * call addPhotosToAlbum. Every failure is swallowed — the visible local result already
-     * reflects success, and the next album-list refresh will reconcile any cloud divergence.
-     */
-    private suspend fun mirrorLocalAddToCloudByName(
-        userId: me.proton.core.domain.entity.UserId,
-        albumName: String,
-        localUris: List<Pair<Uri, String>>,
-        alreadyAddedLinkIds: Set<String>,
-    ) {
-        try {
-            // Resolve every local URI to its backing cloud linkId (null when not yet backed up).
-            val cloudIds = localUris.mapNotNull { (uri, _) ->
-                syncStateRepo.getByUri(uri.toString())?.cloudFileId
-            }.filterNot { it in alreadyAddedLinkIds }
-                .distinct()
-            if (cloudIds.isEmpty()) return
-
-            // Locate or create the cloud album. Case-insensitive lookup against the current
-            // server list (one extra round-trip — acceptable for an add-to-album action).
-            val albums = try { cloudRepo.loadAlbums(userId) } catch (_: Exception) { return }
-            val matching = albums.firstOrNull { it.name.equals(albumName, ignoreCase = true) }
-            val targetLinkId = matching?.linkId ?: try {
-                cloudRepo.createDriveAlbum(userId, albumName).linkId
-            } catch (e: Exception) {
-                android.util.Log.w("GalleryVM", "Cloud album create-on-mirror failed: ${e.message}")
-                return
-            }
-            try {
-                cloudRepo.addPhotosToAlbum(userId, targetLinkId, cloudIds)
-            } catch (e: Exception) {
-                android.util.Log.w("GalleryVM", "Cloud mirror add-to-album failed: ${e.message}")
-            }
-        } catch (e: Exception) {
-            android.util.Log.w("GalleryVM", "Cloud mirror unexpected: ${e.message}")
-        }
-    }
-
-    /**
-     * Inline create-album-then-add flow. Creates the target album first (cloud when any selected
-     * item is cloud-backed, else local-only marker), then forwards to [addSelectedToAlbum].
+     * Inline create-album-then-add flow. Always creates a cloud album, adds the cloud-backed
+     * items in the selection, then sets the first successfully-added photo as the album cover
+     * so the new card isn't blank in the Albums grid.
      */
     fun createAlbumThenAddSelected(name: String) {
         val trimmed = ProtonPhotosStorage.sanitize(name)
@@ -945,43 +974,57 @@ class GalleryViewModel @Inject constructor(
             _uiState.update { it.copy(addToAlbumState = AddToAlbumState.Failed("Album name cannot be empty")) }
             return
         }
-        val items = _uiState.value.selectedItems
+        val items = _uiState.value.selectedItems.toList()
         if (items.isEmpty()) {
             _uiState.update { it.copy(addToAlbumState = AddToAlbumState.Failed("Select photos first")) }
             return
         }
-        val anyCloudBacked = items.any { it is GalleryItem.Synced || it is GalleryItem.CloudOnly }
-        val anyLocal = items.any { it is GalleryItem.LocalOnly || it is GalleryItem.Synced }
         viewModelScope.launch {
             _uiState.update { it.copy(addToAlbumState = AddToAlbumState.Working) }
-            var newAlbumLinkId: String? = null
-            if (anyCloudBacked) {
-                val userId = accountManager.getPrimaryUserId().first() ?: run {
-                    _uiState.update { it.copy(addToAlbumState = AddToAlbumState.Failed("Not signed in")) }
-                    return@launch
+            val userId = accountManager.getPrimaryUserId().first() ?: run {
+                _uiState.update { it.copy(addToAlbumState = AddToAlbumState.Failed("Not signed in")) }
+                return@launch
+            }
+            val newAlbumLinkId = try {
+                cloudRepo.createDriveAlbum(userId, trimmed).linkId
+            } catch (e: Exception) {
+                _uiState.update { it.copy(addToAlbumState = AddToAlbumState.Failed(
+                    "Could not create album: ${e.message}",
+                )) }
+                return@launch
+            }
+
+            val cloudLinkIds = items.mapNotNull { item ->
+                when (item) {
+                    is GalleryItem.Synced    -> item.cloud.linkId
+                    is GalleryItem.CloudOnly -> item.cloud.linkId
+                    is GalleryItem.LocalOnly -> null
                 }
+            }
+            // LocalOnly items can't join a cloud album until they upload — reported as skipped.
+            val skipped = items.count { it is GalleryItem.LocalOnly }
+
+            val addResult = if (cloudLinkIds.isNotEmpty()) {
                 try {
-                    newAlbumLinkId = cloudRepo.createDriveAlbum(userId, trimmed).linkId
+                    cloudRepo.addPhotosToAlbum(userId, newAlbumLinkId, cloudLinkIds)
                 } catch (e: Exception) {
                     _uiState.update { it.copy(addToAlbumState = AddToAlbumState.Failed(
-                        "Could not create album: ${e.message}",
+                        e.message ?: "Could not add to album",
                     )) }
                     return@launch
                 }
+            } else null
+
+            val cloudAdded = addResult?.succeededLinkIds?.size ?: 0
+            // Set the first SUCCEEDED photo as cover — cover failure must not fail the add.
+            addResult?.succeededLinkIds?.firstOrNull()?.let { firstSucceeded ->
+                runCatching { cloudRepo.setAlbumCover(userId, newAlbumLinkId, firstSucceeded) }
             }
-            // Always register the marker so the local-bucket version shows in the Albums tab
-            // even for cloud-only selections (so users can move local stuff into it later).
-            context.settingsDataStore.edit { prefs ->
-                val current = prefs[SettingsKeys.MANUAL_LOCAL_ALBUMS] ?: emptySet()
-                prefs[SettingsKeys.MANUAL_LOCAL_ALBUMS] = current + trimmed
-            }
-            // Now forward to the normal add flow. targetIsLocalBucket = true when there's any
-            // local file in the selection that should move into the new bucket.
-            addSelectedToAlbum(
-                albumLinkId = newAlbumLinkId,
-                albumName = trimmed,
-                targetIsLocalBucket = anyLocal,
-            )
+            albumListEvents.notifyChanged()
+            _uiState.update { it.copy(
+                selectedItems    = emptySet(),
+                addToAlbumState  = AddToAlbumState.Done(cloudAdded, 0, skipped, trimmed),
+            ) }
         }
     }
 
@@ -997,6 +1040,13 @@ class GalleryViewModel @Inject constructor(
     // STRIP_TIMESTAMP / STRIP_SOFTWARE_INFO) so the user controls *what* gets stripped from
     // one place. When no strip flag is set we surface a Failed state instead of silently
     // doing nothing.
+
+    /** Strip config + counters carried across an Android 10+ write-permission dialog so the
+     *  granted retry strips the deferred foreign URIs and folds them into the final tally. */
+    private var pendingStripConfig: MetadataStripConfig? = null
+    private var pendingStripUris: List<String> = emptyList()
+    private var pendingStripStripped = 0
+    private var pendingStripSkipped = 0
 
     fun stripMetadataSelected() {
         val items = _uiState.value.selectedItems.toList()
@@ -1027,19 +1077,91 @@ class GalleryViewModel @Inject constructor(
                     is GalleryItem.CloudOnly -> skippedCloud++
                 }
             }
-            val (stripped, skippedLocal) = withContext(Dispatchers.IO) {
-                var ok = 0
-                var failed = 0
-                for (uri in localUris) {
-                    if (ExifHelper.stripFieldsInPlace(context, uri, config)) ok++ else failed++
-                }
-                ok to failed
-            }
-            _uiState.update { it.copy(
-                selectedItems    = emptySet(),
-                multiStripState  = MultiStripState.Done(stripped, skippedCloud + skippedLocal),
-            ) }
+            runStripPass(config, localUris, baseStripped = 0, baseSkipped = skippedCloud)
         }
+    }
+
+    /**
+     * Strips [uris] in place, then either finishes (Done) or — when some URIs are foreign files
+     * the OS refuses to write — defers them into a single [MediaStore.createWriteRequest] and
+     * surfaces [GalleryUiState.pendingStripIntent]. [baseStripped] / [baseSkipped] seed the running
+     * tally so a retry adds to (rather than overwrites) the counts from the first pass.
+     */
+    private suspend fun runStripPass(
+        config: MetadataStripConfig,
+        uris: List<String>,
+        baseStripped: Int,
+        baseSkipped: Int,
+    ) {
+        val needsPermission = mutableListOf<String>()
+        val (stripped, failed) = withContext(Dispatchers.IO) {
+            var ok = 0
+            var failedCount = 0
+            for (uri in uris) {
+                when (ExifHelper.stripFieldsInPlace(context, uri, config)) {
+                    is StripResult.Stripped       -> ok++
+                    is StripResult.NeedsPermission -> needsPermission += uri
+                    is StripResult.Failed         -> failedCount++
+                }
+            }
+            ok to failedCount
+        }
+        val totalStripped = baseStripped + stripped
+        val totalSkipped  = baseSkipped + failed
+
+        // Android 11+: ask once for write access to every foreign URI in this pass, then replay
+        // the strip on just those in [retryPendingStrip]. The consent intent is API 30 — older
+        // scoped-storage devices have no batch-consent flow, so those count as skipped.
+        if (needsPermission.isNotEmpty() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            pendingStripConfig   = config
+            pendingStripUris     = needsPermission
+            pendingStripStripped = totalStripped
+            pendingStripSkipped  = totalSkipped
+            val pi = MediaStore.createWriteRequest(
+                context.contentResolver, needsPermission.map(Uri::parse),
+            )
+            _uiState.update { it.copy(
+                multiStripState   = MultiStripState.Idle,
+                pendingStripIntent = pi,
+            ) }
+            return
+        }
+        _uiState.update { it.copy(
+            selectedItems    = emptySet(),
+            multiStripState  = MultiStripState.Done(totalStripped, totalSkipped + needsPermission.size),
+        ) }
+    }
+
+    /** Re-runs the strip on the foreign URIs after the user granted the write-permission dialog. */
+    fun retryPendingStrip() {
+        val config = pendingStripConfig ?: return
+        val uris = pendingStripUris
+        val baseStripped = pendingStripStripped
+        val baseSkipped = pendingStripSkipped
+        clearPendingStripState()
+        viewModelScope.launch {
+            _uiState.update { it.copy(multiStripState = MultiStripState.Working, pendingStripIntent = null) }
+            runStripPass(config, uris, baseStripped, baseSkipped)
+        }
+    }
+
+    /** User canceled the write-permission dialog — count the deferred URIs as skipped, no retry. */
+    fun clearPendingStripIntent() {
+        val baseStripped = pendingStripStripped
+        val deferred = pendingStripUris.size + pendingStripSkipped
+        clearPendingStripState()
+        _uiState.update { it.copy(
+            selectedItems     = emptySet(),
+            multiStripState   = MultiStripState.Done(baseStripped, deferred),
+            pendingStripIntent = null,
+        ) }
+    }
+
+    private fun clearPendingStripState() {
+        pendingStripConfig = null
+        pendingStripUris = emptyList()
+        pendingStripStripped = 0
+        pendingStripSkipped = 0
     }
 
     fun resetMultiStripState() {
@@ -1050,25 +1172,44 @@ class GalleryViewModel @Inject constructor(
         items: List<GalleryItem>,
         filter: GalleryFilter,
         favoriteIds: Set<String> = emptySet(),
-    ): List<GalleryItem> = when (filter) {
-        GalleryFilter.All -> items
-        GalleryFilter.Favorites -> items.filter { item ->
-            // Favorite = locally flagged (DataStore) OR has the Drive Favorite tag (id 0).
-            val localId = when (item) {
-                is GalleryItem.LocalOnly -> item.local.uri
-                is GalleryItem.Synced    -> item.local.uri
-                is GalleryItem.CloudOnly -> item.cloud.linkId
+        albumHideCloudIds: Set<String> = emptySet(),
+    ): List<GalleryItem> {
+        // Album-membership filter only applies on the [GalleryFilter.All] view. Non-All tabs
+        // (Favorites, Screenshots, Videos, …) bypass it — when the user explicitly picks a
+        // category, they want every matching item, regardless of whether the photo is also
+        // in an album. The set is empty when the "Hide photos in albums" toggle is off,
+        // so this is a no-op for users who don't enable the feature.
+        val baseItems = if (filter == GalleryFilter.All) {
+            items.filter { item ->
+                val cloudLinkId = when (item) {
+                    is GalleryItem.CloudOnly -> item.cloud.linkId
+                    is GalleryItem.Synced -> item.cloud.linkId
+                    is GalleryItem.LocalOnly -> null
+                }
+                val inCloudAlbum = cloudLinkId != null && cloudLinkId in albumHideCloudIds
+                !inCloudAlbum
             }
-            val localFlag = localId in favoriteIds
-            val cloudFlag = CategorizeItem.belongsTo(item, tagId = 0)
-            localFlag || cloudFlag
-        }
-        // All other tag filters: server-side tags win when set, but for freshly-uploaded photos
-        // and local-only items we also try a client-side heuristic (mime type, filename pattern,
-        // aspect ratio, bucket name) so Videos / Screenshots / Panoramas / RAW work immediately.
-        else -> {
-            val tagId = filter.tagId ?: return items
-            items.filter { CategorizeItem.belongsTo(it, tagId) }
+        } else items
+        return when (filter) {
+            GalleryFilter.All -> baseItems
+            GalleryFilter.Favorites -> baseItems.filter { item ->
+                // Favorite = locally flagged (DataStore) OR has the Drive Favorite tag (id 0).
+                val localId = when (item) {
+                    is GalleryItem.LocalOnly -> item.local.uri
+                    is GalleryItem.Synced    -> item.local.uri
+                    is GalleryItem.CloudOnly -> item.cloud.linkId
+                }
+                val localFlag = localId in favoriteIds
+                val cloudFlag = CategorizeItem.belongsTo(item, tagId = 0)
+                localFlag || cloudFlag
+            }
+            // All other tag filters: server-side tags win when set, but for freshly-uploaded photos
+            // and local-only items we also try a client-side heuristic (mime type, filename pattern,
+            // aspect ratio, bucket name) so Videos / Screenshots / Panoramas / RAW work immediately.
+            else -> {
+                val tagId = filter.tagId ?: return baseItems
+                baseItems.filter { CategorizeItem.belongsTo(it, tagId) }
+            }
         }
     }
 

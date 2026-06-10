@@ -144,21 +144,9 @@ class PhotoDownloadService @Inject constructor(
         onProgress: ((doneBytes: Long, totalBytes: Long) -> Unit)? = null,
     ): File = withContext(Dispatchers.IO) {
         val cacheDir = File(context.cacheDir, "fullres").also { it.mkdirs() }
-        // Map MIME → file extension explicitly: ExoPlayer / Coil rely on the suffix to
-        // infer the container/codec. The naive substring split produces things like
-        // ".quicktime" or ".x-matroska" which neither player recognises, so the
-        // downloaded clip ends up unplayable. Anything not in the table falls back to
-        // the substring (covers mp4/webm/3gpp where MIME subtype already matches).
-        val sub = photo.mimeType.substringAfterLast('/').lowercase()
-        val ext = when (sub) {
-            "jpeg" -> "jpg"
-            "quicktime" -> "mov"
-            "x-matroska" -> "mkv"
-            "x-msvideo" -> "avi"
-            "x-ms-wmv" -> "wmv"
-            "mpeg" -> if (photo.mimeType.startsWith("video/")) "mpg" else "mp3"
-            else -> sub
-        }
+        // Single-source-of-truth MIME→extension mapping (see util/MimeExtensions.kt for
+        // the rationale — ExoPlayer / Coil rely on the suffix to infer container/codec).
+        val ext = eu.akoos.photos.util.mimeToFileExtension(photo.mimeType)
         val outputFile = File(cacheDir, "${photo.linkId}.$ext")
         val tempFile = File(cacheDir, "${photo.linkId}.$ext.tmp")
         // Atomic temp-rename: writes go to a `.tmp` sibling and only get renamed to
@@ -314,19 +302,44 @@ class PhotoDownloadService @Inject constructor(
         // process death, so a 5 GB MKV that got 60 % through can pick up where it left
         // off instead of starting from zero. A dec file is trusted iff it exists and
         // length > 0 (decrypt-on-success is the only writer; a torn write would have
-        // ended up at 0 bytes). Resumed blocks contribute their bytes to doneBytes but
-        // their encrypted-hash is NOT re-fetched for manifest verification — they were
-        // verified at original download time, and re-verifying here would defeat the
-        // resume's network-savings purpose.
+        // ended up at 0 bytes). Resumed blocks contribute their bytes to doneBytes.
+        //
+        // Integrity: a sibling sidecar `<linkId>.hashes` (written after the prior
+        // run's manifest verification) lets us (a) recompute the dec file's SHA-256
+        // and detect bit-rot, dropping any tampered block back into the re-fetch set,
+        // and (b) fill the resumed blocks' encrypted-hash slots so the manifest verify
+        // below can run end-to-end instead of being skipped. If the sidecar is absent
+        // (older app version, or first download), we trust the dec file's existence
+        // alone and fall back to the legacy skip-verify behaviour.
+        // Sidecar rows are positional: row[i] corresponds to blocks[i] (the index-sorted
+        // list). Block.index is a Drive-server-assigned int that typically starts at 1,
+        // so we can't use it as a list index — iterate with withIndex() and look up by
+        // position instead.
+        val sidecar = readBlockHashSidecar(cacheDir, photo.linkId, expectedCount = blocks.size)
         val resumedBytes = ConcurrentHashMap<Int, ByteArray>()
+        val resumedBlockEncryptedHashes = ConcurrentHashMap<Int, ByteArray>()
         var resumedSize = 0L
-        for (block in blocks) {
+        var sidecarMismatches = 0
+        for ((position, block) in blocks.withIndex()) {
             val decFile = blockDecFile(cacheDir, photo.linkId, block.index)
-            if (decFile.exists() && decFile.length() > 0) {
-                val bytes = decFile.readBytes()
-                resumedBytes[block.index] = bytes
-                resumedSize += bytes.size.toLong()
+            if (!decFile.exists() || decFile.length() <= 0) continue
+            val bytes = decFile.readBytes()
+            val expected = sidecar?.get(position)
+            if (expected != null) {
+                val actualDec = cryptoHelper.sha256(bytes)
+                if (!actualDec.contentEquals(expected.decrypted)) {
+                    Log.w(TAG, "downloadFullResPhoto: resume sidecar mismatch on block ${block.index} of ${photo.linkId} — dropping for re-fetch")
+                    decFile.delete()
+                    sidecarMismatches++
+                    continue
+                }
+                resumedBlockEncryptedHashes[block.index] = expected.encrypted
             }
+            resumedBytes[block.index] = bytes
+            resumedSize += bytes.size.toLong()
+        }
+        if (sidecarMismatches > 0) {
+            Log.w(TAG, "downloadFullResPhoto: ${photo.linkId} — $sidecarMismatches resumed block(s) failed sidecar check; will re-fetch")
         }
         if (resumedBytes.isNotEmpty()) {
             doneBytes.set(resumedSize)
@@ -347,17 +360,18 @@ class PhotoDownloadService @Inject constructor(
         // ── Parallel block download + decrypt ────────────────────────────────────
         // Block-level semaphore (4) caps how many CDN fetch+decrypt pipelines run at
         // once. Each coroutine writes to its own dec_*.bin so there is no shared
-        // output-stream contention. The encrypted SHA-256 of each freshly downloaded
-        // block goes into a ConcurrentHashMap so we can stitch the manifest in index
-        // order at the end (without having to re-read every dec file).
+        // output-stream contention. The encrypted + decrypted SHA-256 of each freshly
+        // downloaded block goes into a ConcurrentHashMap so we can (a) stitch the
+        // manifest in index order at the end and (b) persist a sidecar of decrypted
+        // hashes for bit-rot detection on a future resumed download.
         val blockSemaphore = Semaphore(BLOCK_PARALLELISM)
-        val freshHashes = ConcurrentHashMap<Int, ByteArray>()
+        val freshHashes = ConcurrentHashMap<Int, BlockHashes>()
         val toDownload = blocks.filter { it.index !in resumedBytes.keys }
         coroutineScope {
             toDownload.map { block ->
                 async {
                     blockSemaphore.withPermit {
-                        val hash = downloadAndDecryptBlock(
+                        val hashes = downloadAndDecryptBlock(
                             block = block,
                             cacheDir = cacheDir,
                             linkId = photo.linkId,
@@ -368,7 +382,7 @@ class PhotoDownloadService @Inject constructor(
                             totalBytes = totalBytes,
                             lastEmitMsRef = lastEmitMs,
                         )
-                        freshHashes[block.index] = hash
+                        freshHashes[block.index] = hashes
                     }
                 }
             }.awaitAll()
@@ -384,19 +398,22 @@ class PhotoDownloadService @Inject constructor(
 
         // ── Manifest signature verify ────────────────────────────────────────────
         // Manifest = concat(blockHashes in index order) detached-signed by the uploader.
-        // We can only verify the slice corresponding to freshly downloaded blocks —
-        // resumed blocks' encrypted hashes weren't persisted. If we resumed ANY block,
-        // we log a warning and skip the verify (re-fetching just the missing hashes
-        // would defeat the point of the resume). The original download path still
+        // For freshly downloaded blocks we have the encrypted SHA-256 in [freshHashes].
+        // For resumed blocks the encrypted bytes are gone, so we fill the corresponding
+        // slots from the sidecar (written after a previous run's manifest verification
+        // succeeded). When NO sidecar is present from an older app version we fall back
+        // to the legacy skip-with-warning behaviour — the original download path still
         // verifies the full manifest, so a corrupted block can only sneak past on a
-        // mid-download interruption — and even then the dec bytes themselves were
-        // produced by the authenticated PGP decrypt, so corruption would have caused
-        // a decrypt failure rather than silent data tampering.
+        // mid-download interruption straddling the version bump, and even then the dec
+        // bytes themselves were produced by the authenticated PGP decrypt.
         val manifestSig = revisionResp.revision.manifestSignature
         val signerEmail = revisionResp.revision.signatureAddress
+        var manifestVerified = false
         if (manifestSig != null) {
-            if (resumedBytes.isNotEmpty()) {
-                Log.w(TAG, "VERIFY_SKIP manifest linkId=${photo.linkId} signer=$signerEmail (resumed ${resumedBytes.size}/${blocks.size} blocks — encrypted hashes unavailable)")
+            val canVerify = resumedBytes.isEmpty() ||
+                resumedBlockEncryptedHashes.size == resumedBytes.size
+            if (!canVerify) {
+                Log.w(TAG, "VERIFY_SKIP manifest linkId=${photo.linkId} signer=$signerEmail (resumed ${resumedBytes.size}/${blocks.size} blocks, sidecar missing/partial — encrypted hashes unavailable)")
             } else {
                 val ownPublicKeys = cryptoHelper.getOwnPublicKeysArmored(userId)
                 if (ownPublicKeys.isNotEmpty()) {
@@ -419,15 +436,46 @@ class PhotoDownloadService @Inject constructor(
                             }
                         }
                         ?: emptyList()
-                    val downloadedBlockHashes = blocks.map { freshHashes[it.index] ?: error("Missing hash for block ${it.index}") }
+                    val downloadedBlockHashes = blocks.map { b ->
+                        freshHashes[b.index]?.encrypted
+                            ?: resumedBlockEncryptedHashes[b.index]
+                            ?: error("Missing hash for block ${b.index}")
+                    }
                     val manifestBytes = (thumbnailHashBytes + downloadedBlockHashes)
                         .fold(ByteArray(0)) { acc, h -> acc + h }
                     val ok = cryptoHelper.verifyDetachedSignature(manifestBytes, manifestSig, ownPublicKeys)
                     if (!ok) {
-                        Log.w(TAG, "VERIFY_FAIL manifest linkId=${photo.linkId} signer=$signerEmail (downloaded ${downloadedBlockHashes.size} blocks, ${thumbnailHashBytes.size} thumb hashes prepended)")
+                        Log.w(TAG, "VERIFY_FAIL manifest linkId=${photo.linkId} signer=$signerEmail (downloaded ${freshHashes.size} fresh + ${resumedBlockEncryptedHashes.size} resumed blocks, ${thumbnailHashBytes.size} thumb hashes prepended)")
+                        // If the verification combined sidecar data with fresh fetches and
+                        // still failed, the sidecar entries are the prime suspect (CDN bytes
+                        // are freshly hashed so they can't be the lie). Wipe sidecar + all
+                        // dec_*.bin so the next call drops into a clean full re-fetch path
+                        // — by spec, an unreconcilable mismatch falls back to a full
+                        // re-download and re-verification on the subsequent attempt.
+                        if (resumedBlockEncryptedHashes.isNotEmpty()) {
+                            blockHashSidecar(cacheDir, photo.linkId).delete()
+                            for (b in blocks) blockDecFile(cacheDir, photo.linkId, b.index).delete()
+                            Log.w(TAG, "downloadFullResPhoto: ${photo.linkId} — wiped sidecar + dec cache after verify-fail; next call will re-fetch from scratch")
+                            error("Manifest verification failed on resumed download for ${photo.linkId}")
+                        }
+                    } else {
+                        manifestVerified = true
                     }
                 }
             }
+        }
+
+        // ── Persist sidecar ──────────────────────────────────────────────────────
+        // Only write once the manifest verification succeeded — a sidecar written
+        // before verification could capture a corrupted state and poison every future
+        // resume. When no manifest signature exists, write the sidecar opportunistically
+        // anyway (the decrypted hashes still buy us bit-rot detection on resume) but
+        // leave the encrypted-hash side empty would defeat manifest verify; require all
+        // blocks to have BOTH hashes from this run before persisting.
+        val haveAllFreshThisRun = freshHashes.size == blocks.size
+        if (haveAllFreshThisRun && (manifestVerified || manifestSig == null)) {
+            val ordered = blocks.map { freshHashes[it.index] ?: error("Missing fresh hashes for block ${it.index}") }
+            writeBlockHashSidecar(cacheDir, photo.linkId, ordered)
         }
 
         // ── Concat per-block files into tempFile ────────────────────────────────
@@ -454,10 +502,12 @@ class PhotoDownloadService @Inject constructor(
 
         // Clean up per-block files only on full success — leaving them around would
         // be a cache leak and would also confuse the resume-scan on a later re-download
-        // (e.g. after the user clears the outputFile manually).
+        // (e.g. after the user clears the outputFile manually). The hash sidecar is
+        // resume-only state too, so it goes here as well.
         for (block in blocks) {
             blockDecFile(cacheDir, photo.linkId, block.index).delete()
         }
+        blockHashSidecar(cacheDir, photo.linkId).delete()
 
         Log.d(TAG, "downloadFullResPhoto: saved ${outputFile.length()} bytes for ${photo.linkId}")
         outputFile
@@ -465,7 +515,8 @@ class PhotoDownloadService @Inject constructor(
 
     /**
      * Fetches one encrypted block, decrypts it to `dec_${linkId}_${index}.bin`, and
-     * returns the SHA-256 of the encrypted bytes (for manifest verification).
+     * returns the SHA-256 of BOTH the encrypted bytes (for manifest verification) and
+     * the decrypted bytes (for on-disk bit-rot detection on later resumes).
      *
      * Retries the network leg up to 4 times with backoff and honours `Retry-After` on
      * 429/503. The decrypt leg is not retried — a decrypt failure means corrupted
@@ -485,11 +536,11 @@ class PhotoDownloadService @Inject constructor(
         doneBytes: AtomicLong,
         totalBytes: Long,
         lastEmitMsRef: AtomicLong,
-    ): ByteArray {
+    ): BlockHashes {
         val bareUrl = block.bareUrl ?: block.url
             ?: error("No URL for block ${block.index} of $linkId")
         val encBytes = cdnBlockFetcher.fetchBlock(url = bareUrl, token = block.token, maxAttempts = 4)
-        val hash = cryptoHelper.sha256(encBytes)
+        val encHash = cryptoHelper.sha256(encBytes)
 
         // Proton Drive content blocks are SEIPD-only — the session key from
         // ContentKeyPacket is the primary (and normally the only) decrypt path.
@@ -522,6 +573,8 @@ class PhotoDownloadService @Inject constructor(
             plain
         }
 
+        val decHash = cryptoHelper.sha256(decryptedBytes)
+
         // Atomic-add to the shared accumulator then throttle the emit. The CAS on
         // lastEmitMsRef means the first coroutine past the 250 ms window wins and the
         // others bail; without it, four coroutines finishing within the same ~ms would
@@ -536,11 +589,102 @@ class PhotoDownloadService @Inject constructor(
             }
         }
 
-        return hash
+        return BlockHashes(encHash, decHash)
     }
+
+    /** SHA-256 of the encrypted ciphertext (used for manifest signature verification) and
+     *  of the decrypted plaintext (used for detecting bit-rot of the on-disk `dec_*.bin`
+     *  file on a later resumed download). */
+    private data class BlockHashes(val encrypted: ByteArray, val decrypted: ByteArray)
 
     private fun blockDecFile(cacheDir: File, linkId: String, index: Int): File =
         File(cacheDir, "dec_${linkId}_${index}.bin")
+
+    /**
+     * Per-revision sidecar listing the encrypted + decrypted SHA-256 of every block in
+     * index order. Written once after a successful manifest verification so a later
+     * resumed download can both (a) re-verify the full manifest signature and (b)
+     * detect bit-rot of any on-disk `dec_*.bin` before stitching the final blob.
+     *
+     * Format: one line per block, `<encryptedHex>:<decryptedHex>`. Trailing newline. The
+     * `:` delimiter is unambiguous because both halves are fixed-length lowercase hex.
+     * Encrypted hash matches what the Drive manifest signs; decrypted hash matches the
+     * bytes actually stored in `dec_*.bin` and can be recomputed locally on resume.
+     */
+    private fun blockHashSidecar(cacheDir: File, linkId: String): File =
+        File(cacheDir, "$linkId.hashes")
+
+    private fun writeBlockHashSidecar(cacheDir: File, linkId: String, hashes: List<BlockHashes>) {
+        val sidecar = blockHashSidecar(cacheDir, linkId)
+        try {
+            val tmp = File(cacheDir, "$linkId.hashes.tmp")
+            // Two-step write: only rename a fully-written file into place so a process
+            // death mid-write can never leave a half-line sidecar that would silently
+            // corrupt the next resume's integrity check.
+            tmp.bufferedWriter().use { w ->
+                for (h in hashes) {
+                    w.write(h.encrypted.toHex())
+                    w.write(":")
+                    w.write(h.decrypted.toHex())
+                    w.newLine()
+                }
+            }
+            if (!tmp.renameTo(sidecar)) {
+                tmp.inputStream().use { src ->
+                    sidecar.outputStream().use { dst -> src.copyTo(dst) }
+                }
+                tmp.delete()
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "writeBlockHashSidecar: $linkId failed: ${e.message}")
+            // Best-effort cleanup of any partial write.
+            File(cacheDir, "$linkId.hashes.tmp").delete()
+        }
+    }
+
+    /**
+     * Loads the sidecar for [linkId] and returns the parsed list of [BlockHashes] in
+     * index order, or null if the sidecar is absent / unreadable / malformed / has a
+     * row count != [expectedCount]. A `null` return triggers the legacy "no sidecar,
+     * trust dec files, skip manifest verify" branch.
+     */
+    private fun readBlockHashSidecar(
+        cacheDir: File,
+        linkId: String,
+        expectedCount: Int,
+    ): List<BlockHashes>? {
+        val sidecar = blockHashSidecar(cacheDir, linkId)
+        if (!sidecar.exists() || sidecar.length() == 0L) return null
+        return try {
+            val lines = sidecar.readLines().map { it.trim() }.filter { it.isNotEmpty() }
+            if (lines.size != expectedCount) {
+                Log.w(TAG, "readBlockHashSidecar: $linkId rowCount=${lines.size} expected=$expectedCount — discarding")
+                return null
+            }
+            lines.map { line ->
+                val parts = line.split(':')
+                if (parts.size != 2 || parts[0].length != 64 || parts[1].length != 64) {
+                    Log.w(TAG, "readBlockHashSidecar: $linkId malformed row — discarding sidecar")
+                    return null
+                }
+                BlockHashes(parts[0].hexToByteArray(), parts[1].hexToByteArray())
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "readBlockHashSidecar: $linkId failed: ${e.message}")
+            null
+        }
+    }
+
+    private fun ByteArray.toHex(): String = joinToString("") { "%02x".format(it) }
+
+    private fun String.hexToByteArray(): ByteArray {
+        val out = ByteArray(length / 2)
+        for (i in out.indices) {
+            out[i] = ((Character.digit(this[i * 2], 16) shl 4) +
+                Character.digit(this[i * 2 + 1], 16)).toByte()
+        }
+        return out
+    }
 
     companion object {
         /**
@@ -552,10 +696,37 @@ class PhotoDownloadService @Inject constructor(
         const val FULLRES_TTL_MS: Long = 30L * 60L * 1000L
 
         /**
+         * Returns the canonical on-disk path for the full-res blob of [photo], or null when
+         * the mime-type can't be mapped to a file extension. Same derivation as [doDownload]
+         * — `<cacheDir>/fullres/<linkId>.<ext>` — kept in the companion so any caller (the
+         * downloader, a pre-flight cache check, the viewer's metered-network gate) ends up
+         * agreeing on exactly one filename.
+         */
+        fun fullResFile(context: Context, photo: CloudPhoto): File? {
+            val ext = eu.akoos.photos.util.mimeToFileExtension(photo.mimeType)
+            if (ext.isEmpty()) return null
+            val cacheDir = File(context.cacheDir, "fullres")
+            return File(cacheDir, "${photo.linkId}.$ext")
+        }
+
+        /**
+         * True when the full-res blob for [photo] is already on disk with non-zero size.
+         * Cheap synchronous filesystem stat — safe to call from the UI dispatcher. Used by
+         * the viewer's metered-network gate to skip the wifi-only prompt when nothing
+         * actually needs fetching.
+         */
+        fun isFullResCached(context: Context, photo: CloudPhoto): Boolean {
+            val file = fullResFile(context, photo) ?: return false
+            return file.exists() && file.length() > 0
+        }
+
+        /**
          * Sweeps `cacheDir/fullres/` for FINAL output files older than [FULLRES_TTL_MS]
          * and deletes them. Skips the per-block scratch files (`dec_*.bin`, `enc_*.bin`)
          * and any `.tmp` partials — those belong to an in-flight or resumable download
-         * and the existing resume logic handles their lifecycle.
+         * and the existing resume logic handles their lifecycle. A `.hashes` sidecar
+         * adjacent to a swept blob is also removed; an orphan sidecar would never be
+         * consulted again (the blob it described is gone) and just wastes inodes.
          *
          * When [networkAvailable] is false the sweep is a no-op so cached photos remain
          * viewable while the device is offline. TTL eviction resumes the next time this
@@ -574,10 +745,21 @@ class PhotoDownloadService @Inject constructor(
             cacheDir.listFiles()?.forEach { f ->
                 if (!f.isFile) return@forEach
                 val name = f.name
-                // Skip in-flight scratch files; only sweep finalized blobs.
+                // Skip in-flight scratch files; only sweep finalized blobs (and their
+                // hash sidecars). `.hashes.tmp` is also covered by the .tmp guard below.
                 if (name.startsWith("dec_") || name.startsWith("enc_") || name.endsWith(".tmp")) return@forEach
                 if (f.lastModified() in 1..cutoff) {
                     if (f.delete()) deleted++
+                    // Wipe the linkId.hashes sidecar alongside any swept blob so we don't
+                    // leave behind orphaned hash files describing data the OS no longer
+                    // has.  Mirror name pattern: `<linkId>.<ext>` → `<linkId>.hashes`.
+                    if (!name.endsWith(".hashes")) {
+                        val base = name.substringBeforeLast('.')
+                        if (base.isNotEmpty()) {
+                            val sidecar = File(cacheDir, "$base.hashes")
+                            if (sidecar.exists()) sidecar.delete()
+                        }
+                    }
                 }
             }
             if (deleted > 0) Log.d(TAG, "pruneStaleFullResCache: removed $deleted stale fullres file(s)")

@@ -24,7 +24,10 @@ package eu.akoos.photos.presentation.viewer
 
 import android.content.Context
 import android.net.Uri
+import android.os.Build
+import android.provider.MediaStore
 import android.util.Log
+import coil.imageLoader
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -37,7 +40,6 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
@@ -47,19 +49,21 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import androidx.datastore.preferences.core.edit
 import me.proton.core.accountmanager.domain.AccountManager
+import eu.akoos.photos.R
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
-import eu.akoos.photos.domain.repository.LocalMediaRepository
 import eu.akoos.photos.domain.usecase.DeletePhotoUseCase
 import eu.akoos.photos.data.hidden.HiddenStorageManager
 import eu.akoos.photos.domain.usecase.DownloadPhotosUseCase
 import eu.akoos.photos.util.ExifHelper
+import eu.akoos.photos.util.StripResult
 import eu.akoos.photos.util.MetadataStripConfig
 import eu.akoos.photos.util.PhotoMetadata
+import eu.akoos.photos.util.friendlyNetworkError
 import javax.inject.Inject
 
 @HiltViewModel
@@ -70,9 +74,9 @@ class PhotoViewerViewModel @Inject constructor(
     private val deletePhotoUseCase: DeletePhotoUseCase,
     private val downloadPhotos: DownloadPhotosUseCase,
     private val hiddenStorage: HiddenStorageManager,
-    private val localMediaRepo: LocalMediaRepository,
     private val syncStateRepo: eu.akoos.photos.domain.repository.SyncStateRepository,
     private val networkObserver: eu.akoos.photos.util.NetworkObserver,
+    private val albumListEvents: eu.akoos.photos.util.AlbumListEventBus,
 ) : ViewModel() {
 
     override fun onCleared() {
@@ -130,6 +134,13 @@ class PhotoViewerViewModel @Inject constructor(
         data class Failed(val message: String) : RenameState()
     }
 
+    sealed class StripState {
+        data object Idle : StripState()
+        /** Android 10+ write-permission dialog for a non-app-owned file must be shown;
+         *  [pendingIntent] launches it, then the screen calls [retryPendingStrip]. */
+        data class NeedsPermission(val pendingIntent: android.app.PendingIntent) : StripState()
+    }
+
     private val _state = MutableStateFlow<ViewerState>(ViewerState.Loading)
     val state: StateFlow<ViewerState> = _state.asStateFlow()
 
@@ -172,6 +183,13 @@ class PhotoViewerViewModel @Inject constructor(
     private val _isStrippingMetadata = MutableStateFlow(false)
     val isStrippingMetadata: StateFlow<Boolean> = _isStrippingMetadata.asStateFlow()
 
+    private val _stripState = MutableStateFlow<StripState>(StripState.Idle)
+    val stripState: StateFlow<StripState> = _stripState.asStateFlow()
+
+    /** Strip args stashed when the OS demanded a write-permission confirmation. Replayed by
+     *  [retryPendingStrip] after RESULT_OK; cleared on grant or cancel so it never leaks. */
+    private var pendingStrip: Pair<String, MetadataStripConfig>? = null
+
     private val _isHidden = MutableStateFlow(false)
     val isHidden: StateFlow<Boolean> = _isHidden.asStateFlow()
 
@@ -189,32 +207,6 @@ class PhotoViewerViewModel @Inject constructor(
      */
     private val _currentPhotoAlbumIds = MutableStateFlow<Set<String>>(emptySet())
     val currentPhotoAlbumIds: StateFlow<Set<String>> = _currentPhotoAlbumIds.asStateFlow()
-
-    /**
-     * Names of all on-device albums: auto-discovered MediaStore buckets + user-created
-     * manual markers + every album referenced by a virtual-membership entry. Deduplicated
-     * and sorted alphabetically for predictable picker order.
-     *
-     * Surfaced so the viewer's "Add to album" sheet can offer local destinations alongside
-     * cloud albums, mirroring [GalleryAddToAlbumPickerSheet] in the main gallery.
-     */
-    val localAlbumNames: StateFlow<List<String>> = combine(
-        localMediaRepo.observeLocalMedia(),
-        context.settingsDataStore.data.map { it[SettingsKeys.MANUAL_LOCAL_ALBUMS] ?: emptySet() },
-        context.settingsDataStore.data.map { prefs ->
-            val raw = prefs[SettingsKeys.LOCAL_ALBUM_VIRTUAL_MEMBERSHIP] ?: emptySet()
-            raw.mapNotNull { entry ->
-                val sep = entry.indexOf("||")
-                if (sep <= 0) null else entry.substring(0, sep)
-            }.toSet()
-        },
-    ) { items, manualMarkers, virtualNames ->
-        val bucketNames = items.mapNotNull { it.bucketName }.toSet()
-        (bucketNames + manualMarkers + virtualNames)
-            .filter { it.isNotBlank() }
-            .toSortedSet(String.CASE_INSENSITIVE_ORDER)
-            .toList()
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     private val _isAddingToAlbum = MutableStateFlow(false)
     val isAddingToAlbum: StateFlow<Boolean> = _isAddingToAlbum.asStateFlow()
@@ -674,17 +666,52 @@ class PhotoViewerViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Drops any cached image bytes tied to the just-renamed [item] so the stale original
+     * stops showing the instant the rename lands. Same Coil memory+disk wipe the editor
+     * does after a save (PhotoEditorViewModel.invalidateImageCache); for a cloud
+     * replace-original it also deletes the trashed linkId's full-res blob so a re-open of
+     * the viewer can't serve the old file from disk. Called from the screen once the rename
+     * reports Done.
+     */
+    @OptIn(coil.annotation.ExperimentalCoilApi::class)
+    fun invalidateAfterRename(item: GalleryItem) {
+        val keys = when (item) {
+            is GalleryItem.LocalOnly -> listOf(item.local.uri)
+            is GalleryItem.Synced    -> listOf(item.local.uri)
+            is GalleryItem.CloudOnly -> {
+                // Both the CDN thumbnail URL and the on-disk full-res file are cached under
+                // their own Coil keys; wipe whichever the viewer rendered.
+                val file = eu.akoos.photos.data.repository.drive.PhotoDownloadService
+                    .fullResFile(context, item.cloud)
+                file?.let { runCatching { it.delete() } }
+                listOfNotNull(item.cloud.thumbnailUrl, file?.let { Uri.fromFile(it).toString() })
+            }
+        }
+        val loader = context.imageLoader
+        val mc = loader.memoryCache
+        keys.forEach { key ->
+            if (mc != null) runCatching {
+                mc.keys.filter { it.key == key }.forEach { mc.remove(it) }
+            }
+            runCatching { loader.diskCache?.remove(key) }
+            // Nudge MediaStore observers (the gallery grid) for renamed device files so the
+            // new display name surfaces without a manual pull-to-refresh.
+            if (item !is GalleryItem.CloudOnly) {
+                runCatching { context.contentResolver.notifyChange(Uri.parse(key), null) }
+            }
+        }
+    }
+
     fun loadAlbums() {
         viewModelScope.launch {
             val userId = accountManager.getPrimaryUserId().first() ?: return@launch
             runCatching { cloudRepo.loadAlbums(userId) }
                 .onSuccess { _albums.value = it }
                 .onFailure { e ->
-                    // Drive sometimes returns an HTML 5xx error page in `e.message` when the
-                    // gateway is unhappy — surfacing raw HTML in the snackbar shows tags and
-                    // confuses users. Strip tags and collapse whitespace before display.
-                    _transientError.value =
-                        "Could not load albums: ${sanitizeErrorMessage(e.message)}"
+                    val friendly = friendlyNetworkError(e, networkObserver.isOnline.value, context)
+                    _transientError.value = friendly
+                        ?: "Could not load albums: ${eu.akoos.photos.util.sanitizeErrorMessage(e.message)}"
                 }
         }
     }
@@ -774,9 +801,8 @@ class PhotoViewerViewModel @Inject constructor(
      * Adds the single viewed item to a cloud album by linkId. Used by the viewer's
      * action-bar bubble when the user picks a Drive album from the picker sheet.
      *
-     * Local-only items can't enter a cloud album — there's no [CloudPhoto.linkId] yet.
-     * For "add a local file to a local album" use [addToLocalAlbum] which writes to the
-     * virtual-membership DataStore map.
+     * Local-only items can't enter a cloud album — there's no [CloudPhoto.linkId] until
+     * the photo has been backed up.
      */
     fun addToAlbum(albumLinkId: String, item: GalleryItem) {
         viewModelScope.launch {
@@ -807,7 +833,8 @@ class PhotoViewerViewModel @Inject constructor(
     /**
      * Creates a new cloud (Drive) album with [name], then adds [item] to it. Used by the
      * viewer's "+ New album" row when the viewed item is cloud-backed and the user picks
-     * a brand-new destination instead of an existing album.
+     * a brand-new destination instead of an existing album. The added photo becomes the
+     * album cover so the new card isn't blank in the Albums grid.
      */
     fun createCloudAlbumAndAdd(name: String, item: GalleryItem) {
         val trimmed = name.trim()
@@ -823,7 +850,10 @@ class PhotoViewerViewModel @Inject constructor(
             runCatching {
                 val album = cloudRepo.createDriveAlbum(userId, trimmed)
                 cloudRepo.addPhotosToAlbum(userId, album.linkId, listOf(linkId))
+                // Cover failure must not fail the add — the photo is already in the album.
+                runCatching { cloudRepo.setAlbumCover(userId, album.linkId, linkId) }
                 _albums.value = listOf(album) + _albums.value
+                albumListEvents.notifyChanged()
             }.onSuccess {
                 _addToAlbumDone.tryEmit(trimmed)
             }.onFailure { e ->
@@ -833,65 +863,56 @@ class PhotoViewerViewModel @Inject constructor(
         }
     }
 
-    /**
-     * Adds the viewed local file to a local album by writing a virtual-membership entry
-     * to [SettingsKeys.LOCAL_ALBUM_VIRTUAL_MEMBERSHIP]. The file is NOT moved on disk —
-     * its MediaStore row keeps its original DATE_TAKEN, which Android Q+ would otherwise
-     * silently nuke on a RELATIVE_PATH update we don't own.
-     *
-     * For Synced items the cloud copy ALSO gets added to the cloud album (if a cloud
-     * counterpart album linkId is supplied), matching the multi-select "Add to album"
-     * picker's routing.
-     */
-    fun addToLocalAlbum(albumName: String, item: GalleryItem) {
-        viewModelScope.launch {
-            val localUri = when (item) {
-                is GalleryItem.LocalOnly -> item.local.uri
-                is GalleryItem.Synced    -> item.local.uri
-                is GalleryItem.CloudOnly -> return@launch // nothing to write virtually
-            }
-            _isAddingToAlbum.value = true
-            runCatching {
-                context.settingsDataStore.edit { prefs ->
-                    val current = prefs[SettingsKeys.LOCAL_ALBUM_VIRTUAL_MEMBERSHIP] ?: emptySet()
-                    prefs[SettingsKeys.LOCAL_ALBUM_VIRTUAL_MEMBERSHIP] = current + "$albumName||$localUri"
-                    // Also persist the album marker so empty-yet-named local albums still
-                    // appear in the Albums tab when the user only added local files to them.
-                    val markers = prefs[SettingsKeys.MANUAL_LOCAL_ALBUMS] ?: emptySet()
-                    prefs[SettingsKeys.MANUAL_LOCAL_ALBUMS] = markers + albumName
-                }
-            }.onSuccess {
-                _addToAlbumDone.tryEmit(albumName)
-            }.onFailure { e ->
-                _transientError.value = "Add to album failed: ${e.message ?: "unknown error"}"
-            }
-            _isAddingToAlbum.value = false
-        }
+    fun stripMetadataFromLocal(uri: String, config: MetadataStripConfig) {
+        viewModelScope.launch { runStrip(uri, config) }
     }
 
-    fun stripMetadataFromLocal(uri: String, config: MetadataStripConfig) {
-        viewModelScope.launch {
-            _isStrippingMetadata.value = true
-            val success = withContext(Dispatchers.IO) {
-                ExifHelper.stripFieldsInPlace(context, uri, config)
-            }
-            if (success) {
+    /**
+     * Replays the strip that triggered an Android 10+ write-permission dialog, now that the user
+     * granted it. Called by the screen on RESULT_OK from the [StripState.NeedsPermission] launcher.
+     */
+    fun retryPendingStrip() {
+        val (uri, config) = pendingStrip ?: return
+        pendingStrip = null
+        _stripState.value = StripState.Idle
+        viewModelScope.launch { runStrip(uri, config) }
+    }
+
+    /** User canceled the write-permission dialog — drop the deferred strip, no error toast. */
+    fun resetStripState() {
+        pendingStrip = null
+        _stripState.value = StripState.Idle
+    }
+
+    private suspend fun runStrip(uri: String, config: MetadataStripConfig) {
+        _isStrippingMetadata.value = true
+        when (withContext(Dispatchers.IO) { ExifHelper.stripFieldsInPlace(context, uri, config) }) {
+            is StripResult.Stripped -> {
                 // Re-read after stripping so the metadata sheet reflects the wipe — the
                 // "Strip" button on that section disappears automatically once its source
                 // fields are null.
                 _metadata.value = withContext(Dispatchers.IO) {
                     ExifHelper.readMetadata(context, uri)
                 }
-            } else {
-                // Most common cause on Android 10+: the file isn't owned by this app
-                // (e.g. user-taken camera roll photo) and scoped storage blocks the
-                // in-place rw open without an IntentSender flow. Tell the user instead of
-                // silently no-op'ing.
-                _transientError.value = "Couldn't strip metadata, this file may need a permission " +
-                    "confirmation that's not yet wired up. Try editing a copy instead (Edit, Save as copy)."
             }
-            _isStrippingMetadata.value = false
+            is StripResult.NeedsPermission -> {
+                // Android 11+ scoped storage: the file is not app-owned (e.g. a camera-roll photo).
+                // Ask the OS for one-shot write access via createWriteRequest (API 30); older
+                // scoped-storage devices fall through to the error path.
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    pendingStrip = uri to config
+                    val pi = MediaStore.createWriteRequest(
+                        context.contentResolver, listOf(Uri.parse(uri)),
+                    )
+                    _stripState.value = StripState.NeedsPermission(pi)
+                } else {
+                    _transientError.value = context.getString(R.string.strip_metadata_failed)
+                }
+            }
+            is StripResult.Failed ->
+                _transientError.value = context.getString(R.string.strip_metadata_failed)
         }
+        _isStrippingMetadata.value = false
     }
 
     /**
@@ -953,10 +974,17 @@ class PhotoViewerViewModel @Inject constructor(
             // metered network, hold off the auto-download and let the thumbnail stand in.
             // Explicit user actions (Save to device, Edit) bypass this gate elsewhere —
             // those are deliberate and shouldn't be silently blocked.
+            //
+            // Cache-already-present escape: if the full-res blob is sitting on disk from a
+            // previous fetch, opening the viewer doesn't consume any metered bytes — so the
+            // wifi-only prompt would be a false alarm. Skip the gate in that case and let
+            // the normal download path return the cached file immediately.
             val wifiOnlyFullres = context.settingsDataStore.data
                 .map { it[SettingsKeys.FULLRES_WIFI_ONLY] }
                 .first() != false
-            if (wifiOnlyFullres && !networkObserver.isUnmetered.value) {
+            val alreadyCached = eu.akoos.photos.data.repository.drive.PhotoDownloadService
+                .isFullResCached(context, photo)
+            if (wifiOnlyFullres && !networkObserver.isUnmetered.value && !alreadyCached) {
                 _fullResBlockedByMetered.value = true
                 _isDownloading.value = false
                 _downloadProgress.value = null

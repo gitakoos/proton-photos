@@ -121,6 +121,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -152,6 +153,7 @@ import androidx.core.app.ActivityCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.entity.GalleryItem
@@ -162,7 +164,6 @@ import eu.akoos.photos.util.sanitizeErrorMessage
 import eu.akoos.photos.presentation.albums.AlbumsFilter
 import eu.akoos.photos.presentation.albums.AlbumsScreen
 import eu.akoos.photos.presentation.albums.AlbumsViewModel
-import eu.akoos.photos.domain.entity.LocalAlbum
 import eu.akoos.photos.presentation.shared.SharedScreen
 import eu.akoos.photos.presentation.shared.SharedViewModel
 import eu.akoos.photos.presentation.theme.Accent
@@ -235,8 +236,6 @@ private fun buildContentFilterSummary(
 fun GalleryScreen(
     onPhotoClick: (items: List<GalleryItem>, index: Int, hiddenCloudLinkIds: Set<String>) -> Unit,
     onAlbumClick: (Album) -> Unit = {},
-    onLocalAlbumClick: (LocalAlbum) -> Unit = {},
-    onMergedAlbumClick: (LocalAlbum, Album) -> Unit = { _, _ -> },
     onSettingsClick: () -> Unit,
     onHiddenAlbumClick: () -> Unit = {},
     onSearchClick: () -> Unit = {},
@@ -250,6 +249,7 @@ fun GalleryScreen(
     viewModel: GalleryViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val downloadedCloudLinkIds by viewModel.downloadedCloudLinkIds.collectAsStateWithLifecycle()
     val albumsViewModel: AlbumsViewModel = hiltViewModel()
     val albumsState by albumsViewModel.uiState.collectAsStateWithLifecycle()
     val sharedViewModel: SharedViewModel = hiltViewModel()
@@ -263,6 +263,66 @@ fun GalleryScreen(
     var sharedFilter by remember { mutableStateOf(SharedFilter.SharedWithMe) }
     var activeEmailFilter by remember { mutableStateOf<String?>(null) }
     var showEmailFilterSheet by remember { mutableStateOf(false) }
+
+    // ── Thumbnail look-ahead ──────────────────────────────────────────────────
+    // Feed the decrypt scheduler the rows just past the bottom of the viewport in the
+    // scroll direction so they are already warm when the user reaches them. The window
+    // is anchored on the last visible cell's stable key (matched back to filteredItems)
+    // rather than the raw grid index, so interleaved date headers and the memories card
+    // don't skew the offset. Prefetch sits behind the visible band in the scheduler, so
+    // this never delays an on-screen cell.
+    run {
+        // Rows to warm ahead of the viewport — roughly the next two screens at the densest
+        // grid zoom, so a steady scroll always meets pre-decrypted thumbnails.
+        val prefetchWindow = 60
+        val cloudLinkIdOf: (GalleryItem) -> String? = { gi ->
+            when (gi) {
+                is GalleryItem.CloudOnly -> gi.cloud.linkId
+                is GalleryItem.Synced    -> gi.cloud.linkId
+                is GalleryItem.LocalOnly -> null
+            }
+        }
+        LaunchedEffect(gridState, state.filteredItems) {
+            val rendered = state.filteredItems
+            if (rendered.isEmpty()) return@LaunchedEffect
+            // Stable-key → filteredItems index, for the two cell key shapes the grid emits.
+            val indexByLinkId = HashMap<String, Int>(rendered.size)
+            rendered.forEachIndexed { idx, gi -> cloudLinkIdOf(gi)?.let { indexByLinkId[it] = idx } }
+            var lastAnchor = -1
+            snapshotFlow {
+                val last = gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.key as? String
+                last?.removePrefix("cloud_")?.removePrefix("synced_")
+            }.collect { anchorLinkId ->
+                val anchorIdx = anchorLinkId?.let { indexByLinkId[it] } ?: return@collect
+                // Only look ahead while moving forward; reverse scroll keeps warm rows warm.
+                if (anchorIdx <= lastAnchor) { lastAnchor = anchorIdx; return@collect }
+                lastAnchor = anchorIdx
+                val from = anchorIdx + 1
+                val to = (anchorIdx + 1 + prefetchWindow).coerceAtMost(rendered.size)
+                if (from >= to) return@collect
+                val ids = rendered.subList(from, to).mapNotNull(cloudLinkIdOf)
+                if (ids.isNotEmpty()) viewModel.prefetchThumbnails(ids)
+            }
+        }
+    }
+
+    // ── "On this day" thumbnails ──────────────────────────────────────────────
+    // The memories row renders above the grid and lives outside the scrolling cell list,
+    // so its tiles never fire a per-cell decrypt request. Queue their cloud thumbnails at
+    // visible priority the moment the row's contents are known so the card fills instead
+    // of showing blank tiles. Keyed on the source list so it re-runs when items load.
+    LaunchedEffect(state.items) {
+        val memoryLinkIds = computeOnThisDay(state.items)
+            .flatMap { (_, yearItems) -> yearItems }
+            .mapNotNull { gi ->
+                when (gi) {
+                    is GalleryItem.CloudOnly -> gi.cloud.linkId
+                    is GalleryItem.Synced    -> gi.cloud.linkId
+                    is GalleryItem.LocalOnly -> null
+                }
+            }
+        if (memoryLinkIds.isNotEmpty()) viewModel.requestThumbnailsVisible(memoryLinkIds)
+    }
 
     val mediaPermissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
         arrayOf(Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VIDEO)
@@ -434,6 +494,20 @@ fun GalleryScreen(
         deletePermissionLauncher.launch(IntentSenderRequest.Builder(pi.intentSender).build())
     }
 
+    // ── Metadata-strip write-permission launcher ──────────────────────────────
+    // Foreign files in a batch strip need an Android 10+ write consent; RESULT_OK
+    // replays the strip on the deferred URIs (mirrors the delete launcher above).
+    val stripPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) viewModel.retryPendingStrip()
+        else viewModel.clearPendingStripIntent()
+    }
+    LaunchedEffect(state.pendingStripIntent) {
+        val pi = state.pendingStripIntent ?: return@LaunchedEffect
+        stripPermissionLauncher.launch(IntentSenderRequest.Builder(pi.intentSender).build())
+    }
+
     // ── Multi-select delete sheet ─────────────────────────────────────────────
     var showMultiDeleteSheet by remember { mutableStateOf(false) }
     val multiDeleteState = state.multiDeleteState
@@ -445,6 +519,23 @@ fun GalleryScreen(
         if (multiDeleteState is MultiDeleteState.Failed) {
             snackbarHostState.showSnackbar(multiDeleteState.message)
             viewModel.resetMultiDeleteState()
+        }
+    }
+
+    // Hide has its own state channel (separate spinner on the selection bar);
+    // surface its terminal states here. On success, disclose that backed-up
+    // photos keep their Drive copies — hiding only affects this device's gallery.
+    val multiHideState = state.multiHideState
+    LaunchedEffect(multiHideState) {
+        if (multiHideState is MultiDeleteState.Done) {
+            if (state.hideCloudNoticePending) {
+                snackbarHostState.showSnackbar(context.getString(R.string.hide_cloud_copy_notice))
+            }
+            viewModel.resetMultiHideState()
+        }
+        if (multiHideState is MultiDeleteState.Failed) {
+            snackbarHostState.showSnackbar(multiHideState.message)
+            viewModel.resetMultiHideState()
         }
     }
 
@@ -580,9 +671,11 @@ fun GalleryScreen(
                                 isSelectionMode    = state.isSelectionMode,
                                 onLongPress        = viewModel::toggleSelection,
                                 onToggleSelect     = viewModel::toggleSelection,
+                                onToggleGroup      = viewModel::toggleGroup,
                                 grouping           = state.timelineGrouping,
                                 onGroupingChanged  = viewModel::setTimelineGrouping,
                                 hiddenCloudLinkIds = state.hiddenCloudLinkIds,
+                                downloadedCloudLinkIds = downloadedCloudLinkIds,
                                 onRequestThumbnail = viewModel::requestThumbnailDecrypt,
                                 onCancelThumbnail  = viewModel::cancelThumbnailDecrypt,
                             )
@@ -593,8 +686,6 @@ fun GalleryScreen(
                 topPadding = headerHeightDp,
                 gridState = albumsGridState,
                 onAlbumClick = onAlbumClick,
-                onLocalAlbumClick = onLocalAlbumClick,
-                onMergedAlbumClick = onMergedAlbumClick,
             )
             2 -> SharedScreen(
                 topPadding = headerHeightDp,
@@ -605,72 +696,35 @@ fun GalleryScreen(
         }
 
         // ── FLOATING HEADER (normal mode) ─────────────────────────────────────
+        val isOnlineNow by viewModel.isOnline.collectAsStateWithLifecycle()
         AnimatedVisibility(
             visible = showOverlays && !state.isSelectionMode,
             enter = fadeIn(),
             exit = fadeOut(),
             modifier = Modifier.align(Alignment.TopCenter),
         ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .onGloballyPositioned { headerHeightPx = it.size.height },
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .statusBarsPadding()
-                        .padding(horizontal = 20.dp)
-                        .padding(top = 10.dp, bottom = 14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    when (selectedTab) {
-                        0 -> {
-                            FilterRail(
-                                selectedFilter = state.selectedFilter,
-                                totalCount = state.items.size,
-                                onFilterSelected = viewModel::onFilterSelected,
-                                contentFilter = state.contentFilter,
-                                onSearchClick = onSearchClick,
-                                onCalendarClick = onCalendarClick,
-                                onClearContentFilter = { viewModel.setContentFilter(ContentFilter()) },
-                                modifier = Modifier.weight(1f),
-                            )
-                        }
-                        1 -> {
-                            AlbumsFilterRail(
-                                selectedFilter = albumsState.albumsFilter,
-                                onFilterSelected = albumsViewModel::setFilter,
-                                onHiddenAlbumClick = onHiddenAlbumClick,
-                                onShowFilterSheet = { showAlbumsFilterSheet = true },
-                                modifier = Modifier.weight(1f),
-                            )
-                        }
-                        2 -> {
-                            SharedFilterRail(
-                                selectedFilter = sharedFilter,
-                                onFilterSelected = { filter ->
-                                    sharedFilter = filter
-                                    activeEmailFilter = null
-                                },
-                                activeEmailFilter = activeEmailFilter,
-                                onFilterClick = { showEmailFilterSheet = true },
-                                modifier = Modifier.weight(1f),
-                            )
-                        }
-                    }
-                    val isOnlineNow by viewModel.isOnline.collectAsStateWithLifecycle()
-                    AvatarButton(
-                        initial         = state.userInitial,
-                        storageFraction = state.storageFraction,
-                        isSyncing       = state.isSyncing || albumsState.isLoading,
-                        isOffline       = !isOnlineNow,
-                        onClick         = onSettingsClick,
-                    )
-                }
-
-            }
+            GalleryHeader(
+                selectedTab = selectedTab,
+                galleryState = state,
+                albumsState = albumsState,
+                sharedFilter = sharedFilter,
+                activeEmailFilter = activeEmailFilter,
+                isOnlineNow = isOnlineNow,
+                onFilterSelected = viewModel::onFilterSelected,
+                onSearchClick = onSearchClick,
+                onCalendarClick = onCalendarClick,
+                onClearContentFilter = { viewModel.setContentFilter(ContentFilter()) },
+                onAlbumsFilterSelected = albumsViewModel::setFilter,
+                onHiddenAlbumClick = onHiddenAlbumClick,
+                onShowAlbumsFilterSheet = { showAlbumsFilterSheet = true },
+                onSharedFilterSelected = { filter ->
+                    sharedFilter = filter
+                    activeEmailFilter = null
+                },
+                onShowSharedEmailSheet = { showEmailFilterSheet = true },
+                onSettingsClick = onSettingsClick,
+                onHeaderMeasured = { headerHeightPx = it },
+            )
         }
 
         // ── SELECTION HEADER ──────────────────────────────────────────────────
@@ -680,235 +734,22 @@ fun GalleryScreen(
             exit = fadeOut(),
             modifier = Modifier.align(Alignment.TopCenter),
         ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    // No translucent grey strip behind the pills — a full-width bg0 wash
-                    // would make the selection bar look heavier than the regular photo
-                    // chips on the same screen. Floating pills match the rest of the top
-                    // chrome.
-                    .onGloballyPositioned { headerHeightPx = it.size.height }
-                    .statusBarsPadding()
-                    .padding(horizontal = 16.dp)
-                    .padding(top = 10.dp, bottom = 14.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                // Cancel
-                Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        .background(PillBg, CircleShape)
-                        .border(0.5.dp, PillBorder, CircleShape)
-                        .clickable { viewModel.clearSelection() },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.gallery_cancel_selection),
-                        tint = appColors.fgPrimary, modifier = Modifier.size(20.dp))
-                }
-                // Split the selection counter by media type — gallery items can be local-only,
-                // synced or cloud-only, but in every case we only care about photo-vs-video.
-                // Reusing the same helper-style logic as AlbumDetailScreen for visual parity.
-                val selectedPhotosCount = state.selectedItems.count { item ->
-                    val mt: String = when (item) {
-                        is eu.akoos.photos.domain.entity.GalleryItem.LocalOnly -> item.local.mimeType
-                        is eu.akoos.photos.domain.entity.GalleryItem.Synced    -> item.local.mimeType
-                        is eu.akoos.photos.domain.entity.GalleryItem.CloudOnly -> item.cloud.mimeType
-                    }
-                    !mt.startsWith("video/")
-                }
-                val selectedVideosCount = state.selectedCount - selectedPhotosCount
-                val selPhotosText = androidx.compose.ui.res.pluralStringResource(
-                    R.plurals.count_photos_plural, selectedPhotosCount, selectedPhotosCount,
-                )
-                val selVideosText = androidx.compose.ui.res.pluralStringResource(
-                    R.plurals.count_videos_plural, selectedVideosCount, selectedVideosCount,
-                )
-                val selectionLabel = when {
-                    selectedPhotosCount > 0 && selectedVideosCount > 0 -> "$selPhotosText, $selVideosText"
-                    selectedVideosCount > 0 -> selVideosText
-                    else -> selPhotosText
-                }
-                Text(
-                    selectionLabel,
-                    color = appColors.fgPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
-                )
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    // Three primary actions stay outside the dropdown — they're the ones
-                    // users reach for most often during a bulk select. Less-frequent
-                    // operations (Strip metadata, Hide) collapse into the More menu so the
-                    // bar fits even when the selection-count text is long.
-                    //
-                    // Download — hidden when the entire selection is local-only since there's
-                    // nothing on the cloud side to download.
-                    val onlyLocalSelected = state.selectedItems.isNotEmpty() &&
-                        state.selectedItems.all { it is GalleryItem.LocalOnly }
-                    val isDownloading = multiDownloadState is MultiDownloadState.Working
-                    if (!onlyLocalSelected) {
-                        Box(
-                            modifier = Modifier
-                                .size(40.dp)
-                                .background(PillBg, CircleShape)
-                                .border(0.5.dp, PillBorder, CircleShape)
-                                .clickable(enabled = !isDownloading) { viewModel.downloadSelected() },
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            if (isDownloading) {
-                                val progress = multiDownloadState as MultiDownloadState.Working
-                                CircularProgressIndicator(
-                                    progress = { if (progress.total > 0) progress.done.toFloat() / progress.total else 0f },
-                                    color = Accent, strokeWidth = 2.dp,
-                                    modifier = Modifier.size(16.dp),
-                                )
-                            } else {
-                                Icon(Icons.Default.FileDownload, stringResource(R.string.gallery_download_selected),
-                                    tint = appColors.accent, modifier = Modifier.size(20.dp))
-                            }
-                        }
-                    }
-                    // Add to album moved into the More dropdown so the bar fits when the
-                    // selection counter text is long ("12 photos, 4 videos"). The previous
-                    // outer pill collided with the title on portrait phones for >9-char
-                    // counters. Still rendered when the More-menu spinner is needed for
-                    // the in-flight Add-to-album action (handled below).
-                    val isAddingToAlbum = addToAlbumState is AddToAlbumState.Working
-                    // Delete
-                    val isWorking = multiDeleteState is MultiDeleteState.Working
-                    Box(
-                        modifier = Modifier
-                            .size(40.dp)
-                            .background(PillBg, CircleShape)
-                            .border(0.5.dp, PillBorder, CircleShape)
-                            .clickable(enabled = !isWorking) { showMultiDeleteSheet = true },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        if (isWorking) {
-                            CircularProgressIndicator(
-                                color = ErrorColor, strokeWidth = 2.dp,
-                                modifier = Modifier.size(16.dp),
-                            )
-                        } else {
-                            Icon(Icons.Default.DeleteOutline, stringResource(R.string.gallery_delete_selected),
-                                tint = appColors.errorColor, modifier = Modifier.size(20.dp))
-                        }
-                    }
-                    // More menu — Strip metadata + Hide live here. Same DropdownMenu styling
-                    // as the viewer's overflow so the visual language matches everywhere.
-                    Box {
-                        var moreExpanded by remember { mutableStateOf(false) }
-                        val isStripping = state.multiStripState is MultiStripState.Working
-                        val isHiding = multiDeleteState is MultiDeleteState.Working
-                        Box(
-                            modifier = Modifier
-                                .size(40.dp)
-                                .background(PillBg, CircleShape)
-                                .border(0.5.dp, PillBorder, CircleShape)
-                                .clickable { moreExpanded = true },
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            if (isStripping || isHiding || isAddingToAlbum) {
-                                CircularProgressIndicator(
-                                    color = Accent, strokeWidth = 2.dp,
-                                    modifier = Modifier.size(16.dp),
-                                )
-                            } else {
-                                Icon(Icons.Default.MoreVert, "More",
-                                    tint = appColors.fgPrimary, modifier = Modifier.size(20.dp))
-                            }
-                        }
-                        androidx.compose.material3.DropdownMenu(
-                            expanded = moreExpanded,
-                            onDismissRequest = { moreExpanded = false },
-                            shape = RoundedCornerShape(18.dp),
-                            containerColor = appColors.cardBg,
-                            border = androidx.compose.foundation.BorderStroke(0.5.dp, appColors.pillBorder),
-                        ) {
-                            // Add to album — moved into the More menu so the toolbar fits
-                            // long mixed-media selection counters. Disabled while a previous
-                            // add is in flight; the spinner replaces the More-icon above too.
-                            //
-                            // Gating: any selection that mixes LocalOnly + CloudOnly items has
-                            // no shared album semantics (LocalOnly goes into a local bucket
-                            // album, CloudOnly goes into a Drive album — different stores,
-                            // different IDs) so we surface the entry as disabled with a
-                            // tooltip-style hint text rather than letting the picker open
-                            // and silently dropping items. This covers BOTH the 2-way
-                            // (LocalOnly + CloudOnly) and 3-way (LocalOnly + CloudOnly + Synced)
-                            // cases — Synced presence does NOT make the mix safe, because the
-                            // LocalOnly + CloudOnly halves still get dropped per leg regardless
-                            // of how many Synced items are along for the ride.
-                            val hasLocalOnly = state.selectedItems.any { it is GalleryItem.LocalOnly }
-                            val hasCloudOnly = state.selectedItems.any { it is GalleryItem.CloudOnly }
-                            val mixedHasSilentDrop = hasLocalOnly && hasCloudOnly
-                            androidx.compose.material3.DropdownMenuItem(
-                                text = {
-                                    Column {
-                                        Text(
-                                            stringResource(R.string.gallery_add_to_album),
-                                            color = if (mixedHasSilentDrop) appColors.fgDim else appColors.fgPrimary,
-                                        )
-                                        if (mixedHasSilentDrop) {
-                                            Text(
-                                                stringResource(R.string.gallery_add_to_album_mixed_hint),
-                                                color = appColors.fgMute,
-                                                fontSize = 11.sp,
-                                            )
-                                        }
-                                    }
-                                },
-                                leadingIcon = { Icon(Icons.Default.PhotoAlbum, null,
-                                    tint = if (mixedHasSilentDrop) appColors.fgMute else appColors.accent, modifier = Modifier.size(20.dp)) },
-                                enabled = !isAddingToAlbum && !mixedHasSilentDrop,
-                                onClick = {
-                                    moreExpanded = false
-                                    showAddToAlbumSheet = true
-                                },
-                            )
-                            // "Strip metadata" only fits device-only (LocalOnly) photos —
-                            // backed-up + cloud-only items already went through the upload
-                            // pipeline's strip toggle (Settings → Privacy & Metadata) and
-                            // re-stripping post-upload is a no-op on Drive. Hiding the entry
-                            // for mixed / cloud-leaning selections matches the user's mental
-                            // model of "this action prepares my device file" — same gating
-                            // pattern as the hide-selected entry above.
-                            val allDeviceOnly = state.selectedItems.isNotEmpty() &&
-                                state.selectedItems.all { it is GalleryItem.LocalOnly }
-                            if (allDeviceOnly) androidx.compose.material3.DropdownMenuItem(
-                                text = { Text(stringResource(R.string.gallery_strip_metadata),
-                                    color = appColors.fgPrimary) },
-                                leadingIcon = { Icon(Icons.Default.PrivacyTip, null,
-                                    tint = appColors.fgPrimary, modifier = Modifier.size(20.dp)) },
-                                enabled = !isStripping,
-                                onClick = {
-                                    moreExpanded = false
-                                    viewModel.stripMetadataSelected()
-                                },
-                            )
-                            // Hide selected applies only to LocalOnly/Synced — CloudOnly
-                            // items have no device counterpart. Same gating as the
-                            // per-section Strip action in the viewer Details.
-                            val hasHideable = state.selectedItems.isNotEmpty() &&
-                                state.selectedItems.all { it is GalleryItem.LocalOnly }
-                            if (hasHideable) {
-                                androidx.compose.material3.DropdownMenuItem(
-                                    text = { Text("Hide selected",
-                                        color = appColors.fgPrimary) },
-                                    leadingIcon = { Icon(Icons.Default.VisibilityOff, null,
-                                        tint = appColors.fgPrimary, modifier = Modifier.size(20.dp)) },
-                                    enabled = !isHiding,
-                                    onClick = {
-                                        moreExpanded = false
-                                        viewModel.hideSelected()
-                                    },
-                                )
-                            }
-                        }
-                    }
-                }
-            }
+            GallerySelectionHeader(
+                selectedItems = state.selectedItems,
+                selectedCount = state.selectedCount,
+                multiDownloadState = multiDownloadState,
+                multiDeleteState = multiDeleteState,
+                multiHideState = state.multiHideState,
+                multiStripState = multiStripState,
+                addToAlbumState = addToAlbumState,
+                onCancel = viewModel::clearSelection,
+                onDownload = viewModel::downloadSelected,
+                onRequestDelete = { showMultiDeleteSheet = true },
+                onRequestAddToAlbum = { showAddToAlbumSheet = true },
+                onStripMetadata = viewModel::stripMetadataSelected,
+                onHideSelected = viewModel::hideSelected,
+                onHeaderHeightChanged = { headerHeightPx = it },
+            )
         }
 
         // ── BOTTOM DOCK ───────────────────────────────────────────────────────
@@ -936,260 +777,91 @@ fun GalleryScreen(
         )
     }
 
-    // ── Content filter bottom sheet ───────────────────────────────────────────
+    // ── Bottom sheets — extracted to GalleryDialogs.kt for JIT-blob shrink ────
     if (showFilterSheet) {
-        ModalBottomSheet(
-            onDismissRequest = { showFilterSheet = false },
+        GalleryContentFilterDialog(
+            currentFilter = state.contentFilter,
+            currentCategory = state.selectedFilter,
             sheetState = filterSheetState,
-            containerColor = Bg2,
-            scrimColor = Color.Black.copy(alpha = 0.5f),
-        ) {
-            ContentFilterSheet(
-                currentFilter = state.contentFilter,
-                currentCategory = state.selectedFilter,
-                onApply = { filter -> viewModel.setContentFilter(filter) },
-                onCategorySelected = { cat -> viewModel.onFilterSelected(cat) },
-                onDismiss = { showFilterSheet = false },
-            )
-        }
+            onApply = { filter -> viewModel.setContentFilter(filter) },
+            onCategorySelected = { cat -> viewModel.onFilterSelected(cat) },
+            onDismiss = { showFilterSheet = false },
+        )
     }
-
-    // ── Albums filter bottom sheet ────────────────────────────────────────────
     if (showAlbumsFilterSheet) {
-        ModalBottomSheet(
-            onDismissRequest = { showAlbumsFilterSheet = false },
+        GalleryAlbumsFilterDialog(
+            currentFilter = albumsState.albumsFilter,
             sheetState = albumsFilterSheetState,
-            containerColor = Bg2,
-        ) {
-            AlbumsFilterSheet(
-                currentFilter = albumsState.albumsFilter,
-                onApply = { albumsViewModel.setFilter(it) },
-                onDismiss = { showAlbumsFilterSheet = false },
-            )
-        }
+            onApply = { albumsViewModel.setFilter(it) },
+            onDismiss = { showAlbumsFilterSheet = false },
+        )
     }
-
-    // ── Shared email filter sheet ─────────────────────────────────────────────
     if (showEmailFilterSheet) {
-        val availableEmails = sharedUiState.availableEmails
-        ModalBottomSheet(
-            onDismissRequest = { showEmailFilterSheet = false },
-            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-            containerColor = Bg2,
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .navigationBarsPadding()
-                    .padding(horizontal = 20.dp, vertical = 8.dp),
-            ) {
-                Text(stringResource(R.string.share_filter_by_person), color = FgPrimary,
-                    fontSize = 18.sp, fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.padding(bottom = 12.dp))
-                if (availableEmails.isEmpty()) {
-                    Text(stringResource(R.string.share_no_shared), color = FgMute, fontSize = 14.sp,
-                        modifier = Modifier.padding(vertical = 16.dp))
-                } else {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(
-                                if (activeEmailFilter == null) Accent.copy(0.15f) else PillBg,
-                                RoundedCornerShape(10.dp),
-                            )
-                            .clickable { activeEmailFilter = null; showEmailFilterSheet = false }
-                            .padding(horizontal = 16.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                    ) {
-                        Text(stringResource(R.string.share_all), color = if (activeEmailFilter == null) Accent else FgPrimary,
-                            fontSize = 15.sp, fontWeight = FontWeight.Medium)
-                        if (activeEmailFilter == null) {
-                            Icon(Icons.Default.Check, null, tint = Accent, modifier = Modifier.size(16.dp))
-                        }
-                    }
-                    Spacer(Modifier.height(4.dp))
-                    availableEmails.forEach { email ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .background(
-                                    if (activeEmailFilter == email) Accent.copy(0.15f) else PillBg,
-                                    RoundedCornerShape(10.dp),
-                                )
-                                .clickable { activeEmailFilter = email; showEmailFilterSheet = false }
-                                .padding(horizontal = 16.dp, vertical = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                        ) {
-                            Text(email, color = if (activeEmailFilter == email) Accent else FgPrimary,
-                                fontSize = 15.sp)
-                            if (activeEmailFilter == email) {
-                                Icon(Icons.Default.Check, null, tint = Accent, modifier = Modifier.size(16.dp))
-                            }
-                        }
-                        Spacer(Modifier.height(4.dp))
-                    }
-                }
-                Spacer(Modifier.height(12.dp))
-            }
-        }
+        GallerySharedEmailFilterDialog(
+            availableEmails = sharedUiState.availableEmails,
+            activeEmailFilter = activeEmailFilter,
+            onEmailSelected = { picked ->
+                activeEmailFilter = picked
+                showEmailFilterSheet = false
+            },
+            onDismiss = { showEmailFilterSheet = false },
+        )
     }
-
-    // ── Multi-select delete sheet ─────────────────────────────────────────────
     if (showMultiDeleteSheet && state.selectedItems.isNotEmpty()) {
-        ModalBottomSheet(
-            onDismissRequest = { showMultiDeleteSheet = false },
-            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-            containerColor = Bg2,
-        ) {
-            MultiDeleteSheet(
-                selectedItems = state.selectedItems,
-                onDismiss     = { showMultiDeleteSheet = false },
-                onDelete      = { freeUpSpace, deleteFromCloud ->
-                    showMultiDeleteSheet = false
-                    viewModel.deleteSelected(freeUpSpace, deleteFromCloud)
-                },
-            )
-        }
+        GalleryMultiDeleteDialog(
+            selectedItems = state.selectedItems,
+            onDismiss = { showMultiDeleteSheet = false },
+            onDelete = { freeUpSpace, deleteFromCloud ->
+                showMultiDeleteSheet = false
+                viewModel.deleteSelected(freeUpSpace, deleteFromCloud)
+            },
+        )
     }
-
-    // ── Add-to-album picker sheet ─────────────────────────────────────────────
     if (showAddToAlbumSheet && state.selectedItems.isNotEmpty()) {
-        ModalBottomSheet(
-            onDismissRequest = { showAddToAlbumSheet = false },
+        GalleryAddToAlbumDialog(
+            selectedItems = state.selectedItems,
+            cloudAlbums = albumsState.albums,
             sheetState = addToAlbumSheetState,
-            containerColor = Bg2,
-            scrimColor = Color.Black.copy(alpha = 0.5f),
-        ) {
-            // Pull together both album sources from the existing AlbumsViewModel so the picker
-            // matches what the Albums tab shows. Local buckets show as moves-to; cloud albums
-            // show as cloud adds (plus a local move when the selection has a local file).
-            val anyCloudBacked = state.selectedItems.any {
-                it is GalleryItem.Synced || it is GalleryItem.CloudOnly
-            }
-            val anyLocal = state.selectedItems.any {
-                it is GalleryItem.LocalOnly || it is GalleryItem.Synced
-            }
-            GalleryAddToAlbumPickerSheet(
-                cloudAlbums = albumsState.albums,
-                localAlbums = albumsState.localAlbums,
-                selectionHasCloud = anyCloudBacked,
-                selectionHasLocal = anyLocal,
-                onCreateNew = {
-                    showAddToAlbumSheet = false
-                    showCreateAlbumInline = true
-                },
-                onCloudAlbumSelected = { album ->
-                    showAddToAlbumSheet = false
-                    viewModel.addSelectedToAlbum(
-                        albumLinkId = album.linkId,
-                        albumName = album.name,
-                        // When the selection has any local file, also move it into the matching
-                        // bucket — that's the "any photo, anywhere" intuition the maintainer wants.
-                        targetIsLocalBucket = anyLocal,
-                    )
-                },
-                onLocalAlbumSelected = { local ->
-                    showAddToAlbumSheet = false
-                    // Local-bucket-only target. No cloud add even if selection has cloud items —
-                    // the user picked a local bucket explicitly.
-                    viewModel.addSelectedToAlbum(
-                        albumLinkId = null,
-                        albumName = local.name,
-                        targetIsLocalBucket = true,
-                    )
-                },
-                onDismiss = { showAddToAlbumSheet = false },
-            )
-        }
-    }
-
-    // ── New-album inline create (launched from the picker's "+ New album" row) ─
-    if (showCreateAlbumInline) {
-        var newAlbumName by remember { mutableStateOf("") }
-        ModalBottomSheet(
-            onDismissRequest = { showCreateAlbumInline = false },
-            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-            containerColor = appColors.cardBg,
-            scrimColor = Color.Black.copy(alpha = 0.5f),
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .navigationBarsPadding()
-                    .padding(horizontal = 24.dp)
-                    .padding(bottom = 36.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
-            ) {
-                Text(stringResource(R.string.albums_new_album), color = appColors.fgPrimary,
-                    fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
-                OutlinedTextField(
-                    value = newAlbumName,
-                    onValueChange = { newAlbumName = it },
-                    placeholder = { Text(stringResource(R.string.albums_create_album_hint), color = FgMute) },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor   = Accent,
-                        unfocusedBorderColor = Line2,
-                        focusedTextColor     = appColors.fgPrimary,
-                        unfocusedTextColor   = appColors.fgPrimary,
-                        cursorColor          = Accent,
-                    ),
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                    keyboardActions = KeyboardActions(onDone = {
-                        if (newAlbumName.trim().isNotEmpty()) {
-                            showCreateAlbumInline = false
-                            viewModel.createAlbumThenAddSelected(newAlbumName)
-                        }
-                    }),
+            onCreateNew = {
+                showAddToAlbumSheet = false
+                showCreateAlbumInline = true
+            },
+            onCloudAlbumSelected = { album ->
+                showAddToAlbumSheet = false
+                viewModel.addSelectedToAlbum(
+                    albumLinkId = album.linkId,
+                    albumName = album.name,
                 )
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End,
-                ) {
-                    TextButton(onClick = { showCreateAlbumInline = false }) {
-                        Text(stringResource(R.string.cancel), color = appColors.fgDim)
-                    }
-                    TextButton(
-                        enabled = newAlbumName.trim().isNotEmpty(),
-                        onClick = {
-                            showCreateAlbumInline = false
-                            viewModel.createAlbumThenAddSelected(newAlbumName)
-                        },
-                    ) {
-                        Text(stringResource(R.string.albums_create_album), color = Accent,
-                            fontWeight = FontWeight.SemiBold)
-                    }
-                }
-            }
-        }
+            },
+            onDismiss = { showAddToAlbumSheet = false },
+        )
+    }
+    if (showCreateAlbumInline) {
+        GalleryNewAlbumDialog(
+            onDismiss = { showCreateAlbumInline = false },
+            onCreate = { name ->
+                showCreateAlbumInline = false
+                viewModel.createAlbumThenAddSelected(name)
+            },
+        )
     }
 }
 
 // ── Add-to-album picker sheet ─────────────────────────────────────────────────
 //
-// Bottom sheet with three section: [+ New album] row, cloud albums, local-only buckets.
+// Bottom sheet with a [+ New album] row followed by the user's cloud albums.
 // Mirrors the styling AlbumDetailScreen uses for its own bottom sheets.
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun GalleryAddToAlbumPickerSheet(
+internal fun GalleryAddToAlbumPickerSheet(
     cloudAlbums: List<Album>,
-    localAlbums: List<LocalAlbum>,
     selectionHasCloud: Boolean,
-    selectionHasLocal: Boolean,
     onCreateNew: () -> Unit,
     onCloudAlbumSelected: (Album) -> Unit,
-    onLocalAlbumSelected: (LocalAlbum) -> Unit,
     onDismiss: () -> Unit,
 ) {
     val appColors = AppColors.current
-    // De-dup: when a local bucket and a cloud album share a name we keep the cloud entry
-    // (cloud picker has additive semantics — selection lands in both) and drop the local copy.
-    val cloudNames = cloudAlbums.map { it.name.lowercase() }.toSet()
-    val localOnly = localAlbums.filter { it.name.lowercase() !in cloudNames }
 
     Column(
         modifier = Modifier
@@ -1232,12 +904,10 @@ private fun GalleryAddToAlbumPickerSheet(
         HorizontalDivider(color = Line2, thickness = 0.5.dp,
             modifier = Modifier.padding(horizontal = 20.dp))
 
-        // Cloud albums — when the selection has any cloud-backed item we show these.
-        // For pure-local selections we still expose them so the user can pull a local-only
-        // photo into a Drive album by uploading later (today the add becomes a no-op on the
-        // cloud leg, but it still moves the local copy into the matching bucket).
+        // Cloud albums — shown when the selection has any cloud-backed item. Local-only
+        // photos have no Drive linkId yet, so they can only join an album once uploaded.
         if (cloudAlbums.isNotEmpty() && selectionHasCloud) {
-            Text("Drive albums",
+            Text(stringResource(R.string.gallery_picker_drive_albums),
                 color = appColors.fgMute, fontSize = 12.sp, fontWeight = FontWeight.Medium,
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
             cloudAlbums.forEach { album ->
@@ -1279,57 +949,8 @@ private fun GalleryAddToAlbumPickerSheet(
             }
         }
 
-        // Local buckets — only when there's a local file in the selection.
-        if (localOnly.isNotEmpty() && selectionHasLocal) {
-            HorizontalDivider(color = Line2, thickness = 0.5.dp,
-                modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp))
-            Text("On this device",
-                color = appColors.fgMute, fontSize = 12.sp, fontWeight = FontWeight.Medium,
-                modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
-            localOnly.forEach { album ->
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { onLocalAlbumSelected(album) }
-                        .padding(horizontal = 20.dp, vertical = 14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    val cover = album.coverUri
-                    if (cover != null) {
-                        AsyncImage(
-                            model = android.net.Uri.parse(cover),
-                            contentDescription = null,
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier
-                                .size(44.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(Bg0),
-                        )
-                    } else {
-                        Box(modifier = Modifier
-                            .size(44.dp)
-                            .background(Bg0, RoundedCornerShape(10.dp)),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Icon(Icons.Default.Phone, null, tint = appColors.fgMute,
-                                modifier = Modifier.size(18.dp))
-                        }
-                    }
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(album.name, color = appColors.fgPrimary, fontSize = 15.sp,
-                            fontWeight = FontWeight.Medium)
-                        Text("${album.itemCount} photos · Device",
-                            color = appColors.fgMute, fontSize = 12.sp)
-                    }
-                }
-            }
-        }
-
         // Empty state — nothing to pick from. The + New row above is still tappable.
-        if ((cloudAlbums.isEmpty() || !selectionHasCloud) &&
-            (localOnly.isEmpty() || !selectionHasLocal)
-        ) {
+        if (cloudAlbums.isEmpty() || !selectionHasCloud) {
             Text(
                 "No albums yet — create one above.",
                 color = appColors.fgMute,
@@ -1343,7 +964,7 @@ private fun GalleryAddToAlbumPickerSheet(
 // ── Albums filter rail ────────────────────────────────────────────────────────
 
 @Composable
-private fun AlbumsFilterRail(
+internal fun AlbumsFilterRail(
     selectedFilter: AlbumsFilter,
     onFilterSelected: (AlbumsFilter) -> Unit,
     onHiddenAlbumClick: () -> Unit = {},
@@ -1361,7 +982,6 @@ private fun AlbumsFilterRail(
             val isFiltered = selectedFilter != AlbumsFilter.All
             val label = when (selectedFilter) {
                 AlbumsFilter.All -> stringResource(R.string.gallery_filter_all)
-                AlbumsFilter.Local -> stringResource(R.string.albums_filter_local)
                 AlbumsFilter.BackedUp -> stringResource(R.string.albums_filter_backed_up)
             }
             Row(
@@ -1426,7 +1046,7 @@ private fun storageArcColor(fraction: Float): Color = when {
 // ── Avatar button ─────────────────────────────────────────────────────────────
 
 @Composable
-private fun AvatarButton(initial: String, storageFraction: Float, isSyncing: Boolean, isOffline: Boolean = false, onClick: () -> Unit) {
+internal fun AvatarButton(initial: String, storageFraction: Float, isSyncing: Boolean, isOffline: Boolean = false, onClick: () -> Unit) {
     // Animate the arc smoothly when storage data first loads
     val animatedFraction by animateFloatAsState(
         targetValue = storageFraction,
@@ -1552,7 +1172,7 @@ private fun AvatarButton(initial: String, storageFraction: Float, isSyncing: Boo
 // ── Filter rail ───────────────────────────────────────────────────────────────
 
 @Composable
-private fun FilterRail(
+internal fun FilterRail(
     selectedFilter: GalleryFilter,
     totalCount: Int,
     onFilterSelected: (GalleryFilter) -> Unit,
@@ -1646,7 +1266,7 @@ private fun FilterRail(
                     .clickable { onSearchClick() },
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(Icons.Default.Search, "Search",
+                Icon(Icons.Default.Search, stringResource(R.string.search_title),
                     tint = FgDim, modifier = Modifier.size(18.dp))
             }
         }
@@ -1661,7 +1281,7 @@ private fun FilterRail(
                     .clickable { onCalendarClick() },
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(Icons.Default.CalendarMonth, "Calendar",
+                Icon(Icons.Default.CalendarMonth, stringResource(R.string.calendar_title),
                     tint = FgDim, modifier = Modifier.size(18.dp))
             }
         }
@@ -1708,7 +1328,7 @@ private fun DockTab(
     onClick: () -> Unit,
 ) {
     // Compact padding + maxLines/softWrap=false so the labels never wrap onto two lines
-    // on narrow screens (S22-class 6.1" / smaller-screen Pixels). The text shrinks to
+    // on narrow screens (6.1"-class and smaller screens). The text shrinks to
     // ellipsis if a localised label is unusually long instead of breaking the pill.
     Row(
         modifier = Modifier
@@ -1754,9 +1374,11 @@ private fun PhotoGrid(
     isSelectionMode: Boolean = false,
     onLongPress: (GalleryItem) -> Unit = {},
     onToggleSelect: (GalleryItem) -> Unit = {},
+    onToggleGroup: (List<GalleryItem>) -> Unit = {},
     grouping: TimelineGrouping = TimelineGrouping.Month,
     onGroupingChanged: (TimelineGrouping) -> Unit = {},
     hiddenCloudLinkIds: Set<String> = emptySet(),
+    downloadedCloudLinkIds: Set<String> = emptySet(),
     onRequestThumbnail: (linkId: String) -> Unit = {},
     onCancelThumbnail: (linkId: String) -> Unit = {},
 ) {
@@ -1970,8 +1592,17 @@ private fun PhotoGrid(
             // truly flat thumbnail wall. The single placeholder "bucket" produced above
             // is still iterated to render its items.
             if (effectiveGrouping != TimelineGrouping.None) {
+                val selectedInGroup = monthItems.count { it in selectedItems }
                 item(span = { GridItemSpan(columnCount) }) {
-                    MonthHeader(month = month, photoCount = monthPhotos, videoCount = monthVideos)
+                    MonthHeader(
+                        month = month,
+                        photoCount = monthPhotos,
+                        videoCount = monthVideos,
+                        isSelectionMode = isSelectionMode,
+                        selectedInGroup = selectedInGroup,
+                        groupSize = monthItems.size,
+                        onToggleGroup = { onToggleGroup(monthItems) },
+                    )
                 }
             }
             items(monthItems, key = { item ->
@@ -1991,6 +1622,7 @@ private fun PhotoGrid(
                     selected          = item in selectedItems,
                     isSelectionMode   = isSelectionMode,
                     isHiddenOnDevice  = cloudId != null && cloudId in hiddenCloudLinkIds,
+                    isDownloaded      = cloudId != null && cloudId in downloadedCloudLinkIds,
                     onClick           = {
                         if (isSelectionMode) onToggleSelect(item)
                         else onPhotoClick(items, items.indexOf(item))
@@ -2082,6 +1714,10 @@ private fun OnThisDayTile(
     val yearsAgoLabel = androidx.compose.ui.res.pluralStringResource(
         R.plurals.count_years_ago_plural, yearsAgo, yearsAgo,
     )
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val tileRequest = remember(imageModel) {
+        ImageRequest.Builder(context).data(imageModel).size(384).build()
+    }
     Box(
         modifier = Modifier
             .size(90.dp)
@@ -2090,7 +1726,7 @@ private fun OnThisDayTile(
             .clickable(onClick = onClick),
     ) {
         AsyncImage(
-            model = imageModel,
+            model = tileRequest,
             contentDescription = null,
             contentScale = ContentScale.Crop,
             modifier = Modifier.fillMaxSize(),
@@ -2168,13 +1804,56 @@ private fun PermissionBanner(permanent: Boolean, onAction: () -> Unit) {
 }
 
 @Composable
-private fun MonthHeader(month: String, photoCount: Int, videoCount: Int) {
+private fun MonthHeader(
+    month: String,
+    photoCount: Int,
+    videoCount: Int,
+    isSelectionMode: Boolean = false,
+    selectedInGroup: Int = 0,
+    groupSize: Int = 0,
+    onToggleGroup: () -> Unit = {},
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .padding(top = 24.dp, bottom = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        // Leading tri-state circle — only while selecting. Tapping it selects/deselects the
+        // whole date group. Mirrors the per-cell indicator styling so the two read as one
+        // selection language: filled accent + check when every item is in, accent with a
+        // hollow centre when partial, dim bordered ring when none.
+        if (isSelectionMode) {
+            val allSelected = groupSize > 0 && selectedInGroup == groupSize
+            val partiallySelected = selectedInGroup > 0 && !allSelected
+            Box(
+                modifier = Modifier
+                    .padding(end = 12.dp)
+                    .size(22.dp)
+                    .clip(CircleShape)
+                    .clickable(onClick = onToggleGroup)
+                    .then(
+                        if (allSelected || partiallySelected)
+                            Modifier.background(Accent, CircleShape)
+                        else Modifier
+                            .background(Color.Black.copy(alpha = 0.3f), CircleShape)
+                            .border(1.5.dp, Color.White.copy(alpha = 0.8f), CircleShape)
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                when {
+                    allSelected -> Icon(
+                        Icons.Default.Check, stringResource(R.string.gallery_deselect_all),
+                        tint = Color.White, modifier = Modifier.size(14.dp),
+                    )
+                    partiallySelected -> Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .background(Color.White, CircleShape),
+                    )
+                }
+            }
+        }
         Text(
             text = month,
             color = FgPrimary,
@@ -2213,6 +1892,7 @@ internal fun PhotoCell(
     selected: Boolean = false,
     isSelectionMode: Boolean = false,
     isHiddenOnDevice: Boolean = false,
+    isDownloaded: Boolean = false,
     onClick: () -> Unit,
     onLongClick: () -> Unit = {},
     onRequestThumbnail: (linkId: String) -> Unit = {},
@@ -2297,10 +1977,13 @@ internal fun PhotoCell(
         //   LocalOnly  = no badge (device-only photos need no indicator)
         //   Synced     = green cloud (backed up AND on device)
         //   CloudOnly  = white cloud (only in Drive — not on device)
+        // A CloudOnly cell upgrades to the green badge once its linkId has a SYNCED local copy:
+        // the user downloaded it but the static item snapshot still reads CloudOnly. Mirrors the
+        // same upgrade the photo viewer applies.
         when (item) {
             is GalleryItem.LocalOnly -> { /* no badge */ }
             is GalleryItem.Synced    -> SyncedCloudBadge()
-            is GalleryItem.CloudOnly -> CloudBadge()
+            is GalleryItem.CloudOnly -> if (isDownloaded) SyncedCloudBadge() else CloudBadge()
         }
 
         // Hidden-eye overlay — drawn on the cell when its cloud linkId is referenced by a
@@ -2362,7 +2045,7 @@ internal fun PhotoCell(
                             .background(Accent, CircleShape),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Icon(Icons.Default.Check, "Selected",
+                        Icon(Icons.Default.Check, stringResource(R.string.cd_status_selected),
                             tint = Color.White, modifier = Modifier.size(14.dp))
                     }
                 } else {
@@ -2391,7 +2074,7 @@ private fun BoxScope.CloudBadge() {
     ) {
         Icon(
             Icons.Default.Cloud,
-            contentDescription = "Only in Drive",
+            contentDescription = stringResource(R.string.cd_status_cloud_only),
             tint = Color.White,
             modifier = Modifier.size(12.dp),
         )
@@ -2411,7 +2094,7 @@ private fun BoxScope.SyncedCloudBadge() {
     ) {
         Icon(
             Icons.Default.Cloud,
-            contentDescription = "Backed up, also on device",
+            contentDescription = stringResource(R.string.cd_status_backed_up_device),
             tint = Color(0xFF30D158),
             modifier = Modifier.size(12.dp),
         )
@@ -2433,7 +2116,7 @@ private fun BoxScope.HiddenEyeBadge() {
     ) {
         Icon(
             Icons.Default.VisibilityOff,
-            contentDescription = "Hidden on this device",
+            contentDescription = stringResource(R.string.cd_status_hidden_local),
             tint = Color.White,
             modifier = Modifier.size(12.dp),
         )
@@ -2453,7 +2136,7 @@ private fun BoxScope.DeviceBadge() {
     ) {
         Icon(
             Icons.Default.Phone,
-            contentDescription = "Only on device",
+            contentDescription = stringResource(R.string.cd_status_device_only),
             tint = FgMute,
             modifier = Modifier.size(11.dp),
         )
@@ -2464,7 +2147,7 @@ private fun BoxScope.DeviceBadge() {
 // ── Multi-select delete sheet ─────────────────────────────────────────────────
 
 @Composable
-private fun MultiDeleteSheet(
+internal fun MultiDeleteSheet(
     selectedItems: Set<GalleryItem>,
     onDismiss: () -> Unit,
     onDelete: (freeUpSpace: Boolean, deleteFromCloud: Boolean) -> Unit,
@@ -2792,7 +2475,7 @@ internal fun FilterChip(label: String, selected: Boolean, onClick: () -> Unit) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun AlbumsFilterSheet(
+internal fun AlbumsFilterSheet(
     currentFilter: AlbumsFilter,
     onApply: (AlbumsFilter) -> Unit,
     onDismiss: () -> Unit,
@@ -2815,7 +2498,6 @@ private fun AlbumsFilterSheet(
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             listOf(
                 AlbumsFilter.All to stringResource(R.string.gallery_filter_all),
-                AlbumsFilter.Local to stringResource(R.string.albums_filter_local),
                 AlbumsFilter.BackedUp to stringResource(R.string.albums_filter_backed_up),
             ).forEach { (status, label) ->
                 FilterChip(
@@ -2833,7 +2515,7 @@ private fun AlbumsFilterSheet(
 enum class SharedFilter { SharedWithMe, SharedByMe }
 
 @Composable
-private fun SharedFilterRail(
+internal fun SharedFilterRail(
     selectedFilter: SharedFilter,
     onFilterSelected: (SharedFilter) -> Unit,
     activeEmailFilter: String? = null,

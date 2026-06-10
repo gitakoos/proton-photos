@@ -32,6 +32,7 @@ import android.net.Uri
 import android.os.ParcelFileDescriptor
 import java.io.File
 import java.nio.ByteBuffer
+import kotlin.coroutines.cancellation.CancellationException
 import kotlin.math.min
 
 /**
@@ -96,6 +97,11 @@ internal class VideoReencoder(private val context: Context) {
          *  this and [originalAudioGain] are > 0 the two streams mix sample-by-sample. */
         musicAudioGain: Float = 1.0f,
         onProgress: (Float) -> Unit,
+        /** Cooperative cancellation probe, checked once per encode-loop iteration. Returns
+         *  false once the calling coroutine is cancelled; the loop then releases its codecs
+         *  via the finally block and throws so the caller's temp-file cleanup runs. Defaults
+         *  to always-active for callers that don't need cancellation. */
+        isActive: () -> Boolean = { true },
     ) {
         var sourcePfd: ParcelFileDescriptor? = null
         var audioPfd: ParcelFileDescriptor? = null
@@ -228,7 +234,7 @@ internal class VideoReencoder(private val context: Context) {
                 ?: error("Source video track has no MIME type")
             decoder = MediaCodec.createDecoderByType(decoderMime)
             // Force the decoder to output frames in raw byte orientation by clearing
-            // KEY_ROTATION. On some chipsets (Samsung Exynos S22 confirmed) the
+            // KEY_ROTATION. On some chipsets (confirmed on Exynos) the
             // SurfaceTexture's intrinsic transform applies the source's rotation tag
             // automatically when KEY_ROTATION is present, which then double-rotated with
             // our orientation hint and squished portrait content into a landscape encoder
@@ -350,6 +356,11 @@ internal class VideoReencoder(private val context: Context) {
             var lastReportedProgress = -1f
 
             while (!encoderOutputDone) {
+                // A cancelled save (user backed out / closed the editor) should stop burning
+                // CPU immediately rather than transcoding to completion. The finally block
+                // below releases the codecs and muxer; throwing here lets the caller delete
+                // the half-written temp file.
+                if (!isActive()) throw CancellationException("Video transcode cancelled")
                 // Feed encoded video samples into decoder.
                 if (!inputDone) {
                     val inputIdx = decoder.dequeueInputBuffer(timeoutUs)
@@ -464,6 +475,7 @@ internal class VideoReencoder(private val context: Context) {
                     startUs = if (streamCopyOverlay) audioTrimStartUs else trimStartUs,
                     endUs = if (streamCopyOverlay) audioTrimEndUs else trimEndUs,
                     timeOriginUs = if (streamCopyOverlay) audioTrimStartUs else trimStartUs,
+                    isActive = isActive,
                 )
             } else if (audioMuxerTrackIdx >= 0 && needsAudioEncode && mixTargetFormat != null) {
                 val (sr, ch) = mixTargetFormat
@@ -524,6 +536,9 @@ internal class VideoReencoder(private val context: Context) {
         originalAudioGain: Float,
         musicAudioGain: Float,
         onProgress: (Float) -> Unit,
+        /** Cooperative cancellation probe, checked once per stream-copy iteration. See
+         *  [transcode] for the contract. */
+        isActive: () -> Boolean = { true },
     ) {
         var sourcePfd: ParcelFileDescriptor? = null
         var videoExtractor: MediaExtractor? = null
@@ -606,6 +621,9 @@ internal class VideoReencoder(private val context: Context) {
             val totalUs = (trimEndUs - trimStartUs).coerceAtLeast(1L)
             var lastReported = -1f
             while (true) {
+                // Bail out of a cancelled save before copying the next sample — the finally
+                // block releases the muxer and the caller deletes the temp file.
+                if (!isActive()) throw CancellationException("Video stream-copy cancelled")
                 buf.clear()
                 val read = videoExtractor.readSampleData(buf, 0)
                 if (read < 0) break
@@ -637,6 +655,7 @@ internal class VideoReencoder(private val context: Context) {
                     startUs = if (streamCopyOvl) audioTrimStartUs else trimStartUs,
                     endUs = if (streamCopyOvl) audioTrimEndUs else trimEndUs,
                     timeOriginUs = if (streamCopyOvl) audioTrimStartUs else trimStartUs,
+                    isActive = isActive,
                 )
             } else if (audioMuxerTrack >= 0 && needsAudioEncode && mixTargetFormat != null) {
                 val (sr, ch) = mixTargetFormat
@@ -687,6 +706,7 @@ internal class VideoReencoder(private val context: Context) {
         startUs: Long,
         endUs: Long,
         timeOriginUs: Long,
+        isActive: () -> Boolean = { true },
     ) {
         // Use the already-selected audio track's format for buffer sizing.
         var maxBufferSize = 256 * 1024
@@ -702,6 +722,7 @@ internal class VideoReencoder(private val context: Context) {
         val buffer = ByteBuffer.allocate(maxBufferSize)
         val info = MediaCodec.BufferInfo()
         while (true) {
+            if (!isActive()) throw CancellationException("Audio copy cancelled")
             buffer.clear()
             val read = extractor.readSampleData(buffer, 0)
             if (read < 0) break

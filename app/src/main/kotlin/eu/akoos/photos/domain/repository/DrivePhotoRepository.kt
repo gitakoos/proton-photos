@@ -44,6 +44,26 @@ interface DrivePhotoRepository {
     suspend fun loadAlbums(userId: UserId): List<Album>
 
     /**
+     * DB-only read of the cached cloud album list. Empty when no successful refresh has ever
+     * run on this device, or right after sign-out wiped the cache. Used by AlbumsScreen for
+     * cold-launch instant paint (including airplane-mode starts) before the network refresh
+     * lands. Cover thumbnail URLs are rehydrated from the local photo DB / disk cache where
+     * available; cells with null thumbnailUrl will trigger the lazy decrypt scheduler on view.
+     */
+    suspend fun loadAlbumsCached(): List<Album>
+
+    /**
+     * Background pass that walks each album's children pagination on Drive and persists the
+     * `albumLinkId → photoLinkId` rows so a subsequent `loadAlbumPhotos(...)` call hits the
+     * local DB instead of a network round-trip — and an offline open of an album the user
+     * has never tapped into still shows its photos. Skips albums whose cached row count
+     * already matches Drive's photoCount (cheap freshness check). Intended to be
+     * fire-and-forget from the AlbumsScreen's onSuccess; failures per album are swallowed
+     * so one broken row doesn't poison the rest.
+     */
+    suspend fun prefetchAlbumsMembership(userId: UserId, albums: List<Album>)
+
+    /**
      * Returns a `photoLinkId → primary album name` map across every album the user owns.
      * Photos belonging to multiple albums get the alphabetically-first album's name.
      * Photos that aren't in any album are absent from the map. Used by the download flow
@@ -71,6 +91,7 @@ interface DrivePhotoRepository {
         userId: UserId,
         albumLinkId: String,
         volumeId: String? = null,
+        sharingShareId: String? = null,
         onLinkIdsResolved: ((List<String>) -> Unit)? = null,
     ): List<CloudPhoto>
 
@@ -107,7 +128,7 @@ interface DrivePhotoRepository {
     suspend fun uploadFile(
         userId: UserId,
         item: LocalMediaItem,
-        hash: String,
+        sha1HexContentDigest: String,
         uploadUri: String = item.uri,
         onProgress: ((
             phase: eu.akoos.photos.data.repository.drive.UploadPhase,
@@ -190,16 +211,117 @@ interface DrivePhotoRepository {
     suspend fun setAlbumCover(userId: UserId, albumLinkId: String, coverPhotoLinkId: String)
     /** Returns all photos currently in the Drive server-side trash. */
     suspend fun getCloudTrash(userId: UserId): List<CloudTrashItem>
-    /** Moves trashed photos back to the Photos stream (un-delete). */
-    suspend fun restoreFromCloudTrash(userId: UserId, linkIds: List<String>)
-    /** Permanently removes photos from the server (cannot be undone). */
-    suspend fun deleteFromCloudForever(userId: UserId, linkIds: List<String>)
+    /** Moves trashed photos back to the Photos stream (un-delete). Returns the per-link
+     *  outcome so callers can keep rejected items selected and flag a stale gallery. */
+    suspend fun restoreFromCloudTrash(
+        userId: UserId,
+        linkIds: List<String>,
+    ): eu.akoos.photos.data.repository.drive.CloudRestoreOutcome
+    /** Permanently removes photos from the server (cannot be undone). Returns the
+     *  per-link outcome so callers can keep rejected items selected. */
+    suspend fun deleteFromCloudForever(
+        userId: UserId,
+        linkIds: List<String>,
+    ): eu.akoos.photos.data.repository.drive.CloudDeleteOutcome
     /** Creates a public share link for an album; returns the public URL. */
     suspend fun createAlbumShareLink(userId: UserId, albumLinkId: String): String
     /** Invites a Proton user (by email) to an album with read permissions. */
     suspend fun inviteToAlbum(userId: UserId, albumLinkId: String, email: String)
+
+    /**
+     * Server-side photo-copy roll-up: takes every photo in [sourceAlbumLinkId]
+     * (a shared-with-me album reached via [sharingShareId]) and copies it into a
+     * new album owned by the caller. The backend duplicates the encrypted blobs
+     * server-side after the recipient's client rewraps the per-photo metadata.
+     *
+     * Returns the linkId of the freshly-created owned album plus per-photo
+     * counts so the UI can surface a "saved N of M" toast.
+     */
+    suspend fun saveSharedAlbumToOwnLibrary(
+        userId: UserId,
+        sharingShareId: String,
+        sourceAlbumLinkId: String,
+        sourceAlbumDecryptedName: String,
+        sourceVolumeId: String,
+    ): SaveSharedAlbumOutcome
+
+    data class SaveSharedAlbumOutcome(
+        val newAlbumLinkId: String,
+        val copiedCount: Int,
+        val failedCount: Int,
+        val totalRequested: Int,
+    )
+
+    /**
+     * Fire-and-forget singleton-backed launcher for [saveSharedAlbumToOwnLibrary].
+     * The job survives VM destruction so navigating away mid-copy doesn't kill it.
+     * Observe [saveSharedAlbumState] for progress + outcome.
+     */
+    fun startSaveSharedAlbumToOwnLibrary(
+        userId: UserId,
+        sharingShareId: String,
+        sourceAlbumLinkId: String,
+        sourceAlbumDecryptedName: String,
+        sourceVolumeId: String,
+    )
+
+    val saveSharedAlbumState: kotlinx.coroutines.flow.StateFlow<SaveSharedAlbumProgress>
+
+    fun acknowledgeSaveSharedAlbumResult()
+
+    /** Aborts an in-flight save-to-library copy. Safe to call when no copy is
+     *  running. Emits a terminal [SaveSharedAlbumProgress.Cancelled] state so the
+     *  UI can surface a neutral acknowledgement. */
+    fun cancelSaveSharedAlbumToOwnLibrary()
+
+    sealed interface SaveSharedAlbumProgress {
+        data object Idle : SaveSharedAlbumProgress
+        data class Running(
+            val sourceAlbumLinkId: String,
+            val copied: Int,
+            val total: Int,
+        ) : SaveSharedAlbumProgress
+        data class Done(
+            val sourceAlbumLinkId: String,
+            val newAlbumLinkId: String,
+            val copiedCount: Int,
+            val failedCount: Int,
+            val totalRequested: Int,
+        ) : SaveSharedAlbumProgress
+        data class Failed(
+            val sourceAlbumLinkId: String,
+            val reason: String?,
+        ) : SaveSharedAlbumProgress
+        data class Cancelled(
+            val sourceAlbumLinkId: String,
+            val copied: Int,
+            val total: Int,
+        ) : SaveSharedAlbumProgress
+    }
     /** Deletes an album share. */
     suspend fun deleteShare(userId: UserId, shareId: String)
+    /**
+     * Recipient-side leave: removes the current user's membership from a
+     * shared-with-me album. The owner's copy and other members are unaffected.
+     * Wipes the local album row + memberships so the grid updates immediately.
+     */
+    suspend fun leaveSharedAlbum(userId: UserId, shareId: String, albumLinkId: String)
+    /**
+     * Disables only the public URL on a share, keeping accepted members + pending
+     * invitations intact. Use this when the user wants to stop sharing the link but
+     * still let invited Proton accounts open the album.
+     */
+    suspend fun revokeShareUrlOnly(userId: UserId, shareId: String)
+    /**
+     * Changes a member's permission bitmap on an album share. Use 4 for viewer (read)
+     * or 6 for editor (read + write). Other bitmaps are rejected server-side.
+     */
+    suspend fun changeMemberPermission(userId: UserId, shareId: String, memberId: String, permissions: Int)
+    /**
+     * Changes a PENDING invitation's permission bitmap before the invitee accepts.
+     * Same 4 = viewer / 6 = editor semantics as [changeMemberPermission].
+     */
+    suspend fun changeInvitationPermission(userId: UserId, shareId: String, invitationId: String, permissions: Int)
     /** Returns albums that other users have shared with the current user. */
     suspend fun loadSharedWithMeAlbums(userId: UserId): List<Album>
     /** Returns the list of users invited to a share. */
@@ -253,4 +375,21 @@ interface DrivePhotoRepository {
      * doesn't spend JNI bandwidth on work the user no longer needs.
      */
     fun cancelThumbnailDecrypt(linkId: String)
+
+    /**
+     * Look-ahead decrypt for [linkIds] at prefetch priority. Fed by the gallery scroll
+     * state with the rows just beyond the viewport in the scroll direction, so they are
+     * already warm by the time the user reaches them. Every entry sorts behind the
+     * visible band, so this never delays an on-screen cell. No-op for rows already
+     * decrypted, cached, queued, or running.
+     */
+    fun prefetchThumbnailDecrypt(userId: UserId, linkIds: List<String>)
+
+    /**
+     * Decrypt [linkIds] at visible (viewport) priority even though they may sit outside the
+     * scrolling grid — used by surfaces that render off-grid thumbnails which would
+     * otherwise never trigger a per-cell request (e.g. the "On this day" memories row at
+     * the top of the timeline). No-op for rows already decrypted, cached, queued, or running.
+     */
+    fun requestThumbnailDecrypt(userId: UserId, linkIds: List<String>)
 }

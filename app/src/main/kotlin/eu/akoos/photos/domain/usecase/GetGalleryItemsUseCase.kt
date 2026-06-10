@@ -99,6 +99,12 @@ class GetGalleryItemsUseCase @Inject constructor(
             }
         }
 
-        return result.sortedByDescending { it.captureTimeMs }
+        // Single merge-sort key: GalleryItem.captureTimeMs already routes each state through
+        // TimestampSanity, so a sub-floor cloud value falls back to its local twin's DATE_TAKEN
+        // instead of sinking to the list tail. linkId/uri tiebreak keeps equal-timestamp bursts
+        // in a stable total order across re-emissions.
+        return result.sortedWith(
+            compareByDescending<GalleryItem> { it.captureTimeMs }.thenBy { it.stableId }
+        )
     }
 }

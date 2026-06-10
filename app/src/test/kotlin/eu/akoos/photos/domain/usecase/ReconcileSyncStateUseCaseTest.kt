@@ -42,14 +42,15 @@ class ReconcileSyncStateUseCaseTest {
         syncStateRepo = mockk(relaxed = true)
 
         // Mock DataStore extension on Context
-        val mockPrefs = mockk<Preferences>()
+        val mockPrefs = mockk<Preferences>(relaxed = true)
         val mockDataStore = mockk<DataStore<Preferences>>()
         mockkStatic("eu.akoos.photos.data.preferences.SettingsDataStoreKt")
         context = mockk()
         every { context.settingsDataStore } returns mockDataStore
         every { mockDataStore.data } returns flowOf(mockPrefs)
         every { mockPrefs[SettingsKeys.SYNC_FOLDER_NAMES] } returns setOf("Camera")  // back up Camera folder
-        every { mockPrefs[SettingsKeys.AUTO_BACKUP_NEW_FOLDERS] } returns false
+        every { mockPrefs[SettingsKeys.BACKUP_EVERYTHING] } returns false
+        every { mockPrefs[SettingsKeys.EXCLUDED_FOLDER_NAMES] } returns emptySet()
 
         useCase = ReconcileSyncStateUseCase(localRepo, cloudRepo, syncStateRepo, context)
     }

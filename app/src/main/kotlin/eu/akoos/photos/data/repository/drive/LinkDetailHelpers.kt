@@ -117,6 +117,45 @@ class LinkDetailHelpers @Inject constructor(
     }
 
     /**
+     * Cross-account variant of [batchFetchLinkDetails] for shared-with-me content.
+     * Goes through `POST drive/shares/{shareId}/links/fetch_metadata` instead of the
+     * volume endpoint, which returns the full [LinkCoreDto] (size, mimeType,
+     * fileProperties, contentKeyPacket — everything) for any link the recipient can
+     * see via the share. The volume endpoint partially blanks those fields when the
+     * caller isn't a direct member of the owner's photos volume, so the Details
+     * sheet shows empty Size / Type rows; this path fills them in.
+     *
+     * The result is wrapped in a [BatchLinkDto] so the rest of the pipeline can
+     * consume it without branching — the `photo` / `album` / `folder` / `sharing`
+     * sub-fields stay null because the share endpoint doesn't surface them, but
+     * downstream callers only ever read `detail.link` for shared-album photos.
+     */
+    suspend fun batchFetchLinkDetailsViaShare(
+        userId: UserId,
+        shareId: String,
+        linkIds: List<String>,
+    ): Map<String, eu.akoos.photos.data.api.dto.BatchLinkDto> {
+        val result = mutableMapOf<String, eu.akoos.photos.data.api.dto.BatchLinkDto>()
+        val manager = apiProvider.get<DriveApiService>(userId)
+        for (chunk in linkIds.chunked(BATCH_SIZE)) {
+            try {
+                shareService.networkSemaphore.withPermit {
+                    val resp = manager.invoke {
+                        fetchLinkMetadata(shareId, BatchLinksRequest(chunk))
+                    }.valueOrThrow
+                    for (link in resp.links) {
+                        result[link.linkId] = eu.akoos.photos.data.api.dto.BatchLinkDto(link = link)
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "batchFetchLinkDetailsViaShare failed: ${e.message}")
+            }
+        }
+        Log.d(TAG, "batchFetchLinkDetailsViaShare: got ${result.size}/${linkIds.size} link details")
+        return result
+    }
+
+    /**
      * Batch-fetches thumbnail download URLs for a list of ThumbnailIDs using the
      * POST /drive/volumes/{volumeId}/thumbnails endpoint.
      *

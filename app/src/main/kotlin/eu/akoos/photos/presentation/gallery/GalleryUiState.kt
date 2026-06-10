@@ -40,10 +40,24 @@ data class GalleryUiState(
     val cloudMaxBytes: Long = 0L,
     val selectedItems: Set<GalleryItem> = emptySet(),
     val multiDeleteState: MultiDeleteState = MultiDeleteState.Idle,
+    /**
+     * Lifecycle of a multi-photo "move to hidden" run. Mirrors [multiDeleteState]'s
+     * sealed shape but is read separately by the selection bar so the Hide spinner
+     * surfaces on the More menu without also setting the Delete (trash) button to
+     * its in-flight state.
+     */
+    val multiHideState: MultiDeleteState = MultiDeleteState.Idle,
+    /** True when the last hide batch included backed-up photos — the post-hide
+     *  snackbar then discloses that the Drive copies remain in the cloud. */
+    val hideCloudNoticePending: Boolean = false,
     val pendingDeleteIntent: android.app.PendingIntent? = null,
     val multiDownloadState: MultiDownloadState = MultiDownloadState.Idle,
     val addToAlbumState: AddToAlbumState = AddToAlbumState.Idle,
     val multiStripState: MultiStripState = MultiStripState.Idle,
+    /** Android 10+ write-permission dialog for stripping metadata from foreign files in the
+     *  selection. Set when a batch strip hits files the OS won't write without consent; the
+     *  screen launches it and the granted retry strips the deferred URIs. */
+    val pendingStripIntent: android.app.PendingIntent? = null,
     val isSyncing: Boolean = false,
     val pendingUploadCount: Int = 0,
     val uploadedCount: Int = 0,
@@ -52,6 +66,12 @@ data class GalleryUiState(
      *  a crossed-out eye overlay so the user can tell at a glance which cloud photos are
      *  hidden on this device. Derived from SyncStateRepo rows with [SyncStatus.HIDDEN]. */
     val hiddenCloudLinkIds: Set<String> = emptySet(),
+    /** Cloud linkIds of photos that belong to at least one Drive album. Used by [applyFilter]
+     *  to exclude album items from the [GalleryFilter.All] view when the "Hide photos in albums"
+     *  toggle is on. Empty when the toggle is off. Non-All filters (Favorites, Screenshots,
+     *  Videos, …) ignore this — when the user explicitly picks a tab, they want to see every
+     *  matching item, album membership or not. */
+    val albumHideCloudIds: Set<String> = emptySet(),
 ) {
     val storageFraction: Float
         get() = if (cloudMaxBytes > 0L)

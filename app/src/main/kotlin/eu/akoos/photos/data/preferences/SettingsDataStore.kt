@@ -68,6 +68,17 @@ object SettingsKeys {
      */
     val THEME_PALETTE = stringPreferencesKey("theme_palette")
     val LAST_SYNC_MS = longPreferencesKey("last_sync_ms")
+
+    /** Wall-clock millis of the last successful GitHub release check. Used to throttle
+     *  the auto-check to once per 24h so the 60 req/hr unauthenticated rate limit
+     *  never matters in practice. */
+    val UPDATE_LAST_CHECK_MS = longPreferencesKey("update_last_check_ms")
+
+    /** versionName the user dismissed via the "Later" button on the update dialog.
+     *  Cleared (overwritten) when a NEWER version appears, so dismissing 2.0.1 still
+     *  lets 2.0.2 prompt again. */
+    val UPDATE_DISMISSED_VERSION = stringPreferencesKey("update_dismissed_version")
+
     val LANGUAGE = stringPreferencesKey("language")
     /** Folders selected for backup. null (key absent) = back up nothing (first-run default). */
     val SYNC_FOLDER_NAMES = stringSetPreferencesKey("sync_folder_names")
@@ -121,6 +132,31 @@ object SettingsKeys {
      * Each entry is "bucketName=albumLinkId". No userId prefix — one Drive account per app.
      */
     val ALBUM_BUCKET_MAP = stringSetPreferencesKey("album_bucket_map")
+
+    /**
+     * Folder names the user opted in to mirror as Drive albums. When a photo is uploaded
+     * from a device bucket whose name is in this set, the upload pipeline also creates
+     * (or reuses) a matching Drive album and adds the photo. Names not in this set never
+     * trigger album creation, even if matching Drive albums already exist — the photo
+     * still uploads to the user's stream, it just doesn't land in a bucket-name album.
+     *
+     * Can include forward-declared names (e.g. "Trip 2026") that don't exist on the
+     * device yet; when a photo with that bucket name eventually arrives, the mirror
+     * kicks in.
+     *
+     * Independent of [SYNC_FOLDER_NAMES] / [EXCLUDED_FOLDER_NAMES] (which control which
+     * photos upload at all). A folder can be both backed up AND mirror as an album, OR
+     * backed up but NOT mirrored.
+     */
+    val ALBUM_OPT_IN_FOLDER_NAMES = stringSetPreferencesKey("album_opt_in_folder_names")
+
+    /**
+     * One-shot migration flag. False on first launch after the opt-in feature ships;
+     * the migration in `App.kt` seeds [ALBUM_OPT_IN_FOLDER_NAMES] from [ALBUM_BUCKET_MAP]
+     * keys (existing users keep mirroring the folders that already have Drive albums),
+     * then flips this to true so the migration never re-runs.
+     */
+    val ALBUM_OPT_IN_MIGRATED = booleanPreferencesKey("album_opt_in_migrated")
 
     fun eventAnchorKey(userId: String, volumeId: String) =
         stringPreferencesKey("event_anchor_${userId}_$volumeId")
@@ -182,30 +218,15 @@ object SettingsKeys {
      *  Drive backups on Proton's side, only the local viewing cache. */
     val CLEAR_CACHE_ON_APP_CLOSE = booleanPreferencesKey("clear_cache_on_app_close")
 
+    /** When true, the Photos timeline hides every cloud photo whose linkId appears
+     *  in the album-photo-membership table. The user treats the main feed as an
+     *  "unfiled" inbox: once a photo is sorted into an album it disappears from
+     *  the timeline. Off by default so existing users see no change. The Albums
+     *  and Shared tabs are untouched — only the Photos tab honours this filter. */
+    val HIDE_PHOTOS_IN_ALBUMS = booleanPreferencesKey("hide_photos_in_albums")
+
     // Favorites — stores URIs (local) or linkIds (cloud) of favorited photos
     val FAVORITE_IDS = stringSetPreferencesKey("favorite_ids")
-
-    /**
-     * Names of local albums the user created manually from inside the app. These show up
-     * alongside auto-discovered MediaStore buckets in AlbumsScreen, even when they contain
-     * no photos yet — so the user can target them when moving files in later.
-     */
-    val MANUAL_LOCAL_ALBUMS = stringSetPreferencesKey("manual_local_albums")
-
-    /**
-     * Virtual local-album membership: which local photos belong to which user-created album
-     * WITHOUT physically moving the file on disk. Each entry is `albumName||contentUri`.
-     *
-     * Background: MediaProvider on Android Q+ refuses to let an unprivileged third-party app
-     * write DATE_TAKEN for a file it doesn't own (`W MediaProvider: Ignoring mutation of
-     * datetaken`). That means any RELATIVE_PATH move resets DATE_TAKEN to NULL on files
-     * authored by the camera app (or anything else) — the gallery then groups them under
-     * "today". To preserve capture dates we leave files in their original bucket and track
-     * album membership here instead, the same way cloud albums are references (not copies).
-     *
-     * `||` as separator because album names may contain `=` or `:` and URIs always contain `/`.
-     */
-    val LOCAL_ALBUM_VIRTUAL_MEMBERSHIP = stringSetPreferencesKey("local_album_virtual_membership")
 
     /**
      * Drive linkIds of photos uploaded by this client, encoded as `linkId|uploadedAtMs`.

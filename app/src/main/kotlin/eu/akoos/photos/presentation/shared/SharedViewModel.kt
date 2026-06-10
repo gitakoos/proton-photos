@@ -22,9 +22,11 @@
 
 package eu.akoos.photos.presentation.shared
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -37,6 +39,8 @@ import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.entity.PendingInvitation
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.presentation.gallery.SharedFilter
+import eu.akoos.photos.util.friendlyNetworkError
+import eu.akoos.photos.util.sanitizeErrorMessage
 import javax.inject.Inject
 
 data class SharedUiState(
@@ -65,9 +69,11 @@ data class SharedUiState(
 
 @HiltViewModel
 class SharedViewModel @Inject constructor(
+    @ApplicationContext private val context: Context,
     private val accountManager: AccountManager,
     private val driveRepo: DrivePhotoRepository,
     private val networkObserver: eu.akoos.photos.util.NetworkObserver,
+    private val albumListEvents: eu.akoos.photos.util.AlbumListEventBus,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SharedUiState())
@@ -75,6 +81,12 @@ class SharedViewModel @Inject constructor(
 
     init {
         loadSharedAlbums()
+        // Album-detail actions emit on this bus when a share flips — e.g. leaving a
+        // shared-with-me album. Re-pull so the grid drops the album immediately instead
+        // of waiting for the next screen resume.
+        viewModelScope.launch {
+            albumListEvents.changes.collect { loadSharedAlbums() }
+        }
     }
 
     fun refresh() = loadSharedAlbums()
@@ -90,7 +102,12 @@ class SharedViewModel @Inject constructor(
             val userId = accountManager.getPrimaryUserId().first() ?: return@launch
             runCatching { driveRepo.declineInvitation(userId, invitationId) }
                 .onSuccess { _uiState.update { it.copy(pendingInvitations = it.pendingInvitations.filter { inv -> inv.invitationId != invitationId }) } }
-                .onFailure { e -> _uiState.update { it.copy(error = "Failed to decline: ${e.message}") } }
+                .onFailure { e ->
+                    val friendly = friendlyNetworkError(e, networkObserver.isOnline.value, context)
+                    _uiState.update {
+                        it.copy(error = friendly ?: "Failed to decline: ${sanitizeErrorMessage(e.message)}")
+                    }
+                }
         }
     }
 
@@ -127,7 +144,15 @@ class SharedViewModel @Inject constructor(
                     onFailure = { e ->
                         // Surface the real error (API path, crypto failure, network) so we can
                         // actually diagnose Method Not Allowed / 4xx responses from a snackbar.
-                        _uiState.update { it.copy(error = "Accept failed: ${e.message ?: e::class.simpleName}") }
+                        // Friendly network message takes precedence over the raw API path so a
+                        // dropped connection doesn't render as a stack-trace fragment.
+                        val friendly = friendlyNetworkError(e, networkObserver.isOnline.value, context)
+                        _uiState.update {
+                            it.copy(
+                                error = friendly
+                                    ?: "Accept failed: ${sanitizeErrorMessage(e.message ?: e::class.simpleName)}",
+                            )
+                        }
                     },
                 )
         }
@@ -141,22 +166,33 @@ class SharedViewModel @Inject constructor(
         viewModelScope.launch {
             val userId = accountManager.getPrimaryUserId().first() ?: return@launch
             _uiState.update { it.copy(isLoading = true, error = null) }
+            // supervisorScope is required because plain async {} children that fail
+            // propagate the exception to the parent scope BEFORE await() resumes — the
+            // runCatching never gets a chance to catch the rethrown ApiException.
+            // Symptoms: toggling wifi off mid-load caused a FATAL UnknownHostException
+            // to escape this block to the top of the launch.
             runCatching {
-                val sharedByMeDeferred = async { driveRepo.loadAlbums(userId) }
-                val sharedWithMeDeferred = async { driveRepo.loadSharedWithMeAlbums(userId) }
-                val pendingDeferred = async { runCatching { driveRepo.loadPendingInvitations(userId) }.getOrElse { emptyList() } }
-                Triple(sharedByMeDeferred.await(), sharedWithMeDeferred.await(), pendingDeferred.await())
+                kotlinx.coroutines.supervisorScope {
+                    val sharedByMeDeferred = async { driveRepo.loadAlbums(userId) }
+                    val sharedWithMeDeferred = async { driveRepo.loadSharedWithMeAlbums(userId) }
+                    val pendingDeferred = async { runCatching { driveRepo.loadPendingInvitations(userId) }.getOrElse { emptyList() } }
+                    Triple(sharedByMeDeferred.await(), sharedWithMeDeferred.await(), pendingDeferred.await())
+                }
             }.fold(
                 onSuccess = { (albums, sharedWithMe, pending) ->
                     _uiState.update { it.copy(isLoading = false, allAlbums = albums, sharedWithMeAlbums = sharedWithMe, pendingInvitations = pending) }
                 },
                 onFailure = { e ->
-                    val networkErr = e.javaClass.name.contains("UnknownHost") ||
-                        e.javaClass.name.contains("SocketTimeout") ||
-                        e.javaClass.name.contains("SocketException")
+                    // Network drop → keep error null so the offline banner + the avatar
+                    // dot tell the user why nothing showed up. Non-network exceptions
+                    // (auth, crypto) still surface a sanitized message in the error sheet.
+                    val friendly = friendlyNetworkError(e, networkObserver.isOnline.value, context)
                     _uiState.update {
-                        it.copy(isLoading = false,
-                            error = if (networkErr) null else "Failed to load shared albums: ${e.message}")
+                        it.copy(
+                            isLoading = false,
+                            error = if (friendly != null) null
+                                else "Failed to load shared albums: ${sanitizeErrorMessage(e.message)}",
+                        )
                     }
                 },
             )

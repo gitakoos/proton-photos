@@ -35,12 +35,14 @@ import android.os.ParcelFileDescriptor
 import android.provider.MediaStore
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.SyncState
 import eu.akoos.photos.domain.entity.SyncStatus
 import coil.imageLoader
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -143,6 +145,19 @@ data class VideoEditorUiState(
      * end-to-end (launcher in the screen, resolved by [onDeletePermissionResolved]).
      */
     val pendingDeleteIntent: android.app.PendingIntent? = null,
+    /**
+     * Latched discriminator for how the editor was entered — drives the save flow's
+     * dispatch between in-place overwrite, cloud upload, and the always-copy External
+     * path. Null until [VideoEditorViewModel.loadLocal] / [loadCloud] / [loadExternal]
+     * publishes the source.
+     */
+    val source: VideoEditorSource? = null,
+    /**
+     * Set true when an [VideoEditorSource.External] save lands as a fresh MediaStore copy
+     * under the editor's default video output directory. The screen reads this to show
+     * the "Saved a copy" feedback so the user knows the foreign original was not mutated.
+     */
+    val savedAsCopy: Boolean = false,
 )
 
 sealed class VideoSaveResult {
@@ -160,6 +175,26 @@ enum class VideoSaveMode { Overwrite, Copy }
  * users to wonder whether the save had finished or stalled.
  */
 enum class VideoSaveStage { Idle, Encoding, Encrypting, Uploading }
+
+/**
+ * Discriminates how the editor was entered so the save flow knows whether the source
+ * URI is safe to write back into.
+ *
+ *  - [Local] — picked from the in-app gallery; the URI points at a MediaStore item the
+ *    user is free to overwrite (subject to R+ consent for foreign-owner rows).
+ *  - [Cloud] — opened on a Drive-only video; the cached file is the edit input, the save
+ *    flow uploads a new linkId.
+ *  - [External] — arrived via Intent.ACTION_EDIT or ACTION_VIEW from outside the app
+ *    (system "Open with" / "Edit with" chooser). The foreign URI may be read-only, owned
+ *    by another app, or backed by a transient grant we lose at process death; save is
+ *    forced to a fresh MediaStore copy in the editor's default video output directory so
+ *    the foreign original is never mutated.
+ */
+sealed class VideoEditorSource {
+    data class Local(val uri: String, val displayName: String, val mimeType: String) : VideoEditorSource()
+    data class Cloud(val photo: CloudPhoto) : VideoEditorSource()
+    data class External(val uri: String, val displayName: String, val mimeType: String) : VideoEditorSource()
+}
 
 @HiltViewModel
 class VideoEditorViewModel @Inject constructor(
@@ -221,6 +256,8 @@ class VideoEditorViewModel @Inject constructor(
                 isLoading = true,
                 errorMessage = null,
                 saveResult = null,
+                source = VideoEditorSource.Local(uri, displayName, mimeType),
+                savedAsCopy = false,
             )
         }
         viewModelScope.launch(Dispatchers.IO) {
@@ -283,6 +320,89 @@ class VideoEditorViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Loads an externally-supplied video (system "Open with" / "Edit with" chooser
+     * entry, ACTION_EDIT / ACTION_VIEW from a foreign app). Identical to [loadLocal]
+     * except the source is tagged [VideoEditorSource.External] so [save] always writes
+     * a fresh MediaStore copy via the editor's default video copy path rather than
+     * attempting an in-place overwrite — the foreign URI may be read-only, may belong to
+     * another app's MediaStore row, or may be backed by a transient grant that
+     * disappears at process death, and we never mutate files we did not create.
+     */
+    fun loadExternal(uri: String, displayName: String, mimeType: String) {
+        _state.update {
+            it.copy(
+                sourceUri = uri,
+                displayName = displayName,
+                mimeType = mimeType,
+                isLoading = true,
+                errorMessage = null,
+                saveResult = null,
+                source = VideoEditorSource.External(uri, displayName, mimeType),
+                savedAsCopy = false,
+            )
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            val parsed = runCatching { Uri.parse(uri) }.getOrNull()
+            if (parsed == null) {
+                _state.update {
+                    it.copy(
+                        isLoading = false,
+                        errorMessage = context.getString(R.string.editor_external_load_error),
+                    )
+                }
+                return@launch
+            }
+            val retriever = MediaMetadataRetriever()
+            val result = runCatching {
+                retriever.setDataSource(context, parsed)
+                val dur = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+                    ?.toLongOrNull() ?: 0L
+                val rot = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)
+                    ?.toIntOrNull() ?: 0
+                val w = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)
+                    ?.toIntOrNull() ?: 0
+                val h = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)
+                    ?.toIntOrNull() ?: 0
+                VideoMeta(dur, rot, w, h)
+            }
+            runCatching { retriever.release() }
+            val meta = result.getOrElse {
+                _state.update {
+                    it.copy(
+                        isLoading = false,
+                        errorMessage = context.getString(R.string.editor_external_load_error),
+                    )
+                }
+                return@launch
+            }
+            sourceRotationDegrees = ((meta.rotation % 360) + 360) % 360
+            // Encoded dims swap into post-rotation effective dims so the crop overlay
+            // clamps to the orientation the user actually sees — matches [loadLocal].
+            val effW = if (sourceRotationDegrees % 180 != 0) meta.height else meta.width
+            val effH = if (sourceRotationDegrees % 180 != 0) meta.width else meta.height
+            _state.update {
+                it.copy(
+                    durationMs = meta.duration,
+                    trimStartMs = 0L,
+                    trimEndMs = meta.duration,
+                    rotationDegrees = 0,
+                    cropRect = null,
+                    sourceWidth = effW,
+                    sourceHeight = effH,
+                    audioOverlayUri = null,
+                    audioOverlayDisplayName = null,
+                    audioOverlayDurationMs = 0L,
+                    audioTrimStartMs = 0L,
+                    audioTrimEndMs = 0L,
+                    originalAudioGain = 1.0f,
+                    musicAudioGain = 1.0f,
+                    isLoading = false,
+                )
+            }
+        }
+    }
+
     private data class VideoMeta(val duration: Long, val rotation: Int, val width: Int, val height: Int)
 
     /**
@@ -306,6 +426,8 @@ class VideoEditorViewModel @Inject constructor(
                 isLoading = true,
                 errorMessage = null,
                 saveResult = null,
+                source = VideoEditorSource.Cloud(photo),
+                savedAsCopy = false,
             )
         }
         viewModelScope.launch(Dispatchers.IO) {
@@ -560,12 +682,33 @@ class VideoEditorViewModel @Inject constructor(
         _state.update { it.copy(saveResult = null, saveProgress = null) }
     }
 
+    /** Clears the [VideoEditorUiState.savedAsCopy] flag once the screen has shown the
+     *  "Saved a copy" feedback, so a subsequent save doesn't re-fire the toast. */
+    fun consumeSavedAsCopy() {
+        _state.update { it.copy(savedAsCopy = false) }
+    }
+
+    /** Clears the error popup state so the screen can hide it. Called from the
+     *  ErrorPopup's OK action — the screen itself usually pops the back stack right
+     *  after, but if the user lands here again (NavBackStackEntry reuse) the cleared
+     *  state ensures the popup doesn't re-appear without a new failure. */
+    fun clearError() {
+        _state.update { it.copy(errorMessage = null) }
+    }
+
     private var pendingWriteMode: VideoSaveMode? = null
 
     fun save(mode: VideoSaveMode, allowWriteRequestRecovery: Boolean = true) {
         val s = _state.value
         val sourceUri = s.sourceUri ?: return
         if (s.isSaving) return
+        // External entries (system "Open with" / "Edit with" chooser) always land as a
+        // fresh MediaStore copy in the editor's default video output directory. The
+        // foreign URI may be read-only, owned by another app, or backed by a transient
+        // grant we will lose at process death — overwriting it ranges from impossible to
+        // outright destructive of a file we did not create. Force Copy mode here so the
+        // caller's choice (if any) cannot bypass this rule.
+        val effectiveMode = if (s.source is VideoEditorSource.External) VideoSaveMode.Copy else mode
         viewModelScope.launch(Dispatchers.IO) {
             // Decide between fast stream-copy and full re-encode. A re-encode is required
             // whenever the user has set a crop OR swapped the audio track — both modify
@@ -617,8 +760,8 @@ class VideoEditorViewModel @Inject constructor(
                     syncedTempFile != null -> saveLocalFromExistingFile(
                         s, mode, editTimestampMs, allowWriteRequestRecovery, syncedTempFile,
                     )
-                    needsReencode -> saveReencoded(s, mode, finalRotation, editTimestampMs, allowWriteRequestRecovery)
-                    else -> saveStreamCopy(s, mode, finalRotation, editTimestampMs, allowWriteRequestRecovery)
+                    needsReencode -> saveReencoded(s, effectiveMode, finalRotation, editTimestampMs, allowWriteRequestRecovery)
+                    else -> saveStreamCopy(s, effectiveMode, finalRotation, editTimestampMs, allowWriteRequestRecovery)
                 }
                 val savedUri: Uri? = when (result) {
                     is VideoSaveResult.Success -> result.uri
@@ -699,7 +842,20 @@ class VideoEditorViewModel @Inject constructor(
             // pendingWriteIntent suspended the save until the user reacts to the consent
             // dialog — leave isSaving on the state from that branch alone.
             if (_state.value.pendingWriteIntent == null) {
-                _state.update { it.copy(isSaving = false, saveResult = saveResult, saveProgress = null, saveStage = VideoSaveStage.Idle) }
+                val markCopied = s.source is VideoEditorSource.External &&
+                    (saveResult is VideoSaveResult.Success || saveResult is VideoSaveResult.SuccessAsCopy)
+                _state.update {
+                    it.copy(
+                        isSaving = false,
+                        saveResult = saveResult,
+                        saveProgress = null,
+                        saveStage = VideoSaveStage.Idle,
+                        // Latch the "Saved a copy" hint for External entries — the screen's
+                        // LaunchedEffect(savedAsCopy) raises the post-save feedback so the user
+                        // sees that the foreign original was left untouched.
+                        savedAsCopy = it.savedAsCopy || markCopied,
+                    )
+                }
             }
         }
     }
@@ -743,6 +899,7 @@ class VideoEditorViewModel @Inject constructor(
                     originalAudioGain = s.originalAudioGain,
                     musicAudioGain = s.musicAudioGain,
                     onProgress = { p -> _state.update { it.copy(saveProgress = p) } },
+                    isActive = { isActive },
                 )
             }
             needsReencode -> {
@@ -758,6 +915,7 @@ class VideoEditorViewModel @Inject constructor(
                     originalAudioGain = s.originalAudioGain,
                     musicAudioGain = s.musicAudioGain,
                     onProgress = { p -> _state.update { it.copy(saveProgress = p) } },
+                    isActive = { isActive },
                 )
             }
             else -> muxTrimmed(
@@ -849,7 +1007,7 @@ class VideoEditorViewModel @Inject constructor(
             height = s.sourceHeight,
             duration = (s.trimEndMs - s.trimStartMs).coerceAtLeast(0L),
         )
-        val hash = sha256(tempFile)
+        val hash = sha1(tempFile)
         val newLinkId = cloudRepo.uploadFile(userId, item, hash, uploadUri) { phase, doneBytes, totalBytes ->
             // Distinguish the encrypt and CDN-PUT phases on the sheet so the user sees
             // two distinct progress bars (Encrypting → Uploading) instead of a single
@@ -960,6 +1118,7 @@ class VideoEditorViewModel @Inject constructor(
                     originalAudioGain = s.originalAudioGain,
                 musicAudioGain = s.musicAudioGain,
                     onProgress = { p -> _state.update { it.copy(saveProgress = p) } },
+                    isActive = { isActive },
                 )
             } else {
                 muxTrimmed(
@@ -993,7 +1152,7 @@ class VideoEditorViewModel @Inject constructor(
                 height = s.sourceHeight,
                 duration = (s.trimEndMs - s.trimStartMs).coerceAtLeast(0L),
             )
-            val hash = sha256(tempFile)
+            val hash = sha1(tempFile)
             // Flip to Uploading just before the upload starts so the sheet stops sitting
             // at 100 % silently while the cloud leg runs.
             _state.update { it.copy(saveStage = VideoSaveStage.Encrypting, saveProgress = 0f) }
@@ -1018,8 +1177,14 @@ class VideoEditorViewModel @Inject constructor(
         }
     }
 
-    private fun sha256(file: File): String {
-        val digest = java.security.MessageDigest.getInstance("SHA-256")
+    /**
+     * Hex-encodes the SHA-1 of the file's plaintext bytes. The upload pipeline
+     * feeds this into `Common.Digests.SHA1` of the encrypted xAttr blob AND into
+     * the `HMAC-SHA256(rootNodeHashKey, ...)` that produces the wire ContentHash.
+     * See `PhotoEditorViewModel.sha1` for the cross-client rationale.
+     */
+    private fun sha1(file: File): String {
+        val digest = java.security.MessageDigest.getInstance("SHA-1")
         file.inputStream().use { stream ->
             val buf = ByteArray(8192)
             var read: Int
@@ -1159,6 +1324,7 @@ class VideoEditorViewModel @Inject constructor(
                 onProgress = { p ->
                     _state.update { it.copy(saveProgress = p) }
                 },
+                isActive = { isActive },
             )
             val written = when (mode) {
                 VideoSaveMode.Overwrite -> try {
@@ -1495,6 +1661,7 @@ class VideoEditorViewModel @Inject constructor(
                 musicAudioGain = s.musicAudioGain,
                     onProgress = { /* Cloud-fanout progress not surfaced — local save already
                                       finished and the user sees a "Saved" state. */ },
+                    isActive = { isActive },
                 )
             } else {
                 muxTrimmed(
@@ -1527,7 +1694,7 @@ class VideoEditorViewModel @Inject constructor(
                 height = s.sourceHeight,
                 duration = (s.trimEndMs - s.trimStartMs).coerceAtLeast(0L),
             )
-            val hash = sha256(tempFile)
+            val hash = sha1(tempFile)
             _state.update { it.copy(saveStage = VideoSaveStage.Encrypting, saveProgress = 0f) }
             val newLinkId = cloudRepo.uploadFile(userId, item, hash, uploadUri) { phase, doneBytes, totalBytes ->
                 val frac = (doneBytes.toFloat() / totalBytes.coerceAtLeast(1L).toFloat()).coerceIn(0f, 1f)

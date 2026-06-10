@@ -157,6 +157,10 @@ fun PhotoEditorScreen(
     syncedCloudCounterpart: CloudPhoto? = null,
     /** If the photo was opened from an album, the new cloud uploads are added to it too. */
     sourceAlbumLinkId: String? = null,
+    /** Non-null when the editor was launched from a system "Open with" / "Edit with"
+     *  chooser. Takes precedence over [localUri] / [cloudPhoto]; the save flow is
+     *  forced to copy-to-MediaStore so the foreign original is never mutated. */
+    externalRequest: eu.akoos.photos.navigation.ExternalEditRequest? = null,
     onBack: () -> Unit,
     onSaved: () -> Unit,
     vm: PhotoEditorViewModel = hiltViewModel(),
@@ -177,17 +181,21 @@ fun PhotoEditorScreen(
     val saveSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     // Draft rect for the free-form crop. Stays null until the user enters the Crop
     // tool, at which point it seeds from the committed cropRect (or full-image bounds).
-    // The user can drag corners / pan the rect; only on "Apply" does vm.applyCrop(...)
-    // commit. Snapped chips also seed this rect.
+    // The user drags corners / pan the rect and each change commits live via vm.applyCrop;
+    // pendingCropRect just mirrors that committed value for the overlay. Snapped chips and
+    // Reset also seed this rect.
     var pendingCropRect by remember { mutableStateOf<android.graphics.Rect?>(null) }
     // Seed pendingCropRect whenever the user enters the Crop tool, and clear it when
-    // they leave. originalBitmap may not be ready yet — handled by the LaunchedEffect.
-    androidx.compose.runtime.LaunchedEffect(activeTool, state.originalBitmap) {
+    // they leave. Full-image bounds come from the DISPLAYED crop bitmap (rotation already
+    // baked in, so width/height match the rect's display space). adjustedBitmapNoCrop may
+    // not be ready yet — handled by the LaunchedEffect re-running on it.
+    val cropDisplayBitmap = state.adjustedBitmapNoCrop ?: state.originalBitmap
+    androidx.compose.runtime.LaunchedEffect(activeTool, cropDisplayBitmap) {
         if (activeTool == Tool.Crop) {
-            val orig = state.originalBitmap
-            if (orig != null && pendingCropRect == null) {
+            val disp = cropDisplayBitmap
+            if (disp != null && pendingCropRect == null) {
                 pendingCropRect = state.adjustments.cropRect
-                    ?: android.graphics.Rect(0, 0, orig.width, orig.height)
+                    ?: android.graphics.Rect(0, 0, disp.width, disp.height)
             }
         } else {
             pendingCropRect = null
@@ -206,9 +214,15 @@ fun PhotoEditorScreen(
         vm.setCloudCounterpart(syncedCloudCounterpart)
     }
 
-    // Load source once.
-    androidx.compose.runtime.LaunchedEffect(localUri, cloudPhoto?.linkId) {
+    // Load source once. externalRequest wins when present so the system "Edit with"
+    // chooser entry path doesn't fight with a stale localUri left in scope.
+    androidx.compose.runtime.LaunchedEffect(externalRequest?.uri, localUri, cloudPhoto?.linkId) {
         when {
+            externalRequest != null -> vm.loadExternal(
+                uri = externalRequest.uri,
+                displayName = externalRequest.displayName,
+                mimeType = externalRequest.mimeType,
+            )
             cloudPhoto != null -> vm.loadCloud(cloudPhoto)
             localUri != null   -> vm.loadLocal(localUri, localDisplayName ?: "photo.jpg", localMimeType ?: "image/jpeg")
         }
@@ -268,6 +282,20 @@ fun PhotoEditorScreen(
         }
     }
 
+    // External-source save feedback. The Save / SuccessAsCopy branches above handle the
+    // device-owned URI case; External is a separate flag the VM latches on its forced
+    // copy-to-MediaStore save so the toast fires reliably even though the SaveResult
+    // path is Success (we DID succeed at writing — just always as a fresh copy).
+    androidx.compose.runtime.LaunchedEffect(state.savedAsCopy) {
+        if (state.savedAsCopy) {
+            android.widget.Toast.makeText(
+                saveContext,
+                saveContext.getString(R.string.editor_saved_as_copy),
+                android.widget.Toast.LENGTH_SHORT,
+            ).show()
+        }
+    }
+
 
     val canUndo by vm.canUndo.collectAsStateWithLifecycle()
     val canRedo by vm.canRedo.collectAsStateWithLifecycle()
@@ -296,10 +324,10 @@ fun PhotoEditorScreen(
         )
 
         // ── Preview area ─────────────────────────────────────────────────────
-        // While Crop is the active tool we ignore previewBitmap and render the FULL
-        // uncropped original instead, with a draggable crop overlay on top. The user
-        // hits "Apply" in CropPanel to commit the rect via vm.applyCrop(); after that
-        // they normally switch tabs and the regular previewBitmap path resumes.
+        // While Crop is the active tool we ignore previewBitmap and render the uncropped
+        // (but rotation- and colour-adjusted) bitmap instead, with a draggable crop overlay
+        // on top. Releasing a drag commits the rect live via vm.applyCrop() — no Apply step —
+        // so switching tabs resumes the regular previewBitmap path already showing the crop.
         Box(
             Modifier.weight(1f).fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
             contentAlignment = Alignment.Center,
@@ -322,16 +350,28 @@ fun PhotoEditorScreen(
                     )
                 }
                 activeTool == Tool.Crop && state.originalBitmap != null -> CropPreview(
-                    // Use originalBitmap because the crop rect coordinates are in the
-                    // ORIGINAL image's pixel space. previewBitmap has the user's existing
-                    // crop already applied, so handing it to the crop overlay would put
-                    // the rect on the wrong canvas size and produce out-of-bounds reads
-                    // → crash. The trade-off: in-progress brightness/saturation tweaks
-                    // are not visible in the crop view (a separate "pre-crop preview"
-                    // bitmap is needed for that, deferred).
-                    bitmap = state.originalBitmap!!,
+                    // Use adjustedBitmapNoCrop so colour edits AND any rotation / flip the
+                    // user applied stay visible while they pick a crop rectangle — the Crop
+                    // tab then shows the same picture the other tabs do, and the rect lives in
+                    // that rotated display space (which the pipeline crops in, post-rotation).
+                    // Fall back to originalBitmap for the brief window between load and the
+                    // first adjust-render — identical dimensions at 0° rotation. previewBitmap
+                    // is unsuitable because it has crop already applied; that would put the
+                    // rect on the wrong canvas size and produce out-of-bounds reads → crash.
+                    bitmap = state.adjustedBitmapNoCrop ?: state.originalBitmap!!,
                     cropRect = pendingCropRect,
+                    // During the drag only the lightweight overlay rect updates (no re-render).
                     onCropRectChanged = { pendingCropRect = it },
+                    // On release the rect commits to crop state, so other tabs and save reflect
+                    // it without a separate Apply press. Committing here instead of per-tick
+                    // keeps it to one render + one undo entry per gesture. A full-image rect
+                    // commits null so the pipeline skips a pointless full-size createBitmap().
+                    onCropRectCommit = {
+                        val disp = cropDisplayBitmap
+                        val full = disp != null && it.left == 0 && it.top == 0 &&
+                            it.right == disp.width && it.bottom == disp.height
+                        vm.applyCrop(if (full) null else it)
+                    },
                 )
                 state.previewBitmap != null -> ImageWithRedactOverlay(
                     bitmap = state.previewBitmap!!,
@@ -536,8 +576,8 @@ private fun SaveSheet(
             title = if (isCloud) "Save as new copy" else "Save as copy",
             subtitle = when {
                 isCloud  -> "Uploads as a new photo. The original stays in Drive."
-                isSynced -> "Creates a new file in Pictures/Proton Photos AND uploads a paired copy to Drive."
-                else     -> "Creates a new file in Pictures/Proton Photos."
+                isSynced -> "Creates a new file in your gallery AND uploads a paired copy to Drive."
+                else     -> "Creates a new file in your gallery."
             },
             onClick = { onPicked(SaveMode.Copy) },
         )
@@ -552,7 +592,7 @@ private fun SaveSheet(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Center,
         ) {
-            Text("Cancel", color = FgPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            Text(stringResource(R.string.cancel), color = FgPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
         }
     }
 }
@@ -576,7 +616,8 @@ private fun TopBar(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         IconBubble(onClick = onBack) {
-            Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = FgPrimary, modifier = Modifier.size(20.dp))
+            Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.onboarding_back),
+                tint = FgPrimary, modifier = Modifier.size(20.dp))
         }
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
             // Undo/Redo are placed left of Reset/Save so the user's hand doesn't cross the
@@ -585,7 +626,7 @@ private fun TopBar(
             IconBubble(onClick = onUndo, enabled = canUndo) {
                 Icon(
                     Icons.AutoMirrored.Filled.Undo,
-                    "Undo",
+                    stringResource(R.string.cd_editor_undo),
                     tint = if (canUndo) FgPrimary else FgDim,
                     modifier = Modifier.size(18.dp),
                 )
@@ -593,13 +634,14 @@ private fun TopBar(
             IconBubble(onClick = onRedo, enabled = canRedo) {
                 Icon(
                     Icons.AutoMirrored.Filled.Redo,
-                    "Redo",
+                    stringResource(R.string.cd_editor_redo),
                     tint = if (canRedo) FgPrimary else FgDim,
                     modifier = Modifier.size(18.dp),
                 )
             }
             IconBubble(onClick = onReset) {
-                Icon(Icons.Default.Restore, "Reset", tint = FgDim, modifier = Modifier.size(18.dp))
+                Icon(Icons.Default.Restore, stringResource(R.string.cd_editor_reset),
+                    tint = FgDim, modifier = Modifier.size(18.dp))
             }
             SavePill(isSaving = isSaving, onClick = onSave)
         }
@@ -623,7 +665,7 @@ private fun SavePill(isSaving: Boolean, onClick: () -> Unit) {
         } else {
             Icon(Icons.Default.Check, null, tint = Color.White, modifier = Modifier.size(16.dp))
         }
-        Text("Save", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+        Text(stringResource(R.string.action_save), color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
     }
 }
 
@@ -1009,16 +1051,21 @@ private fun CropPanel(
     pendingCropRect: android.graphics.Rect?,
     onPendingCropRectChange: (android.graphics.Rect?) -> Unit,
 ) {
-    val orig = state.originalBitmap ?: return
+    // Full-image bounds and ratio math run against the DISPLAYED crop bitmap (rotation
+    // baked in), so its width/height match the rect's display space after a turn. Falls
+    // back to the raw original for the brief pre-render window (same dimensions at 0°).
+    val disp = state.adjustedBitmapNoCrop ?: state.originalBitmap ?: return
+    val dispW = disp.width
+    val dispH = disp.height
     // The chip "selected" indicator compares against the pending rect (what's currently
     // showing in the overlay), not the committed cropRect, so tapping a ratio chip
     // updates the preview immediately and the chip lights up. Original = full-image.
-    val pending = pendingCropRect ?: android.graphics.Rect(0, 0, orig.width, orig.height)
+    val pending = pendingCropRect ?: android.graphics.Rect(0, 0, dispW, dispH)
     val fullImage = pending.left == 0 && pending.top == 0
-        && pending.right == orig.width && pending.bottom == orig.height
+        && pending.right == dispW && pending.bottom == dispH
     val selected = CropAspect.entries.firstOrNull { aspect ->
         if (aspect.ratio == null) fullImage
-        else pending == centeredCrop(orig.width, orig.height, aspect.ratio)
+        else pending == centeredCrop(dispW, dispH, aspect.ratio)
     } ?: if (fullImage) CropAspect.Original else null
 
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -1038,11 +1085,17 @@ private fun CropPanel(
                         )
                         .then(if (!isSelected) Modifier.border(0.5.dp, PillBorder, pillShape) else Modifier)
                         .clickable {
-                            val newRect = if (aspect.ratio == null)
-                                android.graphics.Rect(0, 0, orig.width, orig.height)
-                            else
-                                centeredCrop(orig.width, orig.height, aspect.ratio)
-                            onPendingCropRectChange(newRect)
+                            // Tapping a ratio chip both shows the rect in the overlay AND
+                            // commits it live (no Apply step). Original ratio = full image,
+                            // committed as null so the pipeline skips a full-size crop.
+                            if (aspect.ratio == null) {
+                                onPendingCropRectChange(android.graphics.Rect(0, 0, dispW, dispH))
+                                vm.applyCrop(null)
+                            } else {
+                                val newRect = centeredCrop(dispW, dispH, aspect.ratio)
+                                onPendingCropRectChange(newRect)
+                                vm.applyCrop(newRect)
+                            }
                         }
                         .padding(horizontal = 14.dp),
                     contentAlignment = Alignment.Center,
@@ -1060,32 +1113,16 @@ private fun CropPanel(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             modifier = Modifier.fillMaxWidth(),
         ) {
-            // Reset = clear the committed crop (and the pending rect snaps back to full).
+            // Reset clears the committed crop and snaps the pending rect back to full image.
+            // No Apply chip — drags and ratio chips already commit live (see onCropRectCommit
+            // and the chip click above).
             ActionChip(
                 label = androidx.compose.ui.res.stringResource(R.string.editor_crop_reset),
                 icon = Icons.Default.Restore,
                 enabled = true,
                 onClick = {
-                    onPendingCropRectChange(android.graphics.Rect(0, 0, orig.width, orig.height))
+                    onPendingCropRectChange(android.graphics.Rect(0, 0, dispW, dispH))
                     vm.applyCrop(null)
-                },
-                modifier = Modifier.weight(1f),
-            )
-            // Apply = commit the current pending rect via vm.applyCrop(). If the user
-            // happens to have it set to the full image we commit null instead so the
-            // bitmap pipeline doesn't pointlessly createBitmap() at full size.
-            ActionChip(
-                label = androidx.compose.ui.res.stringResource(R.string.editor_crop_apply),
-                icon = Icons.Default.Check,
-                enabled = true,
-                onClick = {
-                    val rect = pendingCropRect
-                    if (rect == null || (rect.left == 0 && rect.top == 0
-                            && rect.right == orig.width && rect.bottom == orig.height)) {
-                        vm.applyCrop(null)
-                    } else {
-                        vm.applyCrop(rect)
-                    }
                 },
                 modifier = Modifier.weight(1f),
             )
@@ -1107,6 +1144,7 @@ private fun CropPreview(
     bitmap: Bitmap,
     cropRect: android.graphics.Rect?,
     onCropRectChanged: (android.graphics.Rect) -> Unit,
+    onCropRectCommit: (android.graphics.Rect) -> Unit,
 ) {
     var containerSize by remember { mutableStateOf(IntSize.Zero) }
     val handleSizePx = with(LocalDensity.current) { 28.dp.toPx() }
@@ -1116,7 +1154,14 @@ private fun CropPreview(
     val touchSlopPx = with(LocalDensity.current) { 56.dp.toPx() }
     val minCropPx = 32f // bitmap-space minimum crop size — prevents zero-area rects
 
-    val rect = cropRect ?: android.graphics.Rect(0, 0, bitmap.width, bitmap.height)
+    // The pointerInput gesture loop below outlives recomposition: a plain capture
+    // of the rect would freeze its FIRST value inside the closure, so every new
+    // touch would measure handles against the original rect and snap the crop
+    // back. rememberUpdatedState keeps the loop reading the freshest rect.
+    val rectState = androidx.compose.runtime.rememberUpdatedState(
+        cropRect ?: android.graphics.Rect(0, 0, bitmap.width, bitmap.height),
+    )
+    val rect = rectState.value
 
     Box(
         modifier = Modifier
@@ -1145,91 +1190,86 @@ private fun CropPreview(
                 modifier = Modifier
                     .fillMaxSize()
                     .pointerInput(bitmap, fit) {
-                        // dragMode = which corner is being dragged, or "inside" for pan
-                        var dragMode: Int = -1 // 0..3 = TL/TR/BL/BR, 4 = inside, -1 = none
-                        var startRect = rect
+                        // Track which handle is grabbed so a fast move past another corner
+                        // doesn't snap to it mid-drag. An inside grab translates the rect; we
+                        // remember the finger's bitmap-space offset from the rect's top-left so
+                        // the translation stays anchored to the finger instead of jumping the
+                        // corner under it. Mirrors the video editor's crop mechanics.
+                        var grabbedHandle: CropHandle? = null
+                        var insideOffsetX = 0
+                        var insideOffsetY = 0
                         detectDragGestures(
                             onDragStart = { offset ->
-                                startRect = rect
-                                // Resolve which handle (or inside) the user grabbed by
-                                // comparing the touch point against the four corner
-                                // screen positions; within touchSlopPx counts as a hit.
-                                val corners = listOf(
-                                    Offset(
-                                        fit.offsetX + startRect.left * fit.scale,
-                                        fit.offsetY + startRect.top * fit.scale,
-                                    ),
-                                    Offset(
-                                        fit.offsetX + startRect.right * fit.scale,
-                                        fit.offsetY + startRect.top * fit.scale,
-                                    ),
-                                    Offset(
-                                        fit.offsetX + startRect.left * fit.scale,
-                                        fit.offsetY + startRect.bottom * fit.scale,
-                                    ),
-                                    Offset(
-                                        fit.offsetX + startRect.right * fit.scale,
-                                        fit.offsetY + startRect.bottom * fit.scale,
-                                    ),
-                                )
-                                val nearest = corners.withIndex()
-                                    .minByOrNull { (_, c) ->
-                                        val dx = c.x - offset.x
-                                        val dy = c.y - offset.y
-                                        dx * dx + dy * dy
-                                    }
-                                val nearestDist = nearest?.let {
-                                    val dx = it.value.x - offset.x
-                                    val dy = it.value.y - offset.y
-                                    kotlin.math.sqrt(dx * dx + dy * dy)
-                                } ?: Float.MAX_VALUE
-                                dragMode = if (nearestDist <= touchSlopPx) {
-                                    nearest!!.index
-                                } else {
-                                    // Pan only when the touch is inside the rect.
-                                    val leftPx = fit.offsetX + startRect.left * fit.scale
-                                    val rightPx = fit.offsetX + startRect.right * fit.scale
-                                    val topPx = fit.offsetY + startRect.top * fit.scale
-                                    val bottomPx = fit.offsetY + startRect.bottom * fit.scale
-                                    if (offset.x in leftPx..rightPx && offset.y in topPx..bottomPx) 4 else -1
+                                val rect = rectState.value
+                                grabbedHandle = pickCropHandle(rect, fit, offset, touchSlopPx)
+                                if (grabbedHandle == CropHandle.Inside) {
+                                    val bx = ((offset.x - fit.offsetX) / fit.scale)
+                                        .coerceIn(0f, bitmap.width.toFloat()).toInt()
+                                    val by = ((offset.y - fit.offsetY) / fit.scale)
+                                        .coerceIn(0f, bitmap.height.toFloat()).toInt()
+                                    insideOffsetX = bx - rect.left
+                                    insideOffsetY = by - rect.top
                                 }
                             },
-                            onDrag = { change, drag ->
-                                if (dragMode == -1) return@detectDragGestures
+                            onDrag = { change, _ ->
+                                val h = grabbedHandle ?: return@detectDragGestures
+                                val rect = rectState.value
                                 change.consume()
-                                // Convert the screen-space drag delta to bitmap-space.
-                                val dxBmp = drag.x / fit.scale
-                                val dyBmp = drag.y / fit.scale
-                                val r = android.graphics.Rect(rect)
-                                when (dragMode) {
-                                    0 -> { // TL
-                                        r.left = (r.left + dxBmp).toInt().coerceIn(0, r.right - minCropPx.toInt())
-                                        r.top  = (r.top  + dyBmp).toInt().coerceIn(0, r.bottom - minCropPx.toInt())
-                                    }
-                                    1 -> { // TR
-                                        r.right = (r.right + dxBmp).toInt().coerceIn(r.left + minCropPx.toInt(), bitmap.width)
-                                        r.top   = (r.top   + dyBmp).toInt().coerceIn(0, r.bottom - minCropPx.toInt())
-                                    }
-                                    2 -> { // BL
-                                        r.left   = (r.left   + dxBmp).toInt().coerceIn(0, r.right - minCropPx.toInt())
-                                        r.bottom = (r.bottom + dyBmp).toInt().coerceIn(r.top + minCropPx.toInt(), bitmap.height)
-                                    }
-                                    3 -> { // BR
-                                        r.right  = (r.right  + dxBmp).toInt().coerceIn(r.left + minCropPx.toInt(), bitmap.width)
-                                        r.bottom = (r.bottom + dyBmp).toInt().coerceIn(r.top + minCropPx.toInt(), bitmap.height)
-                                    }
-                                    4 -> { // pan inside — clamp the whole rect to bitmap bounds
-                                        val w = r.width()
-                                        val h = r.height()
-                                        val newLeft = (r.left + dxBmp).toInt().coerceIn(0, bitmap.width - w)
-                                        val newTop  = (r.top  + dyBmp).toInt().coerceIn(0, bitmap.height - h)
-                                        r.set(newLeft, newTop, newLeft + w, newTop + h)
+                                // Work in absolute bitmap-space from the finger position
+                                // rather than accumulating deltas — keeps the grabbed corner
+                                // pinned under the finger even on fast drags.
+                                val bx = ((change.position.x - fit.offsetX) / fit.scale)
+                                    .coerceIn(0f, bitmap.width.toFloat()).toInt()
+                                val by = ((change.position.y - fit.offsetY) / fit.scale)
+                                    .coerceIn(0f, bitmap.height.toFloat()).toInt()
+                                val min = minCropPx.toInt()
+                                val r = when (h) {
+                                    CropHandle.TopLeft -> android.graphics.Rect(
+                                        bx.coerceAtMost(rect.right - min),
+                                        by.coerceAtMost(rect.bottom - min),
+                                        rect.right, rect.bottom,
+                                    )
+                                    CropHandle.TopRight -> android.graphics.Rect(
+                                        rect.left,
+                                        by.coerceAtMost(rect.bottom - min),
+                                        bx.coerceAtLeast(rect.left + min),
+                                        rect.bottom,
+                                    )
+                                    CropHandle.BottomLeft -> android.graphics.Rect(
+                                        bx.coerceAtMost(rect.right - min),
+                                        rect.top,
+                                        rect.right,
+                                        by.coerceAtLeast(rect.top + min),
+                                    )
+                                    CropHandle.BottomRight -> android.graphics.Rect(
+                                        rect.left,
+                                        rect.top,
+                                        bx.coerceAtLeast(rect.left + min),
+                                        by.coerceAtLeast(rect.top + min),
+                                    )
+                                    CropHandle.Inside -> {
+                                        // Bodily translate, preserving W×H and clamping to
+                                        // bitmap bounds on both axes.
+                                        val w = rect.width()
+                                        val hgt = rect.height()
+                                        val newLeft = (bx - insideOffsetX).coerceIn(0, bitmap.width - w)
+                                        val newTop  = (by - insideOffsetY).coerceIn(0, bitmap.height - hgt)
+                                        android.graphics.Rect(newLeft, newTop, newLeft + w, newTop + hgt)
                                     }
                                 }
                                 onCropRectChanged(r)
                             },
-                            onDragEnd = { dragMode = -1 },
-                            onDragCancel = { dragMode = -1 },
+                            // Commit the freshest rect on release so the crop applies without
+                            // an Apply tap. Only when a handle was actually grabbed — a stray
+                            // tap outside the rect must not re-commit and spawn an undo entry.
+                            onDragEnd = {
+                                if (grabbedHandle != null) onCropRectCommit(rectState.value)
+                                grabbedHandle = null
+                            },
+                            onDragCancel = {
+                                if (grabbedHandle != null) onCropRectCommit(rectState.value)
+                                grabbedHandle = null
+                            },
                         )
                     },
             ) {
@@ -1297,6 +1337,52 @@ private fun CropPreview(
             }
         }
     }
+}
+
+private enum class CropHandle { TopLeft, TopRight, BottomLeft, BottomRight, Inside }
+
+/**
+ * Edge-buffer crop-handle picker (ported from the video editor). A touch lands on a corner
+ * only when it sits within a tight buffer of two adjacent edges (top+left, top+right,
+ * bottom+left, bottom+right); touches well inside the rect become [CropHandle.Inside]
+ * (translate), and touches well outside return null.
+ *
+ * This replaces the old "nearest corner within slop" test, which on portrait crops claimed
+ * every touch above the rect's vertical midpoint for the nearest top corner — so dragging
+ * the body of the rect resized it instead of moving it, and it felt like the rect couldn't
+ * be repositioned.
+ */
+private fun pickCropHandle(
+    rect: android.graphics.Rect,
+    fit: FitRect,
+    point: Offset,
+    touchSlopPx: Float,
+): CropHandle? {
+    val l = fit.offsetX + rect.left * fit.scale
+    val t = fit.offsetY + rect.top * fit.scale
+    val r = fit.offsetX + rect.right * fit.scale
+    val b = fit.offsetY + rect.bottom * fit.scale
+    // Corner zone is tighter than the slop so it doesn't gobble the whole rect on
+    // small / portrait crops. 0.45x leaves a comfortable fingertip target while still
+    // freeing the rect interior for translation.
+    val edgeBufferPx = touchSlopPx * 0.45f
+    val nearTop = (point.y - t) in -touchSlopPx..edgeBufferPx
+    val nearBottom = (b - point.y) in -touchSlopPx..edgeBufferPx
+    val nearLeft = (point.x - l) in -touchSlopPx..edgeBufferPx
+    val nearRight = (r - point.x) in -touchSlopPx..edgeBufferPx
+
+    val corner = when {
+        nearTop && nearLeft -> CropHandle.TopLeft
+        nearTop && nearRight -> CropHandle.TopRight
+        nearBottom && nearLeft -> CropHandle.BottomLeft
+        nearBottom && nearRight -> CropHandle.BottomRight
+        else -> null
+    }
+    if (corner != null) return corner
+
+    val insideRect = point.x in (l - touchSlopPx)..(r + touchSlopPx) &&
+        point.y in (t - touchSlopPx)..(b + touchSlopPx)
+    return if (insideRect) CropHandle.Inside else null
 }
 
 // ─── Reusable components ────────────────────────────────────────────────────

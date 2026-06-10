@@ -24,6 +24,8 @@ package eu.akoos.photos.util
 
 import android.app.RecoverableSecurityException
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.Matrix
 import android.net.Uri
 import android.os.Build
 import android.util.Log
@@ -68,6 +70,16 @@ data class MetadataStripConfig(
         get() = !stripGps && !stripCameraInfo && !stripTimestamp && !stripSoftwareInfo
 }
 
+/** Outcome of an in-place strip. [NeedsPermission] means the OS raised a
+ *  [RecoverableSecurityException] for a non-app-owned MediaStore file on Android 10+; the caller
+ *  batches the affected URIs into a single [MediaStore.createWriteRequest], launches it, and
+ *  retries on RESULT_OK. */
+sealed interface StripResult {
+    data object Stripped : StripResult
+    data object NeedsPermission : StripResult
+    data object Failed : StripResult
+}
+
 object ExifHelper {
 
     @Suppress("DEPRECATION") // TAG_ISO_SPEED_RATINGS kept as fallback for older EXIF files.
@@ -108,6 +120,54 @@ object ExifHelper {
         }
     }
 
+    /** Reads the raw EXIF orientation tag (one of [ExifInterface]'s ORIENTATION_* values)
+     *  from a content [uri]. Returns ORIENTATION_NORMAL when the stream can't be opened or
+     *  carries no orientation. */
+    fun readOrientation(context: Context, uri: String): Int = try {
+        context.contentResolver.openInputStream(Uri.parse(uri))?.use {
+            ExifInterface(it).getAttributeInt(
+                ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL,
+            )
+        } ?: ExifInterface.ORIENTATION_NORMAL
+    } catch (_: Exception) {
+        ExifInterface.ORIENTATION_NORMAL
+    }
+
+    /** Same as [readOrientation] but for a local [file] (used for the cloud full-res
+     *  download, which lands on disk before decoding). */
+    fun readOrientation(file: File): Int = try {
+        ExifInterface(file.absolutePath).getAttributeInt(
+            ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL,
+        )
+    } catch (_: Exception) {
+        ExifInterface.ORIENTATION_NORMAL
+    }
+
+    /**
+     * Rotates / flips [bitmap] so its pixels match the EXIF [orientation]. BitmapFactory
+     * never honours the orientation tag, so a decode followed by this call yields the same
+     * upright image the gallery thumbnail shows. Returns the original bitmap unchanged for
+     * NORMAL / UNDEFINED (the common case) so no copy is made when none is needed.
+     */
+    fun applyOrientation(bitmap: Bitmap, orientation: Int): Bitmap {
+        val matrix = Matrix()
+        when (orientation) {
+            ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
+            ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
+            ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
+            ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.postScale(-1f, 1f)
+            ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.postScale(1f, -1f)
+            ExifInterface.ORIENTATION_TRANSPOSE -> { matrix.postRotate(90f); matrix.postScale(-1f, 1f) }
+            ExifInterface.ORIENTATION_TRANSVERSE -> { matrix.postRotate(270f); matrix.postScale(-1f, 1f) }
+            else -> return bitmap
+        }
+        return try {
+            Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+        } catch (_: Exception) {
+            bitmap
+        }
+    }
+
     /**
      * Copies the file from [uri] to a temp file, strips the configured metadata fields,
      * and returns the temp file path. Caller must delete the temp file after use.
@@ -134,6 +194,8 @@ object ExifHelper {
                 exif.setAttribute(ExifInterface.TAG_GPS_SPEED_REF, null)
                 exif.setAttribute(ExifInterface.TAG_GPS_TRACK, null)
                 exif.setAttribute(ExifInterface.TAG_GPS_TRACK_REF, null)
+                exif.setAttribute(ExifInterface.TAG_GPS_PROCESSING_METHOD, null)
+                exif.setAttribute(ExifInterface.TAG_GPS_DOP, null)
             }
             if (config.stripCameraInfo) {
                 exif.setAttribute(ExifInterface.TAG_MAKE, null)
@@ -173,18 +235,19 @@ object ExifHelper {
      * Works for files accessible via content resolver with rw mode
      * (e.g., app-owned files or with MANAGE_MEDIA permission).
      *
-     * Returns false (and logs) on:
-     *  - Pre-flight nothing-to-strip (no flags set).
-     *  - [RecoverableSecurityException] on Android 10+ when the file isn't app-owned — the
-     *    OS requires an IntentSender confirmation flow we don't drive yet (callers should
-     *    surface a friendly message; see PhotoViewerViewModel.stripMetadataFromLocal).
-     *  - Any other I/O or EXIF error.
+     * Returns:
+     *  - [StripResult.Stripped] on success.
+     *  - [StripResult.NeedsPermission] on Android 10+ when the file isn't app-owned — carries the
+     *    IntentSender from the [RecoverableSecurityException] so the caller can launch the system
+     *    write-permission dialog and retry. (See PhotoViewerViewModel / GalleryViewModel.)
+     *  - [StripResult.Failed] for a pre-flight no-op or any other I/O or EXIF error.
      */
     @Suppress("DEPRECATION") // TAG_ISO_SPEED_RATINGS kept to wipe the legacy tag too.
-    fun stripFieldsInPlace(context: Context, uri: String, config: MetadataStripConfig): Boolean {
-        if (config.isNoOp) return false
+    fun stripFieldsInPlace(context: Context, uri: String, config: MetadataStripConfig): StripResult {
+        if (config.isNoOp) return StripResult.Failed
         return try {
-            val fd = context.contentResolver.openFileDescriptor(Uri.parse(uri), "rw") ?: return false
+            val fd = context.contentResolver.openFileDescriptor(Uri.parse(uri), "rw")
+                ?: return StripResult.Failed
             fd.use {
                 val exif = ExifInterface(it.fileDescriptor)
                 if (config.stripGps) {
@@ -200,6 +263,8 @@ object ExifHelper {
                     exif.setAttribute(ExifInterface.TAG_GPS_SPEED_REF, null)
                     exif.setAttribute(ExifInterface.TAG_GPS_TRACK, null)
                     exif.setAttribute(ExifInterface.TAG_GPS_TRACK_REF, null)
+                    exif.setAttribute(ExifInterface.TAG_GPS_PROCESSING_METHOD, null)
+                    exif.setAttribute(ExifInterface.TAG_GPS_DOP, null)
                 }
                 if (config.stripCameraInfo) {
                     // Keep this set in sync with [stripToTempFile] — the user-facing UI
@@ -234,20 +299,21 @@ object ExifHelper {
                 }
                 exif.saveAttributes()
             }
-            true
+            StripResult.Stripped
         } catch (e: SecurityException) {
-            // Android 10+ scoped storage: rw on a non-app-owned MediaStore file requires
-            // the user to confirm via an IntentSender (RecoverableSecurityException carries
-            // it). Caller must surface a friendly message — we just log + bail here.
+            // Android 10+ scoped storage: rw on a non-app-owned MediaStore file requires the user
+            // to confirm via an IntentSender. RecoverableSecurityException carries one; surface it
+            // so the caller can launch the system dialog (or batch the URI into createWriteRequest)
+            // and retry. API <29 never raises the recoverable variant, so it falls through to Failed.
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && e is RecoverableSecurityException) {
-                Log.w(TAG, "stripFieldsInPlace: scoped-storage rw denied, IntentSender flow needed", e)
+                StripResult.NeedsPermission
             } else {
                 Log.w(TAG, "stripFieldsInPlace: SecurityException", e)
+                StripResult.Failed
             }
-            false
         } catch (e: Exception) {
             Log.w(TAG, "stripFieldsInPlace failed", e)
-            false
+            StripResult.Failed
         }
     }
 }

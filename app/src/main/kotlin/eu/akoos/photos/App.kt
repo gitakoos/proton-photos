@@ -30,6 +30,8 @@ import android.content.IntentFilter
 import android.os.Build
 import android.util.Log
 import androidx.appcompat.app.AppCompatDelegate
+import androidx.core.os.LocaleListCompat
+import androidx.datastore.preferences.core.edit
 import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.Configuration
 import androidx.work.DelegatingWorkerFactory
@@ -48,6 +50,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import eu.akoos.photos.data.preferences.LanguagePrefsBoot
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.ThemePrefsBoot
 import eu.akoos.photos.data.preferences.settingsDataStore
@@ -98,6 +101,12 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
         // Apply the user's theme to AppCompatDelegate so externally-launched Activities
         // (ProtonCore login/payment screens with their own DayNight XML theme) honour it too.
         applyStoredThemeMode()
+        // Apply the user's saved locale to AppCompatDelegate ONCE at process startup so
+        // ProtonCore login Activities (XML-based, outside our Compose tree) render in
+        // the chosen language. Runtime switches inside the app use LocaleOverride in
+        // the Compose tree and intentionally skip this call — calling it after process
+        // startup forces an Activity recreate which loses navigation state.
+        applyStoredLanguage()
         // Register notification channels eagerly so the first foreground-promoted Worker
         // run doesn't race with channel creation (Android 8+). Idempotent — safe to call
         // every cold start.
@@ -109,7 +118,33 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
         // start) cannot reach. Idempotent — ExistingPeriodicWorkPolicy.UPDATE means safe
         // to call on every launch.
         CachePruneWorker.schedule(WorkManager.getInstance(this))
+        seedAlbumOptInFromBucketMap()
         registerCacheCleanupOnBackground()
+    }
+
+    /**
+     * One-shot seed for [SettingsKeys.ALBUM_OPT_IN_FOLDER_NAMES]. The first launch after
+     * this code ships, copies the bucket names already present in [SettingsKeys.ALBUM_BUCKET_MAP]
+     * into the opt-in set, so installs that were silently mirroring folders as Drive albums
+     * keep mirroring exactly those folders after the toggle becomes user-visible. Gated on
+     * [SettingsKeys.ALBUM_OPT_IN_MIGRATED] so subsequent launches skip the work entirely.
+     */
+    private fun seedAlbumOptInFromBucketMap() {
+        appScope.launch {
+            runCatching {
+                val prefs = settingsDataStore.data.first()
+                if (prefs[SettingsKeys.ALBUM_OPT_IN_MIGRATED] == true) return@runCatching
+                val mapEntries = prefs[SettingsKeys.ALBUM_BUCKET_MAP].orEmpty()
+                val existingBucketNames = mapEntries
+                    .mapNotNull { it.substringBefore('=', missingDelimiterValue = "").takeIf { name -> name.isNotEmpty() } }
+                    .toSet()
+                settingsDataStore.edit { p ->
+                    p[SettingsKeys.ALBUM_OPT_IN_FOLDER_NAMES] = existingBucketNames
+                    p[SettingsKeys.ALBUM_OPT_IN_MIGRATED] = true
+                }
+                Log.d("AlbumOptInMigration", "Seeded album opt-in list with ${existingBucketNames.size} folders from ALBUM_BUCKET_MAP")
+            }
+        }
     }
 
     /**
@@ -184,7 +219,7 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
         // `isSystemInDarkTheme()`. We force NIGHT_YES for every value except an explicit
         // "light" preference — the app's color palette is built for dark surfaces, and the
         // previous "system" default made the login flow appear light on light-system phones
-        // (S22, default Samsung). The Compose-side ProtonPhotosTheme in MainActivity still
+        // (default theme on some OEM builds). The Compose-side ProtonPhotosTheme in MainActivity still
         // respects the user's full system/dark/light choice for the in-app surfaces, so a
         // user who explicitly picks "system" after first login still gets a system-following
         // main app — the login flow just doesn't bounce between modes.
@@ -212,6 +247,53 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
                 ThemePrefsBoot.write(this@App, fromDataStore)
                 // Note: don't re-apply on the fly — would cause activity recreate flash. The
                 // current visible theme stays; the corrected value will apply on next cold start.
+            }
+        }
+    }
+
+    /**
+     * Reads the cached language tag from a tiny SharedPreferences mirror and applies it
+     * to AppCompatDelegate exactly once at process startup. The canonical store is
+     * DataStore (`SettingsKeys.LANGUAGE`); the SharedPreferences side is kept in sync on
+     * every language write in `SettingsViewModel` / `OnboardingViewModel` and refreshed
+     * in the background here in case the canonical version drifted.
+     *
+     * Why a one-shot at startup: `setApplicationLocales` triggers an Activity recreate
+     * when called after startup, which loses navigation state and plays a reload
+     * animation. Runtime locale switches inside the app go through `LocaleOverride` in
+     * the Compose tree — this call only covers the externally-launched ProtonCore login
+     * Activities (XML-based, outside the Compose tree).
+     */
+    private fun applyStoredLanguage() {
+        val cached = LanguagePrefsBoot.read(this)
+        val desired = if (cached == "system" || cached.isEmpty()) {
+            LocaleListCompat.getEmptyLocaleList()
+        } else {
+            LocaleListCompat.forLanguageTags(cached)
+        }
+        // Dedup: setApplicationLocales triggers an Activity recreate (visible as a
+        // scale-from-center animation). If the framework already has the right locale
+        // from a previous session, skip the call. AppCompatDelegate persists
+        // setApplicationLocales across process death, so the no-op branch is the steady
+        // state once the user has picked a language.
+        val current = AppCompatDelegate.getApplicationLocales()
+        if (current.toLanguageTags() != desired.toLanguageTags()) {
+            AppCompatDelegate.setApplicationLocales(desired)
+        }
+        // Defensive: same drift-sync as applyStoredThemeMode(). Handles a first boot
+        // where DataStore already holds the migrated tag but the SharedPreferences
+        // mirror has nothing.
+        appScope.launch {
+            val fromDataStore = runCatching {
+                settingsDataStore.data.map { prefs ->
+                    prefs[SettingsKeys.LANGUAGE] ?: "system"
+                }.first()
+            }.getOrNull() ?: return@launch
+            if (fromDataStore != cached) {
+                LanguagePrefsBoot.write(this@App, fromDataStore)
+                // Don't re-apply on the fly — would force the Activity recreate this
+                // whole mechanism is built to avoid. The corrected value lands on the
+                // next cold start.
             }
         }
     }

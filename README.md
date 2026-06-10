@@ -2,7 +2,7 @@
 
 > **Unofficial** open-source Proton Drive Photos client for Android. Built against the publicly documented Drive API.
 
-[![Release](https://img.shields.io/badge/release-v2.0.0-blue)](https://github.com/gitakoos/proton-photos/releases/latest)
+[![Release](https://img.shields.io/badge/release-v2.1.0-blue)](https://github.com/gitakoos/proton-photos/releases/latest)
 [![License](https://img.shields.io/badge/license-GPL--3.0-green)](LICENSE)
 [![Min SDK](https://img.shields.io/badge/minSdk-26-orange)](https://developer.android.com/about/dashboards)
 
@@ -17,22 +17,26 @@ End-to-end encrypted photo backup and browsing for your Proton Drive Photos libr
 - Background sync — per-folder selection or "back up everything" with a per-folder exclude list, Wi-Fi-only toggle, continuous backup (uploads start within seconds of capture and resume after device reboot), three-photo parallel uploads.
 - Reinstall pairing — previously backed-up photos rejoin Synced state automatically after a clean install.
 - Delete after backup — optional toggle that removes the device copy as soon as the cloud upload succeeds, with a system trash consent notification that drains on unlock.
-- Albums — create, rename (cloud + local parity), add / remove photos, quick-set cover via long-press on any photo.
-- Multi-step share dialog — email chips, viewer / editor permissions, optional invite message.
+- Albums — every album is cloud-native and end-to-end encrypted: create, rename, add / remove photos, automatic cover that you can override with a long-press on any photo.
+- Album sharing — invite people by email with viewer or editor roles and an optional message, manage members and pending invites, revoke access or stop sharing entirely. Albums shared with you appear in a dedicated tab; "Save to my library" copies their photos into your own Photos.
+- Mirror folders to Drive albums — pick device folders and the app keeps a matching encrypted album on Drive in sync as new photos land.
 - Built-in photo editor — eight adjustments (brightness, exposure, contrast, highlights, shadows, saturation, tone, temperature), filter, redact, rotate, free-form crop, undo / redo.
-- Built-in video editor — trim, crop, rotate, music overlay with audio trim. Works on both device and cloud-hosted videos.
+- Built-in video editor — trim, crop, rotate, music overlay with audio trim. Works on both device and cloud-hosted videos. Strips embedded GPS and other location metadata from the exported clip.
+- Open-with support — hand a photo or video to the app from any file manager or gallery to view it full-screen, or to jump straight into the editor.
 - Photo viewer — slideshow with video support (waits for clips to finish), pinch-zoom, "On this day" memories card.
 - Pinch-to-zoom on the photos grid groups by day, month or year as you zoom in / out.
 - Calendar view — every day on a calendar, with a hero photo per day, an editable place + description, and the full grid of that day's photos and videos.
-- Search — filename, media type, sync state, year and month filters; the empty-state shows recent photos, an "On this day" carousel and a jump-to-month grid.
+- Search — filename, media type, sync state, year and month filters, with accent-insensitive matching so an unaccented query still finds accented names; the empty-state shows recent photos, an "On this day" carousel and a jump-to-month grid.
 - Timeline scrubber on the photos grid for fast year-jump navigation.
 - Multi-select bulk actions — download, add to album, delete, hide, strip metadata. Mixed device + cloud selection is guarded so nothing is silently dropped.
+- Cloud trash, in-app — browse deleted cloud photos, restore them, or empty the trash for good without leaving the app.
 - Hidden vault behind biometric / PIN. Heavy blur overlay on cells and viewer.
 - Per-field metadata stripping (GPS, camera, timestamps, software) on upload or in bulk.
 - Offline browsing — cached photos and videos work without a network connection.
 - Lazy thumbnail decryption — gallery populates instantly, thumbnails resolve as cells scroll into view.
 - One-tap bulk free-up of already-backed-up device copies.
 - Configurable app lock with timeout.
+- In-app updater — checks the releases page for a newer build, then downloads and installs the APK from within the app.
 - Home-screen widget — four modes including a Cloud Photos mode that pulls thumbnails from the encrypted on-disk cache, so the source bytes never enter the device's photo index or any other app's view.
 - Sandbox hardening — TLS cert pinning on every Proton call (API + CDN), network allowlist (only proton.me, quad9.net, cloudflare-dns.com reachable; cleartext blocked), `allowBackup="false"` + empty `dataExtractionRules` (no state migrates via Google Drive auto-backup or device transfer), all `Log.*` stripped in release builds, StrictMode cleartext detector in debug.
 - 6 languages (en, hu, de, fr, es, it), light / dark / system theme, 6 colour palettes (Default, Forest, Sunset, Sea, Sepia, Mono).
@@ -56,8 +60,9 @@ app/src/main/kotlin/eu/akoos/photos/
 │   ├── editor/       Photo + video editor
 │   ├── search/       Search with filename + content filters
 │   ├── hidden/       Hidden vault (PIN / biometric)
-│   ├── settings/     Settings, About, Privacy, Language, Theme, Palette
+│   ├── settings/     Settings, About, Privacy, Language, Theme, Palette, Trash, folder-mirror
 │   ├── lock/         App lock
+│   ├── updater/      In-app update orchestration
 │   ├── common/       Shared composables (ErrorPopup, ConfirmDialog, EmptyState, ThemedSnackbar)
 │   ├── util/         Presentation-layer helpers (formatters, focus helpers)
 │   └── theme/        Colour tokens + palette factories
@@ -71,10 +76,13 @@ app/src/main/kotlin/eu/akoos/photos/
 │   ├── db/           Room DAOs / entities / migrations
 │   ├── repository/
 │   │   └── drive/    Drive backend split per concern (Upload, Download,
-│   │                 Stream, Album, AlbumSharing, CloudTrash, …)
+│   │                 Stream, Album, AlbumSharing, AlbumCryptoChain,
+│   │                 CloudTrash, ThumbnailDecryptScheduler, …)
 │   ├── preferences/  DataStore
+│   ├── updater/      APK download + install
 │   └── hidden/       Hidden-vault storage
-├── di/               Hilt modules (Core, Network, Database, Repository, Stub)
+├── di/               Hilt modules (Core, Network, Database, Repository,
+│                     WorkManager, Updater, Stub)
 ├── navigation/       Single NavGraph
 ├── util/             Cross-cutting helpers (Exif, NetworkObserver, ErrorMessageSanitizer)
 ├── worker/           WorkManager workers
@@ -113,11 +121,13 @@ Telemetry / observability modules are pulled in (transitively required by some d
 | `PhotoUploadService` | Per-file streaming upload pipeline — 4 MB blocks → encrypt + sign → CDN PUT in parallel (bounded). Manifest = sorted block-hash concat + detached signature. Block spill files in `cacheDir`. |
 | `PhotoDownloadService` | Cloud → device. Stream + decrypt + apply `DATE_TAKEN` from `captureTime + zone offset`. Optional album subfolder. |
 | `PhotoStreamService` | Incremental cloud-state sync (mutation journal). Owns `createOrGetPhotosVolume` lazy bootstrap. |
-| `AlbumService` | Album CRUD: create / rename / set-cover, add/remove photos (batched). |
-| `AlbumSharingService` | Public link mint, email invite (PKESK encrypt to invitee + sign), member list / revoke, shared-with-me (primary + v2 backup endpoints), accept/decline. The multi-step share popup (email chips, permission picker, optional message) is wired through this service. |
+| `AlbumService` | Album CRUD: create / rename / set-cover, add/remove photos (batched). Mirrors selected device folders into matching Drive albums. |
+| `AlbumCryptoChain` | Single source of truth for album-share key selection — album NodeKey decrypt, photo parent-key resolution, and the share-context bundle that downstream code reuses. |
+| `AlbumSharingService` | Public link mint, email invite (PKESK encrypt to invitee + sign) with viewer / editor roles, member + invitation management (revoke / remove), leave or stop sharing, shared-with-me (primary + v2 backup endpoints), accept / decline, and server-side "Save to my library" copy. The multi-step share popup (email chips, role picker, optional message) is wired through this service. |
 | `PhotosShareService` | Per-user key cache (volumeId, shareId, rootLinkId, rootLinkKeyBytes, rootNodeHashKey) + shared API semaphore. Wiped on sign-out. |
 | `PhotosVolumeBootstrap` | First-run Photos volume + share + root-link creation. Handles `ALREADY_EXISTS` race via `getVolumes()` fallback. |
-| `CloudTrashService` | Cloud trash listing, restore (`moveTrashLinks`), permanent delete. |
+| `CloudTrashService` | Cloud trash listing, restore (`moveTrashLinks`), permanent delete — surfaced as the in-app Trash screen. |
+| `ThumbnailDecryptScheduler` | On-demand thumbnail decryption — resolves cells as they scroll into view, bounded + priority-ordered with prefetch so scroll stays smooth. |
 | `RecentUploadsTracker` | Short-TTL (90 s) recently-uploaded-linkIds map — stops stale rows from blocking cloud-delete propagation. |
 | `LinkDetailHelpers`, `ThumbnailHelpers`, `PhotoEntityBuilder` | Shared helpers (batch link metadata, JPEG thumbnail ≤512 px, DTO → Room entity mapping). |
 
@@ -127,7 +137,7 @@ Plus the layers around them:
 - `data/crypto/DriveCryptoHelper.kt` — thin wrapper over `me.proton.core:crypto*` (no custom crypto primitives; PGP delegated entirely to upstream).
 - `data/db/` — Room schema for the local mutation journal (`PhotoListingEntity`, `SyncStateEntity`) with exported schemas + migrations.
 - `domain/usecase/` — `UploadPendingUseCase`, `ReconcileSyncStateUseCase`, `DownloadPhotosUseCase`, `FreeUpSpaceUseCase`, `DeletePhotoUseCase`, `GetGalleryItemsUseCase`, `CategorizeItem`.
-- `worker/` — `SyncWorker`, `AlbumDownloadWorker`, `FreeUpSpaceWorker` (WorkManager + foreground service notifications).
+- `worker/` — `SyncWorker`, `AlbumDownloadWorker`, `FreeUpSpaceWorker`, `CachePruneWorker` (WorkManager + foreground service notifications, battery-aware constraints).
 - `presentation/` — Jetpack Compose UI (gallery, viewer, editor, albums, settings, …) and ViewModels.
 
 No private endpoints, no undocumented APIs, no obfuscation (`-dontobfuscate` in `proguard-rules.pro` so the released APK can be byte-compared to a fresh build from this source).

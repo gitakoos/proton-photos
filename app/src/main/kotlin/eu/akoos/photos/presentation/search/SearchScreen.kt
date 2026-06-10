@@ -45,7 +45,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -93,6 +93,12 @@ import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
 
+// Shared rounded shape for the filter rail's pill controls. A real corner radius —
+// rather than a full-capsule RoundedCornerShape(50) — keeps the hairline border crisp
+// at the chip ends instead of breaking up into a faint, fragmented outline. Matches the
+// filter-sheet chip radius so the two surfaces read as the same control family.
+private val chipShape = RoundedCornerShape(10.dp)
+
 @Composable
 fun SearchScreen(
     onBack: () -> Unit,
@@ -130,7 +136,7 @@ fun SearchScreen(
             ) {
                 Icon(
                     Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = null,
+                    contentDescription = stringResource(R.string.onboarding_back),
                     tint = colors.fgPrimary,
                 )
             }
@@ -170,7 +176,7 @@ fun SearchScreen(
                     ) {
                         Icon(
                             Icons.Filled.Close,
-                            contentDescription = null,
+                            contentDescription = stringResource(R.string.cd_clear_search),
                             tint = colors.fgDim,
                         )
                     }
@@ -290,8 +296,7 @@ fun SearchScreen(
                     .fillMaxSize()
                     .navigationBarsPadding(),
             ) {
-                items(results, key = { keyOf(it) }) { item ->
-                    val idx = results.indexOf(item)
+                itemsIndexed(results, key = { _, it -> keyOf(it) }) { idx, item ->
                     PhotoCell(
                         item = item,
                         onClick = { onPhotoClick(results, idx) },
@@ -343,9 +348,11 @@ private fun FilterRailRow(
         item(key = "filter_btn") {
             Row(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(50))
+                    // 1.dp keeps the outline solid in light mode, where a hairline
+                    // pillBorder all but vanished against the page.
+                    .clip(chipShape)
                     .background(colors.chipUnselectedBg)
-                    .border(0.5.dp, colors.pillBorder, RoundedCornerShape(50))
+                    .border(1.dp, colors.pillBorder, chipShape)
                     .clickable(onClick = onOpenSheet)
                     .padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -420,9 +427,13 @@ private fun ActiveFilterChip(
 ) {
     Row(
         modifier = Modifier
-            .clip(RoundedCornerShape(50))
-            .background(colors.chipSelectedBg)
-            .border(0.5.dp, colors.accent.copy(alpha = 0.5f), RoundedCornerShape(50))
+            // Same shape instance for clip + border so the rounded corners line up and
+            // can't shed a sliver. A subtle accent tint plus a 1.dp full-strength accent
+            // stroke marks the chip as active without the fragmentation a hairline,
+            // low-alpha stroke produced at sub-pixel coverage.
+            .clip(chipShape)
+            .background(colors.accent.copy(alpha = 0.15f))
+            .border(1.dp, colors.accent, chipShape)
             .clickable(onClick = onClear)
             .padding(start = 12.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,

@@ -98,11 +98,15 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.res.stringResource
@@ -154,8 +158,8 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-private val bubbleShape = CircleShape
-private val infoPillShape = RoundedCornerShape(999.dp)
+internal val bubbleShape = CircleShape
+internal val infoPillShape = RoundedCornerShape(999.dp)
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -165,6 +169,12 @@ fun PhotoViewerScreen(
     onBack: () -> Unit,
     showSaveToDevice: Boolean = true,
     sourceAlbumLinkId: String? = null,
+    /** True when the viewer was opened from a shared-with-me album. Suppresses every
+     *  destructive / mutating affordance (Move to trash, Delete from device, Delete
+     *  everywhere, Set as album cover, Rename, Edit) — the user is a guest on someone
+     *  else's album and the backend rejects those operations from the wrong share id
+     *  anyway. Save-to-device + Info stay visible because they're purely local. */
+    isReadOnlyAlbum: Boolean = false,
     /** Timestamp from the editor pop-back signal — keyed into the page-load effect so the
      *  viewer drops its bitmap cache + re-asks the VM for fresh bytes after a save. */
     editedAt: Long = 0L,
@@ -213,37 +223,36 @@ fun PhotoViewerScreen(
     // Load albums once for Add to Album feature
     LaunchedEffect(Unit) { viewModel.loadAlbums() }
     val scope = rememberCoroutineScope()
+    val snackbarHostState = remember { SnackbarHostState() }
 
-    // Surface add-to-album / save / load-albums failures as a Toast.
+    // Surface add-to-album / save / load-albums failures as a themed snackbar so
+    // the viewer's success+error feedback all share the same in-app look (instead
+    // of half being system Toast popups outside the app's theme).
     val transientError by viewModel.transientError.collectAsStateWithLifecycle()
-    val context = androidx.compose.ui.platform.LocalContext.current
     LaunchedEffect(transientError) {
         val msg = transientError ?: return@LaunchedEffect
-        android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_LONG).show()
+        snackbarHostState.showSnackbar(msg)
         viewModel.clearTransientError()
     }
-    // Success feedback for "Add to album". Mirrors the AddToAlbumState.Done snackbar in
-    // GalleryScreen.
+    // Success feedback for "Add to album" + "Set as album cover" — both collectors share a
+    // single repeatOnLifecycle(STARTED) wrap so they pause together when the viewer is
+    // backgrounded. Without this, an album-cover update mid-background would fire a
+    // snackbar against a host that's no longer visible.
+    val addedToAlbumTemplate = stringResource(R.string.viewer_added_to_album)
+    val coverUpdatedMessage = stringResource(R.string.album_cover_updated)
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
     LaunchedEffect(Unit) {
-        viewModel.addToAlbumDone.collect { albumName ->
-            android.widget.Toast.makeText(
-                context,
-                "Added to \"$albumName\"",
-                android.widget.Toast.LENGTH_SHORT,
-            ).show()
-        }
-    }
-    // Success feedback for "Set as album cover" — same Toast pattern as the add-to-album
-    // done flow above so the user gets immediate confirmation without us threading a
-    // SnackbarHost into the viewer (it doesn't have one).
-    val coverUpdatedToast = stringResource(R.string.album_cover_updated)
-    LaunchedEffect(Unit) {
-        viewModel.setCoverDone.collect {
-            android.widget.Toast.makeText(
-                context,
-                coverUpdatedToast,
-                android.widget.Toast.LENGTH_SHORT,
-            ).show()
+        lifecycleOwner.lifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
+            launch {
+                viewModel.addToAlbumDone.collect { albumName ->
+                    snackbarHostState.showSnackbar(String.format(addedToAlbumTemplate, albumName))
+                }
+            }
+            launch {
+                viewModel.setCoverDone.collect {
+                    snackbarHostState.showSnackbar(coverUpdatedMessage)
+                }
+            }
         }
     }
 
@@ -261,11 +270,49 @@ fun PhotoViewerScreen(
 
     var scale  by remember { mutableFloatStateOf(1f) }
     var offset by remember { mutableStateOf(Offset.Zero) }
-    LaunchedEffect(pagerState.settledPage) { scale = 1f; offset = Offset.Zero }
+    // Viewport size in px — bounds for pan clamping and the double-tap focal math.
+    var containerSize by remember { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
+    // Accumulated pan distance past the image edge while zoomed. Once it crosses the
+    // threshold we page to the neighbour instead of letting the user drag the photo
+    // into empty background forever.
+    var edgeOverpan by remember { mutableFloatStateOf(0f) }
+    LaunchedEffect(pagerState.settledPage) { scale = 1f; offset = Offset.Zero; edgeOverpan = 0f }
 
     val transformState = rememberTransformableState { zoomChange, panChange, _ ->
-        scale  = (scale * zoomChange).coerceIn(1f, 6f)
-        offset = if (scale > 1f) offset + panChange else Offset.Zero
+        scale = (scale * zoomChange).coerceIn(1f, 6f)
+        if (scale > 1f) {
+            // Clamp the pan so the (scaled) content never detaches from the viewport —
+            // graphicsLayer scales around the center, so the reachable translation range
+            // is symmetric: ±(viewport * (scale-1) / 2) per axis.
+            val maxX = (containerSize.width  * (scale - 1f)) / 2f
+            val maxY = (containerSize.height * (scale - 1f)) / 2f
+            val unclamped = offset + panChange
+            offset = Offset(
+                unclamped.x.coerceIn(-maxX, maxX),
+                unclamped.y.coerceIn(-maxY, maxY),
+            )
+            // Edge-paging: a pure pan (no active pinch) pushing past the horizontal
+            // bound accumulates; crossing the threshold advances the pager the same
+            // direction the finger travels. Any in-bounds pan resets the accumulator
+            // so casual panning never triggers it.
+            if (kotlin.math.abs(zoomChange - 1f) < 0.001f) {
+                when {
+                    unclamped.x < -maxX -> edgeOverpan += (-maxX - unclamped.x)
+                    unclamped.x >  maxX -> edgeOverpan -= (unclamped.x - maxX)
+                    else                -> edgeOverpan = 0f
+                }
+                val threshold = 140f
+                if (edgeOverpan > threshold && pagerState.currentPage < items.lastIndex) {
+                    edgeOverpan = 0f
+                    scope.launch { pagerState.animateScrollToPage(pagerState.currentPage + 1) }
+                } else if (edgeOverpan < -threshold && pagerState.currentPage > 0) {
+                    edgeOverpan = 0f
+                    scope.launch { pagerState.animateScrollToPage(pagerState.currentPage - 1) }
+                }
+            }
+        } else {
+            offset = Offset.Zero
+        }
     }
 
     // Per-page full-res image cache: keeps the last loaded image so non-settled pages
@@ -330,17 +377,16 @@ fun PhotoViewerScreen(
     // Slideshow play/pause — saved across rotation so the user doesn't lose their state.
     var isPlaying by rememberSaveable { mutableStateOf(false) }
 
-    // Overlay visibility: tap image to toggle; force-show on page settle unless the
-    // slideshow is running (otherwise the chrome would flash visible every 4 seconds
-    // when auto-advance moves to the next photo).
+    // Overlay visibility: tap image to toggle. Deliberately NOT reset on page change —
+    // once the user hides the chrome they stay in immersive browsing across swipes
+    // until they tap again.
     var showOverlays by remember { mutableStateOf(true) }
-    LaunchedEffect(pagerState.settledPage) { if (!isPlaying) showOverlays = true }
 
     // Pause if the user single-taps anywhere on a photo (the same gesture that
     // toggles chrome). We do this by observing [showOverlays] — when it flips from
     // hidden to visible while playing, the user just tapped, so stop the slideshow.
-    // (Page-change resets to showOverlays=true don't trip this because we re-hide
-    //  the chrome immediately below while playing, never letting it linger visible.)
+    // (Overlay visibility persists across page changes, so only a real tap can flip
+    //  it to visible while the slideshow runs.)
     LaunchedEffect(showOverlays, isPlaying) {
         if (isPlaying && showOverlays) {
             // Give the user 1 second to see the chrome before re-hiding it. If they
@@ -412,6 +458,24 @@ fun PhotoViewerScreen(
         else viewModel.resetDeleteState()
     }
 
+    // Android 10+ write-permission dialog launcher for stripping metadata from a
+    // non-app-owned file (mirrors the delete launcher above).
+    val stripState by viewModel.stripState.collectAsStateWithLifecycle()
+    val stripPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) viewModel.retryPendingStrip()
+        else viewModel.resetStripState()
+    }
+    LaunchedEffect(stripState) {
+        val ss = stripState
+        if (ss is PhotoViewerViewModel.StripState.NeedsPermission) {
+            stripPermissionLauncher.launch(
+                IntentSenderRequest.Builder(ss.pendingIntent.intentSender).build()
+            )
+        }
+    }
+
     // Handle delete state changes
     LaunchedEffect(deleteState) {
         when (val ds = deleteState) {
@@ -426,16 +490,13 @@ fun PhotoViewerScreen(
                 )
             }
             is PhotoViewerViewModel.DeleteState.Failed -> {
-                // Surface the failure as a snackbar/toast and reset the state so the
-                // delete-overlay spinner doesn't get pinned to the screen forever (the
-                // "Not signed in" case in particular ended up with a permanent Failed
-                // overlay that the user couldn't dismiss). The reset moves us back to
-                // Idle so the next user action can proceed.
-                android.widget.Toast.makeText(
-                    context,
-                    ds.message,
-                    android.widget.Toast.LENGTH_LONG,
-                ).show()
+                // Surface the failure as a themed snackbar (same in-app pattern as the
+                // other viewer feedback) and reset the state so the delete-overlay
+                // spinner doesn't get pinned to the screen forever (the "Not signed in"
+                // case in particular ended up with a permanent Failed overlay that the
+                // user couldn't dismiss). The reset moves us back to Idle so the next
+                // user action can proceed.
+                snackbarHostState.showSnackbar(ds.message)
                 viewModel.resetDeleteState()
             }
             else -> {}
@@ -443,9 +504,21 @@ fun PhotoViewerScreen(
     }
 
     Box(
-        modifier = Modifier.fillMaxSize().background(Bg0),
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Bg0)
+            .onSizeChanged { containerSize = it },
         contentAlignment = Alignment.Center,
     ) {
+        // Gesture lambdas live in a key-less pointerInput so the detectors are installed
+        // exactly once per page composition. Keying the pointerInput on scale/showMetadata
+        // (the previous setup) cancelled and re-installed the tap detector on every pinch
+        // step, and the first tap after a zoom landed in the restart window and was
+        // silently dropped — the chrome only reacted to the second tap.
+        val currentScale  by rememberUpdatedState(scale)
+        val metadataShown by rememberUpdatedState(showMetadata)
+        val slideshowOn   by rememberUpdatedState(isPlaying)
+
         // ── Pager ──────────────────────────────────────────────────────────────
         HorizontalPager(
             state = pagerState,
@@ -458,29 +531,53 @@ fun PhotoViewerScreen(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .pointerInput(scale, showMetadata) {
+                    // Theme-reactive page background: pure black viewer chrome in dark
+                    // mode, white in light mode. Bg0 also covers the one-frame window
+                    // between the thumb hiding and the full-res draw, so no off-theme
+                    // flash can show through.
+                    .background(Bg0)
+                    .pointerInput(Unit) {
                         coroutineScope {
-                            // Tap → toggle overlays. While the slideshow is running, a
-                            // tap also pauses it (and forces chrome visible so the user
-                            // gets immediate feedback that auto-advance stopped).
                             launch {
-                                detectTapGestures(onTap = {
-                                    if (isPlaying) {
-                                        isPlaying = false
-                                        showOverlays = true
-                                    } else {
-                                        showOverlays = !showOverlays
-                                    }
-                                })
+                                detectTapGestures(
+                                    // Tap → toggle overlays. While the slideshow is running,
+                                    // a tap pauses it and forces the chrome visible so the
+                                    // user gets immediate feedback that auto-advance stopped.
+                                    onTap = {
+                                        if (slideshowOn) {
+                                            isPlaying = false
+                                            showOverlays = true
+                                        } else {
+                                            showOverlays = !showOverlays
+                                        }
+                                    },
+                                    // Double tap → zoom toward the tapped point; double tap
+                                    // again → reset to fit.
+                                    onDoubleTap = { tap ->
+                                        if (currentScale > 1f) {
+                                            scale = 1f
+                                            offset = Offset.Zero
+                                        } else {
+                                            val newScale = 2.5f
+                                            val cx = containerSize.width / 2f
+                                            val cy = containerSize.height / 2f
+                                            val maxX = (containerSize.width  * (newScale - 1f)) / 2f
+                                            val maxY = (containerSize.height * (newScale - 1f)) / 2f
+                                            scale = newScale
+                                            offset = Offset(
+                                                ((cx - tap.x) * (newScale - 1f)).coerceIn(-maxX, maxX),
+                                                ((cy - tap.y) * (newScale - 1f)).coerceIn(-maxY, maxY),
+                                            )
+                                        }
+                                    },
+                                )
                             }
                             // Swipe up → open details (only when not zoomed)
                             launch {
-                                if (scale <= 1f && !showMetadata) {
-                                    detectVerticalDragGestures { _, dragAmount ->
-                                        if (dragAmount < -40f) {
-                                            showMetadata = true
-                                            showOverlays = true
-                                        }
+                                detectVerticalDragGestures { _, dragAmount ->
+                                    if (currentScale <= 1f && !metadataShown && dragAmount < -40f) {
+                                        showMetadata = true
+                                        showOverlays = true
                                     }
                                 }
                             }
@@ -517,7 +614,25 @@ fun PhotoViewerScreen(
                     state is PhotoViewerViewModel.ViewerState.ShowVideo
                 val suppressThumbForVideo = isSettled && isVideoItemThumb &&
                     (videoStarted || showingVideoState)
-                if (thumbModel != null && !suppressThumbForVideo) {
+                // Identity of the item currently bound to this page (same expression the
+                // settled-block uses below for stateMatchesPage). Lifted here so the thumb
+                // gate can check whether the full-res image is actually rendering for *this*
+                // page before we hide the placeholder.
+                val currentItemKey: String? = when (item) {
+                    is GalleryItem.LocalOnly -> item.local.uri
+                    is GalleryItem.Synced    -> item.local.uri
+                    is GalleryItem.CloudOnly -> item.cloud.linkId
+                    null -> null
+                }
+                val stateMatchesPage = state.itemKey == null || state.itemKey == currentItemKey
+                // Hide the thumb once the full-res image is loaded for this settled page so
+                // it stops peeking through at the edges when the user pinch-zooms and pans —
+                // the full-res layer is graphicsLayer-translated, the thumb is not, and at
+                // any non-centered scale>1f the thumb would otherwise show through behind.
+                val suppressThumbForLoadedImage = isSettled &&
+                    state is PhotoViewerViewModel.ViewerState.ShowImage &&
+                    stateMatchesPage
+                if (thumbModel != null && !suppressThumbForVideo && !suppressThumbForLoadedImage) {
                     AsyncImage(
                         model = thumbModel,
                         contentDescription = null,
@@ -539,18 +654,11 @@ fun PhotoViewerScreen(
                     }
                 }
                 if (isSettled) {
-                    // Identity of the item currently bound to this page. Match against
-                    // [state.itemKey] before rendering: when the user swipes A → B, there's
-                    // a one-frame window where `settledPage = B` but `state` still references
-                    // A's loaded image (loadCloud runs in a coroutine, recomposition happens
-                    // first). Without this guard the new page flashes the previous photo.
-                    val currentItemKey: String? = when (item) {
-                        is GalleryItem.LocalOnly -> item.local.uri
-                        is GalleryItem.Synced    -> item.local.uri
-                        is GalleryItem.CloudOnly -> item.cloud.linkId
-                        null -> null
-                    }
-                    val stateMatchesPage = state.itemKey == null || state.itemKey == currentItemKey
+                    // currentItemKey + stateMatchesPage are hoisted above the thumb block so
+                    // both the placeholder gate and the full-res renderer use the same
+                    // page-identity check. The stateMatchesPage guard handles the one-frame
+                    // window during a swipe A → B where settledPage flips to B but `state`
+                    // still references A's loaded image — without it, B would flash A.
                     when (val s = state) {
                         is PhotoViewerViewModel.ViewerState.ShowImage ->
                             if (stateMatchesPage) {
@@ -722,7 +830,7 @@ fun PhotoViewerScreen(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 ViewerBubble(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back",
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.onboarding_back),
                         tint = FgPrimary, modifier = Modifier.size(20.dp))
                 }
                 Row(
@@ -734,12 +842,18 @@ fun PhotoViewerScreen(
                     val isLocalItem = settledItem is GalleryItem.LocalOnly || settledItem is GalleryItem.Synced
                     val isCloudItem = settledItem is GalleryItem.Synced || settledItem is GalleryItem.CloudOnly
 
-                    // Favorite button
-                    if (settledItem != null) {
+                    // Favorite button — hidden for shared-with-me viewers because the
+                    // favorite flag is a node-level tag on the OWNER's photo, not a
+                    // private bookmark on the recipient side. Writing it from the
+                    // recipient would either fail or mutate the owner's library.
+                    if (settledItem != null && !isReadOnlyAlbum) {
                         ViewerBubble(onClick = { viewModel.toggleFavorite(settledItem) }) {
                             Icon(
                                 if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                                if (isFavorite) "Remove from favorites" else "Add to favorites",
+                                stringResource(
+                                    if (isFavorite) R.string.cd_favorite_remove
+                                    else R.string.cd_favorite_add,
+                                ),
                                 tint = if (isFavorite) Color(0xFFFF3B30) else FgDim,
                                 modifier = Modifier.size(18.dp),
                             )
@@ -750,13 +864,18 @@ fun PhotoViewerScreen(
                     // representation. Cloud / Synced → cloud album add (addPhotosToAlbum API).
                     // LocalOnly / Synced → local virtual-album membership (DataStore write,
                     // no file move so DATE_TAKEN survives Android Q+ MediaProvider restrictions).
-                    if (settledItem != null) {
+                    // Add to album — hidden for shared-with-me viewers. The recipient
+                    // could in theory pin someone else's photo into one of their own
+                    // albums, but the underlying call needs cloud-side share access
+                    // and our path doesn't bridge across the recipient/owner volume
+                    // boundary.
+                    if (settledItem != null && !isReadOnlyAlbum) {
                         ViewerBubble(onClick = { showAddToAlbumSheet = true }) {
                             if (isAddingToAlbum) {
                                 CircularProgressIndicator(color = Accent, strokeWidth = 2.dp,
                                     modifier = Modifier.size(16.dp))
                             } else {
-                                Icon(Icons.Default.LibraryAdd, "Add to album",
+                                Icon(Icons.Default.LibraryAdd, stringResource(R.string.gallery_add_to_album),
                                     tint = FgDim, modifier = Modifier.size(18.dp))
                             }
                         }
@@ -779,9 +898,9 @@ fun PhotoViewerScreen(
                         }
                         null -> false
                     }
-                    if (settledItem != null && isEditable) {
+                    if (settledItem != null && isEditable && !isReadOnlyAlbum) {
                         ViewerBubble(onClick = { onEditItem(settledItem) }) {
-                            Icon(Icons.Default.Edit, "Edit",
+                            Icon(Icons.Default.Edit, stringResource(R.string.cd_viewer_edit),
                                 tint = FgPrimary, modifier = Modifier.size(18.dp))
                         }
                     }
@@ -844,7 +963,7 @@ fun PhotoViewerScreen(
                             // because setAlbumCover is idempotent server-side.
                             val isCloudItemForCover = settledItem is GalleryItem.Synced ||
                                 settledItem is GalleryItem.CloudOnly
-                            if (sourceAlbumLinkId != null && isCloudItemForCover) {
+                            if (sourceAlbumLinkId != null && isCloudItemForCover && !isReadOnlyAlbum) {
                                 androidx.compose.material3.DropdownMenuItem(
                                     text = { Text(stringResource(R.string.album_set_as_album_cover),
                                         color = FgPrimary) },
@@ -910,17 +1029,21 @@ fun PhotoViewerScreen(
                                     showMetadata = true
                                 },
                             )
-                            androidx.compose.material3.DropdownMenuItem(
-                                text = { Text(stringResource(R.string.viewer_menu_delete),
-                                    color = ErrorColor) },
-                                leadingIcon = { Icon(Icons.Default.DeleteOutline, null,
-                                    tint = ErrorColor, modifier = Modifier.size(20.dp)) },
-                                enabled = !isDeleting,
-                                onClick = {
-                                    menuExpanded = false
-                                    showDeleteSheet = true
-                                },
-                            )
+                            // Shared-with-me viewers stay strictly read-only — no
+                            // delete affordance for someone else's photo.
+                            if (!isReadOnlyAlbum) {
+                                androidx.compose.material3.DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.viewer_menu_delete),
+                                        color = ErrorColor) },
+                                    leadingIcon = { Icon(Icons.Default.DeleteOutline, null,
+                                        tint = ErrorColor, modifier = Modifier.size(20.dp)) },
+                                    enabled = !isDeleting,
+                                    onClick = {
+                                        menuExpanded = false
+                                        showDeleteSheet = true
+                                    },
+                                )
+                            }
                         }
                     }
                 }
@@ -993,7 +1116,7 @@ fun PhotoViewerScreen(
                     effectiveSynced -> {
                         Icon(
                             Icons.Default.Cloud,
-                            contentDescription = "Backed up, also on device",
+                            contentDescription = stringResource(R.string.cd_status_backed_up_device),
                             tint = Color(0xFF30D158),
                             modifier = Modifier.size(13.dp),
                         )
@@ -1002,8 +1125,10 @@ fun PhotoViewerScreen(
                     currentItem is GalleryItem.CloudOnly -> {
                         Icon(
                             Icons.Default.Cloud,
-                            contentDescription = "Only in Drive",
-                            tint = Color.White,
+                            contentDescription = stringResource(R.string.cd_status_cloud_only),
+                            // Theme-reactive tint: the pill background turns near-white in
+                            // light mode, where a fixed white glyph disappears entirely.
+                            tint = FgPrimary,
                             modifier = Modifier.size(13.dp),
                         )
                         Text("·", color = FgMute, fontSize = 13.sp)
@@ -1022,6 +1147,18 @@ fun PhotoViewerScreen(
             }
         }
         } // AnimatedVisibility
+
+        // Bottom-anchored themed snackbar — keeps add-to-album / set-as-cover
+        // confirmations + delete-failure errors inside the app's visual language
+        // instead of the OS Toast popup that ignored our theme + sat below the
+        // navigation bar.
+        eu.akoos.photos.presentation.common.ThemedSnackbarHost(
+            snackbarHostState,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(bottom = 96.dp),
+        )
     }
 
     // ── Metadata sheet ─────────────────────────────────────────────────────────
@@ -1047,8 +1184,13 @@ fun PhotoViewerScreen(
                     if (uri != null) viewModel.stripMetadataFromLocal(uri, config)
                 },
                 onRenameClick = {
-                    showMetadata = false
-                    showRenameDialog = true
+                    // Rename is a node-level mutation we don't grant guests of a
+                    // shared-with-me album. The metadata sheet's button is hidden
+                    // when no callback fires, and this stays a no-op on that path.
+                    if (!isReadOnlyAlbum) {
+                        showMetadata = false
+                        showRenameDialog = true
+                    }
                 },
             )
         }
@@ -1079,9 +1221,12 @@ fun PhotoViewerScreen(
         }
     }
 
-    // Close the dialog and reset state when the rename finishes.
+    // Close the dialog and reset state when the rename finishes. Drop the renamed item's
+    // cached bytes so the stale original (old name / trashed cloud copy) stops showing
+    // immediately — same invalidation the editor does after a save.
     LaunchedEffect(renameState) {
         if (renameState is PhotoViewerViewModel.RenameState.Done) {
+            items.getOrNull(pagerState.settledPage)?.let { viewModel.invalidateAfterRename(it) }
             showRenameDialog = false
             viewModel.resetRenameState()
         }
@@ -1090,9 +1235,7 @@ fun PhotoViewerScreen(
     // ── Add to Album sheet ────────────────────────────────────────────────────────
     if (showAddToAlbumSheet) {
         val settledItem = items.getOrNull(pagerState.settledPage)
-        val localAlbumNames by viewModel.localAlbumNames.collectAsStateWithLifecycle()
         val currentPhotoAlbumIds by viewModel.currentPhotoAlbumIds.collectAsStateWithLifecycle()
-        val hasLocal = settledItem is GalleryItem.LocalOnly || settledItem is GalleryItem.Synced
         val hasCloud = settledItem is GalleryItem.Synced || settledItem is GalleryItem.CloudOnly
         // Refresh membership for the current photo every time the sheet opens — fast on cache
         // hit (5-min TTL in AlbumService) and self-heals if the user removed the photo from an
@@ -1103,7 +1246,6 @@ fun PhotoViewerScreen(
         AddToAlbumSheet(
             sheetState = addToAlbumSheetState,
             cloudAlbums = if (hasCloud) albums else emptyList(),
-            localAlbumNames = if (hasLocal) localAlbumNames else emptyList(),
             currentPhotoAlbumIds = currentPhotoAlbumIds,
             onDismiss = { showAddToAlbumSheet = false },
             onCloudAlbumPicked = { albumLinkId ->
@@ -1115,10 +1257,6 @@ fun PhotoViewerScreen(
                         viewModel.addToAlbum(albumLinkId, settledItem)
                     }
                 }
-                showAddToAlbumSheet = false
-            },
-            onLocalAlbumPicked = { albumName ->
-                if (settledItem != null) viewModel.addToLocalAlbum(albumName, settledItem)
                 showAddToAlbumSheet = false
             },
         )
@@ -1143,1073 +1281,6 @@ fun PhotoViewerScreen(
                         viewModel.deleteItem(item, freeUpSpace, deleteFromCloud)
                     },
                 )
-            }
-        }
-    }
-}
-
-// ── Filmstrip ──────────────────────────────────────────────────────────────────
-
-@Composable
-private fun Filmstrip(
-    items: List<GalleryItem>,
-    currentPage: Int,
-    onThumbnailClick: (Int) -> Unit,
-) {
-    val listState = rememberLazyListState()
-    val density   = LocalDensity.current
-
-    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
-        val viewportPx = constraints.maxWidth
-        val itemPx     = with(density) { 54.dp.roundToPx() }
-
-        LaunchedEffect(currentPage) {
-            listState.animateScrollToItem(
-                index        = currentPage,
-                scrollOffset = -(viewportPx / 2 - itemPx / 2),
-            )
-        }
-
-        LazyRow(
-            state = listState,
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(5.dp),
-            contentPadding = PaddingValues(horizontal = 16.dp),
-            userScrollEnabled = false,
-        ) {
-            itemsIndexed(items) { index, item ->
-                val isCurrent = index == currentPage
-                val thumbModel: Any? = when (item) {
-                    is GalleryItem.LocalOnly -> Uri.parse(item.local.uri)
-                    is GalleryItem.Synced    -> Uri.parse(item.local.uri)
-                    is GalleryItem.CloudOnly -> item.cloud.thumbnailUrl
-                }
-                Box(
-                    modifier = Modifier
-                        .size(54.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(Bg2)
-                        .then(
-                            if (isCurrent)
-                                Modifier.border(2.dp, Color.White, RoundedCornerShape(8.dp))
-                            else
-                                Modifier.alpha(0.45f)
-                        )
-                        .clickable { onThumbnailClick(index) },
-                ) {
-                    if (thumbModel != null) {
-                        AsyncImage(
-                            model = thumbModel,
-                            contentDescription = null,
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier.fillMaxSize(),
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-// ── Bubble button ──────────────────────────────────────────────────────────────
-
-@Composable
-private fun ViewerBubble(onClick: () -> Unit, content: @Composable () -> Unit) {
-    Box(
-        modifier = Modifier
-            .size(40.dp)
-            .background(PillBg, bubbleShape)
-            .border(0.5.dp, PillBorder, bubbleShape)
-            .clickable(onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) { content() }
-}
-
-// ── Metadata sheet ─────────────────────────────────────────────────────────────
-
-@Composable
-private fun PhotoMetadataSheet(
-    item: GalleryItem?,
-    exif: PhotoMetadata?,
-    isStripping: Boolean,
-    /** On-disk size of the resolved full-res blob. The server batch API sometimes returns
-     *  `link.size = null` for video uploads, leaving [CloudPhoto.sizeBytes] at 0 — this
-     *  fallback fills the Size row with the real byte count once the viewer's background
-     *  download finishes. Null when the item is local-only or the download hasn't landed. */
-    cloudSizeFallback: Long? = null,
-    onStripFields: (MetadataStripConfig) -> Unit,
-    onRenameClick: () -> Unit = {},
-) {
-    if (item == null) return
-    val isLocal = item is GalleryItem.LocalOnly || item is GalleryItem.Synced
-    // Per-section Strip actions only apply to device-only photos. Synced items already
-    // went through Settings → Privacy & Metadata's "Strip on upload" toggle, so the
-    // local file's EXIF is the right copy and we don't want to teach users that a
-    // post-upload strip changes anything visible on Drive (it doesn't — Drive holds
-    // the already-stripped version). CloudOnly has no on-device EXIF to touch at all.
-    val isDeviceOnly = item is GalleryItem.LocalOnly
-    // Hidden-vault photos live under file:// in app-private storage and aren't safe to
-    // rename via the normal MediaStore path. The dedicated rename function does work
-    // but the underlying file's `__<captureMs>.ext` suffix bleeds back into the visible
-    // display-name (the file's name IS the display-name for hidden items) and produces
-    // confusing artifacts on re-rename ("file with that name already exists" hits when
-    // the user un-knowingly tries to rename to the same stem + suffix combination).
-    // Cleanest UX: hide the rename affordance entirely for hidden items.
-    val itemUri = when (item) {
-        is GalleryItem.LocalOnly -> item.local.uri
-        is GalleryItem.Synced -> item.local.uri
-        is GalleryItem.CloudOnly -> null
-    }
-    val isHiddenItem = itemUri?.startsWith("file://") == true
-    val effectiveRenameClick: (() -> Unit)? = if (isHiddenItem) null else onRenameClick
-    var showStripConfirm by remember { mutableStateOf(false) }
-    var pendingStripConfig by remember { mutableStateOf<MetadataStripConfig?>(null) }
-
-    androidx.compose.foundation.rememberScrollState().let { scrollState ->
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .verticalScroll(scrollState)
-                .padding(horizontal = 20.dp)
-                .padding(bottom = 40.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
-            Text(
-                "Details",
-                color = FgPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
-            )
-
-            // ── File info ──────────────────────────────────────────────────
-            MetadataSection("File Info") {
-                when (item) {
-                    is GalleryItem.LocalOnly -> {
-                        MetaRow("File", item.local.displayName, onEdit = effectiveRenameClick)
-                        MetaRow("Date", formatMs(item.local.dateTaken))
-                        MetaRow("Size", formatBytes(item.local.sizeBytes))
-                        MetaRow("Type", item.local.mimeType)
-                        item.local.bucketName?.let { MetaRow("Album", it) }
-                        MetaRow("Source", "On device only")
-                    }
-                    is GalleryItem.Synced -> {
-                        MetaRow("File", item.local.displayName, onEdit = effectiveRenameClick)
-                        // Date sourced from the CLOUD captureTime — Drive stores the original
-                        // upload-time consistently while MediaStore's DATE_TAKEN can drift to
-                        // the download moment on devices where the column gets silently reset
-                        // (Samsung One UI is the worst offender). Falls back to the local
-                        // dateTaken only when the cloud side has no captureTime (rare).
-                        val displayDateMs = if (item.cloud.captureTime > 0L)
-                            item.cloud.captureTime * 1000L
-                        else item.local.dateTaken
-                        MetaRow("Date", formatMs(displayDateMs))
-                        MetaRow("Size", formatBytes(item.local.sizeBytes))
-                        MetaRow("Type", item.local.mimeType)
-                        item.local.bucketName?.let { MetaRow("Album", it) }
-                        MetaRow("Source", "Backed up to Proton Drive")
-                    }
-                    is GalleryItem.CloudOnly -> {
-                        MetaRow("File", item.cloud.displayName, onEdit = onRenameClick)
-                        MetaRow("Date", formatMs(item.cloud.captureTime * 1000L))
-                        val displaySize = item.cloud.sizeBytes.takeIf { it > 0 } ?: cloudSizeFallback ?: 0L
-                        MetaRow("Size", if (displaySize > 0) formatBytes(displaySize) else "—")
-                        MetaRow("Type", item.cloud.mimeType)
-                        MetaRow("Source", "Proton Drive")
-                    }
-                }
-            }
-
-            // ── EXIF — Camera ──────────────────────────────────────────────
-            if (exif != null && (exif.make != null || exif.model != null || exif.focalLength != null)) {
-                MetadataSection(
-                    label = "Camera",
-                    actionLabel = if (isDeviceOnly) "Strip" else null,
-                    actionEnabled = !isStripping,
-                    onAction = {
-                        pendingStripConfig = MetadataStripConfig(stripCameraInfo = true)
-                        showStripConfirm = true
-                    },
-                ) {
-                    exif.make?.let { MetaRow("Make", it) }
-                    exif.model?.let { MetaRow("Model", it) }
-                    exif.lensModel?.let { MetaRow("Lens", it) }
-                    exif.focalLength?.let { MetaRow("Focal length", "${it}mm") }
-                    exif.aperture?.let { MetaRow("Aperture", "f/$it") }
-                    exif.exposureTime?.let { MetaRow("Exposure", it) }
-                    exif.isoSpeed?.let { MetaRow("ISO", it) }
-                    exif.flash?.let { MetaRow("Flash", if (it and 0x01 != 0) "Fired" else "No flash") }
-                    exif.whiteBalance?.let { MetaRow("White balance", if (it == 0) "Auto" else "Manual") }
-                }
-            }
-
-            // ── EXIF — Location ────────────────────────────────────────────
-            if (exif != null && (exif.gpsLatitude != null || exif.gpsLongitude != null)) {
-                MetadataSection(
-                    label = "Location",
-                    actionLabel = if (isDeviceOnly) "Strip" else null,
-                    actionEnabled = !isStripping,
-                    onAction = {
-                        pendingStripConfig = MetadataStripConfig(stripGps = true)
-                        showStripConfirm = true
-                    },
-                ) {
-                    exif.gpsLatitude?.let {
-                        MetaRow("Latitude", "%.6f°".format(it))
-                    }
-                    exif.gpsLongitude?.let {
-                        MetaRow("Longitude", "%.6f°".format(it))
-                    }
-                    exif.gpsAltitude?.let {
-                        MetaRow("Altitude", "%.1f m".format(it))
-                    }
-                }
-            }
-
-            // ── EXIF — Date & Time ─────────────────────────────────────────
-            if (exif != null && (exif.dateTime != null || exif.dateTimeOriginal != null)) {
-                MetadataSection(
-                    label = "Date & Time",
-                    actionLabel = if (isDeviceOnly) "Strip" else null,
-                    actionEnabled = !isStripping,
-                    onAction = {
-                        pendingStripConfig = MetadataStripConfig(stripTimestamp = true)
-                        showStripConfirm = true
-                    },
-                ) {
-                    exif.dateTimeOriginal?.let { MetaRow("Taken", it) }
-                    exif.dateTime?.let { MetaRow("Modified", it) }
-                }
-            }
-
-            // ── EXIF — Software ────────────────────────────────────────────
-            if (exif != null && (exif.software != null || exif.artist != null || exif.copyright != null)) {
-                MetadataSection(
-                    label = "Software & Author",
-                    actionLabel = if (isDeviceOnly) "Strip" else null,
-                    actionEnabled = !isStripping,
-                    onAction = {
-                        pendingStripConfig = MetadataStripConfig(stripSoftwareInfo = true)
-                        showStripConfirm = true
-                    },
-                ) {
-                    exif.software?.let { MetaRow("Software", it) }
-                    exif.artist?.let { MetaRow("Artist", it) }
-                    exif.copyright?.let { MetaRow("Copyright", it) }
-                }
-            }
-
-            // ── Image dimensions ───────────────────────────────────────────
-            if (exif != null && exif.width != null && exif.height != null) {
-                MetadataSection("Image") {
-                    MetaRow("Dimensions", "${exif.width} × ${exif.height}")
-                    exif.orientation?.let {
-                        val orientLabel = when (it) {
-                            1 -> "Normal"
-                            3 -> "Rotated 180°"
-                            6 -> "Rotated 90° CW"
-                            8 -> "Rotated 90° CCW"
-                            else -> "$it"
-                        }
-                        MetaRow("Orientation", orientLabel)
-                    }
-                }
-            }
-
-            // ── Strip all — quick action for local items ───────────────────
-            if (isLocal && exif != null) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(DeleteTint, RoundedCornerShape(12.dp))
-                        .border(0.5.dp, ErrorColor.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
-                        .clickable(enabled = !isStripping) {
-                            pendingStripConfig = MetadataStripConfig(
-                                stripGps = true,
-                                stripCameraInfo = true,
-                                stripTimestamp = false,
-                                stripSoftwareInfo = true,
-                            )
-                            showStripConfirm = true
-                        }
-                        .padding(horizontal = 16.dp, vertical = 14.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column {
-                        Text(
-                            "Strip all private metadata",
-                            color = ErrorColor, fontSize = 14.sp, fontWeight = FontWeight.Medium,
-                        )
-                        Text(
-                            "Removes GPS, camera info and software fields from this file",
-                            color = FgMute, fontSize = 11.5.sp,
-                        )
-                    }
-                    if (isStripping) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(18.dp),
-                            strokeWidth = 2.dp,
-                            color = ErrorColor,
-                        )
-                    }
-                }
-            }
-        }
-    }
-
-    if (showStripConfirm && pendingStripConfig != null) {
-        val config = pendingStripConfig!!
-        val what = buildList {
-            if (config.stripGps) add("GPS location")
-            if (config.stripCameraInfo) add("camera info")
-            if (config.stripTimestamp) add("timestamps")
-            if (config.stripSoftwareInfo) add("software info")
-        }.joinToString(", ")
-        ConfirmDialog(
-            title = "Strip metadata?",
-            message = "This will permanently remove $what from the file on your device. This cannot be undone.",
-            confirmLabel = "Strip",
-            dismissLabel = "Cancel",
-            onConfirm = {
-                showStripConfirm = false
-                onStripFields(config)
-                pendingStripConfig = null
-            },
-            onDismiss = { showStripConfirm = false },
-            destructive = true,
-        )
-    }
-}
-
-@Composable
-private fun MetadataSection(
-    label: String,
-    actionLabel: String? = null,
-    actionEnabled: Boolean = true,
-    onAction: () -> Unit = {},
-    content: @Composable () -> Unit,
-) {
-    Column {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 6.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                label.uppercase(),
-                color = FgMute, fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold,
-                letterSpacing = 0.8.sp,
-            )
-            if (actionLabel != null) {
-                Text(
-                    actionLabel,
-                    color = if (actionEnabled) ErrorColor else FgMute,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Medium,
-                    modifier = Modifier.clickable(enabled = actionEnabled, onClick = onAction),
-                )
-            }
-        }
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(CardBg, RoundedCornerShape(12.dp))
-                .border(0.5.dp, Line2, RoundedCornerShape(12.dp)),
-        ) {
-            Column { content() }
-        }
-    }
-}
-
-// ── Rename dialog ──────────────────────────────────────────────────────────────
-
-@Composable
-private fun RenameDialog(
-    currentName: String,
-    isCloud: Boolean,
-    isWorking: Boolean,
-    errorMessage: String?,
-    onDismiss: () -> Unit,
-    onConfirm: (newName: String, replaceOriginal: Boolean) -> Unit,
-) {
-    var text by remember(currentName) {
-        mutableStateOf(
-            androidx.compose.ui.text.input.TextFieldValue(
-                text = currentName,
-                selection = androidx.compose.ui.text.TextRange(0, splitName(currentName).first.length),
-            ),
-        )
-    }
-    val trimmed = text.text.trim()
-    val unchanged = trimmed == currentName
-    val canSubmit = !isWorking && trimmed.isNotEmpty() && !unchanged
-
-    androidx.compose.ui.window.Dialog(onDismissRequest = { if (!isWorking) onDismiss() }) {
-        Column(
-            modifier = Modifier
-                .clip(RoundedCornerShape(20.dp))
-                .background(Bg2)
-                .padding(horizontal = 22.dp, vertical = 22.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            Text("Rename file", color = FgPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
-            Text(
-                if (isCloud) "Choose how to apply the new name to your cloud photo."
-                else "Choose how to apply the new name on this device.",
-                color = FgMute, fontSize = 13.sp,
-            )
-
-            androidx.compose.material3.OutlinedTextField(
-                value = text,
-                onValueChange = { text = it },
-                singleLine = true,
-                enabled = !isWorking,
-                label = { Text("File name") },
-                modifier = Modifier.fillMaxWidth(),
-                colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
-                    focusedTextColor = FgPrimary,
-                    unfocusedTextColor = FgPrimary,
-                    focusedLabelColor = Accent,
-                    unfocusedLabelColor = FgMute,
-                    focusedBorderColor = Accent,
-                    unfocusedBorderColor = FgMute.copy(alpha = 0.4f),
-                    cursorColor = Accent,
-                ),
-            )
-
-            if (errorMessage != null) {
-                Text(errorMessage, color = ErrorColor, fontSize = 12.sp)
-            }
-
-            // Two primary actions stacked, then a Cancel.
-            RenameOptionButton(
-                title = if (isCloud) "Rename in cloud" else "Rename original",
-                subtitle = if (isCloud)
-                    "Uploads under the new name, then moves the original to Recently Deleted."
-                else
-                    "Updates the file in place on your device.",
-                accent = true,
-                enabled = canSubmit,
-                onClick = { onConfirm(trimmed, /* replaceOriginal = */ true) },
-            )
-            RenameOptionButton(
-                title = "Save as copy",
-                subtitle = if (isCloud)
-                    "Uploads as a new photo. The original stays in Drive."
-                else
-                    "Creates a new file in Pictures/Proton Photos.",
-                accent = false,
-                enabled = canSubmit,
-                onClick = { onConfirm(trimmed, /* replaceOriginal = */ false) },
-            )
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(42.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .clickable(enabled = !isWorking, onClick = onDismiss),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center,
-            ) {
-                if (isWorking) {
-                    CircularProgressIndicator(color = Accent, strokeWidth = 2.dp, modifier = Modifier.size(16.dp))
-                } else {
-                    Text("Cancel", color = FgPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun RenameOptionButton(
-    title: String,
-    subtitle: String,
-    accent: Boolean,
-    enabled: Boolean,
-    onClick: () -> Unit,
-) {
-    val bg = if (accent) Accent.copy(alpha = if (enabled) 1f else 0.4f)
-             else PanelChip.let { if (enabled) it else it.copy(alpha = 0.6f) }
-    val fg = if (accent) Color.White else FgPrimary
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(bg)
-            .clickable(enabled = enabled, onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-    ) {
-        Text(title, color = fg, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-        Text(subtitle, color = fg.copy(alpha = 0.7f), fontSize = 12.sp)
-    }
-}
-
-/** Returns (basename, ".ext") — used to pre-select the basename in the rename field. */
-private fun splitName(name: String): Pair<String, String> {
-    val dot = name.lastIndexOf('.')
-    return if (dot > 0) name.substring(0, dot) to name.substring(dot)
-           else name to ""
-}
-
-@Composable
-private fun MetaRow(label: String, value: String, onEdit: (() -> Unit)? = null) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .let { if (onEdit != null) it.clickable(onClick = onEdit) else it }
-            .padding(horizontal = 16.dp, vertical = 11.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(label, color = FgMute, fontSize = 13.sp, modifier = Modifier.weight(0.4f))
-        Row(
-            modifier = Modifier.weight(0.6f),
-            horizontalArrangement = Arrangement.End,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                value,
-                color = FgPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium,
-                textAlign = androidx.compose.ui.text.style.TextAlign.End,
-                modifier = Modifier.weight(1f, fill = false),
-            )
-            if (onEdit != null) {
-                Spacer(Modifier.width(8.dp))
-                Icon(
-                    Icons.Default.Edit,
-                    contentDescription = "Edit",
-                    tint = Accent,
-                    modifier = Modifier.size(16.dp),
-                )
-            }
-        }
-    }
-}
-
-// ── Delete confirmation sheet ──────────────────────────────────────────────────
-
-@Composable
-private fun DeleteConfirmSheet(
-    item: GalleryItem,
-    onDismiss: () -> Unit,
-    onDelete: (freeUpSpace: Boolean, deleteFromCloud: Boolean) -> Unit,
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 20.dp)
-            .padding(bottom = 40.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Text(
-            when (item) {
-                is GalleryItem.LocalOnly  -> "Delete photo?"
-                is GalleryItem.Synced     -> "Remove photo?"
-                is GalleryItem.CloudOnly  -> "Delete from Proton Drive?"
-            },
-            color = FgPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
-        )
-
-        when (item) {
-            is GalleryItem.LocalOnly -> {
-                Text(
-                    "This will move the photo to your device's Recently Deleted folder.",
-                    color = FgDim, fontSize = 14.sp,
-                )
-                Spacer(Modifier.height(4.dp))
-                DeleteButton("Move to trash") { onDelete(true, false) }
-            }
-
-            is GalleryItem.Synced -> {
-                Text(
-                    "This photo is backed up to Proton Drive. Choose what to do:",
-                    color = FgDim, fontSize = 14.sp,
-                )
-                Spacer(Modifier.height(4.dp))
-                // Option A – keep backup, remove local copy
-                androidx.compose.foundation.layout.Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(
-                            CardBg,
-                            androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
-                        )
-                        .border(
-                            0.5.dp,
-                            CardBorder,
-                            androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
-                        )
-                        .clickable { onDelete(true, false) }
-                        .padding(horizontal = 16.dp, vertical = 14.dp),
-                ) {
-                    Text("Remove from device", color = FgPrimary, fontSize = 15.sp,
-                        fontWeight = FontWeight.Medium)
-                    Text("Keep the backup in Proton Drive", color = FgMute, fontSize = 12.sp)
-                }
-                // Option B – keep local copy, remove from cloud
-                androidx.compose.foundation.layout.Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(
-                            CardBg,
-                            androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
-                        )
-                        .border(
-                            0.5.dp,
-                            CardBorder,
-                            androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
-                        )
-                        .clickable { onDelete(false, true) }
-                        .padding(horizontal = 16.dp, vertical = 14.dp),
-                ) {
-                    Text("Remove from cloud", color = FgPrimary, fontSize = 15.sp,
-                        fontWeight = FontWeight.Medium)
-                    Text("Keep the photo on this device, move the backup to Drive trash",
-                        color = FgMute, fontSize = 12.sp)
-                }
-                // Option C – delete everywhere
-                androidx.compose.foundation.layout.Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(
-                            DeleteTint,
-                            androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
-                        )
-                        .border(
-                            0.5.dp,
-                            ErrorColor.copy(alpha = 0.3f),
-                            androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
-                        )
-                        .clickable { onDelete(true, true) }
-                        .padding(horizontal = 16.dp, vertical = 14.dp),
-                ) {
-                    Text("Delete everywhere", color = ErrorColor, fontSize = 15.sp,
-                        fontWeight = FontWeight.Medium)
-                    Text("Moves to device trash AND Proton Drive trash",
-                        color = FgMute, fontSize = 12.sp)
-                }
-            }
-
-            is GalleryItem.CloudOnly -> {
-                Text(
-                    "This will move the photo to Proton Drive's trash. You can recover it from Recently Deleted.",
-                    color = FgDim, fontSize = 14.sp,
-                )
-                Spacer(Modifier.height(4.dp))
-                DeleteButton("Move to Drive trash") { onDelete(false, true) }
-            }
-        }
-
-        // Cancel
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(
-                    CardBg,
-                    androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
-                )
-                .border(
-                    0.5.dp,
-                    CardBorder,
-                    androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
-                )
-                .clickable(onClick = onDismiss)
-                .padding(vertical = 14.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text("Cancel", color = FgPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium)
-        }
-    }
-}
-
-@Composable
-private fun DeleteButton(label: String, onClick: () -> Unit) {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(
-                DeleteTint,
-                androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
-            )
-            .border(
-                0.5.dp,
-                ErrorColor.copy(alpha = 0.3f),
-                androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
-            )
-            .clickable(onClick = onClick)
-            .padding(vertical = 14.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(label, color = ErrorColor, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-    }
-}
-
-// ── Video player ───────────────────────────────────────────────────────────────
-
-/**
- * Plays a video file or content URI using ExoPlayer (Media3).
- * Released automatically when the composable leaves the composition.
- */
-@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
-@Composable
-private fun VideoPlayer(
-    uri: Uri,
-    onPlayerReady: (ExoPlayer) -> Unit = {},
-    modifier: Modifier = Modifier,
-    /** Optional bump value mixed into the player's `remember` key — caller passes the
-     *  editor's last-save timestamp so an Overwrite (same URI, fresh bytes) builds a new
-     *  ExoPlayer instead of reusing the one whose MediaSource still points at the
-     *  pre-edit state. */
-    reloadKey: Any = Unit,
-    /** When false the player is built and prepared (first frame visible) but doesn't
-     *  start playback — the pill's play button flips this true via state at the call site.
-     *  This split lets the surface fade in immediately on cloud-video download and the
-     *  tap-to-play feel instantaneous instead of waiting on prepare(). */
-    autoPlay: Boolean = true,
-) {
-    val context = LocalContext.current
-    val exoPlayer = remember(uri, reloadKey) {
-        ExoPlayer.Builder(context).build().apply {
-            setMediaItem(MediaItem.fromUri(uri))
-            prepare()
-            playWhenReady = autoPlay
-            repeatMode = ExoPlayer.REPEAT_MODE_ONE
-        }.also { onPlayerReady(it) }
-    }
-    // Sync playback state when the caller flips autoPlay (user tapped the pill).
-    LaunchedEffect(exoPlayer, autoPlay) {
-        exoPlayer.playWhenReady = autoPlay
-    }
-    DisposableEffect(exoPlayer) {
-        onDispose { exoPlayer.release() }
-    }
-    AndroidView(
-        factory = { ctx ->
-            PlayerView(ctx).apply {
-                // Disable the built-in controller BEFORE attaching the player. Setting
-                // `player = ...` first lets PlayerView observe the initial Player.STATE_*
-                // transition with the default controller still enabled — on some devices
-                // that paints a one-frame play/pause/seek bar overlay before our explicit
-                // useController=false takes effect. Setting it false first prevents that
-                // first-paint leak.
-                useController = false
-                controllerAutoShow = false
-                controllerHideOnTouch = false
-                controllerShowTimeoutMs = 0
-                // setShowBuffering NEVER also kills the spinner that ExoPlayer briefly
-                // shows when buffering — our own download/loading pill is the source of
-                // truth for "video is loading".
-                setShowBuffering(PlayerView.SHOW_BUFFERING_NEVER)
-                hideController()
-                // The PlayerView's "shutter" view is a solid background that covers the
-                // surface until the first frame renders — and on some devices it stays
-                // up during pause / seek, looking like an unwanted overlay. Make it
-                // transparent so users only ever see the video itself.
-                setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
-                // The default artwork (a centered placeholder) shows when audio-only
-                // metadata is detected — irrelevant for our case but kill it explicitly.
-                useArtwork = false
-                setDefaultArtwork(null)
-                // Player attach AFTER the controller is fully suppressed.
-                player = exoPlayer
-                // Restored to true once single-flight download per linkId landed and
-                // eliminated the swipe-back-rebuilds-player path. The cached video now
-                // reuses the same ExoPlayer instance, so there's no "kept old frame"
-                // hazard — and keeping content on reset removes a flicker where the
-                // surface would briefly clear to transparent and the page background
-                // would bleed through.
-                setKeepContentOnPlayerReset(true)
-            }
-        },
-        update = { view ->
-            view.player = exoPlayer
-            // Defensive: if any code path flips useController back on (e.g. another
-            // PlayerView util we add later), keep the suppression invariant on update.
-            view.useController = false
-        },
-        modifier = modifier,
-    )
-}
-
-// ── Video control pill — everything inline in one pill ────────────────────────
-
-@Composable
-private fun VideoControlPill(
-    player: ExoPlayer?,
-    videoStarted: Boolean,
-    onPlay: () -> Unit,
-) {
-    var isPlaying  by remember { mutableStateOf(false) }
-    var isMuted    by remember { mutableStateOf(false) }
-    var currentMs  by remember { mutableLongStateOf(0L) }
-    var durationMs by remember { mutableLongStateOf(0L) }
-    var isSeeking  by remember { mutableStateOf(false) }
-    var seekRatio  by remember { mutableStateOf(0f) }
-    var trackWidthPx by remember { mutableStateOf(1f) }
-
-    LaunchedEffect(player) {
-        if (player == null) return@LaunchedEffect
-        while (true) {
-            isPlaying  = player.isPlaying
-            durationMs = player.duration.coerceAtLeast(0)
-            if (!isSeeking) currentMs = player.currentPosition
-            delay(200)
-        }
-    }
-
-    val progress = when {
-        isSeeking -> seekRatio
-        durationMs > 0 -> (currentMs.toFloat() / durationMs).coerceIn(0f, 1f)
-        else -> 0f
-    }
-
-    // Single pill: [▶/⏸] [seek bar ~90dp] [time] [🔊]
-    Row(
-        modifier = Modifier
-            .background(PillBg, infoPillShape)
-            .border(0.5.dp, PillBorder, infoPillShape)
-            .padding(horizontal = 16.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        // Play / Pause
-        Box(
-            modifier = Modifier.size(28.dp).clip(CircleShape).clickable {
-                when {
-                    !videoStarted -> onPlay()
-                    isPlaying     -> player?.pause()
-                    else          -> player?.play()
-                }
-            },
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                if (videoStarted && isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                null, tint = Color.White, modifier = Modifier.size(20.dp),
-            )
-        }
-
-        // Compact seek bar inside pill
-        Canvas(
-            modifier = Modifier
-                .width(90.dp)
-                .height(20.dp)
-                .onGloballyPositioned { trackWidthPx = it.size.width.toFloat().coerceAtLeast(1f) }
-                .pointerInput(player) {
-                    if (player == null) return@pointerInput
-                    detectDragGestures(
-                        onDragStart = { offset ->
-                            isSeeking = true
-                            seekRatio = (offset.x / trackWidthPx).coerceIn(0f, 1f)
-                        },
-                        onDrag = { change, _ ->
-                            change.consume()
-                            seekRatio = (change.position.x / trackWidthPx).coerceIn(0f, 1f)
-                        },
-                        onDragEnd = {
-                            player.seekTo((seekRatio * durationMs).toLong())
-                            isSeeking = false
-                        },
-                        onDragCancel = { isSeeking = false },
-                    )
-                }
-                .pointerInput(player) {
-                    if (player == null) return@pointerInput
-                    detectTapGestures { offset ->
-                        val ratio = (offset.x / trackWidthPx).coerceIn(0f, 1f)
-                        player.seekTo((ratio * durationMs).toLong())
-                    }
-                },
-        ) {
-            val cy = size.height / 2f
-            drawLine(Color.White.copy(alpha = 0.25f),
-                Offset(0f, cy), Offset(size.width, cy),
-                strokeWidth = 2.dp.toPx(), cap = StrokeCap.Round)
-            val px = size.width * progress
-            if (px > 0f) {
-                drawLine(Color.White, Offset(0f, cy), Offset(px, cy),
-                    strokeWidth = 2.dp.toPx(), cap = StrokeCap.Round)
-            }
-            drawCircle(Color.White, radius = 5.dp.toPx(), center = Offset(px, cy))
-        }
-
-        // Time
-        Text(
-            if (durationMs > 0) "${formatVideoTime(currentMs)} / ${formatVideoTime(durationMs)}"
-            else "0:00",
-            color = FgPrimary, fontSize = 12.sp, fontWeight = FontWeight.Medium,
-        )
-
-        // Mute — always visible
-        Box(
-            modifier = Modifier.size(28.dp).clip(CircleShape).clickable {
-                isMuted = !isMuted
-                player?.volume = if (isMuted) 0f else 1f
-            },
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                if (isMuted) Icons.AutoMirrored.Filled.VolumeOff else Icons.AutoMirrored.Filled.VolumeUp,
-                null, tint = Color.White.copy(alpha = if (videoStarted) 1f else 0.4f),
-                modifier = Modifier.size(18.dp),
-            )
-        }
-    }
-}
-
-// ── Helpers ────────────────────────────────────────────────────────────────────
-
-private fun formatItemDate(item: GalleryItem): String = formatMs(item.captureTimeMs)
-
-private fun formatMs(ms: Long): String =
-    SimpleDateFormat("MMM d, yyyy", Locale.getDefault()).format(Date(ms))
-
-private fun formatBytes(bytes: Long): String = when {
-    bytes >= 1_000_000 -> "%.1f MB".format(bytes / 1_000_000.0)
-    bytes >= 1_000     -> "%.0f KB".format(bytes / 1_000.0)
-    else               -> "$bytes B"
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun AddToAlbumSheet(
-    sheetState: androidx.compose.material3.SheetState,
-    cloudAlbums: List<Album>,
-    localAlbumNames: List<String>,
-    currentPhotoAlbumIds: Set<String> = emptySet(),
-    onDismiss: () -> Unit,
-    onCloudAlbumPicked: (String) -> Unit,
-    onLocalAlbumPicked: (String) -> Unit,
-) {
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState,
-        containerColor = Bg2,
-        scrimColor = Color.Black.copy(alpha = 0.5f),
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .navigationBarsPadding()
-                .padding(bottom = 16.dp),
-        ) {
-            Text(
-                "Add to Album",
-                color = FgPrimary,
-                fontSize = 17.sp,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.padding(horizontal = 20.dp, vertical = 14.dp),
-            )
-            if (cloudAlbums.isEmpty() && localAlbumNames.isEmpty()) {
-                Text(
-                    "No albums yet. Create one from the Albums tab.",
-                    color = FgMute,
-                    fontSize = 14.sp,
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 24.dp),
-                )
-            }
-
-            // Cloud albums (Drive) — shown when the item has a cloud counterpart.
-            if (cloudAlbums.isNotEmpty()) {
-                Text(
-                    "DRIVE ALBUMS",
-                    color = FgMute,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
-                )
-                cloudAlbums.forEach { album ->
-                    val isMember = album.linkId in currentPhotoAlbumIds
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onCloudAlbumPicked(album.linkId) }
-                            .padding(horizontal = 20.dp, vertical = 14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        if (album.coverThumbnailUrl != null) {
-                            AsyncImage(
-                                model = album.coverThumbnailUrl,
-                                contentDescription = null,
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier
-                                    .size(44.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(Bg0),
-                            )
-                        } else {
-                            Box(
-                                modifier = Modifier
-                                    .size(44.dp)
-                                    .background(Bg0, RoundedCornerShape(8.dp)),
-                            )
-                        }
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(album.name, color = FgPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium)
-                            Text(
-                                if (isMember) "Tap to remove from album"
-                                else "${album.photoCount} photos",
-                                color = if (isMember) Accent else FgMute,
-                                fontSize = 12.sp,
-                            )
-                        }
-                        // Member indicator: filled accent-coloured check tile on the trailing
-                        // edge of the row. Doubles as the "tap removes" affordance because the
-                        // whole row's onClick handles both add + remove based on this state.
-                        if (isMember) {
-                            Box(
-                                modifier = Modifier
-                                    .size(28.dp)
-                                    .background(Accent, RoundedCornerShape(14.dp)),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Icon(
-                                    Icons.Default.Check,
-                                    contentDescription = "Photo is in this album",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(18.dp),
-                                )
-                            }
-                        }
-                    }
-                    HorizontalDivider(color = Line2, thickness = 0.5.dp,
-                        modifier = Modifier.padding(horizontal = 20.dp))
-                }
-            }
-
-            // Local albums — shown when the item has a local counterpart.
-            // Picks here write a virtual-membership entry; the file does NOT move on disk
-            // (preserves DATE_TAKEN, which Android Q+ MediaProvider would otherwise nuke on
-            // a RELATIVE_PATH update against a file our app doesn't own).
-            if (localAlbumNames.isNotEmpty()) {
-                Text(
-                    "ON THIS DEVICE",
-                    color = FgMute,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
-                )
-                localAlbumNames.forEach { name ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onLocalAlbumPicked(name) }
-                            .padding(horizontal = 20.dp, vertical = 14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(44.dp)
-                                .background(Bg0, RoundedCornerShape(8.dp)),
-                        )
-                        Text(name, color = FgPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium)
-                    }
-                    HorizontalDivider(color = Line2, thickness = 0.5.dp,
-                        modifier = Modifier.padding(horizontal = 20.dp))
-                }
             }
         }
     }

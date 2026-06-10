@@ -92,7 +92,7 @@ class PhotoStreamService @Inject constructor(
      * boot kick, MainActivity.onResume silent refresh, GalleryViewModel.doSync) and each
      * one previously ran the full crypto loop in parallel. With 315 photos × 3 callers ×
      * sequential per-photo decrypt, the system would queue ~945 Go OpenPGP calls within a
-     * couple of seconds on a Samsung S22 BETA, and the runtime would eventually trip the
+     * couple of seconds on Android 16 beta firmware, and the runtime would eventually trip the
      * `slice bounds out of range [:-1]` panic in libgojni.so. Coalescing all callers onto
      * one in-flight refresh both eliminates the duplicate work AND keeps Go-runtime
      * concurrency well-bounded — the second / third caller just waits for the first to
@@ -250,7 +250,7 @@ class PhotoStreamService @Inject constructor(
             //    crypto calls, leaving the UI with a frozen-empty grid while the work ran
             //    AND eventually racing Android 16's CMC GC (userfaultfd) against the Go
             //    OpenPGP runtime memory layout — observed as a SIGABRT after ~7 minutes on
-            //    Samsung S22 BETA firmware.
+            //    Android 16 beta firmware.
             //
             // Chunk size 10 + 100ms delay between chunks: empirically the smallest
             // chunks-per-second that don't trigger the Go panic during a cold-cache full
@@ -265,7 +265,7 @@ class PhotoStreamService @Inject constructor(
                 val chunkLinkIds = chunk.map { it.linkId }
                 // Fast path: photos already in DB with a still-on-disk cached thumbnail get
                 // re-used as-is. This avoids re-running the per-photo decrypt + thumbnail-decrypt
-                // pipeline on every cold start, which on Samsung S22 BETA (Android 16) is what
+                // pipeline on every cold start, which on Android 16 beta firmware is what
                 // pushes the Go OpenPGP library into "slice bounds out of range" SIGABRT
                 // territory once enough crypto ops pile up. Cache-cleared installs still walk
                 // the full path (no cache hits possible), but the steady-state app launch with

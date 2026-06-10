@@ -83,8 +83,20 @@ data class SettingsUiState(
     /** Privacy opt-in: wipe `cacheDir/fullres/` on every process backgrounding. Off by
      *  default — the 30-min TTL + offline-grace sweeper is the regular behaviour. */
     val clearCacheOnAppClose: Boolean = false,
+    /** When true, the main Photos timeline hides every photo already filed into an
+     *  album. Off by default. The Albums + Shared tabs are unaffected. */
+    val hidePhotosInAlbums: Boolean = false,
     // Trash
     val trashedCount: Int = 0,
+    /** Drive (cloud) trash count. `null` = unknown — UI then falls back to the
+     *  device-only subtitle. A successful fetch populates an Int; transient failures
+     *  preserve the prior value so a brief offline blip doesn't flicker the row
+     *  back to device-only. */
+    val cloudTrashCount: Int? = null,
+    /** Epoch ms of the last successful Drive trash fetch — the TTL gate inside
+     *  [SettingsViewModel.loadCloudTrashCount] compares against this. 0 means "never
+     *  fetched (or just signed out)". */
+    val lastCloudTrashFetchMs: Long = 0L,
     // Free-up space: non-null when system delete dialog should be launched
     val freeUpPendingIntent: android.app.PendingIntent? = null,
     // ── Per-file upload progress (Sync card progress bar + expandable list) ────

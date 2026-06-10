@@ -99,6 +99,18 @@ fun SharedScreen(
         viewModel.setFilter(filter)
     }
 
+    // Re-pull the shared list on every screen resume — the user navigates back
+    // here after opening a shared album in detail, and the cover thumbnail for
+    // that album lands in the on-disk cache only once the album's first photo
+    // gets decrypted by the lazy scheduler. Without a re-fetch, the Album row
+    // here stays frozen with the cover still null even though the cached file
+    // is sitting at `cacheDir/thumbnails/thumb_<coverLinkId>.jpg` waiting for
+    // `resolveOfflineCoverUrl` to pick it up on the next pass.
+    androidx.lifecycle.compose.LifecycleResumeEffect(Unit) {
+        viewModel.refresh()
+        onPauseOrDispose { }
+    }
+
     val albums = state.displayedAlbums.let { list ->
         if (activeEmailFilter != null) list.filter { it.sharedByEmail == activeEmailFilter } else list
     }
@@ -239,55 +251,89 @@ private fun PendingInvitationsSection(
 
         invitations.forEachIndexed { idx, inv ->
             if (idx > 0) HorizontalDivider(color = PillBorder, thickness = 0.5.dp)
-            Row(
+            // Stack the row vertically so a long email + invitation description never
+            // collides with the action buttons; the buttons live on their own row at the
+            // bottom with end alignment.
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(32.dp)
-                        .background(Accent.copy(alpha = 0.15f), CircleShape),
-                    contentAlignment = Alignment.Center,
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    Text(
-                        inv.inviterEmail.first().uppercase(),
-                        color = Accent,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold,
-                    )
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .background(Accent.copy(alpha = 0.15f), CircleShape),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            inv.inviterEmail.first().uppercase(),
+                            color = Accent,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            inv.inviterEmail,
+                            color = FgPrimary,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Spacer(Modifier.size(2.dp))
+                        Text(
+                            stringResource(R.string.shared_invited_to_album),
+                            color = FgMute,
+                            fontSize = 12.sp,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 }
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        inv.inviterEmail,
-                        color = FgPrimary,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Medium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(
-                        stringResource(R.string.shared_invited_to_album),
-                        color = FgMute,
-                        fontSize = 12.sp,
-                    )
-                }
-                TextButton(onClick = { onDecline(inv.invitationId) }) {
-                    Text(stringResource(R.string.shared_decline), color = ErrorColor, fontSize = 13.sp)
-                }
-                Spacer(Modifier.size(4.dp))
-                Box(
-                    modifier = Modifier
-                        .height(34.dp)
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(Accent)
-                        .clickable { onAccept(inv.invitationId) }
-                        .padding(horizontal = 14.dp),
-                    contentAlignment = Alignment.Center,
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(stringResource(R.string.shared_accept), color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    Box(
+                        modifier = Modifier
+                            .height(36.dp)
+                            .clip(RoundedCornerShape(18.dp))
+                            .background(Color.Transparent)
+                            .border(0.5.dp, PillBorder, RoundedCornerShape(18.dp))
+                            .clickable { onDecline(inv.invitationId) }
+                            .padding(horizontal = 18.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            stringResource(R.string.shared_decline),
+                            color = ErrorColor,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .height(36.dp)
+                            .clip(RoundedCornerShape(18.dp))
+                            .background(Accent)
+                            .clickable { onAccept(inv.invitationId) }
+                            .padding(horizontal = 18.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            stringResource(R.string.shared_accept),
+                            color = Color.White,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
                 }
             }
         }

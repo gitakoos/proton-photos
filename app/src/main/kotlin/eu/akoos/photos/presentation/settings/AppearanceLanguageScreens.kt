@@ -60,6 +60,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import eu.akoos.photos.R
 import eu.akoos.photos.presentation.settings.components.CollapsibleSection
 import eu.akoos.photos.presentation.settings.components.RowDivider
+import eu.akoos.photos.presentation.settings.components.SettingsCard
+import eu.akoos.photos.presentation.settings.components.SettingsSubPageScaffold
+import eu.akoos.photos.presentation.settings.components.ToggleRow
 import eu.akoos.photos.presentation.settings.components.rememberDebouncedAction
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.paletteAccent
@@ -159,6 +162,24 @@ fun AppearanceSettingsScreen(
                     )
                     if (index < options.lastIndex) RowDivider()
                 }
+            }
+        }
+
+        Spacer(Modifier.height(20.dp))
+
+        // ── Photos timeline behaviour ────────────────────────────────────────
+        // Display-level toggles that change WHAT shows up on the Photos tab,
+        // separate from the look (theme / palette) and the language. Lives here
+        // rather than under Privacy because it's a visualisation choice, not a
+        // security one.
+        CollapsibleSection(label = stringResource(R.string.settings_photos_timeline_section)) {
+            SettingsCard {
+                ToggleRow(
+                    label = stringResource(R.string.settings_hide_album_photos),
+                    description = stringResource(R.string.settings_hide_album_photos_desc),
+                    checked = state.hidePhotosInAlbums,
+                    onCheckedChange = viewModel::setHidePhotosInAlbums,
+                )
             }
         }
     }
@@ -261,47 +282,3 @@ private fun ChoiceRow(
     }
 }
 
-@Composable
-internal fun SettingsSubPageScaffold(
-    title: String,
-    onBack: () -> Unit,
-    content: @Composable () -> Unit,
-) {
-    val colors = AppColors.current
-    val debouncedBack = rememberDebouncedAction { onBack() }
-    Box(modifier = Modifier.fillMaxSize().background(colors.pageBg)) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .statusBarsPadding()
-                .navigationBarsPadding()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp)
-                .padding(bottom = 32.dp),
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(top = 16.dp, bottom = 24.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(36.dp)
-                        .background(colors.surfaceWeak, CircleShape)
-                        .border(0.5.dp, colors.pillBorder, CircleShape)
-                        .clickable(onClick = debouncedBack),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        Icons.AutoMirrored.Filled.ArrowBack,
-                        null,
-                        tint = colors.fgDim,
-                        modifier = Modifier.size(16.dp),
-                    )
-                }
-                Text(title, color = colors.fgPrimary, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
-            }
-            content()
-        }
-    }
-}

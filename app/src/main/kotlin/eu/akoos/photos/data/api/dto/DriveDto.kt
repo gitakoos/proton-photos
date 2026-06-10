@@ -380,10 +380,23 @@ data class CommitBlockDto(
     @SerialName("Token") val token: String? = null,
 )
 
+/**
+ * Wire shape for the `Photo` block sent inside a CommitRevision request. Mirrors
+ * Drive Android's `PhotoDto`. Critical wire fields:
+ *   - [contentHash] is HMAC-SHA256(rootNodeHashKey, sha256-hex-of-plaintext-content)
+ *     NOT the bare SHA-256 of the file content. Drive web's
+ *     `photosTransferPayloadBuilder` rejects payloads whose ContentHash doesn't
+ *     verify against the photos root NodeHashKey: "Cannot build photo payload
+ *     without a content hash".
+ *   - [tags] must be present even when empty. Drive web parses the photo block
+ *     positionally and a missing Tags field surfaces the same content-hash error
+ *     because the parser bails before checking content_hash.
+ */
 @Serializable
 data class PhotoMetaDto(
     @SerialName("CaptureTime") val captureTime: Long,
     @SerialName("ContentHash") val contentHash: String? = null,
+    @SerialName("Tags") val tags: List<Long> = emptyList(),
 )
 
 @Serializable
@@ -405,17 +418,57 @@ data class PhotoTrashResponse(
 
 // Response for GET drive/volumes/{volumeId}/trash — full Drive trash (all types).
 // Web-confirmed path (no v2). Pagination via ?Page=N (1-indexed).
-// Server returns empty Links list on the last page.
-// Filter client-side for image/* and video/* to show only photos/videos in the UI.
+// Server returns trashed items grouped by ShareID with bare LinkIDs only; metadata
+// (mime type, thumbnails, crypto material) must be hydrated via a follow-up link
+// detail fetch. Empty Trash list signals the end of pagination.
 @Serializable
 data class VolumeTrashResponse(
-    @SerialName("Links") val links: List<LinkCoreDto> = emptyList(),
+    @SerialName("Trash") val trash: List<VolumeTrashGroupDto> = emptyList(),
     @SerialName("Code") val code: Int,
+)
+
+/**
+ * One bucket of trashed items grouped by their share + parent folder. The server
+ * returns just link IDs here — full link details (mime, fileProperties, crypto keys)
+ * require a per-link detail fetch.
+ */
+@Serializable
+data class VolumeTrashGroupDto(
+    @SerialName("ShareID") val shareId: String,
+    @SerialName("LinkIDs") val linkIds: List<String> = emptyList(),
+    @SerialName("ParentIDs") val parentIds: List<String> = emptyList(),
 )
 
 @Serializable
 data class BaseResponse(
     @SerialName("Code") val code: Int,
+)
+
+/**
+ * Response for the `trash/restore_multiple` and `trash/delete_multiple` PUT/POST calls.
+ * The top-level [code] only reports that the batch was accepted — NOT that every link
+ * was restored/removed. Each entry in [responses] carries its own per-link
+ * [TrashActionOutcome.code]: 1000 means that link succeeded, anything else means the
+ * backend rejected that specific link (already restored, parent missing, link not found).
+ * Reading only the top-level code would report a full success while some links silently
+ * stayed in trash.
+ */
+@Serializable
+data class TrashActionResponse(
+    @SerialName("Code") val code: Int,
+    @SerialName("Responses") val responses: List<TrashActionOutcomeEntry> = emptyList(),
+)
+
+@Serializable
+data class TrashActionOutcomeEntry(
+    @SerialName("LinkID") val linkId: String,
+    @SerialName("Response") val response: TrashActionOutcome,
+)
+
+@Serializable
+data class TrashActionOutcome(
+    @SerialName("Code") val code: Int,
+    @SerialName("Error") val error: String? = null,
 )
 
 @Serializable
@@ -502,6 +555,11 @@ data class LinkCoreDto(
     @SerialName("NodePassphrase") val nodePassphrase: String? = null,
     @SerialName("NodePassphraseSignature") val nodePassphraseSignature: String? = null,
     @SerialName("SignatureEmail") val signatureEmail: String? = null,
+    // Set separately from SignatureEmail because Drive's name signature and node-passphrase
+    // signature can be issued by different addresses (e.g., a photo uploaded by one user
+    // and renamed by another). addPhotosToAlbum's "should we attach a fresh signature?"
+    // predicate gates on either being missing, matching Drive Android's Link.kt:30-44.
+    @SerialName("NameSignatureEmail") val nameSignatureEmail: String? = null,
     @SerialName("State") val state: Int? = null,
     // FileProperties holds ContentKeyPacket for file-type links.
     // It is the canonical location per the official Proton Drive Android SDK
@@ -537,6 +595,11 @@ data class LinkFileActiveRevisionDto(
     @SerialName("State") val state: Int? = null,
     @SerialName("ManifestSignature") val manifestSignature: String? = null,
     @SerialName("Thumbnails") val thumbnails: List<ThumbnailEntryDto>? = null,
+    // Photo block embedded inside the file's active revision — the share endpoint
+    // surfaces every photo's ContentHash here (the volume endpoint puts it on a
+    // top-level `Photo` block instead). We carry it so the Save-to-library copy
+    // can pull the source's photoContentHash without making a second round-trip.
+    @SerialName("Photo") val photo: LinkPhotoDto? = null,
 )
 
 @Serializable
@@ -614,6 +677,40 @@ data class ShareDetailsResponse(
     @SerialName("Code") val code: Int,
 )
 
+/**
+ * Flat (un-wrapped) response of `GET drive/shares/{shareId}` — the v1 share-bootstrap
+ * endpoint. Unlike [ShareDetailsResponse] (v2, wraps the share under a `Share` field),
+ * v1 returns all share fields at the top level. Mirror of `GetShareBootstrapResponse`
+ * in the official Drive Android client.
+ */
+@Serializable
+data class ShareBootstrapResponse(
+    @SerialName("Code") val code: Int,
+    @SerialName("ShareID") val shareId: String,
+    @SerialName("Type") val type: Int? = null,
+    @SerialName("LinkID") val linkId: String? = null,
+    @SerialName("VolumeID") val volumeId: String? = null,
+    @SerialName("Key") val key: String? = null,
+    @SerialName("Passphrase") val passphrase: String? = null,
+    @SerialName("PassphraseSignature") val passphraseSignature: String? = null,
+    @SerialName("AddressID") val addressId: String? = null,
+    @SerialName("Creator") val creator: String? = null,
+    // The CALLING user's own membership rows on this share. This is how a
+    // non-admin recipient learns their own MemberID (the admin-only
+    // `GET drive/v2/shares/{shareId}/members` listing 403s for them).
+    // Mirror of `MembershipDto` in the official client's share bootstrap.
+    @SerialName("Memberships") val memberships: List<ShareMembershipDto> = emptyList(),
+)
+
+@Serializable
+data class ShareMembershipDto(
+    @SerialName("MemberID") val memberId: String,
+    @SerialName("ShareID") val shareId: String? = null,
+    @SerialName("AddressID") val addressId: String? = null,
+    @SerialName("Inviter") val inviter: String? = null,
+    @SerialName("Permissions") val permissions: Long? = null,
+)
+
 @Serializable
 data class ShareFullDto(
     @SerialName("ShareID") val shareId: String,
@@ -683,11 +780,55 @@ data class AddAlbumMultipleEntry(
     @SerialName("NodePassphrase") val nodePassphrase: String,
     @SerialName("NameSignatureEmail") val nameSignatureEmail: String,
     @SerialName("ContentHash") val contentHash: String,
+    /** Detached signature over the raw passphrase bytes the photo's NodeKey is wrapped
+     *  under. Drive web and Drive Android both verify this against `signatureEmail`'s
+     *  public address keys via `BuildNodeKey` before unlocking the photo. Without it,
+     *  a recipient who loads the album over a share sees placeholder thumbnails because
+     *  `decryptAndVerify(nodePassphrase)` rejects the unsigned PGP message. */
+    @SerialName("NodePassphraseSignature") val nodePassphraseSignature: String? = null,
+    /** Address that produced [nodePassphraseSignature]. Recipient code resolves the
+     *  verifier key from this email; missing here means "no signature to verify",
+     *  which fails the verification path on stricter clients. */
+    @SerialName("SignatureEmail") val signatureEmail: String? = null,
 )
 
 @Serializable
 data class AddAlbumMultipleRequest(
     @SerialName("AlbumData") val albumData: List<AddAlbumMultipleEntry>,
+)
+
+/**
+ * Response for the `add-multiple` POST. The top-level [code] reports that the batch
+ * was processed — NOT that every photo succeeded. Each entry in [responses] has its
+ * own per-photo [PhotoAddOutcome.code]: 1000 means the photo is now in the album,
+ * anything else means the backend rejected that specific photo (duplicate, missing
+ * signature, link not found, etc.). Reading only the top-level code would surface
+ * "added 6/6" while none of the photos actually landed.
+ *
+ * Mirrors the Drive Android `AddToAlbumResponse` shape.
+ */
+@Serializable
+data class AddAlbumMultipleResponse(
+    @SerialName("Code") val code: Int,
+    @SerialName("Responses") val responses: List<PhotoAddOutcomeEntry> = emptyList(),
+)
+
+@Serializable
+data class PhotoAddOutcomeEntry(
+    @SerialName("LinkID") val linkId: String,
+    @SerialName("Response") val response: PhotoAddOutcome,
+)
+
+@Serializable
+data class PhotoAddOutcome(
+    @SerialName("Code") val code: Int,
+    @SerialName("Error") val error: String? = null,
+    @SerialName("Details") val details: PhotoAddDetails? = null,
+)
+
+@Serializable
+data class PhotoAddDetails(
+    @SerialName("NewLinkID") val newLinkId: String? = null,
 )
 
 /**
@@ -923,6 +1064,16 @@ data class ShareMemberDto(
     @SerialName("CreateTime") val createTime: Long? = null,
 )
 
+/**
+ * PUT `drive/v2/shares/{shareId}/members/{shareMemberId}` — change a member's permission
+ * bitmap. Permissions: 4 = viewer (read), 6 = editor (read + write). Mirror of
+ * `UpdateShareMemberRequest` in the official Drive Android source.
+ */
+@Serializable
+data class UpdateShareMemberRequest(
+    @SerialName("Permissions") val permissions: Long,
+)
+
 // ── Album sharing DTOs ────────────────────────────────────────────────────────
 
 /**
@@ -970,16 +1121,53 @@ data class CreateLinkShareResponse(
     @SerialName("ShareID") val shareId: String? = null,
 )
 
+/**
+ * POST `drive/shares/{shareId}/urls` — mint a public share-URL backed by an existing share.
+ *
+ * Wire format mirrors `ShareUrlRequest` in the official Drive Android source
+ * (drive/share-url/base/data/.../api/request/ShareUrlRequest.kt). The backend rejects
+ * requests that omit any of `Permissions`, `UrlPasswordSalt`, `SharePasswordSalt`,
+ * `SRPVerifier`, `SRPModulusID`, `Flags`, `SharePassphraseKeyPacket` and `Password` —
+ * those drive the random-URL-password / SRP verification scheme that the public link
+ * recipient uses to unlock the share without an account.
+ *
+ * Permissions: bitmap — 4 = read (the only currently allowed value for share URLs).
+ * Flags: 1 = custom password set by user, 2 = random password generated by the client.
+ *        Random is what every Drive client mints by default.
+ */
 @Serializable
 data class CreateShareUrlRequest(
-    @SerialName("CreatorEmail") val creatorEmail: String,
-    @SerialName("Password") val password: String? = null,
-    @SerialName("MaxAccesses") val maxAccesses: Int? = null,
+    /** UNIX timestamp when the URL stops working. Null = no absolute expiration. */
+    @SerialName("ExpirationTime") val expirationTime: Long? = null,
+    /** Relative TTL in seconds (max 90 days). Null = no expiration window. */
     @SerialName("ExpirationDuration") val expirationDuration: Long? = null,
+    /** Max times the URL can be opened. 0 / null = unlimited. */
+    @SerialName("MaxAccesses") val maxAccesses: Long? = null,
+    /** Address email that minted this share — required for server-side display. */
+    @SerialName("CreatorEmail") val creatorEmail: String,
+    /** Permissions bitmap. 4 = read, 2 = write. Only 4 is currently allowed. */
+    @SerialName("Permissions") val permissions: Long,
+    /** Base64 random salt used in SRP password verification of the URL recipient. */
+    @SerialName("UrlPasswordSalt") val urlPasswordSalt: String,
+    /** Base64 salt for the salted-password used to re-encrypt the share passphrase. */
+    @SerialName("SharePasswordSalt") val sharePasswordSalt: String,
+    /** Base64 SRP verifier computed from the random URL password and the modulus. */
+    @SerialName("SRPVerifier") val srpVerifier: String,
+    /** SRP modulus ID returned by `randomModulus(sessionId)`. */
+    @SerialName("SRPModulusID") val srpModulusId: String,
+    /** Password flags. 2 = random URL password generated by the client. */
+    @SerialName("Flags") val flags: Long,
+    /** Base64 PKESK encrypting the share session key under the salted URL password. */
+    @SerialName("SharePassphraseKeyPacket") val sharePassphraseKeyPacket: String,
+    /** Armored PGP message: random URL password encrypted to the creator's address pub key. */
+    @SerialName("Password") val encryptedUrlPassword: String,
+    /** Optional armored encrypted display name. Drive web shows this in the public link UI. */
+    @SerialName("Name") val name: String? = null,
 )
 
 @Serializable
 data class ShareUrlDto(
+    @SerialName("ShareUrlID") val shareUrlId: String? = null,
     @SerialName("Token") val token: String,
     @SerialName("PublicUrl") val publicUrl: String? = null,
     @SerialName("ShareID") val shareId: String? = null,
@@ -1052,3 +1240,48 @@ data class ShareInvitationDto(
     @SerialName("State") val state: Int? = null,
 )
 
+
+/**
+ * POST drive/volumes/{volumeId}/links/{linkId}/copy
+ *
+ * Server-side photo copy used by "Save to my library" on shared-with-me albums.
+ * Mirrors the canonical Drive Android `CopyLinkRequest` (see
+ * `ProtonDriveApps/android-drive` repo, `drive/link/data/.../CopyLinkRequest.kt`).
+ * The backend keeps the encrypted blob server-side and just rewraps the metadata
+ * we provide, so the recipient never has to download + reupload the actual photo
+ * bytes — only the re-encrypted node passphrase + the re-encrypted name + a fresh
+ * HMAC under the target album's NodeHashKey ride on the wire.
+ */
+@Serializable
+data class CopyLinkRequest(
+    @SerialName("Name") val name: String,
+    @SerialName("Hash") val hash: String,
+    @SerialName("TargetVolumeID") val targetVolumeId: String,
+    @SerialName("TargetParentLinkID") val targetParentLinkId: String,
+    @SerialName("NodePassphrase") val nodePassphrase: String,
+    @SerialName("NameSignatureEmail") val nameSignatureEmail: String,
+    @SerialName("NodePassphraseSignature") val nodePassphraseSignature: String? = null,
+    @SerialName("SignatureEmail") val signatureEmail: String? = null,
+    @SerialName("Photos") val photos: PhotosCopyData? = null,
+) {
+    @Serializable
+    data class PhotosCopyData(
+        @SerialName("ContentHash") val contentHash: String,
+        @SerialName("RelatedPhotos") val relatedPhotos: List<RelatedPhotoCopyData> = emptyList(),
+    )
+
+    @Serializable
+    data class RelatedPhotoCopyData(
+        @SerialName("LinkID") val linkId: String,
+        @SerialName("Name") val name: String,
+        @SerialName("Hash") val hash: String,
+        @SerialName("NodePassphrase") val nodePassphrase: String,
+        @SerialName("ContentHash") val contentHash: String,
+    )
+}
+
+@Serializable
+data class CopyLinkResponse(
+    @SerialName("Code") val code: Int,
+    @SerialName("LinkID") val linkId: String? = null,
+)

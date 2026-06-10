@@ -69,10 +69,8 @@
 -keep @androidx.room.Dao interface * { *; }
 -keepclassmembers @androidx.room.TypeConverter class * { *; }
 
-# ── Compose runtime + Material ───────────────────────────────────────────
+# ── Compose runtime ──────────────────────────────────────────────────────
 # Compose itself ships with the rules it needs in -consumer-proguard-rules.
-# Most issues here come from Material icon class refs; keep them just in case.
--keepclassmembers class androidx.compose.material.icons.** { *; }
 -dontwarn androidx.compose.**
 
 # ── Coil image loading ───────────────────────────────────────────────────

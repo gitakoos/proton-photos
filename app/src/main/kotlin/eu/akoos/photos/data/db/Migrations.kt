@@ -105,6 +105,59 @@ object Migrations {
         }
     }
 
+    /**
+     * v6 → v7: new `cloud_albums` table — persisted snapshot of the cloud album list so
+     * AlbumsScreen can paint instantly from disk on cold launch (and survive airplane-mode
+     * starts). Sharing-related scalars are stored too so the badges render without a
+     * network round-trip; `coverThumbnailUrl` is deliberately NOT persisted — that's a
+     * decrypted CDN URL whose signature expires.
+     */
+    val MIGRATION_6_7 = object : Migration(6, 7) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS `cloud_albums` (
+                    `linkId` TEXT NOT NULL,
+                    `name` TEXT NOT NULL,
+                    `photoCount` INTEGER NOT NULL,
+                    `coverLinkId` TEXT,
+                    `lastActivityTimeMs` INTEGER,
+                    `sharingShareId` TEXT,
+                    `sharingShareUrlId` TEXT,
+                    `sharedByEmail` TEXT,
+                    `volumeId` TEXT,
+                    `lastFetchedMs` INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY(`linkId`)
+                )
+                """.trimIndent()
+            )
+        }
+    }
+
+    /**
+     * v7 → v8: new `album_photo_membership` table. Many-to-many edge between cloud
+     * albums and the photos they reference, so opening an album offline can enumerate
+     * its photos via a JOIN against `photo_listing` — previously impossible because
+     * `photo_listing.parentLinkId` points at the photos root, not the album.
+     */
+    val MIGRATION_7_8 = object : Migration(7, 8) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS `album_photo_membership` (
+                    `albumLinkId` TEXT NOT NULL,
+                    `photoLinkId` TEXT NOT NULL,
+                    PRIMARY KEY(`albumLinkId`, `photoLinkId`)
+                )
+                """.trimIndent()
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_album_photo_membership_photoLinkId` " +
+                    "ON `album_photo_membership` (`photoLinkId`)"
+            )
+        }
+    }
+
     /** All migrations in version-ascending order — pass to [androidx.room.RoomDatabase.Builder.addMigrations]. */
-    val ALL: Array<Migration> = arrayOf(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+    val ALL: Array<Migration> = arrayOf(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
 }

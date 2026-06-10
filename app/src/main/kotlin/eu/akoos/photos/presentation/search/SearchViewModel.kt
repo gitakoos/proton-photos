@@ -34,10 +34,12 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import java.text.Normalizer
 import me.proton.core.accountmanager.domain.AccountManager
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
@@ -96,12 +98,17 @@ class SearchViewModel @Inject constructor(
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    /** The text field updates [_query] on every keystroke for instant echo, but the heavy
+     *  per-item filter only needs to run once typing settles. Debouncing the query feed into
+     *  [results] keeps the field responsive while sparing the library a full re-scan per key. */
+    private val debouncedQuery = _query.debounce(250)
+
     val results: StateFlow<List<GalleryItem>> = accountManager.getPrimaryUserId()
         .flatMapLatest { userId ->
             if (userId == null) flowOf(emptyList())
             else combine(
                 getGalleryItems.invoke(userId),
-                _query,
+                debouncedQuery,
                 _contentFilter,
                 hiddenUrisFlow,
             ) { all, q, filter, hidden -> applyAll(all.dropHidden(hidden), q, filter) }
@@ -120,12 +127,19 @@ class SearchViewModel @Inject constructor(
         if (qTrimmed.isEmpty() && filter == ContentFilter()) return emptyList()
         var out = items
         if (qTrimmed.isNotEmpty()) {
-            val needle = qTrimmed.lowercase()
-            out = out.filter { displayNameOf(it).lowercase().contains(needle) }
+            val needle = fold(qTrimmed)
+            out = out.filter { fold(displayNameOf(it)).contains(needle) }
         }
         out = applyContentFilter(out, filter)
         return out
     }
+
+    /** Lower-cases and strips diacritics so an ASCII query ("jose") matches accented names
+     *  ("josé"). NFD decomposes each accented letter into base + combining mark, then the
+     *  `\p{Mn}` (Mark, nonspacing) class removes the marks, leaving the bare letter. */
+    private fun fold(text: String): String =
+        Normalizer.normalize(text.lowercase(), Normalizer.Form.NFD)
+            .replace(MARK_REGEX, "")
 
     private fun displayNameOf(item: GalleryItem): String = when (item) {
         is GalleryItem.LocalOnly -> item.local.displayName
@@ -163,5 +177,10 @@ class SearchViewModel @Inject constructor(
         is GalleryItem.LocalOnly -> item.local.mimeType
         is GalleryItem.Synced    -> item.local.mimeType
         is GalleryItem.CloudOnly -> item.cloud.mimeType
+    }
+
+    private companion object {
+        /** Combining (nonspacing) marks left behind by NFD decomposition. */
+        val MARK_REGEX = Regex("\\p{Mn}+")
     }
 }

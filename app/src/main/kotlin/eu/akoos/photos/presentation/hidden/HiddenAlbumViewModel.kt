@@ -49,6 +49,8 @@ import eu.akoos.photos.domain.entity.LocalMediaItem
 import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.domain.repository.LocalMediaRepository
 import eu.akoos.photos.domain.repository.SyncStateRepository
+import eu.akoos.photos.util.friendlyNetworkError
+import eu.akoos.photos.util.sanitizeErrorMessage
 import javax.inject.Inject
 
 data class HiddenAlbumUiState(
@@ -70,6 +72,7 @@ class HiddenAlbumViewModel @Inject constructor(
     private val localMediaRepo: LocalMediaRepository,
     private val hiddenStorage: HiddenStorageManager,
     private val syncStateRepo: SyncStateRepository,
+    private val networkObserver: eu.akoos.photos.util.NetworkObserver,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(HiddenAlbumUiState())
@@ -87,6 +90,22 @@ class HiddenAlbumViewModel @Inject constructor(
 
     fun onAuthenticationFailed() {
         _uiState.value = _uiState.value.copy(isAuthenticated = false)
+    }
+
+    /**
+     * Drop the authenticated state and stop observing the hidden set. The authenticated
+     * flag lives here (not in composable state), so it would otherwise survive the screen
+     * going to the background and back — leaving the vault open without a fresh unlock.
+     * Callers invoke this when the screen leaves the foreground so returning to it requires
+     * re-authentication. Items are cleared too so no decoded hidden content lingers in state.
+     */
+    fun lock() {
+        observeJob?.cancel()
+        observeJob = null
+        _uiState.value = _uiState.value.copy(
+            isAuthenticated = false,
+            items = emptyList(),
+        )
     }
 
     /**
@@ -116,7 +135,11 @@ class HiddenAlbumViewModel @Inject constructor(
                 .distinctUntilChanged()
             combine(urisFlow, backedUpFlow) { uris, backedUp -> uris to backedUp }
                 .catch { e ->
-                    _uiState.value = _uiState.value.copy(error = e.message, isLoading = false)
+                    val friendly = friendlyNetworkError(e, networkObserver.isOnline.value, context)
+                    _uiState.value = _uiState.value.copy(
+                        error = friendly ?: sanitizeErrorMessage(e.message),
+                        isLoading = false,
+                    )
                 }
                 .collectLatest { (hiddenUris, backedUpUris) ->
                     val items = hiddenUris.mapNotNull { uri ->

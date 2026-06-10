@@ -75,6 +75,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import eu.akoos.photos.R
+import eu.akoos.photos.presentation.common.IconBubble
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.Bg2
@@ -203,21 +204,16 @@ fun DayDetailScreen(
                 .padding(horizontal = 16.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Box(
-                modifier = Modifier
-                    .size(40.dp)
-                    .background(PillBg, CircleShape)
-                    .border(0.5.dp, PillBorder, CircleShape)
-                    .clickable(onClick = onBack),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = null,
-                    tint = colors.fgPrimary,
-                    modifier = Modifier.size(20.dp),
-                )
-            }
+            IconBubble(
+                icon = Icons.AutoMirrored.Filled.ArrowBack,
+                contentDescription = stringResource(R.string.onboarding_back),
+                onClick = onBack,
+                diameter = 40.dp,
+                iconSize = 20.dp,
+                background = PillBg,
+                borderColor = PillBorder,
+                tint = colors.fgPrimary,
+            )
         }
     }
 

@@ -32,4 +32,14 @@ data class CloudTrashItem(
     val captureTime: Long?,       // epoch seconds, null if unknown
     val thumbnailUrl: String?,    // pre-fetched CDN bare-URL, null if unavailable
     val thumbnailToken: String?,  // CDN token for the thumbnail URL
+    /** Encrypted node key for THIS item — needed to derive the per-photo session key for
+     *  thumbnail decryption. Null on legacy links missing the field. */
+    val encNodeKey: String?,
+    val encNodePassphrase: String?,
+    /** PKESK packet that holds the symmetric content key, encrypted to the node key. */
+    val contentKeyPacket: String?,
+    /** Parent link id — needed so the thumbnail scheduler can resolve the parent's key
+     *  bytes and walk down to the photo's session key. */
+    val parentLinkId: String?,
+    val volumeId: String?,
 )

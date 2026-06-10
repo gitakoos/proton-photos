@@ -24,16 +24,13 @@ package eu.akoos.photos.presentation.onboarding.steps
 
 import android.content.Intent
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.Icon
@@ -109,28 +106,5 @@ internal fun AboutStep() {
             subtitle = stringResource(R.string.onboarding_about_github_subtitle),
             onClick = { openUrl("https://github.com/gitakoos/proton-photos") },
         )
-        Spacer(Modifier.height(10.dp))
-        LinkCard(
-            title = stringResource(R.string.onboarding_about_license_title),
-            subtitle = stringResource(R.string.onboarding_about_license_subtitle),
-            onClick = { openUrl("https://github.com/gitakoos/proton-photos/blob/main/LICENSE") },
-        )
-        Spacer(Modifier.height(14.dp))
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(colors.cardBg, RoundedCornerShape(12.dp))
-                .border(0.5.dp, colors.cardBorder, RoundedCornerShape(12.dp))
-                .padding(horizontal = 14.dp, vertical = 12.dp),
-        ) {
-            Text(
-                stringResource(R.string.onboarding_about_disclaimer),
-                color = colors.fgDim,
-                fontSize = 12.sp,
-                lineHeight = 17.sp,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth(),
-            )
-        }
     }
 }

@@ -43,9 +43,12 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -58,12 +61,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.ExpandLess
-import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.ViewModule
-import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
@@ -98,6 +99,12 @@ import eu.akoos.photos.presentation.theme.PillBorder
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
+
+// Shared rounded shape for the jump-to-month picker's year/month pills. A real corner
+// radius — rather than a full-capsule RoundedCornerShape(50) — keeps the hairline border
+// crisp at the chip ends instead of breaking up into a faint, fragmented outline. Matches
+// the search filter rail + filter-sheet chips so all pickers read as one control family.
+private val chipShape = RoundedCornerShape(10.dp)
 
 /**
  * Top-level Calendar view. Three layered surfaces:
@@ -148,15 +155,20 @@ fun CalendarScreen(
             .background(colors.bg0),
     ) {
         // ───────────── Main content area ─────────────
-        // We always reserve enough space at the top for the floating header — that's
-        // why the content's first padding line includes the search bar height when the
-        // bar is open.
-        val contentTopPad = when {
-            // 56 (status approx) + 56 (header) + 64 (search field) + 32 (16dp breathing
-            // room above & below the field) + 8 (slack) when search is open; otherwise
-            // just the header zone.
-            state.isSearchActive -> 156.dp
-            else -> 76.dp
+        // Reserve enough space at the top for the floating header. The header column
+        // applies statusBarsPadding() on top of its 52dp tap-target row (40dp icon +
+        // 6dp vertical padding ×2), so the on-screen header height is the actual
+        // status-bar inset + 52dp. We resolve the inset at runtime instead of guessing
+        // a single dp number that breaks on devices with taller cutouts/notches.
+        val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+        val headerBaseHeight = 52.dp
+        // 16dp breathing room above and below the inline search field + 64dp field
+        // height — only reserved when the field is actually visible.
+        val searchFieldExtra = 96.dp
+        val contentTopPad = if (state.isSearchActive) {
+            statusBarTop + headerBaseHeight + searchFieldExtra
+        } else {
+            statusBarTop + headerBaseHeight
         }
         when {
             state.isLoading -> {
@@ -233,7 +245,6 @@ fun CalendarScreen(
                 onSearchToggle = { viewModel.setSearchActive(!state.isSearchActive) },
                 onViewModeToggle = { viewModel.toggleViewMode() },
                 onJumpToggle = { viewModel.setJumpPickerVisible(!state.isJumpPickerVisible) },
-                isJumpVisible = state.isJumpPickerVisible,
             )
 
             // Inline search input — slides in below the title bar when the search icon
@@ -293,7 +304,6 @@ private fun CalendarTopBar(
     onSearchToggle: () -> Unit,
     onViewModeToggle: () -> Unit,
     onJumpToggle: () -> Unit,
-    isJumpVisible: Boolean,
 ) {
     val colors = AppColors.current
     Row(
@@ -312,7 +322,7 @@ private fun CalendarTopBar(
         ) {
             Icon(
                 Icons.AutoMirrored.Filled.ArrowBack,
-                contentDescription = null,
+                contentDescription = stringResource(R.string.onboarding_back),
                 tint = colors.fgPrimary,
             )
         }
@@ -326,9 +336,10 @@ private fun CalendarTopBar(
 
         Spacer(modifier = Modifier.weight(1f))
 
-        // Jump-to-month action — same pill style as the back chevron, no fill.
+        // Jump-to-month action — a single calendar affordance that opens (and re-taps to
+        // close) the month picker. The panel also closes via its own × and system back.
         IconBtn(
-            icon = if (isJumpVisible) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+            icon = Icons.Filled.DateRange,
             contentDescription = stringResource(R.string.calendar_jump_cd),
             onClick = onJumpToggle,
             tint = colors.fgPrimary,
@@ -497,7 +508,7 @@ private fun JumpToMonthPicker(
             ) {
                 Icon(
                     Icons.Filled.Close,
-                    contentDescription = null,
+                    contentDescription = stringResource(R.string.close),
                     tint = colors.fgDim,
                     modifier = Modifier.size(18.dp),
                 )
@@ -515,9 +526,13 @@ private fun JumpToMonthPicker(
                 val selected = year == selectedYear
                 Box(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(50))
-                        .background(if (selected) colors.chipSelectedBg else colors.chipUnselectedBg)
-                        .border(0.5.dp, if (selected) colors.accent.copy(alpha = 0.6f) else colors.pillBorder, RoundedCornerShape(50))
+                        // One shape instance drives both clip and border so the corners
+                        // register exactly. Selected: subtle accent tint + 1.dp full-strength
+                        // accent stroke; unselected: 1.dp pillBorder. The earlier fragmented
+                        // outline came from a hairline, low-alpha stroke, not the corner radius.
+                        .clip(chipShape)
+                        .background(if (selected) colors.accent.copy(alpha = 0.15f) else colors.chipUnselectedBg)
+                        .border(1.dp, if (selected) colors.accent else colors.pillBorder, chipShape)
                         .clickable { selectedYear = year }
                         .padding(horizontal = 12.dp, vertical = 6.dp),
                 ) {
@@ -546,9 +561,11 @@ private fun JumpToMonthPicker(
                 }
                 Box(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(50))
+                        // 1.dp pillBorder on the same shape instance used for the clip —
+                        // a hairline stroke broke apart at the rounded corners.
+                        .clip(chipShape)
                         .background(colors.chipUnselectedBg)
-                        .border(0.5.dp, colors.pillBorder, RoundedCornerShape(50))
+                        .border(1.dp, colors.pillBorder, chipShape)
                         .clickable {
                             onMonthPicked(YearMonth(bucket.year, bucket.month))
                         }
@@ -698,17 +715,6 @@ private fun SearchDayTile(
                     .align(Alignment.BottomStart)
                     .padding(start = 6.dp, bottom = 4.dp),
             )
-            if (!day.locationText.isNullOrBlank()) {
-                Icon(
-                    Icons.Filled.LocationOn,
-                    contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .padding(4.dp)
-                        .size(14.dp),
-                )
-            }
         }
         Text(
             text = dateLabel,

@@ -53,8 +53,10 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import eu.akoos.photos.R
 import eu.akoos.photos.presentation.theme.Bg2
 import eu.akoos.photos.presentation.theme.FgMute
 import eu.akoos.photos.presentation.theme.FgPrimary
@@ -127,7 +129,7 @@ fun UnifiedAlbumCard(
                     horizontalArrangement = Arrangement.spacedBy(3.dp),
                 ) {
                     Icon(Icons.Default.Folder, null, tint = Color.White, modifier = Modifier.size(11.dp))
-                    Text("Folder", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Medium)
+                    Text(stringResource(R.string.album_card_folder_badge), color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Medium)
                 }
             }
 

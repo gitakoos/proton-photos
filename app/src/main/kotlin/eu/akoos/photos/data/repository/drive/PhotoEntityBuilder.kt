@@ -70,6 +70,13 @@ class PhotoEntityBuilder @Inject constructor(
         contentKeyPacket: String? = null,
         ownPublicKeys: List<String> = emptyList(),
         decryptThumbnail: Boolean = true,
+        /** Extra decryption-key candidate offered for the photo Name decrypt path.
+         *  Shared-with-me albums substitute the photo Name's PKESK to the share's
+         *  encryption subkey, so the album-level parent key alone doesn't open it.
+         *  Passing the share private key bytes here lets gopenpgp try both and pick
+         *  whichever PKESK matches the photo's substituted target. Owner-side album
+         *  opens leave this null and behave exactly as before. */
+        fallbackParentKeyBytes: ByteArray? = null,
     ): PhotoListingEntity {
         val link = detail?.link
         var displayName = ""
@@ -117,7 +124,11 @@ class PhotoEntityBuilder @Inject constructor(
                     // Decryption uses the PARENT key directly (Drive encrypts Link.Name to the
                     // parent, not the node key) which is already in-hand from the share cache.
                     link.name?.let { encName ->
-                        val verified = cryptoHelper.decryptAndVerifyData(encName, parentKeyBytes, ownPublicKeys)
+                        val candidates = buildList {
+                            add(parentKeyBytes)
+                            fallbackParentKeyBytes?.let { add(it) }
+                        }
+                        val verified = cryptoHelper.decryptAndVerifyData(encName, candidates, ownPublicKeys)
                         if (verified != null) {
                             displayName = String(verified.data, Charsets.UTF_8)
                             if (!verified.verified && ownPublicKeys.isNotEmpty()) {

@@ -53,6 +53,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -69,19 +70,22 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
-import androidx.core.os.LocaleListCompat
 import androidx.datastore.preferences.core.edit
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.R
+import eu.akoos.photos.data.preferences.LanguagePrefsBoot
 import eu.akoos.photos.data.preferences.SettingsKeys
+import eu.akoos.photos.data.preferences.ThemePrefsBoot
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.repository.LocalMediaRepository
 import eu.akoos.photos.presentation.onboarding.components.ProgressDots
 import eu.akoos.photos.presentation.onboarding.steps.AboutStep
+import eu.akoos.photos.presentation.onboarding.steps.AlbumMirrorStep
 import eu.akoos.photos.presentation.onboarding.steps.AppLockStep
 import eu.akoos.photos.presentation.onboarding.steps.AppearanceStep
 import eu.akoos.photos.presentation.onboarding.steps.BackupModeStep
@@ -117,6 +121,33 @@ class OnboardingViewModel @Inject constructor(
 ) : ViewModel() {
 
     /**
+     * Live appearance selections backed by DataStore — single source of truth so
+     * the picker UI always reflects the most recently written value and survives
+     * recomposition without a local shadow `rememberSaveable`. Initial values
+     * mirror the persisted defaults; `stringResource` calls re-resolve via
+     * `LocaleOverride` when the language flow re-emits.
+     */
+    val themeMode: StateFlow<ThemeMode> = context.settingsDataStore.data
+        .map { prefs ->
+            val key = prefs[SettingsKeys.THEME_MODE]
+                ?: when (prefs[SettingsKeys.DARK_MODE]) {
+                    true  -> "dark"
+                    false -> "light"
+                    null  -> "system"
+                }
+            ThemeMode.fromKey(key)
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), ThemeMode.System)
+
+    val palette: StateFlow<ThemePalette> = context.settingsDataStore.data
+        .map { ThemePalette.fromKey(it[SettingsKeys.THEME_PALETTE]) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), ThemePalette.Default)
+
+    val language: StateFlow<String> = context.settingsDataStore.data
+        .map { it[SettingsKeys.LANGUAGE] ?: "system" }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), "system")
+
+    /**
      * Bucket list for the folder picker step. Empty list while the photos read
      * permission hasn't been granted (MediaStore returns nothing) — the step UI
      * shows a "grant permission first" placeholder in that case. Once granted,
@@ -140,17 +171,25 @@ class OnboardingViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), emptyList())
 
     /**
-     * Theme + palette are written immediately on selection so the wizard re-themes
-     * live — the user sees the choice the moment they pick. They never trigger an
-     * Activity recreate, unlike language. Wrapped in viewModelScope so the
-     * composition stays responsive.
+     * Canonical DataStore write + boot-mirror update. We DELIBERATELY do not call
+     * AppCompatDelegate.setDefaultNightMode here: it forces an Activity recreate
+     * which the user perceives as a screen-scale-from-center animation. The Compose
+     * tree re-themes via the DataStore flow [MainActivity] collects, so the in-app
+     * surface flips immediately without any recreate. ProtonCore login Activities
+     * pick up the right theme at the next cold start through [App.applyStoredThemeMode]
+     * — they never appear during the onboarding flow itself.
      */
     fun setThemeLive(mode: ThemeMode) {
         viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.THEME_MODE] = mode.storageKey }
+            context.settingsDataStore.edit {
+                it[SettingsKeys.THEME_MODE] = mode.storageKey
+                it.remove(SettingsKeys.DARK_MODE)
+            }
+            ThemePrefsBoot.write(context, mode.storageKey)
         }
     }
 
+    /** Palette is purely an in-Compose accent swap — no boot-mirror, no AppCompat. */
     fun setPaletteLive(palette: ThemePalette) {
         viewModelScope.launch {
             context.settingsDataStore.edit { it[SettingsKeys.THEME_PALETTE] = palette.storageKey }
@@ -158,24 +197,26 @@ class OnboardingViewModel @Inject constructor(
     }
 
     /**
-     * Language is applied live so the wizard itself relocalizes the moment a
-     * locale is picked. `setApplicationLocales` triggers an Activity recreate;
-     * the onboarding state (rememberSaveable backupMode, folder picks, etc.) and
-     * the PagerState both survive the recreate, so the user lands back on the
-     * Appearance step in the new language.
+     * Language switch — canonical DataStore write plus boot-mirror update so the
+     * next cold start hands the right locale to ProtonCore login Activities. Does
+     * NOT call `AppCompatDelegate.setApplicationLocales`: that triggers an Activity
+     * recreate which loses navigation state and plays a reload animation. The
+     * in-app Compose tree re-resolves strings via [eu.akoos.photos.presentation.util.LocaleOverride]
+     * wired up in `MainActivity` — DataStore change → flow re-emits → override key
+     * changes → recomposition picks up the new locale.
      */
     fun setLanguageLive(tag: String) {
         viewModelScope.launch {
             context.settingsDataStore.edit { it[SettingsKeys.LANGUAGE] = tag }
-            applyLocale(tag)
+            LanguagePrefsBoot.write(context, tag)
         }
     }
 
     /**
-     * Commits every onboarding choice in a single DataStore transaction. Theme +
-     * palette are already persisted (live above), but we re-write them here so a
-     * partial mid-wizard write paired with a process death still ends up with
-     * the user's final selections after they re-walk the wizard.
+     * Commits every onboarding choice in a single DataStore transaction. Theme,
+     * palette, and language are already persisted (live above) but we re-write them
+     * here so a partial mid-wizard write paired with a process death still ends up
+     * with the user's final selections after they re-walk the wizard.
      */
     fun finishOnboarding(
         backupMode: BackupMode,
@@ -193,6 +234,8 @@ class OnboardingViewModel @Inject constructor(
         language: String,
         appLockEnabled: Boolean,
         appLockTimeoutMinutes: Int,
+        albumMirrorSelection: Set<String>,
+        albumMirrorCustom: Set<String>,
         onAppliedLocale: () -> Unit,
     ) {
         viewModelScope.launch {
@@ -228,20 +271,26 @@ class OnboardingViewModel @Inject constructor(
                 p[SettingsKeys.LANGUAGE] = language
                 p[SettingsKeys.APP_LOCK_ENABLED] = appLockEnabled
                 p[SettingsKeys.APP_LOCK_TIMEOUT_MINUTES] = appLockTimeoutMinutes
+                // Album-mirror opt-in: persist the chosen folder names (the
+                // custom set is already a subset of the selection because every
+                // add-custom flow auto-checks the new row) and flip the
+                // migration flag so the first-run migration doesn't run
+                // afterwards and clobber the user's explicit pick. The
+                // albumMirrorCustom parameter at the call site is intentionally
+                // accepted but unused here — its values are already merged into
+                // albumMirrorSelection by the step composable.
+                p[SettingsKeys.ALBUM_OPT_IN_FOLDER_NAMES] = albumMirrorSelection
+                p[SettingsKeys.ALBUM_OPT_IN_MIGRATED] = true
                 p[SettingsKeys.ONBOARDING_COMPLETE] = true
             }
-            applyLocale(language)
+            // Final defensive sync of the boot mirrors — both were already written by
+            // the live setters above, but a user who skipped the Appearance step (back
+            // button, system back, etc.) and let it submit defaults would otherwise
+            // leave the boot store stale.
+            ThemePrefsBoot.write(context, themeMode.storageKey)
+            LanguagePrefsBoot.write(context, language)
             onAppliedLocale()
         }
-    }
-
-    private fun applyLocale(tag: String) {
-        val locales = if (tag == "system" || tag.isEmpty()) {
-            LocaleListCompat.getEmptyLocaleList()
-        } else {
-            LocaleListCompat.forLanguageTags(tag)
-        }
-        AppCompatDelegate.setApplicationLocales(locales)
     }
 }
 
@@ -262,6 +311,8 @@ fun OnboardingScreen(
     var backupMode by rememberSaveable { mutableStateOf(BackupMode.Everything) }
     var selectedFolders by rememberSaveable { mutableStateOf<Set<String>>(emptySet()) }
     var excludedFolders by rememberSaveable { mutableStateOf<Set<String>>(emptySet()) }
+    var albumMirrorSelection by rememberSaveable { mutableStateOf<Set<String>>(emptySet()) }
+    var albumMirrorCustom by rememberSaveable { mutableStateOf<Set<String>>(emptySet()) }
     var stripMetadata by rememberSaveable { mutableStateOf(true) }
     var stripGps by rememberSaveable { mutableStateOf(true) }
     var stripCamera by rememberSaveable { mutableStateOf(false) }
@@ -269,9 +320,13 @@ fun OnboardingScreen(
     var stripSoftware by rememberSaveable { mutableStateOf(false) }
     var renameOnUpload by rememberSaveable { mutableStateOf(false) }
     var deleteAfterBackup by rememberSaveable { mutableStateOf(false) }
-    var themeMode by rememberSaveable { mutableStateOf(ThemeMode.System) }
-    var palette by rememberSaveable { mutableStateOf(ThemePalette.Default) }
-    var language by rememberSaveable { mutableStateOf("system") }
+    // Theme / palette / language are read from the VM (DataStore-backed) instead of
+    // shadow `rememberSaveable` state — the live setters below already persist to
+    // DataStore, so a single source of truth keeps the picker UI consistent with the
+    // active theme + locale of the rest of the app (and survives process death).
+    val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
+    val palette by viewModel.palette.collectAsStateWithLifecycle()
+    val language by viewModel.language.collectAsStateWithLifecycle()
     var appLockEnabled by rememberSaveable { mutableStateOf(false) }
     var appLockTimeoutMinutes by rememberSaveable { mutableIntStateOf(5) }
 
@@ -309,6 +364,7 @@ fun OnboardingScreen(
         add(OnboardingStep.BackupMode)
         if (backupMode != BackupMode.NothingForNow) {
             add(OnboardingStep.FolderPicker)
+            add(OnboardingStep.AlbumMirrorOptIn)
         }
         add(OnboardingStep.Privacy)
         add(OnboardingStep.AppLock)
@@ -378,18 +434,9 @@ fun OnboardingScreen(
                             themeMode = themeMode,
                             palette = palette,
                             language = language,
-                            onThemeMode = {
-                                themeMode = it
-                                viewModel.setThemeLive(it)
-                            },
-                            onPalette = {
-                                palette = it
-                                viewModel.setPaletteLive(it)
-                            },
-                            onLanguage = {
-                                language = it
-                                viewModel.setLanguageLive(it)
-                            },
+                            onThemeMode = { viewModel.setThemeLive(it) },
+                            onPalette = { viewModel.setPaletteLive(it) },
+                            onLanguage = { viewModel.setLanguageLive(it) },
                         )
                         OnboardingStep.PhotosAccess -> PhotosAccessStep(
                             granted = mediaGranted,
@@ -408,6 +455,29 @@ fun OnboardingScreen(
                             onSelectedChange = { selectedFolders = it },
                             onExcludedChange = { excludedFolders = it },
                         )
+                        OnboardingStep.AlbumMirrorOptIn -> {
+                            val deviceFolders by viewModel.folders.collectAsStateWithLifecycle()
+                            AlbumMirrorStep(
+                                availableBuckets = deviceFolders.map { it.name },
+                                selected = albumMirrorSelection,
+                                customNames = albumMirrorCustom,
+                                onToggle = { name ->
+                                    albumMirrorSelection = if (name in albumMirrorSelection) {
+                                        albumMirrorSelection - name
+                                    } else {
+                                        albumMirrorSelection + name
+                                    }
+                                },
+                                onAddCustom = { name ->
+                                    albumMirrorCustom = albumMirrorCustom + name
+                                    albumMirrorSelection = albumMirrorSelection + name
+                                },
+                                onRemoveCustom = { name ->
+                                    albumMirrorCustom = albumMirrorCustom - name
+                                    albumMirrorSelection = albumMirrorSelection - name
+                                },
+                            )
+                        }
                         OnboardingStep.Privacy -> PrivacyStep(
                             stripMetadata = stripMetadata,
                             stripGps = stripGps,
@@ -494,6 +564,8 @@ fun OnboardingScreen(
                                 language = language,
                                 appLockEnabled = appLockEnabled,
                                 appLockTimeoutMinutes = appLockTimeoutMinutes,
+                                albumMirrorSelection = albumMirrorSelection,
+                                albumMirrorCustom = albumMirrorCustom,
                                 onAppliedLocale = onComplete,
                             )
                         }
@@ -529,7 +601,7 @@ fun OnboardingScreen(
 
 private enum class OnboardingStep {
     About, Welcome, Appearance, PhotosAccess, BackupMode, FolderPicker,
-    Privacy, AppLock, Notifications, ManageMedia, Done,
+    AlbumMirrorOptIn, Privacy, AppLock, Notifications, ManageMedia, Done,
 }
 
 private fun hasMediaPermission(context: Context): Boolean {

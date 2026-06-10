@@ -22,7 +22,6 @@
 
 package eu.akoos.photos.presentation.albums
 
-import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -49,7 +48,6 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.AlertDialog
@@ -89,7 +87,6 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import eu.akoos.photos.domain.entity.Album
-import eu.akoos.photos.domain.entity.LocalAlbum
 import androidx.compose.ui.res.stringResource
 import eu.akoos.photos.R
 import eu.akoos.photos.presentation.theme.Accent
@@ -101,25 +98,12 @@ import eu.akoos.photos.presentation.theme.Line2
 import eu.akoos.photos.presentation.theme.PillBg
 import eu.akoos.photos.presentation.theme.PillBorder
 
-// Unified entry for mixed grid display
-private sealed interface AlbumEntry {
-    data class Cloud(val album: Album) : AlbumEntry
-    data class Local(val album: LocalAlbum) : AlbumEntry
-    /** Local folder that has a matching Drive album (same name) — shows as one card. */
-    data class Merged(val local: LocalAlbum, val cloud: Album) : AlbumEntry
-}
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AlbumsScreen(
     topPadding: Dp = 0.dp,
     gridState: LazyGridState = rememberLazyGridState(),
     onAlbumClick: (Album) -> Unit = {},
-    onLocalAlbumClick: (LocalAlbum) -> Unit = {},
-    /** Tap on an [AlbumEntry.Merged] card — passes BOTH the local bucket and the matching
-     *  cloud album so NavGraph can route to a detail screen that shows the union of both
-     *  sources. Falls back to local-only nav if the host hasn't wired this. */
-    onMergedAlbumClick: (LocalAlbum, Album) -> Unit = { local, _ -> onLocalAlbumClick(local) },
     viewModel: AlbumsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -129,40 +113,19 @@ fun AlbumsScreen(
     var showCreateDialog by remember { mutableStateOf(false) }
     var albumToDelete by remember { mutableStateOf<Album?>(null) }
 
-    // Local-album long-press flow state ────────────────────────────────────────
-    // [localAlbumSheetFor] drives the bottom sheet that lets the user choose Rename or Delete
-    // (only opens for virtual-only albums — bucket-derived folders snackbar instead).
-    // [localAlbumRenameFor] / [localAlbumDeleteFor] drive the confirm dialogs that follow.
-    // [pendingCloudDelete] drives the "also delete on cloud?" dialog after a virtual-only
-    // local delete succeeded and a matching cloud album was found.
-    var localAlbumSheetFor by remember { mutableStateOf<LocalAlbum?>(null) }
-    var localAlbumRenameFor by remember { mutableStateOf<LocalAlbum?>(null) }
-    var localAlbumDeleteFor by remember { mutableStateOf<LocalAlbum?>(null) }
-    // Cloud-album long-press surfaces the same Rename + Delete bottom sheet
-    // that local albums get. Holding the in-flight Album object directly so we
-    // can read the current name + linkId without a second lookup.
+    // Cloud-album long-press surfaces a Rename + Delete bottom sheet. Holding the in-flight
+    // Album object directly so we can read the current name + linkId without a second lookup.
     var cloudAlbumSheetFor by remember { mutableStateOf<Album?>(null) }
     var cloudAlbumRenameFor by remember { mutableStateOf<Album?>(null) }
-    var pendingCloudDelete by remember {
-        mutableStateOf<LocalAlbumActionResult.DoneWithCloudPending?>(null)
-    }
 
-    /**
-     * Collect a [LocalAlbumActionResult] flow once and snackbar the outcome. Virtual-only
-     * paths never need consent (we only mutate DataStore), so the only async branch is
-     * DoneWithCloudPending which stages a follow-up dialog for the cloud-side mirror.
-     */
-    suspend fun handleLocalAlbumActionFlow(
-        actionFlow: Flow<LocalAlbumActionResult>,
+    /** Collect an [AlbumActionResult] flow once and snackbar the outcome. */
+    suspend fun handleAlbumActionFlow(
+        actionFlow: Flow<AlbumActionResult>,
         doneMessage: String,
     ) {
         when (val outcome = actionFlow.first()) {
-            is LocalAlbumActionResult.Done -> snackbarHostState.showSnackbar(doneMessage)
-            is LocalAlbumActionResult.Failed -> snackbarHostState.showSnackbar(outcome.message)
-            is LocalAlbumActionResult.DoneWithCloudPending -> {
-                snackbarHostState.showSnackbar(doneMessage)
-                pendingCloudDelete = outcome
-            }
+            is AlbumActionResult.Done -> snackbarHostState.showSnackbar(doneMessage)
+            is AlbumActionResult.Failed -> snackbarHostState.showSnackbar(outcome.message)
         }
     }
 
@@ -180,26 +143,7 @@ fun AlbumsScreen(
         }
     }
 
-    // Build unified list: merge local + cloud by name, then orphans
-    val entries: List<AlbumEntry> = buildList {
-        val cloudByName = state.visibleCloudAlbums.associateBy { it.name.lowercase() }
-        val matchedCloudNames = mutableSetOf<String>()
-        for (local in state.visibleLocalAlbums) {
-            val cloud = cloudByName[local.name.lowercase()]
-            if (cloud != null) {
-                add(AlbumEntry.Merged(local, cloud))
-                matchedCloudNames += cloud.name.lowercase()
-            } else {
-                add(AlbumEntry.Local(local))
-            }
-        }
-        // Cloud albums without a matching local folder
-        for (cloud in state.visibleCloudAlbums) {
-            if (cloud.name.lowercase() !in matchedCloudNames) {
-                add(AlbumEntry.Cloud(cloud))
-            }
-        }
-    }
+    val albums = state.visibleCloudAlbums
 
     Box(modifier = Modifier.fillMaxSize()) {
         PullToRefreshBox(
@@ -210,7 +154,7 @@ fun AlbumsScreen(
             indicator = {},
         ) {
             when {
-                state.isLoading && entries.isEmpty() ->
+                state.isLoading && albums.isEmpty() ->
                     // Skeleton placeholder grid — must use the SAME paddings, spacings, and
                     // header structure as the real grid below, otherwise the transition into
                     // real content reflows visibly (placeholders shift to new positions when
@@ -242,7 +186,7 @@ fun AlbumsScreen(
                         }
                     }
 
-                entries.isEmpty() ->
+                albums.isEmpty() ->
                     Column(
                         modifier = Modifier
                             .align(Alignment.Center)
@@ -284,55 +228,14 @@ fun AlbumsScreen(
                         }
 
                         items(
-                            entries,
-                            key = {
-                                when (it) {
-                                    is AlbumEntry.Cloud   -> "cloud_${it.album.linkId}"
-                                    is AlbumEntry.Local   -> "local_${it.album.name}"
-                                    is AlbumEntry.Merged  -> "merged_${it.cloud.linkId}"
-                                }
-                            },
-                        ) { entry ->
-                            when (entry) {
-                                is AlbumEntry.Cloud -> CloudAlbumCard(
-                                    album       = entry.album,
-                                    onClick     = { onAlbumClick(entry.album) },
-                                    onLongClick = { cloudAlbumSheetFor = entry.album },
-                                )
-                                is AlbumEntry.Local -> {
-                                    val bucketGuardMsg = stringResource(
-                                        R.string.bucket_album_readonly_msg, "\"${entry.album.name}\"",
-                                    )
-                                    LocalAlbumCard(
-                                        album       = entry.album,
-                                        onClick     = { onLocalAlbumClick(entry.album) },
-                                        onLongClick = {
-                                            // Bucket-derived "albums" (Camera, Screenshots, …) are device
-                                            // folders we don't own — refuse rename/delete and tell the user
-                                            // how to organize their photos instead.
-                                            if (entry.album.isVirtualOnly) {
-                                                localAlbumSheetFor = entry.album
-                                            } else {
-                                                scope.launch {
-                                                    snackbarHostState.showSnackbar(bucketGuardMsg)
-                                                }
-                                            }
-                                        },
-                                    )
-                                }
-                                is AlbumEntry.Merged -> MergedAlbumCard(
-                                    local       = entry.local,
-                                    cloud       = entry.cloud,
-                                    onClick     = {
-                                        // Open a merged detail view that shows BOTH the local
-                                        // bucket photos AND the matching cloud album photos
-                                        // deduped, so neither side is hidden from the user
-                                        // when a local bucket and a cloud album share a name.
-                                        onMergedAlbumClick(entry.local, entry.cloud)
-                                    },
-                                    onLongClick = { cloudAlbumSheetFor = entry.cloud },
-                                )
-                            }
+                            albums,
+                            key = { "cloud_${it.linkId}" },
+                        ) { album ->
+                            CloudAlbumCard(
+                                album       = album,
+                                onClick     = { onAlbumClick(album) },
+                                onLongClick = { cloudAlbumSheetFor = album },
+                            )
                         }
                     }
             }
@@ -362,7 +265,6 @@ fun AlbumsScreen(
     // ── Create Album dialog ────────────────────────────────────────────────────
     if (showCreateDialog) {
         var albumName by remember { mutableStateOf("") }
-        var createCloud by remember { mutableStateOf(true) } // default = cloud (existing behavior)
         ModalBottomSheet(
             onDismissRequest = { showCreateDialog = false; albumName = "" },
             containerColor = AppColors.current.cardBg,
@@ -376,21 +278,6 @@ fun AlbumsScreen(
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 Text(stringResource(R.string.albums_new_album), color = FgPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
-
-                // Cloud vs Local toggle. Dedicated strings (NOT the filter "Backed up" label)
-                // so the dialog reads as "where to create" rather than "filter by state".
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    AlbumKindChip(
-                        label = stringResource(R.string.albums_new_kind_cloud),
-                        selected = createCloud,
-                        onClick = { createCloud = true },
-                    )
-                    AlbumKindChip(
-                        label = stringResource(R.string.albums_new_kind_local),
-                        selected = !createCloud,
-                        onClick = { createCloud = false },
-                    )
-                }
 
                 OutlinedTextField(
                     value = albumName,
@@ -408,8 +295,7 @@ fun AlbumsScreen(
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                     keyboardActions = KeyboardActions(onDone = {
                         if (albumName.trim().isNotEmpty()) {
-                            if (createCloud) viewModel.createAlbum(albumName)
-                            else viewModel.createLocalAlbum(albumName)
+                            viewModel.createAlbum(albumName)
                             showCreateDialog = false
                             albumName = ""
                         }
@@ -424,8 +310,7 @@ fun AlbumsScreen(
                     }
                     TextButton(
                         onClick = {
-                            if (createCloud) viewModel.createAlbum(albumName)
-                            else viewModel.createLocalAlbum(albumName)
+                            viewModel.createAlbum(albumName)
                             showCreateDialog = false
                             albumName = ""
                         },
@@ -436,26 +321,9 @@ fun AlbumsScreen(
         }
     }
 
-    // ── Local-album long-press action sheet ──────────────────────────────────
-    localAlbumSheetFor?.let { album ->
-        LocalAlbumActionSheet(
-            album = album,
-            onDismiss = { localAlbumSheetFor = null },
-            onRename  = {
-                localAlbumSheetFor = null
-                localAlbumRenameFor = album
-            },
-            onDelete  = {
-                localAlbumSheetFor = null
-                localAlbumDeleteFor = album
-            },
-        )
-    }
-
-    // ── Cloud-album long-press action sheet (parity with local) ──────────────
-    // Same Rename + Delete sheet shape — delete maps to the existing
-    // albumToDelete confirm path (already wired), rename opens the new dialog
-    // below which calls renameCloudAlbum via the shared action-flow helper.
+    // ── Cloud-album long-press action sheet ──────────────────────────────────
+    // Rename + Delete sheet — delete maps to the existing albumToDelete confirm path,
+    // rename opens the dialog below which calls renameCloudAlbum via the action-flow helper.
     cloudAlbumSheetFor?.let { album ->
         CloudAlbumActionSheet(
             album = album,
@@ -489,7 +357,7 @@ fun AlbumsScreen(
                         val target = newName.trim()
                         cloudAlbumRenameFor = null
                         scope.launch {
-                            handleLocalAlbumActionFlow(
+                            handleAlbumActionFlow(
                                 actionFlow = viewModel.renameCloudAlbum(album.linkId, album.name, target),
                                 doneMessage = "Renamed to \"$target\"",
                             )
@@ -512,7 +380,7 @@ fun AlbumsScreen(
                         val target = newName.trim()
                         cloudAlbumRenameFor = null
                         scope.launch {
-                            handleLocalAlbumActionFlow(
+                            handleAlbumActionFlow(
                                 actionFlow = viewModel.renameCloudAlbum(album.linkId, album.name, target),
                                 doneMessage = "Renamed to \"$target\"",
                             )
@@ -528,117 +396,11 @@ fun AlbumsScreen(
         )
     }
 
-    // ── Rename local-album dialog ────────────────────────────────────────────
-    localAlbumRenameFor?.let { album ->
-        var newName by remember(album.name) { mutableStateOf(album.name) }
-        AlertDialog(
-            onDismissRequest = { localAlbumRenameFor = null },
-            containerColor    = AppColors.current.cardBg,
-            titleContentColor = AppColors.current.fgPrimary,
-            title = { Text(stringResource(R.string.album_rename), fontWeight = FontWeight.SemiBold) },
-            text  = {
-                OutlinedTextField(
-                    value = newName,
-                    onValueChange = { newName = it },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                    keyboardActions = KeyboardActions(onDone = {
-                        val target = newName
-                        localAlbumRenameFor = null
-                        scope.launch {
-                            handleLocalAlbumActionFlow(
-                                actionFlow = viewModel.renameLocalAlbum(album.name, target),
-                                doneMessage = "Renamed to \"${eu.akoos.photos.util.ProtonPhotosStorage.sanitize(target)}\"",
-                            )
-                        }
-                    }),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = AppColors.current.fgPrimary,
-                        unfocusedTextColor = AppColors.current.fgPrimary,
-                        cursorColor = Accent,
-                        focusedBorderColor = Accent,
-                        unfocusedBorderColor = AppColors.current.fgDim,
-                    ),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            },
-            confirmButton = {
-                TextButton(
-                    enabled = newName.isNotBlank() && newName.trim() != album.name,
-                    onClick = {
-                        val target = newName
-                        localAlbumRenameFor = null
-                        scope.launch {
-                            handleLocalAlbumActionFlow(
-                                actionFlow = viewModel.renameLocalAlbum(album.name, target),
-                                doneMessage = "Renamed to \"${eu.akoos.photos.util.ProtonPhotosStorage.sanitize(target)}\"",
-                            )
-                        }
-                    },
-                ) { Text(stringResource(R.string.album_rename_confirm), color = Accent, fontWeight = FontWeight.SemiBold) }
-            },
-            dismissButton = {
-                TextButton(onClick = { localAlbumRenameFor = null }) {
-                    Text(stringResource(R.string.cancel), color = AppColors.current.fgDim)
-                }
-            },
-        )
-    }
-
-    // ── Delete local-album confirmation ──────────────────────────────────────
-    // Virtual-only delete: we only drop the album marker + membership entries.
-    // The underlying photos stay in their original device folders.
-    localAlbumDeleteFor?.let { album ->
-        val msg = if (album.itemCount > 0) {
-            "This will remove the album. Your ${album.itemCount} photo" +
-                (if (album.itemCount != 1) "s" else "") +
-                " stay on your device in their original folders."
-        } else stringResource(R.string.albums_no_photos)
-        ConfirmDialog(
-            title = "\"${album.name}\"",
-            message = msg,
-            confirmLabel = stringResource(R.string.delete_button_permanently),
-            dismissLabel = stringResource(R.string.cancel),
-            onConfirm = {
-                localAlbumDeleteFor = null
-                scope.launch {
-                    handleLocalAlbumActionFlow(
-                        actionFlow = viewModel.deleteLocalAlbum(album.name),
-                        doneMessage = "Deleted \"${album.name}\"",
-                    )
-                }
-            },
-            onDismiss = { localAlbumDeleteFor = null },
-            destructive = true,
-        )
-    }
-
-    // ── "Also delete on Drive?" follow-up after a virtual-only delete ───────
-    pendingCloudDelete?.let { pending ->
-        ConfirmDialog(
-            title = "Also delete on Drive?",
-            message = "A cloud album named \"${pending.albumName}\" exists too. Delete it from " +
-                "Proton Drive as well? Photos in it stay on Drive — only the album " +
-                "reference is removed.",
-            confirmLabel = stringResource(R.string.delete_button_permanently),
-            dismissLabel = "Keep on Drive",
-            onConfirm = {
-                viewModel.confirmCloudDeleteForLocalAlbum(pending.cloudLinkId)
-                pendingCloudDelete = null
-            },
-            onDismiss = {
-                viewModel.cancelCloudDeleteForLocalAlbum()
-                pendingCloudDelete = null
-            },
-            destructive = true,
-        )
-    }
 }
 
 /**
- * Bottom sheet that opens on long-press of a cloud album card. Parity with the
- * local equivalent below — same shape, same Rename + Delete rows. Cloud rename
- * is wired through `AlbumsViewModel.renameCloudAlbum` which round-trips through
+ * Bottom sheet that opens on long-press of a cloud album card. Two rows: Rename + Delete.
+ * Cloud rename is wired through `AlbumsViewModel.renameCloudAlbum` which round-trips through
  * `DrivePhotoRepository.renameAlbum`.
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -673,73 +435,14 @@ private fun CloudAlbumActionSheet(
                 modifier = Modifier.padding(top = 8.dp, bottom = 4.dp),
             )
             Spacer(Modifier.height(16.dp))
-            LocalAlbumActionRow(
+            AlbumActionRow(
                 icon = Icons.Default.Edit,
                 label = stringResource(R.string.album_rename),
                 tint = Accent,
                 onClick = onRename,
             )
             Spacer(Modifier.height(8.dp))
-            LocalAlbumActionRow(
-                icon = Icons.Default.DeleteOutline,
-                label = stringResource(R.string.delete_button_permanently),
-                tint = ErrorColor,
-                onClick = onDelete,
-            )
-        }
-    }
-}
-
-/** Bottom sheet that opens on long-press of a local-album card. Two rows: Rename + Delete. */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun LocalAlbumActionSheet(
-    album: LocalAlbum,
-    onDismiss: () -> Unit,
-    onRename: () -> Unit,
-    onDelete: () -> Unit,
-) {
-    val colors = AppColors.current
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        containerColor = colors.cardBg,
-        scrimColor = Color.Black.copy(alpha = 0.5f),
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .navigationBarsPadding()
-                .padding(horizontal = 20.dp)
-                .padding(bottom = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            Text(
-                "\"${album.name}\"",
-                color = colors.fgPrimary,
-                fontSize = 17.sp,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(top = 8.dp, bottom = 4.dp),
-            )
-            if (album.itemCount > 0) {
-                val countText = androidx.compose.ui.res.pluralStringResource(
-                    R.plurals.count_photos_plural, album.itemCount, album.itemCount,
-                )
-                Text(countText, color = colors.fgMute, fontSize = 13.sp,
-                    modifier = Modifier.padding(bottom = 16.dp))
-            } else {
-                Spacer(Modifier.height(16.dp))
-            }
-
-            LocalAlbumActionRow(
-                icon = Icons.Default.Edit,
-                label = stringResource(R.string.album_rename),
-                tint = Accent,
-                onClick = onRename,
-            )
-            Spacer(Modifier.height(8.dp))
-            LocalAlbumActionRow(
+            AlbumActionRow(
                 icon = Icons.Default.DeleteOutline,
                 label = stringResource(R.string.delete_button_permanently),
                 tint = ErrorColor,
@@ -750,7 +453,7 @@ private fun LocalAlbumActionSheet(
 }
 
 @Composable
-private fun LocalAlbumActionRow(
+private fun AlbumActionRow(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     label: String,
     tint: Color,
@@ -769,27 +472,6 @@ private fun LocalAlbumActionRow(
     ) {
         Icon(icon, null, tint = tint, modifier = Modifier.size(20.dp))
         Text(label, color = AppColors.current.fgPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium)
-    }
-}
-
-@Composable
-private fun AlbumKindChip(label: String, selected: Boolean, onClick: () -> Unit) {
-    val colors = AppColors.current
-    Row(
-        modifier = Modifier
-            .height(36.dp)
-            .clip(RoundedCornerShape(10.dp))
-            .background(if (selected) Accent.copy(alpha = 0.22f) else colors.chipSelectedBg)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            label,
-            color = if (selected) Accent else FgPrimary,
-            fontSize = 13.sp,
-            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-        )
     }
 }
 
@@ -845,81 +527,16 @@ private fun shareBadgeOf(album: Album): AlbumShareBadge = when {
 @Composable
 private fun CloudAlbumCard(album: Album, onClick: () -> Unit, onLongClick: () -> Unit = {}) {
     // Cloud Album entity has no per-mime-type breakdown, so we only have a total to show.
-    // Using count_photos_plural keeps "1 photo" / "N photos" pluralisation correct without
-    // promising a photos-vs-videos split we can't compute without per-album child fetches.
+    // Using the media-neutral count_items_plural keeps "1 item" / "N items" pluralisation
+    // correct without promising a photos-vs-videos split we can't compute without per-album
+    // child fetches.
     UnifiedAlbumCard(
         coverModel  = album.coverThumbnailUrl,
         title       = album.name,
         metaText    = androidx.compose.ui.res.pluralStringResource(
-            R.plurals.count_photos_plural, album.photoCount, album.photoCount,
+            R.plurals.count_items_plural, album.photoCount, album.photoCount,
         ),
         shareBadge  = shareBadgeOf(album),
-        cloudBadge  = AlbumCloudBadge.Cloud,
-        onClick     = onClick,
-        onLongClick = onLongClick,
-    )
-}
-
-@Composable
-private fun LocalAlbumCard(album: LocalAlbum, onClick: () -> Unit, onLongClick: () -> Unit = {}) {
-    val backedUp = stringResource(R.string.albums_filter_backed_up)
-    val photoCount = androidx.compose.ui.res.pluralStringResource(
-        R.plurals.count_photos_plural, album.itemCount, album.itemCount,
-    )
-    val metaText = when {
-        album.isFullyBackedUp -> "$backedUp · ${album.itemCount}"
-        album.hasAnyBackedUp  -> "${album.backedUpCount}/${album.itemCount} · $backedUp"
-        else                  -> photoCount
-    }
-    val cloudBadge = when {
-        album.isFullyBackedUp -> AlbumCloudBadge.LocallyBackedUpFull
-        album.hasAnyBackedUp  -> AlbumCloudBadge.LocallyBackedUpPart
-        else                  -> AlbumCloudBadge.None
-    }
-    UnifiedAlbumCard(
-        coverModel  = album.coverUri?.let { Uri.parse(it) },
-        title       = album.name,
-        metaText    = metaText,
-        shareBadge  = AlbumShareBadge.None,
-        cloudBadge  = cloudBadge,
-        // Bucket-derived (non-virtual) albums map to real device folders the user can't safely
-        // rename or delete from us — flag them so the user has a hint when they long-press and
-        // get the "device folder" snackbar.
-        isDeviceFolder = !album.isVirtualOnly,
-        onClick     = onClick,
-        onLongClick = onLongClick,
-    )
-}
-
-@Composable
-private fun MergedAlbumCard(
-    local: LocalAlbum,
-    cloud: Album,
-    onClick: () -> Unit,
-    onLongClick: () -> Unit = {},
-) {
-    val coverModel: Any? = when {
-        local.coverUri != null          -> Uri.parse(local.coverUri)
-        cloud.coverThumbnailUrl != null -> cloud.coverThumbnailUrl
-        else                            -> null
-    }
-    // Merged-view count must include the cloud side too — using only the local bucket
-    // count (e.g. "1 photos") understated when the cloud album had many more.
-    // max(local, cloud) is a tight lower bound of the true union for the common case
-    // where the device's bucket is a subset of the cloud album (typical post-backup
-    // state). It does overstate slightly when both sides have items the other doesn't,
-    // but never understates.
-    val mergedCount = maxOf(local.itemCount, cloud.photoCount)
-    val metaText = when {
-        local.isFullyBackedUp -> "Backed up · $mergedCount"
-        local.hasAnyBackedUp  -> "${local.backedUpCount}/$mergedCount backed up"
-        else                  -> "$mergedCount photos"
-    }
-    UnifiedAlbumCard(
-        coverModel  = coverModel,
-        title       = cloud.name,
-        metaText    = metaText,
-        shareBadge  = shareBadgeOf(cloud),
         cloudBadge  = AlbumCloudBadge.Cloud,
         onClick     = onClick,
         onLongClick = onLongClick,

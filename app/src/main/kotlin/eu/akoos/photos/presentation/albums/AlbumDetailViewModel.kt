@@ -23,6 +23,7 @@
 package eu.akoos.photos.presentation.albums
 
 import android.content.Context
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -37,12 +38,15 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import me.proton.core.accountmanager.domain.AccountManager
 import me.proton.core.user.domain.usecase.GetUser
+import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.ShareInvitation
 import eu.akoos.photos.domain.entity.ShareMember
 import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.SyncStateRepository
+import eu.akoos.photos.util.friendlyNetworkError
+import eu.akoos.photos.util.sanitizeErrorMessage
 import eu.akoos.photos.worker.AlbumDownloadWorker
 import javax.inject.Inject
 
@@ -68,7 +72,6 @@ sealed class AlbumDownloadState {
      * state to dismiss the "Downloading" overlay and show a one-shot confirmation snackbar.
      */
     data object Enqueued : AlbumDownloadState()
-    data class Done(val downloaded: Int, val skipped: Int, val failed: Int) : AlbumDownloadState()
 }
 
 data class AlbumDetailUiState(
@@ -109,11 +112,39 @@ data class AlbumDetailUiState(
      *  monotonically increasing tick (not a Boolean flag) means two consecutive sets in a row still
      *  trigger two snackbars without a manual "clear" round-trip. */
     val coverUpdatedTick: Int = 0,
+    /** True while the shared-album "Save to my library" round-trip is in flight. */
+    val isSavingToLibrary: Boolean = false,
+    /** Photos already copied + total to copy. Surfaces the per-photo progress as
+     *  a real "N of M" indicator on the action button. Both reset to 0 once
+     *  the singleton-backed flow returns to Idle. */
+    val savingCopied: Int = 0,
+    val savingTotal: Int = 0,
+    /** One-shot summary the UI consumes via LaunchedEffect to snackbar the outcome
+     *  of [saveSharedAlbumToOwnLibrary] — copied count, total requested, and the
+     *  new owned album's linkId so the toast can offer a "View library album" jump. */
+    val saveToLibraryResult: SaveToLibraryResult? = null,
+    /** One-shot snapshot of a user-cancelled save-to-library job. Holds the
+     *  copied/total pair at the moment of cancellation so the snackbar can
+     *  surface "Save cancelled at N / M". Cleared by the UI once consumed. */
+    val saveCancelledAt: Pair<Int, Int>? = null,
+    /** True while the "Leave album" action is in flight on a shared-with-me album. */
+    val isLeavingAlbum: Boolean = false,
+    /** Bumped to `true` once the leave round-trip completes successfully so the screen
+     *  can pop back to the Shared tab. The UI consumes this via a LaunchedEffect; the
+     *  ViewModel does not navigate on its own. */
+    val leaveAlbumDone: Boolean = false,
 ) {
     val isSelectionMode: Boolean get() = selectedPhotos.isNotEmpty()
     val selectedCount: Int get() = selectedPhotos.size
     val isSharedWithMe: Boolean get() = sharedByEmail != null
 }
+
+data class SaveToLibraryResult(
+    val newAlbumLinkId: String,
+    val copiedCount: Int,
+    val failedCount: Int,
+    val totalRequested: Int,
+)
 
 @HiltViewModel
 class AlbumDetailViewModel @Inject constructor(
@@ -131,6 +162,12 @@ class AlbumDetailViewModel @Inject constructor(
 
     /** Cached primary userId — same rationale as GalleryViewModel.primaryUserId. */
     @Volatile private var primaryUserId: me.proton.core.domain.entity.UserId? = null
+
+    // Canonical album photo order, kept in step with AlbumService.photoOrder: effective
+    // captureTime DESC (via TimestampSanity, matching the timeline key) with linkId as a
+    // stable tie-breaker so equal-captureTime bursts don't reshuffle between the observer's
+    // chunked emissions and the final server paint.
+    private val photoOrder = compareByDescending<CloudPhoto> { it.captureTimeMs }.thenBy { it.linkId }
 
     /**
      * Enqueue an on-demand thumbnail decrypt for the album cell with [linkId]. The
@@ -172,6 +209,14 @@ class AlbumDetailViewModel @Inject constructor(
             val userId = accountManager.getPrimaryUserId().first() ?: return@launch
             val email = runCatching { getUser(userId, refresh = false).email }.getOrNull().orEmpty()
             _uiState.update { it.copy(ownerEmail = email) }
+        }
+        // Re-pull this album when photos are added/removed elsewhere (e.g. the gallery's
+        // "Add to album" sheet emits on the album-list bus). Without this the detail grid
+        // keeps the stale snapshot until the user re-opens the album.
+        viewModelScope.launch {
+            albumListEvents.changes.collect {
+                if (_uiState.value.albumLinkId.isNotBlank()) refresh()
+            }
         }
     }
 
@@ -215,18 +260,46 @@ class AlbumDetailViewModel @Inject constructor(
                     userId = userId,
                     albumLinkId = albumLinkId,
                     volumeId = volumeId,
+                    // For shared-with-me albums (any time we have a shareId attached) the
+                    // album metadata + photo keys can't be opened via this user's root
+                    // link key — pass the sharing share id so the lower layer bootstraps
+                    // and unlocks the share key to use as the parent in its place.
+                    sharingShareId = _uiState.value.shareId,
                     onLinkIdsResolved = { linkIds ->
-                        _uiState.update { it.copy(isLoading = false) }
-                        if (linkIds.isEmpty()) return@loadAlbumPhotos
+                        // If the album is genuinely empty (rare) drop the skeleton
+                        // straight to the "No photos" empty state. Otherwise keep
+                        // `isLoading = true` until the first DB row lands so the
+                        // skeleton tiles transition straight to real cells instead
+                        // of flashing through the empty-album copy mid-load.
+                        if (linkIds.isEmpty()) {
+                            _uiState.update { it.copy(isLoading = false) }
+                            return@loadAlbumPhotos
+                        }
                         observeJob = viewModelScope.launch {
                             driveRepo.observePhotosByLinkIds(linkIds).collect { dbRows ->
                                 val byId = dbRows.associateBy { it.linkId }
-                                // Preserve the album's server-ordering: walk linkIds in order
-                                // and pluck from `byId` (rows not yet upserted are skipped).
+                                // Render captureTime DESC — matches Drive web UI and the
+                                // final loadAlbumPhotos result, so the observer's chunked
+                                // updates settle into the same order as the final paint.
                                 val ordered = linkIds.mapNotNull { byId[it] }
+                                    .sortedWith(photoOrder)
                                 _uiState.update { state ->
                                     val existingById = state.photos.associateBy { it.linkId }
+                                    // An empty observation pass is NOT a green light to wipe
+                                    // the grid. It can mean the network refresh just walked
+                                    // the album membership table and the entities haven't
+                                    // landed in `photo_listing` under the new linkIds yet
+                                    // (shared-album rewrites do that), or that we're between
+                                    // chunked upserts. In both cases the cached snapshot
+                                    // we painted from `loadAlbumPhotosCached` is still the
+                                    // truthful view of what's in the album, so keep it.
+                                    if (ordered.isEmpty() && state.photos.isNotEmpty()) {
+                                        return@update state
+                                    }
                                     state.copy(
+                                        // First non-empty DB emission is what swaps the
+                                        // skeleton for the real grid.
+                                        isLoading = state.isLoading && ordered.isEmpty(),
                                         photos = ordered.map { dbPhoto ->
                                             // Adopt updates from DB; fall back to the existing
                                             // state if a field would otherwise blank out (e.g.
@@ -263,18 +336,33 @@ class AlbumDetailViewModel @Inject constructor(
                         }
                     },
                     onFailure = { e ->
+                        // Coroutine cancellation is not an error: it fires whenever the
+                        // user navigates back before the network refresh finishes (the
+                        // viewModelScope cancels its children on dispose). Surfacing
+                        // "StandaloneCoroutine was cancelled" as a snackbar makes every
+                        // back-press look like a failure even though everything worked.
+                        if (e is kotlinx.coroutines.CancellationException) return@fold
                         // Network failure: keep the cached snapshot (if any), drop the
-                        // skeleton, and don't show a misleading error banner for network
-                        // exceptions — looksLikeNetworkError-style classes.
-                        val netErr = e.javaClass.name.let {
-                            it.contains("UnknownHost") || it.contains("SocketTimeout") ||
-                                it.contains("SocketException") || it.contains("SSLException")
+                        // skeleton, and let the offline banner / avatar dot tell the user
+                        // why the list didn't refresh. For non-network exceptions we still
+                        // route the message through sanitizeErrorMessage so a server-side
+                        // HTML page can't leak into the error banner.
+                        val friendly = friendlyNetworkError(e, networkObserver.isOnline.value, context)
+                        _uiState.update {
+                            it.copy(
+                                isLoading = false,
+                                error = if (friendly != null) null else sanitizeErrorMessage(e.message),
+                            )
                         }
-                        _uiState.update { it.copy(isLoading = false, error = if (netErr) null else e.message) }
                     },
                 )
         }
-        if (shareId != null && sharedByEmail == null) {
+        // Kick the members/invitations fetch off in parallel with the photo load for any
+        // owned album (not just ones whose share sheet is already open), so the avatar row
+        // is populated by the time the header renders instead of popping in late.
+        // loadInvitations() self-guards on shareId/shared-with-me and launches its own
+        // coroutine, so this never blocks the photo path.
+        if (sharedByEmail == null) {
             loadInvitations()
         }
     }
@@ -296,12 +384,15 @@ class AlbumDetailViewModel @Inject constructor(
             val invitationsResult = runCatching { driveRepo.loadShareInvitations(userId, shareId) }
             val membersResult = runCatching { driveRepo.loadShareMembers(userId, shareId) }
             val firstError = invitationsResult.exceptionOrNull() ?: membersResult.exceptionOrNull()
+            val friendly = firstError?.let {
+                friendlyNetworkError(it, networkObserver.isOnline.value, context)
+            }
             _uiState.update {
                 it.copy(
                     isLoadingInvitations = false,
                     invitations = invitationsResult.getOrDefault(emptyList()),
                     members = membersResult.getOrDefault(emptyList()),
-                    error = firstError?.message ?: it.error,
+                    error = friendly ?: firstError?.let { e -> sanitizeErrorMessage(e.message) } ?: it.error,
                 )
             }
         }
@@ -309,12 +400,21 @@ class AlbumDetailViewModel @Inject constructor(
 
     fun revokeInvitation(invitationId: String) {
         val shareId = _uiState.value.shareId ?: return
+        // Optimistic placeholder rows carry a blank id until loadInvitations() replaces
+        // them with server truth — there's nothing to revoke on the backend yet.
+        if (invitationId.isBlank()) return
         viewModelScope.launch {
             val userId = accountManager.getPrimaryUserId().first() ?: return@launch
             runCatching { driveRepo.revokeShareInvitation(userId, shareId, invitationId) }
                 .fold(
                     onSuccess = { _uiState.update { it.copy(invitations = it.invitations.filter { inv -> inv.invitationId != invitationId }) } },
-                    onFailure = { e -> _uiState.update { it.copy(error = "Revoke failed: ${e.message}") } },
+                    onFailure = { e ->
+                        Log.e("AlbumDetailVM", "revokeInvitation failed", e)
+                        val friendly = friendlyNetworkError(e, networkObserver.isOnline.value, context)
+                        _uiState.update {
+                            it.copy(error = friendly ?: context.getString(R.string.share_revoke_failed))
+                        }
+                    },
                 )
         }
     }
@@ -327,7 +427,13 @@ class AlbumDetailViewModel @Inject constructor(
             runCatching { driveRepo.removeShareMember(userId, shareId, memberId) }
                 .fold(
                     onSuccess = { _uiState.update { it.copy(members = it.members.filter { m -> m.memberId != memberId }) } },
-                    onFailure = { e -> _uiState.update { it.copy(error = "Remove failed: ${e.message}") } },
+                    onFailure = { e ->
+                        Log.e("AlbumDetailVM", "removeMember failed", e)
+                        val friendly = friendlyNetworkError(e, networkObserver.isOnline.value, context)
+                        _uiState.update {
+                            it.copy(error = friendly ?: context.getString(R.string.share_remove_member_failed))
+                        }
+                    },
                 )
         }
     }
@@ -360,7 +466,14 @@ class AlbumDetailViewModel @Inject constructor(
                         }
                     },
                     onFailure = { e ->
-                        _uiState.update { it.copy(isDeletingPhotos = false, error = "Delete failed: ${e.message}") }
+                        Log.e("AlbumDetailVM", "deleteSelectedPhotos failed", e)
+                        val friendly = friendlyNetworkError(e, networkObserver.isOnline.value, context)
+                        _uiState.update {
+                            it.copy(
+                                isDeletingPhotos = false,
+                                error = friendly ?: context.getString(R.string.album_delete_photos_failed),
+                            )
+                        }
                     },
                 )
         }
@@ -392,13 +505,20 @@ class AlbumDetailViewModel @Inject constructor(
                                 // weren't actually removed.
                                 photos = state.photos.filter { it.linkId !in removedSet },
                                 error = if (removed.size != linkIds.size)
-                                    "Removed ${removed.size}/${linkIds.size} — some chunks failed"
+                                    context.getString(R.string.album_remove_partial, removed.size, linkIds.size)
                                 else null,
                             )
                         }
                     },
                     onFailure = { e ->
-                        _uiState.update { it.copy(isDeletingPhotos = false, error = "Remove failed: ${e.message}") }
+                        Log.e("AlbumDetailVM", "removeSelectedPhotosFromAlbum failed", e)
+                        val friendly = friendlyNetworkError(e, networkObserver.isOnline.value, context)
+                        _uiState.update {
+                            it.copy(
+                                isDeletingPhotos = false,
+                                error = friendly ?: context.getString(R.string.album_remove_photos_failed),
+                            )
+                        }
                     },
                 )
         }
@@ -417,7 +537,13 @@ class AlbumDetailViewModel @Inject constructor(
             runCatching { driveRepo.renameAlbum(userId, albumLinkId, trimmed) }
                 .fold(
                     onSuccess = { _uiState.update { it.copy(albumName = trimmed, error = null) } },
-                    onFailure = { e -> _uiState.update { it.copy(error = "Rename failed: ${e.message}") } },
+                    onFailure = { e ->
+                        Log.e("AlbumDetailVM", "renameAlbum failed", e)
+                        val friendly = friendlyNetworkError(e, networkObserver.isOnline.value, context)
+                        _uiState.update {
+                            it.copy(error = friendly ?: context.getString(R.string.album_rename_failed))
+                        }
+                    },
                 )
         }
     }
@@ -466,7 +592,13 @@ class AlbumDetailViewModel @Inject constructor(
                         // newly chosen cover the moment the user pops back to the list.
                         albumListEvents.notifyChanged()
                     },
-                    onFailure = { e -> _uiState.update { it.copy(error = "Set cover failed: ${e.message}") } },
+                    onFailure = { e ->
+                        Log.e("AlbumDetailVM", "setAlbumCover failed", e)
+                        val friendly = friendlyNetworkError(e, networkObserver.isOnline.value, context)
+                        _uiState.update {
+                            it.copy(error = friendly ?: context.getString(R.string.album_set_cover_failed))
+                        }
+                    },
                 )
         }
     }
@@ -489,7 +621,16 @@ class AlbumDetailViewModel @Inject constructor(
                             it.copy(isSharing = false, shareLink = url, publicShareUrl = url)
                         }
                     },
-                    onFailure = { e -> _uiState.update { it.copy(isSharing = false, error = "Share failed: ${e.message}") } },
+                    onFailure = { e ->
+                        Log.e("AlbumDetailVM", "createShareLink failed", e)
+                        val friendly = friendlyNetworkError(e, networkObserver.isOnline.value, context)
+                        _uiState.update {
+                            it.copy(
+                                isSharing = false,
+                                error = friendly ?: context.getString(R.string.share_create_link_failed),
+                            )
+                        }
+                    },
                 )
         }
     }
@@ -500,80 +641,152 @@ class AlbumDetailViewModel @Inject constructor(
      * URL displayed (and a separate "Copy" button), not a one-shot clipboard event.
      */
     fun createPublicLink() {
-        val albumLinkId = _uiState.value.albumLinkId.ifBlank { return }
+        val albumLinkId = _uiState.value.albumLinkId.ifBlank {
+            Log.w("AlbumDetailVM", "createPublicLink: albumLinkId is blank, ignoring tap")
+            return
+        }
+        Log.d("AlbumDetailVM", "createPublicLink: ENTER albumLinkId=$albumLinkId")
         viewModelScope.launch {
-            val userId = accountManager.getPrimaryUserId().first() ?: return@launch
+            val userId = accountManager.getPrimaryUserId().first() ?: run {
+                Log.w("AlbumDetailVM", "createPublicLink: no primary userId, aborting")
+                return@launch
+            }
             _uiState.update { it.copy(isTogglingPublicLink = true) }
             runCatching { driveRepo.createAlbumShareLink(userId, albumLinkId) }
                 .fold(
                     onSuccess = { url ->
+                        Log.d("AlbumDetailVM", "createPublicLink: SUCCESS url=$url")
                         _uiState.update { it.copy(isTogglingPublicLink = false, publicShareUrl = url) }
                     },
                     onFailure = { e ->
-                        _uiState.update { it.copy(isTogglingPublicLink = false, error = "Share failed: ${e.message}") }
-                    },
-                )
-        }
-    }
-
-    /**
-     * Toggles the public link OFF. There is no dedicated `deleteShareUrl` endpoint plumbed
-     * through the repository, so we fall back to [deleteShare] — BUT only when there are
-     * no accepted members or pending invitations (otherwise [deleteShare] would also wipe
-     * member access, which is not the user's intent when they only meant to disable the
-     * public URL). If members exist, we surface an error so the user knows the public
-     * link can't be selectively revoked yet.
-     *
-     * TODO: implement `revokeShareUrlOnly` in [DrivePhotoRepository] backed by
-     *  `DELETE drive/shares/{shareId}/urls/{shareUrlId}` so we can disable the public link
-     *  without nuking member shares.
-     */
-    fun disablePublicLink() {
-        val shareId = _uiState.value.shareId ?: return
-        val hasMembers = _uiState.value.members.isNotEmpty() || _uiState.value.invitations.isNotEmpty()
-        if (hasMembers) {
-            _uiState.update {
-                it.copy(error = "Remove members first to disable the public link separately.")
-            }
-            return
-        }
-        viewModelScope.launch {
-            val userId = accountManager.getPrimaryUserId().first() ?: return@launch
-            _uiState.update { it.copy(isTogglingPublicLink = true) }
-            runCatching { driveRepo.deleteShare(userId, shareId) }
-                .fold(
-                    onSuccess = {
+                        Log.e("AlbumDetailVM", "createPublicLink: FAILURE msg=${e.message}", e)
+                        val friendly = friendlyNetworkError(e, networkObserver.isOnline.value, context)
                         _uiState.update {
                             it.copy(
                                 isTogglingPublicLink = false,
-                                publicShareUrl = null,
-                                shareId = null,
+                                error = friendly ?: context.getString(R.string.share_create_link_failed),
                             )
                         }
-                        // Same rationale as the deleteShare() handler: invalidates the
-                        // gallery album list so the shared-badge drops immediately.
-                        albumListEvents.notifyChanged()
-                    },
-                    onFailure = { e ->
-                        _uiState.update { it.copy(isTogglingPublicLink = false, error = "Failed: ${e.message}") }
                     },
                 )
         }
     }
 
     /**
-     * Permission upgrade/downgrade stub.
-     *
-     * The Drive backend supports `POST drive/v2/shares/{shareId}/members/{memberId}` with a
-     * `Permissions` field for editor/viewer toggles, but this app's [DrivePhotoRepository]
-     * does NOT yet expose that endpoint. Until it does, we surface a Toast-like error so the
-     * UI can react without claiming the change succeeded.
-     *
-     * TODO: implement `updateMemberPermissions(userId, shareId, memberId, permissions)` in
-     *  [DrivePhotoRepository] + [AlbumSharingService] and replace this stub.
+     * Toggles the public link OFF. When the share has accepted members or pending
+     * invitations we now keep the share itself and just delete the public URL — so
+     * invited Proton accounts retain access. Otherwise we drop the whole share so the
+     * album reverts to "not shared" everywhere.
+     */
+    fun disablePublicLink() {
+        val shareId = _uiState.value.shareId ?: return
+        val keepShare = _uiState.value.members.isNotEmpty() || _uiState.value.invitations.isNotEmpty()
+        viewModelScope.launch {
+            val userId = accountManager.getPrimaryUserId().first() ?: return@launch
+            _uiState.update { it.copy(isTogglingPublicLink = true) }
+            val action = runCatching {
+                if (keepShare) driveRepo.revokeShareUrlOnly(userId, shareId)
+                else driveRepo.deleteShare(userId, shareId)
+            }
+            action.fold(
+                onSuccess = {
+                    _uiState.update {
+                        it.copy(
+                            isTogglingPublicLink = false,
+                            publicShareUrl = null,
+                            // When members stayed we keep `shareId` populated so the
+                            // member list keeps loading; only drop it when the share
+                            // itself is gone.
+                            shareId = if (keepShare) it.shareId else null,
+                        )
+                    }
+                    // Refresh the gallery album list so the shared-badge stays in sync
+                    // with the new state — present when members remain, gone otherwise.
+                    albumListEvents.notifyChanged()
+                },
+                onFailure = { e ->
+                    Log.e("AlbumDetailVM", "disablePublicLink failed", e)
+                    val friendly = friendlyNetworkError(e, networkObserver.isOnline.value, context)
+                    _uiState.update {
+                        it.copy(
+                            isTogglingPublicLink = false,
+                            error = friendly ?: context.getString(R.string.share_disable_link_failed),
+                        )
+                    }
+                },
+            )
+        }
+    }
+
+    /**
+     * Upgrades or downgrades an accepted member's permission bitmap on the album share.
+     * `4` = viewer (read), `6` = editor (read + write). The local member list is updated
+     * optimistically and the server call follows; on failure we revert + surface a
+     * friendly error.
      */
     fun changeMemberPermission(memberId: String, permissions: Int) {
-        _uiState.update { it.copy(error = "Permission changes coming soon") }
+        val shareId = _uiState.value.shareId ?: return
+        val originalMembers = _uiState.value.members
+        val updatedMembers = originalMembers.map { m ->
+            if (m.memberId == memberId) m.copy(permissions = permissions) else m
+        }
+        _uiState.update { it.copy(members = updatedMembers) }
+        viewModelScope.launch {
+            val userId = accountManager.getPrimaryUserId().first() ?: return@launch
+            runCatching { driveRepo.changeMemberPermission(userId, shareId, memberId, permissions) }
+                .fold(
+                    onSuccess = {
+                        _uiState.update { it.copy(error = null) }
+                    },
+                    onFailure = { e ->
+                        // Revert to the prior member list so the row reflects reality.
+                        Log.e("AlbumDetailVM", "changeMemberPermission failed", e)
+                        val friendly = friendlyNetworkError(e, networkObserver.isOnline.value, context)
+                        _uiState.update {
+                            it.copy(
+                                members = originalMembers,
+                                error = friendly ?: context.getString(R.string.share_permission_change_failed),
+                            )
+                        }
+                    },
+                )
+        }
+    }
+
+    /**
+     * Same permission swap for a PENDING invitation — lets the owner downgrade a
+     * not-yet-accepted invite from the editor default to viewer (or back). Optimistic
+     * local update with revert-on-failure, mirroring [changeMemberPermission].
+     */
+    fun changeInvitationPermission(invitationId: String, permissions: Int) {
+        val shareId = _uiState.value.shareId ?: return
+        // Optimistic placeholder rows carry a blank id until loadInvitations() replaces
+        // them with server truth — there's no invitation to update on the backend yet.
+        if (invitationId.isBlank()) return
+        val originalInvitations = _uiState.value.invitations
+        val updatedInvitations = originalInvitations.map { inv ->
+            if (inv.invitationId == invitationId) inv.copy(permissions = permissions) else inv
+        }
+        _uiState.update { it.copy(invitations = updatedInvitations) }
+        viewModelScope.launch {
+            val userId = accountManager.getPrimaryUserId().first() ?: return@launch
+            runCatching { driveRepo.changeInvitationPermission(userId, shareId, invitationId, permissions) }
+                .fold(
+                    onSuccess = {
+                        _uiState.update { it.copy(error = null) }
+                    },
+                    onFailure = { e ->
+                        Log.e("AlbumDetailVM", "changeInvitationPermission failed", e)
+                        val friendly = friendlyNetworkError(e, networkObserver.isOnline.value, context)
+                        _uiState.update {
+                            it.copy(
+                                invitations = originalInvitations,
+                                error = friendly ?: context.getString(R.string.share_permission_change_failed),
+                            )
+                        }
+                    },
+                )
+        }
     }
 
     fun inviteUser(email: String) {
@@ -583,7 +796,13 @@ class AlbumDetailViewModel @Inject constructor(
             runCatching { driveRepo.inviteToAlbum(userId, albumLinkId, email) }
                 .fold(
                     onSuccess = { _uiState.update { it.copy(error = null) } },
-                    onFailure = { e -> _uiState.update { it.copy(error = "Invite failed: ${e.message}") } },
+                    onFailure = { e ->
+                        Log.e("AlbumDetailVM", "inviteUser failed", e)
+                        val friendly = friendlyNetworkError(e, networkObserver.isOnline.value, context)
+                        _uiState.update {
+                            it.copy(error = friendly ?: context.getString(R.string.share_invite_failed))
+                        }
+                    },
                 )
         }
     }
@@ -606,19 +825,51 @@ class AlbumDetailViewModel @Inject constructor(
         if (emails.isEmpty()) return
         viewModelScope.launch {
             val userId = accountManager.getPrimaryUserId().first() ?: return@launch
-            _uiState.update { it.copy(isInvitingBatch = true) }
+            // Optimistically drop a pending row in "Who has access" for every brand-new
+            // invitee so the sheet reflects the action instantly instead of looking frozen
+            // until loadInvitations() lands. These carry a blank invitationId (revoke /
+            // permission-change are no-ops on them) and are replaced by server truth once
+            // the refresh below returns.
+            _uiState.update { state ->
+                val known = (state.invitations.map { it.email } + state.members.map { it.email })
+                    .map { it.lowercase() }
+                    .toSet()
+                val placeholders = emails
+                    .filter { it.lowercase() !in known }
+                    .map { ShareInvitation(invitationId = "", email = it, permissions = permissions) }
+                state.copy(
+                    isInvitingBatch = true,
+                    invitations = state.invitations + placeholders,
+                )
+            }
             val failures = mutableListOf<Pair<String, String>>() // email → error message
             var successes = 0
             for (email in emails) {
                 runCatching { driveRepo.inviteToAlbum(userId, albumLinkId, email) }
                     .fold(
                         onSuccess = { successes++ },
-                        onFailure = { e -> failures.add(email to (e.message ?: "unknown error")) },
+                        onFailure = { e ->
+                            val friendly = friendlyNetworkError(e, networkObserver.isOnline.value, context)
+                            // IllegalArgumentException carries our hand-crafted "not a
+                            // Proton account / couldn't reach directory" strings that
+                            // already include the email — sanitising them would replace
+                            // the email with `<email>` and confuse the user. Trust those
+                            // verbatim; sanitise only opaque server-side messages.
+                            val raw = if (e is IllegalArgumentException) e.message.orEmpty()
+                                else sanitizeErrorMessage(e.message)
+                            failures.add(email to (friendly ?: raw))
+                        },
                     )
             }
             _uiState.update {
                 it.copy(
                     isInvitingBatch = false,
+                    // When nothing landed there's no refetch below to repaint the list, so
+                    // strip the optimistic placeholders here to avoid ghost pending rows.
+                    // On a (partial) success loadInvitations() replaces the whole list with
+                    // server truth, so the placeholders are left in place to avoid a flicker.
+                    invitations = if (successes > 0) it.invitations
+                        else it.invitations.filter { inv -> inv.invitationId.isNotBlank() },
                     inviteBatchResult = InviteBatchResult(
                         successCount = successes,
                         failures = failures.toList(),
@@ -652,6 +903,152 @@ class AlbumDetailViewModel @Inject constructor(
         val linkIds = _uiState.value.photos.map { it.linkId }
         if (linkIds.isEmpty()) return
         enqueueAlbumDownload(folderName, linkIds, clearSelectionOnEnqueue = false)
+    }
+
+    /**
+     * Shared-with-me equivalent of "download": copies every photo from the shared
+     * album into a new owned album with the same name in the caller's own photos
+     * library. The backend duplicates the encrypted blobs server-side, so this is
+     * a metadata-only round-trip on the recipient client. Once it returns, the
+     * caller's regular Photos sync brings the new copies down + the green-cloud
+     * badge appears on each one naturally.
+     */
+    fun saveSharedAlbumToOwnLibrary() {
+        val state = _uiState.value
+        val albumLinkId = state.albumLinkId
+        val sharingShareId = state.shareId
+        val volumeId = state.volumeId
+        if (albumLinkId.isBlank() || sharingShareId == null || volumeId == null) return
+        if (!state.isSharedWithMe) return
+        viewModelScope.launch {
+            val userId = accountManager.getPrimaryUserId().first() ?: return@launch
+            driveRepo.startSaveSharedAlbumToOwnLibrary(
+                userId = userId,
+                sharingShareId = sharingShareId,
+                sourceAlbumLinkId = albumLinkId,
+                sourceAlbumDecryptedName = state.albumName,
+                sourceVolumeId = volumeId,
+            )
+        }
+    }
+
+    fun clearSaveToLibraryResult() {
+        driveRepo.acknowledgeSaveSharedAlbumResult()
+        _uiState.update { it.copy(saveToLibraryResult = null) }
+    }
+
+    /** Aborts an in-flight save-to-library copy. The repository tears the job
+     *  down + emits a Cancelled progress state which we surface as a neutral
+     *  snackbar. Safe to call when no copy is running. */
+    fun cancelSaveToLibrary() {
+        driveRepo.cancelSaveSharedAlbumToOwnLibrary()
+    }
+
+    /** Recipient-side "Leave album". Resolves the user's membership for the share
+     *  and POSTs the delete. On success the album row is wiped from the local
+     *  cache and `leaveAlbumDone = true` signals the screen to pop back. */
+    fun leaveSharedAlbum() {
+        val st = _uiState.value
+        val shareId = st.shareId
+        val albumLinkId = st.albumLinkId
+        val userId = primaryUserId
+        if (shareId.isNullOrBlank() || albumLinkId.isBlank() || userId == null) {
+            _uiState.update { it.copy(error = context.getString(R.string.album_leave_missing_details)) }
+            return
+        }
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLeavingAlbum = true, error = null) }
+            runCatching {
+                driveRepo.leaveSharedAlbum(userId, shareId, albumLinkId)
+            }.onSuccess {
+                _uiState.update { it.copy(isLeavingAlbum = false, leaveAlbumDone = true) }
+                // Refresh the shared-with-me grid so the album disappears the moment the
+                // screen pops back, instead of lingering until the next manual reload.
+                albumListEvents.notifyChanged()
+            }.onFailure { e ->
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                Log.e("AlbumDetailVM", "leaveSharedAlbum failed", e)
+                val friendly = friendlyNetworkError(e, networkObserver.isOnline.value, context)
+                _uiState.update {
+                    it.copy(isLeavingAlbum = false, error = friendly ?: context.getString(R.string.album_leave_failed))
+                }
+            }
+        }
+    }
+
+    fun clearSaveCancelledAt() {
+        driveRepo.acknowledgeSaveSharedAlbumResult()
+        _uiState.update { it.copy(saveCancelledAt = null) }
+    }
+
+    // Observe the singleton-backed save-to-library state so progress and outcome
+    // survive VM destruction. The viewModelScope subscription dies when the VM
+    // goes — the next AlbumDetailViewModel that opens the same album simply
+    // re-subscribes and inherits whatever the singleton currently holds.
+    init {
+        viewModelScope.launch {
+            driveRepo.saveSharedAlbumState.collect { progress ->
+                when (progress) {
+                    is DrivePhotoRepository.SaveSharedAlbumProgress.Idle -> {
+                        _uiState.update { it.copy(isSavingToLibrary = false, savingCopied = 0, savingTotal = 0) }
+                    }
+                    is DrivePhotoRepository.SaveSharedAlbumProgress.Running -> {
+                        if (progress.sourceAlbumLinkId == _uiState.value.albumLinkId) {
+                            _uiState.update {
+                                it.copy(
+                                    isSavingToLibrary = true,
+                                    savingCopied = progress.copied,
+                                    savingTotal = progress.total,
+                                )
+                            }
+                        }
+                    }
+                    is DrivePhotoRepository.SaveSharedAlbumProgress.Done -> {
+                        if (progress.sourceAlbumLinkId == _uiState.value.albumLinkId) {
+                            _uiState.update {
+                                it.copy(
+                                    isSavingToLibrary = false,
+                                    savingCopied = 0,
+                                    savingTotal = 0,
+                                    saveToLibraryResult = SaveToLibraryResult(
+                                        newAlbumLinkId = progress.newAlbumLinkId,
+                                        copiedCount = progress.copiedCount,
+                                        failedCount = progress.failedCount,
+                                        totalRequested = progress.totalRequested,
+                                    ),
+                                )
+                            }
+                            albumListEvents.notifyChanged()
+                        }
+                    }
+                    is DrivePhotoRepository.SaveSharedAlbumProgress.Failed -> {
+                        if (progress.sourceAlbumLinkId == _uiState.value.albumLinkId) {
+                            _uiState.update {
+                                it.copy(
+                                    isSavingToLibrary = false,
+                                    savingCopied = 0,
+                                    savingTotal = 0,
+                                    error = context.getString(R.string.shared_save_failed),
+                                )
+                            }
+                            driveRepo.acknowledgeSaveSharedAlbumResult()
+                        }
+                    }
+                    is DrivePhotoRepository.SaveSharedAlbumProgress.Cancelled -> {
+                        if (progress.sourceAlbumLinkId == _uiState.value.albumLinkId) {
+                            _uiState.update {
+                                it.copy(
+                                    isSavingToLibrary = false,
+                                    savingCopied = 0,
+                                    savingTotal = 0,
+                                    saveCancelledAt = progress.copied to progress.total,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     /**
@@ -712,7 +1109,16 @@ class AlbumDetailViewModel @Inject constructor(
                         // sticks until the next cold-start refresh.
                         albumListEvents.notifyChanged()
                     },
-                    onFailure = { e -> _uiState.update { it.copy(isSharing = false, error = "Failed to stop sharing: ${e.message}") } },
+                    onFailure = { e ->
+                        Log.e("AlbumDetailVM", "deleteShare failed", e)
+                        val friendly = friendlyNetworkError(e, networkObserver.isOnline.value, context)
+                        _uiState.update {
+                            it.copy(
+                                isSharing = false,
+                                error = friendly ?: context.getString(R.string.share_stop_failed),
+                            )
+                        }
+                    },
                 )
         }
     }
