@@ -2,7 +2,7 @@
 
 > **Unofficial** open-source Proton Drive Photos client for Android. Built against the publicly documented Drive API.
 
-[![Release](https://img.shields.io/badge/release-v2.1.0-blue)](https://github.com/gitakoos/proton-photos/releases/latest)
+[![Release](https://img.shields.io/badge/release-v2.1.1-blue)](https://github.com/gitakoos/proton-photos/releases/latest)
 [![License](https://img.shields.io/badge/license-GPL--3.0-green)](LICENSE)
 [![Min SDK](https://img.shields.io/badge/minSdk-26-orange)](https://developer.android.com/about/dashboards)
 

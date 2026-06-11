@@ -79,4 +79,15 @@ interface PhotoListingDao {
      */
     @Query("UPDATE photo_listing SET thumbnailUrl = :url WHERE linkId = :linkId")
     suspend fun updateThumbnailUrl(linkId: String, url: String)
+
+    /**
+     * Clears every cached `file://` thumbnail path so the rows fall back to the lazy
+     * decrypt path. Called after the decrypted-thumbnail files are deleted from disk:
+     * the stored paths now point at missing files, and the scheduler skips re-decrypt
+     * while `thumbnailUrl` is non-null. Nulling the column lets each visible cell
+     * re-request its thumbnail immediately off the persisted crypto material, with no
+     * per-photo network round-trip and without waiting for a full library refresh.
+     */
+    @Query("UPDATE photo_listing SET thumbnailUrl = NULL WHERE thumbnailUrl LIKE 'file://%'")
+    suspend fun clearCachedThumbnailUrls()
 }

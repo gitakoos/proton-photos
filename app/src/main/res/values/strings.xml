@@ -156,6 +156,7 @@
     <string name="sync_backed_up">Backed up</string>
     <string name="sync_pending">Pending</string>
     <string name="sync_none">None</string>
+    <string name="sync_first_run_in_progress">First sync in progress…</string>
     <string name="sync_photo_count">%1$d photos</string>
     <string name="sync_photo_count_singular">1 photo</string>
     <!-- Sync progress (Settings card) -->

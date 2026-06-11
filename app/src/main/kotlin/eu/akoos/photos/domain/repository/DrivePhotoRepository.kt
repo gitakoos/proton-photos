@@ -386,6 +386,14 @@ interface DrivePhotoRepository {
     fun prefetchThumbnailDecrypt(userId: UserId, linkIds: List<String>)
 
     /**
+     * Nulls every cached `file://` thumbnail path in the DB so the rows fall back to the
+     * lazy decrypt path. Call after deleting the decrypted-thumbnail files from disk —
+     * otherwise the stored paths point at missing files and the scheduler skips re-decrypt
+     * while the column is non-null, leaving tiles blank until a full library refresh.
+     */
+    suspend fun clearCachedThumbnailUrls()
+
+    /**
      * Decrypt [linkIds] at visible (viewport) priority even though they may sit outside the
      * scrolling grid — used by surfaces that render off-grid thumbnails which would
      * otherwise never trigger a per-cell request (e.g. the "On this day" memories row at

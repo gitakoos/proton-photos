@@ -66,6 +66,21 @@ private const val TAG = "PhotoStreamSvc"
 private const val UPLOAD_PROTECTION_WINDOW_MS: Long = 90L * 1000L
 
 /**
+ * Number of link stubs processed per metadata/thumbnail/CKP/build/upsert pass inside the
+ * full-refresh loop. The listing pagination still pulls 500 small stubs per page, but the
+ * heavy per-link work runs in sub-batches of this size so the transient maps (link details,
+ * thumbnail URLs, content-key packets, built entities) only ever hold one batch at a time
+ * and are released before the next. Bounding the live set this way is what keeps a
+ * thousands-of-photos library from inflating tens of MB of simultaneous transient heap and
+ * pushing the device into OutOfMemoryError on a fresh-login full refresh.
+ *
+ * 100 keeps the network round-trips coarse enough (the batch endpoints already chunk to 50
+ * internally) while staying an order of magnitude below the heap pressure that triggered the
+ * crash, and stays a clean multiple of the per-batch crypto-pacing chunk (10) below.
+ */
+private const val REFRESH_BATCH = 100
+
+/**
  * Cloud photo stream: paginated full refresh + event-based incremental refresh +
  * observe-from-DB flows.
  *
@@ -102,6 +117,42 @@ class PhotoStreamService @Inject constructor(
     private val refreshIncrementalMutex = Mutex()
 
     /**
+     * Live, per-chunk-read pacing signal for [doRefreshCloudPhotos]. When true the full
+     * refresh runs on the gentle knobs (smaller effective batch, smaller crypto chunk,
+     * longer inter-chunk delay); when false it runs on the normal knobs.
+     *
+     * Read fresh on every chunk rather than captured once, so flipping it mid-refresh
+     * takes effect on the very next chunk — the refresh starts gentle while a heavy
+     * first-screen surface is on display, then speeds up the instant that surface signals
+     * it no longer needs the slack.
+     *
+     * The gentle cadence stretches the gopenpgp decrypt calls further apart in wall-clock
+     * time. That widens the window the CMC GC has to interleave with the Go runtime's
+     * memory layout instead of colliding with it, lowering the chance of the libgojni
+     * SIGABRT that a tight cold-cache decrypt burst can trip.
+     */
+    @Volatile
+    private var gentleSyncActive: Boolean = false
+
+    /** Set the live pacing signal read per chunk by [doRefreshCloudPhotos]. */
+    fun setGentleSync(active: Boolean) {
+        gentleSyncActive = active
+    }
+
+    /**
+     * Set by [doRefreshCloudPhotos] to report whether the most recent full refresh saw the
+     * WHOLE listing through to a clean finish (listing paginated completely AND every
+     * processing batch upserted without error). The incremental fallback in
+     * [doRefreshCloudPhotosIncremental] consults it before persisting the initial event
+     * anchor: the events feed only delivers FUTURE changes, never a backfill, so storing the
+     * "caught up to now" anchor on top of a partially-populated DB would permanently strand
+     * the photos that a crashed/aborted batch never wrote. Leaving the anchor unsaved makes
+     * the next launch fall through to another full refresh, which retries the missing rows.
+     */
+    @Volatile
+    private var lastFullRefreshComplete: Boolean = false
+
+    /**
      * Cooldown to break a known refresh-loop: when [getLatestEventAnchor]
      * returns "Invalid ID" (some accounts simply don't have an event anchor available),
      * [doRefreshCloudPhotosIncremental] never persists an anchor, so EVERY subsequent
@@ -133,6 +184,9 @@ class PhotoStreamService @Inject constructor(
     }
 
     private suspend fun doRefreshCloudPhotos(userId: UserId) {
+        // Default to "incomplete" until the loop below proves the listing finished cleanly;
+        // any early return or thrown error then correctly leaves the event anchor unsaved.
+        lastFullRefreshComplete = false
         try {
             val volumeId = shareService.getVolumeId(userId)
             val shareId = shareService.getShareId(userId, volumeId)
@@ -177,210 +231,273 @@ class PhotoStreamService @Inject constructor(
                 Log.w(TAG, "refreshCloudPhotos: stream unavailable (${e.javaClass.simpleName}: ${e.message})")
             }
 
-            // 3. Build the photo list from the stream only.
+            // 3. Order the stream stubs for processing.
             // Album children are intentionally excluded here: all backed-up photos are in the
             // Photos stream, so albums add no new photos that belong in the main timeline.
             // Including album children would cause shared-album photos (from other users) to
             // appear in the owner's main gallery as if they were backed up.
             // Album photos are fetched on demand by loadAlbumPhotos() and cached in the DB.
             //
-            // Sort by captureTime DESC so the chunked loop processes newest-first — matches
+            // Sort by captureTime DESC so the processing loop handles newest-first — matches
             // the gallery's display order (GetGalleryItemsUseCase sortedByDescending captureTime).
-            // Without this, chunks land in linkId order from the server, and a photo from the
+            // Without this, batches land in linkId order from the server, and a photo from the
             // middle of the timeline can show up before the most-recent shot at the top of the
             // gallery, so the load order looks random instead of top-down.
+            //
+            // Only these light stubs are retained for the whole library; all the heavy maps
+            // (link details, thumbnail URLs, content-key packets, built entities) live one
+            // REFRESH_BATCH at a time inside the loop below and are released before the next
+            // batch — that bound is the fix for the fresh-login OutOfMemoryError on big
+            // libraries, where fetching every link's metadata into one map blew the heap.
             val allPhotoLinks = streamLinks.sortedByDescending { it.captureTime }
-            val linkShareMap = streamLinks.associate { it.linkId to effectiveShareId }
             Log.d(TAG, "refreshCloudPhotos: ${allPhotoLinks.size} photos in stream")
 
-            // 4. Batch-fetch link details.
-            val linkDetailMap = linkDetailHelpers.batchFetchLinkDetails(userId, activeVolumeId, allPhotoLinks.map { it.linkId })
-
-            // 5. Build parentKey cache.
             val rootLinkId = shareService.photosRootLinkId()
-            val parentKeyCache = mutableMapOf<String?, ByteArray?>()
-            parentKeyCache[rootLinkId] = rootLinkKeyBytes
-            val albumParentIds = linkDetailMap.values
-                .mapNotNull { it.link.parentLinkId }
-                .filter { it != rootLinkId }
-                .toSet()
-            if (albumParentIds.isNotEmpty() && rootLinkKeyBytes != null) {
-                val albumDetailMap = linkDetailHelpers.batchFetchLinkDetails(userId, activeVolumeId, albumParentIds.toList())
-                for ((albumId, albumDetail) in albumDetailMap) {
-                    val aLink = albumDetail.link
-                    if (aLink.nodeKey != null && aLink.nodePassphrase != null) {
-                        parentKeyCache[albumId] = try {
-                            cryptoHelper.decryptNodeKey(aLink.nodeKey, aLink.nodePassphrase, rootLinkKeyBytes)
-                        } catch (e: Exception) {
-                            Log.w(TAG, "refreshCloudPhotos: albumKey failed for $albumId: ${e.message}")
-                            rootLinkKeyBytes
-                        }
-                    }
-                }
-            }
-
-            // 6. Batch-fetch thumbnail URLs for all photos that have ThumbnailIDs.
-            //    Drive offers two sizes per photo: Type 1 (small ~200px) and Type 2 (HD ~512px+).
-            //    The grid renders at ~1/3 screen width which is well above 200px on modern phones,
-            //    so the Type 1 thumb was visibly blurry. Prefer Type 2 with Type 1 fallback for
-            //    older revisions that only have the small variant.
-            val thumbnailIdToLinkId = mutableMapOf<String, String>()
-            for ((linkId, detail) in linkDetailMap) {
-                val thumbnailList = detail.link.fileProperties?.activeRevision?.thumbnails
-                    ?: detail.photo?.activeRevision?.thumbnails
-                val tid = thumbnailList?.firstOrNull { it.type == 2 }?.thumbnailId
-                    ?: thumbnailList?.firstOrNull { it.type == 1 }?.thumbnailId
-                    ?: thumbnailList?.firstOrNull()?.thumbnailId
-                if (tid != null) thumbnailIdToLinkId[tid] = linkId
-            }
-            val thumbnailUrlMap: Map<String, ThumbnailUrlInfo> =
-                if (thumbnailIdToLinkId.isNotEmpty())
-                    linkDetailHelpers.batchFetchThumbnailUrls(userId, activeVolumeId, thumbnailIdToLinkId.keys.toList())
-                else emptyMap()
-            Log.d(TAG, "refreshCloudPhotos: fetched ${thumbnailUrlMap.size} thumbnail URLs")
-
-            // 6b. Batch-fetch ContentKeyPackets via regular Drive API (Photos batch API omits them).
-            //     CKPs are needed to decrypt thumbnail blocks (SEIPD format, same as content blocks).
-            val ckpMap = linkDetailHelpers.batchFetchContentKeyPackets(userId, effectiveShareId, allPhotoLinks.map { it.linkId })
             val ownPublicKeys = cryptoHelper.getOwnPublicKeysArmored(userId)
 
-            // 7. Build entities in chunks. The previous code built all N photos in a single
-            //    sequential .map then upsertAll'd at the end. For users with hundreds of
-            //    photos this monopolised one IO-dispatcher thread for hundreds of consecutive
-            //    crypto calls, leaving the UI with a frozen-empty grid while the work ran
-            //    AND eventually racing Android 16's CMC GC (userfaultfd) against the Go
-            //    OpenPGP runtime memory layout — observed as a SIGABRT after ~7 minutes on
-            //    Android 16 beta firmware.
-            //
-            // Chunk size 10 + 100ms delay between chunks: empirically the smallest
-            // chunks-per-second that don't trigger the Go panic during a cold-cache full
-            // refresh (315+ photos with no DB cache hits). The first chunk lands in the
-            // gallery within ~1 sec; the remainder streams in over the next 10-20 seconds.
-            // Lowering the chunk size further didn't measurably reduce crash rate but did
-            // make perceived progress noticeably slower, so 10 is the floor.
-            val chunkSize = 10
-            val interChunkDelayMs = 100L
-            val entities = mutableListOf<eu.akoos.photos.data.db.entity.PhotoListingEntity>()
-            for (chunk in allPhotoLinks.chunked(chunkSize)) {
-                val chunkLinkIds = chunk.map { it.linkId }
-                // Fast path: photos already in DB with a still-on-disk cached thumbnail get
-                // re-used as-is. This avoids re-running the per-photo decrypt + thumbnail-decrypt
-                // pipeline on every cold start, which on Android 16 beta firmware is what
-                // pushes the Go OpenPGP library into "slice bounds out of range" SIGABRT
-                // territory once enough crypto ops pile up. Cache-cleared installs still walk
-                // the full path (no cache hits possible), but the steady-state app launch with
-                // existing local cache touches almost no Go code at all.
-                val existingByLinkId = photoListingDao.getByLinkIds(chunkLinkIds).associateBy { it.linkId }
-                val chunkToSave = mutableListOf<eu.akoos.photos.data.db.entity.PhotoListingEntity>()
-                for (stub in chunk) {
-                    val cached = existingByLinkId[stub.linkId]
-                    if (cached != null && thumbnailHelpers.isCachedValid(cached.thumbnailUrl)) {
-                        // Fast path reuses the cached row to skip a crypto rebuild, BUT the
-                        // server-side tags (PhotoTag IDs — 0=Favorite) on the freshly-fetched
-                        // stub can have changed since the last cache write (e.g. user
-                        // favorited the photo on Drive Web). Reusing `cached` as-is dropped
-                        // those updates silently, so the heart icon never appeared in our
-                        // app even after a forced pull-to-refresh. Merge the stub's tags
-                        // into the cached row when they differ, otherwise leave it alone.
-                        val stubTagsCsv = stub.tags.sorted().joinToString(",")
-                        val cachedTagsCsv = cached.tagsCsv
-                            .split(',')
-                            .mapNotNull { it.toIntOrNull() }
-                            .sorted()
-                            .joinToString(",")
-                        if (stubTagsCsv != cachedTagsCsv) {
-                            val refreshed = cached.copy(tagsCsv = stubTagsCsv)
-                            chunkToSave += refreshed
-                            entities += refreshed
-                        } else {
-                            entities += cached
+            // Parent keys decrypted across ALL batches, used once after the loop to seed the
+            // lazy thumbnail scheduler. Keyed material only (linkId → key bytes) — small and
+            // de-duplicated, so accumulating it for the whole library is not a heap concern.
+            val accumulatedParentKeys = mutableMapOf<String, ByteArray>()
+            // LinkIds successfully observed in the stream listing — collected as plain strings
+            // (cheap) so the post-loop stale-entry cleanup can compute what to delete without
+            // holding any heavy per-link state.
+            val foundIds = mutableSetOf<String>()
+            // Batches that threw partway: one bad batch is logged and skipped so the rest of
+            // the refresh still lands, but its presence suppresses the stale-entry cleanup and
+            // the incremental-anchor save (an incomplete picture must not prune valid rows or
+            // declare the library caught-up).
+            var failedBatches = 0
+            // Fire the first-screen thumbnail pre-warm exactly once, after the first batch's
+            // rows have been persisted. prefetch dedupes + bounds, so a re-fire would be
+            // harmless, but the flag keeps it to the one batch whose rows the gallery shows first.
+            var firstScreenPrewarmed = false
+
+            // Per-chunk crypto pacing. Two cadences, selected live per chunk off
+            // [gentleSyncActive] (see its field doc):
+            //   • normal (chunk 10 + 100ms delay): empirically the smallest chunks-per-second
+            //     that don't trip the Go OpenPGP panic during a cold-cache full refresh. The
+            //     first chunk lands in the gallery within ~1 sec; the remainder streams in.
+            //     Lowering the chunk further didn't measurably reduce crash rate but made
+            //     perceived progress noticeably slower, so 10 is the floor.
+            //   • gentle (chunk 5 + 300ms delay): a slower cadence used while a heavy
+            //     first-screen surface is on display, halving the per-tick decrypt count and
+            //     tripling the gap so the decrypt burst spreads further across wall-clock time.
+            // Read fresh inside the inner loop so a mid-refresh flip applies on the next chunk.
+
+            // 4. Process the library in REFRESH_BATCH-sized passes. Everything heavy — link
+            //    details, parent-key decrypt, thumbnail URLs, content-key packets, entity
+            //    build, and the DB upsert — happens INSIDE each pass so the transient maps are
+            //    scoped to one batch and garbage-collected before the next one starts.
+            for (batch in allPhotoLinks.chunked(REFRESH_BATCH)) {
+                try {
+                    val batchLinkIds = batch.map { it.linkId }
+                    val linkDetailMap = linkDetailHelpers.batchFetchLinkDetails(userId, activeVolumeId, batchLinkIds)
+
+                    // Parent-key cache for THIS batch: root key plus any album parents whose
+                    // photos appear in the batch. Decrypted album keys are also copied into
+                    // accumulatedParentKeys so the post-loop scheduler seed sees the union.
+                    val parentKeyCache = mutableMapOf<String?, ByteArray?>()
+                    parentKeyCache[rootLinkId] = rootLinkKeyBytes
+                    val albumParentIds = linkDetailMap.values
+                        .mapNotNull { it.link.parentLinkId }
+                        .filter { it != rootLinkId }
+                        .toSet()
+                    if (albumParentIds.isNotEmpty() && rootLinkKeyBytes != null) {
+                        val albumDetailMap = linkDetailHelpers.batchFetchLinkDetails(userId, activeVolumeId, albumParentIds.toList())
+                        for ((albumId, albumDetail) in albumDetailMap) {
+                            val aLink = albumDetail.link
+                            if (aLink.nodeKey != null && aLink.nodePassphrase != null) {
+                                parentKeyCache[albumId] = try {
+                                    cryptoHelper.decryptNodeKey(aLink.nodeKey, aLink.nodePassphrase, rootLinkKeyBytes)
+                                } catch (e: Exception) {
+                                    Log.w(TAG, "refreshCloudPhotos: albumKey failed for $albumId: ${e.message}")
+                                    rootLinkKeyBytes
+                                }
+                            }
                         }
-                        continue
                     }
-                    val detail = linkDetailMap[stub.linkId]
-                    val parentId = detail?.link?.parentLinkId
-                    val parentKeyBytes = parentKeyCache[parentId] ?: rootLinkKeyBytes
-                    val itemShareId = linkShareMap[stub.linkId] ?: effectiveShareId
-                    val thumbnailInfo = thumbnailIdToLinkId.entries
-                        .firstOrNull { it.value == stub.linkId }
-                        ?.key
-                        ?.let { thumbnailUrlMap[it] }
-                    // Lazy-thumbnail: skip the eager thumbnail download+decrypt for
-                    // cache-miss items. We persist the encrypted material into the row;
-                    // [ThumbnailDecryptScheduler] consumes it when the cell scrolls into
-                    // view. This is what trades cold-start "minutes-of-libgojni-burn" for
-                    // "snappy grid populates immediately, thumbnails materialise as you
-                    // scroll" — and it's what stops the Android-16 SIGABRT on big libraries.
-                    val built = photoEntityBuilder.build(
-                        stub, detail, userId, itemShareId, activeVolumeId, parentKeyBytes,
-                        thumbnailCacheDir, thumbnailInfo, ckpMap[stub.linkId], ownPublicKeys,
-                        decryptThumbnail = false,
-                    )
-                    // Preserve a previously-cached thumbnail URL when the new build came back
-                    // without one (e.g. v2/volumes uploads have no server-side thumbnail);
-                    // otherwise the gallery tile would blank out on refresh.
+                    for ((k, v) in parentKeyCache) {
+                        if (k != null && v != null) accumulatedParentKeys[k] = v
+                    }
+
+                    // Thumbnail URLs for the batch's photos that carry a ThumbnailID.
+                    //   Drive offers two sizes per photo: Type 1 (small ~200px) and Type 2 (HD
+                    //   ~512px+). The grid renders at ~1/3 screen width which is well above
+                    //   200px on modern phones, so the Type 1 thumb was visibly blurry. Prefer
+                    //   Type 2 with Type 1 fallback for older revisions that only have the small
+                    //   variant.
+                    val thumbnailIdToLinkId = mutableMapOf<String, String>()
+                    for ((linkId, detail) in linkDetailMap) {
+                        val thumbnailList = detail.link.fileProperties?.activeRevision?.thumbnails
+                            ?: detail.photo?.activeRevision?.thumbnails
+                        val tid = thumbnailList?.firstOrNull { it.type == 2 }?.thumbnailId
+                            ?: thumbnailList?.firstOrNull { it.type == 1 }?.thumbnailId
+                            ?: thumbnailList?.firstOrNull()?.thumbnailId
+                        if (tid != null) thumbnailIdToLinkId[tid] = linkId
+                    }
+                    val thumbnailUrlMap: Map<String, ThumbnailUrlInfo> =
+                        if (thumbnailIdToLinkId.isNotEmpty())
+                            linkDetailHelpers.batchFetchThumbnailUrls(userId, activeVolumeId, thumbnailIdToLinkId.keys.toList())
+                        else emptyMap()
+
+                    // ContentKeyPackets via regular Drive API (Photos batch API omits them).
+                    // CKPs are needed to decrypt thumbnail blocks (SEIPD format, same as content
+                    // blocks).
+                    val ckpMap = linkDetailHelpers.batchFetchContentKeyPackets(userId, effectiveShareId, batchLinkIds)
+
+                    // Build + upsert the batch in crypto-paced chunks. Building all rows in a
+                    // single sequential pass monopolised one IO-dispatcher thread for a long
+                    // run of consecutive crypto calls and raced Android's CMC GC against the Go
+                    // OpenPGP runtime memory layout; the chunk-and-delay cadence keeps the JNI
+                    // pressure bounded and lets the first rows reach the gallery quickly.
                     //
-                    // BUT only when the cached URL STILL points at a real file. After "Clear
-                    // app cache" the DB rows survive (Room is in /databases) while every
-                    // thumbnail file under /cache/thumbnails/ is gone — leaving the URL field
-                    // populated but the file missing means PhotoCell skips the lazy-decrypt
-                    // request (it only fires when thumbnailUrl == null) and the grid sticks on
-                    // broken placeholders until a future full refresh happens to walk the slow
-                    // path for that row. Clearing the stale URL lets the scheduler kick in and
-                    // rebuild the cache file on demand as cells scroll into view.
-                    val cachedThumb = cached?.thumbnailUrl
-                        ?.takeIf { thumbnailHelpers.isCachedValid(it) }
-                    val merged = if (built.thumbnailUrl == null) built.copy(thumbnailUrl = cachedThumb) else built
-                    chunkToSave += merged
-                    entities += merged
-                }
-                if (chunkToSave.isNotEmpty()) {
-                    photoListingDao.upsertAll(chunkToSave)
-                    // Yielding + delaying only matter when we actually did Go-crypto work; a
-                    // pure cache-hit chunk skips both so the steady-state refresh is snappy.
-                    yield()
-                    delay(interChunkDelayMs)
+                    // The window is stepped by an index (not a one-shot `.chunked()`) so the
+                    // chunk size + delay can be re-read from [gentleSyncActive] on every chunk —
+                    // a flip to non-gentle mid-batch speeds the remaining chunks up immediately.
+                    var chunkStart = 0
+                    while (chunkStart < batch.size) {
+                        val gentle = gentleSyncActive
+                        val chunkSize = if (gentle) 5 else 10
+                        val interChunkDelayMs = if (gentle) 300L else 100L
+                        val chunk = batch.subList(chunkStart, minOf(chunkStart + chunkSize, batch.size))
+                        chunkStart += chunkSize
+                        val chunkLinkIds = chunk.map { it.linkId }
+                        // Fast path: photos already in DB with a still-on-disk cached thumbnail
+                        // get re-used as-is. This avoids re-running the per-photo decrypt +
+                        // thumbnail-decrypt pipeline on every cold start, which is what pushes
+                        // the Go OpenPGP library into "slice bounds out of range" territory once
+                        // enough crypto ops pile up. Cache-cleared installs still walk the full
+                        // path (no cache hits possible), but the steady-state app launch with
+                        // existing local cache touches almost no Go code at all.
+                        val existingByLinkId = photoListingDao.getByLinkIds(chunkLinkIds).associateBy { it.linkId }
+                        val chunkToSave = mutableListOf<eu.akoos.photos.data.db.entity.PhotoListingEntity>()
+                        for (stub in chunk) {
+                            val cached = existingByLinkId[stub.linkId]
+                            if (cached != null && thumbnailHelpers.isCachedValid(cached.thumbnailUrl)) {
+                                // Fast path reuses the cached row to skip a crypto rebuild, BUT
+                                // the server-side tags (PhotoTag IDs — 0=Favorite) on the freshly
+                                // fetched stub can have changed since the last cache write (e.g.
+                                // user favorited the photo on Drive Web). Reusing `cached` as-is
+                                // dropped those updates silently, so the heart icon never appeared
+                                // even after a forced pull-to-refresh. Merge the stub's tags into
+                                // the cached row when they differ, otherwise leave it alone.
+                                val stubTagsCsv = stub.tags.sorted().joinToString(",")
+                                val cachedTagsCsv = cached.tagsCsv
+                                    .split(',')
+                                    .mapNotNull { it.toIntOrNull() }
+                                    .sorted()
+                                    .joinToString(",")
+                                if (stubTagsCsv != cachedTagsCsv) {
+                                    chunkToSave += cached.copy(tagsCsv = stubTagsCsv)
+                                }
+                                foundIds += stub.linkId
+                                continue
+                            }
+                            val detail = linkDetailMap[stub.linkId]
+                            val parentId = detail?.link?.parentLinkId
+                            val parentKeyBytes = parentKeyCache[parentId] ?: rootLinkKeyBytes
+                            val thumbnailInfo = thumbnailIdToLinkId.entries
+                                .firstOrNull { it.value == stub.linkId }
+                                ?.key
+                                ?.let { thumbnailUrlMap[it] }
+                            // Lazy-thumbnail: skip the eager thumbnail download+decrypt for
+                            // cache-miss items. We persist the encrypted material into the row;
+                            // [ThumbnailDecryptScheduler] consumes it when the cell scrolls into
+                            // view. This trades cold-start "minutes-of-libgojni-burn" for "snappy
+                            // grid populates immediately, thumbnails materialise as you scroll".
+                            val built = photoEntityBuilder.build(
+                                stub, detail, userId, effectiveShareId, activeVolumeId, parentKeyBytes,
+                                thumbnailCacheDir, thumbnailInfo, ckpMap[stub.linkId], ownPublicKeys,
+                                decryptThumbnail = false,
+                            )
+                            // Preserve a previously-cached thumbnail URL when the new build came
+                            // back without one (e.g. v2/volumes uploads have no server-side
+                            // thumbnail); otherwise the gallery tile would blank out on refresh.
+                            //
+                            // BUT only when the cached URL STILL points at a real file. After
+                            // "Clear app cache" the DB rows survive (Room is in /databases) while
+                            // every thumbnail file under /cache/thumbnails/ is gone — leaving the
+                            // URL field populated but the file missing means PhotoCell skips the
+                            // lazy-decrypt request (it only fires when thumbnailUrl == null) and
+                            // the grid sticks on broken placeholders until a future full refresh
+                            // happens to walk the slow path for that row. Clearing the stale URL
+                            // lets the scheduler rebuild the cache file on demand as cells scroll
+                            // into view.
+                            val cachedThumb = cached?.thumbnailUrl
+                                ?.takeIf { thumbnailHelpers.isCachedValid(it) }
+                            val merged = if (built.thumbnailUrl == null) built.copy(thumbnailUrl = cachedThumb) else built
+                            chunkToSave += merged
+                            foundIds += stub.linkId
+                        }
+                        if (chunkToSave.isNotEmpty()) {
+                            photoListingDao.upsertAll(chunkToSave)
+                            // Yielding + delaying only matter when we actually did Go-crypto work;
+                            // a pure cache-hit chunk skips both so the steady-state refresh stays
+                            // snappy.
+                            yield()
+                            delay(interChunkDelayMs)
+                        }
+                    }
+
+                    // First-screen pre-warm: as soon as the first batch's rows are in the DB,
+                    // kick the lazy scheduler on the newest ~30 of them so the gallery binds real
+                    // thumbnails on arrival instead of blank cells. The keys these rows need are
+                    // already decrypted (this batch merged them into accumulatedParentKeys above);
+                    // seed the scheduler with them first so the prefetch doesn't fall back to a
+                    // per-photo key round-trip. populateParentKeys uses putIfAbsent and prefetch
+                    // dedupes/bounds (WORKER_COUNT), so this can't burst and the later post-loop
+                    // seed + on-scroll requests stay correct.
+                    if (!firstScreenPrewarmed) {
+                        firstScreenPrewarmed = true
+                        val warmKeys = accumulatedParentKeys.toMap()
+                        if (warmKeys.isNotEmpty()) thumbnailDecryptScheduler.populateParentKeys(warmKeys)
+                        val firstScreenIds = batch.take(30).map { it.linkId }
+                        val firstScreenRows = photoListingDao.getByLinkIds(firstScreenIds)
+                        if (firstScreenRows.isNotEmpty()) {
+                            thumbnailDecryptScheduler.prefetch(userId, firstScreenRows)
+                        }
+                    }
+                } catch (e: Exception) {
+                    // One batch failing (network blip, a decode error, transient OOM on a
+                    // single oversized batch) must not abort the whole refresh: the chunks that
+                    // already upserted stay in the DB, and we press on to the next batch.
+                    // Recording the failure suppresses the stale-entry cleanup below.
+                    failedBatches++
+                    Log.w(TAG, "refreshCloudPhotos: batch failed (${e.javaClass.simpleName}: ${e.message}), continuing")
                 }
             }
 
-            // Seed the lazy scheduler with the parent keys we already decrypted during this
-            // sync pass. Without this, every cell that scrolls into view would trigger a
-            // per-photo batchFetchLinkDetails + decrypt round trip to resolve its parent's
-            // node key — measured 5+ minutes for a single thumbnail to appear on a fresh
-            // cache during the lazy rollout. Pre-seeding makes the scheduler's per-cell
-            // work just a network blob fetch + a few cryptoLock-serialized JNI calls.
-            thumbnailDecryptScheduler.populateParentKeys(
-                parentKeyCache.entries.mapNotNull { (k, v) ->
-                    if (k != null && v != null) k to v else null
-                }.toMap(),
-            )
+            // Seed the lazy scheduler with the parent keys decrypted across every batch.
+            // Without this, each cell that scrolls into view would trigger a per-photo
+            // batchFetchLinkDetails + decrypt round trip to resolve its parent's node key.
+            // Pre-seeding makes the scheduler's per-cell work just a network blob fetch plus a
+            // few cryptoLock-serialized JNI calls.
+            thumbnailDecryptScheduler.populateParentKeys(accumulatedParentKeys)
 
-            // Smart merge: upsert all found entities, then conditionally remove stale DB entries.
+            // Stale-entry cleanup: remove DB rows the fresh listing no longer contains.
             //
             // Deletion policy:
             //   • Only delete entries that (a) aren't in the current found set AND
             //     (b) aren't a VERY recent upload (within UPLOAD_PROTECTION_WINDOW_MS).
-            //   • We skip deletion entirely when the photo stream was unavailable (404 / network
-            //     error): in that case we only have a PARTIAL picture of what's on the server,
-            //     so deleting would incorrectly remove stream-only photos — including those
-            //     uploaded in previous sessions.
+            //   • Skip deletion entirely when the photo stream was unavailable (404 / network
+            //     error) OR any processing batch failed: in those cases we only have a PARTIAL
+            //     picture of what's on the server, so deleting would incorrectly remove valid
+            //     rows — including stream-only photos uploaded in previous sessions.
             //
             // Why the protection window is TIGHT (≈90s, not the full 1h TTL): the only legitimate
             // "don't delete despite missing from stream" case is the narrow race where an upload
             // committed but the server-side photo stream index hasn't caught up yet (usually
-            // seconds, never minutes). Using the full TTL meant photos deleted on Drive web
-            // kept showing as SYNCED with green cloud icons because their linkIds were still
-            // in the 1h-wide protection set. The persistent TTL is for crash/restart resilience
-            // (so a process kill between upload and refresh can't drop a fresh upload); the
-            // in-refresh protection only needs to span the upload→stream visibility race,
-            // which is orders of magnitude shorter.
-            val foundIds = entities.map { it.linkId }.toSet()
-            // (Thumbnail-URL preservation + per-chunk upsert already happened inside the chunked
-            // loop above. The trailing block here only handles the stale-entry cleanup that
-            // runs once after the whole refresh.)
-            if (streamCallSucceeded) {
-                // Stream responded → we have a full picture; safe to clean up stale entries.
-                // Use the tight protection window (see comment above) rather than the full TTL.
+            // seconds, never minutes). Using the full TTL meant photos deleted on Drive web kept
+            // showing as SYNCED with green cloud icons because their linkIds were still in the
+            // 1h-wide protection set. The persistent TTL is for crash/restart resilience (so a
+            // process kill between upload and refresh can't drop a fresh upload); the in-refresh
+            // protection only needs to span the upload→stream visibility race, which is orders of
+            // magnitude shorter.
+            val listingComplete = streamCallSucceeded && failedBatches == 0
+            if (listingComplete) {
+                // Whole picture in hand → safe to clean up stale entries. Use the tight
+                // protection window (see comment above) rather than the full TTL.
                 val recentUploads = recentUploadsTracker.snapshotWithinMs(UPLOAD_PROTECTION_WINDOW_MS)
                 val existingIds = photoListingDao.getAllLinkIds(userId.id).toSet()
                 val toDelete = (existingIds - foundIds - recentUploads).toList()
@@ -392,14 +509,25 @@ class PhotoStreamService @Inject constructor(
                     Log.d(TAG, "refreshCloudPhotos: removed ${toDelete.size} stale entries " +
                         "(protected ${recentUploads.size} recent uploads within ${UPLOAD_PROTECTION_WINDOW_MS}ms window)")
                 }
-                Log.d(TAG, "refreshCloudPhotos: saved ${entities.size} photos (db now has ${existingIds.size - toDelete.size + entities.count { it.linkId !in existingIds }} total)")
+                Log.d(TAG, "refreshCloudPhotos: saved ${foundIds.size} photos")
             } else {
-                Log.d(TAG, "refreshCloudPhotos: stream unavailable — upserted ${entities.size} photos, skipping stale-entry cleanup to avoid data loss")
+                Log.d(TAG, "refreshCloudPhotos: incomplete refresh (streamOk=$streamCallSucceeded, failedBatches=$failedBatches) — upserted ${foundIds.size} photos, skipping stale-entry cleanup to avoid data loss")
             }
+            // Report completeness so the incremental fallback knows whether the event anchor
+            // may be persisted (see [lastFullRefreshComplete]).
+            lastFullRefreshComplete = listingComplete
         } catch (e: DriveNotFoundException) {
             Log.w(TAG, "refreshCloudPhotos: DriveNotFoundException: ${e.message}")
         } catch (e: Exception) {
             Log.e(TAG, "refreshCloudPhotos failed", e)
+        } catch (t: Throwable) {
+            // Catch OutOfMemoryError (and any other Error) so a heap exhaustion that slips past
+            // the per-batch guard — e.g. while a single batch's maps are live — doesn't crash
+            // the app. Whatever batches already upserted remain in the DB by construction (each
+            // chunk is committed inside the loop). lastFullRefreshComplete is already false from
+            // the entry reset, so the event anchor stays unsaved and the next launch retries a
+            // full refresh. Swallow rather than rethrow: a degraded gallery beats a crash loop.
+            Log.e(TAG, "refreshCloudPhotos aborted (${t.javaClass.simpleName}: ${t.message})", t)
         }
     }
 
@@ -435,6 +563,16 @@ class PhotoStreamService @Inject constructor(
                 }
 
                 refreshCloudPhotos(userId)
+                // Only arm the incremental event feed when the full refresh actually wrote the
+                // WHOLE library. The events endpoint delivers future deltas, never a backfill,
+                // so saving the "caught up to now" anchor on top of a partially-populated DB
+                // (a crashed/aborted/incomplete refresh) would strand the rows that never
+                // landed. Leaving the anchor unsaved makes the next launch full-refresh again
+                // and retry them.
+                if (!lastFullRefreshComplete) {
+                    Log.w(TAG, "incremental: full refresh incomplete, leaving anchor unsaved to retry next launch")
+                    return
+                }
                 try {
                     val manager = apiProvider.get<DriveApiService>(userId)
                     val latestAnchor = semaphore.withPermit {

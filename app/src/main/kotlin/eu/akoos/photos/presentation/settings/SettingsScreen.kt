@@ -285,6 +285,12 @@ fun SettingsScreen(
                                 stringResource(R.string.selection_videos_only, state.syncedVideoCount)
                             state.syncedPhotoCount > 0 ->
                                 stringResource(R.string.selection_photos_only, state.syncedPhotoCount)
+                            // A running sync with zero rows yet is the fresh-login first-sync
+                            // window: the DB-backed count is genuinely 0 because the listing is
+                            // still being page-fetched. Show progress copy instead of a bald
+                            // "None" so the user doesn't read it as "nothing is backed up".
+                            state.isSyncing ->
+                                stringResource(R.string.sync_first_run_in_progress)
                             else ->
                                 stringResource(R.string.sync_none)
                         }

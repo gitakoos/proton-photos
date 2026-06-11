@@ -365,6 +365,10 @@ class DrivePhotoRepositoryImpl @Inject constructor(
         thumbnailScheduler.cancel(linkId)
     }
 
+    override suspend fun clearCachedThumbnailUrls() {
+        photoListingDao.clearCachedThumbnailUrls()
+    }
+
     override fun prefetchThumbnailDecrypt(userId: UserId, linkIds: List<String>) {
         if (linkIds.isEmpty()) return
         thumbnailRequestScope.launch {

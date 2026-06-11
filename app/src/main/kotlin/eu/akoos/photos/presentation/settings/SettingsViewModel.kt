@@ -183,6 +183,10 @@ class SettingsViewModel @Inject constructor(
                         f.deleteRecursively()
                     }
                 }
+                // The decrypted thumbnail files are gone but the DB still points at them;
+                // null those paths so visible cells re-request a decrypt off the persisted
+                // crypto material instead of staying blank until a full library refresh.
+                cloudRepo.clearCachedThumbnailUrls()
             }
             refreshLocalStorage()
         }

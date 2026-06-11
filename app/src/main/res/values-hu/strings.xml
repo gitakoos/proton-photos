@@ -119,6 +119,7 @@
     <string name="sync_backed_up">Mentve</string>
     <string name="sync_pending">Függőben</string>
     <string name="sync_none">Nincs</string>
+    <string name="sync_first_run_in_progress">Első szinkronizálás folyamatban…</string>
     <string name="sync_photo_count">%1$d kép</string>
     <string name="sync_photo_count_singular">1 kép</string>
     <string name="sync_progress_completed">%1$d%% kész</string>

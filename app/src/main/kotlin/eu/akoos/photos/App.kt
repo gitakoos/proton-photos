@@ -68,6 +68,9 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
     @Inject
     lateinit var networkObserver: eu.akoos.photos.util.NetworkObserver
 
+    @Inject
+    lateinit var photoListingDao: eu.akoos.photos.data.db.dao.PhotoListingDao
+
     // Initialized in constructor so getWorkManagerConfiguration() never crashes even
     // when called by startup initializers before Hilt injects workerFactory.
     private val delegatingFactory = DelegatingWorkerFactory()
@@ -333,6 +336,10 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
                             ).forEach { sub ->
                                 java.io.File(cacheDir, sub).deleteRecursively()
                             }
+                            // The decrypted thumbnail files are gone; null their DB paths so
+                            // the next launch re-requests a decrypt instead of pointing cells
+                            // at missing files (which the scheduler would skip as "done").
+                            photoListingDao.clearCachedThumbnailUrls()
                         }
                     }
                 }

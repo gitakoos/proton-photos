@@ -120,6 +120,7 @@
     <string name="sync_backed_up">Respaldadas</string>
     <string name="sync_pending">Pendientes</string>
     <string name="sync_none">Ninguna</string>
+    <string name="sync_first_run_in_progress">Primera sincronización en curso…</string>
     <string name="sync_photo_count">%1$d fotos</string>
     <string name="sync_photo_count_singular">1 foto</string>
     <string name="sync_progress_completed">%1$d%% completado</string>

@@ -37,7 +37,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.sample
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
@@ -60,6 +60,7 @@ import eu.akoos.photos.data.hidden.HiddenStorageManager
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.entity.GalleryItem
+import eu.akoos.photos.data.repository.drive.PhotoStreamService
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.LocalMediaRepository
 import eu.akoos.photos.domain.repository.SyncStateRepository
@@ -93,6 +94,7 @@ class GalleryViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val getGalleryItems: GetGalleryItemsUseCase,
     private val cloudRepo: DrivePhotoRepository,
+    private val photoStreamService: PhotoStreamService,
     private val localRepo: LocalMediaRepository,
     private val accountManager: AccountManager,
     private val observeUser: ObserveUser,
@@ -354,11 +356,15 @@ class GalleryViewModel @Inject constructor(
             // landing during a Gallery first-load) into one emit per ~300 ms. Without this,
             // every decrypt completion re-emits the full items list, invalidates the
             // LazyVerticalGrid, and recomposes every cell — scroll stutters until decrypts
-            // quiet down. The debounce sits on the items flow ALONE, not the combined
-            // result: the hidden-vault, hide-in-albums toggle and album-membership flows
-            // must propagate immediately so flipping the toggle (either way) re-filters the
-            // grid in the very next pass instead of waiting on the items-coalescing window.
-            val itemsFlow = getGalleryItems.invoke(userId).debounce(300)
+            // quiet down. `sample` (not `debounce`) is required: a debounce only emits after
+            // a quiet gap, so a continuous decrypt burst (a completion every ~100-200 ms)
+            // keeps resetting the timer and the grid never repaints until the burst ends or
+            // an unrelated recomposition forces it. `sample` emits the latest snapshot every
+            // 300 ms regardless, so freshly-decrypted thumbnails appear live throughout the
+            // burst. It sits on the items flow ALONE, not the combined result: the
+            // hidden-vault, hide-in-albums toggle and album-membership flows propagate
+            // immediately so flipping the toggle re-filters the grid in the very next pass.
+            val itemsFlow = getGalleryItems.invoke(userId).sample(300)
 
             combine(
                 itemsFlow,
@@ -442,6 +448,12 @@ class GalleryViewModel @Inject constructor(
     }
 
     private fun syncOnLaunch() {
+        // The gallery is now on screen, so the early refresh started at app launch no longer
+        // needs the gentle (first-screen) cadence — flip the live signal off so any in-flight
+        // full refresh speeds back up to the normal pace on its next chunk. Done before the
+        // userId await so it takes effect immediately on arrival. The refresh below coalesces
+        // onto that same in-flight one via refreshFullMutex (single-flight) — no second refresh.
+        photoStreamService.setGentleSync(false)
         viewModelScope.launch {
             val userId = accountManager.getPrimaryUserId().first() ?: return@launch
             doSync(userId)

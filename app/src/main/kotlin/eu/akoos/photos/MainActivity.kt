@@ -24,7 +24,9 @@ package eu.akoos.photos
 
 import android.content.ContentResolver
 import android.content.Intent
+import android.content.IntentFilter
 import android.net.Uri
+import android.os.BatteryManager
 import android.os.Bundle
 import android.provider.OpenableColumns
 import android.widget.Toast
@@ -90,6 +92,8 @@ import eu.akoos.photos.presentation.settings.ThemeMode
 import eu.akoos.photos.presentation.settings.ThemePalette
 import eu.akoos.photos.presentation.theme.ProtonPhotosTheme
 import eu.akoos.photos.presentation.util.LocaleOverride
+import eu.akoos.photos.data.repository.drive.PhotoStreamService
+import eu.akoos.photos.util.NetworkObserver
 import eu.akoos.photos.worker.SyncWorker
 import javax.inject.Inject
 
@@ -101,6 +105,8 @@ class MainActivity : AppCompatActivity() {
     @Inject lateinit var appLockManager: AppLockManager
     @Inject lateinit var accountManager: AccountManager
     @Inject lateinit var driveRepo: DrivePhotoRepository
+    @Inject lateinit var photoStreamService: PhotoStreamService
+    @Inject lateinit var networkObserver: NetworkObserver
     @Inject lateinit var reconcile: ReconcileSyncStateUseCase
     @Inject lateinit var pendingDeleteNotif: PendingDeleteNotificationUseCase
     @Inject lateinit var updateOrchestrator: UpdateOrchestrator
@@ -195,6 +201,34 @@ class MainActivity : AppCompatActivity() {
                 SyncWorker.scheduleContentObserver(this@MainActivity, wifiOnly)
                 eu.akoos.photos.service.BackgroundSyncService.start(this@MainActivity)
             }
+        }
+
+        // Early cloud-photo refresh kicked off the moment a primary user resolves — runs
+        // pre-Gallery for BOTH a first-install onboarding user (the wizard is on screen for
+        // many seconds) AND a returning user who skips straight to the gallery. Starting it
+        // here (app/activity scope, not onboarding scope) means the first thumbnails are
+        // already landing by the time the gallery appears, and the gopenpgp decrypt burst
+        // begins spread out at the gentle cadence.
+        //
+        // setGentleSync(true) makes the in-flight loop pace slowly while a heavy first screen
+        // is shown; GalleryViewModel flips it back to false when the gallery becomes visible so
+        // the remainder speeds up. The full refresh is single-flighted by refreshFullMutex, so
+        // GalleryViewModel.syncOnLaunch's later refresh just awaits this one — no second
+        // concurrent full refresh.
+        //
+        // Gated to respect the same backup constraints the sync workers honour: only when
+        // auto-sync is on, never on low battery (mirrors SyncWorker's batteryNotLow), and never
+        // on a metered network when Wi-Fi-only is set (mirrors the UNMETERED network constraint).
+        lifecycleScope.launch {
+            val userId = accountManager.getPrimaryUserId().first() ?: return@launch
+            val prefs = settingsDataStore.data.first()
+            val autoSync = prefs[SettingsKeys.AUTO_SYNC] != false
+            if (!autoSync) return@launch
+            if (isBatteryLow()) return@launch
+            val wifiOnly = prefs[SettingsKeys.SYNC_WIFI_ONLY] != false
+            if (wifiOnly && !networkObserver.isUnmetered.value) return@launch
+            photoStreamService.setGentleSync(true)
+            runCatching { driveRepo.refreshCloudPhotos(userId) }
         }
 
         // Observe lock setting changes. The DataStore-backed flow re-emits on every preference
@@ -505,6 +539,24 @@ class MainActivity : AppCompatActivity() {
         if (!segment.isNullOrBlank() && segment.contains('.')) return segment
         val ts = System.currentTimeMillis()
         return if (isVideo) "video_$ts.mp4" else "image_$ts.jpg"
+    }
+
+    /**
+     * Whether the device is in a low-battery state, the runtime analogue of the
+     * `setRequiresBatteryNotLow(true)` constraint the sync workers use. Read off the sticky
+     * ACTION_BATTERY_CHANGED broadcast (no receiver to register/unregister) and compared to a
+     * 15% floor, the level at which the OS itself reports the "battery low" condition. Returns
+     * false (don't block) when the level can't be read, so a missing broadcast never suppresses
+     * the early refresh.
+     */
+    private fun isBatteryLow(): Boolean {
+        val status = runCatching {
+            registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        }.getOrNull() ?: return false
+        val level = status.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
+        val scale = status.getIntExtra(BatteryManager.EXTRA_SCALE, -1)
+        if (level < 0 || scale <= 0) return false
+        return level.toFloat() / scale.toFloat() <= 0.15f
     }
 
     override fun onStop() {
