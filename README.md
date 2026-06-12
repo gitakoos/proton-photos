@@ -2,7 +2,7 @@
 
 > **Unofficial** open-source Proton Drive Photos client for Android. Built against the publicly documented Drive API.
 
-[![Release](https://img.shields.io/badge/release-v2.1.1-blue)](https://github.com/gitakoos/proton-photos/releases/latest)
+[![Release](https://img.shields.io/badge/release-v2.2.0-blue)](https://github.com/gitakoos/proton-photos/releases/latest)
 [![License](https://img.shields.io/badge/license-GPL--3.0-green)](LICENSE)
 [![Min SDK](https://img.shields.io/badge/minSdk-26-orange)](https://developer.android.com/about/dashboards)
 
@@ -18,8 +18,9 @@ End-to-end encrypted photo backup and browsing for your Proton Drive Photos libr
 - Reinstall pairing — previously backed-up photos rejoin Synced state automatically after a clean install.
 - Delete after backup — optional toggle that removes the device copy as soon as the cloud upload succeeds, with a system trash consent notification that drains on unlock.
 - Albums — every album is cloud-native and end-to-end encrypted: create, rename, add / remove photos, automatic cover that you can override with a long-press on any photo.
-- Album sharing — invite people by email with viewer or editor roles and an optional message, manage members and pending invites, revoke access or stop sharing entirely. Albums shared with you appear in a dedicated tab; "Save to my library" copies their photos into your own Photos.
+- Album sharing — invite people by email with viewer or editor roles and an optional message, manage members and pending invites, revoke access or stop sharing entirely. Albums shared with you appear in a dedicated tab and open instantly from cache, with large shared albums loading fast; "Save to my library" copies their photos into your own Photos.
 - Mirror folders to Drive albums — pick device folders and the app keeps a matching encrypted album on Drive in sync as new photos land.
+- Device folders — browse the folders on your phone, each on its own page; back up a whole folder (optionally mirrored as a Drive album) or hand-pick individual photos with live progress; delete device photos with the same options as the main grid.
 - Built-in photo editor — eight adjustments (brightness, exposure, contrast, highlights, shadows, saturation, tone, temperature), filter, redact, rotate, free-form crop, undo / redo.
 - Built-in video editor — trim, crop, rotate, music overlay with audio trim. Works on both device and cloud-hosted videos. Strips embedded GPS and other location metadata from the exported clip.
 - Open-with support — hand a photo or video to the app from any file manager or gallery to view it full-screen, or to jump straight into the editor.
@@ -28,12 +29,14 @@ End-to-end encrypted photo backup and browsing for your Proton Drive Photos libr
 - Calendar view — every day on a calendar, with a hero photo per day, an editable place + description, and the full grid of that day's photos and videos.
 - Search — filename, media type, sync state, year and month filters, with accent-insensitive matching so an unaccented query still finds accented names; the empty-state shows recent photos, an "On this day" carousel and a jump-to-month grid.
 - Timeline scrubber on the photos grid for fast year-jump navigation.
-- Multi-select bulk actions — download, add to album, delete, hide, strip metadata. Mixed device + cloud selection is guarded so nothing is silently dropped.
+- Multi-select bulk actions — back up to Drive, download, add to album, delete, hide, strip metadata; adding a local photo to a cloud album uploads it first, back up also works on a single photo from the viewer, and uploads keep running in the background after you leave. Mixed device + cloud selection is guarded so nothing is silently dropped.
+- Share to other apps — send photos and videos to any other app from the gallery, an album, or a device folder; cloud-only photos download first, then share.
+- Timeline filter — choose which device folders and album photos appear on the Photos timeline; display-only, so everything stays backed up and browsable.
 - Cloud trash, in-app — browse deleted cloud photos, restore them, or empty the trash for good without leaving the app.
 - Hidden vault behind biometric / PIN. Heavy blur overlay on cells and viewer.
 - Per-field metadata stripping (GPS, camera, timestamps, software) on upload or in bulk.
 - Offline browsing — cached photos and videos work without a network connection.
-- Lazy thumbnail decryption — gallery populates instantly, thumbnails resolve as cells scroll into view.
+- Background thumbnail cache — gallery populates instantly with visible cells resolved first, and a size-bounded background warm-up decrypts the rest of the library ahead of time so scrolling stays smooth.
 - One-tap bulk free-up of already-backed-up device copies.
 - Configurable app lock with timeout.
 - In-app updater — checks the releases page for a newer build, then downloads and installs the APK from within the app.
@@ -127,7 +130,7 @@ Telemetry / observability modules are pulled in (transitively required by some d
 | `PhotosShareService` | Per-user key cache (volumeId, shareId, rootLinkId, rootLinkKeyBytes, rootNodeHashKey) + shared API semaphore. Wiped on sign-out. |
 | `PhotosVolumeBootstrap` | First-run Photos volume + share + root-link creation. Handles `ALREADY_EXISTS` race via `getVolumes()` fallback. |
 | `CloudTrashService` | Cloud trash listing, restore (`moveTrashLinks`), permanent delete — surfaced as the in-app Trash screen. |
-| `ThumbnailDecryptScheduler` | On-demand thumbnail decryption — resolves cells as they scroll into view, bounded + priority-ordered with prefetch so scroll stays smooth. |
+| `ThumbnailDecryptScheduler` | On-demand + background thumbnail decryption — resolves visible cells first (priority-ordered with prefetch), warms the rest of the library in the background, and keeps the decrypted-thumbnail cache within a size budget by evicting the least-recently-used. |
 | `RecentUploadsTracker` | Short-TTL (90 s) recently-uploaded-linkIds map — stops stale rows from blocking cloud-delete propagation. |
 | `LinkDetailHelpers`, `ThumbnailHelpers`, `PhotoEntityBuilder` | Shared helpers (batch link metadata, JPEG thumbnail ≤512 px, DTO → Room entity mapping). |
 

@@ -38,7 +38,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.unit.dp
-import eu.akoos.photos.presentation.albums.AlbumsFilter
 import eu.akoos.photos.presentation.common.OfflineBanner
 import eu.akoos.photos.presentation.albums.AlbumsUiState
 
@@ -66,8 +65,8 @@ internal fun GalleryHeader(
     onSearchClick: () -> Unit,
     onCalendarClick: () -> Unit,
     onClearContentFilter: () -> Unit,
-    onAlbumsFilterSelected: (AlbumsFilter) -> Unit,
     onHiddenAlbumClick: () -> Unit,
+    /** Opens the Timeline filter screen from the Albums tab. */
     onShowAlbumsFilterSheet: () -> Unit,
     onSharedFilterSelected: (SharedFilter) -> Unit,
     onShowSharedEmailSheet: () -> Unit,
@@ -112,8 +111,6 @@ internal fun GalleryHeader(
                 }
                 1 -> {
                     AlbumsFilterRail(
-                        selectedFilter = albumsState.albumsFilter,
-                        onFilterSelected = onAlbumsFilterSelected,
                         onHiddenAlbumClick = onHiddenAlbumClick,
                         onShowFilterSheet = onShowAlbumsFilterSheet,
                         modifier = Modifier.weight(1f),

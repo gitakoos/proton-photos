@@ -22,6 +22,12 @@
 
 package eu.akoos.photos.presentation.albums
 
+import android.app.Activity
+import android.content.Intent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.IntentSenderRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import eu.akoos.photos.domain.entity.GalleryItem
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -102,6 +108,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -151,11 +158,26 @@ fun AlbumDetailScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     var showDeleteConfirm by remember { mutableStateOf(false) }
+    // System trash-dialog launcher for deletes that remove the on-device copy (Android 11+),
+    // mirroring the gallery and device-folder flow.
+    val deletePermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult(),
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) viewModel.onDeletePermissionGranted()
+        else viewModel.clearPendingDeleteIntent()
+    }
+    LaunchedEffect(state.pendingDeleteIntent) {
+        val pi = state.pendingDeleteIntent ?: return@LaunchedEffect
+        deletePermissionLauncher.launch(IntentSenderRequest.Builder(pi.intentSender).build())
+    }
     var showShareSheet by remember { mutableStateOf(false) }
     var showRenameDialog by remember { mutableStateOf(false) }
     var showSaveToLibraryConfirm by remember { mutableStateOf(false) }
     var showSharedAlbumOverflow by remember { mutableStateOf(false) }
     var showLeaveAlbumConfirm by remember { mutableStateOf(false) }
+    // Sharing album photos to other apps needs the cloud-only ones downloaded first; warn before
+    // that. A selection where every photo already has a local copy shares with no warning.
+    var showShareCloudWarning by remember { mutableStateOf(false) }
     val shareSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scope = rememberCoroutineScope()
     val clipboard = LocalClipboardManager.current
@@ -171,6 +193,16 @@ fun AlbumDetailScreen(
         state.error?.let {
             snackbarHostState.showSnackbar(it)
             viewModel.clearError()
+        }
+    }
+
+    // Hand the VM-built share intent to the system chooser. One-shot collect; the share pill
+    // spinner is driven by state.shareState, not by this flow.
+    val shareCtx = LocalContext.current
+    val shareChooserTitle = stringResource(R.string.share_chooser_title)
+    LaunchedEffect(Unit) {
+        viewModel.shareIntent.collect { intent ->
+            runCatching { shareCtx.startActivity(Intent.createChooser(intent, shareChooserTitle)) }
         }
     }
 
@@ -295,16 +327,10 @@ fun AlbumDetailScreen(
                 val videosTextRes = androidx.compose.ui.res.pluralStringResource(
                     R.plurals.count_videos_plural, headerVideoCount, headerVideoCount,
                 )
-                val savingFmt = stringResource(R.string.shared_save_progress_fmt)
+                // Running progress (save-to-library / download / share) is shown by the shared
+                // OperationProgressPill below, not in the subtitle — so this stays a plain count.
                 val countLabel = when {
                     state.isLoading -> ""
-                    // While the save-to-library copy is in flight, surface the
-                    // running "N of M copied" right under the title so the user
-                    // sees real progress instead of just a spinning ring on the
-                    // action button. Replaces the photo-count text — that count
-                    // doesn't change during the copy anyway.
-                    state.isSavingToLibrary && state.savingTotal > 0 ->
-                        savingFmt.format(state.savingCopied, state.savingTotal)
                     headerPhotoCount > 0 && headerVideoCount > 0 -> "$photosTextRes, $videosTextRes"
                     headerVideoCount > 0 -> videosTextRes
                     else -> photosTextRes
@@ -626,6 +652,35 @@ fun AlbumDetailScreen(
                     color = appColors.fgPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.padding(start = 12.dp).weight(1f),
                 )
+                // Share selected to other apps. Album photos live on Drive — a cloud-only one
+                // downloads first (warn before that), one already on the device shares directly.
+                // The ring tracks how many photos in the batch have been resolved.
+                val isSharingPhotos = state.shareState is AlbumShareState.Working
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .background(PillBg, CircleShape)
+                        .border(0.5.dp, PillBorder, CircleShape)
+                        .clickable(enabled = !isSharingPhotos) {
+                            // Warn first when any selected photo isn't already on the device.
+                            val needsDownload = state.selectedPhotos.any { state.localUriByLinkId[it] == null }
+                            if (needsDownload) showShareCloudWarning = true
+                            else viewModel.shareSelected()
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (isSharingPhotos) {
+                        val p = state.shareState as AlbumShareState.Working
+                        CircularProgressIndicator(
+                            progress = { if (p.total > 0) p.done.toFloat() / p.total else 0f },
+                            color = Accent, strokeWidth = 2.dp, modifier = Modifier.size(16.dp),
+                        )
+                    } else {
+                        Icon(Icons.Default.Share, stringResource(R.string.share_action),
+                            tint = Accent, modifier = Modifier.size(18.dp))
+                    }
+                }
+                Spacer(modifier = Modifier.size(4.dp))
                 // Download selected
                 val isDownloading = state.downloadState is AlbumDownloadState.Working
                 Box(
@@ -700,6 +755,38 @@ fun AlbumDetailScreen(
             }
         }
 
+        // Unified progress pill — one surface for save-to-library, multi-download and multi-share,
+        // matching the device-folder back-up and gallery bulk actions. Offset below the selection
+        // bar while selecting (download / share run there); sits at the top otherwise.
+        val savingTpl = stringResource(R.string.shared_save_progress_fmt)
+        val downloadingTpl = stringResource(R.string.op_downloading_fmt)
+        val sharingTpl = stringResource(R.string.op_sharing_fmt)
+        val dlState = state.downloadState
+        val shState = state.shareState
+        val opProgress = when {
+            state.isSavingToLibrary && state.savingTotal > 0 ->
+                eu.akoos.photos.presentation.common.OperationProgress(
+                    state.savingCopied, state.savingTotal,
+                    savingTpl.format(state.savingCopied, state.savingTotal),
+                )
+            dlState is AlbumDownloadState.Working ->
+                eu.akoos.photos.presentation.common.OperationProgress(
+                    dlState.done, dlState.total, downloadingTpl.format(dlState.done, dlState.total),
+                )
+            shState is AlbumShareState.Working ->
+                eu.akoos.photos.presentation.common.OperationProgress(
+                    shState.done, shState.total, sharingTpl.format(shState.done, shState.total),
+                )
+            else -> null
+        }
+        eu.akoos.photos.presentation.common.OperationProgressPill(
+            progress = opProgress,
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .statusBarsPadding()
+                .padding(top = if (state.isSelectionMode) 64.dp else 8.dp),
+        )
+
         eu.akoos.photos.presentation.common.ThemedSnackbarHost(snackbarHostState, modifier = Modifier.align(Alignment.BottomCenter))
     }
 
@@ -742,6 +829,19 @@ fun AlbumDetailScreen(
         }
     }
 
+    if (showShareCloudWarning) {
+        ConfirmDialog(
+            title = stringResource(R.string.gallery_share_cloud_warning_title),
+            message = stringResource(R.string.gallery_share_cloud_warning_body),
+            confirmLabel = stringResource(R.string.gallery_share_cloud_warning_continue),
+            dismissLabel = stringResource(R.string.cancel),
+            onConfirm = {
+                showShareCloudWarning = false
+                viewModel.shareSelected()
+            },
+            onDismiss = { showShareCloudWarning = false },
+        )
+    }
     if (showSaveToLibraryConfirm) {
         // Confirms the cross-share copy before kicking off the round-trip. The
         // body explains both what the action does (copy to the recipient's own
@@ -765,16 +865,30 @@ fun AlbumDetailScreen(
         )
     }
 
-    if (showDeleteConfirm) {
-        val n = state.selectedCount
-        ConfirmDialog(
-            title = androidx.compose.ui.res.pluralStringResource(R.plurals.delete_title_plural, n, n),
-            message = stringResource(R.string.delete_also_cloud_warning),
-            confirmLabel = stringResource(R.string.delete_button_permanently),
-            dismissLabel = stringResource(R.string.cancel),
-            onConfirm = { showDeleteConfirm = false; viewModel.deleteSelectedPhotos() },
+    if (showDeleteConfirm && state.selectedPhotos.isNotEmpty()) {
+        // Same sheet as the gallery and device folders: green-cloud (Synced) photos get the
+        // device / cloud / both choice, cloud-only photos get accurate "moved to trash" copy.
+        val deleteItems = remember(state.selectedPhotos, state.photos, state.localUriByLinkId) {
+            val byId = state.photos.associateBy { it.linkId }
+            state.selectedPhotos.mapNotNull { linkId ->
+                val photo = byId[linkId] ?: return@mapNotNull null
+                val uri = state.localUriByLinkId[linkId]
+                if (uri != null) GalleryItem.Synced(
+                    photo,
+                    eu.akoos.photos.domain.entity.LocalMediaItem(
+                        uri = uri, dateTaken = photo.captureTimeMs, displayName = "",
+                        mimeType = photo.mimeType, sizeBytes = 0L, bucketName = null,
+                    ),
+                ) else GalleryItem.CloudOnly(photo)
+            }.toSet()
+        }
+        eu.akoos.photos.presentation.gallery.GalleryMultiDeleteDialog(
+            selectedItems = deleteItems,
             onDismiss = { showDeleteConfirm = false },
-            destructive = true,
+            onDelete = { freeUpSpace, deleteFromCloud ->
+                showDeleteConfirm = false
+                viewModel.deleteSelectedPhotos(freeUpSpace, deleteFromCloud)
+            },
         )
     }
 

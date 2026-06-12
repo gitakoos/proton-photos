@@ -36,6 +36,21 @@ interface PhotoListingDao {
     @Query("SELECT * FROM photo_listing WHERE userId = :userId ORDER BY captureTime DESC")
     fun observeAll(userId: String): Flow<List<PhotoListingEntity>>
 
+    /**
+     * The user's own photo stream. Photos loaded from a shared-with-me album live in the same
+     * table but carry the album linkId as their parentLinkId (the recipient-side pin written by
+     * the album loader); the user's own photos are parented to their photos root, never to an
+     * album. Excluding rows whose parent is a known album keeps someone else's shared photos
+     * off the timeline, the search index and the widget picker. parentLinkId IS NULL rows are
+     * legacy own photos from before the parent column existed — they stay visible.
+     */
+    @Query(
+        "SELECT * FROM photo_listing WHERE userId = :userId AND (parentLinkId IS NULL OR " +
+            "parentLinkId NOT IN (SELECT DISTINCT albumLinkId FROM album_photo_membership)) " +
+            "ORDER BY captureTime DESC",
+    )
+    fun observeOwnStream(userId: String): Flow<List<PhotoListingEntity>>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(entities: List<PhotoListingEntity>)
 
@@ -54,6 +69,13 @@ interface PhotoListingDao {
     /** Returns all linkIds currently stored for a user. Used by the smart-merge refresh strategy. */
     @Query("SELECT linkId FROM photo_listing WHERE userId = :userId")
     suspend fun getAllLinkIds(userId: String): List<String>
+
+    /** Rows whose thumbnail hasn't been decrypted yet, newest photo first — fed to the
+     *  scheduler's background warm-up. The scheduler walks this list until the on-disk cache
+     *  reaches its size budget, so the most recently captured photos (the ones a user is most
+     *  likely to browse) get warmed first and the cold tail decrypts on demand. */
+    @Query("SELECT * FROM photo_listing WHERE userId = :userId AND thumbnailUrl IS NULL ORDER BY captureTime DESC")
+    suspend fun getUndecryptedThumbnails(userId: String): List<PhotoListingEntity>
 
     /** Returns entities for the given linkIds — used to preserve existing thumbnailUrls during refresh. */
     @Query("SELECT * FROM photo_listing WHERE linkId IN (:linkIds)")
@@ -90,4 +112,15 @@ interface PhotoListingDao {
      */
     @Query("UPDATE photo_listing SET thumbnailUrl = NULL WHERE thumbnailUrl LIKE 'file://%'")
     suspend fun clearCachedThumbnailUrls()
+
+    /**
+     * Nulls the cached `file://` thumbnail path for a specific set of links. Used by the
+     * thumbnail cache's size-bounded eviction: once the oldest `thumb_<linkId>.jpg` files are
+     * deleted to stay under the cache cap, their rows must drop the now-dangling path so the
+     * scheduler re-decrypts them the next time the cell scrolls into view (the enqueue path
+     * skips any row whose thumbnailUrl is still non-null). The crypto material stays on the
+     * row, so a re-warm costs one decrypt, never a network round-trip.
+     */
+    @Query("UPDATE photo_listing SET thumbnailUrl = NULL WHERE linkId IN (:linkIds)")
+    suspend fun clearThumbnailUrlsByLinkIds(linkIds: List<String>)
 }

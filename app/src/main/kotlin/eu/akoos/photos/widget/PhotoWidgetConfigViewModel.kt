@@ -144,7 +144,9 @@ class PhotoWidgetConfigViewModel @Inject constructor(
     private fun observeCloudPhotos() {
         viewModelScope.launch {
             val userId: UserId = accountManager.getPrimaryUserId().first() ?: return@launch
-            photoListingDao.observeAll(userId.id).collectLatest { rows ->
+            // Own stream only — photos from shared-with-me albums must not be offered as
+            // widget content.
+            photoListingDao.observeOwnStream(userId.id).collectLatest { rows ->
                 val sorted = rows.sortedByDescending { it.captureTime ?: 0L }
                 _state.update { it.copy(cloudPhotos = sorted) }
             }

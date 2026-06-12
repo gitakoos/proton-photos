@@ -59,10 +59,10 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import eu.akoos.photos.R
 import eu.akoos.photos.presentation.settings.components.CollapsibleSection
+import eu.akoos.photos.presentation.settings.components.NavRow
 import eu.akoos.photos.presentation.settings.components.RowDivider
 import eu.akoos.photos.presentation.settings.components.SettingsCard
 import eu.akoos.photos.presentation.settings.components.SettingsSubPageScaffold
-import eu.akoos.photos.presentation.settings.components.ToggleRow
 import eu.akoos.photos.presentation.settings.components.rememberDebouncedAction
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.paletteAccent
@@ -80,6 +80,7 @@ import eu.akoos.photos.presentation.theme.paletteAccent
 @Composable
 fun AppearanceSettingsScreen(
     onBack: () -> Unit,
+    onTimelineFilterClick: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -174,11 +175,12 @@ fun AppearanceSettingsScreen(
         // security one.
         CollapsibleSection(label = stringResource(R.string.settings_photos_timeline_section)) {
             SettingsCard {
-                ToggleRow(
-                    label = stringResource(R.string.settings_hide_album_photos),
-                    description = stringResource(R.string.settings_hide_album_photos_desc),
-                    checked = state.hidePhotosInAlbums,
-                    onCheckedChange = viewModel::setHidePhotosInAlbums,
+                // Single entry point — the timeline filter screen holds both the
+                // "hide album photos" toggle and the per-folder device exclusions, so
+                // everything that controls what shows on the Photos tab lives in one place.
+                NavRow(
+                    label = stringResource(R.string.settings_timeline_filter),
+                    onClick = onTimelineFilterClick,
                 )
             }
         }
@@ -192,8 +194,13 @@ fun AppearanceSettingsScreen(
 @Composable
 fun LanguageSettingsScreen(
     onBack: () -> Unit,
+    onTimelineFilterClick: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel(),
-) = AppearanceSettingsScreen(onBack = onBack, viewModel = viewModel)
+) = AppearanceSettingsScreen(
+    onBack = onBack,
+    onTimelineFilterClick = onTimelineFilterClick,
+    viewModel = viewModel,
+)
 
 private data class LanguageOption(val tag: String, val labelRes: Int)
 

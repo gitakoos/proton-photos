@@ -77,6 +77,7 @@ class PhotoViewerViewModel @Inject constructor(
     private val syncStateRepo: eu.akoos.photos.domain.repository.SyncStateRepository,
     private val networkObserver: eu.akoos.photos.util.NetworkObserver,
     private val albumListEvents: eu.akoos.photos.util.AlbumListEventBus,
+    private val forceUploadLocalUris: eu.akoos.photos.domain.usecase.ForceUploadLocalUrisUseCase,
 ) : ViewModel() {
 
     override fun onCleared() {
@@ -155,6 +156,19 @@ class PhotoViewerViewModel @Inject constructor(
 
     private val _isSavingToDevice = MutableStateFlow(false)
     val isSavingToDevice: StateFlow<Boolean> = _isSavingToDevice.asStateFlow()
+
+    /** True while [shareItem] resolves a shareable URI (decrypting a cloud-only photo first).
+     *  Drives the overflow spinner the same way [isSavingToDevice] does. */
+    private val _isSharing = MutableStateFlow(false)
+    val isSharing: StateFlow<Boolean> = _isSharing.asStateFlow()
+
+    /**
+     * One-shot carrier for the built share intent. A ViewModel can't call startActivity, so the
+     * screen collects this and launches `Intent.createChooser(...)`. Same replay=0 + single-buffer
+     * shape as [addToAlbumDone] so a paused screen doesn't block the emit.
+     */
+    private val _shareIntent = MutableSharedFlow<android.content.Intent>(replay = 0, extraBufferCapacity = 1)
+    val shareIntent: SharedFlow<android.content.Intent> = _shareIntent.asSharedFlow()
 
     private val _deleteState = MutableStateFlow<DeleteState>(DeleteState.Idle)
     val deleteState: StateFlow<DeleteState> = _deleteState.asStateFlow()
@@ -505,6 +519,19 @@ class PhotoViewerViewModel @Inject constructor(
                 prefs[SettingsKeys.HIDDEN_PHOTO_URIS] = if (uri in current) current - uri else current + uri
             }
             _isHidden.value = !_isHidden.value
+        }
+    }
+
+    /**
+     * Force a not-yet-backed-up (LocalOnly) photo in the viewer to upload to Drive — the same
+     * path the gallery selection and device-folder views use. No-op for already-synced or
+     * cloud-only items. The viewer's sync badge flips once the upload lands.
+     */
+    fun backUpItem(item: GalleryItem) {
+        val uri = (item as? GalleryItem.LocalOnly)?.local?.uri ?: return
+        viewModelScope.launch {
+            val userId = accountManager.getPrimaryUserId().first() ?: return@launch
+            forceUploadLocalUris.forceUpload(userId, listOf(uri))
         }
     }
 
@@ -945,6 +972,44 @@ class PhotoViewerViewModel @Inject constructor(
                 _transientError.value = "Save to device failed: ${e.message ?: "unknown error"}"
             }
             _isSavingToDevice.value = false
+        }
+    }
+
+    /**
+     * Resolve a shareable URI for the item and emit the send intent for the screen to launch.
+     * Local items (LocalOnly / Synced) reuse their MediaStore content URI directly — already
+     * decrypted and cross-app readable, zero copy. A cloud-only item is decrypted to
+     * cacheDir/fullres/ via [DrivePhotoRepository.downloadFullResPhoto] (single-flighted, cheap
+     * on a cache hit) and handed out through the share FileProvider. The temp file is left in
+     * place — the receiver reads it asynchronously and the fullres TTL sweep reclaims it later.
+     */
+    fun shareItem(item: GalleryItem) {
+        viewModelScope.launch {
+            _isSharing.value = true
+            runCatching {
+                val uri: Uri = when (item) {
+                    is GalleryItem.LocalOnly -> Uri.parse(item.local.uri)
+                    is GalleryItem.Synced    -> Uri.parse(item.local.uri)
+                    is GalleryItem.CloudOnly -> {
+                        val userId = accountManager.getPrimaryUserId().first()
+                            ?: error("Not signed in")
+                        val file = cloudRepo.downloadFullResPhoto(userId, item.cloud)
+                        androidx.core.content.FileProvider.getUriForFile(
+                            context, "${context.packageName}.share.fileprovider", file,
+                        ).also {
+                            // Report the real filename to the receiver instead of the linkId.
+                            eu.akoos.photos.util.ShareFileProvider.putDisplayName(it, item.cloud.displayName)
+                        }
+                    }
+                }
+                val mime = eu.akoos.photos.util.ShareIntentBuilder.shareableMime(listOf(item))
+                eu.akoos.photos.util.ShareIntentBuilder.buildSendIntent(context, listOf(uri), mime)
+            }.onSuccess { intent ->
+                _shareIntent.tryEmit(intent)
+            }.onFailure { e ->
+                _transientError.value = "Share failed: ${e.message ?: "unknown error"}"
+            }
+            _isSharing.value = false
         }
     }
 

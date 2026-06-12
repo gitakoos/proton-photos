@@ -190,6 +190,14 @@ class DownloadPhotosUseCase @Inject constructor(
      */
     private fun alreadyExistsInMediaStore(displayName: String, mimeType: String, sizeBytes: Long): Uri? {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null
+        // Size is the ONLY reliable disambiguator here (MediaStore indexes no content hash).
+        // Without it we can't tell two same-named-but-different photos apart — e.g. burst frames
+        // that "rename on upload" collapsed to the same capture-time filename — so claiming the
+        // photo already exists would skip the second frame and lose it. When the size is unknown
+        // (cloud DTO carried 0) we must NOT pre-skip: fall through to the download, and let the
+        // save-time check (which always has the real file size) dedupe precisely. The cost is at
+        // most a redundant download when the photo really was already on device.
+        if (sizeBytes <= 0L) return null
         val isVideo = mimeType.startsWith("video/")
         // IMPORTANT: use EXTERNAL_CONTENT_URI (the "external" volume alias), NOT the
         // VOLUME_EXTERNAL_PRIMARY-keyed URI. LocalMediaRepository reads through the same
@@ -200,16 +208,12 @@ class DownloadPhotosUseCase @Inject constructor(
         else
             MediaStore.Images.Media.EXTERNAL_CONTENT_URI
 
-        // Size = 0 means "we don't know" (cloud DTO didn't carry it) — fall back to a
-        // displayName-only match. Risk: same filename in two different folders matches the
-        // wrong file, but that's the same risk LocalMediaRepository already accepts for the
-        // gallery merge. Better than re-downloading every time.
-        val (selection, args) = if (sizeBytes > 0L) {
-            "${MediaStore.MediaColumns.DISPLAY_NAME} = ? AND ${MediaStore.MediaColumns.SIZE} = ?" to
-                arrayOf(displayName, sizeBytes.toString())
-        } else {
-            "${MediaStore.MediaColumns.DISPLAY_NAME} = ?" to arrayOf(displayName)
-        }
+        // Match on (DISPLAY_NAME, SIZE): displayName alone collides too easily (IMG_0001.jpg is
+        // common across folders, and capture-time renames make burst frames share a name); the
+        // size pins it to bytes-of-the-same-photo. Size is guaranteed > 0 here (the unknown-size
+        // case returned null above).
+        val selection = "${MediaStore.MediaColumns.DISPLAY_NAME} = ? AND ${MediaStore.MediaColumns.SIZE} = ?"
+        val args = arrayOf(displayName, sizeBytes.toString())
 
         val cursor = context.contentResolver.query(
             collection,

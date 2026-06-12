@@ -385,9 +385,9 @@ fun VideoEditorScreen(
     val hasSource = state.sourceUri != null && !state.isLoading
 
     // Filmstrip thumbnails live at the screen scope so swapping tools (Trim → Crop →
-    // Trim) does NOT throw away the extracted bitmaps and re-extract. Each switch was
-    // previously a 12-frame × ~200 ms MediaMetadataRetriever pass. Hoisting here means
-    // the SnapshotStateList outlives the inner `when (activeTool)` branch swap.
+    // Trim) does NOT throw away the extracted bitmaps and re-extract — each re-extract
+    // is a 12-frame × ~200 ms MediaMetadataRetriever pass. Hoisting here means the
+    // SnapshotStateList outlives the inner `when (activeTool)` branch swap.
     val filmstripThumbnails = remember(state.sourceUri, state.durationMs) {
         androidx.compose.runtime.mutableStateListOf<android.graphics.Bitmap>()
     }
@@ -851,14 +851,23 @@ private fun CropOverPlayer(
     val srcH = sourceHeight.coerceAtLeast(1)
 
     // Local pending crop — drag commits live to the VM, the local copy keeps the
-    // pointer math snappy without round-tripping the StateFlow on every frame.
-    var pending by remember(currentCrop, srcW, srcH) {
-        mutableStateOf(currentCrop ?: AndroidRect(0, 0, srcW, srcH))
+    // pointer math snappy without round-tripping the StateFlow on every frame. The
+    // rect is owned by the drag gestures once seeded: keying the remember on currentCrop
+    // would re-create this state on every committed drag from the (normalized,
+    // briefly-null-on-reset) cropRect and snap it back to the full frame mid-interaction
+    // (the "crop jumps to original size on touch" bug). Like the photo editor, seed once
+    // and only re-seed when currentCrop is explicitly cleared (reset / rotation), never
+    // during a drag.
+    var pending by remember { mutableStateOf<AndroidRect?>(null) }
+    LaunchedEffect(srcW, srcH, currentCrop) {
+        if (srcW <= 0 || srcH <= 0) return@LaunchedEffect
+        when {
+            currentCrop == null -> pending = AndroidRect(0, 0, srcW, srcH) // reset / rotation cleared it
+            pending == null -> pending = currentCrop                       // first entry with a committed crop
+            // else: a drag owns `pending` — do NOT overwrite from currentCrop.
+        }
     }
-    LaunchedEffect(currentCrop, srcW, srcH) {
-        if (currentCrop != null && currentCrop != pending) pending = currentCrop
-        if (currentCrop == null) pending = AndroidRect(0, 0, srcW, srcH)
-    }
+    val pendingRect = pending ?: AndroidRect(0, 0, srcW, srcH)
 
     val sideways = ((rotationDegrees % 360) + 360) % 360 % 180 != 0
     val videoAspect = srcW.toFloat() / srcH.toFloat()
@@ -912,7 +921,7 @@ private fun CropOverPlayer(
                 )
                 CropHandleCanvas(
                     srcW = srcW, srcH = srcH,
-                    pending = pending,
+                    pending = pendingRect,
                     onPendingChange = { rect ->
                         pending = rect
                         onCropChange(rect)
@@ -938,6 +947,11 @@ private fun CropHandleCanvas(
     onPendingChange: (AndroidRect) -> Unit,
 ) {
     var containerSize by remember { mutableStateOf(IntSize.Zero) }
+    // The pointerInput gesture loop below outlives recomposition: a plain capture of `pending`
+    // freezes its FIRST value inside the closure, so a SECOND touch measures handles against the
+    // original (full-frame) rect and snaps the crop back to original size. rememberUpdatedState
+    // keeps the loop reading the freshest rect — same pattern the photo editor's crop uses.
+    val pendingState = androidx.compose.runtime.rememberUpdatedState(pending)
     Box(modifier = Modifier.fillMaxSize().onSizeChanged { containerSize = it }) {
         val fit = remember(srcW, srcH, containerSize) {
             fitRectFor(srcW.toFloat(), srcH.toFloat(),
@@ -947,12 +961,12 @@ private fun CropHandleCanvas(
 
         val density = LocalDensity.current
         val handleRadiusPx = with(density) { 14.dp.toPx() }
-        // Tighter than the old 56dp so corners get picked only when the touch sits
-        // close to an edge. The edge-buffer logic in pickClosestHandle does the heavy
-        // lifting — corner candidates only arise when the touch is near TWO adjacent
-        // edges. Touches anywhere else inside the rect translate the rect bodily,
-        // which fixes the "can drag horizontally but not vertically on portrait" bug.
-        val touchRadiusPx = with(density) { 36.dp.toPx() }
+        // Kept tight so corners get picked only when the touch sits close to an edge.
+        // The edge-buffer logic in pickClosestHandle does the heavy lifting — corner
+        // candidates only arise when the touch is near TWO adjacent edges. Touches
+        // anywhere else inside the rect translate the rect bodily, which fixes the
+        // "can drag horizontally but not vertically on portrait" bug.
+        val touchRadiusPx = with(density) { 48.dp.toPx() }
 
         val accent = Accent
         Canvas(
@@ -969,18 +983,22 @@ private fun CropHandleCanvas(
                     var insideOffsetSrcY = 0
                     detectDragGestures(
                         onDragStart = { offset ->
-                            grabbedHandle = pickClosestHandle(pending, fit, offset, touchRadiusPx)
+                            val p = pendingState.value
+                            grabbedHandle = pickClosestHandle(p, fit, offset, touchRadiusPx)
                             if (grabbedHandle == Handle.Inside) {
                                 val srcX = ((offset.x - fit.offsetX) / fit.scale)
                                     .coerceIn(0f, srcW.toFloat()).toInt()
                                 val srcY = ((offset.y - fit.offsetY) / fit.scale)
                                     .coerceIn(0f, srcH.toFloat()).toInt()
-                                insideOffsetSrcX = srcX - pending.left
-                                insideOffsetSrcY = srcY - pending.top
+                                insideOffsetSrcX = srcX - p.left
+                                insideOffsetSrcY = srcY - p.top
                             }
                         },
                         onDrag = { change, _ ->
                             val h = grabbedHandle ?: return@detectDragGestures
+                            // Read the LIVE rect each frame (not the captured one) so a resize/move
+                            // builds on the current crop instead of snapping back to the original.
+                            val p = pendingState.value
                             val srcX = ((change.position.x - fit.offsetX) / fit.scale)
                                 .coerceIn(0f, srcW.toFloat()).toInt()
                             val srcY = ((change.position.y - fit.offsetY) / fit.scale)
@@ -988,34 +1006,47 @@ private fun CropHandleCanvas(
                             val minSize = 32 // pixels — keep handles spread apart
                             val newRect = when (h) {
                                 Handle.TopLeft -> AndroidRect(
-                                    srcX.coerceAtMost(pending.right - minSize),
-                                    srcY.coerceAtMost(pending.bottom - minSize),
-                                    pending.right, pending.bottom,
+                                    srcX.coerceAtMost(p.right - minSize),
+                                    srcY.coerceAtMost(p.bottom - minSize),
+                                    p.right, p.bottom,
                                 )
                                 Handle.TopRight -> AndroidRect(
-                                    pending.left,
-                                    srcY.coerceAtMost(pending.bottom - minSize),
-                                    srcX.coerceAtLeast(pending.left + minSize),
-                                    pending.bottom,
+                                    p.left,
+                                    srcY.coerceAtMost(p.bottom - minSize),
+                                    srcX.coerceAtLeast(p.left + minSize),
+                                    p.bottom,
                                 )
                                 Handle.BottomLeft -> AndroidRect(
-                                    srcX.coerceAtMost(pending.right - minSize),
-                                    pending.top,
-                                    pending.right,
-                                    srcY.coerceAtLeast(pending.top + minSize),
+                                    srcX.coerceAtMost(p.right - minSize),
+                                    p.top,
+                                    p.right,
+                                    srcY.coerceAtLeast(p.top + minSize),
                                 )
                                 Handle.BottomRight -> AndroidRect(
-                                    pending.left,
-                                    pending.top,
-                                    srcX.coerceAtLeast(pending.left + minSize),
-                                    srcY.coerceAtLeast(pending.top + minSize),
+                                    p.left,
+                                    p.top,
+                                    srcX.coerceAtLeast(p.left + minSize),
+                                    srcY.coerceAtLeast(p.top + minSize),
+                                )
+                                // Edge grabs — drag one side, the other three stay put.
+                                Handle.Top -> AndroidRect(
+                                    p.left, srcY.coerceAtMost(p.bottom - minSize), p.right, p.bottom,
+                                )
+                                Handle.Bottom -> AndroidRect(
+                                    p.left, p.top, p.right, srcY.coerceAtLeast(p.top + minSize),
+                                )
+                                Handle.Left -> AndroidRect(
+                                    srcX.coerceAtMost(p.right - minSize), p.top, p.right, p.bottom,
+                                )
+                                Handle.Right -> AndroidRect(
+                                    p.left, p.top, srcX.coerceAtLeast(p.left + minSize), p.bottom,
                                 )
                                 Handle.Inside -> {
                                     // Bodily translate the rect — preserve W×H, clamp
                                     // to source bounds so the rect doesn't leave the
                                     // frame on either axis.
-                                    val w = pending.width()
-                                    val hgt = pending.height()
+                                    val w = p.width()
+                                    val hgt = p.height()
                                     val newLeft = (srcX - insideOffsetSrcX)
                                         .coerceIn(0, srcW - w)
                                     val newTop = (srcY - insideOffsetSrcY)
@@ -1073,7 +1104,7 @@ private fun CropHandleCanvas(
     }
 }
 
-private enum class Handle { TopLeft, TopRight, BottomLeft, BottomRight, Inside }
+private enum class Handle { TopLeft, TopRight, BottomLeft, BottomRight, Top, Bottom, Left, Right, Inside }
 
 /**
  * Edge-buffer handle picker. A touch is assigned to a corner ONLY when it sits within a
@@ -1114,10 +1145,20 @@ private fun pickClosestHandle(
     }
     if (corner != null) return corner
 
+    // Single edges — grab a side by its line: near that edge AND within the other axis's span.
+    val withinX = point.x in (l - touchRadiusPx)..(r + touchRadiusPx)
+    val withinY = point.y in (t - touchRadiusPx)..(b + touchRadiusPx)
+    val edge = when {
+        nearTop && withinX -> Handle.Top
+        nearBottom && withinX -> Handle.Bottom
+        nearLeft && withinY -> Handle.Left
+        nearRight && withinY -> Handle.Right
+        else -> null
+    }
+    if (edge != null) return edge
+
     // Inside the rect (with a small grace margin) → translate.
-    val insideRect = point.x in (l - touchRadiusPx)..(r + touchRadiusPx) &&
-        point.y in (t - touchRadiusPx)..(b + touchRadiusPx)
-    return if (insideRect) Handle.Inside else null
+    return if (withinX && withinY) Handle.Inside else null
 }
 
 /**
@@ -1167,9 +1208,9 @@ private fun TrimPanel(
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         // Start / duration / end pills sit ABOVE the filmstrip — start pinned to the left
-        // edge of the strip, end pinned to the right, duration centered. The old layout
-        // put bare labels under the strip which read as detached from the timeline; the
-        // pill row anchors the numbers to the same horizontal extents as the trim handles.
+        // edge of the strip, end pinned to the right, duration centered. The pill row
+        // anchors the numbers to the same horizontal extents as the trim handles so they
+        // read as part of the timeline rather than detached labels.
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp),
             horizontalArrangement = Arrangement.SpaceBetween,

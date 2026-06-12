@@ -384,4 +384,8 @@ class DrivePhotoRepositoryImpl @Inject constructor(
             entities.forEach { thumbnailScheduler.request(userId, it) }
         }
     }
+
+    override fun backfillThumbnails(userId: UserId) {
+        thumbnailScheduler.backfillAll(userId)
+    }
 }

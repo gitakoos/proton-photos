@@ -1247,6 +1247,19 @@ private fun CropPreview(
                                         bx.coerceAtLeast(rect.left + min),
                                         by.coerceAtLeast(rect.top + min),
                                     )
+                                    // Edge grabs — drag one side, the other three stay put.
+                                    CropHandle.Top -> android.graphics.Rect(
+                                        rect.left, by.coerceAtMost(rect.bottom - min), rect.right, rect.bottom,
+                                    )
+                                    CropHandle.Bottom -> android.graphics.Rect(
+                                        rect.left, rect.top, rect.right, by.coerceAtLeast(rect.top + min),
+                                    )
+                                    CropHandle.Left -> android.graphics.Rect(
+                                        bx.coerceAtMost(rect.right - min), rect.top, rect.right, rect.bottom,
+                                    )
+                                    CropHandle.Right -> android.graphics.Rect(
+                                        rect.left, rect.top, bx.coerceAtLeast(rect.left + min), rect.bottom,
+                                    )
                                     CropHandle.Inside -> {
                                         // Bodily translate, preserving W×H and clamping to
                                         // bitmap bounds on both axes.
@@ -1339,18 +1352,13 @@ private fun CropPreview(
     }
 }
 
-private enum class CropHandle { TopLeft, TopRight, BottomLeft, BottomRight, Inside }
+private enum class CropHandle { TopLeft, TopRight, BottomLeft, BottomRight, Top, Bottom, Left, Right, Inside }
 
 /**
  * Edge-buffer crop-handle picker (ported from the video editor). A touch lands on a corner
  * only when it sits within a tight buffer of two adjacent edges (top+left, top+right,
  * bottom+left, bottom+right); touches well inside the rect become [CropHandle.Inside]
  * (translate), and touches well outside return null.
- *
- * This replaces the old "nearest corner within slop" test, which on portrait crops claimed
- * every touch above the rect's vertical midpoint for the nearest top corner — so dragging
- * the body of the rect resized it instead of moving it, and it felt like the rect couldn't
- * be repositioned.
  */
 private fun pickCropHandle(
     rect: android.graphics.Rect,
@@ -1380,9 +1388,19 @@ private fun pickCropHandle(
     }
     if (corner != null) return corner
 
-    val insideRect = point.x in (l - touchSlopPx)..(r + touchSlopPx) &&
-        point.y in (t - touchSlopPx)..(b + touchSlopPx)
-    return if (insideRect) CropHandle.Inside else null
+    // Single edges — grab a side by its line: near that edge AND within the other axis's span.
+    val withinX = point.x in (l - touchSlopPx)..(r + touchSlopPx)
+    val withinY = point.y in (t - touchSlopPx)..(b + touchSlopPx)
+    val edge = when {
+        nearTop && withinX -> CropHandle.Top
+        nearBottom && withinX -> CropHandle.Bottom
+        nearLeft && withinY -> CropHandle.Left
+        nearRight && withinY -> CropHandle.Right
+        else -> null
+    }
+    if (edge != null) return edge
+
+    return if (withinX && withinY) CropHandle.Inside else null
 }
 
 // ─── Reusable components ────────────────────────────────────────────────────

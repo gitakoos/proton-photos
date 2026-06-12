@@ -118,6 +118,10 @@ class UploadPendingUseCase @Inject constructor(
 ) {
     private val mutex = Mutex()
 
+    /** Serialises read-modify-write on the PENDING_ALBUM_ADDS set so two concurrent uploads
+     *  removing different entries don't clobber each other's removals. */
+    private val pendingAddMutex = Mutex()
+
     /**
      * Hot stream of per-file upload events. Buffered so a slow collector never throttles the
      * upload loop. Replay = 1 so a UI that connects mid-batch sees the latest event immediately.
@@ -179,7 +183,32 @@ class UploadPendingUseCase @Inject constructor(
             stripSoftwareInfo = prefs[SettingsKeys.STRIP_SOFTWARE_INFO] ?: false,
         )
 
-        if (!backupEverything && (selectedFolders == null || selectedFolders.isEmpty())) {
+        // Drain pending album-adds for photos that already finished uploading (their row is
+        // SYNCED, so uploadOne below won't run for them). This covers the gap where a photo
+        // backed up before its album-add succeeded — or a prior add failed — and guarantees the
+        // add is eventually applied across restarts and partial failures. Runs BEFORE the
+        // no-folders early-out so a queued add still lands even when backup is otherwise idle.
+        val pendingAdds = decodePendingAlbumAdds(prefs[SettingsKeys.PENDING_ALBUM_ADDS] ?: emptySet())
+        for ((localUri, albumLinkId) in pendingAdds) {
+            val cloudId = syncStateRepo.getByUri(localUri)?.cloudFileId ?: continue
+            // No-album sentinel: the entry only forced the upload, there is no album to join.
+            // Drop it now that the photo is backed up.
+            if (albumLinkId == SettingsKeys.PENDING_ALBUM_ADD_NO_ALBUM) {
+                removePendingAlbumAdd(localUri, albumLinkId)
+                continue
+            }
+            runCatching { cloudRepo.addPhotosToAlbum(userId, albumLinkId, listOf(cloudId)) }
+                .onSuccess {
+                    removePendingAlbumAdd(localUri, albumLinkId)
+                    Log.d(UPLOAD_TAG, "Drained pending add: $cloudId → album $albumLinkId")
+                }
+                .onFailure { e -> Log.w(UPLOAD_TAG, "Pending-add drain failed for $localUri: ${e.message}") }
+        }
+        // URIs that still have a queued album-add need their upload forced even when their folder
+        // is not in the backup selection — bypass the folder guards below for these.
+        val forcedUploadUris: Set<String> = pendingAdds.keys
+
+        if (!backupEverything && (selectedFolders == null || selectedFolders.isEmpty()) && forcedUploadUris.isEmpty()) {
             Log.d(UPLOAD_TAG, "No backup folders configured — skipping upload")
             _progress.tryEmit(UploadProgress("", "", UploadStatus.Idle, 0, 0))
             return@withLock Result(attempted = 0, successCount = 0)
@@ -198,6 +227,9 @@ class UploadPendingUseCase @Inject constructor(
                 .associate { it.uri to it.bucketName }
             val before = pending.size
             pending = pending.filter { state ->
+                // A photo the user explicitly added to an album always uploads, even from an
+                // excluded bucket — it has to back up to join the album.
+                if (state.localUri in forcedUploadUris) return@filter true
                 val bucket = bucketByUri[state.localUri]
                 bucket == null || bucket !in excludedFolders
             }
@@ -290,6 +322,7 @@ class UploadPendingUseCase @Inject constructor(
                                 totalCount = totalCount,
                                 backupEverything = backupEverything,
                                 selectedFolders = selectedFolders,
+                                forcedUploadUris = forcedUploadUris,
                                 albumOptInFolders = albumOptInFolders,
                                 stripOnUpload = stripOnUpload,
                                 renameToCaptureDate = renameToCaptureDate,
@@ -345,6 +378,7 @@ class UploadPendingUseCase @Inject constructor(
         totalCount: Int,
         backupEverything: Boolean,
         selectedFolders: Set<String>?,
+        forcedUploadUris: Set<String>,
         albumOptInFolders: Set<String>,
         stripOnUpload: Boolean,
         renameToCaptureDate: Boolean,
@@ -368,8 +402,11 @@ class UploadPendingUseCase @Inject constructor(
             // ReconcileSyncStateUseCase normally cleans these up, but this is a safety net
             // in case a stale LOCAL_ONLY entry survives (e.g. after import / app restart).
             // backupEverything skips this defense-in-depth folder check too —
-            // there's no folder filter to compare against.
-            if (!backupEverything && rawLocalItem.bucketName != null && selectedFolders != null && rawLocalItem.bucketName !in selectedFolders) {
+            // there's no folder filter to compare against. A photo the user explicitly added to
+            // an album (forcedUploadUris) also bypasses the check: it must upload so it can join
+            // the album even when its source folder isn't in the backup set.
+            if (!backupEverything && state.localUri !in forcedUploadUris &&
+                rawLocalItem.bucketName != null && selectedFolders != null && rawLocalItem.bucketName !in selectedFolders) {
                 Log.d(UPLOAD_TAG, "Skipping ${rawLocalItem.displayName}: folder '${rawLocalItem.bucketName}' not selected for backup")
                 return
             }
@@ -596,6 +633,28 @@ class UploadPendingUseCase @Inject constructor(
                     // Non-fatal: photo is uploaded, album sync is best-effort
                 }
             }
+
+            // User-queued album-adds for this freshly-uploaded photo. These are album linkIds
+            // directly (the user picked an existing album for a local-only photo), so skip the
+            // bucket-name resolve/create the mirror loop above does. Best-effort like the mirror:
+            // on failure the photo stays uploaded and the entry stays for the next-pass drain.
+            val queuedAlbumLinkIds = decodePendingAlbumAdds(
+                context.settingsDataStore.data.first()[SettingsKeys.PENDING_ALBUM_ADDS] ?: emptySet()
+            ).filterKeys { it == state.localUri }.values.toSet()
+            for (albumLinkId in queuedAlbumLinkIds) {
+                // No-album sentinel: this URI was forced to upload with no album to join. The
+                // upload just succeeded, so drop the marker without an album call.
+                if (albumLinkId == SettingsKeys.PENDING_ALBUM_ADD_NO_ALBUM) {
+                    removePendingAlbumAdd(state.localUri, albumLinkId)
+                    continue
+                }
+                runCatching { cloudRepo.addPhotosToAlbum(userId, albumLinkId, listOf(cloudId)) }
+                    .onSuccess {
+                        removePendingAlbumAdd(state.localUri, albumLinkId)
+                        Log.d(UPLOAD_TAG, "Added $cloudId to queued album $albumLinkId")
+                    }
+                    .onFailure { e -> Log.w(UPLOAD_TAG, "Queued album-add failed for $albumLinkId: ${e.message}") }
+            }
         } catch (e: CancellationException) {
             // Structured cancellation — re-throw so awaitAll() tears down siblings cleanly.
             throw e
@@ -640,6 +699,29 @@ class UploadPendingUseCase @Inject constructor(
      * `drive/base/domain/.../ConfigurationProvider.kt:73`). The xAttr Common.Digests
      * map carries the same SHA-1 hex so a later cross-client xAttr verify lines up.
      */
+    /**
+     * Decodes the PENDING_ALBUM_ADDS set ("localUri=albumLinkId" entries) into a localUri→linkId
+     * map. The split is on the LAST '=' because a content:// URI can contain '=' in a query
+     * string while a Drive album linkId never does. A localUri with multiple queued albums keeps
+     * only the last one in the map, but every raw entry is still removed individually on success.
+     */
+    private fun decodePendingAlbumAdds(raw: Set<String>): Map<String, String> =
+        raw.mapNotNull { entry ->
+            val idx = entry.lastIndexOf('=')
+            if (idx <= 0 || idx == entry.length - 1) null
+            else entry.substring(0, idx) to entry.substring(idx + 1)
+        }.toMap()
+
+    /** Removes a single "localUri=albumLinkId" entry from PENDING_ALBUM_ADDS after its add lands. */
+    private suspend fun removePendingAlbumAdd(localUri: String, albumLinkId: String) {
+        pendingAddMutex.withLock {
+            context.settingsDataStore.edit { p ->
+                val existing = p[SettingsKeys.PENDING_ALBUM_ADDS] ?: emptySet()
+                p[SettingsKeys.PENDING_ALBUM_ADDS] = existing - "$localUri=$albumLinkId"
+            }
+        }
+    }
+
     private fun computeSha1(uri: String): String {
         val digest = MessageDigest.getInstance("SHA-1")
         try {

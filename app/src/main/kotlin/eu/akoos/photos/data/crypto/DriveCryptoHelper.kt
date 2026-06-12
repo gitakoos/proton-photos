@@ -159,7 +159,12 @@ class DriveCryptoHelper @Inject constructor(
         if (addresses.isEmpty()) return emptyList()
         return addresses.flatMap { address ->
             address.keys.mapNotNull { addrKey ->
-                runCatching { cryptoContext.pgpCrypto.getPublicKey(addrKey.privateKey.key) }.getOrNull()
+                // getPublicKey enters libgojni; serialize it through cryptoLock so it can't run
+                // concurrently with a thumbnail/decrypt worker's Go call. Addresses were already
+                // fetched above (the suspend part), so the lock stays off the suspension path.
+                cryptoLock.withLock {
+                    runCatching { cryptoContext.pgpCrypto.getPublicKey(addrKey.privateKey.key) }.getOrNull()
+                }
             }
         }
     }
@@ -427,12 +432,16 @@ class DriveCryptoHelper @Inject constructor(
         val key = activeKeys.firstOrNull { it.privateKey.isPrimary }
             ?: activeKeys.firstOrNull()
             ?: error("No active address key with passphrase for ${address.email}")
-        val plainPassphrase = cryptoContext.keyStoreCrypto.decrypt(key.privateKey.passphrase!!)
-        val unlocked = cryptoContext.pgpCrypto.unlock(key.privateKey.key, plainPassphrase.array)
-        plainPassphrase.close()
-        val keyBytes = unlocked.value.copyOf()
-        unlocked.close()
-        val publicKey = cryptoContext.pgpCrypto.getPublicKey(key.privateKey.key)
+        // unlock + getPublicKey both enter libgojni; serialize through cryptoLock. Synchronous
+        // method (caller already did any suspend address fetch), so the lock never spans a suspension.
+        val (keyBytes, publicKey) = cryptoLock.withLock {
+            val plainPassphrase = cryptoContext.keyStoreCrypto.decrypt(key.privateKey.passphrase!!)
+            val unlocked = cryptoContext.pgpCrypto.unlock(key.privateKey.key, plainPassphrase.array)
+            plainPassphrase.close()
+            val bytes = unlocked.value.copyOf()
+            unlocked.close()
+            bytes to cryptoContext.pgpCrypto.getPublicKey(key.privateKey.key)
+        }
         return AddressSigningKey(
             email = address.email,
             addressId = address.addressId.id,
@@ -451,7 +460,7 @@ class DriveCryptoHelper @Inject constructor(
     fun generateAlbumNodeKey(): NodeKeyMaterial = generateNodeKey()
 
 
-    fun generateNodeKey(): NodeKeyMaterial {
+    fun generateNodeKey(): NodeKeyMaterial = cryptoLock.withLock {
         val rawBytes = cryptoContext.pgpCrypto.generateRandomBytes(32)
         // NodePassphrase is decrypted by clients as a UTF-8 string (web: TextDecoder.decode).
         // Raw random bytes break TextDecoder.  Base64-encoding the bytes produces valid UTF-8.
@@ -472,7 +481,7 @@ class DriveCryptoHelper @Inject constructor(
         val unlocked   = cryptoContext.pgpCrypto.unlock(armoredKey, passphraseBytes)
         val keyBytes   = unlocked.value.copyOf()
         unlocked.close()
-        return NodeKeyMaterial(
+        NodeKeyMaterial(
             armoredPrivateKey = armoredKey,
             passphraseBytes   = passphraseBytes,   // UTF-8 bytes of the base64 string
             publicKeyArmored  = publicKey,
@@ -531,11 +540,10 @@ class DriveCryptoHelper @Inject constructor(
         // key. Decrypt-then-encrypt loses information (literal-data type byte
         // t/b, internal framing, signature inclusion) which produces a
         // ciphertext that the photo NodeKey's S2K passphrase cannot reproduce
-        // on the recipient side — every photo nodePassphrase rewrap previously
-        // failed on the recipient with "Message cannot be decrypted". By
-        // KEEPING THE SAME SEIPD bytes and only swapping the key-packet
-        // recipient, the bytes the recipient extracts after PKESK unwrap are
-        // byte-for-byte the bytes the photo NodeKey was originally encrypted
+        // on the recipient side, so the rewrap fails with "Message cannot be
+        // decrypted". Keeping the SEIPD bytes and only swapping the key-packet
+        // recipient means the bytes the recipient extracts after PKESK unwrap
+        // are byte-for-byte the bytes the photo NodeKey was originally encrypted
         // against.
         val originalPackets = cryptoContext.pgpCrypto.getEncryptedPackets(sourceNodePassphraseArmored)
         val pkeskPackets = originalPackets.filter { it.type == PacketType.Key }.map { it.packet }
@@ -748,7 +756,9 @@ class DriveCryptoHelper @Inject constructor(
      */
     fun signManifest(blockHashBytes: List<ByteArray>, signerKeyBytes: ByteArray): String {
         val manifest = blockHashBytes.fold(ByteArray(0)) { acc, hash -> acc + hash }
-        return cryptoContext.pgpCrypto.signData(manifest, signerKeyBytes, null)
+        // signData enters libgojni; serialize it. Manifest assembly above is pure CPU, kept
+        // outside the lock to minimize the held region.
+        return cryptoLock.withLock { cryptoContext.pgpCrypto.signData(manifest, signerKeyBytes, null) }
     }
 
     /**
@@ -840,29 +850,33 @@ class DriveCryptoHelper @Inject constructor(
         inviteeEmail: String,
     ): String {
         val keyPacketBytes = Base64.decode(keyPacketBase64, Base64.DEFAULT)
-        // Look up the EXACT address the invitation was sent to. Iterating blindly
-        // over every active address used to feel safe, but gopenpgp's
-        // decryptSessionKey doesn't always throw on a key mismatch — sometimes it
-        // returns garbage bytes that still produce a valid-looking signature, and
-        // the server-side accept then proceeds with a session-key signature that
-        // doesn't match the actual share session key. The membership lands in a
-        // half-broken state where the recipient can never decrypt anything in the
-        // album. Resolving by email avoids the brute force entirely.
+        // Look up the EXACT address the invitation was sent to. Brute-forcing over
+        // every active address is unsafe: gopenpgp's decryptSessionKey doesn't always
+        // throw on a key mismatch — sometimes it returns garbage bytes that still
+        // produce a valid-looking signature, and the server-side accept then proceeds
+        // with a session-key signature that doesn't match the actual share session key.
+        // The membership lands in a half-broken state where the recipient can never
+        // decrypt anything in the album. Resolving by email avoids the brute force.
         val addresses = userAddressRepository.getAddresses(userId, false)
             .filter { it.enabled && it.keys.isNotEmpty() }
         val invitee = inviteeEmail.lowercase().trim()
         val address = addresses.firstOrNull { it.email.lowercase() == invitee }
             ?: error("No active address matching invitee email=$inviteeEmail for userId=${userId.id}")
         val signingKey = unlockAddressAsSigningKey(address)
-        val sessionKey = cryptoContext.pgpCrypto.decryptSessionKey(keyPacketBytes, signingKey.unlockedKeyBytes)
-        // Sign WITH the "drive.share-member.member" context — without it the server rejects
-        // the accept with "Invalid Signature: wrong context".
-        val armoredSignature = cryptoContext.pgpCrypto.signData(
-            sessionKey.key,
-            signingKey.unlockedKeyBytes,
-            DriveSignatureContexts.MEMBER,
-        )
-        val unarmored = cryptoContext.pgpCrypto.getUnarmored(armoredSignature)
+        // decryptSessionKey + signData + getUnarmored all enter libgojni; serialize the whole
+        // sequence. Address fetch (suspend) and unlockAddressAsSigningKey (self-locked) already
+        // ran above, so this lock never spans a suspension.
+        val unarmored = cryptoLock.withLock {
+            val sessionKey = cryptoContext.pgpCrypto.decryptSessionKey(keyPacketBytes, signingKey.unlockedKeyBytes)
+            // Sign WITH the "drive.share-member.member" context — without it the server rejects
+            // the accept with "Invalid Signature: wrong context".
+            val armoredSignature = cryptoContext.pgpCrypto.signData(
+                sessionKey.key,
+                signingKey.unlockedKeyBytes,
+                DriveSignatureContexts.MEMBER,
+            )
+            cryptoContext.pgpCrypto.getUnarmored(armoredSignature)
+        }
         Log.d(TAG, "signInvitationKeyPacket: matched invitee=$inviteeEmail addressId=${address.addressId.id}")
         return Base64.encodeToString(unarmored, Base64.NO_WRAP)
     }
@@ -883,7 +897,9 @@ class DriveCryptoHelper @Inject constructor(
         sessionKey: SessionKey,
         inviteePublicKeyArmored: String,
         signerKeyBytes: ByteArray,
-    ): Pair<String, String> {
+    ): Pair<String, String> = cryptoLock.withLock {
+        // encryptSessionKey + signData + getUnarmored all enter libgojni; serialize the whole
+        // sequence. Synchronous method — no suspension inside the lock.
         val keyPacket = try {
             cryptoContext.pgpCrypto.encryptSessionKey(sessionKey, inviteePublicKeyArmored)
         } catch (t: Throwable) {
@@ -904,7 +920,7 @@ class DriveCryptoHelper @Inject constructor(
             DriveSignatureContexts.INVITER,
         )
         val unarmoredSig = cryptoContext.pgpCrypto.getUnarmored(armoredSig)
-        return keyPacketBase64 to Base64.encodeToString(unarmoredSig, Base64.NO_WRAP)
+        keyPacketBase64 to Base64.encodeToString(unarmoredSig, Base64.NO_WRAP)
     }
 
     /**
@@ -949,7 +965,7 @@ class DriveCryptoHelper @Inject constructor(
         addressPublicKeyArmored: String,
         signerKeyBytes: ByteArray,
         plaintextName: String,
-    ): GeneratedShare {
+    ): GeneratedShare = cryptoLock.withLock {
         // 1. New PGP key + passphrase (base64-encoded random bytes so the passphrase round-trips
         //    cleanly as UTF-8 — same trick we use for node passphrases).
         val rawPassphrase = cryptoContext.pgpCrypto.generateRandomBytes(32)
@@ -983,7 +999,7 @@ class DriveCryptoHelper @Inject constructor(
             nameKeyPacketBytes + nameSeipd, PGPHeader.Message,
         )
 
-        return GeneratedShare(
+        GeneratedShare(
             shareKeyArmored = shareKeyArmored,
             sharePassphraseArmored = sharePassphraseArmored,
             sharePassphraseSignature = sharePassphraseSignature,
@@ -1402,8 +1418,10 @@ class DriveCryptoHelper @Inject constructor(
 
         var lastError: Throwable? = null
         for (address in addresses) {
+            // useKeys enters libgojni; serialize each attempt. Lock taken per iteration so it's
+            // never held across the loop control flow, and addresses were fetched before the loop.
             val attempt = runCatching {
-                address.useKeys(cryptoContext) { decryptSessionKey(keyPacketBytes) }
+                cryptoLock.withLock { address.useKeys(cryptoContext) { decryptSessionKey(keyPacketBytes) } }
             }
             if (attempt.isSuccess) return attempt.getOrThrow()
             lastError = attempt.exceptionOrNull()
@@ -1431,14 +1449,19 @@ class DriveCryptoHelper @Inject constructor(
         if (addresses.isEmpty()) error("No active address for userId=${userId.id}")
         var lastError: Throwable? = null
         for (address in addresses) {
+            // useKeys and the follow-up unlock both enter libgojni; serialize each. Locks taken
+            // per iteration so they're never held across loop control flow; addresses fetched above.
             val attempt = runCatching {
-                address.useKeys(cryptoContext) { decryptData(sharePassphraseArmored) }
+                cryptoLock.withLock { address.useKeys(cryptoContext) { decryptData(sharePassphraseArmored) } }
             }
             if (attempt.isSuccess) {
                 val passphraseBytes = attempt.getOrThrow()
-                val unlockedKey = cryptoContext.pgpCrypto.unlock(shareKeyArmored, passphraseBytes)
-                val keyBytes = unlockedKey.value.copyOf()
-                unlockedKey.close()
+                val keyBytes = cryptoLock.withLock {
+                    val unlockedKey = cryptoContext.pgpCrypto.unlock(shareKeyArmored, passphraseBytes)
+                    val bytes = unlockedKey.value.copyOf()
+                    unlockedKey.close()
+                    bytes
+                }
                 Log.d(TAG, "decryptExternalShareKey: address=${address.email} passphraseBytes=${passphraseBytes.size} keyBytes=${keyBytes.size}")
                 return keyBytes
             }

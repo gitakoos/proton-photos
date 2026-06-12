@@ -400,4 +400,12 @@ interface DrivePhotoRepository {
      * the top of the timeline). No-op for rows already decrypted, cached, queued, or running.
      */
     fun requestThumbnailDecrypt(userId: UserId, linkIds: List<String>)
+
+    /**
+     * Warm the whole library's thumbnail cache in the background at the lowest priority, so a
+     * large account (thousands of photos) fills in without the user scrolling past every row.
+     * Runs only while the viewport and prefetch windows are idle and skips anything already
+     * decrypted, cached, queued, or running, so it never delays a visible cell.
+     */
+    fun backfillThumbnails(userId: UserId)
 }

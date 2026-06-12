@@ -23,19 +23,26 @@
 package eu.akoos.photos.presentation.albums
 
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import me.proton.core.accountmanager.domain.AccountManager
 import me.proton.core.user.domain.usecase.GetUser
 import eu.akoos.photos.R
@@ -74,6 +81,13 @@ sealed class AlbumDownloadState {
     data object Enqueued : AlbumDownloadState()
 }
 
+/** Progress of a share-to-other-apps batch. [Working] advances per resolved photo — cloud-only
+ *  album photos decrypt to a temp file first, so the share pill shows a determinate ring. */
+sealed class AlbumShareState {
+    data object Idle : AlbumShareState()
+    data class Working(val done: Int, val total: Int) : AlbumShareState()
+}
+
 data class AlbumDetailUiState(
     val albumName: String = "",
     val albumLinkId: String = "",
@@ -82,6 +96,8 @@ data class AlbumDetailUiState(
     val error: String? = null,
     val selectedPhotos: Set<String> = emptySet(),
     val isDeletingPhotos: Boolean = false,
+    /** System trash/delete consent intent to launch, set when a delete needs MediaStore permission. */
+    val pendingDeleteIntent: android.app.PendingIntent? = null,
     val isSharing: Boolean = false,
     val shareLink: String? = null,
     /** Persistent public-link URL when the album has an active public share. Distinct from
@@ -101,6 +117,7 @@ data class AlbumDetailUiState(
     val members: List<ShareMember> = emptyList(),
     val isLoadingInvitations: Boolean = false,
     val downloadState: AlbumDownloadState = AlbumDownloadState.Idle,
+    val shareState: AlbumShareState = AlbumShareState.Idle,
     /** linkId → local MediaStore URI for photos that have been downloaded to this device. */
     val localUriByLinkId: Map<String, String> = emptyMap(),
     /** True while the multi-email Share-popup batch is in flight; gates the "Share" button + chip removals. */
@@ -155,10 +172,15 @@ class AlbumDetailViewModel @Inject constructor(
     private val getUser: GetUser,
     private val networkObserver: eu.akoos.photos.util.NetworkObserver,
     private val albumListEvents: eu.akoos.photos.util.AlbumListEventBus,
+    private val deletePhotoUseCase: eu.akoos.photos.domain.usecase.DeletePhotoUseCase,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(AlbumDetailUiState())
     val uiState: StateFlow<AlbumDetailUiState> = _uiState.asStateFlow()
+
+    /** One-shot system-share intents emitted to the screen, which launches the chooser. */
+    private val _shareIntent = MutableSharedFlow<Intent>(replay = 0, extraBufferCapacity = 1)
+    val shareIntent: SharedFlow<Intent> = _shareIntent.asSharedFlow()
 
     /** Cached primary userId — same rationale as GalleryViewModel.primaryUserId. */
     @Volatile private var primaryUserId: me.proton.core.domain.entity.UserId? = null
@@ -260,11 +282,15 @@ class AlbumDetailViewModel @Inject constructor(
                     userId = userId,
                     albumLinkId = albumLinkId,
                     volumeId = volumeId,
-                    // For shared-with-me albums (any time we have a shareId attached) the
-                    // album metadata + photo keys can't be opened via this user's root
-                    // link key — pass the sharing share id so the lower layer bootstraps
-                    // and unlocks the share key to use as the parent in its place.
-                    sharingShareId = _uiState.value.shareId,
+                    // Only a shared-WITH-me album needs the share bootstrap: the recipient
+                    // doesn't hold the owner's photos-root key, so the loader unlocks the album
+                    // through the accepted share and pins each photo's parentLinkId to the album.
+                    // An album the user OWNS — even one they shared BY themselves — still opens
+                    // with their own root key, so passing a shareId here would wrongly route it
+                    // down the recipient path and pin the owner's own photos to the album, which
+                    // drops them from the timeline, search and the backed-up count. Gate on
+                    // isSharedWithMe so own albums keep their photos parented to the photos root.
+                    sharingShareId = if (_uiState.value.isSharedWithMe) _uiState.value.shareId else null,
                     onLinkIdsResolved = { linkIds ->
                         // If the album is genuinely empty (rare) drop the skeleton
                         // straight to the "No photos" empty state. Otherwise keep
@@ -448,35 +474,111 @@ class AlbumDetailViewModel @Inject constructor(
 
     fun clearSelection() = _uiState.update { it.copy(selectedPhotos = emptySet()) }
 
-    fun deleteSelectedPhotos() {
+    /** Deferred cloud-delete work + context, held while the system trash dialog is up. */
+    private var pendingPermissionResult: eu.akoos.photos.domain.usecase.DeletePhotoUseCase.Result.NeedsMediaWritePermission? = null
+    private var pendingDeleteLinkIds: List<String> = emptyList()
+    private var pendingDeleteFromCloud: Boolean = false
+
+    /**
+     * Resolve the selected album photos to [GalleryItem]s for [DeletePhotoUseCase]: a photo with a
+     * known local twin ([AlbumDetailUiState.localUriByLinkId]) is [GalleryItem.Synced] (delete can
+     * offer device / cloud / both), otherwise [GalleryItem.CloudOnly]. The LocalMediaItem only needs
+     * a real `uri` for the delete; the rest mirrors the cloud photo's metadata.
+     */
+    private fun selectedGalleryItems(): List<eu.akoos.photos.domain.entity.GalleryItem> {
+        val state = _uiState.value
+        val byId = state.photos.associateBy { it.linkId }
+        return state.selectedPhotos.mapNotNull { linkId ->
+            val photo = byId[linkId] ?: return@mapNotNull null
+            val uri = state.localUriByLinkId[linkId]
+            if (uri != null) eu.akoos.photos.domain.entity.GalleryItem.Synced(
+                photo,
+                eu.akoos.photos.domain.entity.LocalMediaItem(
+                    uri = uri,
+                    dateTaken = photo.captureTimeMs,
+                    displayName = "",
+                    mimeType = photo.mimeType,
+                    sizeBytes = 0L,
+                    bucketName = null,
+                ),
+            ) else eu.akoos.photos.domain.entity.GalleryItem.CloudOnly(photo)
+        }
+    }
+
+    /**
+     * Delete the selected photos, matching the gallery exactly: [freeUpSpace] removes the on-device
+     * copy, [deleteFromCloud] trashes the Drive copy (recoverable — NOT a permanent delete). On
+     * Android 11+ a local delete routes through the system trash dialog first. A device-only delete
+     * keeps the cloud photo, so the photo stays in the album (only its green cloud goes); deleting
+     * from the cloud drops it from the album.
+     */
+    fun deleteSelectedPhotos(freeUpSpace: Boolean, deleteFromCloud: Boolean) {
         val linkIds = _uiState.value.selectedPhotos.toList()
-        if (linkIds.isEmpty()) return
+        val items = selectedGalleryItems()
+        if (linkIds.isEmpty() || items.isEmpty()) return
         viewModelScope.launch {
             val userId = accountManager.getPrimaryUserId().first() ?: return@launch
             _uiState.update { it.copy(isDeletingPhotos = true) }
-            runCatching { driveRepo.deleteFiles(userId, linkIds) }
-                .fold(
-                    onSuccess = {
-                        _uiState.update { state ->
-                            state.copy(
-                                isDeletingPhotos = false,
-                                selectedPhotos   = emptySet(),
-                                photos           = state.photos.filter { it.linkId !in linkIds },
-                            )
-                        }
-                    },
-                    onFailure = { e ->
-                        Log.e("AlbumDetailVM", "deleteSelectedPhotos failed", e)
-                        val friendly = friendlyNetworkError(e, networkObserver.isOnline.value, context)
-                        _uiState.update {
-                            it.copy(
-                                isDeletingPhotos = false,
-                                error = friendly ?: context.getString(R.string.album_delete_photos_failed),
-                            )
-                        }
-                    },
-                )
+            val result = runCatching { deletePhotoUseCase(userId, items, freeUpSpace, deleteFromCloud) }
+                .getOrElse { e ->
+                    Log.e("AlbumDetailVM", "deleteSelectedPhotos failed", e)
+                    val friendly = friendlyNetworkError(e, networkObserver.isOnline.value, context)
+                    _uiState.update { it.copy(isDeletingPhotos = false, error = friendly ?: context.getString(R.string.album_delete_photos_failed)) }
+                    return@launch
+                }
+            when (result) {
+                is eu.akoos.photos.domain.usecase.DeletePhotoUseCase.Result.Success ->
+                    finishDelete(linkIds, deleteFromCloud)
+                is eu.akoos.photos.domain.usecase.DeletePhotoUseCase.Result.NeedsMediaWritePermission -> {
+                    pendingPermissionResult = result
+                    pendingDeleteLinkIds = linkIds
+                    pendingDeleteFromCloud = deleteFromCloud
+                    _uiState.update { it.copy(isDeletingPhotos = false, pendingDeleteIntent = result.pendingIntent) }
+                }
+                is eu.akoos.photos.domain.usecase.DeletePhotoUseCase.Result.CloudDeleteFailed ->
+                    _uiState.update { it.copy(isDeletingPhotos = false, error = context.getString(R.string.album_delete_photos_failed)) }
+            }
         }
+    }
+
+    /** Drop the deleted photos from the album view — but only when the cloud copy was trashed; a
+     *  device-only delete leaves the cloud photo in the album (it just loses its green cloud). */
+    private fun finishDelete(linkIds: List<String>, deleteFromCloud: Boolean) {
+        _uiState.update { state ->
+            state.copy(
+                isDeletingPhotos = false,
+                selectedPhotos = emptySet(),
+                photos = if (deleteFromCloud) state.photos.filter { it.linkId !in linkIds } else state.photos,
+            )
+        }
+    }
+
+    /** Run the deferred cloud delete once the system trash dialog is confirmed, then update the view. */
+    fun onDeletePermissionGranted() {
+        val pending = pendingPermissionResult ?: return
+        val linkIds = pendingDeleteLinkIds
+        val fromCloud = pendingDeleteFromCloud
+        pendingPermissionResult = null
+        _uiState.update { it.copy(pendingDeleteIntent = null) }
+        viewModelScope.launch {
+            val userId = accountManager.getPrimaryUserId().first()
+            if (userId != null) runCatching {
+                deletePhotoUseCase.completeAfterPermissionGranted(
+                    userId = userId,
+                    cloudLinkIds = pending.cloudLinkIds,
+                    items = pending.itemsBeingDeleted,
+                    freeUpSpace = pending.freeUpSpace,
+                    hide = pending.hide,
+                )
+            }
+            finishDelete(linkIds, fromCloud)
+        }
+    }
+
+    /** User cancelled the system trash dialog — drop the deferred cloud work. */
+    fun clearPendingDeleteIntent() {
+        pendingPermissionResult = null
+        _uiState.update { it.copy(isDeletingPhotos = false, pendingDeleteIntent = null) }
     }
 
     /**
@@ -897,6 +999,54 @@ class AlbumDetailViewModel @Inject constructor(
         enqueueAlbumDownload(folderName, photos.map { it.linkId }, clearSelectionOnEnqueue = true)
     }
 
+    /**
+     * Share the selected album photos to other apps. Album photos live on Drive, so a photo that
+     * also has a local copy ([AlbumDetailUiState.localUriByLinkId]) shares that content URI
+     * directly; a cloud-only one is decrypted to cacheDir/fullres/ via
+     * [DrivePhotoRepository.downloadFullResPhoto] (single-flighted, cheap on a cache hit) and
+     * exposed through the share FileProvider. [AlbumShareState.Working] advances per resolved
+     * photo so the share pill shows progress. The screen warns before calling this whenever the
+     * selection contains a photo that still needs downloading.
+     */
+    fun shareSelected() {
+        val state = _uiState.value
+        val selected = state.photos.filter { it.linkId in state.selectedPhotos }
+        if (selected.isEmpty()) return
+        viewModelScope.launch {
+            _uiState.update { it.copy(shareState = AlbumShareState.Working(0, selected.size)) }
+            val userId = accountManager.getPrimaryUserId().first()
+            val uris = ArrayList<Uri>(selected.size)
+            var done = 0
+            for (photo in selected) {
+                runCatching {
+                    val local = state.localUriByLinkId[photo.linkId]
+                    if (local != null) {
+                        Uri.parse(local)
+                    } else {
+                        val uid = userId ?: error("Not signed in")
+                        val file = driveRepo.downloadFullResPhoto(uid, photo)
+                        androidx.core.content.FileProvider.getUriForFile(
+                            context, "${context.packageName}.share.fileprovider", file,
+                        ).also {
+                            // Report the real filename to the receiver instead of the linkId.
+                            eu.akoos.photos.util.ShareFileProvider.putDisplayName(it, photo.displayName)
+                        }
+                    }
+                }.onSuccess { uris.add(it) }
+                    .onFailure { Log.w("AlbumDetailVM", "share resolve failed: ${it.message}") }
+                done++
+                _uiState.update { it.copy(shareState = AlbumShareState.Working(done, selected.size)) }
+            }
+            if (uris.isNotEmpty()) {
+                val mime = eu.akoos.photos.util.ShareIntentBuilder.shareableMimeOf(selected.map { it.mimeType })
+                _shareIntent.tryEmit(
+                    eu.akoos.photos.util.ShareIntentBuilder.buildSendIntent(context, uris, mime),
+                )
+            }
+            _uiState.update { it.copy(shareState = AlbumShareState.Idle, selectedPhotos = emptySet()) }
+        }
+    }
+
     fun downloadAllPhotos() {
         // See downloadSelectedPhotos above — same album-aware routing.
         val folderName = eu.akoos.photos.util.ProtonPhotosStorage.sanitize(_uiState.value.albumName)
@@ -1068,13 +1218,16 @@ class AlbumDetailViewModel @Inject constructor(
         viewModelScope.launch {
             val userId = accountManager.getPrimaryUserId().first() ?: return@launch
             val albumLinkId = _uiState.value.albumLinkId
-            AlbumDownloadWorker.enqueue(
-                context = context,
-                albumLinkId = albumLinkId,
-                albumName = folderName,
-                photoLinkIds = photoLinkIds,
-                userIdString = userId.id,
-            )
+            // enqueue() spills the id list to a cache file, so run it off the main thread.
+            withContext(Dispatchers.IO) {
+                AlbumDownloadWorker.enqueue(
+                    context = context,
+                    albumLinkId = albumLinkId,
+                    albumName = folderName,
+                    photoLinkIds = photoLinkIds,
+                    userIdString = userId.id,
+                )
+            }
             _uiState.update {
                 it.copy(
                     downloadState = AlbumDownloadState.Enqueued,

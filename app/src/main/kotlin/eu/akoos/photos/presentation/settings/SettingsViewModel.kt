@@ -869,6 +869,9 @@ class SettingsViewModel @Inject constructor(
                             // adding it here, a shared device that signs out → signs back in
                             // as a different account inherits the previous user's choice.
                             SettingsKeys.HIDE_PHOTOS_IN_ALBUMS,
+                            SettingsKeys.HIDE_DEVICE_FOLDERS_IN_ALBUMS,
+                            // Timeline folder filter is likewise a per-user view preference.
+                            SettingsKeys.TIMELINE_EXCLUDED_FOLDER_NAMES,
                         )
                         accountTied.forEach { prefs.remove(it) }
                     }

@@ -23,6 +23,7 @@
 package eu.akoos.photos.presentation.viewer
 
 import android.app.Activity
+import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
@@ -131,9 +132,11 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.LibraryAdd
 import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.VisibilityOff
 import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.entity.GalleryItem
@@ -202,6 +205,7 @@ fun PhotoViewerScreen(
     val albums by viewModel.albums.collectAsStateWithLifecycle()
     val isAddingToAlbum by viewModel.isAddingToAlbum.collectAsStateWithLifecycle()
     val isSavingToDevice by viewModel.isSavingToDevice.collectAsStateWithLifecycle()
+    val isSharing by viewModel.isSharing.collectAsStateWithLifecycle()
     // Live cloud→device twin map. Lets the bottom badge flip from "cloud only" to
     // "synced" the moment downloadToDevice persists a SyncState, instead of waiting
     // for the user to leave + re-enter the viewer (which is what the static `items`
@@ -240,6 +244,8 @@ fun PhotoViewerScreen(
     // snackbar against a host that's no longer visible.
     val addedToAlbumTemplate = stringResource(R.string.viewer_added_to_album)
     val coverUpdatedMessage = stringResource(R.string.album_cover_updated)
+    val shareChooserTitle = stringResource(R.string.share_chooser_title)
+    val shareContext = LocalContext.current
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
     LaunchedEffect(Unit) {
         lifecycleOwner.lifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
@@ -251,6 +257,14 @@ fun PhotoViewerScreen(
             launch {
                 viewModel.setCoverDone.collect {
                     snackbarHostState.showSnackbar(coverUpdatedMessage)
+                }
+            }
+            // The VM resolved a shareable URI and handed us the send intent — wrap it in the
+            // chooser and launch. Lives in this STARTED block so a backgrounded viewer doesn't
+            // pop the share sheet over another screen.
+            launch {
+                viewModel.shareIntent.collect { intent ->
+                    shareContext.startActivity(Intent.createChooser(intent, shareChooserTitle))
                 }
             }
         }
@@ -909,7 +923,7 @@ fun PhotoViewerScreen(
                         val appColors = eu.akoos.photos.presentation.theme.AppColors.current
                         var menuExpanded by remember { mutableStateOf(false) }
                         ViewerBubble(onClick = { menuExpanded = true }) {
-                            val anyInFlight = isDeleting || isSavingToDevice
+                            val anyInFlight = isDeleting || isSavingToDevice || isSharing
                             if (anyInFlight) {
                                 CircularProgressIndicator(color = Accent, strokeWidth = 2.dp,
                                     modifier = Modifier.size(16.dp))
@@ -943,6 +957,24 @@ fun PhotoViewerScreen(
                                     },
                                 )
                             }
+                            // Share via the system sheet. Unconditional across the three
+                            // subtypes — local items share their MediaStore URI directly, a
+                            // cloud-only item is decrypted to a temp file first. A shared-album
+                            // guest can use it too: it copies bytes out, it doesn't grant the
+                            // album.
+                            if (settledItem != null) {
+                                androidx.compose.material3.DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.share_action),
+                                        color = FgPrimary) },
+                                    leadingIcon = { Icon(Icons.Default.Share, null,
+                                        tint = FgPrimary, modifier = Modifier.size(20.dp)) },
+                                    enabled = !isSharing,
+                                    onClick = {
+                                        menuExpanded = false
+                                        viewModel.shareItem(settledItem)
+                                    },
+                                )
+                            }
                             if (showSaveToDevice && settledItem is GalleryItem.CloudOnly) {
                                 androidx.compose.material3.DropdownMenuItem(
                                     text = { Text(stringResource(R.string.viewer_menu_save_to_device),
@@ -953,6 +985,20 @@ fun PhotoViewerScreen(
                                     onClick = {
                                         menuExpanded = false
                                         viewModel.downloadToDevice(settledItem)
+                                    },
+                                )
+                            }
+                            // "Back up to Drive" — force-upload a not-yet-backed-up local photo.
+                            // Only LocalOnly qualifies; Synced / CloudOnly are already on Drive.
+                            if (settledItem is GalleryItem.LocalOnly) {
+                                androidx.compose.material3.DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.device_folder_upload_action),
+                                        color = FgPrimary) },
+                                    leadingIcon = { Icon(Icons.Default.CloudUpload, null,
+                                        tint = Accent, modifier = Modifier.size(20.dp)) },
+                                    onClick = {
+                                        menuExpanded = false
+                                        viewModel.backUpItem(settledItem)
                                     },
                                 )
                             }

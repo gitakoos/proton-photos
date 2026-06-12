@@ -134,6 +134,28 @@ object SettingsKeys {
     val ALBUM_BUCKET_MAP = stringSetPreferencesKey("album_bucket_map")
 
     /**
+     * Local-only photos the user added to a cloud album before they finished backing up.
+     * Each entry is "localUri=albumLinkId" (same key=value flatten as [ALBUM_BUCKET_MAP]).
+     * The upload pipeline reads this after a successful upload and joins the freshly-uploaded
+     * cloud file to the queued album linkId(s), then removes the entry. A drain at the start of
+     * each upload pass also covers photos that already finished uploading before their album-add
+     * succeeded, so the add is eventually consistent across restarts and partial failures.
+     * No userId prefix — one Drive account per app.
+     */
+    val PENDING_ALBUM_ADDS = stringSetPreferencesKey("pending_album_adds")
+
+    /**
+     * Sentinel album-linkId used in a [PENDING_ALBUM_ADDS] entry ("localUri=<sentinel>") that
+     * means "force this local-only photo to upload, but it joins no album". It reuses the same
+     * forced-upload bypass as a real album-add (the upload pipeline treats any URI present in
+     * PENDING_ALBUM_ADDS as forced, so it backs up even from a folder outside the backup
+     * selection), while the upload pipeline recognises this value and skips the album-join step,
+     * just removing the entry once the photo is backed up. A real Drive album linkId never
+     * collides with this value.
+     */
+    const val PENDING_ALBUM_ADD_NO_ALBUM = "__force_upload_no_album__"
+
+    /**
      * Folder names the user opted in to mirror as Drive albums. When a photo is uploaded
      * from a device bucket whose name is in this set, the upload pipeline also creates
      * (or reuses) a matching Drive album and adds the photo. Names not in this set never
@@ -224,6 +246,19 @@ object SettingsKeys {
      *  the timeline. Off by default so existing users see no change. The Albums
      *  and Shared tabs are untouched — only the Photos tab honours this filter. */
     val HIDE_PHOTOS_IN_ALBUMS = booleanPreferencesKey("hide_photos_in_albums")
+    val HIDE_DEVICE_FOLDERS_IN_ALBUMS = booleanPreferencesKey("hide_device_folders_in_albums")
+
+    /**
+     * Bucket display names the user has chosen to keep OUT of the main Photos timeline.
+     * Purely a display filter — items in these folders stay on the device, remain
+     * browsable, and keep backing up exactly as before; they're just dropped from every
+     * timeline tab. Empty set (or key absent) = show everything (the default).
+     *
+     * Independent of [SYNC_FOLDER_NAMES] / [EXCLUDED_FOLDER_NAMES] / [BACKUP_EVERYTHING],
+     * which decide what gets uploaded. Matches MediaStore bucket display names with the
+     * same cross-path collision caveat as [EXCLUDED_FOLDER_NAMES].
+     */
+    val TIMELINE_EXCLUDED_FOLDER_NAMES = stringSetPreferencesKey("timeline_excluded_folder_names")
 
     // Favorites — stores URIs (local) or linkIds (cloud) of favorited photos
     val FAVORITE_IDS = stringSetPreferencesKey("favorite_ids")

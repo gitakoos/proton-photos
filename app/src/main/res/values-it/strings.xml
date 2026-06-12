@@ -16,7 +16,7 @@
     <string name="onboarding_welcome_title">Benvenuto in Photos for Proton</string>
     <string name="onboarding_welcome_subtitle">Le tue foto e video, crittografati end to end su Proton Drive. Impostiamo qualche preferenza così l\'app si adatta a te.</string>
 
-    <string name="onboarding_backup_title">Cosa salvare?</string>
+    <string name="onboarding_backup_title">Scegli cosa salvare</string>
     <string name="onboarding_backup_subtitle">Modificabile in qualsiasi momento dalle Impostazioni.</string>
     <string name="onboarding_backup_everything">Salva tutto</string>
     <string name="onboarding_backup_everything_desc">Tutte le foto e i video del dispositivo, escluse le cartelle che escluderai più tardi.</string>
@@ -28,7 +28,7 @@
     <string name="onboarding_privacy_title">Controlli privacy</string>
     <string name="onboarding_privacy_subtitle">Scegli come le tue foto arrivano dal dispositivo a Drive. Tutto viene comunque crittografato sopra a queste impostazioni.</string>
     <string name="onboarding_privacy_strip">Rimuovi metadati al caricamento</string>
-    <string name="onboarding_privacy_strip_desc">Rimuove coordinate GPS e dettagli della fotocamera prima del cloud. Consigliato.</string>
+    <string name="onboarding_privacy_strip_desc">Rimuove la posizione GPS dalle foto prima che raggiungano il cloud. I dati di fotocamera, data e software sono facoltativi. Consigliato.</string>
     <string name="onboarding_privacy_rename">Rinomina con data di scatto</string>
     <string name="onboarding_privacy_rename_desc">Carica i file come 2026-05-30_14-32-08.jpg invece di IMG_2841.jpg. Il file sul dispositivo resta uguale.</string>
     <string name="onboarding_privacy_delete">Rimuovi dal dispositivo dopo backup</string>
@@ -83,16 +83,26 @@
     <string name="gallery_tab_albums">Album</string>
     <string name="gallery_tab_shared">Condivisi</string>
     <string name="gallery_cancel_selection">Annulla selezione</string>
+    <string name="share_action">Condividi</string>
+    <string name="share_chooser_title">Condividi tramite</string>
+    <string name="share_preparing">Preparazione…</string>
     <string name="gallery_download_selected">Scarica selezione</string>
     <string name="gallery_delete_selected">Elimina selezione</string>
     <string name="gallery_download_done">%1$d foto scaricate</string>
     <string name="gallery_download_done_singular">1 foto scaricata</string>
     <string name="gallery_download_partial">%1$d scaricate, %2$d fallite</string>
+    <string name="gallery_share_cloud_warning_title">Condividere le foto del cloud?</string>
+    <string name="gallery_share_cloud_warning_body">Alcune sono salvate solo nel cloud. L\'app recupera una copia privata temporanea e la consegna solo all\'app che scegli. Niente viene aggiunto alla tua galleria né reso visibile ad altre app.</string>
+    <string name="gallery_share_cloud_warning_continue">Condividi</string>
     <string name="gallery_add_to_album">Aggiungi all\'album</string>
+    <string name="gallery_add_to_album_local_note">Queste foto verranno prima salvate, poi aggiunte all\'album.</string>
+    <string name="gallery_no_albums_yet">Ancora nessun album. Creane uno sopra.</string>
     <string name="gallery_add_to_album_mixed_hint">Elementi solo sul dispositivo e solo nel cloud non possono condividere un album</string>
     <string name="gallery_add_to_album_partial">%1$d aggiunte a %2$s, %3$d elemento/i non salvati (selezione mista)</string>
     <string name="gallery_strip_metadata">Rimuovi metadati</string>
     <string name="gallery_added_to_album">%1$d foto aggiunte a %2$s</string>
+    <string name="gallery_add_to_album_added_and_queued">%1$d aggiunte, altre %2$d verranno aggiunte dopo il backup</string>
+    <string name="gallery_add_to_album_queued_only">%1$d verranno aggiunte a %2$s dopo il backup</string>
     <string name="gallery_stripped_metadata">Metadati rimossi da %1$d foto</string>
     <string name="gallery_stripped_with_skipped">%1$d rimosse, %2$d ignorate (esterne)</string>
     <string name="strip_metadata_failed">Impossibile rimuovere i metadati da questo file.</string>
@@ -129,7 +139,6 @@
     <string name="sync_progress_hide_files">Nascondi file</string>
 
     <!-- Delete bottom sheet -->
-    <string name="delete_also_cloud_warning">L\'originale verrà eliminato definitivamente. Proton non potrà recuperarlo.</string>
     <string name="delete_album_container_warning">Questo elimina l\'album ma mantiene le tue foto in Proton Drive.</string>
     <string name="delete_button_permanently">Elimina definitivamente</string>
     <string name="delete_multi_mixed_msg">Alcune di queste foto sono nel backup di Proton Drive. Scegli come eliminarle.</string>
@@ -244,11 +253,11 @@
     <string name="settings_storage_refresh">Aggiorna spazio</string>
     <string name="settings_section_settings">Impostazioni</string>
     <string name="settings_privacy_metadata">Privacy e metadati</string>
-    <string name="settings_privacy_metadata_desc">Rimuovi EXIF, GPS, info fotocamera prima del caricamento</string>
+    <string name="settings_privacy_metadata_desc">Rimuovi GPS e campi EXIF facoltativi dai caricamenti</string>
     <string name="settings_security">Sicurezza</string>
     <string name="settings_security_desc">Blocco app, foto nascoste</string>
     <string name="settings_strip_metadata_upload">Rimuovi metadati al caricamento</string>
-    <string name="settings_strip_metadata_upload_desc">Rimuovi i dati personali dalle foto prima del caricamento su Drive</string>
+    <string name="settings_strip_metadata_upload_desc">Rimuovi la posizione GPS prima del caricamento. Aggiungi i campi di fotocamera, data e software in Personalizza.</string>
     <string name="settings_rename_on_upload">Rinomina alla data di scatto al caricamento</string>
     <string name="settings_rename_on_upload_desc">Usa i metadati della foto o del video per impostare il nome del file alla data e ora di scatto prima del caricamento. Il file originale sul dispositivo resta invariato.</string>
     <string name="settings_strip_gps">Rimuovi posizione GPS</string>
@@ -273,12 +282,16 @@
     <string name="settings_clear_cache_on_close_desc">Elimina le copie locali delle foto cloud visualizzate quando l\'app passa in secondo piano. Vengono riscaricate alla prossima apertura.</string>
     <string name="viewer_added_to_album">Aggiunta a %1$s</string>
     <string name="settings_photos_timeline_section">Sequenza Foto</string>
-    <string name="settings_hide_album_photos">Nascondi le foto negli album</string>
-    <string name="settings_hide_album_photos_desc">Non mostrare nella scheda Foto le immagini già inserite in un album. Le schede Album e Condivisi non sono interessate.</string>
+    <string name="settings_hide_album_photos">Nascondi le foto negli album Drive</string>
+    <string name="settings_hide_album_photos_desc">Le foto aggiunte a un album Drive (cloud) non appariranno nella sequenza principale di Foto. Restano visibili nelle schede Album e Condivisi.</string>
+    <string name="settings_timeline_filter">Filtro sequenza</string>
+    <string name="timeline_filter_title">Filtro sequenza</string>
+    <string name="timeline_filter_subtitle">Scegli cosa nascondere dalla sequenza principale di Foto. Le foto nascoste restano sul dispositivo e continuano a essere salvate.</string>
+    <string name="timeline_filter_albums_header">Album Drive</string>
     <string name="settings_telemetry">Telemetria</string>
     <string name="settings_telemetry_desc">Gestita dalle impostazioni del tuo account Proton. Apri account.proton.me per modificarla.</string>
     <string name="settings_hidden_photos">Foto nascoste</string>
-    <string name="settings_hidden_photos_desc">Foto nascoste dalla galleria principale, protette da biometria</string>
+    <string name="settings_hidden_photos_desc">Foto nascoste dalla galleria principale, sbloccate con la biometria o il PIN del dispositivo</string>
     <string name="settings_media_management">Gestione contenuti multimediali</string>
     <string name="settings_media_management_granted">Concesso, l\'eliminazione non chiederà ogni volta</string>
     <string name="settings_media_management_grant_desc">Concedi una volta per evitare la conferma a ogni eliminazione</string>
@@ -381,9 +394,6 @@
     <string name="about_lib_gopenpgp">Implementazione OpenPGP</string>
 
     <!-- Albums -->
-    <string name="albums_filter_backed_up">Sottoposte a backup</string>
-    <string name="albums_filter_title">Filtra album</string>
-    <string name="albums_filter_type">Tipo</string>
     <string name="albums_new_album">Nuovo album</string>
     <string name="albums_create_album">Crea album</string>
     <string name="albums_create_album_hint">Nome dell\'album</string>
@@ -649,6 +659,9 @@
     <string name="shared_save_success_fmt">%1$d foto salvate nella tua libreria</string>
     <string name="shared_save_partial_fmt">%1$d di %2$d foto salvate nella tua libreria</string>
     <string name="shared_save_progress_fmt">Salvataggio %1$d / %2$d nella tua libreria…</string>
+    <string name="op_downloading_fmt">Download %1$d / %2$d</string>
+    <string name="op_sharing_fmt">Condivisione %1$d / %2$d</string>
+    <string name="op_adding_to_album">Aggiunta all\'album…</string>
     <string name="viewer_delete_subtitle_synced">Questa foto ha una copia su Proton Drive. Scegli cosa fare:</string>
     <string name="viewer_delete_remove_from_device">Rimuovi dal dispositivo</string>
     <string name="viewer_delete_remove_from_device_desc">Mantieni la copia su Proton Drive</string>
@@ -661,6 +674,23 @@
     <string name="action_save">Salva</string>
     <string name="gallery_picker_drive_albums">Album Drive</string>
     <string name="album_card_folder_badge">Cartella</string>
+    <string name="device_folders_title">Cartelle su questo dispositivo</string>
+    <string name="device_folders_entry">Cartelle su questo dispositivo</string>
+    <string name="device_folders_section">Cartelle su questo dispositivo</string>
+    <string name="albums_toggle_device_folders">Mostra o nascondi le cartelle del dispositivo</string>
+    <string name="device_folders_empty">Nessuna cartella su questo dispositivo.</string>
+    <string name="device_folder_upload_action">Carica su Drive</string>
+    <string name="device_folder_uploading_fmt">Caricamento di %1$d su Drive</string>
+    <string name="device_folder_already_backed_up">Già salvato su Drive</string>
+    <string name="device_folder_added_to_album">Aggiunto all\'album</string>
+    <string name="device_folder_backing_up_fmt">Backup %1$d / %2$d</string>
+    <string name="device_folder_backup_all">Esegui backup cartella</string>
+    <string name="device_folder_backup_choice_title">Eseguire il backup di questa cartella?</string>
+    <string name="device_folder_backup_choice_body">Tutte le foto e i video di questa cartella verranno salvati su Drive. Puoi anche duplicare la cartella come album.</string>
+    <string name="device_folder_backup_timeline">Esegui backup solo delle foto</string>
+    <string name="device_folder_backup_timeline_sub">Caricamento una tantum delle foto qui nella tua galleria.</string>
+    <string name="device_folder_backup_mirror">Crea anche un album</string>
+    <string name="device_folder_backup_mirror_sub">Resta sincronizzato: le nuove foto in questa cartella entrano anche nell\'album.</string>
     <string name="sync_folders_add_dialog_title">Aggiungi cartella</string>
     <string name="sync_folders_add_row_title">Aggiungi cartella per nome</string>
     <string name="sync_folders_add_dialog_name_hint">Nome cartella</string>

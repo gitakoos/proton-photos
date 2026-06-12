@@ -643,8 +643,8 @@ class AlbumService @Inject constructor(
         // Album → photos is many-to-many: photos physically live in the photos-root
         // folder on Drive, the album is just a reference list. We walk that reference
         // list via the membership table, then fetch the matching photo_listing rows.
-        // Without the membership join the old getByParentLinkId path returned zero,
-        // because photo_listing.parentLinkId points at the root — not the album.
+        // The membership join is required because photo_listing.parentLinkId points at
+        // the root, not the album, so a parent-based lookup would return zero rows.
         val photoLinkIds = albumPhotoMembershipDao.getPhotoLinkIds(albumLinkId)
         if (photoLinkIds.isEmpty()) return@withContext emptyList()
         val rowsByLinkId = photoListingDao.getByLinkIds(photoLinkIds).associateBy { it.linkId }
@@ -789,19 +789,39 @@ class AlbumService @Inject constructor(
             )
         }.onFailure { Log.w(TAG, "loadAlbumPhotos: membership upsert failed: ${it.message}") }
 
-        // Three independent batch round-trips drive the rest of the load:
+        // Bulk-read every already-cached row up front (chunked — SQLite's bind-variable
+        // limit is 999 on older Android releases). A complete row — full key material,
+        // and for shared albums the recipient-side parent pin — needs no metadata fetch
+        // and no rebuild, so the batch round-trips below shrink to just the photos this
+        // device has never processed. Re-opening a fully-cached album costs zero
+        // per-photo network work.
+        val childIds = children.map { it.linkId }.distinct()
+        val cachedRows = HashMap<String, PhotoListingEntity>(childIds.size)
+        for (idChunk in childIds.chunked(500)) {
+            photoListingDao.getByLinkIds(idChunk).forEach { cachedRows[it.linkId] = it }
+        }
+        fun cachedUsable(e: PhotoListingEntity?): Boolean = e != null &&
+            !e.encNodeKey.isNullOrBlank() &&
+            !e.encNodePassphrase.isNullOrBlank() &&
+            !e.contentKeyPacket.isNullOrBlank() &&
+            // A row without the recipient-side pin may be the owner's view from a previous
+            // session under the same SQLite file; its parentLinkId then points at the
+            // owner's photos root, a linkId the recipient has no key for, and the
+            // thumbnail scheduler would dead-end at placeholder cells. Rebuild those.
+            (sharingShareId == null || e.parentLinkId == albumLinkId)
+        val missingIds = childIds.filter { !cachedUsable(cachedRows[it]) }
+
+        // Three independent batch round-trips drive the rest of the load, scoped to the
+        // photos that actually need processing:
         //   • linkDetailMap — full link metadata (parent / passphrase / name)
         //   • thumbnailUrlMap — CDN URLs for each Type-2 thumbnail (needs linkDetailMap)
         //   • ckpMap — content-key packets for thumbnail decryption (own endpoint)
         // ckpMap is fully independent of the other two, so we launch it concurrently
-        // with the link-detail fetch and only join at the chunk loop. For a 190-photo
-        // shared album this halves the placeholder-to-thumbnails latency because the
-        // recipient's share endpoint and the photos volume endpoint don't share a
-        // bottleneck. The share id we use here is the per-album share id when we have
-        // one (covers the OWNER's photo linkIds the recipient inherited) and falls
-        // back to our own primary share id for owner-side album opens.
+        // with the link-detail fetch and only join at the chunk loop. The share id we
+        // use here is the per-album share id when we have one (covers the OWNER's photo
+        // linkIds the recipient inherited) and falls back to our own primary share id
+        // for owner-side album opens.
         val ckpFetchShareId = sharingShareId ?: shareId
-        val childIds = children.map { it.linkId }
         val (linkDetailMap, ckpMap) = coroutineScope {
             // For shared-with-me albums the per-photo Size / Type / fileProperties
             // come back blank from the photos volume endpoint because the recipient
@@ -810,14 +830,16 @@ class AlbumService @Inject constructor(
             // the volume endpoint does for owners (thumbnail IDs included), so the
             // downstream thumbnail-url / entity-build pipeline keeps working.
             val linkDetailDeferred = async {
-                if (sharingShareId != null) {
-                    linkDetailHelpers.batchFetchLinkDetailsViaShare(userId, sharingShareId, childIds)
-                } else {
-                    linkDetailHelpers.batchFetchLinkDetails(userId, resolvedVolumeId, childIds)
+                when {
+                    missingIds.isEmpty() -> emptyMap()
+                    sharingShareId != null ->
+                        linkDetailHelpers.batchFetchLinkDetailsViaShare(userId, sharingShareId, missingIds)
+                    else -> linkDetailHelpers.batchFetchLinkDetails(userId, resolvedVolumeId, missingIds)
                 }
             }
             val ckpDeferred = async {
-                linkDetailHelpers.batchFetchContentKeyPackets(userId, ckpFetchShareId, childIds)
+                if (missingIds.isEmpty()) emptyMap()
+                else linkDetailHelpers.batchFetchContentKeyPackets(userId, ckpFetchShareId, missingIds)
             }
             Pair(linkDetailDeferred.await(), ckpDeferred.await())
         }
@@ -857,44 +879,28 @@ class AlbumService @Inject constructor(
         // 10 photos per chunk + a 100ms breather lets the ART CMC GC run cleanly between
         // bursts of Go crypto calls.
         val result = mutableListOf<CloudPhoto>()
-        // Smaller chunks + a shorter cooperative breath: 10×100ms = 1.9s of pure delay
-        // for a 190-photo album drowns the user in waiting, and the per-chunk crypto
-        // is light enough on the lazy path (no thumbnail decrypt, just name +
-        // passphrase verify) that the original 100ms safety margin was overkill.
-        // 30ms is still plenty for the ART CMC GC to land a cycle between bursts on
-        // Android 16, which is the only case the delay was ever there to protect.
+        // Small chunks with a short cooperative breath. The per-chunk crypto on the
+        // lazy path is light (no thumbnail decrypt, just name + passphrase verify), so
+        // a 100ms delay is unnecessary; 30ms still lets the ART CMC GC land a cycle
+        // between bursts on Android 16, which is the only case the delay protects.
         val chunkSize = 10
         val interChunkDelayMs = 30L
         for (chunk in uniqueChildren.chunked(chunkSize)) {
-            val chunkLinkIds = chunk.map { it.linkId }
-            // Batch DB read — sequential getByLinkId in the old code was N synchronous SQL
-            // queries (one per album child), which alone added perceptible delay on big albums.
-            val cachedByLinkId = photoListingDao.getByLinkIds(chunkLinkIds).associateBy { it.linkId }
             val chunkNewEntities = mutableListOf<PhotoListingEntity>()
             for (child in chunk) {
-                val cached = cachedByLinkId[child.linkId]
-                // Fast path: a previously-loaded photo is already in the DB. Even when
-                // the thumbnail hasn't been decrypted yet (thumbnailUrl null), the row
-                // still carries every encrypted input the scheduler needs — re-building
-                // it just to overwrite identical material with the same material is the
-                // single biggest source of the "counts up from 0" feeling on second open.
-                // Skipping the rebuild also dodges the per-chunk 30ms breath, dropping
-                // the second-open latency for a 190-photo album from a few seconds to
-                // effectively zero past the cached paint.
-                //
-                // For shared-with-me albums we DO want the rebuild every time: the
-                // recipient-only parentLinkId override (set further down to point at
-                // the album NodeKey instead of the owner's root link) needs to land
-                // on every load, and the DB row may carry the owner's view from a
-                // previous session under the same SQLite file. Without the rebuild
-                // the thumbnail scheduler looks up the owner's root parent key which
-                // the recipient does not have, and the grid stays at placeholder cells.
-                if (sharingShareId == null &&
-                    cached != null &&
-                    !cached.encNodeKey.isNullOrBlank() &&
-                    !cached.encNodePassphrase.isNullOrBlank() &&
-                    !cached.contentKeyPacket.isNullOrBlank()
-                ) {
+                val cached = cachedRows[child.linkId]
+                // Fast path: a photo already in the DB skips the rebuild entirely. Even
+                // with its thumbnail not yet decrypted (thumbnailUrl null) the row still
+                // carries every encrypted input the scheduler needs, so rebuilding it
+                // would only overwrite identical material and re-incur the per-chunk
+                // delay — the main reason a second open ever feels slow. When the cached
+                // row still lacks its decrypted thumbnail, re-issue the scheduler request
+                // here: on shared albums the cell-mount request path races the Flow
+                // emission and can otherwise miss the nudge.
+                if (cachedUsable(cached)) {
+                    if (cached!!.thumbnailUrl == null && !cached.serverThumbnailUrl.isNullOrBlank()) {
+                        thumbnailDecryptScheduler.request(userId, cached)
+                    }
                     result.add(cached.toDomain())
                     continue
                 }
@@ -999,7 +1005,9 @@ class AlbumService @Inject constructor(
                 }
             }
             kotlinx.coroutines.yield()
-            kotlinx.coroutines.delay(interChunkDelayMs)
+            // The inter-chunk breather exists to let the GC land between crypto bursts;
+            // an all-cached chunk ran no crypto, so it skips the delay.
+            if (chunkNewEntities.isNotEmpty()) kotlinx.coroutines.delay(interChunkDelayMs)
         }
 
         // Match Drive web UI: captureTime DESC. Drive's pagination order is addedTime
@@ -1155,13 +1163,12 @@ class AlbumService @Inject constructor(
                 // Drive Android's Link.signatureEmail()/nodePassphraseSignature()
                 // (tempandroid-drive .../Link.kt:30-44) gate on
                 // `signatureEmail.isEmpty() || nameSignatureEmail.isNullOrEmpty()`.
-                // We previously only checked `signatureEmail`, so a source photo
-                // with the rare combination of a present signatureEmail but a
-                // missing nameSignatureEmail (some legacy upload paths) landed
-                // on the wire with no fresh signature attached to the
-                // re-wrapped passphrase, and the recipient refused to verify
-                // the photo NodeKey decrypt chain. Match Drive Android byte for
-                // byte so every consumer sees the same predicate.
+                // Both fields must be checked: a source photo with a present
+                // signatureEmail but a missing nameSignatureEmail (some legacy
+                // upload paths) still counts as anonymous, so it needs a fresh
+                // signature on the re-wrapped passphrase or the recipient refuses
+                // to verify the photo NodeKey decrypt chain. Match Drive Android's
+                // predicate exactly so every consumer agrees.
                 val sourceMissingSignature = photoLink.signatureEmail.orEmpty().isEmpty() ||
                     photoLink.nameSignatureEmail.orEmpty().isEmpty()
                 val nodePassphraseSigToSend = if (sourceMissingSignature) reencryptedPass.armoredSignature else null
@@ -1213,8 +1220,8 @@ class AlbumService @Inject constructor(
         }
         if (rejectedByLink.isNotEmpty()) {
             // Promote rejected photos from succeeded → failed and log each one so a
-            // bug report includes the exact server error per photo. The "successfully
-            // added" toast was previously lying about these.
+            // bug report includes the exact server error per photo, and the success
+            // toast reflects only the photos that were actually added.
             val rejectedSet = rejectedByLink.keys
             val (kept, dropped) = succeeded.partition { it !in rejectedSet }
             succeeded.clear(); succeeded.addAll(kept)

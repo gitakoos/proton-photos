@@ -102,6 +102,11 @@ class CloudTrashService @Inject constructor(
             // observePhotosByLinkIds re-emits when rows disappear, so the cell drops out
             // immediately.
             runCatching { photoListingDao.deleteByLinkIds(linkIds) }
+            // Keep these out of the next refresh's upsert until the server's trash propagates, so
+            // an in-flight or about-to-run stream listing (which can still return a just-trashed
+            // photo for ~a minute) can't re-add the rows we just removed and flash the green-cloud
+            // badge back on in the timeline / device folders.
+            photoStreamService.markRecentlyTrashed(linkIds)
             Log.d(TAG, "deleteFiles: trashed ${linkIds.size} photos + cleared local rows")
         } catch (e: DriveNotFoundException) {
             Log.w(TAG, "deleteFiles: DriveNotFoundException: ${e.message}")
@@ -274,6 +279,9 @@ class CloudTrashService @Inject constructor(
                 }
                 val restored = linkIds.toSet() - failed
                 Log.d(TAG, "restoreFromCloudTrash: restored ${restored.size}/${linkIds.size} items (${failed.size} failed)")
+                // Lift the just-trashed guard for the restored ids, or the refresh below would
+                // keep skipping them (they'd stay invisible until the trash window expires).
+                photoStreamService.forgetRecentlyTrashed(restored)
 
                 // Drive moves restored items out of trash on the server, but our local
                 // photo_listing was emptied of those rows when they were trashed. Without a

@@ -44,46 +44,30 @@ class PhotosApiClient @Inject constructor(
     @ApplicationContext private val context: Context,
 ) : ApiClient {
     // The Proton API only accepts a fixed set of product identifiers (mail/drive/calendar/vpn/pass).
-    // "android-photos" is rejected with "Product 'photos' is not valid".
+    // "android-photos" is rejected with "Product 'photos' is not valid", so requests route under the
+    // Drive product.
     //
-    // We declare as the official Proton Drive Android client. The Drive backend gates several
-    // newer APIs (notably the album share-invite endpoint POST /drive/v2/shares/{shareId}/invitations
-    // and album share creation via POST /drive/volumes/{volumeId}/shares) behind a client-version
-    // whitelist — clients sending a version that's outside the accepted range get
-    //     "You are using an outdated version of the app. Please update to share this file or folder."
+    // The App-Version header identifies this as an external (third-party) client to the Drive
+    // backend, per the Drive SDK operational requirements
+    // (https://github.com/ProtonDriveApps/sdk#operational-requirements). It must not impersonate
+    // an official Proton client.
     //
-    // The official android-drive client (ProtonDriveApps/android-drive) builds its header as
-    // "android-drive@${BuildConfig.VERSION_NAME}" (see app/build.gradle.kts → APP_VERSION_HEADER,
-    // and BuildConfigurationProvider). Latest tagged stable on GitHub is 2.38.0, but the
-    // Drive Play Store track typically leads the open-source tree by one minor — Proton pushes
-    // to Play, then publishes the source tag a few weeks later. The album share-invite whitelist
-    // tracks the Play-deployed version, not the public tag, so the GitHub-newest value drifts
-    // out of the accepted range once the server-side whitelist narrows.
+    // CONSTRAINT (do not "fix" to the hyphenated form): the bundled ProtonCore network library
+    // (network-data 36.x) runs its OWN client-side validation in ApiManagerFactory and throws
+    // `IllegalArgumentException: Invalid app version code` BEFORE any request is sent if the value
+    // doesn't match its regex. The SDK-example `external-drive-akoos-proton-photos@2.1.0`
+    // (hyphen-separated name) FAILS that validation and crashes the app on launch; this underscore
+    // form passes BOTH ProtonCore's client regex AND the auth server (sign-in confirmed working).
     //
-    // Sharing endpoint history on our side:
-    //   - "android-drive@4.0.0"               → REJECTED (above any released official build).
-    //   - "android-drive@2.38.0-beta+photos"  → REJECTED (server's strict SemVer parser chokes
-    //                                             on pre-release / build-metadata tails).
-    //   - "android-drive@2.38.0"              → REJECTED with "outdated app — please update"
-    //                                             once the server whitelist moved past it.
-    //   - "android-drive@2.40.0"              → speculative bump after the crypto-refresh
-    //                                             rollout — Drive's whitelist is by exact
-    //                                             version match, not a >= threshold, so this
-    //                                             never landed.
-    //   - "android-drive@2.42.0"              → same mistake, one notch higher.
-    //   - "android-drive@2.39.0"              → CURRENT — the Drive Android stable release
-    //                                             that's actually on the Play Store whitelist
-    //                                             right now. Bump in lockstep with the official
-    //                                             release; do NOT future-stamp.
-    override val appVersionHeader = "android-drive@2.39.0"
-    // Match the official android-drive User-Agent shape byte-for-byte. The string the
-    // backend sees needs the Android release plus the brand/model trailer
-    //     ProtonDrive/2.39.0 (Android 14; Google Pixel 9)
-    // rather than the shorter `(Android)` we shipped before — share-creation traffic
-    // was being rejected with "Make sure you are using the latest version of Proton
-    // Drive" even though the App-Version header alone matched. Build the string from
-    // android.os.Build so emulators and every device family get the right shape
-    // without us hardcoding a fake device.
+    // The {semver} tracks the app's release version, derived from BuildConfig so it bumps with each
+    // release automatically. A pre-release suffix (e.g. "-test15", "-beta") is stripped so a test
+    // build still emits a clean {semver}; the channel stays `stable`.
+    override val appVersionHeader =
+        "external-drive-akoos_proton_photos@${BuildConfig.VERSION_NAME.substringBefore('-')}-stable"
+    // The backend validates the User-Agent shape for share-creation traffic: it needs the Android
+    // release plus the brand/model trailer, e.g. "ProtonDrive/2.39.0 (Android 14; Google Pixel 9)",
+    // rather than a bare "(Android)". Build it from android.os.Build so every device family gets the
+    // right shape without hardcoding a device.
     override val userAgent: String = buildString {
         append("ProtonDrive/2.39.0 (")
         append("Android ").append(android.os.Build.VERSION.RELEASE).append("; ")

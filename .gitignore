@@ -3,7 +3,6 @@
 .kotlin
 /local.properties
 /.idea/
-.claude/
 .DS_Store
 /build
 /app/build
@@ -15,26 +14,8 @@ local.properties
 *.jks
 *.keystore
 keystore.properties
-
-# Gradle wrapper except the jar
-!gradle/wrapper/gradle-wrapper.jar
-
-# Planning / audit / release-prep artefacts — not needed for build.
-AGENT_*.md
-AUDIT_*.md
-.release_notes_v*.md
-photosforproton.md
 *.har
 *.log
 
-# Sample-photo seeding helper — dev-only.
-/tools/
-
-# Scratch + test artefacts under build/ that crept into commits.
-/build/release_notes_*.md
-/build/screen*.png
-/build/t*.png
-/build/ui.xml
-tempandroid-drive/
-sharing-log*.txt
-tempweb-drive/
+# Gradle wrapper except the jar
+!gradle/wrapper/gradle-wrapper.jar

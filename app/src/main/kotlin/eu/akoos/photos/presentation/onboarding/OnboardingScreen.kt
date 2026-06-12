@@ -117,8 +117,20 @@ enum class BackupMode { Everything, ChooseLater, NothingForNow }
 @HiltViewModel
 class OnboardingViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
-    localMediaRepo: LocalMediaRepository,
+    private val localMediaRepo: LocalMediaRepository,
 ) : ViewModel() {
+
+    /**
+     * Forces the device-folder list to re-query. The [folders] flow seeds an empty
+     * list while the media permission is unset (MediaStore returns nothing), and a
+     * permission grant does not fire a content-change notification for media that was
+     * already present — so without an explicit poke the folder picker would stay empty
+     * after the user grants access until the app restarts or a new photo is captured.
+     * Called from the permission-result callback.
+     */
+    fun onMediaPermissionChanged() {
+        localMediaRepo.notifyPermissionChanged()
+    }
 
     /**
      * Live appearance selections backed by DataStore — single source of truth so
@@ -388,6 +400,11 @@ fun OnboardingScreen(
         contract = ActivityResultContracts.RequestMultiplePermissions(),
     ) { result ->
         mediaGranted = result.values.all { it }
+        // Re-query device folders now that access is granted: an existing-media
+        // permission grant fires no content-change notification, so the folder
+        // picker's flow needs an explicit poke or it stays on its pre-grant empty
+        // snapshot until an app restart.
+        if (result.values.any { it }) viewModel.onMediaPermissionChanged()
         scope.launch { pagerState.animateScrollToPage(pagerState.currentPage + 1) }
     }
     val manageMediaLauncher = rememberLauncherForActivityResult(

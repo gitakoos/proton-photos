@@ -63,7 +63,6 @@ import androidx.compose.ui.unit.sp
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.entity.GalleryItem
-import eu.akoos.photos.presentation.albums.AlbumsFilter
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.Bg2
@@ -99,29 +98,6 @@ internal fun GalleryContentFilterDialog(
             currentCategory = currentCategory,
             onApply = onApply,
             onCategorySelected = onCategorySelected,
-            onDismiss = onDismiss,
-        )
-    }
-}
-
-// ── Albums filter bottom sheet ────────────────────────────────────────────────
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-internal fun GalleryAlbumsFilterDialog(
-    currentFilter: AlbumsFilter,
-    sheetState: SheetState,
-    onApply: (AlbumsFilter) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState,
-        containerColor = Bg2,
-    ) {
-        AlbumsFilterSheet(
-            currentFilter = currentFilter,
-            onApply = onApply,
             onDismiss = onDismiss,
         )
     }

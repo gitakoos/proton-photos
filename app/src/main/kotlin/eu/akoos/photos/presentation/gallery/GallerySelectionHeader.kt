@@ -39,11 +39,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PhotoAlbum
 import androidx.compose.material.icons.filled.PrivacyTip
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -92,14 +94,17 @@ fun GallerySelectionHeader(
     selectedItems: Set<GalleryItem>,
     selectedCount: Int,
     multiDownloadState: MultiDownloadState,
+    multiShareState: MultiShareState,
     multiDeleteState: MultiDeleteState,
     multiHideState: MultiDeleteState,
     multiStripState: MultiStripState,
     addToAlbumState: AddToAlbumState,
     onCancel: () -> Unit,
+    onShare: () -> Unit,
     onDownload: () -> Unit,
     onRequestDelete: () -> Unit,
     onRequestAddToAlbum: () -> Unit,
+    onBackUp: () -> Unit,
     onStripMetadata: () -> Unit,
     onHideSelected: () -> Unit,
     onHeaderHeightChanged: (Int) -> Unit,
@@ -171,10 +176,10 @@ fun GallerySelectionHeader(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // Add to album — promoted to a direct button. A whole-library select-all
-            // was dropped on purpose: selecting thousands of items at once makes
-            // every downstream bulk action pathological; per-day group selection
-            // on the date headers covers the realistic bulk case.
+            // Add to album — a direct button. There is deliberately no whole-library
+            // select-all: selecting thousands of items at once makes every downstream
+            // bulk action pathological, and per-day group selection on the date headers
+            // covers the realistic bulk case.
             val isAddingToAlbum = addToAlbumState is AddToAlbumState.Working
             Box(
                 modifier = Modifier
@@ -197,17 +202,67 @@ fun GallerySelectionHeader(
                     )
                 }
             }
+            // Back up to Drive — force-uploads the not-yet-backed-up (local-only) photos in the
+            // selection. Shown only when at least one selected photo isn't on Drive yet.
+            if (selectedItems.any { it is GalleryItem.LocalOnly }) {
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .background(PillBg, CircleShape)
+                        .border(0.5.dp, PillBorder, CircleShape)
+                        .clickable { onBackUp() },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.Default.CloudUpload,
+                        stringResource(R.string.device_folder_upload_action),
+                        tint = appColors.accent,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+            }
+            // Share — always available: local items share their MediaStore URI directly,
+            // cloud-only items decrypt to a temp file first. A determinate ring tracks how
+            // many items in the batch have been resolved (cloud decrypts dominate the wait).
+            val isSharing = multiShareState is MultiShareState.Working
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .background(PillBg, CircleShape)
+                    .border(0.5.dp, PillBorder, CircleShape)
+                    .clickable(enabled = !isSharing) { onShare() },
+                contentAlignment = Alignment.Center,
+            ) {
+                if (isSharing) {
+                    val progress = multiShareState as MultiShareState.Working
+                    CircularProgressIndicator(
+                        progress = { if (progress.total > 0) progress.done.toFloat() / progress.total else 0f },
+                        color = Accent,
+                        strokeWidth = 2.dp,
+                        modifier = Modifier.size(16.dp),
+                    )
+                } else {
+                    Icon(
+                        Icons.Default.Share,
+                        stringResource(R.string.share_action),
+                        tint = appColors.accent,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+            }
             // Three primary actions stay outside the dropdown — they're the ones
             // users reach for most often during a bulk select. Less-frequent
             // operations (Strip metadata, Hide) collapse into the More menu so the
             // bar fits even when the selection-count text is long.
             //
-            // Download — hidden when the entire selection is local-only since there's
-            // nothing on the cloud side to download.
-            val onlyLocalSelected = selectedItems.isNotEmpty() &&
-                selectedItems.all { it is GalleryItem.LocalOnly }
+            // Download saves cloud originals to the device. It only makes sense when the
+            // selection holds at least one cloud-only photo — both LocalOnly and Synced
+            // (green-cloud) items already have a device copy, so a green-cloud + device-only
+            // selection shows no download button (the action would skip every item anyway:
+            // DownloadPhotosUseCase filters to CloudOnly).
+            val hasDownloadable = selectedItems.any { it is GalleryItem.CloudOnly }
             val isDownloading = multiDownloadState is MultiDownloadState.Working
-            if (!onlyLocalSelected) {
+            if (hasDownloadable) {
                 Box(
                     modifier = Modifier
                         .size(40.dp)

@@ -31,7 +31,6 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
-import androidx.work.Data
 import androidx.work.ExistingWorkPolicy
 import androidx.work.ForegroundInfo
 import androidx.work.OneTimeWorkRequestBuilder
@@ -41,6 +40,7 @@ import androidx.work.workDataOf
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import kotlinx.coroutines.flow.first
+import java.io.File
 import me.proton.core.domain.entity.UserId
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
@@ -59,7 +59,10 @@ import eu.akoos.photos.domain.usecase.DownloadPhotosUseCase
  *
  * Inputs (set via `workDataOf` in the enqueuer):
  *  - `albumName: String` — local folder name (`Pictures/<albumName>/`) and notification title
- *  - `photoLinkIds: Array<String>` — cloud photo IDs to download (loaded by the worker)
+ *  - `photoLinkIdsFile: String` — path to a cache file with the cloud photo IDs, one per line.
+ *    Spilled to a file because the list can exceed WorkManager's 10 KB input-data limit; the
+ *    worker reads it on start and deletes it.
+ *  - `photoCount: Int` — number of IDs, for the initial progress total
  *  - `userIdString: String` — for `UserId(userIdString)`
  */
 @HiltWorker
@@ -72,10 +75,16 @@ class AlbumDownloadWorker @AssistedInject constructor(
 
     override suspend fun doWork(): Result {
         val albumName = inputData.getString(KEY_ALBUM_NAME).orEmpty()
-        val linkIds = inputData.getStringArray(KEY_PHOTO_LINK_IDS)?.toList().orEmpty()
         val userIdString = inputData.getString(KEY_USER_ID_STRING).orEmpty()
+        // The id list is spilled to a cache file (it can be far larger than WorkManager's 10 KB
+        // input-data ceiling). Read it back, then drop the file — the list now lives in memory.
+        val listFile = inputData.getString(KEY_PHOTO_LINK_IDS_FILE)?.let { File(it) }
+        val linkIds = listFile?.takeIf { it.exists() }
+            ?.readLines()?.filter { it.isNotBlank() }
+            .orEmpty()
         if (linkIds.isEmpty() || userIdString.isEmpty()) {
             Log.w(TAG, "Missing input: linkIds=${linkIds.size} userId=${userIdString.isNotEmpty()}")
+            listFile?.delete()
             return Result.failure()
         }
         val userId = UserId(userIdString)
@@ -119,12 +128,16 @@ class AlbumDownloadWorker @AssistedInject constructor(
         } catch (e: Exception) {
             Log.e(TAG, "Album '$albumName' download failed", e)
             Result.failure()
+        } finally {
+            // Drop the spilled id-list file once the run ends. If the process is killed mid-run
+            // the finally is skipped and the file survives, so WorkManager's re-run can resume.
+            listFile?.delete()
         }
     }
 
     override suspend fun getForegroundInfo(): ForegroundInfo {
         val albumName = inputData.getString(KEY_ALBUM_NAME).orEmpty()
-        val total = inputData.getStringArray(KEY_PHOTO_LINK_IDS)?.size ?: 0
+        val total = inputData.getInt(KEY_PHOTO_COUNT, 0)
         return buildForegroundInfo(albumName, done = 0, total = total)
     }
 
@@ -176,7 +189,8 @@ class AlbumDownloadWorker @AssistedInject constructor(
         const val NOTIFICATION_ID = 4242
 
         const val KEY_ALBUM_NAME = "albumName"
-        const val KEY_PHOTO_LINK_IDS = "photoLinkIds"
+        const val KEY_PHOTO_LINK_IDS_FILE = "photoLinkIdsFile"
+        const val KEY_PHOTO_COUNT = "photoCount"
         const val KEY_USER_ID_STRING = "userIdString"
 
         /**
@@ -220,19 +234,21 @@ class AlbumDownloadWorker @AssistedInject constructor(
             // first-ever album download.
             ensureChannel(context)
 
+            // WorkManager input Data is capped at 10 KB. A large album's id array blows past it
+            // (each id is ~90 bytes, so ~110 photos is the ceiling) and Data.Builder.build() then
+            // throws, crashing the caller. Spill the id list to a per-album cache file and hand the
+            // worker just the path + a count, so album size never bounds the download. The worker
+            // reads and deletes the file on start.
+            val listFile = File(context.cacheDir, "album_dl_${albumLinkId.hashCode()}.txt")
+            runCatching { listFile.writeText(photoLinkIds.joinToString("\n")) }
+                .onFailure { Log.w(TAG, "Failed to spill album id list: ${it.message}") }
+
             val data = workDataOf(
                 KEY_ALBUM_NAME to albumName,
-                KEY_PHOTO_LINK_IDS to photoLinkIds.toTypedArray(),
+                KEY_PHOTO_LINK_IDS_FILE to listFile.absolutePath,
+                KEY_PHOTO_COUNT to photoLinkIds.size,
                 KEY_USER_ID_STRING to userIdString,
             )
-            // Validate input size against WorkManager's MAX_DATA_BYTES (10 KB by default).
-            // ~250 byte linkIds × ~40 IDs hits the limit. For a 5000-photo album the array
-            // would be ~125 KB, which would throw at enqueue time. Detect that here and log
-            // — the caller's already shown the "enqueued" UI, so silently truncating would
-            // confuse the user.
-            if (data.toByteArray().size > Data.MAX_DATA_BYTES) {
-                Log.w(TAG, "Input data exceeds MAX_DATA_BYTES (${data.toByteArray().size}/${Data.MAX_DATA_BYTES}); download may fail")
-            }
 
             val request = OneTimeWorkRequestBuilder<AlbumDownloadWorker>()
                 .setInputData(data)

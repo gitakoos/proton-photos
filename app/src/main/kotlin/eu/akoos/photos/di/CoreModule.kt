@@ -80,9 +80,9 @@ object CoreModule {
     @DohProviderUrls
     fun provideDohProviderUrls(): Array<String> = arrayOf(
         // Quad9 (Switzerland based, no logging) + Cloudflare (1.1.1.1, no logging,
-        // explicit privacy policy). Google was previously included as a fallback but
-        // we deliberately avoid Google infrastructure for DNS — every DoH lookup
-        // would advertise the user's interest in Proton to Google's logs.
+        // explicit privacy policy). Google infrastructure is deliberately excluded as
+        // a DoH provider — every lookup would advertise the user's interest in Proton
+        // to Google's logs.
         "https://dns11.quad9.net/dns-query/",
         "https://cloudflare-dns.com/dns-query/",
     )
@@ -192,7 +192,9 @@ object CoreModule {
     @Provides
     @Singleton
     @HumanVerificationApiHost
-    fun provideHumanVerificationApiHost(): String = "verify.proton.me"
+    // Must be a full URL with scheme: the HV3 dialog extracts the host via Uri.parse(...).host,
+    // which is null for a bare domain — requireNotNull then crashes the captcha screen mid-login.
+    fun provideHumanVerificationApiHost(): String = "https://verify.proton.me"
 
     @Provides
     @Singleton

@@ -230,9 +230,20 @@ class ReconcileSyncStateUseCase @Inject constructor(
         // Without this, removed-folder items stay LOCAL_ONLY forever and keep being uploaded.
         // HIDDEN rows are excluded by the status filter — they never have a corresponding
         // MediaStore file anyway, so they look "out of scope" by every other heuristic.
+        // Force-marked uploads (PENDING_ALBUM_ADDS) must survive this cleanup. A photo or video the
+        // user explicitly chose to back up — or to add to an album — from an unselected folder is
+        // out of the normal scope by design; deleting its LOCAL_ONLY row here would make the very
+        // next upload pass skip it, so the forced upload would silently never run.
+        val forcedUris = (prefs[SettingsKeys.PENDING_ALBUM_ADDS] ?: emptySet())
+            .map { it.substringBeforeLast('=') }
+            .toSet()
         val inScopeUris = newStates.map { it.localUri }.toSet()
         val staleLocalOnly = syncStateRepo.observeAll(userId).first()
-            .filter { it.status == SyncStatus.LOCAL_ONLY && it.localUri !in inScopeUris }
+            .filter {
+                it.status == SyncStatus.LOCAL_ONLY &&
+                    it.localUri !in inScopeUris &&
+                    it.localUri !in forcedUris
+            }
         if (staleLocalOnly.isNotEmpty()) {
             syncStateRepo.deleteLocalOnlyByUris(staleLocalOnly.map { it.localUri })
             Log.d(TAG, "reconcile: cleaned up ${staleLocalOnly.size} LOCAL_ONLY entries for excluded folders")

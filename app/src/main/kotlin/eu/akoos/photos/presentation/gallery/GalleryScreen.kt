@@ -24,12 +24,14 @@ package eu.akoos.photos.presentation.gallery
 
 import android.Manifest
 import android.app.Activity
+import android.content.Intent
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.datastore.preferences.core.edit
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import androidx.compose.animation.AnimatedVisibility
@@ -119,6 +121,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -157,11 +160,11 @@ import coil.request.ImageRequest
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.entity.GalleryItem
+import eu.akoos.photos.presentation.common.ConfirmDialog
 import eu.akoos.photos.presentation.common.EmptyState
 import eu.akoos.photos.presentation.common.ErrorPopup
 import eu.akoos.photos.util.computeOnThisDay
 import eu.akoos.photos.util.sanitizeErrorMessage
-import eu.akoos.photos.presentation.albums.AlbumsFilter
 import eu.akoos.photos.presentation.albums.AlbumsScreen
 import eu.akoos.photos.presentation.albums.AlbumsViewModel
 import eu.akoos.photos.presentation.shared.SharedScreen
@@ -236,10 +239,14 @@ private fun buildContentFilterSummary(
 fun GalleryScreen(
     onPhotoClick: (items: List<GalleryItem>, index: Int, hiddenCloudLinkIds: Set<String>) -> Unit,
     onAlbumClick: (Album) -> Unit = {},
+    onDeviceFolderClick: (bucketName: String) -> Unit = {},
     onSettingsClick: () -> Unit,
     onHiddenAlbumClick: () -> Unit = {},
     onSearchClick: () -> Unit = {},
     onCalendarClick: () -> Unit = {},
+    /** Opens the Timeline filter screen — reached from the Albums tab's filter button now that
+     *  the obsolete All/Backed-up album filter is gone (device + cloud albums show together). */
+    onOpenTimelineFilter: () -> Unit = {},
     /** Non-null when the user tapped the home-screen photo widget. The screen waits for
      *  the items flow to populate, finds the matching item, and forwards to
      *  [onPhotoClick]. [onPendingWidgetPhotoConsumed] is invoked exactly once after
@@ -260,6 +267,7 @@ fun GalleryScreen(
     var selectedTab by rememberSaveable { mutableIntStateOf(0) }
     val gridState = rememberLazyGridState()
     val albumsGridState = rememberLazyGridState()
+    val tabScope = rememberCoroutineScope()
     var sharedFilter by remember { mutableStateOf(SharedFilter.SharedWithMe) }
     var activeEmailFilter by remember { mutableStateOf<String?>(null) }
     var showEmailFilterSheet by remember { mutableStateOf(false) }
@@ -476,9 +484,6 @@ fun GalleryScreen(
     var showFilterSheet by remember { mutableStateOf(false) }
     val filterSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
-    var showAlbumsFilterSheet by remember { mutableStateOf(false) }
-    val albumsFilterSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-
     // Grouping is controlled exclusively by the photo grid's pinch gesture (see
     // PhotoGrid). Pinching zooms across (cols, grouping) pairs in one motion.
 
@@ -554,6 +559,21 @@ fun GalleryScreen(
         }
     }
 
+    val multiShareState = state.multiShareState
+    // A mixed selection that includes cloud-only photos has to download those originals before they
+    // can leave the app, so we warn first. A pure-local selection shares straight away.
+    var showShareCloudWarning by remember { mutableStateOf(false) }
+    // Hand the VM-built ACTION_SEND_MULTIPLE intent to the system chooser. One-shot collect;
+    // the share pill spinner is driven by multiShareState above, not by this flow.
+    val shareChooserTitle = stringResource(R.string.share_chooser_title)
+    LaunchedEffect(Unit) {
+        viewModel.shareIntent.collect { intent ->
+            runCatching {
+                context.startActivity(Intent.createChooser(intent, shareChooserTitle))
+            }
+        }
+    }
+
     // ── Add-to-album multi-action ─────────────────────────────────────────────
     // Drives the picker sheet, the consent dialog and the new-album inline create.
     var showAddToAlbumSheet by remember { mutableStateOf(false) }
@@ -566,22 +586,30 @@ fun GalleryScreen(
     LaunchedEffect(addToAlbumState) {
         when (addToAlbumState) {
             is AddToAlbumState.Done -> {
-                val totalAdded = addToAlbumState.cloudAdded + addToAlbumState.localMoved
+                // localMoved carries the count of local-only photos queued to upload, then join
+                // the album once backed up (the add is async for those). cloudAdded joined now.
+                val cloudAdded = addToAlbumState.cloudAdded
+                val queued = addToAlbumState.localMoved
                 val msg = when {
-                    // Partial success — some items in the selection couldn't be saved to the
-                    // chosen target (cloud-only items picked into a local bucket, or local-only
-                    // items picked into a Drive album). Disclose the skip count explicitly so
-                    // the user doesn't think the missing items disappeared.
+                    // Genuine failures the album couldn't accept — disclose the skip count so the
+                    // user doesn't think the missing items disappeared.
                     addToAlbumState.skipped > 0 -> context.getString(
                         R.string.gallery_add_to_album_partial,
-                        totalAdded, addToAlbumState.albumName, addToAlbumState.skipped,
+                        cloudAdded, addToAlbumState.albumName, addToAlbumState.skipped,
                     )
-                    totalAdded > 0 -> context.getString(
-                        R.string.gallery_added_to_album, totalAdded, addToAlbumState.albumName,
+                    // Some joined now, the rest follow after they back up.
+                    cloudAdded > 0 && queued > 0 -> context.getString(
+                        R.string.gallery_add_to_album_added_and_queued, cloudAdded, queued,
                     )
-                    // Edge case: both legs reported 0 added but the operation still "succeeded"
-                    // (e.g. user picked an existing album the photos were already in). Fall back
-                    // to the localised "added to" template with 0 so we still surface a snackbar.
+                    // Selection was all local-only — nothing joined yet, all will after backup.
+                    queued > 0 -> context.getString(
+                        R.string.gallery_add_to_album_queued_only, queued, addToAlbumState.albumName,
+                    )
+                    cloudAdded > 0 -> context.getString(
+                        R.string.gallery_added_to_album, cloudAdded, addToAlbumState.albumName,
+                    )
+                    // Edge case: nothing added and nothing queued but the op still "succeeded"
+                    // (e.g. the photos were already in the picked album). Surface a snackbar anyway.
                     else -> context.getString(R.string.gallery_added_to_album, 0, addToAlbumState.albumName)
                 }
                 snackbarHostState.showSnackbar(msg)
@@ -686,6 +714,7 @@ fun GalleryScreen(
                 topPadding = headerHeightDp,
                 gridState = albumsGridState,
                 onAlbumClick = onAlbumClick,
+                onDeviceFolderClick = onDeviceFolderClick,
             )
             2 -> SharedScreen(
                 topPadding = headerHeightDp,
@@ -714,9 +743,9 @@ fun GalleryScreen(
                 onSearchClick = onSearchClick,
                 onCalendarClick = onCalendarClick,
                 onClearContentFilter = { viewModel.setContentFilter(ContentFilter()) },
-                onAlbumsFilterSelected = albumsViewModel::setFilter,
                 onHiddenAlbumClick = onHiddenAlbumClick,
-                onShowAlbumsFilterSheet = { showAlbumsFilterSheet = true },
+                // The Albums-tab filter button opens the Timeline filter screen.
+                onShowAlbumsFilterSheet = onOpenTimelineFilter,
                 onSharedFilterSelected = { filter ->
                     sharedFilter = filter
                     activeEmailFilter = null
@@ -738,19 +767,56 @@ fun GalleryScreen(
                 selectedItems = state.selectedItems,
                 selectedCount = state.selectedCount,
                 multiDownloadState = multiDownloadState,
+                multiShareState = multiShareState,
                 multiDeleteState = multiDeleteState,
                 multiHideState = state.multiHideState,
                 multiStripState = multiStripState,
                 addToAlbumState = addToAlbumState,
                 onCancel = viewModel::clearSelection,
+                onShare = {
+                    // Cloud-only photos must be downloaded before sharing; warn first. A selection
+                    // of only on-device photos shares immediately.
+                    if (state.selectedItems.any { it is GalleryItem.CloudOnly })
+                        showShareCloudWarning = true
+                    else
+                        viewModel.shareSelected()
+                },
                 onDownload = viewModel::downloadSelected,
                 onRequestDelete = { showMultiDeleteSheet = true },
                 onRequestAddToAlbum = { showAddToAlbumSheet = true },
+                onBackUp = { viewModel.backUpSelected { } },
                 onStripMetadata = viewModel::stripMetadataSelected,
                 onHideSelected = viewModel::hideSelected,
                 onHeaderHeightChanged = { headerHeightPx = it },
             )
         }
+
+        // ── UNIFIED PROGRESS PILL ─────────────────────────────────────────────
+        // One surface for multi-download, multi-share and add-to-album, matching the
+        // device-folder back-up and album bulk actions. Sits just under the selection header,
+        // which stays visible while these run.
+        val opDownloadingTpl = stringResource(R.string.op_downloading_fmt)
+        val opSharingTpl = stringResource(R.string.op_sharing_fmt)
+        val opAddingLabel = stringResource(R.string.op_adding_to_album)
+        val dlS = multiDownloadState
+        val shS = multiShareState
+        val galleryOpProgress = when {
+            dlS is MultiDownloadState.Working ->
+                eu.akoos.photos.presentation.common.OperationProgress(
+                    dlS.done, dlS.total, opDownloadingTpl.format(dlS.done, dlS.total))
+            shS is MultiShareState.Working ->
+                eu.akoos.photos.presentation.common.OperationProgress(
+                    shS.done, shS.total, opSharingTpl.format(shS.done, shS.total))
+            addToAlbumState is AddToAlbumState.Working ->
+                eu.akoos.photos.presentation.common.OperationProgress(0, 0, opAddingLabel, indeterminate = true)
+            else -> null
+        }
+        eu.akoos.photos.presentation.common.OperationProgressPill(
+            progress = galleryOpProgress,
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(top = if (headerHeightPx > 0) headerHeightDp + 4.dp else 8.dp),
+        )
 
         // ── BOTTOM DOCK ───────────────────────────────────────────────────────
         AnimatedVisibility(
@@ -764,7 +830,20 @@ fun GalleryScreen(
         ) {
             BottomDock(
                 selectedTab = selectedTab,
-                onTabSelected = { selectedTab = it },
+                onTabSelected = { tab ->
+                    if (tab == selectedTab) {
+                        // Re-tapping the active tab jumps its grid straight to the top — no
+                        // animated scroll, the user just wants to be back at the top instantly.
+                        when (tab) {
+                            0 -> if (gridState.firstVisibleItemIndex > 0)
+                                tabScope.launch { gridState.scrollToItem(0) }
+                            1 -> if (albumsGridState.firstVisibleItemIndex > 0)
+                                tabScope.launch { albumsGridState.scrollToItem(0) }
+                        }
+                    } else {
+                        selectedTab = tab
+                    }
+                },
             )
         }
 
@@ -788,14 +867,6 @@ fun GalleryScreen(
             onDismiss = { showFilterSheet = false },
         )
     }
-    if (showAlbumsFilterSheet) {
-        GalleryAlbumsFilterDialog(
-            currentFilter = albumsState.albumsFilter,
-            sheetState = albumsFilterSheetState,
-            onApply = { albumsViewModel.setFilter(it) },
-            onDismiss = { showAlbumsFilterSheet = false },
-        )
-    }
     if (showEmailFilterSheet) {
         GallerySharedEmailFilterDialog(
             availableEmails = sharedUiState.availableEmails,
@@ -805,6 +876,19 @@ fun GalleryScreen(
                 showEmailFilterSheet = false
             },
             onDismiss = { showEmailFilterSheet = false },
+        )
+    }
+    if (showShareCloudWarning) {
+        ConfirmDialog(
+            title = stringResource(R.string.gallery_share_cloud_warning_title),
+            message = stringResource(R.string.gallery_share_cloud_warning_body),
+            confirmLabel = stringResource(R.string.gallery_share_cloud_warning_continue),
+            dismissLabel = stringResource(R.string.cancel),
+            onConfirm = {
+                showShareCloudWarning = false
+                viewModel.shareSelected()
+            },
+            onDismiss = { showShareCloudWarning = false },
         )
     }
     if (showMultiDeleteSheet && state.selectedItems.isNotEmpty()) {
@@ -904,12 +988,18 @@ internal fun GalleryAddToAlbumPickerSheet(
         HorizontalDivider(color = Line2, thickness = 0.5.dp,
             modifier = Modifier.padding(horizontal = 20.dp))
 
-        // Cloud albums — shown when the selection has any cloud-backed item. Local-only
-        // photos have no Drive linkId yet, so they can only join an album once uploaded.
-        if (cloudAlbums.isNotEmpty() && selectionHasCloud) {
+        // Cloud albums — shown whenever any album exists. Local-only photos have no Drive
+        // linkId yet; tapping an album backs them up first, then joins them (handled in the
+        // add path), so the rows stay tappable and an inline note explains the two steps.
+        if (cloudAlbums.isNotEmpty()) {
             Text(stringResource(R.string.gallery_picker_drive_albums),
                 color = appColors.fgMute, fontSize = 12.sp, fontWeight = FontWeight.Medium,
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
+            if (!selectionHasCloud) {
+                Text(stringResource(R.string.gallery_add_to_album_local_note),
+                    color = appColors.fgMute, fontSize = 13.sp,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp))
+            }
             cloudAlbums.forEach { album ->
                 Row(
                     modifier = Modifier
@@ -949,10 +1039,10 @@ internal fun GalleryAddToAlbumPickerSheet(
             }
         }
 
-        // Empty state — nothing to pick from. The + New row above is still tappable.
-        if (cloudAlbums.isEmpty() || !selectionHasCloud) {
+        // Empty state — shown only when no album exists. The + New row above is still tappable.
+        if (cloudAlbums.isEmpty()) {
             Text(
-                "No albums yet — create one above.",
+                stringResource(R.string.gallery_no_albums_yet),
                 color = appColors.fgMute,
                 fontSize = 13.sp,
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 24.dp),
@@ -965,39 +1055,15 @@ internal fun GalleryAddToAlbumPickerSheet(
 
 @Composable
 internal fun AlbumsFilterRail(
-    selectedFilter: AlbumsFilter,
-    onFilterSelected: (AlbumsFilter) -> Unit,
     onHiddenAlbumClick: () -> Unit = {},
     onShowFilterSheet: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val colors = AppColors.current
     LazyRow(
         modifier = modifier,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         contentPadding = PaddingValues(end = 8.dp),
     ) {
-        // Active filter pill
-        item(key = "active_filter") {
-            val isFiltered = selectedFilter != AlbumsFilter.All
-            val label = when (selectedFilter) {
-                AlbumsFilter.All -> stringResource(R.string.gallery_filter_all)
-                AlbumsFilter.BackedUp -> stringResource(R.string.albums_filter_backed_up)
-            }
-            Row(
-                modifier = Modifier
-                    .height(38.dp)
-                    .background(if (isFiltered) Accent.copy(alpha = 0.18f) else colors.filterPillBg, pillShape)
-                    .then(if (!isFiltered) Modifier.border(0.5.dp, PillBorder, pillShape) else Modifier)
-                    .clickable(enabled = isFiltered) { onFilterSelected(AlbumsFilter.All) }
-                    .padding(horizontal = 14.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                if (!isFiltered) Icon(Icons.Default.Check, null, tint = FgPrimary, modifier = Modifier.size(12.dp))
-                Text(label, color = if (isFiltered) Accent else FgPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-            }
-        }
         // Hidden chip
         item(key = "hidden") {
             Row(
@@ -1014,21 +1080,19 @@ internal fun AlbumsFilterRail(
                 Text(stringResource(R.string.gallery_filter_hidden), color = FgDim, fontSize = 13.sp, fontWeight = FontWeight.Medium)
             }
         }
-        // Filter button
+        // Timeline-filter button — opens the Timeline filter screen (hide albums / device folders
+        // from the Photos timeline).
         item(key = "filter_button") {
-            val isFiltered = selectedFilter != AlbumsFilter.All
             Box(
                 modifier = Modifier
                     .size(38.dp)
-                    .background(if (isFiltered) Accent.copy(alpha = 0.18f) else PillBg, pillShape)
-                    .then(if (!isFiltered) Modifier.border(0.5.dp, PillBorder, pillShape) else Modifier)
+                    .background(PillBg, pillShape)
+                    .border(0.5.dp, PillBorder, pillShape)
                     .clickable { onShowFilterSheet() },
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(Icons.Default.FilterList, "Filter", tint = if (isFiltered) Accent else FgDim, modifier = Modifier.size(18.dp))
-                if (isFiltered) {
-                    Box(Modifier.size(8.dp).align(Alignment.TopEnd).background(Accent, CircleShape))
-                }
+                Icon(Icons.Default.FilterList, stringResource(R.string.settings_timeline_filter),
+                    tint = FgDim, modifier = Modifier.size(18.dp))
             }
         }
     }
@@ -2468,45 +2532,6 @@ internal fun FilterChip(label: String, selected: Boolean, onClick: () -> Unit) {
             fontSize = 13.sp,
             fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
         )
-    }
-}
-
-// ── Albums Filter Sheet ───────────────────────────────────────────────────────
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-internal fun AlbumsFilterSheet(
-    currentFilter: AlbumsFilter,
-    onApply: (AlbumsFilter) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 20.dp)
-            .padding(bottom = 36.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        Text(
-            text = stringResource(R.string.albums_filter_title),
-            color = FgPrimary,
-            fontSize = 17.sp,
-            fontWeight = FontWeight.SemiBold,
-        )
-
-        FilterSectionLabel(stringResource(R.string.albums_filter_type))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            listOf(
-                AlbumsFilter.All to stringResource(R.string.gallery_filter_all),
-                AlbumsFilter.BackedUp to stringResource(R.string.albums_filter_backed_up),
-            ).forEach { (status, label) ->
-                FilterChip(
-                    label = label,
-                    selected = currentFilter == status,
-                    onClick = { onApply(status); onDismiss() },
-                )
-            }
-        }
     }
 }
 

@@ -66,6 +66,15 @@ private const val TAG = "PhotoStreamSvc"
 private const val UPLOAD_PROTECTION_WINDOW_MS: Long = 90L * 1000L
 
 /**
+ * How long a just-trashed photo is kept out of the refresh upsert. Covers the server-side
+ * eventual-consistency window where the photo stream still lists a photo the user already
+ * trashed; comfortably longer than [UPLOAD_PROTECTION_WINDOW_MS] since trash propagation is the
+ * slower of the two. After this, a still-listed linkId is assumed to be a genuine re-add (e.g.
+ * restored from Drive web) and is allowed back in.
+ */
+private const val TRASH_PROTECTION_WINDOW_MS: Long = 3L * 60L * 1000L
+
+/**
  * Number of link stubs processed per metadata/thumbnail/CKP/build/upsert pass inside the
  * full-refresh loop. The listing pagination still pulls 500 small stubs per page, but the
  * heavy per-link work runs in sub-batches of this size so the transient maps (link details,
@@ -173,8 +182,42 @@ class PhotoStreamService @Inject constructor(
     private val lastFallbackFullRefreshMs = java.util.concurrent.atomic.AtomicLong(0L)
     private val fallbackFullRefreshCooldownMs: Long = 60_000L
 
+    /**
+     * LinkIds the user trashed within [TRASH_PROTECTION_WINDOW_MS]. The refresh skips re-adding
+     * these so a server stream that hasn't caught up to the trash can't flash the photo (and its
+     * green-cloud badge) back. In-memory only: a process death before the next refresh is harmless
+     * because the trash is already committed server-side, so the post-restart refresh sees it gone.
+     */
+    private val recentlyTrashed = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    /** Mark [linkIds] as just-trashed so the next refresh keeps them out (see [isRecentlyTrashed]). */
+    fun markRecentlyTrashed(linkIds: Collection<String>) {
+        val now = System.currentTimeMillis()
+        linkIds.forEach { recentlyTrashed[it] = now }
+    }
+
+    /**
+     * Clear the just-trashed mark for [linkIds] — call this when a photo is RESTORED from trash
+     * within the protection window. Otherwise the refresh would keep treating it as trashed and
+     * skip re-adding it (leaving it invisible until the window expires).
+     */
+    fun forgetRecentlyTrashed(linkIds: Collection<String>) {
+        linkIds.forEach { recentlyTrashed.remove(it) }
+    }
+
+    private fun isRecentlyTrashed(linkId: String): Boolean {
+        val at = recentlyTrashed[linkId] ?: return false
+        if (System.currentTimeMillis() - at > TRASH_PROTECTION_WINDOW_MS) {
+            recentlyTrashed.remove(linkId)
+            return false
+        }
+        return true
+    }
+
     fun observeCloudPhotos(userId: UserId): Flow<List<CloudPhoto>> =
-        photoListingDao.observeAll(userId.id).map { list -> list.map { it.toDomain() } }
+        // observeOwnStream, not observeAll: rows loaded from shared-with-me albums sit in the
+        // same table and must not surface in the user's own timeline.
+        photoListingDao.observeOwnStream(userId.id).map { list -> list.map { it.toDomain() } }
 
     fun observePhotosByLinkIds(linkIds: List<String>): Flow<List<CloudPhoto>> =
         photoListingDao.observeByLinkIds(linkIds).map { list -> list.map { it.toDomain() } }
@@ -427,8 +470,16 @@ class PhotoStreamService @Inject constructor(
                             val cachedThumb = cached?.thumbnailUrl
                                 ?.takeIf { thumbnailHelpers.isCachedValid(it) }
                             val merged = if (built.thumbnailUrl == null) built.copy(thumbnailUrl = cachedThumb) else built
-                            chunkToSave += merged
-                            foundIds += stub.linkId
+                            // Skip photos the user just trashed. The server photo stream can keep
+                            // returning a trashed photo for up to ~a minute (eventual consistency);
+                            // without this guard the refresh re-adds the row we already removed on
+                            // delete, flashing the green-cloud badge back on until a later refresh
+                            // finally sees it gone. Treating it as "not found" also lets the
+                            // stale-entry cleanup drop any lingering row immediately.
+                            if (!isRecentlyTrashed(stub.linkId)) {
+                                chunkToSave += merged
+                                foundIds += stub.linkId
+                            }
                         }
                         if (chunkToSave.isNotEmpty()) {
                             photoListingDao.upsertAll(chunkToSave)

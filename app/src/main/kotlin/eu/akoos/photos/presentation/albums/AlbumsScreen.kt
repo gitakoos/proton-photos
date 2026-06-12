@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.presentation.albums
 
+import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -39,6 +40,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyGridScope
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -50,6 +52,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ModalBottomSheet
 import eu.akoos.photos.presentation.common.ConfirmDialog
@@ -87,6 +91,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import eu.akoos.photos.domain.entity.Album
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import eu.akoos.photos.R
 import eu.akoos.photos.presentation.theme.Accent
@@ -104,6 +109,7 @@ fun AlbumsScreen(
     topPadding: Dp = 0.dp,
     gridState: LazyGridState = rememberLazyGridState(),
     onAlbumClick: (Album) -> Unit = {},
+    onDeviceFolderClick: (bucketName: String) -> Unit = {},
     viewModel: AlbumsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -186,6 +192,33 @@ fun AlbumsScreen(
                         }
                     }
 
+                // No cloud albums. When the device still has folders, show the New Album row
+                // plus the "Folders on this device" section in a grid so the page isn't bare.
+                // Otherwise fall back to the centred empty-state copy.
+                albums.isEmpty() && state.deviceFolders.isNotEmpty() ->
+                    LazyVerticalGrid(
+                        columns = GridCells.Fixed(2),
+                        state = gridState,
+                        contentPadding = PaddingValues(
+                            top = topPadding + 12.dp,
+                            start = 20.dp,
+                            end = 20.dp,
+                            bottom = 120.dp,
+                        ),
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(20.dp),
+                        modifier = Modifier.fillMaxSize(),
+                    ) {
+                        item(span = { GridItemSpan(maxLineSpan) }) {
+                            NewAlbumRow(
+                                isCreating = state.isCreatingAlbum,
+                                onClick    = { showCreateDialog = true },
+                                modifier   = Modifier.padding(bottom = 4.dp),
+                            )
+                        }
+                        deviceFoldersSection(state.deviceFolders, state.hideDeviceFolders, { viewModel.setHideDeviceFolders(!state.hideDeviceFolders) }, onDeviceFolderClick)
+                    }
+
                 albums.isEmpty() ->
                     Column(
                         modifier = Modifier
@@ -237,6 +270,9 @@ fun AlbumsScreen(
                                 onLongClick = { cloudAlbumSheetFor = album },
                             )
                         }
+
+                        // ── "Folders on this device" section ───────────────────
+                        deviceFoldersSection(state.deviceFolders, state.hideDeviceFolders, { viewModel.setHideDeviceFolders(!state.hideDeviceFolders) }, onDeviceFolderClick)
                     }
             }
         }
@@ -512,6 +548,60 @@ private fun NewAlbumRow(
             color = if (isCreating) FgMute else Accent,
             fontSize = 14.sp,
             fontWeight = FontWeight.Medium,
+        )
+    }
+}
+
+/**
+ * Appends the "Folders on this device" section to an albums grid: a full-span header followed
+ * by one [UnifiedAlbumCard] per MediaStore bucket. Tapping a card opens the per-folder detail
+ * screen via [onFolderClick]. No-op when [folders] is empty so callers can append unconditionally.
+ */
+private fun LazyGridScope.deviceFoldersSection(
+    folders: List<DeviceFolder>,
+    collapsed: Boolean,
+    onToggle: () -> Unit,
+    onFolderClick: (bucketName: String) -> Unit,
+) {
+    if (folders.isEmpty()) return
+    // The section header doubles as the show/hide control: tapping it collapses the device
+    // folders out of the Albums grid. The choice is persisted, so it stays across launches.
+    item(span = { GridItemSpan(maxLineSpan) }) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { onToggle() }
+                .padding(top = 8.dp, bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = stringResource(R.string.device_folders_section),
+                color = FgMute,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.weight(1f),
+            )
+            Icon(
+                if (collapsed) Icons.Default.ExpandMore else Icons.Default.ExpandLess,
+                contentDescription = stringResource(R.string.albums_toggle_device_folders),
+                tint = FgMute,
+                modifier = Modifier.size(20.dp),
+            )
+        }
+    }
+    if (collapsed) return
+    items(
+        folders,
+        key = { "devfolder_${it.name}" },
+    ) { folder ->
+        UnifiedAlbumCard(
+            coverModel = folder.coverUri?.let(Uri::parse),
+            title = folder.name,
+            metaText = pluralStringResource(
+                R.plurals.count_photos_plural, folder.itemCount, folder.itemCount,
+            ),
+            isDeviceFolder = true,
+            onClick = { onFolderClick(folder.name) },
         )
     }
 }

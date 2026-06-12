@@ -179,6 +179,22 @@
         </provider>
 
         <!--
+            Dedicated FileProvider for the share sheet. A cloud-only photo has no MediaStore
+            URI, so sharing it decrypts the full-res bytes to cacheDir/fullres/ and exposes
+            that single subfolder here. Kept separate from the updater provider above so each
+            authority advertises the minimal set of paths it actually needs.
+        -->
+        <provider
+            android:name=".util.ShareFileProvider"
+            android:authorities="${applicationId}.share.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/share_paths" />
+        </provider>
+
+        <!--
             WorkManager's SystemForegroundService entry — needs explicit
             foregroundServiceType="dataSync" on Android 14+ for any worker that calls
             setForeground(). Without this the system kills the worker on Android 14+ as

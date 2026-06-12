@@ -50,7 +50,6 @@ internal fun BackupModeStep(selected: BackupMode, onSelect: (BackupMode) -> Unit
             description = stringResource(R.string.onboarding_backup_everything_desc),
             selected = selected == BackupMode.Everything,
             onClick = { onSelect(BackupMode.Everything) },
-            recommended = true,
         )
         Spacer(Modifier.height(10.dp))
         ChoiceCard(

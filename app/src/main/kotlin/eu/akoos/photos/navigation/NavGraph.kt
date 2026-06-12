@@ -67,6 +67,7 @@ import eu.akoos.photos.presentation.calendar.CalendarScreen
 import eu.akoos.photos.presentation.calendar.DayDetailScreen
 import eu.akoos.photos.presentation.editor.PhotoEditorScreen
 import eu.akoos.photos.presentation.editor.VideoEditorScreen
+import eu.akoos.photos.presentation.folders.DeviceFolderDetailScreen
 import eu.akoos.photos.presentation.gallery.GalleryScreen
 import eu.akoos.photos.presentation.hidden.HiddenAlbumScreen
 import eu.akoos.photos.presentation.onboarding.OnboardingScreen
@@ -80,6 +81,7 @@ import eu.akoos.photos.presentation.settings.SecuritySettingsScreen
 import eu.akoos.photos.presentation.settings.SettingsScreen
 import eu.akoos.photos.presentation.settings.ExcludedFoldersScreen
 import eu.akoos.photos.presentation.settings.SyncFoldersScreen
+import eu.akoos.photos.presentation.settings.TimelineFilterScreen
 import eu.akoos.photos.presentation.settings.SyncSettingsScreen
 import eu.akoos.photos.presentation.search.SearchScreen
 import eu.akoos.photos.presentation.settings.TrashScreen
@@ -96,6 +98,7 @@ sealed class Screen(val route: String) {
     data object Viewer : Screen("viewer")
     data object AlbumDetail : Screen("album_detail")
     data object SyncFolders : Screen("sync_folders")
+    data object DeviceFolderDetail : Screen("device_folder_detail")
     data object ExcludedFolders : Screen("excluded_folders")
     data object AlbumMirrorFolders : Screen("album_mirror_folders")
     data object Trash : Screen("trash")
@@ -108,6 +111,7 @@ sealed class Screen(val route: String) {
     data object Onboarding : Screen("onboarding")
     data object AppearanceSettings : Screen("appearance_settings")
     data object LanguageSettings : Screen("language_settings")
+    data object TimelineFilter : Screen("timeline_filter")
     data object Search : Screen("search")
     data object Calendar : Screen("calendar")
     data object DayDetail : Screen("day_detail")
@@ -189,6 +193,8 @@ fun NavGraph(
     // composable-level rememberSaveable inside DayDetailScreen isn't the source of truth
     // (nav between days from the calendar root needs to push fresh dates onto this state).
     var selectedDayDate by remember { mutableStateOf<String?>(null) }
+    // The device folder (MediaStore bucket name) the user tapped on the device-folder browser.
+    var selectedDeviceFolder by remember { mutableStateOf<String?>(null) }
 
     val isLoggedIn = navViewModel.isLoggedIn
 
@@ -236,9 +242,6 @@ fun NavGraph(
     //     the photo viewer with a synthetic single-item list wrapping the foreign URI.
     //   - ACTION_EDIT ("Edit with" chooser, edit affordances in other apps) → push the
     //     editor, which handles the foreign URI and saves any edits as a new copy.
-    // Previously both actions routed to the editor — picking the
-    // app from "Open with" used to land on the editor instead of the viewer, which is
-    // jarring when the intent was only to view the image.
     val startupRouteForExternal by navViewModel.startupRoute.collectAsStateWithLifecycle()
     LaunchedEffect(pendingExternalEdit, startupRouteForExternal) {
         val req = pendingExternalEdit ?: return@LaunchedEffect
@@ -328,10 +331,15 @@ fun NavGraph(
                     selectedAlbum = album
                     navController.navigate(Screen.AlbumDetail.route)
                 },
+                onDeviceFolderClick = { bucketName ->
+                    selectedDeviceFolder = bucketName
+                    navController.navigate(Screen.DeviceFolderDetail.route)
+                },
                 onSettingsClick = { navController.navigate(Screen.Settings.route) },
                 onHiddenAlbumClick = { navController.navigate(Screen.HiddenAlbum.route) },
                 onSearchClick = { navController.navigate(Screen.Search.route) },
                 onCalendarClick = { navController.navigate(Screen.Calendar.route) },
+                onOpenTimelineFilter = { navController.navigate(Screen.TimelineFilter.route) },
                 pendingWidgetPhotoUri = widgetPhotoUri,
                 onPendingWidgetPhotoConsumed = onWidgetPhotoConsumed,
             )
@@ -613,11 +621,17 @@ fun NavGraph(
         }
 
         composable(Screen.AppearanceSettings.route) {
-            AppearanceSettingsScreen(onBack = { navController.popBackStack() })
+            AppearanceSettingsScreen(
+                onBack = { navController.popBackStack() },
+                onTimelineFilterClick = { navController.navigate(Screen.TimelineFilter.route) },
+            )
         }
 
         composable(Screen.LanguageSettings.route) {
-            LanguageSettingsScreen(onBack = { navController.popBackStack() })
+            LanguageSettingsScreen(
+                onBack = { navController.popBackStack() },
+                onTimelineFilterClick = { navController.navigate(Screen.TimelineFilter.route) },
+            )
         }
 
         composable(Screen.SyncSettings.route) {
@@ -686,8 +700,31 @@ fun NavGraph(
             SyncFoldersScreen(onBack = { navController.popBackStack() })
         }
 
+        composable(Screen.DeviceFolderDetail.route) {
+            val bucketName = selectedDeviceFolder
+            if (bucketName == null) {
+                navController.popBackStack()
+            } else {
+                DeviceFolderDetailScreen(
+                    bucketName = bucketName,
+                    onPhotoClick = { items, index ->
+                        selectedViewerItems = items
+                        selectedViewerIndex = index
+                        selectedViewerHiddenLinkIds = emptySet()
+                        viewerFromAlbum = false
+                        navController.navigate(Screen.Viewer.route)
+                    },
+                    onBack = { navController.popBackStack() },
+                )
+            }
+        }
+
         composable(Screen.ExcludedFolders.route) {
             ExcludedFoldersScreen(onBack = { navController.popBackStack() })
+        }
+
+        composable(Screen.TimelineFilter.route) {
+            TimelineFilterScreen(onBack = { navController.popBackStack() })
         }
 
         composable(Screen.Trash.route) {

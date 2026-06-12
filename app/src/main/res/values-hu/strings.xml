@@ -15,7 +15,7 @@
     <string name="onboarding_welcome_title">Üdv a Photos for Proton appban</string>
     <string name="onboarding_welcome_subtitle">Fényképeid és videóid végpontok közötti titkosítással a Proton Drive-on. Állítsuk be pár dolgot, hogy az app úgy működjön, ahogy szereted.</string>
 
-    <string name="onboarding_backup_title">Mit mentsünk?</string>
+    <string name="onboarding_backup_title">Válaszd ki, mit mentsünk</string>
     <string name="onboarding_backup_subtitle">Bármikor módosítható a Beállításokban.</string>
     <string name="onboarding_backup_everything">Mindent</string>
     <string name="onboarding_backup_everything_desc">Az összes fényképet és videót az eszközről, kivéve amit később kizársz.</string>
@@ -27,7 +27,7 @@
     <string name="onboarding_privacy_title">Adatvédelem</string>
     <string name="onboarding_privacy_subtitle">Válaszd ki, hogyan jutnak a fotóid az eszközről a Drive-ra. Minden ezeken felül titkosítva megy.</string>
     <string name="onboarding_privacy_strip">Metaadatok eltávolítása feltöltéskor</string>
-    <string name="onboarding_privacy_strip_desc">GPS-koordináták és kameraadatok eltávolítása a fotókból még a felhő előtt. Ajánlott.</string>
+    <string name="onboarding_privacy_strip_desc">A GPS-helyadat eltávolítása a fotókból, mielőtt a felhőbe kerülnének. A kamera-, dátum- és szoftveradatok megtartása opcionális. Ajánlott.</string>
     <string name="onboarding_privacy_rename">Átnevezés a felvétel dátumára</string>
     <string name="onboarding_privacy_rename_desc">A fájlok 2026-05-30_14-32-08.jpg formában kerülnek fel az IMG_2841.jpg helyett. Az eszközön lévő fájl változatlan marad.</string>
     <string name="onboarding_privacy_delete">Eltávolítás eszközről backup után</string>
@@ -82,16 +82,26 @@
     <string name="gallery_tab_albums">Albumok</string>
     <string name="gallery_tab_shared">Megosztott</string>
     <string name="gallery_cancel_selection">Kijelölés visszavonása</string>
+    <string name="share_action">Megosztás</string>
+    <string name="share_chooser_title">Megosztás ezzel</string>
+    <string name="share_preparing">Előkészítés…</string>
     <string name="gallery_download_selected">Kijelöltek letöltése</string>
     <string name="gallery_delete_selected">Kijelöltek törlése</string>
     <string name="gallery_download_done">%1$d fotó letöltve</string>
     <string name="gallery_download_done_singular">1 fotó letöltve</string>
     <string name="gallery_download_partial">Letöltve: %1$d, sikertelen: %2$d</string>
+    <string name="gallery_share_cloud_warning_title">Megosztod a felhős fotókat?</string>
+    <string name="gallery_share_cloud_warning_body">Néhány csak a felhőben van tárolva. Az app egy ideiglenes, privát másolatot tölt le, és csak az általad választott appnak adja át. Semmi nem kerül a galériádba, és más appok sem látják.</string>
+    <string name="gallery_share_cloud_warning_continue">Megosztás</string>
     <string name="gallery_add_to_album">Albumba</string>
+    <string name="gallery_add_to_album_local_note">Ezek a képek előbb biztonsági mentésbe kerülnek, majd bekerülnek az albumba.</string>
+    <string name="gallery_no_albums_yet">Még nincs album. Hozz létre egyet fent.</string>
     <string name="gallery_add_to_album_mixed_hint">Csak eszközön és csak felhőben lévő tételek nem kerülhetnek közös albumba</string>
     <string name="gallery_add_to_album_partial">%1$d hozzáadva ehhez: %2$s, %3$d elemet nem lehetett menteni (vegyes kijelölés)</string>
     <string name="gallery_strip_metadata">Metaadatok törlése</string>
     <string name="gallery_added_to_album">%1$d fotó hozzáadva ehhez: %2$s</string>
+    <string name="gallery_add_to_album_added_and_queued">%1$d hozzáadva, további %2$d a biztonsági mentés után kerül be</string>
+    <string name="gallery_add_to_album_queued_only">%1$d a biztonsági mentés után kerül be ide: %2$s</string>
     <string name="gallery_stripped_metadata">%1$d fotó metaadata törölve</string>
     <string name="gallery_stripped_with_skipped">Törölve: %1$d, kihagyva: %2$d (idegen)</string>
     <string name="strip_metadata_failed">Nem sikerült eltávolítani a metaadatokat erről a fájlról.</string>
@@ -128,7 +138,6 @@
     <string name="sync_progress_hide_files">Fájlok elrejtése</string>
 
     <!-- Delete bottom sheet -->
-    <string name="delete_also_cloud_warning">Ez véglegesen törli az eredetit. A Proton nem tudja visszaállítani.</string>
     <string name="delete_album_container_warning">Ez törli az albumot, de a fényképeid megmaradnak a Proton Drive-ban.</string>
     <string name="delete_button_permanently">Végleges törlés</string>
     <string name="delete_multi_mixed_msg">Néhány fotó már fel van mentve a Proton Drive-ra. Válaszd ki, hogyan töröljük őket.</string>
@@ -241,11 +250,11 @@
     <string name="settings_storage_refresh">Tárhely frissítése</string>
     <string name="settings_section_settings">Beállítások</string>
     <string name="settings_privacy_metadata">Adatvédelem és metaadatok</string>
-    <string name="settings_privacy_metadata_desc">EXIF, GPS és kamerainfó eltávolítása feltöltéskor</string>
+    <string name="settings_privacy_metadata_desc">GPS és opcionális EXIF-mezők eltávolítása a feltöltésekből</string>
     <string name="settings_security">Biztonság</string>
     <string name="settings_security_desc">Alkalmazás zárolása, rejtett fotók</string>
     <string name="settings_strip_metadata_upload">Metaadatok eltávolítása feltöltéskor</string>
-    <string name="settings_strip_metadata_upload_desc">Személyes adatok eltávolítása a Drive-ra feltöltés előtt</string>
+    <string name="settings_strip_metadata_upload_desc">A GPS-helyadat eltávolítása feltöltés előtt. Kamera-, dátum- és szoftvermezők hozzáadása a Testreszabás alatt.</string>
     <string name="settings_rename_on_upload">Átnevezés készítés dátumára feltöltéskor</string>
     <string name="settings_rename_on_upload_desc">A fotó vagy videó metaadata alapján a fájlnév a készítés dátumára és idejére áll be feltöltéskor. Az eszközön lévő eredeti fájl változatlan marad.</string>
     <string name="settings_delete_after_backup">Eszközről törlés mentés után</string>
@@ -272,12 +281,16 @@
     <string name="settings_clear_cache_on_close_desc">A megnézett felhős fotók helyi másolatainak törlése, amikor az alkalmazás a háttérbe kerül. Következő megnyitáskor újra letölti őket.</string>
     <string name="viewer_added_to_album">Hozzáadva: %1$s</string>
     <string name="settings_photos_timeline_section">Fotók idővonala</string>
-    <string name="settings_hide_album_photos">Albumba rakott fotók elrejtése</string>
-    <string name="settings_hide_album_photos_desc">Ne jelenjen meg a Fotók oldalon az a kép, amit már egy albumba soroltál. Az Albumok és Megosztott fülek változatlanok maradnak.</string>
+    <string name="settings_hide_album_photos">Drive-albumba rakott fotók elrejtése</string>
+    <string name="settings_hide_album_photos_desc">A Drive-albumba (felhő) rakott fotók nem jelennek meg a fő Fotók idővonaladon. Az Albumok és Megosztott füleken továbbra is láthatók.</string>
+    <string name="settings_timeline_filter">Idővonal szűrő</string>
+    <string name="timeline_filter_title">Idővonal szűrő</string>
+    <string name="timeline_filter_subtitle">Válaszd ki, mit rejtsünk el a fő Fotók idővonaladról. Az elrejtett fotók az eszközön maradnak és tovább mentődnek.</string>
+    <string name="timeline_filter_albums_header">Drive-albumok</string>
     <string name="settings_telemetry">Telemetria</string>
     <string name="settings_telemetry_desc">A Proton fiókod beállításai vezérlik. A módosításhoz nyisd meg az account.proton.me oldalt.</string>
     <string name="settings_hidden_photos">Rejtett fotók</string>
-    <string name="settings_hidden_photos_desc">A főgalériából elrejtett fotók, biometrikusan védve</string>
+    <string name="settings_hidden_photos_desc">A főgalériából elrejtett fotók, az eszköz biometriájával vagy PIN-jével feloldva</string>
     <string name="settings_media_management">Médiakezelés</string>
     <string name="settings_media_management_granted">Megadva, törlés nem kér megerősítést</string>
     <string name="settings_media_management_grant_desc">Add meg egyszer, hogy ne kérdezzen rá minden törlésnél</string>
@@ -380,9 +393,6 @@
     <string name="about_lib_gopenpgp">OpenPGP implementáció</string>
 
     <!-- Albums -->
-    <string name="albums_filter_backed_up">Mentett</string>
-    <string name="albums_filter_title">Albumok szűrése</string>
-    <string name="albums_filter_type">Típus</string>
     <string name="albums_new_album">Új album</string>
     <string name="albums_create_album">Album létrehozása</string>
     <string name="albums_create_album_hint">Album neve</string>
@@ -642,6 +652,9 @@
     <string name="shared_save_success_fmt">%1$d kép mentve a könyvtáradba</string>
     <string name="shared_save_partial_fmt">%1$d/%2$d kép mentve a könyvtáradba</string>
     <string name="shared_save_progress_fmt">Mentés %1$d / %2$d a könyvtáradba…</string>
+    <string name="op_downloading_fmt">Letöltés %1$d / %2$d</string>
+    <string name="op_sharing_fmt">Megosztás %1$d / %2$d</string>
+    <string name="op_adding_to_album">Hozzáadás albumhoz…</string>
     <string name="viewer_delete_subtitle_synced">Ez a fotó már fent van a Proton Drive-on. Válassz, mit szeretnél:</string>
     <string name="viewer_delete_remove_from_device">Törlés az eszközről</string>
     <string name="viewer_delete_remove_from_device_desc">A biztonsági másolat marad a Proton Drive-on</string>
@@ -654,6 +667,23 @@
     <string name="action_save">Mentés</string>
     <string name="gallery_picker_drive_albums">Drive-albumok</string>
     <string name="album_card_folder_badge">Mappa</string>
+    <string name="device_folders_title">Mappák ezen az eszközön</string>
+    <string name="device_folders_entry">Mappák ezen az eszközön</string>
+    <string name="device_folders_section">Mappák ezen az eszközön</string>
+    <string name="albums_toggle_device_folders">Eszközmappák megjelenítése vagy elrejtése</string>
+    <string name="device_folders_empty">Nincsenek mappák ezen az eszközön.</string>
+    <string name="device_folder_upload_action">Feltöltés a Drive-ra</string>
+    <string name="device_folder_uploading_fmt">%1$d feltöltése a Drive-ra</string>
+    <string name="device_folder_already_backed_up">Már mentve a Drive-ra</string>
+    <string name="device_folder_added_to_album">Hozzáadva az albumhoz</string>
+    <string name="device_folder_backing_up_fmt">Mentés %1$d / %2$d</string>
+    <string name="device_folder_backup_all">Mappa mentése</string>
+    <string name="device_folder_backup_choice_title">Menti ezt a mappát?</string>
+    <string name="device_folder_backup_choice_body">A mappa összes fotója és videója mentésre kerül a Drive-ra. A mappát albumként is tükrözheted.</string>
+    <string name="device_folder_backup_timeline">Csak a fotók mentése</string>
+    <string name="device_folder_backup_timeline_sub">Az itteni fotók egyszeri feltöltése az idővonalra.</string>
+    <string name="device_folder_backup_mirror">Album létrehozása is</string>
+    <string name="device_folder_backup_mirror_sub">Folyamatosan szinkronizál — a mappa új fotói is az albumba kerülnek.</string>
     <string name="sync_folders_add_dialog_title">Mappa hozzáadása</string>
     <string name="sync_folders_add_row_title">Mappa hozzáadása név szerint</string>
     <string name="sync_folders_add_dialog_name_hint">Mappa neve</string>

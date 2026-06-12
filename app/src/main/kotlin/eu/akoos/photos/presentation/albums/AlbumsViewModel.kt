@@ -32,8 +32,11 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import me.proton.core.accountmanager.domain.AccountManager
@@ -41,6 +44,7 @@ import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
+import eu.akoos.photos.domain.repository.LocalMediaRepository
 import eu.akoos.photos.util.friendlyNetworkError
 import eu.akoos.photos.util.sanitizeErrorMessage
 import javax.inject.Inject
@@ -55,12 +59,18 @@ sealed interface AlbumActionResult {
     data class Failed(val message: String) : AlbumActionResult
 }
 
-enum class AlbumsFilter { All, BackedUp }
+/** A MediaStore bucket surfaced as a card under the "Folders on this device" section. */
+data class DeviceFolder(
+    val name: String,
+    val coverUri: String?,
+    val itemCount: Int,
+)
 
 data class AlbumsUiState(
     val isLoading: Boolean = true,
     val albums: List<Album> = emptyList(),
-    val albumsFilter: AlbumsFilter = AlbumsFilter.All,
+    val deviceFolders: List<DeviceFolder> = emptyList(),
+    val hideDeviceFolders: Boolean = false,
     val error: String? = null,
     val isCreatingAlbum: Boolean = false,
     val createAlbumError: String? = null,
@@ -73,6 +83,7 @@ class AlbumsViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val accountManager: AccountManager,
     private val driveRepo: DrivePhotoRepository,
+    private val localMediaRepo: LocalMediaRepository,
     private val networkObserver: eu.akoos.photos.util.NetworkObserver,
     private val albumListEvents: eu.akoos.photos.util.AlbumListEventBus,
 ) : ViewModel() {
@@ -82,11 +93,58 @@ class AlbumsViewModel @Inject constructor(
 
     init {
         loadAlbums()
+        observeDeviceFolders()
         // Detail-screen actions (unshare, public-link-disable) emit on this bus when the
         // album's share state actually flipped — we re-fetch so the badge in the grid
         // drops without waiting for a manual pull-to-refresh.
         viewModelScope.launch {
             albumListEvents.changes.collect { loadAlbums() }
+        }
+    }
+
+    /**
+     * Groups MediaStore items into device-folder cards shown under the cloud albums. Runs in its
+     * own collector that only touches [AlbumsUiState.deviceFolders], so a MediaStore refresh never
+     * disturbs the cloud-album load/create/delete state. Mirrors the grouping the dedicated
+     * folder browser used: bucket name → newest cover + count, hidden-vault items excluded with
+     * the same DataStore key the gallery uses. Resilient to MediaStore errors via an empty fallback.
+     */
+    private fun observeDeviceFolders() {
+        viewModelScope.launch {
+            val hiddenUrisFlow = context.settingsDataStore.data.map {
+                it[SettingsKeys.HIDDEN_PHOTO_URIS] ?: emptySet()
+            }
+            combine(localMediaRepo.observeLocalMedia(), hiddenUrisFlow) { items, hiddenUris ->
+                items
+                    .filter { it.bucketName != null && it.uri !in hiddenUris }
+                    .groupBy { it.bucketName!! }
+                    .map { (name, groupItems) ->
+                        val sorted = groupItems.sortedByDescending { it.dateTaken }
+                        DeviceFolder(
+                            name = name,
+                            coverUri = sorted.firstOrNull()?.uri,
+                            itemCount = sorted.size,
+                        )
+                    }
+                    .sortedByDescending { it.itemCount }
+            }
+                .catch { emit(emptyList()) }
+                .collect { folders ->
+                    _uiState.update { it.copy(deviceFolders = folders) }
+                }
+        }
+        viewModelScope.launch {
+            context.settingsDataStore.data
+                .map { it[SettingsKeys.HIDE_DEVICE_FOLDERS_IN_ALBUMS] ?: false }
+                .catch { emit(false) }
+                .collect { hidden -> _uiState.update { it.copy(hideDeviceFolders = hidden) } }
+        }
+    }
+
+    /** Persisted show/hide toggle for the device-folders section in the Albums grid. */
+    fun setHideDeviceFolders(hidden: Boolean) {
+        viewModelScope.launch {
+            context.settingsDataStore.edit { it[SettingsKeys.HIDE_DEVICE_FOLDERS_IN_ALBUMS] = hidden }
         }
     }
 
@@ -154,10 +212,6 @@ class AlbumsViewModel @Inject constructor(
                 },
             )
         }
-    }
-
-    fun setFilter(filter: AlbumsFilter) {
-        _uiState.update { it.copy(albumsFilter = filter) }
     }
 
     fun clearError() = _uiState.update { it.copy(error = null) }

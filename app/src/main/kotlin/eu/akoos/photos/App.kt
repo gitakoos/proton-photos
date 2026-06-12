@@ -83,6 +83,21 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
             .setWorkerFactory(delegatingFactory)
             .build()
 
+    override fun attachBaseContext(base: Context) {
+        super.attachBaseContext(base)
+        // Disable Go's signal-based goroutine preemption (SIGURG) in the native crypto
+        // runtime before its shared library loads. The Go GC's preemption signals can
+        // collide with the platform's userfaultfd-based GC, aborting the process with a
+        // SIGABRT when two JNI threads call into the Go runtime concurrently. This env var
+        // is read by the Go runtime via libc getenv at init, so it must be set in the
+        // process environment here, the earliest app hook, before any crypto class loads.
+        // It only affects preemptibility of tight call-free loops, which the crypto code
+        // does not have, so throughput is unaffected. A JVM system property would not work
+        // (the runtime reads the OS environment, not JVM properties). setenv can throw
+        // ErrnoException, so guard it — failing to set it must never crash startup.
+        runCatching { android.system.Os.setenv("GODEBUG", "asyncpreemptoff=1", true) }
+    }
+
     override fun onCreate() {
         super.onCreate() // Hilt injects workerFactory here
         delegatingFactory.addFactory(workerFactory)

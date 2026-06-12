@@ -52,6 +52,7 @@ data class GalleryUiState(
     val hideCloudNoticePending: Boolean = false,
     val pendingDeleteIntent: android.app.PendingIntent? = null,
     val multiDownloadState: MultiDownloadState = MultiDownloadState.Idle,
+    val multiShareState: MultiShareState = MultiShareState.Idle,
     val addToAlbumState: AddToAlbumState = AddToAlbumState.Idle,
     val multiStripState: MultiStripState = MultiStripState.Idle,
     /** Android 10+ write-permission dialog for stripping metadata from foreign files in the
@@ -93,6 +94,14 @@ sealed class MultiDownloadState {
     data object Idle : MultiDownloadState()
     data class  Working(val done: Int, val total: Int) : MultiDownloadState()
     data class  Done(val succeeded: Int, val failed: Int) : MultiDownloadState()
+}
+
+/** Lifecycle of the multi-select "Share" action. [Working] tracks how many cloud-only items
+ *  in the batch have finished decrypting so the share pill can show determinate progress; the
+ *  terminal step is the chooser launch, surfaced through a one-shot intent rather than a state. */
+sealed class MultiShareState {
+    data object Idle : MultiShareState()
+    data class  Working(val done: Int, val total: Int) : MultiShareState()
 }
 
 /** Lifecycle of the "Add selected to album" multi-action. Cloud-add and local-move legs run in
