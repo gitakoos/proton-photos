@@ -137,6 +137,8 @@ class PhotoViewerViewModel @Inject constructor(
         data object Working : RenameState()
         data class Done(val newDisplayName: String) : RenameState()
         data class Failed(val message: String) : RenameState()
+        /** A non-app-owned file needs one-shot MediaStore write consent before the in-place rename. */
+        data class NeedsPermission(val pendingIntent: android.app.PendingIntent) : RenameState()
     }
 
     sealed class StripState {
@@ -311,6 +313,13 @@ class PhotoViewerViewModel @Inject constructor(
 
     private val _renameState = MutableStateFlow<RenameState>(RenameState.Idle)
     val renameState: StateFlow<RenameState> = _renameState.asStateFlow()
+    private var pendingRename: PendingRenameRequest? = null
+    private data class PendingRenameRequest(
+        val item: GalleryItem,
+        val newName: String,
+        val replaceOriginal: Boolean,
+        val sourceAlbumLinkId: String?,
+    )
 
     /** Cloud linkId → local URI for photos also on device. Lets the screen upgrade a CloudOnly
      *  badge to "Synced" after a download, since the static `items` snapshot can't reflect it. */
@@ -769,12 +778,38 @@ class PhotoViewerViewModel @Inject constructor(
             }
             _renameState.value = result.fold(
                 onSuccess = { RenameState.Done(trimmed) },
-                onFailure = { e -> RenameState.Failed(e.message ?: context.getString(R.string.viewer_rename_failed)) },
+                onFailure = { e ->
+                    val uri = (item as? GalleryItem.Synced)?.local?.uri
+                        ?: (item as? GalleryItem.LocalOnly)?.local?.uri
+                    // A camera-roll file the app doesn't own throws a SecurityException on the
+                    // in-place DISPLAY_NAME update (Android 11+ scoped storage). Ask the OS for
+                    // one-shot write access — same flow as metadata strip — and retry on consent.
+                    if (replaceOriginal && uri != null && e is SecurityException
+                        && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
+                    ) {
+                        pendingRename = PendingRenameRequest(item, trimmed, replaceOriginal, sourceAlbumLinkId)
+                        RenameState.NeedsPermission(
+                            MediaStore.createWriteRequest(context.contentResolver, listOf(Uri.parse(uri))),
+                        )
+                    } else {
+                        RenameState.Failed(e.message ?: context.getString(R.string.viewer_rename_failed))
+                    }
+                },
             )
         }
     }
 
-    fun resetRenameState() { _renameState.value = RenameState.Idle }
+    /** Re-runs the rename the screen deferred for write consent, now that the user granted it. */
+    fun retryPendingRename() {
+        val p = pendingRename ?: return
+        pendingRename = null
+        renameItem(p.item, p.newName, p.replaceOriginal, p.sourceAlbumLinkId)
+    }
+
+    fun resetRenameState() {
+        pendingRename = null
+        _renameState.value = RenameState.Idle
+    }
 
     private suspend fun renameLocal(uri: String, newName: String, replaceOriginal: Boolean) {
         val parsed = android.net.Uri.parse(uri)

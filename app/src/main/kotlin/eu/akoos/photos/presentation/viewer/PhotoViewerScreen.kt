@@ -536,6 +536,13 @@ fun PhotoViewerScreen(
         if (result.resultCode == Activity.RESULT_OK) viewModel.retryPendingStrip()
         else viewModel.resetStripState()
     }
+    // Android 11+ write-permission dialog for renaming a non-app-owned file in place.
+    val renamePermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) viewModel.retryPendingRename()
+        else viewModel.resetRenameState()
+    }
     LaunchedEffect(stripState) {
         val ss = stripState
         if (ss is PhotoViewerViewModel.StripState.NeedsPermission) {
@@ -1475,10 +1482,15 @@ fun PhotoViewerScreen(
     // cached bytes so the stale original (old name / trashed cloud copy) stops showing
     // immediately — same invalidation the editor does after a save.
     LaunchedEffect(renameState) {
-        if (renameState is PhotoViewerViewModel.RenameState.Done) {
+        val rs = renameState
+        if (rs is PhotoViewerViewModel.RenameState.Done) {
             items.getOrNull(pagerState.settledPage)?.let { viewModel.invalidateAfterRename(it) }
             showRenameDialog = false
             viewModel.resetRenameState()
+        } else if (rs is PhotoViewerViewModel.RenameState.NeedsPermission) {
+            renamePermissionLauncher.launch(
+                IntentSenderRequest.Builder(rs.pendingIntent.intentSender).build()
+            )
         }
     }
 

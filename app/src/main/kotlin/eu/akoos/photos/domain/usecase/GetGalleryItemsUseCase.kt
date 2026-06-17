@@ -108,8 +108,12 @@ class GetGalleryItemsUseCase @Inject constructor(
             val cloudFromSync = sync?.cloudFileId
                 ?.takeIf { it !in usedCloudIds }
                 ?.let { cloudByLinkId[it] }
+            // localHash is the bare SHA-1; cloudByHash is keyed by the cloud ContentHash
+            // (HMAC-SHA256(rootNodeHashKey, sha1Hex)), so convert before the lookup — this pairs a
+            // photo to its cloud copy by content even when rename-on-upload changed the cloud name.
             val cloudFromHash = if (cloudFromSync == null)
                 sync?.localHash?.takeIf { it.isNotEmpty() }
+                    ?.let { cloudRepo.cloudContentHash(it) }
                     ?.let { cloudByHash[it] }
                     ?.takeIf { it.linkId !in usedCloudIds }
             else null

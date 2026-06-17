@@ -100,6 +100,9 @@ class DrivePhotoRepositoryImpl @Inject constructor(
     override suspend fun getShareId(userId: UserId, volumeId: String): String =
         shareService.getShareId(userId, volumeId)
 
+    override fun cloudContentHash(localSha1Hex: String): String? =
+        shareService.rootNodeHashKeyBytes()?.let { cryptoHelper.computeNameHash(localSha1Hex, it) }
+
     override fun observeCloudPhotos(userId: UserId): Flow<List<CloudPhoto>> =
         streamService.observeCloudPhotos(userId)
 

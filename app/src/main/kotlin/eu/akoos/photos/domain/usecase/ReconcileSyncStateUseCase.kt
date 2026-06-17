@@ -157,7 +157,11 @@ class ReconcileSyncStateUseCase @Inject constructor(
                 continue
             }
             val byId = existingSync?.cloudFileId?.let { cloudByLinkId[it] }
-            val byHash = existingSync?.localHash?.takeIf { it.isNotEmpty() }?.let { cloudByHash[it] }
+            // localHash is the bare SHA-1; the cloud ContentHash is HMAC-SHA256(rootNodeHashKey,
+            // sha1Hex), so convert before the lookup. Content-exact, so it pairs a photo to its cloud
+            // copy even when rename-on-upload gave the cloud a different displayName than the local file.
+            val byHash = existingSync?.localHash?.takeIf { it.isNotEmpty() }
+                ?.let { cloudRepo.cloudContentHash(it) }?.let { cloudByHash[it] }
             // captureTime in CloudPhoto is Unix seconds; LocalMediaItem.dateTaken is ms.
             val localCaptureTimeSec = local.dateTaken / 1000L
             val byNameAndDate = cloudByNameAndDate[local.displayName to localCaptureTimeSec]

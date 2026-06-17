@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://photos.akoos.eu/logo.png" alt="Photos for Proton" width="96" />
+  <img src="docs/logo.png" alt="Photos for Proton" width="96" />
 </p>
 
 <h1 align="center">Photos for Proton</h1>

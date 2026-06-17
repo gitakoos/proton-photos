@@ -221,6 +221,14 @@ interface DrivePhotoRepository {
      * a non-member cover would render as a broken tile in the album list.
      */
     suspend fun setAlbumCover(userId: UserId, albumLinkId: String, coverPhotoLinkId: String)
+
+    /**
+     * The cloud `ContentHash` (`HMAC-SHA256(rootNodeHashKey, sha1Hex)`) for a locally-computed bare
+     * SHA-1 hex, or null when the root hash key isn't cached yet. Lets content-hash pairing match a
+     * local file to its cloud copy regardless of the (possibly rename-on-upload) cloud displayName.
+     */
+    fun cloudContentHash(localSha1Hex: String): String?
+
     /** Returns all photos currently in the Drive server-side trash. */
     suspend fun getCloudTrash(userId: UserId): List<CloudTrashItem>
     /** Moves trashed photos back to the Photos stream (un-delete). Returns the per-link
