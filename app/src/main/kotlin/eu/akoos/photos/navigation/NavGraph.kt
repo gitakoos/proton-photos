@@ -42,9 +42,11 @@ import eu.akoos.photos.presentation.theme.AppColors
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import android.content.Context
@@ -70,11 +72,15 @@ import eu.akoos.photos.presentation.editor.VideoEditorScreen
 import eu.akoos.photos.presentation.folders.DeviceFolderDetailScreen
 import eu.akoos.photos.presentation.gallery.GalleryScreen
 import eu.akoos.photos.presentation.hidden.HiddenAlbumScreen
+import eu.akoos.photos.presentation.memories.MemoriesScreen
+import eu.akoos.photos.presentation.memories.MemoryCategory
+import eu.akoos.photos.presentation.memories.MemoryCategoryScreen
 import eu.akoos.photos.presentation.onboarding.OnboardingScreen
 import eu.akoos.photos.presentation.settings.AboutScreen
 import eu.akoos.photos.presentation.settings.AccountScreen
 import eu.akoos.photos.presentation.settings.AppearanceSettingsScreen
 import eu.akoos.photos.presentation.settings.LanguageSettingsScreen
+import eu.akoos.photos.presentation.settings.NotificationSettingsScreen
 import eu.akoos.photos.presentation.settings.PendingDeleteHandler
 import eu.akoos.photos.presentation.settings.PrivacySettingsScreen
 import eu.akoos.photos.presentation.settings.SecuritySettingsScreen
@@ -92,9 +98,13 @@ sealed class Screen(val route: String) {
     data object Gallery : Screen("gallery")
     data object Settings : Screen("settings")
     data object SyncSettings : Screen("sync_settings")
+    data object BackupContent : Screen("backup_content")
+    data object BackupBehavior : Screen("backup_behavior")
+    data object BackupNetwork : Screen("backup_network")
     data object StorageSettings : Screen("storage_settings")
     data object PrivacySettings : Screen("privacy_settings")
     data object SecuritySettings : Screen("security_settings")
+    data object PrivacySecuritySettings : Screen("privacy_security_settings")
     data object Viewer : Screen("viewer")
     data object AlbumDetail : Screen("album_detail")
     data object SyncFolders : Screen("sync_folders")
@@ -110,10 +120,19 @@ sealed class Screen(val route: String) {
     data object Account : Screen("account_settings")
     data object Onboarding : Screen("onboarding")
     data object AppearanceSettings : Screen("appearance_settings")
+    data object ThemeSettings : Screen("theme_settings")
     data object LanguageSettings : Screen("language_settings")
+    data object NotificationSettings : Screen("notification_settings")
     data object TimelineFilter : Screen("timeline_filter")
+    data object TimelineCategoryOrder : Screen("timeline_category_order")
+    data object TimelineAlbumsFilter : Screen("timeline_albums_filter")
+    data object TimelineDeviceFolders : Screen("timeline_device_folders")
     data object Search : Screen("search")
     data object Calendar : Screen("calendar")
+    data object Memories : Screen("memories")
+    data object MemoryCategory : Screen("memory_category/{type}") {
+        fun create(type: String) = "memory_category/$type"
+    }
     data object DayDetail : Screen("day_detail")
 }
 
@@ -174,8 +193,11 @@ fun NavGraph(
     // Cloud linkIds whose local-side photo is in the Hidden vault — captured from the
     // gallery state at viewer-open time so the viewer can blur + label them too. Without
     // this, opening a hidden cloud counterpart from the photos page showed the un-blurred
-    // full-res image (a leak the user explicitly called out).
+    // full-res image — a privacy leak.
     var selectedViewerHiddenLinkIds by remember { mutableStateOf<Set<String>>(emptySet()) }
+    // True when the viewer was opened from the Hidden vault, so the viewer window is marked
+    // FLAG_SECURE and full-res hidden photos stay out of screenshots and the recent-apps preview.
+    var viewerSecure by remember { mutableStateOf(false) }
     var selectedAlbum by remember { mutableStateOf<Album?>(null) }
     // True when the viewer was opened from an album detail (not from the main gallery).
     // Suppresses the per-photo "Save to device" button — the album has its own "Download all".
@@ -339,6 +361,7 @@ fun NavGraph(
                 onHiddenAlbumClick = { navController.navigate(Screen.HiddenAlbum.route) },
                 onSearchClick = { navController.navigate(Screen.Search.route) },
                 onCalendarClick = { navController.navigate(Screen.Calendar.route) },
+                onMemoriesClick = { navController.navigate(Screen.Memories.route) },
                 onOpenTimelineFilter = { navController.navigate(Screen.TimelineFilter.route) },
                 pendingWidgetPhotoUri = widgetPhotoUri,
                 onPendingWidgetPhotoConsumed = onWidgetPhotoConsumed,
@@ -351,6 +374,54 @@ fun NavGraph(
                 onDayClick = { date ->
                     selectedDayDate = date
                     navController.navigate(Screen.DayDetail.route)
+                },
+            )
+        }
+
+        composable(Screen.Memories.route) {
+            MemoriesScreen(
+                onBack = { navController.popBackStack() },
+                onPhotoClick = { items, index ->
+                    selectedViewerItems = items
+                    selectedViewerIndex = index
+                    selectedViewerHiddenLinkIds = emptySet()
+                    viewerFromAlbum = false
+                    navController.navigate(Screen.Viewer.route)
+                },
+                onSeeAll = { cat ->
+                    navController.navigate(
+                        Screen.MemoryCategory.create(
+                            if (cat == MemoryCategory.ON_THIS_DAY) "onthisday" else "seasons",
+                        ),
+                    )
+                },
+            )
+        }
+
+        composable(
+            Screen.MemoryCategory.route,
+            arguments = listOf(navArgument("type") { type = NavType.StringType }),
+        ) { backStackEntry ->
+            val category = if (backStackEntry.arguments?.getString("type") == "seasons") {
+                MemoryCategory.SEASONS
+            } else {
+                MemoryCategory.ON_THIS_DAY
+            }
+            MemoryCategoryScreen(
+                category = category,
+                onBack = { navController.popBackStack() },
+                onPhotoClick = { items, index ->
+                    selectedViewerItems = items
+                    selectedViewerIndex = index
+                    selectedViewerHiddenLinkIds = emptySet()
+                    viewerFromAlbum = false
+                    navController.navigate(Screen.Viewer.route)
+                },
+                onSwitchCategory = { cat ->
+                    val type = if (cat == MemoryCategory.ON_THIS_DAY) "onthisday" else "seasons"
+                    navController.navigate(Screen.MemoryCategory.create(type)) {
+                        popUpTo(Screen.MemoryCategory.route) { inclusive = true }
+                    }
                 },
             )
         }
@@ -386,7 +457,7 @@ fun NavGraph(
             PhotoViewerScreen(
                 items = selectedViewerItems,
                 initialIndex = selectedViewerIndex,
-                onBack = { navController.popBackStack() },
+                onBack = { viewerSecure = false; navController.popBackStack() },
                 showSaveToDevice = !viewerFromAlbum,
                 sourceAlbumLinkId = sourceAlbumLinkId,
                 // A non-null `sharedByEmail` on the album means the user is a guest
@@ -396,6 +467,7 @@ fun NavGraph(
                 isReadOnlyAlbum = viewerFromAlbum && selectedAlbum?.sharedByEmail != null,
                 editedAt = editedAt,
                 hiddenCloudLinkIds = selectedViewerHiddenLinkIds,
+                secure = viewerSecure,
                 onEditItem = { item ->
                     editorItem = item
                     navController.navigate(Screen.PhotoEditor.route)
@@ -585,8 +657,10 @@ fun NavGraph(
                     sharedByEmail = album.sharedByEmail,
                     volumeId = album.volumeId,
                     coverThumbnailUrl = album.coverThumbnailUrl,
-                    onPhotoClick = { photos, index ->
-                        selectedViewerItems = photos.map { GalleryItem.CloudOnly(it) }
+                    onPhotoClick = { items, index ->
+                        // Items arrive already typed (Synced when a local copy exists, else
+                        // CloudOnly) so the viewer's delete sheet offers the right options.
+                        selectedViewerItems = items
                         selectedViewerIndex = index
                         // Album views don't carry the hidden-cloud overlay — clear the
                         // set in case the user just came from the photos page where it
@@ -605,8 +679,8 @@ fun NavGraph(
                 onBack                    = { navController.popBackStack() },
                 onSyncSettingsClick       = { navController.navigate(Screen.SyncSettings.route) },
                 onStorageClick            = { navController.navigate(Screen.StorageSettings.route) },
-                onPrivacySettingsClick    = { navController.navigate(Screen.PrivacySettings.route) },
-                onSecuritySettingsClick   = { navController.navigate(Screen.SecuritySettings.route) },
+                onPrivacySecurityClick    = { navController.navigate(Screen.PrivacySecuritySettings.route) },
+                onNotificationsClick      = { navController.navigate(Screen.NotificationSettings.route) },
                 onRecentlyDeletedClick    = { navController.navigate(Screen.Trash.route) },
                 onAppearanceClick         = { navController.navigate(Screen.AppearanceSettings.route) },
                 onLanguageClick           = { navController.navigate(Screen.LanguageSettings.route) },
@@ -623,24 +697,51 @@ fun NavGraph(
         composable(Screen.AppearanceSettings.route) {
             AppearanceSettingsScreen(
                 onBack = { navController.popBackStack() },
+                onThemeClick = { navController.navigate(Screen.ThemeSettings.route) },
+                onLanguageClick = { navController.navigate(Screen.LanguageSettings.route) },
                 onTimelineFilterClick = { navController.navigate(Screen.TimelineFilter.route) },
+            )
+        }
+
+        composable(Screen.ThemeSettings.route) {
+            eu.akoos.photos.presentation.settings.ThemeSettingsScreen(
+                onBack = { navController.popBackStack() },
             )
         }
 
         composable(Screen.LanguageSettings.route) {
             LanguageSettingsScreen(
                 onBack = { navController.popBackStack() },
-                onTimelineFilterClick = { navController.navigate(Screen.TimelineFilter.route) },
             )
         }
 
         composable(Screen.SyncSettings.route) {
             SyncSettingsScreen(
-                onBack                       = { navController.popBackStack() },
-                onBackupFoldersClick         = { navController.navigate(Screen.SyncFolders.route) },
-                onExcludedFoldersClick       = { navController.navigate(Screen.ExcludedFolders.route) },
-                onAlbumMirrorFoldersClick    = { navController.navigate(Screen.AlbumMirrorFolders.route) },
-                onRecentlyDeletedClick       = { navController.navigate(Screen.Trash.route) },
+                onBack                = { navController.popBackStack() },
+                onBackupContentClick  = { navController.navigate(Screen.BackupContent.route) },
+                onBackupBehaviorClick = { navController.navigate(Screen.BackupBehavior.route) },
+                onNetworkClick        = { navController.navigate(Screen.BackupNetwork.route) },
+            )
+        }
+
+        composable(Screen.BackupContent.route) {
+            eu.akoos.photos.presentation.settings.BackupContentSettingsScreen(
+                onBack                    = { navController.popBackStack() },
+                onBackupFoldersClick      = { navController.navigate(Screen.SyncFolders.route) },
+                onExcludedFoldersClick    = { navController.navigate(Screen.ExcludedFolders.route) },
+                onAlbumMirrorFoldersClick = { navController.navigate(Screen.AlbumMirrorFolders.route) },
+            )
+        }
+
+        composable(Screen.BackupBehavior.route) {
+            eu.akoos.photos.presentation.settings.BackupBehaviorSettingsScreen(
+                onBack = { navController.popBackStack() },
+            )
+        }
+
+        composable(Screen.BackupNetwork.route) {
+            eu.akoos.photos.presentation.settings.BackupNetworkSettingsScreen(
+                onBack = { navController.popBackStack() },
             )
         }
 
@@ -661,6 +762,14 @@ fun NavGraph(
             PrivacySettingsScreen(
                 onBack = { navController.popBackStack() },
                 onHiddenAlbumClick = { navController.navigate(Screen.HiddenAlbum.route) },
+            )
+        }
+
+        composable(Screen.PrivacySecuritySettings.route) {
+            eu.akoos.photos.presentation.settings.PrivacySecuritySettingsScreen(
+                onBack = { navController.popBackStack() },
+                onPrivacyClick = { navController.navigate(Screen.PrivacySettings.route) },
+                onSecurityClick = { navController.navigate(Screen.SecuritySettings.route) },
             )
         }
 
@@ -691,6 +800,7 @@ fun NavGraph(
                     selectedViewerItems = items.map { eu.akoos.photos.domain.entity.GalleryItem.LocalOnly(it) }
                     selectedViewerIndex = index
                     selectedViewerHiddenLinkIds = emptySet()
+                    viewerSecure = true
                     navController.navigate(Screen.Viewer.route)
                 },
             )
@@ -724,7 +834,34 @@ fun NavGraph(
         }
 
         composable(Screen.TimelineFilter.route) {
-            TimelineFilterScreen(onBack = { navController.popBackStack() })
+            TimelineFilterScreen(
+                onBack               = { navController.popBackStack() },
+                onCategoryOrderClick = { navController.navigate(Screen.TimelineCategoryOrder.route) },
+                onAlbumsClick        = { navController.navigate(Screen.TimelineAlbumsFilter.route) },
+                onDeviceFoldersClick = { navController.navigate(Screen.TimelineDeviceFolders.route) },
+            )
+        }
+
+        composable(Screen.TimelineCategoryOrder.route) {
+            eu.akoos.photos.presentation.settings.TimelineCategoryOrderScreen(
+                onBack = { navController.popBackStack() },
+            )
+        }
+
+        composable(Screen.TimelineAlbumsFilter.route) {
+            eu.akoos.photos.presentation.settings.TimelineAlbumsFilterScreen(
+                onBack = { navController.popBackStack() },
+            )
+        }
+
+        composable(Screen.TimelineDeviceFolders.route) {
+            eu.akoos.photos.presentation.settings.TimelineDeviceFoldersScreen(
+                onBack = { navController.popBackStack() },
+            )
+        }
+
+        composable(Screen.NotificationSettings.route) {
+            NotificationSettingsScreen(onBack = { navController.popBackStack() })
         }
 
         composable(Screen.Trash.route) {

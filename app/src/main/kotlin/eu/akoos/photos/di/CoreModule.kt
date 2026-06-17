@@ -26,6 +26,9 @@ import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import me.proton.core.account.domain.entity.AccountType
 import me.proton.core.domain.entity.AppStore
 import me.proton.core.domain.entity.Product
@@ -48,15 +51,20 @@ import okhttp3.OkHttpClient
 import javax.inject.Qualifier
 import javax.inject.Singleton
 
-/**
- * Tags the pinned [OkHttpClient] used by CDN block + thumbnail fetches so it
- * doesn't collide with ProtonCore's own bound clients on the DI graph.
- */
+/** Tags the CDN block/thumbnail [OkHttpClient] so it doesn't collide with ProtonCore's bound clients. */
 @Qualifier @Retention(AnnotationRetention.RUNTIME) annotation class CdnOkHttpClient
+
+/** Tags the application-lifetime [CoroutineScope] used to share long-lived upstream flows. */
+@Qualifier @Retention(AnnotationRetention.RUNTIME) annotation class AppScope
 
 @Module
 @InstallIn(SingletonComponent::class)
 object CoreModule {
+
+    @Provides
+    @Singleton
+    @AppScope
+    fun provideAppScope(): CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     @Provides
     @Singleton
@@ -65,31 +73,21 @@ object CoreModule {
     @Provides
     @Singleton
     @BaseProtonApiUrl
-    // Use the dedicated API gateway (`drive-api.proton.me/`), not the web-frontend
-    // host (`drive.proton.me/api/`). The Drive web host proxies the Drive-specific
-    // paths transparently, BUT it returns its own HTML 404 page for Core endpoints
-    // like `/core/v4/keys/all` — which kotlinx-serialization then surfaces as
-    // "Unexpected JSON token at offset 0, had '<'". The gateway routes everything
-    // (drive + core + auth) and matches both the official Drive Android client
-    // (proton-environment apiPrefix = "drive-api") and the JS SDK
-    // (https://drive-api.proton.me).
+    // The API gateway, NOT the web host (drive.proton.me/api/) — the web host returns an HTML 404
+    // for Core endpoints like /core/v4/keys/all, surfacing as "Unexpected JSON token … had '<'".
     fun provideBaseApiUrl(): HttpUrl = "https://drive-api.proton.me/".toHttpUrl()
 
     @Provides
     @Singleton
     @DohProviderUrls
     fun provideDohProviderUrls(): Array<String> = arrayOf(
-        // Quad9 (Switzerland based, no logging) + Cloudflare (1.1.1.1, no logging,
-        // explicit privacy policy). Google infrastructure is deliberately excluded as
-        // a DoH provider — every lookup would advertise the user's interest in Proton
-        // to Google's logs.
+        // Quad9 + Cloudflare (no-logging). Google is deliberately excluded — every lookup would
+        // advertise the user's interest in Proton to Google's logs.
         "https://dns11.quad9.net/dns-query/",
         "https://cloudflare-dns.com/dns-query/",
     )
 
-    // Public SHA-256 SPKI pins for *.proton.me — sourced from
-    // protoncore_android/network/data/.../di/Constants.DEFAULT_SPKI_PINS.
-    // Without these, the connection accepts any chain a trusted CA issues — MITM is possible.
+    // SHA-256 SPKI pins for *.proton.me. Without these any trusted-CA chain is accepted (MITM-able).
     @Provides
     @Singleton
     @CertificatePins
@@ -114,18 +112,13 @@ object CoreModule {
             override suspend fun onProxiesFailed() {}
         }
 
-    // Payments are disabled in this build (IsPaymentsV5Enabled = false,
-    // IsMobileUpgradesEnabled = false, ProtonIAPBillingLibrary.isAvailable() = false
-    // in StubModule). SecureEndpoint is still required by the ProtonCore Hilt graph,
-    // so we point it at an unresolvable placeholder — any code path that managed to
-    // reach this string would fail fast on DNS instead of silently contacting Proton's
-    // payments host with the user's session.
+    // Payments are disabled, but the Hilt graph still requires SecureEndpoint — point it at an
+    // unresolvable host so any code path that reached it fails fast on DNS instead of contacting Proton.
     @Provides
     @Singleton
     fun provideSecureEndpoint(): SecureEndpoint = SecureEndpoint("localhost")
 
-    // SPKI pins used for the alternative-routing (DoH-resolved) hosts —
-    // protoncore_android.di.Constants.ALTERNATIVE_API_SPKI_PINS.
+    // SPKI pins for the alternative-routing (DoH-resolved) hosts.
     @Provides
     @Singleton
     @AlternativeApiPins

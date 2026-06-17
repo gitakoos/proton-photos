@@ -37,12 +37,9 @@ interface PhotoListingDao {
     fun observeAll(userId: String): Flow<List<PhotoListingEntity>>
 
     /**
-     * The user's own photo stream. Photos loaded from a shared-with-me album live in the same
-     * table but carry the album linkId as their parentLinkId (the recipient-side pin written by
-     * the album loader); the user's own photos are parented to their photos root, never to an
-     * album. Excluding rows whose parent is a known album keeps someone else's shared photos
-     * off the timeline, the search index and the widget picker. parentLinkId IS NULL rows are
-     * legacy own photos from before the parent column existed — they stay visible.
+     * The user's own photo stream. Shared-with-me photos sit in the same table parented to an
+     * album linkId, so excluding rows whose parent is a known album keeps them off the timeline;
+     * own photos are parented to the photos root. NULL parentLinkId = legacy own photos, kept visible.
      */
     @Query(
         "SELECT * FROM photo_listing WHERE userId = :userId AND (parentLinkId IS NULL OR " +
@@ -70,12 +67,12 @@ interface PhotoListingDao {
     @Query("SELECT linkId FROM photo_listing WHERE userId = :userId")
     suspend fun getAllLinkIds(userId: String): List<String>
 
-    /** Rows whose thumbnail hasn't been decrypted yet, newest photo first — fed to the
-     *  scheduler's background warm-up. The scheduler walks this list until the on-disk cache
-     *  reaches its size budget, so the most recently captured photos (the ones a user is most
-     *  likely to browse) get warmed first and the cold tail decrypts on demand. */
-    @Query("SELECT * FROM photo_listing WHERE userId = :userId AND thumbnailUrl IS NULL ORDER BY captureTime DESC")
-    suspend fun getUndecryptedThumbnails(userId: String): List<PhotoListingEntity>
+    /** Page of undecrypted-thumbnail rows with capture time before [beforeTime], newest first — fed to
+     *  the scheduler's background warm-up so the most recently captured photos warm first and the cold
+     *  tail decrypts on demand. Paged (not one big query) so a huge library's rows — each carrying
+     *  crypto material — never all sit in memory at once. */
+    @Query("SELECT * FROM photo_listing WHERE userId = :userId AND thumbnailUrl IS NULL AND captureTime < :beforeTime ORDER BY captureTime DESC LIMIT :limit")
+    suspend fun getUndecryptedThumbnailsBefore(userId: String, beforeTime: Long, limit: Int): List<PhotoListingEntity>
 
     /** Returns entities for the given linkIds — used to preserve existing thumbnailUrls during refresh. */
     @Query("SELECT * FROM photo_listing WHERE linkId IN (:linkIds)")
@@ -85,42 +82,23 @@ interface PhotoListingDao {
     @Query("SELECT * FROM photo_listing WHERE linkId IN (:linkIds) ORDER BY captureTime DESC")
     fun observeByLinkIds(linkIds: List<String>): Flow<List<PhotoListingEntity>>
 
-    /** Cached photos belonging to a specific album. Used by album detail to populate the
-     *  grid INSTANTLY from the DB before the network refresh kicks in. Requires that the
-     *  photo's `parentLinkId` field is populated — true for entities built by PhotoEntityBuilder
-     *  after the v4→v5 migration, false for pre-migration legacy rows (those still need the
-     *  full network refresh on first open). */
+    /** Cached photos for an album, for instant album-detail paint. Needs a populated parentLinkId —
+     *  pre-v4→v5 legacy rows lack it and still need a network refresh on first open. */
     @Query("SELECT * FROM photo_listing WHERE parentLinkId = :albumLinkId ORDER BY captureTime DESC")
     suspend fun getByParentLinkId(albumLinkId: String): List<PhotoListingEntity>
 
-    /**
-     * Lazy-thumbnail-decrypt: after the scheduler decrypts a single photo's thumbnail,
-     * write JUST the URL field without touching anything else. Going through `upsertAll`
-     * with a full row would race against concurrent metadata refreshes (which might
-     * over-write a freshly-decrypted URL with stale null).
-     */
+    /** Writes JUST the thumbnailUrl — a full-row upsert would race a concurrent metadata refresh
+     *  and could overwrite the freshly-decrypted URL with a stale null. */
     @Query("UPDATE photo_listing SET thumbnailUrl = :url WHERE linkId = :linkId")
     suspend fun updateThumbnailUrl(linkId: String, url: String)
 
-    /**
-     * Clears every cached `file://` thumbnail path so the rows fall back to the lazy
-     * decrypt path. Called after the decrypted-thumbnail files are deleted from disk:
-     * the stored paths now point at missing files, and the scheduler skips re-decrypt
-     * while `thumbnailUrl` is non-null. Nulling the column lets each visible cell
-     * re-request its thumbnail immediately off the persisted crypto material, with no
-     * per-photo network round-trip and without waiting for a full library refresh.
-     */
+    /** Nulls every cached `file://` path after the on-disk thumbnails are deleted, re-enabling the
+     *  lazy decrypt path (the scheduler skips rows whose thumbnailUrl is still non-null). */
     @Query("UPDATE photo_listing SET thumbnailUrl = NULL WHERE thumbnailUrl LIKE 'file://%'")
     suspend fun clearCachedThumbnailUrls()
 
-    /**
-     * Nulls the cached `file://` thumbnail path for a specific set of links. Used by the
-     * thumbnail cache's size-bounded eviction: once the oldest `thumb_<linkId>.jpg` files are
-     * deleted to stay under the cache cap, their rows must drop the now-dangling path so the
-     * scheduler re-decrypts them the next time the cell scrolls into view (the enqueue path
-     * skips any row whose thumbnailUrl is still non-null). The crypto material stays on the
-     * row, so a re-warm costs one decrypt, never a network round-trip.
-     */
+    /** Per-link version of [clearCachedThumbnailUrls] for size-bounded cache eviction. Crypto
+     *  material stays on the row, so a re-warm costs one decrypt, never a network round-trip. */
     @Query("UPDATE photo_listing SET thumbnailUrl = NULL WHERE linkId IN (:linkIds)")
     suspend fun clearThumbnailUrlsByLinkIds(linkIds: List<String>)
 }

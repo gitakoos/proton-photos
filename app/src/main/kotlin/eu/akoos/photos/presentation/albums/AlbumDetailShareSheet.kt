@@ -87,30 +87,6 @@ import eu.akoos.photos.presentation.theme.Line2
 import eu.akoos.photos.presentation.theme.PillBg
 import eu.akoos.photos.presentation.theme.PillBorder
 
-// ── Share sheet ────────────────────────────────────────────────────────────────
-//
-// Mirrors the Drive web share dialog:
-//   ┌────────────────────────────────────────────────────────────────────┐
-//   │ Share <albumName>                                              [×] │
-//   ├────────────────────────────────────────────────────────────────────┤
-//   │  ┌──────────────────────────────────────────┐  ┌────────────────┐  │
-//   │  │ Add people or groups to share…           │  │ can edit  ▾    │  │
-//   │  └──────────────────────────────────────────┘  └────────────────┘  │
-//   │                                                                    │
-//   │  Who has access                                                    │
-//   │  ────────────────────────────────────────────────────────────────  │
-//   │   ⓞ owner@…                                       [owner]          │
-//   │   ⓡ friend@…                          [can edit ▾]    [×]          │
-//   │   ⓟ pending@…                          [pending]      [×]          │
-//   ├────────────────────────────────────────────────────────────────────┤
-//   │  Public link                                       [○ Not active]  │
-//   │  Anyone on the Internet with the link              [can view ▾]    │
-//   │  ┌────────────────────────────┐  ┌────────────────┐                │
-//   │  │ https://drive.proton.me/…  │  │   Copy link    │                │
-//   │  └────────────────────────────┘  └────────────────┘                │
-//   ├────────────────────────────────────────────────────────────────────┤
-//   │              Stop sharing  (red, footer)                            │
-//   └────────────────────────────────────────────────────────────────────┘
 @OptIn(ExperimentalMaterial3Api::class, androidx.compose.material3.ExperimentalMaterial3Api::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 internal fun ShareAlbumSheet(
@@ -138,36 +114,21 @@ internal fun ShareAlbumSheet(
     onChangeInvitationPermission: (invitationId: String, permissions: Int) -> Unit,
     onDismissInviteResult: () -> Unit,
 ) {
-    // ── Local state for the Drive-web-style invite popup ────────────────────────
     var inviteEmail by remember { mutableStateOf("") }
-    // Pending chips — the user adds emails here BEFORE tapping Share.
     val pendingEmails = remember { mutableStateListOf<String>() }
-    // Optional message attached to the invite batch. Not currently sent to the backend
-    // (the repo signature doesn't take a message yet), but typed in the UI for parity
-    // with Drive web and so we can plumb it through later without redesigning.
+    // Typed for Drive-web parity but dropped at the data-layer boundary — repo signature has no message field yet.
     var inviteMessage by remember { mutableStateOf("") }
-    // Permission attached to NEW invites — the row-level dropdown is mirrored by the
-    // top-level "can view / can edit" selector that gates the invite text input. We
-    // start at 6 (editor) to match the existing inviteToAlbum() default in the data layer.
+    // 6 (editor) matches the inviteToAlbum() default in the data layer.
     var newInvitePermissions by remember { mutableStateOf(6) }
 
-    // Validation surface for the email field — shows the inline error message when the
-    // user has typed something AND it doesn't parse as a valid address. Empty input is
-    // treated as "no chip yet" (not an error).
     val trimmedEmail = inviteEmail.trim()
-    // EMAIL_ADDRESS is already strict, but harden the prefix anyway: reject angle
-    // brackets, spaces, and other characters that occasionally slip through paste
-    // operations (and that break URL encoding downstream when the server endpoint
-    // looks up the recipient's public key).
+    // Reject chars that slip through paste and break the recipient public-key URL lookup downstream.
     val hasForbiddenChars = trimmedEmail.any { it in "<>\"' \t\n\r" }
     val isValidEmail = trimmedEmail.isNotEmpty() && !hasForbiddenChars &&
         android.util.Patterns.EMAIL_ADDRESS.matcher(trimmedEmail).matches()
     val isDuplicate = isValidEmail && trimmedEmail in pendingEmails
     val canAdd = isValidEmail && !isDuplicate && !isInvitingBatch
 
-    // Reset the input when the sheet is dismissed so the next open is fresh. We can't
-    // tap into the SheetState dismiss reliably from inside ModalBottomSheet, so we key
-    // on the chip list being empty + a focus-free state and reset in the dismiss callback.
     val resetInputs = {
         inviteEmail = ""
         pendingEmails.clear()
@@ -176,11 +137,7 @@ internal fun ShareAlbumSheet(
 
     val appColors = AppColors.current
     val isShareActive = publicShareUrl != null
-    // Show "Stop sharing" whenever a share record exists on the backend, not only
-    // when members/invitations/URL are populated — an album can end up with an
-    // orphan share (e.g., last recipient leaves, or an earlier action created the
-    // share but no one accepted). Without this flag the button stays hidden and
-    // the user has no UI affordance to clean up the leftover share.
+    // Cover the orphan-share case (members/URL empty but a share record lingers) so "Stop sharing" can clean it up.
     val hasActiveShares = hasShareRecord || isShareActive ||
         members.isNotEmpty() || invitations.isNotEmpty()
     val hasPendingInvites = pendingEmails.isNotEmpty()
@@ -232,11 +189,7 @@ internal fun ShareAlbumSheet(
                 }
             }
 
-            // ── Inline invite in-flight banner ───────────────────────────────
-            // While the batch is being sent, show an Accent-tinted banner mirroring the
-            // success banner's styling so the user gets immediate feedback that their tap
-            // registered. The completion snackbar lives behind the open sheet, so without
-            // this the sheet would look frozen until the result banner replaces it.
+            // Inline banner — the completion snackbar sits behind the open sheet, so feedback must render in-sheet.
             if (isInvitingBatch) {
                 val sheetSendingText = stringResource(R.string.share_invite_sending)
                 Column(
@@ -265,12 +218,7 @@ internal fun ShareAlbumSheet(
                 }
             }
 
-            // ── Inline invite-success banner ─────────────────────────────────
-            // When the last batch was a full success, surface the confirmation INSIDE
-            // the sheet because the snackbar that the AlbumDetail screen fires sits
-            // behind the drawer and is invisible until the user dismisses the sheet.
-            // The user shouldn't have to close the sheet to learn that their invite
-            // landed.
+            // Inline success banner — the screen's snackbar is hidden behind the open sheet.
             if (inviteBatchResult != null &&
                 inviteBatchResult.failures.isEmpty() &&
                 inviteBatchResult.successCount > 0
@@ -312,11 +260,7 @@ internal fun ShareAlbumSheet(
                 }
             }
 
-            // ── Inline invite-failure banner ─────────────────────────────────
-            // Render any failed invitations from the latest batch INSIDE the sheet so
-            // the user can read why something didn't go through. (Snackbar lives behind
-            // the drawer and would be invisible while the sheet is open.) Dismisses via
-            // the × button or automatically the next time the user runs an invite batch.
+            // Inline failure banner — the screen's snackbar is hidden behind the open sheet.
             if (inviteBatchResult != null && inviteBatchResult.failures.isNotEmpty()) {
                 val sheetAllFailedFmt = stringResource(R.string.share_invite_summary_all_failed)
                 val sheetPartialFmt   = stringResource(R.string.share_invite_summary_partial)
@@ -366,15 +310,8 @@ internal fun ShareAlbumSheet(
                 }
             }
 
-            // ── Section 1: Drive-web-style invite popup ──────────────────────
-            //
-            // Two-step flow:
-            //   1. Type email → tap "Add" → email becomes a chip in the "Will invite"
-            //      row above. Repeat for multiple recipients.
-            //   2. Tap the bottom "Share" button to fire one inviteToAlbum() per chip.
-            //
-            // "Will invite" chip strip — only rendered while there are pending chips
-            // so the share dialog doesn't open with an empty stripe.
+            // Invite flow: type email → Add → chip; then Share fires one inviteToAlbum() per chip.
+            // "Will invite" chip strip — only while there are pending chips.
             if (hasPendingInvites) {
                 Text(
                     stringResource(R.string.share_invite_will_invite),
@@ -391,8 +328,6 @@ internal fun ShareAlbumSheet(
                     pendingEmails.forEach { email ->
                         androidx.compose.material3.AssistChip(
                             onClick = { /* no-op; close icon handles removal */ },
-                            // Disabled while the batch is in flight so the user can't
-                            // half-modify the list mid-invite.
                             enabled = !isInvitingBatch,
                             label = { Text(email, fontSize = 13.sp) },
                             leadingIcon = {
@@ -445,11 +380,7 @@ internal fun ShareAlbumSheet(
                 ) {
                     Icon(Icons.Default.PersonAdd, null, tint = Accent, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.size(10.dp))
-                    // BasicTextField instead of OutlinedTextField — the latter ships with
-                    // a Material 3 baked-in 56 dp container height that the parent Row
-                    // can't shrink, which is what made the pill look chunky. BasicTextField
-                    // sizes to its content; the pill background + height are owned by the
-                    // surrounding Row, which is exactly the modern pill-input look we want.
+                    // BasicTextField, not OutlinedTextField: the latter's fixed 56 dp container can't shrink to the pill height.
                     androidx.compose.foundation.text.BasicTextField(
                         value = inviteEmail,
                         onValueChange = { inviteEmail = it },
@@ -462,9 +393,7 @@ internal fun ShareAlbumSheet(
                         cursorBrush = androidx.compose.ui.graphics.SolidColor(Accent),
                         keyboardOptions = KeyboardOptions(
                             keyboardType = KeyboardType.Email,
-                            // Done over Send — the IME action only adds to the chip list, not
-                            // submits the whole invite, so Done is more intention-matching and
-                            // avoids losing the input on invalid emails.
+                            // Done, not Send — the IME action only adds a chip, it doesn't submit the whole invite.
                             imeAction = ImeAction.Done,
                         ),
                         keyboardActions = KeyboardActions(onDone = {
@@ -484,8 +413,6 @@ internal fun ShareAlbumSheet(
                             innerTextField()
                         },
                     )
-                    // "Add" button shows up only when the input is non-empty so the row
-                    // doesn't look cluttered while the user hasn't started typing yet.
                     if (inviteEmail.isNotBlank()) {
                         androidx.compose.material3.TextButton(
                             onClick = {
@@ -513,10 +440,6 @@ internal fun ShareAlbumSheet(
                 )
             }
 
-            // Inline validation under the email input — shows AFTER the user types
-            // something that isn't a valid email, OR when the typed email duplicates
-            // a chip already in the list. Hidden in the empty-input state so the
-            // dialog opens cleanly.
             if (inviteEmail.isNotBlank() && !isValidEmail) {
                 Text(
                     stringResource(R.string.share_invite_email_invalid),
@@ -531,10 +454,7 @@ internal fun ShareAlbumSheet(
                 )
             }
 
-            // Optional message field — only revealed once at least one chip exists,
-            // so the entry-point UI stays small for the common "just type one email
-            // and share" case. Matches Drive web which also hides the message field
-            // until a recipient is added.
+            // Message field — revealed only once a chip exists, keeping the common single-email case small.
             if (hasPendingInvites) {
                 Spacer(Modifier.height(12.dp))
                 OutlinedTextField(
@@ -563,9 +483,7 @@ internal fun ShareAlbumSheet(
                 )
 
                 Spacer(Modifier.height(12.dp))
-                // Primary Share + secondary Cancel — fixed-position footer for the
-                // invite popup, distinct from the "Stop sharing" footer at the bottom
-                // of the sheet (which acts on the whole album share, not just the batch).
+                // Share + Cancel footer for the invite batch — distinct from the sheet-level "Stop sharing" footer.
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.End,
@@ -595,9 +513,7 @@ internal fun ShareAlbumSheet(
                                 val snapshot = pendingEmails.toList()
                                 val msg = inviteMessage.trim()
                                 onInviteUsers(snapshot, msg, newInvitePermissions)
-                                // Optimistically clear the popup so the sheet returns
-                                // to its idle state. The VM holds the result for the
-                                // top-level LaunchedEffect to surface as a snackbar.
+                                // Optimistically clear; the VM holds the result for the screen's snackbar.
                                 pendingEmails.clear()
                                 inviteEmail = ""
                                 inviteMessage = ""
@@ -637,16 +553,12 @@ internal fun ShareAlbumSheet(
                 modifier = Modifier.padding(bottom = 8.dp),
             )
 
-            // Owner row — always rendered first when we know the owner email. Has no remove
-            // button and an immutable "owner" chip per the Drive web design.
             if (ownerEmail.isNotEmpty()) {
                 OwnerRow(email = ownerEmail)
             }
 
             if (isLoadingInvitations) {
-                // Two placeholder rows that mirror MemberRow's metrics (32.dp avatar +
-                // name line, 10.dp vertical padding) so the list doesn't jump when the
-                // real members fade in. Reuses the shared shimmer primitive.
+                // Placeholder rows mirror MemberRow's metrics so the list doesn't jump when members fade in.
                 repeat(2) {
                     Row(
                         modifier = Modifier
@@ -661,7 +573,6 @@ internal fun ShareAlbumSheet(
                 }
             }
 
-            // Accepted members — clickable permission chip + remove × icon.
             members.forEach { member ->
                 MemberRow(
                     email = member.email,
@@ -671,8 +582,6 @@ internal fun ShareAlbumSheet(
                 )
             }
 
-            // Pending invites — role dropdown + amber chip + revoke × icon. The owner
-            // can still downgrade/upgrade the role until the invitee accepts.
             invitations.forEach { inv ->
                 PendingInvitationRow(
                     email = inv.email,
@@ -682,14 +591,9 @@ internal fun ShareAlbumSheet(
                 )
             }
 
-            // Public-link card removed: the Proton Drive backend does not support public
-            // URLs on album shares (returns code 2511 — "Creating a ShareURL for an Album
-            // is not supported"). The behaviour mirrors the official Drive Android client
-            // where the share-url module is wired but never reached for type-4 (Photo)
-            // shares. Album sharing is invite-only on this backend; the invite-by-email
-            // section above is the canonical path.
+            // No public-link card: Drive rejects public URLs on album shares (code 2511); album sharing is invite-only.
 
-            // ── Footer — "Stop sharing" (revokes all member access) ──────────
+            // Footer — "Stop sharing" revokes all member access.
             if (hasActiveShares) {
                 Spacer(Modifier.height(16.dp))
                 Box(
@@ -788,14 +692,11 @@ internal fun PendingInvitationRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        // Amber reads fine on the dark card but washes out on white — use a
-        // darker amber for the glyph/text in light mode.
+        // Darker amber in light mode — the dark-card amber washes out on white.
         val pendingAmber = if (AppColors.current.isLight) Color(0xFFB45309) else Color(0xFFFCD34D)
         AvatarCircle(letter = email.first().uppercase(), tint = pendingAmber)
         Text(email, color = FgPrimary, fontSize = 14.sp, modifier = Modifier.weight(1f))
-        // The invitee hasn't accepted yet, so the role is still editable — the
-        // backend allows updating a pending invitation's permission bitmap the
-        // same way as an accepted member's.
+        // Role stays editable pre-acceptance — the backend updates a pending invitation's bitmap like a member's.
         PermissionDropdown(
             currentPermissions = permissions,
             onSelect = onChangePermission,

@@ -37,26 +37,17 @@ import java.nio.ByteBuffer
 private const val TAG = "VideoMetadataStripper"
 
 /**
- * Drops container-level location metadata from a video without re-encoding.
- *
- * MP4/MOV captures embed GPS coordinates as container atoms (udta `©xyz` / `loci`,
- * com.apple.quicktime.location.ISO6709) that sit outside every elementary stream, so
- * EXIF-style tag wiping can't reach them and a byte-for-byte upload would leak them even
- * with GPS stripping requested. Re-muxing solves this structurally: every track's encoded
- * samples are stream-copied verbatim into a fresh [MediaMuxer] output, and the muxer only
- * writes a location atom when [MediaMuxer.setLocation] is called — which this never does —
- * so the moov/udta it emits carries no coordinates. Picture quality is untouched because
- * no decode/encode happens; the bitstream is identical.
+ * Drops container-level GPS metadata (udta `©xyz`/`loci`, QuickTime ISO6709 atoms — outside the
+ * elementary streams, so EXIF wiping can't reach them) by re-muxing: every track is stream-copied
+ * verbatim into a fresh [MediaMuxer], which omits the location atom since we never call setLocation.
+ * No decode/encode, so quality is untouched.
  */
 object VideoMetadataStripper {
 
     /**
-     * Stream-copies every track of [uri] into [outFile], producing a video with no
-     * container location atom. Source orientation is preserved via the muxer's
-     * orientation hint (read from [MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION]).
-     *
-     * @return true on success; false (with the partial output deleted) on any failure, so
-     *   the caller can fall back to uploading the original bytes.
+     * Stream-copies every track of [uri] into [outFile] with no location atom; preserves orientation
+     * via the muxer hint. Returns false (and deletes the partial output) on failure so the caller
+     * can fall back to the original bytes.
      */
     fun remuxWithoutLocation(context: Context, uri: String, outFile: File): Boolean {
         var pfd: ParcelFileDescriptor? = null
@@ -72,8 +63,7 @@ object VideoMetadataStripper {
 
             muxer = MediaMuxer(outFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
 
-            // Carry the source's display rotation forward — without the hint a portrait
-            // capture would play back sideways even though the pixels are untouched.
+            // Carry the source rotation forward, else a portrait capture plays back sideways.
             val rotation = runCatching {
                 val mmr = MediaMetadataRetriever()
                 mmr.setDataSource(context, Uri.parse(uri))
@@ -84,8 +74,7 @@ object VideoMetadataStripper {
             }.getOrDefault(0)
             muxer.setOrientationHint(((rotation % 360) + 360) % 360)
 
-            // Map every source track (video, audio, timed text, …) to an output track so
-            // nothing is dropped on the way through.
+            // Map every source track to an output track so nothing is dropped.
             val muxTrackByExtractorTrack = HashMap<Int, Int>(trackCount)
             var maxInputSize = 1 shl 20 // 1 MiB floor for the sample buffer.
             for (i in 0 until trackCount) {
@@ -104,15 +93,12 @@ object VideoMetadataStripper {
                 val outTrack = muxTrackByExtractorTrack.getValue(i)
                 while (true) {
                     buffer.clear()
-                    // Tracks without KEY_MAX_INPUT_SIZE can carry single samples larger
-                    // than the 1 MiB floor (4K/HEVC keyframes) — readSampleData then
-                    // throws instead of truncating. Grow and retry rather than failing
-                    // the whole strip, which would silently upload the unstripped file.
+                    // 4K/HEVC keyframes can exceed the 1 MiB floor; readSampleData throws rather than
+                    // truncate. Grow and retry instead of failing the strip (which would upload unstripped).
                     val read = try {
                         extractor.readSampleData(buffer, 0)
                     } catch (e: IllegalArgumentException) {
-                        // Cap the retry growth — a non-size IllegalArgumentException
-                        // would otherwise loop forever.
+                        // Cap growth so a non-size IllegalArgumentException can't loop forever.
                         val grown = nextSampleBufferCapacity(buffer.capacity()) ?: throw e
                         buffer = ByteBuffer.allocate(grown)
                         continue
@@ -152,17 +138,10 @@ object VideoMetadataStripper {
         return flags
     }
 
-    /** Hard ceiling for the sample-buffer grow-on-retry loop: at or above this the
-     *  [IllegalArgumentException] is rethrown instead of doubling again, so a non-size
-     *  IllegalArgumentException can't loop forever. */
+    /** Hard ceiling for the sample-buffer grow-on-retry loop; above this the exception is rethrown. */
     internal const val MAX_SAMPLE_BUFFER_BYTES = 64 shl 20
 
-    /**
-     * Buffer-growth cap decision for the [readSampleData] retry loop, factored out of the
-     * inline catch so the branch is unit-testable. Given the current buffer [currentCapacity],
-     * returns the next (doubled) capacity to retry with, or null when the cap is reached and
-     * the caller must rethrow. Pure — no framework types.
-     */
+    /** Next (doubled) buffer capacity for the retry loop, or null at the cap. Extracted for testability. */
     internal fun nextSampleBufferCapacity(currentCapacity: Int): Int? {
         if (currentCapacity >= MAX_SAMPLE_BUFFER_BYTES) return null
         return currentCapacity * 2

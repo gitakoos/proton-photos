@@ -50,6 +50,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -125,7 +126,7 @@ fun AlbumMirrorFoldersScreen(
                         contentAlignment = Alignment.Center,
                     ) {
                         Text(
-                            "No folders found on this device",
+                            stringResource(R.string.settings_excluded_folders_empty),
                             color = colors.fgMute,
                             fontSize = 13.sp,
                         )
@@ -206,7 +207,7 @@ private fun DeviceFolderRow(
             val count = folder.itemCount
             if (count != null) {
                 Text(
-                    "$count photos",
+                    pluralStringResource(R.plurals.count_photos_plural, count, count),
                     color = colors.fgMute,
                     fontSize = 12.sp,
                 )
@@ -215,7 +216,7 @@ private fun DeviceFolderRow(
         if (folder.isOptedIn) {
             Icon(
                 Icons.Default.CheckCircle,
-                contentDescription = "Opted in",
+                contentDescription = stringResource(R.string.mirror_opted_in_cd),
                 tint = colors.accent,
                 modifier = Modifier.size(22.dp),
             )
@@ -265,14 +266,14 @@ private fun CustomFolderRow(
                 fontWeight = FontWeight.Medium,
             )
             Text(
-                "Pending — applies when a folder with this name appears",
+                stringResource(R.string.mirror_custom_pending),
                 color = colors.fgMute,
                 fontSize = 11.5.sp,
             )
         }
         IconBubble(
             icon = Icons.Default.Close,
-            contentDescription = "Remove",
+            contentDescription = stringResource(R.string.mirror_remove_cd),
             onClick = onRemove,
             diameter = 28.dp,
             iconSize = 14.dp,
@@ -342,12 +343,12 @@ private fun AddCustomDialog(
         },
         confirmButton = {
             TextButton(onClick = onConfirm) {
-                Text("Add", color = colors.accent)
+                Text(stringResource(R.string.share_invite_add), color = colors.accent)
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Cancel", color = colors.fgDim)
+                Text(stringResource(R.string.cancel), color = colors.fgDim)
             }
         },
         containerColor = colors.cardBg,

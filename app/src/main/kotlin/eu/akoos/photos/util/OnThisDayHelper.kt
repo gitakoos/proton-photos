@@ -25,36 +25,33 @@ package eu.akoos.photos.util
 import eu.akoos.photos.domain.entity.GalleryItem
 import java.util.Calendar
 
+/** Milestone anniversaries, in years, a memory is allowed to mark. Years in between (3, 4, 6 …)
+ *  are skipped so the carousel highlights meaningful jumps instead of echoing every single year. */
+private val MEMORY_MILESTONE_YEARS = listOf(1, 2, 5, 10)
+
+/** Half-width, in days, of the window around each anniversary. A few days either side (≈ a week)
+ *  keeps a milestone from vanishing just because nothing happened to be shot on the exact day. */
+private const val MEMORY_WINDOW_DAYS = 3
+
 /**
- * Groups items whose capture date falls on TODAY's month + day in a PREVIOUS year
- * (the current year is excluded so "On this day" never echoes back today's own photos).
- * Returns a list of (year, items) pairs sorted most-recent-first. An empty list signals
- * "no memories today" — callers hide the carousel/section entirely.
+ * Curated "memories": photos taken around this date a milestone number of years ago
+ * ([MEMORY_MILESTONE_YEARS] — 1, 2, 5, 10 years), matched within [MEMORY_WINDOW_DAYS] days either
+ * side so a milestone still surfaces when nothing was shot on the exact calendar day. Returns
+ * (year, items) pairs most-recent-first; an empty list means no milestone has photos, so callers
+ * hide the carousel/section entirely. The carousel derives its "N years ago" label from the year.
  *
- * Originally lived in [eu.akoos.photos.presentation.gallery.GalleryScreen]; moved here so
- * the same logic backs both the gallery's "On this day" carousel and the search page's
- * empty-state "On this day" row without two copies drifting apart.
+ * Backs both the gallery's carousel and the search page's memories row from one place.
  */
 fun computeOnThisDay(items: List<GalleryItem>): List<Pair<Int, List<GalleryItem>>> {
     if (items.isEmpty()) return emptyList()
-    val today = Calendar.getInstance()
-    val todayMonth = today.get(Calendar.MONTH)
-    val todayDay = today.get(Calendar.DAY_OF_MONTH)
-    val todayYear = today.get(Calendar.YEAR)
-    val cal = Calendar.getInstance()
-    val matches = items.filter { item ->
-        cal.timeInMillis = item.captureTimeMs
-        cal.get(Calendar.MONTH) == todayMonth &&
-            cal.get(Calendar.DAY_OF_MONTH) == todayDay &&
-            cal.get(Calendar.YEAR) != todayYear
+    val todayYear = Calendar.getInstance().get(Calendar.YEAR)
+    val result = ArrayList<Pair<Int, List<GalleryItem>>>(MEMORY_MILESTONE_YEARS.size)
+    for (yearsAgo in MEMORY_MILESTONE_YEARS) {
+        val anchor = Calendar.getInstance().apply { add(Calendar.YEAR, -yearsAgo) }
+        val lo = (anchor.clone() as Calendar).apply { add(Calendar.DAY_OF_YEAR, -MEMORY_WINDOW_DAYS) }.timeInMillis
+        val hi = (anchor.clone() as Calendar).apply { add(Calendar.DAY_OF_YEAR, MEMORY_WINDOW_DAYS) }.timeInMillis
+        val window = items.filter { it.captureTimeMs in lo..hi }
+        if (window.isNotEmpty()) result += (todayYear - yearsAgo) to window
     }
-    if (matches.isEmpty()) return emptyList()
-    return matches
-        .groupBy { item ->
-            cal.timeInMillis = item.captureTimeMs
-            cal.get(Calendar.YEAR)
-        }
-        .entries
-        .sortedByDescending { it.key }
-        .map { it.key to it.value }
+    return result
 }

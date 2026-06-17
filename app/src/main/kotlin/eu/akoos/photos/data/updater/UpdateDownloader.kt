@@ -81,15 +81,17 @@ class UpdateDownloader @Inject constructor(
         apkUrl: String,
         apkAssetName: String,
     ): Flow<DownloadProgress> = flow {
+        val updatesDir = File(context.cacheDir, "updates").apply { mkdirs() }
+        val partFile = File(updatesDir, "$apkAssetName.part")
         try {
-            val updatesDir = File(context.cacheDir, "updates").apply { mkdirs() }
+            // Clear stale/partial leftovers first so an earlier truncated download can never be
+            // mistaken for a complete, installable APK.
+            updatesDir.listFiles()?.forEach { runCatching { it.delete() } }
             val outFile = File(updatesDir, apkAssetName)
 
             val request = Request.Builder()
                 .url(apkUrl)
-                // GitHub asks for a User-Agent on every API request; the CDN doesn't strictly
-                // require one but tagging the traffic helps server-side debugging if we ever
-                // need to diagnose a bad redirect.
+                // The asset CDN doesn't require a UA, but tagging the traffic eases debugging a bad redirect.
                 .header("User-Agent", "PhotosForProton/${BuildConfig.VERSION_NAME}")
                 .build()
 
@@ -99,9 +101,12 @@ class UpdateDownloader @Inject constructor(
                 }
                 val body = response.body ?: throw IOException("Empty response body")
                 val totalBytes = body.contentLength().takeIf { it > 0L } ?: -1L
+                if (totalBytes > MAX_APK_BYTES) {
+                    throw IOException("Update unexpectedly large ($totalBytes bytes)")
+                }
 
                 body.byteStream().use { input ->
-                    FileOutputStream(outFile).use { output ->
+                    FileOutputStream(partFile).use { output ->
                         val buffer = ByteArray(64 * 1024)
                         var bytesRead: Int
                         var totalRead = 0L
@@ -109,11 +114,13 @@ class UpdateDownloader @Inject constructor(
                         while (input.read(buffer).also { bytesRead = it } != -1) {
                             output.write(buffer, 0, bytesRead)
                             totalRead += bytesRead
+                            // Bound the write even with no Content-Length so a misbehaving CDN can't fill the disk.
+                            if (totalRead > MAX_APK_BYTES) {
+                                throw IOException("Update exceeded the size limit")
+                            }
                             if (totalBytes > 0L) {
+                                // Only forward distinct integer-percent ticks (a 50 MB APK would emit ~800 times).
                                 val percent = ((totalRead * 100L) / totalBytes).toInt().coerceIn(0, 100)
-                                // Avoid emitting on every chunk — a 50 MB APK would otherwise
-                                // emit ~800 times. Only forward distinct integer-percent ticks
-                                // so the dialog redraws on actual progress changes.
                                 if (percent != lastEmittedPercent) {
                                     emit(DownloadProgress.Downloading(percent))
                                     lastEmittedPercent = percent
@@ -123,12 +130,28 @@ class UpdateDownloader @Inject constructor(
                         output.flush()
                     }
                 }
+                // Reject a truncated download: when the length was known, the bytes on disk must match.
+                if (totalBytes > 0L && partFile.length() != totalBytes) {
+                    throw IOException("Truncated download: ${partFile.length()} of $totalBytes")
+                }
+                // Promote .part to the real name only after a complete, size-checked write, so an
+                // interrupted download never leaves an installable-looking file behind.
+                if (outFile.exists()) outFile.delete()
+                if (!partFile.renameTo(outFile)) {
+                    throw IOException("Could not finalize the downloaded update")
+                }
+                emit(DownloadProgress.Complete(outFile))
             }
-            emit(DownloadProgress.Complete(outFile))
         } catch (t: Throwable) {
+            runCatching { partFile.delete() }
             emit(DownloadProgress.Failed(t))
         }
     }.flowOn(Dispatchers.IO)
+
+    private companion object {
+        /** Generous ceiling (release APKs are ~24-39 MB); guards against a runaway/hostile response. */
+        const val MAX_APK_BYTES = 300L * 1024L * 1024L
+    }
 }
 
 sealed class DownloadProgress {

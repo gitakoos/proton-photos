@@ -38,10 +38,22 @@ import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.SyncStateRepository
 import java.io.File
 import java.io.IOException
+import java.util.concurrent.atomic.AtomicInteger
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import javax.inject.Inject
 import javax.inject.Singleton
 
 private const val TAG = "DownloadPhotos"
+
+/** How many album photos download concurrently. Each photo already fetches its blocks in
+ *  parallel, so a small fan-out is enough; the rate-limit-sensitive metadata calls stay
+ *  bounded by the shared network semaphore, and the CDN block fetches carry their own
+ *  retry/backoff, so a couple of photos in flight stays well within Drive's limits. */
+private const val DOWNLOAD_PARALLELISM = 2
 
 @Singleton
 class DownloadPhotosUseCase @Inject constructor(
@@ -65,34 +77,50 @@ class DownloadPhotosUseCase @Inject constructor(
         folderName: String,
         folderByLinkId: Map<String, String> = emptyMap(),
         onProgress: suspend (Progress) -> Unit = {},
-    ): Progress {
-        var done = 0; var failed = 0; var skipped = 0
-        photos.forEach { photo ->
-            try {
-                val existing = alreadyExistsInMediaStore(photo.displayName, photo.mimeType, photo.sizeBytes)
-                if (existing != null) {
-                    linkSyncState(userId, existing, photo)
-                    skipped++
-                    Log.d(TAG, "Already on device, skipped: ${photo.displayName}")
-                } else {
-                    val folder = folderByLinkId[photo.linkId] ?: folderName
-                    val file = cloudRepo.downloadFullResPhoto(userId, photo)
-                    val savedUri = saveFileToMediaStore(
-                        file, photo.displayName, photo.mimeType, folder,
-                        captureTimeSeconds = photo.captureTime,
-                    )
-                    file.delete()
-                    if (savedUri != null) linkSyncState(userId, savedUri, photo)
-                    done++
-                    Log.d(TAG, "Downloaded ${photo.displayName} → ${folder.ifEmpty { "<root>" }}")
+    ): Progress = coroutineScope {
+        val done = AtomicInteger(0); val failed = AtomicInteger(0); val skipped = AtomicInteger(0)
+        val gate = Semaphore(DOWNLOAD_PARALLELISM)
+        fun snapshot() = Progress(done.get() + skipped.get() + failed.get(), photos.size, failed.get(), skipped.get())
+        photos.map { photo ->
+            async {
+                gate.withPermit {
+                    try {
+                        // Reliable skip first: a photo already SYNCED to a still-present local file
+                        // is on the device, so don't re-download it. This catches album photos whose
+                        // cloud DTO carries size 0 — those can't match the MediaStore name+size
+                        // heuristic below, yet they show the green "synced" badge, so re-downloading
+                        // them surprised users.
+                        val syncedUri = syncStateRepo.getByCloudId(photo.linkId)
+                            ?.takeIf { it.status == SyncStatus.SYNCED }
+                            ?.localUri?.takeIf { it.isNotBlank() && localUriExists(it) }
+                        val existing = syncedUri?.let(Uri::parse)
+                            ?: alreadyExistsInMediaStore(photo.displayName, photo.mimeType, photo.sizeBytes)
+                        if (existing != null) {
+                            linkSyncState(userId, existing, photo)
+                            skipped.incrementAndGet()
+                            Log.d(TAG, "Already on device, skipped: ${photo.displayName}")
+                        } else {
+                            val folder = folderByLinkId[photo.linkId] ?: folderName
+                            val file = cloudRepo.downloadFullResPhoto(userId, photo)
+                            val savedUri = saveFileToMediaStore(
+                                file, photo.displayName, photo.mimeType, folder,
+                                captureTimeSeconds = photo.captureTime,
+                            )
+                            file.delete()
+                            if (savedUri != null) linkSyncState(userId, savedUri, photo)
+                            done.incrementAndGet()
+                            Log.d(TAG, "Downloaded ${photo.displayName} → ${folder.ifEmpty { "<root>" }}")
+                        }
+                    } catch (e: Exception) {
+                        if (e is kotlinx.coroutines.CancellationException) throw e
+                        Log.w(TAG, "Failed to download ${photo.displayName}: ${e.message}")
+                        failed.incrementAndGet()
+                    }
+                    onProgress(snapshot())
                 }
-            } catch (e: Exception) {
-                Log.w(TAG, "Failed to download ${photo.displayName}: ${e.message}")
-                failed++
             }
-            onProgress(Progress(done + skipped + failed, photos.size, failed, skipped))
-        }
-        return Progress(done + skipped + failed, photos.size, failed, skipped)
+        }.awaitAll()
+        snapshot()
     }
 
     /**
@@ -111,39 +139,49 @@ class DownloadPhotosUseCase @Inject constructor(
         folderName: String = "",
         folderByLinkId: Map<String, String> = emptyMap(),
         onProgress: suspend (Progress) -> Unit = {},
-    ): Progress {
+    ): Progress = coroutineScope {
         val cloudItems = items.filterIsInstance<GalleryItem.CloudOnly>().map { it.cloud }
         val alreadyOnDevice = items.count { it !is GalleryItem.CloudOnly }
-        var done = 0; var failed = 0; var skipped = alreadyOnDevice
-        onProgress(Progress(done + skipped + failed, items.size, failed, skipped))
+        // CloudOnly items have no local twin by definition (the gallery merge would have paired
+        // them otherwise), so only the MediaStore name+size check is needed here — no SyncState
+        // pre-check like the album path.
+        val done = AtomicInteger(0); val failed = AtomicInteger(0); val skipped = AtomicInteger(alreadyOnDevice)
+        val gate = Semaphore(DOWNLOAD_PARALLELISM)
+        fun snapshot() = Progress(done.get() + skipped.get() + failed.get(), items.size, failed.get(), skipped.get())
+        onProgress(snapshot())
 
-        cloudItems.forEach { photo ->
-            try {
-                val existing = alreadyExistsInMediaStore(photo.displayName, photo.mimeType, photo.sizeBytes)
-                if (existing != null) {
-                    linkSyncState(userId, existing, photo)
-                    skipped++
-                    Log.d(TAG, "Already on device, skipped: ${photo.displayName}")
-                } else {
-                    // Per-photo override beats the default folder. Album-bound photos land in
-                    // Pictures/<AlbumName>/; non-album photos in Pictures/ root (folder = "").
-                    val folder = folderByLinkId[photo.linkId] ?: folderName
-                    val file = cloudRepo.downloadFullResPhoto(userId, photo)
-                    val savedUri = saveFileToMediaStore(
-                        file, photo.displayName, photo.mimeType, folder,
-                        captureTimeSeconds = photo.captureTime,
-                    )
-                    file.delete()
-                    if (savedUri != null) linkSyncState(userId, savedUri, photo)
-                    done++
+        cloudItems.map { photo ->
+            async {
+                gate.withPermit {
+                    try {
+                        val existing = alreadyExistsInMediaStore(photo.displayName, photo.mimeType, photo.sizeBytes)
+                        if (existing != null) {
+                            linkSyncState(userId, existing, photo)
+                            skipped.incrementAndGet()
+                            Log.d(TAG, "Already on device, skipped: ${photo.displayName}")
+                        } else {
+                            // Per-photo override beats the default folder. Album-bound photos land in
+                            // Pictures/<AlbumName>/; non-album photos in Pictures/ root (folder = "").
+                            val folder = folderByLinkId[photo.linkId] ?: folderName
+                            val file = cloudRepo.downloadFullResPhoto(userId, photo)
+                            val savedUri = saveFileToMediaStore(
+                                file, photo.displayName, photo.mimeType, folder,
+                                captureTimeSeconds = photo.captureTime,
+                            )
+                            file.delete()
+                            if (savedUri != null) linkSyncState(userId, savedUri, photo)
+                            done.incrementAndGet()
+                        }
+                    } catch (e: Exception) {
+                        if (e is kotlinx.coroutines.CancellationException) throw e
+                        Log.w(TAG, "Failed to download ${photo.displayName}: ${e.message}")
+                        failed.incrementAndGet()
+                    }
+                    onProgress(snapshot())
                 }
-            } catch (e: Exception) {
-                Log.w(TAG, "Failed to download ${photo.displayName}: ${e.message}")
-                failed++
             }
-            onProgress(Progress(done + skipped + failed, items.size, failed, skipped))
-        }
-        return Progress(done + skipped + failed, items.size, failed, skipped)
+        }.awaitAll()
+        snapshot()
     }
 
     /**
@@ -170,6 +208,7 @@ class DownloadPhotosUseCase @Inject constructor(
             )
             Log.d(TAG, "SyncState linked: ${photo.displayName} → ${savedUri}")
         } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
             Log.w(TAG, "Failed to create SyncState for ${photo.displayName}: ${e.message}")
         }
     }
@@ -230,6 +269,18 @@ class DownloadPhotosUseCase @Inject constructor(
                 Uri.withAppendedPath(collection, id.toString())
             } else null
         }
+    }
+
+    /** True if [uriString] still resolves to a MediaStore row — i.e. the local file behind a
+     *  SYNCED SyncState wasn't deleted out from under it. A stale record then falls through to
+     *  a fresh download instead of being skipped. */
+    private fun localUriExists(uriString: String): Boolean = try {
+        context.contentResolver.query(
+            Uri.parse(uriString), arrayOf(MediaStore.MediaColumns._ID), null, null, null,
+        )?.use { it.moveToFirst() } ?: false
+    } catch (e: Exception) {
+        if (e is kotlinx.coroutines.CancellationException) throw e
+        false
     }
 
     /**
@@ -339,6 +390,7 @@ class DownloadPhotosUseCase @Inject constructor(
             }
             uri
         } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
             // Clean up the pending MediaStore entry on failure
             context.contentResolver.delete(uri, null, null)
             Log.w(TAG, "saveFileToMediaStore failed for $displayName: ${e.message}")

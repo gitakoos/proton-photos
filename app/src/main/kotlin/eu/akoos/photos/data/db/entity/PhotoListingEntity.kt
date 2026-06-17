@@ -23,10 +23,19 @@
 package eu.akoos.photos.data.db.entity
 
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 import eu.akoos.photos.domain.entity.CloudPhoto
 
-@Entity(tableName = "photo_listing")
+@Entity(
+    tableName = "photo_listing",
+    // Cover the timeline's (userId, captureTime) sort and per-album parentLinkId lookups —
+    // both full-scan a large library otherwise.
+    indices = [
+        Index(value = ["userId", "captureTime"]),
+        Index(value = ["parentLinkId"]),
+    ],
+)
 data class PhotoListingEntity(
     @PrimaryKey val linkId: String,
     val shareId: String,
@@ -43,17 +52,9 @@ data class PhotoListingEntity(
     /** Comma-separated PhotoTag ids (Drive enum: 0=Favorite, 1=Screenshot, …). */
     val tagsCsv: String = "",
     // ── Lazy-thumbnail-decrypt material ──────────────────────────────────
-    //
-    // When the sync path runs in "metadata-only" mode we DO NOT decrypt the thumbnail
-    // blob upfront — instead we persist the cipher inputs needed to do it later, on
-    // demand, when the cell actually scrolls into view. All five fields below must
-    // be present for an on-demand decrypt to succeed; any null means we fall back
-    // to the placeholder until the next full refresh fills them in.
-    //
-    // Storing only ENCRYPTED material is non-negotiable: a plaintext nodeKey on
-    // disk would defeat the whole point of Drive's hierarchical encryption (the
-    // encrypted node key bytes are useless without the parent key, which lives
-    // in the in-memory share-key cache).
+    // Cipher inputs for the on-demand thumbnail decrypt; all five must be present or the cell
+    // shows a placeholder until the next refresh. Only ENCRYPTED material is stored — a plaintext
+    // nodeKey at rest would defeat Drive's hierarchical encryption (the parent key stays in memory).
     /** URL where the encrypted thumbnail blob lives on the Drive CDN. */
     val serverThumbnailUrl: String? = null,
     /** Optional pm-storage-token paired with [serverThumbnailUrl] (CDN auth). */

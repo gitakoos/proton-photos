@@ -32,6 +32,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.work.WorkManager
+import coil.imageLoader
 import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -52,6 +53,7 @@ import kotlinx.coroutines.launch
 import me.proton.core.accountmanager.domain.AccountManager
 import me.proton.core.user.domain.usecase.GetUser
 import me.proton.core.user.domain.usecase.ObserveUser
+import eu.akoos.photos.R
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.presentation.lock.AppLockManager
@@ -585,7 +587,7 @@ class SettingsViewModel @Inject constructor(
                 //    still mapped from a previous refresh) and keep them green in the UI.
                 //    Best-effort: a network failure here shouldn't abort the rest of sync.
                 try {
-                    cloudRepo.refreshCloudPhotos(userId)
+                    cloudRepo.refreshCloudPhotos(userId, force = true)
                 } catch (e: kotlinx.coroutines.CancellationException) {
                     throw e
                 } catch (e: Exception) {
@@ -610,7 +612,7 @@ class SettingsViewModel @Inject constructor(
                     android.util.Log.w("SettingsViewModel", "syncNow: post-sync getUser failed", e)
                 }
             } catch (e: Exception) {
-                _uiState.update { it.copy(syncError = e.message ?: "Sync failed") }
+                _uiState.update { it.copy(syncError = e.message ?: context.getString(R.string.settings_sync_failed)) }
             } finally {
                 _uiState.update { it.copy(isSyncing = false) }
             }
@@ -660,9 +662,9 @@ class SettingsViewModel @Inject constructor(
                 when (val result = freeUpSpace(userId, Long.MAX_VALUE)) {
                     is eu.akoos.photos.domain.usecase.FreeUpSpaceUseCase.FreeUpResult.Done -> {
                         val msg = if (result.freed > 0)
-                            "Freed ${result.freed} photo${if (result.freed != 1) "s" else ""} from device"
+                            context.getString(R.string.settings_freed_photos, result.freed)
                         else
-                            "No locally cached backed-up photos to remove"
+                            context.getString(R.string.settings_free_up_none)
                         _uiState.update { it.copy(isFreeingUp = false, syncError = msg) }
                     }
                     is eu.akoos.photos.domain.usecase.FreeUpSpaceUseCase.FreeUpResult.NeedsPermission -> {
@@ -671,7 +673,7 @@ class SettingsViewModel @Inject constructor(
                     }
                 }
             } catch (e: Exception) {
-                _uiState.update { it.copy(isFreeingUp = false, syncError = "Could not free up space: ${e.message}") }
+                _uiState.update { it.copy(isFreeingUp = false, syncError = context.getString(R.string.settings_free_up_error, e.message ?: "")) }
             }
         }
     }
@@ -686,7 +688,7 @@ class SettingsViewModel @Inject constructor(
             val freed = pendingFreeUpLocalUris.size
             pendingFreeUpLocalUris = emptyList()
             _uiState.update { it.copy(freeUpPendingIntent = null,
-                syncError = "Freed $freed photo${if (freed != 1) "s" else ""} from device") }
+                syncError = context.getString(R.string.settings_freed_photos, freed)) }
         }
     }
 
@@ -768,7 +770,7 @@ class SettingsViewModel @Inject constructor(
             _uiState.update { it.copy(deleteLocalAfterBackup = enabled) }
             // Kick off an immediate sync run when the user just turned the toggle on,
             // so the post upload sweep evicts every already SYNCED file without
-            // waiting for the next periodic tick. Mirrors how Save now reacts to a
+            // waiting for the next periodic tick. Mirrors how Save reacts to a
             // user request: the user expects "Delete after backup" to take visible
             // effect the moment they enable it.
             if (enabled) {
@@ -840,17 +842,40 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    @OptIn(coil.annotation.ExperimentalCoilApi::class)
     fun signOut() {
         viewModelScope.launch {
             accountManager.getPrimaryUserId().firstOrNull()?.let { userId ->
-                // Wipe plaintext key material BEFORE the account token disappears so any process
-                // that survives the sign-out can't recover the keys from this Singleton's heap.
-                cloudRepo.clearCacheForSignOut()
-                // Explicitly clear every account-tied DataStore key so a sign-in as a different
-                // user can't inherit the previous account's sync state, folder selection, recent
-                // upload ids, or favourite list. We keep UI preferences (theme, palette,
-                // language) and machine-level flags (onboarding-complete, app-lock, update
-                // throttle) — those are user-of-device choices, not account-tied state.
+                // 1. Stop anything that could re-decrypt content back into the caches we are about
+                //    to wipe, and stop the persistent process-keeper service.
+                runCatching {
+                    SyncWorker.cancel(workManager)
+                    workManager.cancelUniqueWork(SyncWorker.NAME_ONESHOT)
+                    workManager.cancelUniqueWork(SyncWorker.NAME_CONTENT_OBSERVER)
+                    workManager.cancelAllWorkByTag(eu.akoos.photos.worker.AlbumDownloadWorker.TAG)
+                    eu.akoos.photos.service.BackgroundSyncService.stop(context)
+                }
+                // 2. Wipe plaintext key material + this user's cached cloud rows BEFORE the account
+                //    token disappears (heap can't recover keys; the re-login starts from a clean
+                //    fetch instead of replaying stale rows that showed up with black thumbnails).
+                cloudRepo.clearCacheForSignOut(userId)
+                // 3. Delete the decrypted on-disk caches + Coil's caches so no decrypted photo or
+                //    thumbnail of the signed-out user stays readable. MediaStore originals, the
+                //    encrypted in-flight upload spill, and the local hidden vault are left alone.
+                runCatching {
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        listOf("thumbnails", "fullres", "fullres-session", "editor", "video_editor", "motion")
+                            .forEach { File(context.cacheDir, it).deleteRecursively() }
+                        context.cacheDir.listFiles { f -> f.name.startsWith("album_dl_") }?.forEach { it.delete() }
+                        val loader = context.imageLoader
+                        loader.memoryCache?.clear()
+                        loader.diskCache?.clear()
+                    }
+                }
+                // 4. Clear account-tied DataStore state so a sign-in as a different user can't
+                //    inherit the previous account's sync state, folder selection, recent upload
+                //    ids, or favourite list. We keep UI preferences (theme, palette, language) and
+                //    machine-level flags (onboarding-complete, app-lock, update throttle).
                 runCatching {
                     context.settingsDataStore.edit { prefs ->
                         val accountTied = setOf<androidx.datastore.preferences.core.Preferences.Key<*>>(
@@ -874,6 +899,19 @@ class SettingsViewModel @Inject constructor(
                             SettingsKeys.TIMELINE_EXCLUDED_FOLDER_NAMES,
                         )
                         accountTied.forEach { prefs.remove(it) }
+                        // Per-user dynamic keys (one per volume): the events anchor + the photo
+                        // listing resume cursor/complete flag. A stale events anchor surviving
+                        // sign-out is what returned a 404 on the next login until the cache was
+                        // cleared by hand.
+                        val dynamicPrefixes = listOf(
+                            "event_anchor_${userId.id}_",
+                            "photo_listing_cursor_${userId.id}_",
+                            "photo_listing_complete_${userId.id}_",
+                        )
+                        prefs.asMap().keys
+                            .filter { key -> dynamicPrefixes.any { key.name.startsWith(it) } }
+                            .toList()
+                            .forEach { prefs.remove(it) }
                     }
                 }
                 // Reset the MainActivity-held lock timestamps BEFORE disableAccount triggers

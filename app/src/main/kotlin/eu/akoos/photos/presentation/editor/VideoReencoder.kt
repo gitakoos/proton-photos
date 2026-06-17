@@ -36,34 +36,9 @@ import kotlin.coroutines.cancellation.CancellationException
 import kotlin.math.min
 
 /**
- * Decode-then-encode video transcoder. Used when the user has applied a crop or wants
- * pixel-rotation; stream-copy can't satisfy either because the bitstream encodes the
- * full source frame at the source orientation.
- *
- * Pipeline (canonical AOSP CTS pattern, attributed):
- *
- *   MediaExtractor(video) ── encoded samples ──> MediaCodec(decoder)
- *                                                       │
- *                                                       ▼ (decoded RGB on Surface)
- *                                            [OutputSurface ext-OES tex]
- *                                                       │
- *                                                       ▼ GL draw with CropMatrix
- *                                            [InputSurface(encoder.createInputSurface)]
- *                                                       │
- *                                                       ▼
- *                            MediaCodec(encoder) ── encoded samples ──> MediaMuxer(video)
- *
- *   MediaExtractor(audio) ── encoded samples ──> MediaMuxer(audio)   [stream-copy]
- *
- * The audio side is always stream-copy — both the original audio track and the user's
- * picked overlay audio go through the same path. If [audioInputFd] is null we use the
- * original video's audio; otherwise we open a second MediaExtractor on the overlay file.
- *
- * Encoder bitrate strategy: cap at min(sourceBitrate * 1.2, 12 Mbps) so we never blow
- * out a small clip and so cropping doesn't quadruple the file size by accident.
- *
- * Progress reporting: [onProgress] is invoked from the encoder thread every few frames
- * with a value in 0f..1f. The ViewModel can publish this to the UI directly.
+ * Decode-then-encode video transcoder (AOSP CTS pattern: decoder → OutputSurface → GL crop →
+ * InputSurface → encoder → muxer). Used for crop/rotation, which stream-copy can't satisfy.
+ * [onProgress] is invoked from the encoder thread with 0f..1f.
  */
 internal class VideoReencoder(private val context: Context) {
 
@@ -90,17 +65,12 @@ internal class VideoReencoder(private val context: Context) {
         audioOverlayUri: Uri?,
         audioTrimStartUs: Long,
         audioTrimEndUs: Long,
-        /** Source-audio gain in [0..1]. 0 drops the original from the output; 1 keeps it
-         *  unattenuated; intermediate values scale samples via PCM mix. */
+        /** Source-audio gain [0..1]: 0 drops the original, 1 keeps it, between scales via PCM mix. */
         originalAudioGain: Float = 1.0f,
-        /** Overlay-music gain in [0..1]. Ignored when [audioOverlayUri] is null. When both
-         *  this and [originalAudioGain] are > 0 the two streams mix sample-by-sample. */
+        /** Overlay-music gain [0..1], ignored when [audioOverlayUri] is null. */
         musicAudioGain: Float = 1.0f,
         onProgress: (Float) -> Unit,
-        /** Cooperative cancellation probe, checked once per encode-loop iteration. Returns
-         *  false once the calling coroutine is cancelled; the loop then releases its codecs
-         *  via the finally block and throws so the caller's temp-file cleanup runs. Defaults
-         *  to always-active for callers that don't need cancellation. */
+        /** Cooperative cancellation probe checked per loop iteration; false → release codecs and throw. */
         isActive: () -> Boolean = { true },
     ) {
         var sourcePfd: ParcelFileDescriptor? = null
@@ -122,26 +92,9 @@ internal class VideoReencoder(private val context: Context) {
             videoExtractor.selectTrack(videoTrackIdx)
             val srcVideoFormat = videoExtractor.getTrackFormat(videoTrackIdx)
 
-            // Encoder needs an EVEN width/height for H.264 — round down if the user
-            // cropped to an odd number. Mobile encoders enforce 16-aligned input on
-            // some chipsets, but 2-aligned is the safe lowest common denominator.
-            //
-            // SWAP for 90°/270° rotation: the GL pipeline rotates the cropped quad's
-            // content in-place inside the NDC square, then the viewport maps NDC to the
-            // encoder's output buffer. For a non-square crop with sideways rotation the
-            // rotated content's aspect is the inverse of the source crop's — if we
-            // leave encOutW × encOutH equal to cropWidth × cropHeight the output buffer
-            // is "the wrong way around" and the encoder stretches/squishes the rotated
-            // content to fit. Swapping the dims for 90°/270° produces the correct
-            // post-rotation aspect, which is what users expect: a portrait clip rotated
-            // 90° saves as a landscape file with no distortion.
-            // Encoder dim = crop region size (in source pixels). Rotation is handled by
-            // the muxer's orientation hint below — burning rotation into pixels with a GL
-            // matrix was double-applying source rotation on some chipsets (the decoder's
-            // SurfaceTexture intrinsic transform already rotates per source rotation tag)
-            // and produced mirrored / stretched / wrongly-oriented saves. Orientation hint
-            // is honoured by every modern player and matches what the editor preview
-            // shows (ExoPlayer auto-rotates by hint + graphicsLayer adds user rotation).
+            // Encoder dim = crop region size, rounded to even (H.264 needs it), min 16. Rotation goes
+            // through the muxer orientation hint below, NOT GL pixels — burning it in double-applied
+            // source rotation on chipsets where the decoder's SurfaceTexture already rotates by tag.
             val encOutW = (cropWidth and 1.inv()).coerceAtLeast(16)
             val encOutH = (cropHeight and 1.inv()).coerceAtLeast(16)
             val decW = srcVideoFormat.getIntegerOrDefault(MediaFormat.KEY_WIDTH, -1)
@@ -162,14 +115,9 @@ internal class VideoReencoder(private val context: Context) {
                 "source color: standard=$srcStdLog range=$srcRngLog transfer=$srcTrfLog (BT2020=6, HLG=7, PQ=6/13 — see MediaFormat constants)",
             )
 
-            // Build encoder format. KEY_COLOR_FORMAT = COLOR_FormatSurface tells MediaCodec
-            // we'll feed it via createInputSurface() — no manual YUV pushing required.
             val frameRate = srcVideoFormat.getIntegerOrDefault(MediaFormat.KEY_FRAME_RATE, 30)
-            // Many phone captures don't expose KEY_BIT_RATE on the track-level MediaFormat —
-            // fall back to MediaMetadataRetriever's container-level bitrate (video + audio
-            // combined) and subtract a typical 192 kbps audio budget so we don't accidentally
-            // over-encode. Without this fallback the estimate path kicks in and produces a
-            // visibly worse re-encode than the source (user-reported "121 MB → 44 MB").
+            // KEY_BIT_RATE is often absent on phone captures; fall back to MediaMetadataRetriever's
+            // container bitrate minus a 192 kbps audio budget, else the estimate path under-encodes.
             val srcBitrate: Int = run {
                 val fromFormat = srcVideoFormat.getIntegerOrDefault(MediaFormat.KEY_BIT_RATE, 0)
                 if (fromFormat > 0) return@run fromFormat
@@ -191,24 +139,15 @@ internal class VideoReencoder(private val context: Context) {
                 setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
                 setInteger(MediaFormat.KEY_BIT_RATE, encBitrate)
                 setInteger(MediaFormat.KEY_FRAME_RATE, frameRate)
-                setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1) // 1 keyframe per second
-                // H.264 profile/level. High @ Level 4.2 covers 4K @ 30fps at 60 Mbps —
-                // overkill for most phone clips but ensures the encoder doesn't downgrade
-                // to Baseline (which strips B-frames and CABAC, halving quality at the
-                // same bitrate). Wrapped in runCatching so older chipsets that don't
-                // support High profile fall back silently to Baseline rather than crashing.
+                setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
+                // Force High@4.2 so the encoder keeps B-frames/CABAC instead of downgrading to
+                // Baseline (halves quality at the same bitrate). runCatching: older chipsets fall back.
                 runCatching {
                     setInteger(MediaFormat.KEY_PROFILE, MediaCodecInfo.CodecProfileLevel.AVCProfileHigh)
                     setInteger(MediaFormat.KEY_LEVEL, MediaCodecInfo.CodecProfileLevel.AVCLevel42)
                 }
-                // Tag the encoded YUV with explicit color attrs so a player on the other
-                // end interprets the same color space the source was authored in. Sources
-                // that omit KEY_COLOR_STANDARD/RANGE/TRANSFER get BT.709 limited-range
-                // SDR-video defaults — the de-facto standard for SDR phone capture, which
-                // covers ~all of our editor inputs. Without explicit values the encoder
-                // tagged outputs as platform-default (BT.601 on many SoCs) and players
-                // applied the wrong YUV→RGB matrix, surfacing as desaturated reds and
-                // shifted skin tones (user-reported "elvész a szín").
+                // Tag explicit color attrs (default BT.709 limited-range SDR) so players use the right
+                // YUV→RGB matrix; without them many SoCs tag BT.601 and reds/skin tones desaturate.
                 val srcColorStandard = if (srcVideoFormat.containsKey(MediaFormat.KEY_COLOR_STANDARD))
                     srcVideoFormat.getInteger(MediaFormat.KEY_COLOR_STANDARD)
                 else MediaFormat.COLOR_STANDARD_BT709
@@ -228,27 +167,15 @@ internal class VideoReencoder(private val context: Context) {
             inputSurface.makeCurrent()
             encoder.start()
 
-            // The decoder writes decoded frames into our external-OES texture surface.
             outputSurface = OutputSurface()
             val decoderMime = srcVideoFormat.getString(MediaFormat.KEY_MIME)
                 ?: error("Source video track has no MIME type")
             decoder = MediaCodec.createDecoderByType(decoderMime)
-            // Force the decoder to output frames in raw byte orientation by clearing
-            // KEY_ROTATION. On some chipsets (confirmed on Exynos) the
-            // SurfaceTexture's intrinsic transform applies the source's rotation tag
-            // automatically when KEY_ROTATION is present, which then double-rotated with
-            // our orientation hint and squished portrait content into a landscape encoder
-            // buffer. With KEY_ROTATION explicitly 0 the sampled content is always raw
-            // bytes and rotation is handled exclusively by the muxer's orientation hint.
+            // Clear KEY_ROTATION: on Exynos the SurfaceTexture transform auto-applies the rotation tag,
+            // which then double-rotated against the muxer hint. With 0, rotation comes only from the hint.
             srcVideoFormat.setInteger(MediaFormat.KEY_ROTATION, 0)
-            // Tell the decoder which color space the source uses so the SurfaceTexture
-            // sampler picks the correct YUV→RGB matrix. Without this hint many drivers
-            // default to BT.601 limited-range conversion regardless of the source's
-            // actual color standard — which is fine for SD video but desaturates the
-            // reds and shifts skin tones on modern BT.709 phone captures (user-reported
-            // "the saved video's colours are off"). Sources that omit the keys are
-            // assumed to be standard BT.709 SDR limited-range — the de-facto convention
-            // for everything our editor sees in practice.
+            // Hint the source color space (default BT.709 SDR) so the SurfaceTexture sampler picks the
+            // right YUV→RGB matrix; many drivers default to BT.601 and desaturate BT.709 captures.
             if (!srcVideoFormat.containsKey(MediaFormat.KEY_COLOR_STANDARD)) {
                 srcVideoFormat.setInteger(MediaFormat.KEY_COLOR_STANDARD, MediaFormat.COLOR_STANDARD_BT709)
             }
@@ -261,31 +188,16 @@ internal class VideoReencoder(private val context: Context) {
             decoder.configure(srcVideoFormat, outputSurface.surface, null, 0)
             decoder.start()
 
-            // Output muxer. Add video track lazily — encoder needs to surface its
-            // INFO_OUTPUT_FORMAT_CHANGED before we know the final SPS/PPS to embed.
+            // Video track added lazily (need the encoder's INFO_OUTPUT_FORMAT_CHANGED for final SPS/PPS).
             muxer = MediaMuxer(outputFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
-            // Rotation = orientation hint in the output container. Mirrors muxTrimmed's
-            // stream-copy convention so playback through any modern player (ExoPlayer,
-            // VLC, the system gallery) ends up oriented the way the user previewed in
-            // the editor. Burning rotation into pixels via the GL matrix instead led
-            // to double-rotation on chipsets where the decoder's SurfaceTexture
-            // already applies the source rotation — the user saw mirrored / sideways
-            // saves that didn't match the editor preview.
+            // Rotation via container orientation hint (matches muxTrimmed); GL pixel-rotation double-rotated.
             val outputRotation = ((rotationDegrees % 360) + 360) % 360
             muxer.setOrientationHint(outputRotation)
 
             videoExtractor.seekTo(trimStartUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
 
-            // ── Decide audio path ─────────────────────────────────────────────────
-            // Three modes (see AudioMixer doc-comment for full reasoning):
-            //   1. STREAM-COPY: exactly one source has gain == 1.0 and the other is OFF.
-            //      Fast path — no decode/encode. Lossless.
-            //   2. DECODE-ENCODE: at least one track needs partial gain or both tracks need
-            //      to be mixed. AudioMixer.mixAndEncodeAudio handles it; the muxer's audio
-            //      track gets a pre-synthesized AAC LC format with csd-0 baked in so the
-            //      addTrack happens before muxer.start, same as the stream-copy path.
-            //   3. SILENT: both gains effectively 0 (or source has no audio and no overlay).
-            //      audioExtractor stays null and the muxer is built video-only.
+            // Audio path: stream-copy (one track at gain 1.0, lossless), decode-encode (partial gain or
+            // mix, via AudioMixer), or silent (both gains ~0). See AudioMixer for the full reasoning.
             val sourceHasAudio = run {
                 val probe = MediaExtractor().apply { setDataSource(sourcePfd.fileDescriptor) }
                 val has = selectTrack(probe, "audio/") != null
@@ -301,8 +213,7 @@ internal class VideoReencoder(private val context: Context) {
             val streamCopySource = useSourceAudio && !useOverlayAudio && !needsAudioEncode
             val streamCopyOverlay = useOverlayAudio && !useSourceAudio && !needsAudioEncode
 
-            // Open the appropriate stream-copy extractor (mix path bypasses these — it
-            // opens its own extractors inside AudioMixer.decodeAudioToPcm).
+            // Stream-copy extractor (mix path opens its own inside AudioMixer.decodeAudioToPcm).
             if (streamCopyOverlay) {
                 audioPfd = context.contentResolver.openFileDescriptor(audioOverlayUri!!, "r")
                     ?: error("Could not open audio overlay for reading")
@@ -319,18 +230,14 @@ internal class VideoReencoder(private val context: Context) {
                 audioExtractor!!.selectTrack(audioTrackIdx)
             }
 
-            // Pre-compute the AAC encoder's target format (sample rate + channels) for
-            // the mix path. Probe source first (its rate matches what the user is used
-            // to hearing); fall back to overlay if source has no audio track.
+            // AAC target format for the mix path: prefer the source's rate, fall back to overlay.
             val mixTargetFormat: Pair<Int, Int>? = if (needsAudioEncode) {
                 AudioMixer.probeAudioFormat(context, sourceUri)
                     ?: audioOverlayUri?.let { AudioMixer.probeAudioFormat(context, it) }
                     ?: (44100 to 2)
             } else null
 
-            // Rotation passed as 0 — see encOutW/encOutH comment above. The output muxer
-            // gets setOrientationHint(rotationDegrees) instead, which the player honors
-            // on playback without us touching pixel orientation in GL.
+            // Rotation 0 here — handled by the muxer orientation hint, not GL pixels (see above).
             val cropMatrix = CropMatrix.build(
                 sourceWidth = srcVideoFormat.getIntegerOrDefault(MediaFormat.KEY_WIDTH, encOutW),
                 sourceHeight = srcVideoFormat.getIntegerOrDefault(MediaFormat.KEY_HEIGHT, encOutH),
@@ -356,10 +263,6 @@ internal class VideoReencoder(private val context: Context) {
             var lastReportedProgress = -1f
 
             while (!encoderOutputDone) {
-                // A cancelled save (user backed out / closed the editor) should stop burning
-                // CPU immediately rather than transcoding to completion. The finally block
-                // below releases the codecs and muxer; throwing here lets the caller delete
-                // the half-written temp file.
                 if (!isActive()) throw CancellationException("Video transcode cancelled")
                 // Feed encoded video samples into decoder.
                 if (!inputDone) {
@@ -388,11 +291,8 @@ internal class VideoReencoder(private val context: Context) {
                             if (muxerStarted) error("Encoder output format changed twice")
                             val outFormat = encoder.outputFormat
                             videoMuxerTrackIdx = muxer.addTrack(outFormat)
-                            // Register the audio track BEFORE muxer.start() — MediaMuxer
-                            // forbids addTrack after start. Three sources of audio format:
-                            //   • Stream-copy: use the source/overlay's MediaFormat directly
-                            //   • Decode-encode (mix): synthesize an AAC LC format with csd-0
-                            //     so we don't need to spin up a probe encoder just to learn it
+                            // Register audio track before muxer.start() (addTrack is forbidden after):
+                            // stream-copy uses the source format; mix synthesizes an AAC LC format.
                             if (audioExtractor != null && audioMuxerTrackIdx < 0) {
                                 for (i in 0 until audioExtractor.trackCount) {
                                     val fmt = audioExtractor.getTrackFormat(i)
@@ -413,8 +313,7 @@ internal class VideoReencoder(private val context: Context) {
                             val encodedBuffer = encoder.getOutputBuffer(outIdx)
                                 ?: error("encoder.getOutputBuffer returned null")
                             if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0) {
-                                // Codec config bytes — muxer already grabbed them from outputFormat.
-                                bufferInfo.size = 0
+                                bufferInfo.size = 0 // config bytes already taken from outputFormat
                             }
                             if (bufferInfo.size > 0 && muxerStarted) {
                                 encodedBuffer.position(bufferInfo.offset)
@@ -463,10 +362,7 @@ internal class VideoReencoder(private val context: Context) {
                 }
             }
 
-            // ── Audio (stream-copy OR mix-encode) ─────────────────────────────────
-            // Branch on what we decided up top:
-            //   • Stream-copy → byte-for-byte copy the chosen single track (existing path)
-            //   • Mix-encode  → decode source + overlay PCM, mix at user gains, AAC-encode
+            // Audio: stream-copy the single track, or mix source+overlay PCM at user gains and AAC-encode.
             if (audioMuxerTrackIdx >= 0 && audioExtractor != null && !needsAudioEncode) {
                 copyAudioSamples(
                     extractor = audioExtractor,
@@ -504,8 +400,7 @@ internal class VideoReencoder(private val context: Context) {
             runCatching { encoder?.release() }
             runCatching { muxer?.stop() }
             runCatching { muxer?.release() }
-            // Release OutputSurface before InputSurface — the SurfaceTexture's GL texture
-            // is owned by the EGL context that InputSurface holds.
+            // OutputSurface before InputSurface: its GL texture lives in InputSurface's EGL context.
             runCatching { outputSurface?.release() }
             runCatching { inputSurface?.release() }
             runCatching { videoExtractor?.release() }
@@ -516,13 +411,8 @@ internal class VideoReencoder(private val context: Context) {
     }
 
     /**
-     * Stream-copy video samples (lossless, no re-encode) while running the audio path
-     * through the same mix/encode pipeline [transcode] uses. Used when the user has
-     * audio edits (overlay or gain != 0/1) but no crop — re-encoding video would lose
-     * HDR (8-bit GL pipeline can't preserve BT.2020/PQ source dynamic range) and burns
-     * CPU for nothing when we could just copy the bytes.
-     *
-     * Rotation is written via the muxer's orientation hint (same as muxTrimmed).
+     * Stream-copy video (lossless) while mixing audio via [transcode]'s pipeline. Used for audio-only
+     * edits without crop: re-encoding would lose HDR (8-bit GL can't preserve BT.2020/PQ) and waste CPU.
      */
     fun streamCopyVideoWithMixedAudio(
         sourceUri: Uri,
@@ -536,8 +426,7 @@ internal class VideoReencoder(private val context: Context) {
         originalAudioGain: Float,
         musicAudioGain: Float,
         onProgress: (Float) -> Unit,
-        /** Cooperative cancellation probe, checked once per stream-copy iteration. See
-         *  [transcode] for the contract. */
+        /** Cancellation probe; see [transcode]. */
         isActive: () -> Boolean = { true },
     ) {
         var sourcePfd: ParcelFileDescriptor? = null
@@ -559,8 +448,7 @@ internal class VideoReencoder(private val context: Context) {
             muxer.setOrientationHint(outputRotation)
             val videoMuxerTrack = muxer.addTrack(videoFormat)
 
-            // Audio decision tree — same logic as transcode's audio path so the user gets
-            // identical behaviour whether or not crop forced the GL re-encode.
+            // Audio decision tree — same logic as transcode's audio path.
             val sourceHasAudio = run {
                 val probePfd = context.contentResolver.openFileDescriptor(sourceUri, "r")
                 val probe = MediaExtractor().apply { setDataSource(probePfd!!.fileDescriptor) }
@@ -621,8 +509,6 @@ internal class VideoReencoder(private val context: Context) {
             val totalUs = (trimEndUs - trimStartUs).coerceAtLeast(1L)
             var lastReported = -1f
             while (true) {
-                // Bail out of a cancelled save before copying the next sample — the finally
-                // block releases the muxer and the caller deletes the temp file.
                 if (!isActive()) throw CancellationException("Video stream-copy cancelled")
                 buf.clear()
                 val read = videoExtractor.readSampleData(buf, 0)
@@ -635,8 +521,7 @@ internal class VideoReencoder(private val context: Context) {
                     info.presentationTimeUs = (pts - trimStartUs).coerceAtLeast(0L)
                     info.flags = extractorFlagsToBufferFlagsLocal(videoExtractor.sampleFlags)
                     muxer.writeSampleData(videoMuxerTrack, buf, info)
-                    // Video copies very fast (no decode) but we still want a progress signal
-                    // so the sheet shows the bar advance. Cap reports at every 2%.
+                    // Copy is fast but still report progress (capped every 2%) so the bar advances.
                     val p = ((pts - trimStartUs).toFloat() / totalUs.toFloat()) * 0.6f
                     if (p - lastReported >= 0.02f) {
                         lastReported = p
@@ -686,8 +571,7 @@ internal class VideoReencoder(private val context: Context) {
         }
     }
 
-    /** Local copy of extractorFlagsToBufferFlags (defined in VideoEditorViewModel) so
-     *  this file can stream-copy without cross-class plumbing. */
+    /** Local copy of VideoEditorViewModel.extractorFlagsToBufferFlags to avoid cross-class plumbing. */
     private fun extractorFlagsToBufferFlagsLocal(extractorFlags: Int): Int {
         var flags = 0
         if ((extractorFlags and MediaExtractor.SAMPLE_FLAG_SYNC) != 0) {
@@ -708,7 +592,6 @@ internal class VideoReencoder(private val context: Context) {
         timeOriginUs: Long,
         isActive: () -> Boolean = { true },
     ) {
-        // Use the already-selected audio track's format for buffer sizing.
         var maxBufferSize = 256 * 1024
         for (i in 0 until extractor.trackCount) {
             val fmt = extractor.getTrackFormat(i)
@@ -750,20 +633,8 @@ internal class VideoReencoder(private val context: Context) {
     }
 
     /**
-     * Pick an H.264 bitrate that matches the source so a re-encode (crop / audio swap)
-     * doesn't visibly degrade quality. Priority:
-     *
-     *  1. If the source reports KEY_BIT_RATE, use it AS-IS. A re-encode doesn't add
-     *     visual information — using the source's own bitrate gives a faithful output
-     *     for the cropped region. A 4K @ 60 Mbps source stays at 60 Mbps; a 1080p @
-     *     15 Mbps source stays at 15 Mbps. No 30 Mbps cap because that punished 4K
-     *     sources unfairly (user-reported as "the editor turns my 4K into 1080p
-     *     quality").
-     *
-     *  2. If KEY_BIT_RATE is missing (some containers don't expose it), fall back to a
-     *     0.12 bpp pixel-rate estimate with a 5 Mbps floor and a 80 Mbps ceiling. 0.12 bpp
-     *     is roughly the bitrate phones use natively for 1080p30 (10 Mbps) and produces
-     *     visually transparent H.264 output for typical user content.
+     * H.264 bitrate matching the source so a re-encode doesn't degrade quality. Uses KEY_BIT_RATE
+     * as-is when present (no cap — a 30 Mbps cap downgraded 4K), else a 0.12 bpp estimate (5–80 Mbps).
      */
     private fun chooseEncoderBitrate(srcBitrate: Int, width: Int, height: Int, fps: Int): Int {
         if (srcBitrate > 0) return srcBitrate
@@ -772,6 +643,13 @@ internal class VideoReencoder(private val context: Context) {
         return min(estimate, 80_000_000)
     }
 
-    private fun MediaFormat.getIntegerOrDefault(key: String, default: Int): Int =
-        if (containsKey(key)) getInteger(key) else default
+    private fun MediaFormat.getIntegerOrDefault(key: String, default: Int): Int {
+        if (!containsKey(key)) return default
+        // Some encoders store KEY_FRAME_RATE (occasionally KEY_BIT_RATE) as a float; getInteger then
+        // throws ClassCastException and aborts the whole re-encode. Read the float as a fallback,
+        // then the default, so a crop or audio edit never crashes on those devices.
+        return runCatching { getInteger(key) }.getOrElse {
+            runCatching { getFloat(key).toInt() }.getOrDefault(default)
+        }
+    }
 }

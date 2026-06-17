@@ -28,16 +28,9 @@ import androidx.room.PrimaryKey
 import eu.akoos.photos.domain.entity.Album
 
 /**
- * Persisted snapshot of a cloud-hosted album so AlbumsScreen can paint instantly
- * from disk on cold launch (including airplane-mode launches and process death).
- *
- * Mirrors [Album] one-for-one except for [Album.coverThumbnailUrl], which is an
- * already-decrypted CDN URL whose signature expires and whose plaintext we do
- * not want at rest — the repository re-derives it on demand from the encrypted
- * cover-photo material.
- *
- * [lastFetchedMs] is set by the repository when it writes the row, so future
- * "last updated 3 minutes ago"-style UI can be added without another migration.
+ * Cached cloud-album snapshot for instant cold-launch paint. Mirrors [Album] except
+ * [Album.coverThumbnailUrl] — an expiring decrypted CDN URL we don't keep at rest; the repository
+ * re-derives it on demand from the encrypted cover-photo material.
  */
 @Entity(tableName = "cloud_albums")
 data class CloudAlbumEntity(

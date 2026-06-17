@@ -46,10 +46,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import eu.akoos.photos.R
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.ErrorColor
 
@@ -84,9 +86,10 @@ fun ErrorPopup(
     onCopy: (() -> Unit)? = null,
     actionLabel: String? = null,
     onAction: (() -> Unit)? = null,
-    dismissLabel: String = "OK",
+    dismissLabel: String? = null,
 ) {
     val colors = AppColors.current
+    val resolvedDismissLabel = dismissLabel ?: stringResource(R.string.err_dismiss_ok)
     val clipboard = LocalClipboardManager.current
     var expanded by remember(message) { mutableStateOf(false) }
 
@@ -137,7 +140,8 @@ fun ErrorPopup(
                         contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
                     ) {
                         Text(
-                            text = if (expanded) "Show less" else "Show more",
+                            text = if (expanded) stringResource(R.string.err_show_less)
+                                else stringResource(R.string.err_show_more),
                             color = colors.accent,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Medium,
@@ -148,7 +152,7 @@ fun ErrorPopup(
         },
         confirmButton = {
             TextButton(onClick = onDismiss) {
-                Text(dismissLabel, color = colors.accent, fontWeight = FontWeight.SemiBold)
+                Text(resolvedDismissLabel, color = colors.accent, fontWeight = FontWeight.SemiBold)
             }
         },
         dismissButton = {
@@ -176,7 +180,7 @@ fun ErrorPopup(
                             modifier = Modifier.size(14.dp),
                         )
                         Spacer(Modifier.width(6.dp))
-                        Text("Copy", color = colors.fgDim)
+                        Text(stringResource(R.string.err_copy), color = colors.fgDim)
                     }
                 }
             }

@@ -3,7 +3,7 @@
 <resources>
     <string name="app_name">Photos for Proton</string>
 
-    <!-- Procedura guidata di onboarding -->
+    <!-- Procedura guidata iniziale -->
     <string name="onboarding_back">Indietro</string>
     <string name="onboarding_continue">Continua</string>
     <string name="onboarding_skip">Salta per ora</string>
@@ -14,19 +14,19 @@
     <string name="onboarding_recommended">Consigliato</string>
 
     <string name="onboarding_welcome_title">Benvenuto in Photos for Proton</string>
-    <string name="onboarding_welcome_subtitle">Le tue foto e video, crittografati end to end su Proton Drive. Impostiamo qualche preferenza così l\'app si adatta a te.</string>
+    <string name="onboarding_welcome_subtitle">Le tue foto e i tuoi video, crittografati end-to-end su Proton Drive. Configuriamo qualche preferenza così l\'app si adatta al modo in cui vuoi usarla.</string>
 
     <string name="onboarding_backup_title">Scegli cosa salvare</string>
     <string name="onboarding_backup_subtitle">Modificabile in qualsiasi momento dalle Impostazioni.</string>
     <string name="onboarding_backup_everything">Salva tutto</string>
-    <string name="onboarding_backup_everything_desc">Tutte le foto e i video del dispositivo, escluse le cartelle che escluderai più tardi.</string>
+    <string name="onboarding_backup_everything_desc">Tutte le foto e i video del dispositivo, tranne le cartelle che escludi più avanti.</string>
     <string name="onboarding_backup_folders">Scegli cartelle specifiche</string>
     <string name="onboarding_backup_folders_desc">Seleziona le cartelle dalle Impostazioni. Niente verrà caricato finché non scegli.</string>
     <string name="onboarding_backup_nothing">Niente per ora</string>
     <string name="onboarding_backup_nothing_desc">Sfoglia ciò che è già su Proton Drive senza salvare nuove foto.</string>
 
     <string name="onboarding_privacy_title">Controlli privacy</string>
-    <string name="onboarding_privacy_subtitle">Scegli come le tue foto arrivano dal dispositivo a Drive. Tutto viene comunque crittografato sopra a queste impostazioni.</string>
+    <string name="onboarding_privacy_subtitle">Scegli come le tue foto viaggiano dal dispositivo a Drive. Su tutto questo si aggiunge comunque la crittografia.</string>
     <string name="onboarding_privacy_strip">Rimuovi metadati al caricamento</string>
     <string name="onboarding_privacy_strip_desc">Rimuove la posizione GPS dalle foto prima che raggiungano il cloud. I dati di fotocamera, data e software sono facoltativi. Consigliato.</string>
     <string name="onboarding_privacy_rename">Rinomina con data di scatto</string>
@@ -40,8 +40,8 @@
     <string name="onboarding_photos_title">Accesso alle foto</string>
     <string name="onboarding_photos_subtitle">Serve l\'accesso in lettura alle tue foto e video per crittografarli e salvarli su Drive.</string>
 
-    <string name="onboarding_manage_media_title">Gestire i media</string>
-    <string name="onboarding_manage_media_subtitle">Fortemente consigliato. Permette all\'app di modificare, eliminare e rinominare foto e video sul dispositivo senza una finestra di conferma del sistema ogni volta — usato per la modifica in app, salvataggio sul dispositivo, cestino e Rimuovi dopo backup. Tocca per aprire le impostazioni di sistema.</string>
+    <string name="onboarding_manage_media_title">Gestione dei media</string>
+    <string name="onboarding_manage_media_subtitle">Fortemente consigliato. Permette all\'app di modificare, eliminare e rinominare foto e video sul dispositivo senza una finestra di conferma del sistema ogni volta — serve per la modifica nell\'app, il salvataggio sul dispositivo, il cestino e l\'eliminazione dopo il backup. Tocca per aprire le impostazioni di sistema.</string>
     <string name="onboarding_folders_include_title">Cartelle da salvare</string>
     <string name="onboarding_folders_include_subtitle">Scegli quali cartelle caricare su Drive. Le altre restano solo su questo dispositivo.</string>
     <string name="onboarding_folders_exclude_title">Cartelle da escludere</string>
@@ -58,16 +58,16 @@
     <string name="onboarding_about_github_subtitle">Codice sorgente completo su GitHub.</string>
 
     <string name="onboarding_appearance_title">Personalizzala</string>
-    <string name="onboarding_appearance_subtitle">Scegli tema, colore accento e lingua. Tutto modificabile dopo dalle Impostazioni.</string>
+    <string name="onboarding_appearance_subtitle">Scegli tema, colore principale e lingua. Puoi modificare tutto in seguito dalle Impostazioni.</string>
 
     <string name="onboarding_lock_title">Blocco app</string>
-    <string name="onboarding_lock_subtitle">Biometria o codice del dispositivo ogni volta che l\'app torna in primo piano.</string>
-    <string name="onboarding_lock_enable">Attiva blocco app</string>
-    <string name="onboarding_lock_enable_desc">Chiede biometria o PIN del dispositivo ogni volta che l\'app si apre o torna dal secondo piano.</string>
+    <string name="onboarding_lock_subtitle">Usa la biometria o il codice del dispositivo per sbloccare l\'app ogni volta che torna in primo piano.</string>
+    <string name="onboarding_lock_enable">Attiva il blocco app</string>
+    <string name="onboarding_lock_enable_desc">Chiede la biometria o il PIN del dispositivo ogni volta che l\'app si apre o torna dal background.</string>
     <string name="onboarding_lock_timeout_label">Riblocca dopo</string>
 
-    <string name="onboarding_done_title">Pronto</string>
-    <string name="onboarding_done_subtitle">Le tue impostazioni sono salvate. Tutto modificabile dopo dalla pagina Impostazioni.</string>
+    <string name="onboarding_done_title">Tutto pronto</string>
+    <string name="onboarding_done_subtitle">Le tue impostazioni sono salvate. Puoi modificare tutto in seguito dalla pagina Impostazioni.</string>
 
     <!-- Auth / Sign-in landing -->
     <string name="sign_in_subtitle">Backup foto privato, crittografato end-to-end.</string>
@@ -86,6 +86,32 @@
     <string name="share_action">Condividi</string>
     <string name="share_chooser_title">Condividi tramite</string>
     <string name="share_preparing">Preparazione…</string>
+    <string name="share_viewer_sheet_title">Condividi foto</string>
+    <string name="share_send_to_app">Invia a un\'altra app</string>
+    <string name="share_with_people">Condividi con persone</string>
+    <string name="share_with_people_desc">Aggiungi a un album condiviso</string>
+    <string name="share_public_link">Link pubblico</string>
+    <string name="share_create_link">Crea link pubblico</string>
+    <string name="share_upload_create_link">Carica e crea link</string>
+    <string name="share_creating_link">Creazione del link…</string>
+    <string name="share_link_busy">Un momento…</string>
+    <string name="share_copy_link">Copia link</string>
+    <string name="share_remove_link">Rimuovi link</string>
+    <string name="share_link_copied">Link copiato</string>
+    <string name="share_public_link_desc">Chiunque abbia il link può vederla</string>
+    <string name="share_manage_link_title">Link pubblico</string>
+    <string name="share_manage_link_explainer">Crea un link che chiunque può aprire per vedere questa foto. Puoi aggiungere una password o rimuovere il link in qualsiasi momento.</string>
+    <string name="share_require_password">Richiedi una password</string>
+    <string name="share_require_password_desc">I destinatari devono inserirla per aprire il link</string>
+    <string name="share_password_hint">Inserisci una password</string>
+    <string name="share_set_password">Imposta password</string>
+    <string name="share_update_password">Aggiorna</string>
+    <string name="share_password_set">Password aggiornata</string>
+    <string name="share_password_removed">Password rimossa</string>
+    <string name="share_password_failed">Impossibile aggiornare la password</string>
+    <string name="share_retry">Riprova</string>
+    <string name="share_link_local_only_note">Esegui prima il backup di questa foto per condividerla con un link pubblico.</string>
+    <string name="share_link_failed">Impossibile creare il link pubblico</string>
     <string name="gallery_download_selected">Scarica selezione</string>
     <string name="gallery_delete_selected">Elimina selezione</string>
     <string name="gallery_download_done">%1$d foto scaricate</string>
@@ -97,9 +123,11 @@
     <string name="gallery_add_to_album">Aggiungi all\'album</string>
     <string name="gallery_add_to_album_local_note">Queste foto verranno prima salvate, poi aggiunte all\'album.</string>
     <string name="gallery_no_albums_yet">Ancora nessun album. Creane uno sopra.</string>
-    <string name="gallery_add_to_album_mixed_hint">Elementi solo sul dispositivo e solo nel cloud non possono condividere un album</string>
+    <string name="gallery_add_to_album_mixed_hint">Una selezione mista di elementi solo sul dispositivo e solo nel cloud non può finire nello stesso album. Scegli un solo tipo.</string>
     <string name="gallery_add_to_album_partial">%1$d aggiunte a %2$s, %3$d elemento/i non salvati (selezione mista)</string>
     <string name="gallery_strip_metadata">Rimuovi metadati</string>
+    <string name="gallery_hide_selected">Nascondi selezione</string>
+    <string name="more_label">Altro</string>
     <string name="gallery_added_to_album">%1$d foto aggiunte a %2$s</string>
     <string name="gallery_add_to_album_added_and_queued">%1$d aggiunte, altre %2$d verranno aggiunte dopo il backup</string>
     <string name="gallery_add_to_album_queued_only">%1$d verranno aggiunte a %2$s dopo il backup</string>
@@ -204,7 +232,7 @@
     <string name="settings_excluded_folders_desc_singular">1 cartella esclusa</string>
     <string name="settings_excluded_folders_desc_count">%1$d cartelle escluse</string>
     <string name="settings_excluded_folders_title">Cartelle escluse</string>
-    <string name="settings_excluded_folders_intro">Le foto in queste cartelle non verranno salvate, anche con „Salva tutto" attivo. Gli elementi già caricati restano su Drive.</string>
+    <string name="settings_excluded_folders_intro">Le foto in queste cartelle non verranno salvate, anche con \"Salva tutto\" attivo. Gli elementi già caricati restano su Drive.</string>
     <string name="settings_excluded_folders_empty">Nessuna cartella trovata su questo dispositivo</string>
     <string name="settings_excluded_folders_count_label">%1$d di %2$d cartelle escluse</string>
     <string name="settings_excluded_folders_select_all">Escludi tutto</string>
@@ -283,10 +311,17 @@
     <string name="viewer_added_to_album">Aggiunta a %1$s</string>
     <string name="settings_photos_timeline_section">Sequenza Foto</string>
     <string name="settings_hide_album_photos">Nascondi le foto negli album Drive</string>
+    <string name="settings_hide_all_folders">Nascondi tutte le cartelle del dispositivo</string>
+    <string name="settings_hide_all_folders_desc">Le foto nelle cartelle del dispositivo nascoste non appariranno nella sequenza principale di Foto. Restano sul tuo dispositivo.</string>
     <string name="settings_hide_album_photos_desc">Le foto aggiunte a un album Drive (cloud) non appariranno nella sequenza principale di Foto. Restano visibili nelle schede Album e Condivisi.</string>
     <string name="settings_timeline_filter">Filtro sequenza</string>
     <string name="timeline_filter_title">Filtro sequenza</string>
     <string name="timeline_filter_subtitle">Scegli cosa nascondere dalla sequenza principale di Foto. Le foto nascoste restano sul dispositivo e continuano a essere salvate.</string>
+    <string name="timeline_filter_categories_header">Barra delle categorie</string>
+    <string name="timeline_filter_reorder_hint">Usa le frecce per impostare l\'ordine della barra delle categorie mostrata sopra la timeline Foto.</string>
+    <string name="timeline_filter_per_album_hint">Nascondi singoli album dalla sequenza. L\'interruttore sopra li nasconde tutti insieme.</string>
+    <string name="cd_move_up">Sposta su</string>
+    <string name="cd_move_down">Sposta giù</string>
     <string name="timeline_filter_albums_header">Album Drive</string>
     <string name="settings_telemetry">Telemetria</string>
     <string name="settings_telemetry_desc">Gestita dalle impostazioni del tuo account Proton. Apri account.proton.me per modificarla.</string>
@@ -303,6 +338,8 @@
 
     <string name="albums_empty_title">Nessun album</string>
     <string name="albums_empty_subtitle">Gli album creati in Drive appariranno qui</string>
+    <string name="albums_empty_local">Nessuna cartella sul dispositivo</string>
+    <string name="cd_select_month">Seleziona questo mese</string>
     <string name="selection_photos_only">%d foto</string>
     <string name="selection_videos_only">%d video</string>
     <string name="selection_mixed">%1$d foto, %2$d video</string>
@@ -368,6 +405,7 @@
     <string name="language_es">Spagnolo, Español</string>
     <string name="language_hu">Ungherese, Magyar</string>
     <string name="language_it">Italiano</string>
+    <string name="language_nl">Olandese, Nederlands</string>
     <string name="language_section">Lingua dell\'interfaccia</string>
 
     <!-- About -->
@@ -415,7 +453,7 @@
     <string name="sync_worker_channel_name">Backup foto</string>
     <string name="sync_worker_channel_desc">Mostra l\'avanzamento del backup delle foto su Proton Drive.</string>
     <string name="sync_worker_notification_title">Backup delle foto…</string>
-    <string name="sync_worker_notification_progress">%1$d caricate / %2$d in attesa</string>
+    <string name="sync_worker_notification_progress">%1$d di %2$d caricate</string>
     <string name="sync_worker_notification_cancel">Annulla</string>
     <string name="albums_share_button">Condividi album</string>
     <string name="album_link_copied">Link copiato negli appunti</string>
@@ -477,6 +515,7 @@
     <string name="filter_year_label">Anno</string>
     <string name="filter_any">Qualsiasi</string>
     <string name="filter_month_label">Mese</string>
+    <string name="filter_whole_month">Intero mese</string>
     <string name="filter_reset">Reimposta</string>
 
     <!-- Album condivisi -->
@@ -485,11 +524,12 @@
     <string name="shared_decline">Rifiuta</string>
     <string name="shared_accept">Accetta</string>
     <string name="shared_empty_with_me_title">Nulla è stato condiviso con te</string>
-    <string name="shared_empty_by_me_title">Non hai condiviso alcun album</string>
+    <string name="shared_empty_by_me_title">Non hai ancora condiviso nulla</string>
     <string name="shared_empty_with_me_body">Gli album condivisi con te appariranno qui.</string>
-    <string name="shared_empty_by_me_body">Condividi un album dalla scheda Album per vederlo qui.</string>
+    <string name="shared_empty_by_me_body">Condividi un album o una foto per vederlo qui.</string>
     <string name="shared_by_email">da %1$s</string>
     <string name="shared_photo_count">%1$d foto</string>
+    <string name="shared_by_me_photos_section">Foto condivise</string>
 
     <!-- Permesso notifiche -->
     <string name="notifications_blocked_snackbar">Le notifiche sono disattivate. Non vedrai il progresso di caricamento o download.</string>
@@ -502,7 +542,7 @@
     <string name="search_empty_no_results">Nessun risultato</string>
 
     <string name="viewer_play_slideshow">Avvia presentazione</string>
-    <string name="viewer_pause_slideshow">Metti in pausa la presentazione</string>
+    <string name="viewer_pause_slideshow">Sospendi presentazione</string>
 
     <!-- Widget -->
     <string name="widget_description">Photos for Proton, mostra le tue foto sulla schermata Home</string>
@@ -567,6 +607,16 @@
         <item quantity="other">%1$d anni fa</item>
     </plurals>
 
+    <!-- Schermata Ricordi -->
+    <string name="memories_title">Raccolta</string>
+    <string name="memories_seasons">Stagioni</string>
+    <string name="season_winter">Inverno</string>
+    <string name="season_spring">Primavera</string>
+    <string name="season_summer">Estate</string>
+    <string name="season_autumn">Autunno</string>
+    <string name="sort_newest_first">Più recenti prima</string>
+    <string name="sort_oldest_first">Più vecchi prima</string>
+
     <!-- Menu visualizzatore -->
     <string name="viewer_menu_more">Altro</string>
     <string name="viewer_menu_save_to_device">Salva sul dispositivo</string>
@@ -575,6 +625,17 @@
     <string name="viewer_menu_hide">Nascondi</string>
     <string name="viewer_menu_unhide">Mostra</string>
     <string name="viewer_hidden_label">Nascosto su questo dispositivo</string>
+
+    <!-- Motion photo (Android JPEG with an embedded clip) playback in the viewer -->
+    <string name="cd_motion_photo">Foto in movimento</string>
+    <string name="cd_panorama">Panoramica</string>
+    <string name="cd_play_motion_photo">Riproduci foto in movimento</string>
+    <string name="cd_stop_motion_photo">Ferma foto in movimento</string>
+    <string name="cd_view_panorama">Visualizza panoramica</string>
+    <string name="cd_exit_panorama">Esci dalla panoramica</string>
+    <string name="viewer_view_panorama">Visualizza panoramica</string>
+    <string name="viewer_exit_panorama">Esci</string>
+    <string name="motion_photo_play_failed">Impossibile riprodurre questa foto in movimento.</string>
 
     <!-- Editor video -->
     <string name="video_editor_trim">Taglia</string>
@@ -591,10 +652,48 @@
     <string name="video_editor_encrypting">Cifratura…</string>
     <string name="video_editor_uploading">Caricamento su Drive…</string>
     <string name="video_editor_audio_original">Audio originale</string>
-    <string name="editor_discard_changes_title">Annullare le modifiche?</string>
+    <string name="editor_discard_changes_title">Scartare le modifiche?</string>
     <string name="editor_discard_changes_message">Le modifiche non salvate andranno perse.</string>
-    <string name="editor_discard_changes_confirm">Annulla</string>
+    <string name="editor_discard_changes_confirm">Scarta</string>
     <string name="editor_discard_changes_keep">Continua a modificare</string>
+    <string name="editor_tool_adjust">Regola</string>
+    <string name="editor_tool_filter">Filtro</string>
+    <string name="editor_tool_redact">Censura</string>
+    <string name="editor_filter_original">Originale</string>
+    <string name="editor_filter_bw">B/N</string>
+    <string name="editor_filter_sepia">Seppia</string>
+    <string name="editor_filter_vintage">Vintage</string>
+    <string name="editor_filter_vivid">Vivido</string>
+    <string name="editor_filter_cool">Freddo</string>
+    <string name="editor_filter_warm">Caldo</string>
+    <string name="editor_redact_hint">Disegna sui volti o sul testo per nasconderli</string>
+    <string name="editor_redact_blackout">Oscura</string>
+    <string name="editor_redact_pixelate">Pixela</string>
+    <string name="editor_redact_clear">Cancella</string>
+    <string name="editor_flip_h">Capovolgi in orizzontale</string>
+    <string name="editor_flip_v">Capovolgi in verticale</string>
+    <string name="editor_error_title">Errore dell\'editor</string>
+    <string name="editor_error_title_video">Errore dell\'editor video</string>
+    <string name="editor_save_edits">Salva le modifiche</string>
+    <string name="editor_save_as_new_copy">Salva come nuova copia</string>
+    <string name="editor_save_sheet_cloud">Scegli come salvare la foto modificata nel tuo Drive.</string>
+    <string name="editor_save_sheet_synced">Scegli come salvare la foto modificata. Gli originali di cui è stato eseguito il backup restano in Drive.</string>
+    <string name="editor_save_sheet_device">Scegli come salvare la foto modificata sul tuo dispositivo.</string>
+    <string name="editor_save_sheet_cloud_video">Scegli come la modifica torna nel tuo Proton Drive.</string>
+    <string name="editor_save_sheet_synced_video">Scegli come salvare il video modificato. Gli originali di cui è stato eseguito il backup restano in Drive.</string>
+    <string name="editor_save_sheet_device_video">Scegli come salvare il video modificato sul tuo dispositivo.</string>
+    <string name="editor_save_copy_subtitle_cloud">Viene caricata come nuova foto. L\'originale resta in Drive.</string>
+    <string name="editor_save_copy_subtitle_cloud_video">Viene caricato come nuovo file in Proton Drive — mantiene l\'originale.</string>
+    <string name="editor_save_copy_subtitle_synced">Crea un nuovo file nella tua galleria E carica una copia abbinata in Drive.</string>
+    <string name="editor_save_copy_subtitle_device">Crea un nuovo file nella tua galleria.</string>
+    <string name="editor_saving">Salvataggio…</string>
+    <string name="editor_please_wait">Attendi…</string>
+    <string name="editor_save_cancelled">Salvataggio annullato</string>
+    <string name="editor_no_permission">Nessuna autorizzazione per salvare</string>
+    <string name="editor_save_failed">Salvataggio non riuscito</string>
+    <string name="editor_invalid_video_uri">URI video non valido</string>
+    <string name="editor_video_metadata_failed">Impossibile leggere i metadati del video</string>
+    <string name="editor_cloud_video_download_failed">Download del video dal cloud non riuscito</string>
 
     <!-- v1.3.2 missing-translation backfill -->
     <string name="sync_worker_notification_checking">Ricerca di nuove foto…</string>
@@ -625,6 +724,7 @@
     <!-- Aggiornatore in-app -->
     <string name="update_available_title">Aggiornamento disponibile</string>
     <string name="update_available_message">Una nuova versione (%1$s) è pronta per l\'installazione (%2$d MB).</string>
+    <string name="update_banner_message">La versione %1$s è disponibile. Tocca per installare.</string>
     <string name="update_action_update">Aggiorna</string>
     <string name="update_action_later">Più tardi</string>
     <string name="update_downloading">Download in corso… %1$d%%</string>
@@ -634,6 +734,7 @@
     <string name="update_no_update">Stai usando la versione più recente.</string>
     <string name="update_check_failed">Impossibile verificare gli aggiornamenti. Riprova più tardi.</string>
     <string name="update_permission_required">Consenti l\'installazione di app sconosciute nelle impostazioni di sistema.</string>
+    <string name="update_verification_failed">Impossibile verificare l\'aggiornamento, quindi non è stato installato. Riprova.</string>
     <string name="offline_banner_message">Sei offline. Alcune funzioni non saranno disponibili fino al ripristino della connessione.</string>
     <string name="offline_banner_dismiss_cd">Chiudi avviso</string>
     <string name="network_error_offline">Sei offline. Riprova quando torni online.</string>
@@ -660,8 +761,12 @@
     <string name="shared_save_partial_fmt">%1$d di %2$d foto salvate nella tua libreria</string>
     <string name="shared_save_progress_fmt">Salvataggio %1$d / %2$d nella tua libreria…</string>
     <string name="op_downloading_fmt">Download %1$d / %2$d</string>
+    <string name="op_backing_up_fmt">Backup %1$d / %2$d</string>
     <string name="op_sharing_fmt">Condivisione %1$d / %2$d</string>
     <string name="op_adding_to_album">Aggiunta all\'album…</string>
+    <string name="op_deleting">Eliminazione…</string>
+    <string name="op_hiding">Spostamento in Nascosti…</string>
+    <string name="op_removing_from_album">Rimozione dall\'album…</string>
     <string name="viewer_delete_subtitle_synced">Questa foto ha una copia su Proton Drive. Scegli cosa fare:</string>
     <string name="viewer_delete_remove_from_device">Rimuovi dal dispositivo</string>
     <string name="viewer_delete_remove_from_device_desc">Mantieni la copia su Proton Drive</string>
@@ -686,9 +791,9 @@
     <string name="device_folder_backing_up_fmt">Backup %1$d / %2$d</string>
     <string name="device_folder_backup_all">Esegui backup cartella</string>
     <string name="device_folder_backup_choice_title">Eseguire il backup di questa cartella?</string>
-    <string name="device_folder_backup_choice_body">Tutte le foto e i video di questa cartella verranno salvati su Drive. Puoi anche duplicare la cartella come album.</string>
+    <string name="device_folder_backup_choice_body">Tutte le foto e i video di questa cartella verranno salvati su Drive. Puoi anche rispecchiare la cartella come album.</string>
     <string name="device_folder_backup_timeline">Esegui backup solo delle foto</string>
-    <string name="device_folder_backup_timeline_sub">Caricamento una tantum delle foto qui nella tua galleria.</string>
+    <string name="device_folder_backup_timeline_sub">Caricamento una tantum delle foto di questa cartella nella tua galleria.</string>
     <string name="device_folder_backup_mirror">Crea anche un album</string>
     <string name="device_folder_backup_mirror_sub">Resta sincronizzato: le nuove foto in questa cartella entrano anche nell\'album.</string>
     <string name="sync_folders_add_dialog_title">Aggiungi cartella</string>
@@ -720,4 +825,212 @@
     <string name="force_update_title">Aggiornamento richiesto</string>
     <string name="force_update_body">Questa versione non è più supportata. Aggiorna per continuare.</string>
     <string name="force_update_action">Aggiorna</string>
+    <string name="notifications_title">Notifiche</string>
+    <string name="notifications_subtitle">Scegli quali notifiche l\'app può mostrare. Tutto è attivo per impostazione predefinita.</string>
+    <string name="notifications_nav_desc">Scegli quali notifiche vedere</string>
+    <string name="notifications_backup_status">Notifica di backup sempre attiva</string>
+    <string name="notifications_backup_status_desc">Mostra la notifica sempre attiva mentre l\'app attende nuove foto. Il backup continua e le notifiche di caricamento appaiono anche quando è disattivata; le nuove foto vengono solo rilevate un po\' meno istantaneamente.</string>
+    <string name="notifications_album_download">Download degli album</string>
+    <string name="notifications_album_download_desc">Mostra l\'avanzamento e un riepilogo quando scarichi un album sul tuo dispositivo.</string>
+    <string name="notifications_delete_reminder">Promemoria eliminazione dopo il backup</string>
+    <string name="notifications_delete_reminder_desc">Dopo un backup, ricordami quali foto possono essere rimosse in sicurezza da questo dispositivo.</string>
+    <string name="settings_backup_how_section">Come funziona il backup</string>
+    <string name="settings_theme_palette">Tema e tavolozza</string>
+    <string name="settings_privacy_security">Privacy e sicurezza</string>
+    <string name="cd_scroll_to_top">Torna su</string>
+    <string name="albums_section_header">Album</string>
+    <string name="albums_filter_all">Tutti</string>
+    <string name="albums_filter_cloud">Cloud</string>
+    <string name="albums_filter_local">Sul dispositivo</string>
+    <string name="albums_toggle_cloud_albums">Mostra o nascondi gli album</string>
+
+    <!-- Photo viewer details / metadata sheet -->
+    <string name="viewer_meta_section_file_info">Info file</string>
+    <string name="viewer_meta_section_camera">Fotocamera</string>
+    <string name="viewer_meta_section_location">Posizione</string>
+    <string name="viewer_meta_section_datetime">Data e ora</string>
+    <string name="viewer_meta_section_software">Software e autore</string>
+    <string name="viewer_meta_section_image">Immagine</string>
+    <string name="viewer_meta_full">Metadati completi</string>
+    <string name="viewer_meta_row_file">File</string>
+    <string name="viewer_meta_row_date">Data</string>
+    <string name="viewer_meta_row_size">Dimensione</string>
+    <string name="viewer_meta_row_type">Tipo</string>
+    <string name="viewer_meta_row_album">Album</string>
+    <string name="viewer_meta_row_source">Origine</string>
+    <string name="viewer_meta_row_make">Marca</string>
+    <string name="viewer_meta_row_model">Modello</string>
+    <string name="viewer_meta_row_lens">Obiettivo</string>
+    <string name="viewer_meta_row_focal_length">Lunghezza focale</string>
+    <string name="viewer_meta_row_aperture">Apertura</string>
+    <string name="viewer_meta_row_exposure">Esposizione</string>
+    <string name="viewer_meta_row_iso">ISO</string>
+    <string name="viewer_meta_row_flash">Flash</string>
+    <string name="viewer_meta_row_white_balance">Bilanciamento del bianco</string>
+    <string name="viewer_meta_row_latitude">Latitudine</string>
+    <string name="viewer_meta_row_longitude">Longitudine</string>
+    <string name="viewer_meta_row_altitude">Altitudine</string>
+    <string name="viewer_meta_row_taken">Scattata</string>
+    <string name="viewer_meta_row_modified">Modificata</string>
+    <string name="viewer_meta_row_software">Software</string>
+    <string name="viewer_meta_row_artist">Autore</string>
+    <string name="viewer_meta_row_copyright">Copyright</string>
+    <string name="viewer_meta_row_dimensions">Dimensioni</string>
+    <string name="viewer_meta_row_orientation">Orientamento</string>
+    <string name="viewer_meta_flash_fired">Scattato</string>
+    <string name="viewer_meta_flash_none">Nessun flash</string>
+    <string name="viewer_meta_wb_auto">Automatico</string>
+    <string name="viewer_meta_wb_manual">Manuale</string>
+    <string name="viewer_meta_orientation_normal">Normale</string>
+    <string name="viewer_meta_orientation_180">Ruotata di 180°</string>
+    <string name="viewer_meta_orientation_90_cw">Ruotata di 90° in senso orario</string>
+    <string name="viewer_meta_orientation_90_ccw">Ruotata di 90° in senso antiorario</string>
+    <string name="viewer_meta_source_device_only">Solo sul dispositivo</string>
+    <string name="viewer_meta_source_backed_up">Salvata su Proton Drive</string>
+    <string name="viewer_meta_source_cloud">Proton Drive</string>
+    <string name="viewer_meta_strip">Rimuovi</string>
+    <string name="viewer_meta_strip_all">Rimuovi tutti i metadati privati</string>
+    <string name="viewer_meta_strip_all_desc">Rimuove GPS, informazioni della fotocamera e campi software da questo file</string>
+    <string name="viewer_meta_strip_confirm_title">Rimuovere i metadati?</string>
+    <string name="viewer_meta_strip_confirm_message">Questo rimuoverà definitivamente %1$s dal file sul tuo dispositivo. L\'operazione non può essere annullata.</string>
+    <string name="viewer_meta_strip_what_gps">posizione GPS</string>
+    <string name="viewer_meta_strip_what_camera">informazioni della fotocamera</string>
+    <string name="viewer_meta_strip_what_timestamps">data e ora</string>
+    <string name="viewer_meta_strip_what_software">informazioni software</string>
+
+    <!-- Viewer delete sheet + add-to-album sheet -->
+    <string name="viewer_delete_title_local">Eliminare la foto?</string>
+    <string name="viewer_delete_title_synced">Rimuovere la foto?</string>
+    <string name="viewer_delete_title_cloud">Eliminare da Proton Drive?</string>
+    <string name="viewer_delete_local_body">La foto verrà spostata nella cartella \"Eliminati di recente\" del dispositivo.</string>
+    <string name="viewer_delete_move_to_trash">Sposta nel cestino</string>
+    <string name="viewer_add_to_album_title">Aggiungi all\'album</string>
+    <string name="viewer_add_to_album_empty">Ancora nessun album. Creane uno dalla scheda Album.</string>
+    <string name="viewer_drive_albums_header">ALBUM DI DRIVE</string>
+    <string name="viewer_tap_to_remove_from_album">Tocca per rimuovere dall\'album</string>
+
+    <!-- Viewer image/video states -->
+    <string name="viewer_error_loading_photo">Errore durante il caricamento della foto</string>
+    <string name="viewer_downloading_pct">Scaricamento %1$d%%</string>
+    <string name="viewer_downloading">Scaricamento…</string>
+    <string name="viewer_loading">Caricamento…</string>
+
+    <!-- Viewer snackbar / error fallbacks -->
+    <string name="viewer_unknown_error">errore sconosciuto</string>
+    <string name="viewer_not_signed_in">Non hai effettuato l\'accesso</string>
+    <string name="viewer_not_logged_in">Non hai effettuato l\'accesso</string>
+    <string name="viewer_delete_drive_failed">Impossibile eliminare da Drive</string>
+    <string name="viewer_hide_failed">Impossibile spostare il file in Nascosti</string>
+    <string name="viewer_name_empty">Il nome non può essere vuoto</string>
+    <string name="viewer_rename_failed">Ridenominazione non riuscita</string>
+    <string name="viewer_load_albums_failed">Impossibile caricare gli album: %1$s</string>
+    <string name="viewer_remove_from_album_failed">Rimozione dall\'album non riuscita: %1$s</string>
+    <string name="viewer_set_cover_failed">Impostazione della copertina non riuscita: %1$s</string>
+    <string name="viewer_add_to_album_failed">Aggiunta all\'album non riuscita: %1$s</string>
+    <string name="viewer_create_album_failed">Creazione dell\'album non riuscita: %1$s</string>
+    <string name="viewer_save_to_device_failed">Salvataggio sul dispositivo non riuscito: %1$s</string>
+    <string name="viewer_share_failed">Condivisione non riuscita: %1$s</string>
+    <plurals name="viewer_add_photos_failed">
+        <item quantity="one">Impossibile aggiungere %1$d foto all\'album</item>
+        <item quantity="many">Impossibile aggiungere %1$d foto all\'album</item>
+        <item quantity="other">Impossibile aggiungere %1$d foto all\'album</item>
+    </plurals>
+
+    <!-- ErrorPopup dialog -->
+    <string name="err_dismiss_ok">OK</string>
+    <string name="err_show_more">Mostra altro</string>
+    <string name="err_show_less">Mostra meno</string>
+    <string name="err_copy">Copia</string>
+
+    <!-- Gallery snackbar / error fallbacks -->
+    <string name="gallery_error_title">Errore</string>
+    <string name="gallery_no_local_to_hide">Nessuna foto locale da nascondere</string>
+    <string name="gallery_copy_to_hidden_failed">Impossibile copiare in Nascosti</string>
+    <string name="gallery_move_to_hidden_failed">Impossibile spostare in Nascosti</string>
+    <string name="gallery_add_to_cloud_album_failed">Impossibile aggiungere all\'album nel cloud</string>
+    <string name="gallery_add_to_album_failed">Impossibile aggiungere all\'album</string>
+    <string name="gallery_select_photos_first">Seleziona prima delle foto</string>
+    <string name="gallery_create_album_failed">Impossibile creare l\'album: %1$s</string>
+    <string name="gallery_enable_metadata_category">Attiva prima una categoria di metadati in Impostazioni → Privacy</string>
+    <string name="gallery_album_picker_count_drive">%1$s · Drive</string>
+
+    <!-- Album create/rename/delete snackbar fallbacks -->
+    <string name="albums_name_empty">Il nome dell\'album non può essere vuoto</string>
+    <string name="albums_create_failed">Impossibile creare l\'album</string>
+    <string name="albums_rename_same_name">Il nuovo nome è uguale a quello attuale</string>
+    <string name="albums_rename_failed">Ridenominazione non riuscita</string>
+    <string name="albums_delete_failed">Impossibile eliminare l\'album: %1$s</string>
+    <string name="albums_renamed_to">Rinominato in \"%1$s\"</string>
+
+    <string name="cd_album_fully_backed_up">Backup completo</string>
+    <string name="cd_album_partially_backed_up">Backup parziale</string>
+
+    <!-- Trash screen -->
+    <string name="trash_title">Eliminati di recente</string>
+    <string name="trash_restore">Ripristina</string>
+    <string name="trash_empty">Svuota cestino</string>
+    <string name="select_all">Seleziona tutto</string>
+    <string name="trash_device_unsupported">Il cestino del dispositivo richiede Android 11+</string>
+    <string name="trash_device_empty_title">Nessuna foto eliminata di recente</string>
+    <string name="trash_device_empty_subtitle">Le foto eliminate negli ultimi 30 giorni\nappariranno qui</string>
+    <string name="trash_restore_device_message">Verranno ripristinate nella galleria del tuo dispositivo.</string>
+    <string name="trash_delete_forever_message">Non può essere annullato. Le foto verranno rimosse definitivamente da questo dispositivo.</string>
+    <string name="trash_delete_forever_confirm">Elimina definitivamente</string>
+    <string name="trash_restore_cloud_message">Verranno riportate nel tuo flusso foto di Proton Drive.</string>
+    <plurals name="trash_restore_title">
+        <item quantity="one">Ripristinare %1$d foto?</item>
+        <item quantity="many">Ripristinare %1$d foto?</item>
+        <item quantity="other">Ripristinare %1$d foto?</item>
+    </plurals>
+    <plurals name="trash_delete_forever_title">
+        <item quantity="one">Eliminare definitivamente %1$d foto?</item>
+        <item quantity="many">Eliminare definitivamente %1$d foto?</item>
+        <item quantity="other">Eliminare definitivamente %1$d foto?</item>
+    </plurals>
+    <string name="trash_selected_count">%1$d selezionate</string>
+    <string name="trash_long_press_hint">Tieni premuto per selezionare</string>
+
+    <!-- Backup folders (SyncFolders) screen -->
+    <string name="sync_folders_title">Cartelle di backup</string>
+    <string name="sync_folders_description">Scegli quali cartelle salvare su Proton Drive. Le cartelle selezionate verranno caricate automaticamente durante la sincronizzazione.</string>
+    <string name="sync_folders_count_selected">%1$d di %2$d cartelle selezionate</string>
+    <string name="sync_folders_add_action">Aggiungi cartella</string>
+    <string name="sync_folders_add_row_subtitle">Dichiara in anticipo una cartella affinché le foto future al suo interno vengano salvate automaticamente</string>
+    <string name="sync_folders_add_dialog_body">Inserisci il nome esatto della cartella (es. \"Viaggio 2026\"). Appena una foto finisce in una cartella corrispondente, verrà salvata automaticamente.</string>
+    <string name="sync_folders_selected_cd">Selezionata</string>
+
+    <!-- Mirror device folders as albums screen -->
+    <string name="mirror_opted_in_cd">Attivata</string>
+    <string name="mirror_custom_pending">In attesa — si applica quando appare una cartella con questo nome</string>
+    <string name="mirror_remove_cd">Rimuovi</string>
+    <string name="mirror_name_empty">Il nome della cartella non può essere vuoto</string>
+    <string name="mirror_name_invalid_chars">Il nome non può contenere \'/\' né \'=\'</string>
+    <string name="mirror_name_already_added">Cartella già aggiunta</string>
+
+    <!-- Settings — sync error popup + free-up snackbars -->
+    <string name="settings_sync_failed">Sincronizzazione non riuscita</string>
+    <string name="settings_freed_photos">%1$d foto liberate dal dispositivo</string>
+    <string name="settings_free_up_none">Nessuna foto di backup nella cache locale da rimuovere</string>
+    <string name="settings_free_up_error">Impossibile liberare spazio: %1$s</string>
+
+    <!-- Upload status labels (Sync progress panel) -->
+    <string name="upload_status_uploading">Caricamento…</string>
+    <string name="upload_status_encrypting">Crittografia…</string>
+    <string name="upload_status_queued">In coda</string>
+    <string name="upload_status_done">Fatto</string>
+    <string name="upload_status_failed">Non riuscito</string>
+
+    <!-- Shared albums error snackbars -->
+    <string name="shared_decline_failed">Rifiuto non riuscito: %1$s</string>
+    <string name="shared_accept_failed">Accettazione non riuscita: %1$s</string>
+    <string name="shared_load_failed">Impossibile caricare gli album condivisi: %1$s</string>
+
+    <!-- Hidden photos empty state -->
+    <string name="hidden_empty_title">Nessuna foto nascosta</string>
+    <string name="hidden_empty_subtitle">Tieni premuta una foto nella galleria e scegli \"Nascondi\"</string>
+
+    <!-- Densest-layout performance heads-up -->
+    <string name="dense_grid_warning_title">Layout più compatto</string>
+    <string name="dense_grid_warning_message">Mostrare più foto per riga può rendere lo scorrimento meno fluido nelle raccolte molto grandi.</string>
+    <string name="dense_grid_warning_dismiss">Non mostrare più</string>
 </resources>

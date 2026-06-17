@@ -34,6 +34,8 @@ import kotlinx.coroutines.launch
 import me.proton.core.domain.entity.UserId
 import eu.akoos.photos.data.crypto.DriveCryptoHelper
 import eu.akoos.photos.data.db.dao.PhotoListingDao
+import eu.akoos.photos.data.db.dao.SyncStateDao
+import eu.akoos.photos.data.db.dao.DayMetaDao
 import eu.akoos.photos.data.repository.drive.AlbumService
 import eu.akoos.photos.data.repository.drive.AlbumSharingService
 import eu.akoos.photos.data.repository.drive.CloudTrashService
@@ -51,6 +53,7 @@ import eu.akoos.photos.domain.entity.LocalMediaItem
 import eu.akoos.photos.domain.entity.PendingInvitation
 import eu.akoos.photos.domain.entity.ShareInvitation
 import eu.akoos.photos.domain.entity.ShareMember
+import eu.akoos.photos.domain.entity.SharedPhoto
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import java.io.File
 import javax.inject.Inject
@@ -77,6 +80,8 @@ class DrivePhotoRepositoryImpl @Inject constructor(
     private val albumSharingService: AlbumSharingService,
     private val thumbnailScheduler: ThumbnailDecryptScheduler,
     private val photoListingDao: PhotoListingDao,
+    private val syncStateDao: SyncStateDao,
+    private val dayMetaDao: DayMetaDao,
 ) : DrivePhotoRepository {
 
     // Long-lived scope for fire-and-forget DAO lookups in the thumbnail request path.
@@ -84,6 +89,11 @@ class DrivePhotoRepositoryImpl @Inject constructor(
     // actual entity fetch is a DAO suspend call — launching it on an IO supervisor scope
     // keeps the Compose call site cheap and isolates DB failures from leaking out.
     private val thumbnailRequestScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    // App-lifetime scope for repository-owned StateFlows (this repo is a @Singleton). Replaces
+    // GlobalScope for the shared-album save mirror so the flow is owned/cancellable and stops
+    // collecting once no screen observes it.
+    private val repoScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     override suspend fun getVolumeId(userId: UserId): String = shareService.getVolumeId(userId)
 
@@ -96,8 +106,8 @@ class DrivePhotoRepositoryImpl @Inject constructor(
     override fun observePhotosByLinkIds(linkIds: List<String>): Flow<List<CloudPhoto>> =
         streamService.observePhotosByLinkIds(linkIds)
 
-    override suspend fun refreshCloudPhotos(userId: UserId): Unit =
-        streamService.refreshCloudPhotos(userId)
+    override suspend fun refreshCloudPhotos(userId: UserId, force: Boolean): Unit =
+        streamService.refreshCloudPhotos(userId, force)
 
     override suspend fun refreshCloudPhotosIncremental(userId: UserId): Unit =
         streamService.refreshCloudPhotosIncremental(userId)
@@ -168,12 +178,13 @@ class DrivePhotoRepositoryImpl @Inject constructor(
         item: LocalMediaItem,
         sha1HexContentDigest: String,
         uploadUri: String,
+        xAttrMetadata: eu.akoos.photos.data.repository.drive.UploadXAttrMetadata,
         onProgress: ((
             phase: eu.akoos.photos.data.repository.drive.UploadPhase,
             doneBytes: Long,
             totalBytes: Long,
         ) -> Unit)?,
-    ): String = uploadService.uploadFile(userId, item, sha1HexContentDigest, uploadUri, onProgress)
+    ): String = uploadService.uploadFile(userId, item, sha1HexContentDigest, uploadUri, xAttrMetadata, onProgress)
 
     override suspend fun renameOrCopyCloudPhoto(
         userId: UserId,
@@ -184,6 +195,9 @@ class DrivePhotoRepositoryImpl @Inject constructor(
 
     override suspend fun setCloudFavorite(userId: UserId, photo: CloudPhoto, favorite: Boolean): Boolean =
         cloudTrashService.setCloudFavorite(userId, photo, favorite)
+
+    override suspend fun setCloudTag(userId: UserId, photo: CloudPhoto, tagId: Int, add: Boolean): Boolean =
+        cloudTrashService.setCloudTag(userId, photo, tagId, add)
 
     override suspend fun deleteFiles(userId: UserId, linkIds: List<String>) =
         cloudTrashService.deleteFiles(userId, linkIds)
@@ -199,6 +213,18 @@ class DrivePhotoRepositoryImpl @Inject constructor(
 
     override suspend fun createAlbumShareLink(userId: UserId, albumLinkId: String): String =
         albumSharingService.createAlbumShareLink(userId, albumLinkId)
+
+    override suspend fun createPhotoShareLink(userId: UserId, photoLinkId: String): String =
+        albumSharingService.createPhotoShareLink(userId, photoLinkId)
+
+    override suspend fun getPhotoShareLink(userId: UserId, photoLinkId: String): String? =
+        albumSharingService.getPhotoShareLink(userId, photoLinkId)
+
+    override suspend fun revokePhotoShareLink(userId: UserId, photoLinkId: String) =
+        albumSharingService.revokePhotoShareLink(userId, photoLinkId)
+
+    override suspend fun setPhotoLinkPassword(userId: UserId, photoLinkId: String, password: String?): String =
+        albumSharingService.setPhotoLinkPassword(userId, photoLinkId, password)
 
     override suspend fun inviteToAlbum(userId: UserId, albumLinkId: String, email: String) =
         albumSharingService.inviteToAlbum(userId, albumLinkId, email)
@@ -269,14 +295,11 @@ class DrivePhotoRepositoryImpl @Inject constructor(
                     )
                 }
             }
-            .let { flow ->
-                @OptIn(kotlinx.coroutines.DelicateCoroutinesApi::class)
-                flow.stateIn(
-                    scope = GlobalScope,
-                    started = SharingStarted.Eagerly,
-                    initialValue = DrivePhotoRepository.SaveSharedAlbumProgress.Idle,
-                )
-            }
+            .stateIn(
+                scope = repoScope,
+                started = SharingStarted.WhileSubscribed(5_000),
+                initialValue = DrivePhotoRepository.SaveSharedAlbumProgress.Idle,
+            )
 
     override fun acknowledgeSaveSharedAlbumResult() {
         albumSharingService.acknowledgeSaveToLibraryResult()
@@ -313,6 +336,25 @@ class DrivePhotoRepositoryImpl @Inject constructor(
     override suspend fun loadSharedWithMeAlbums(userId: UserId): List<Album> =
         albumSharingService.loadSharedWithMeAlbums(userId)
 
+    override suspend fun loadSharedByMePhotos(userId: UserId): List<SharedPhoto> =
+        albumSharingService.loadSharedByMePhotos(userId)
+
+    override fun observeSharedByMePhotos(linkIds: List<String>): Flow<List<SharedPhoto>> =
+        photoListingDao.observeByLinkIds(linkIds).map { rows ->
+            val byId = rows.associateBy { it.linkId }
+            // Preserve the caller's order (the feed order) and drop rows the DB doesn't have yet.
+            linkIds.mapNotNull { id ->
+                byId[id]?.let { row ->
+                    SharedPhoto(
+                        linkId = row.linkId,
+                        displayName = row.displayName,
+                        isVideo = row.mimeType.startsWith("video/"),
+                        thumbnailUrl = row.thumbnailUrl,
+                    )
+                }
+            }
+        }
+
     override suspend fun loadShareInvitations(userId: UserId, shareId: String): List<ShareInvitation> =
         albumSharingService.loadShareInvitations(userId, shareId)
 
@@ -334,7 +376,7 @@ class DrivePhotoRepositoryImpl @Inject constructor(
     override suspend fun acceptInvitation(userId: UserId, invitationId: String) =
         albumSharingService.acceptInvitation(userId, invitationId)
 
-    override fun clearCacheForSignOut() {
+    override suspend fun clearCacheForSignOut(userId: UserId) {
         // Wipe all plaintext key material before the user's tokens disappear, so even if the
         // process keeps running afterwards a heap inspection can't pull keys from this Singleton.
         shareService.wipeKeyCache()
@@ -346,10 +388,18 @@ class DrivePhotoRepositoryImpl @Inject constructor(
         // old account's album linkId. The Job is rooted in a Singleton-scoped SupervisorJob
         // that otherwise survives ViewModel teardown.
         runCatching { albumSharingService.cancelSaveToLibrary() }
-        // Drop the cached cloud album list so the next signed-in user doesn't briefly see the
-        // previous account's albums on cold launch. Fire-and-forget — sign-out should not
-        // block on a Room write.
-        thumbnailRequestScope.launch { albumService.clearAlbumCache() }
+        // Drop the cached cloud rows for THIS user so a re-login starts from a clean fetch
+        // instead of replaying the previous session's stale entries. The stale photo_listing
+        // rows were the cause of photos reappearing with black thumbnails after re-login (their
+        // decrypt material was gone), and stale pairing/day-meta rows lingered too. Per-user
+        // (userId-scoped) so any other account still signed in is left intact.
+        runCatching { photoListingDao.deleteAll(userId.id) }
+        runCatching { syncStateDao.deleteAll(userId.id) }
+        runCatching { dayMetaDao.deleteAll(userId.id) }
+        // Drop the cached cloud album list so the next signed-in user doesn't see the previous
+        // account's albums. Awaited now (the method is suspend) so the wipe completes before the
+        // account is disabled.
+        runCatching { albumService.clearAlbumCache() }
     }
 
     override fun requestThumbnailDecrypt(userId: UserId, linkId: String) {

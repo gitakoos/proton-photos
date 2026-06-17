@@ -1,0 +1,1046 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Photos for Proton</string>
+
+    <!-- Onboarding wizard (first-launch, post-sign-in) -->
+    <string name="onboarding_back">Terug</string>
+    <string name="onboarding_continue">Doorgaan</string>
+    <string name="onboarding_skip">Nu overslaan</string>
+    <string name="onboarding_allow">Toestaan</string>
+    <string name="onboarding_open_settings">Instellingen openen</string>
+    <string name="onboarding_permission_granted">Verleend</string>
+    <string name="onboarding_finish">Mijn galerij openen</string>
+    <string name="onboarding_recommended">Aanbevolen</string>
+
+    <string name="onboarding_welcome_title">Welkom bij Photos for Proton</string>
+    <string name="onboarding_welcome_subtitle">Je foto\'s en video\'s, end-to-end versleuteld op Proton Drive. Laten we een paar voorkeuren instellen zodat de app past bij hoe jij hem wilt gebruiken.</string>
+
+    <string name="onboarding_backup_title">Kies wat je wilt back-uppen</string>
+    <string name="onboarding_backup_subtitle">Je kunt dit altijd wijzigen in Instellingen.</string>
+    <string name="onboarding_backup_everything">Alles back-uppen</string>
+    <string name="onboarding_backup_everything_desc">Alle foto\'s en video\'s op je apparaat, minus de mappen die je later uitsluit.</string>
+    <string name="onboarding_backup_folders">Specifieke mappen kiezen</string>
+    <string name="onboarding_backup_folders_desc">Kies in Instellingen welke mappen je wilt back-uppen. Er wordt niets geüpload tot je kiest.</string>
+    <string name="onboarding_backup_nothing">Voorlopig niets</string>
+    <string name="onboarding_backup_nothing_desc">Bekijk wat al op Proton Drive staat zonder nieuwe foto\'s te back-uppen.</string>
+
+    <string name="onboarding_privacy_title">Privacyinstellingen</string>
+    <string name="onboarding_privacy_subtitle">Kies hoe je foto\'s van je apparaat naar Drive gaan. Daar bovenop wordt alles versleuteld.</string>
+    <string name="onboarding_privacy_strip">Metadata verwijderen bij uploaden</string>
+    <string name="onboarding_privacy_strip_desc">Verwijder de GPS-locatie uit foto\'s voordat ze de cloud bereiken. Camera-, tijdstempel- en softwaregegevens zijn optioneel. Aanbevolen.</string>
+    <string name="onboarding_privacy_rename">Hernoemen naar opnamedatum</string>
+    <string name="onboarding_privacy_rename_desc">Upload bestanden als 2026-05-30_14-32-08.jpg in plaats van IMG_2841.jpg. Het bestand op je apparaat blijft zoals het is.</string>
+    <string name="onboarding_privacy_delete">Van apparaat verwijderen na back-up</string>
+    <string name="onboarding_privacy_delete_desc">Zodra een foto veilig op Drive staat, haal je hem van dit apparaat om ruimte te besparen. Andere galerij-apps zien hem dan niet meer.</string>
+
+    <string name="onboarding_notif_title">Blijf op de hoogte</string>
+    <string name="onboarding_notif_subtitle">Sta meldingen toe zodat je de voortgang van back-ups en opruimmeldingen kunt zien, ook als de app gesloten is.</string>
+
+    <string name="onboarding_photos_title">Toegang tot je foto\'s</string>
+    <string name="onboarding_photos_subtitle">We hebben leestoegang tot je foto\'s en video\'s nodig om ze te versleutelen en naar Drive te back-uppen.</string>
+
+    <string name="onboarding_manage_media_title">Media beheren</string>
+    <string name="onboarding_manage_media_subtitle">Sterk aanbevolen. Hiermee kan de app foto\'s en video\'s op je apparaat bewerken, verwijderen en hernoemen zonder telkens een systeemvenster ter bevestiging — gebruikt voor bewerken in de app, terug opslaan op apparaat, de prullenbakflow en Verwijderen na back-up. Tik om de systeeminstellingen te openen.</string>
+    <string name="onboarding_folders_include_title">Mappen om te back-uppen</string>
+    <string name="onboarding_folders_include_subtitle">Kies welke mappen naar Drive geüpload moeten worden. Items in andere mappen blijven alleen op dit apparaat.</string>
+    <string name="onboarding_folders_exclude_title">Mappen om over te slaan</string>
+    <string name="onboarding_folders_exclude_subtitle">Vink de mappen aan die je NIET wilt uploaden. Al het andere wordt automatisch geback-upt.</string>
+    <string name="onboarding_folders_needs_perm">Sta eerst toegang tot foto\'s toe om je mappen te zien.</string>
+    <string name="onboarding_folders_empty">Geen fotomappen op dit apparaat gevonden.</string>
+    <string name="onboarding_album_mirror_title">Apparaatmappen spiegelen als Drive-albums?</string>
+    <string name="onboarding_album_mirror_subtitle">Kies mappen waarvan de foto\'s ook in bijbehorende Drive-albums moeten verschijnen. Sla over om alles alleen in je fotostroom te houden.</string>
+    <string name="onboarding_album_mirror_add_custom">Eigen mapnaam toevoegen</string>
+
+    <string name="onboarding_about_title">Onafhankelijke externe client</string>
+    <string name="onboarding_about_subtitle">Gemaakt door één ontwikkelaar. Niet verbonden met Proton AG. Broncode beschikbaar, GPL-gelicentieerd, geen eigen telemetrie.</string>
+    <string name="onboarding_about_author_subtitle">Persoonlijke site van de ontwikkelaar.</string>
+    <string name="onboarding_about_github_subtitle">Volledige broncode op GitHub.</string>
+
+    <string name="onboarding_appearance_title">Maak het je eigen</string>
+    <string name="onboarding_appearance_subtitle">Kies thema, accentkleur en taal. Alles later aanpasbaar in Instellingen.</string>
+
+    <string name="onboarding_lock_title">App-vergrendeling</string>
+    <string name="onboarding_lock_subtitle">Gebruik biometrie of apparaatcode om de app te ontgrendelen telkens als hij naar de voorgrond terugkeert.</string>
+    <string name="onboarding_lock_enable">App-vergrendeling inschakelen</string>
+    <string name="onboarding_lock_enable_desc">Vraagt om biometrie of apparaatpincode telkens als de app opent of terugkeert uit de achtergrond.</string>
+    <string name="onboarding_lock_timeout_label">Opnieuw vergrendelen na</string>
+
+    <string name="onboarding_done_title">Je bent helemaal klaar</string>
+    <string name="onboarding_done_subtitle">Je instellingen zijn opgeslagen. Alles hier kun je later aanpassen op de pagina Instellingen.</string>
+
+    <!-- Auth / Sign-in landing -->
+    <string name="sign_in_subtitle">Privé, end-to-end versleutelde fotoback-up.</string>
+    <string name="sign_in_unofficial_tag">Onofficiële externe app, niet verbonden met Proton AG</string>
+    <string name="sign_in_button">Aanmelden</string>
+    <string name="sign_in_footer">Veilig aanmelden met je Proton-account</string>
+
+    <!-- Gallery -->
+    <string name="gallery_empty_title">Nog geen foto\'s</string>
+    <string name="gallery_empty_subtitle">Je foto\'s verschijnen hier zodra ze gesynchroniseerd zijn.</string>
+    <string name="gallery_filter_all">Alle</string>
+    <string name="gallery_tab_photos">Foto\'s</string>
+    <string name="gallery_tab_albums">Albums</string>
+    <string name="gallery_tab_shared">Gedeeld</string>
+    <!-- Selection counter variants split by media type. The toolbar uses these instead of
+         gallery_selected_count when the selection contains a non-trivial mix, so the user
+         sees at a glance how many photos vs videos they're about to act on. -->
+    <string name="selection_photos_only">%d foto\'s</string>
+    <string name="selection_videos_only">%d video\'s</string>
+    <string name="selection_mixed">%1$d foto\'s, %2$d video\'s</string>
+
+    <!-- Photo editor error strings, previously hardcoded Hungarian in PhotoEditorViewModel.
+         Surfaced via state.errorMessage on the editor screen. -->
+    <string name="editor_error_load_local">Kon de afbeelding niet laden</string>
+    <string name="editor_saved_as_copy">Kopie opgeslagen in Photos for Proton</string>
+    <string name="editor_external_load_error">Kon dat bestand niet openen</string>
+    <string name="editor_saved_as_copy_toast">Origineel is alleen-lezen, als kopie opgeslagen in je galerij</string>
+    <string name="editor_error_not_signed_in">Je bent niet aangemeld</string>
+    <string name="editor_error_download_failed">Kon de afbeelding niet downloaden</string>
+    <string name="editor_error_decode_failed">Kon de afbeelding niet decoderen</string>
+    <string name="editor_auto_fix">Auto-correctie</string>
+    <string name="editor_crop_reset">Herstellen</string>
+    <!-- Adjustment pill labels in the redesigned Adjust panel. The Auto pill reuses
+         the existing editor_auto_fix string. -->
+    <string name="editor_adj_brightness">Helderheid</string>
+    <string name="editor_adj_exposure">Belichting</string>
+    <string name="editor_adj_contrast">Contrast</string>
+    <string name="editor_adj_highlights">Hooglichten</string>
+    <string name="editor_adj_shadows">Schaduwen</string>
+    <string name="editor_adj_saturation">Verzadiging</string>
+    <string name="editor_adj_tone">Toon</string>
+    <string name="editor_adj_temperature">Temperatuur</string>
+
+    <!-- Hidden album screen, previously hardcoded English. -->
+    <string name="hidden_photos_title">Verborgen foto\'s</string>
+    <string name="hidden_photos_auth_prompt">Verifieer je identiteit om je verborgen foto\'s te bekijken</string>
+    <string name="hidden_photos_unlock">Ontgrendelen</string>
+    <string name="hidden_no_device_lock_notice">Geen schermvergrendeling ingesteld — de kluis is niet beschermd.</string>
+    <string name="hidden_auth_title">Verborgen foto\'s</string>
+    <string name="hidden_auth_description">Verifieer je identiteit om je verborgen foto\'s te bekijken</string>
+    <string name="hide_cloud_copy_notice">Geback-upte foto\'s blijven in je Proton Drive — verbergen verwijdert ze alleen uit de galerij van dit apparaat.</string>
+    <string name="gallery_cancel_selection">Selectie annuleren</string>
+    <string name="share_action">Delen</string>
+    <string name="share_chooser_title">Delen via</string>
+    <string name="share_preparing">Voorbereiden…</string>
+    <string name="share_viewer_sheet_title">Foto delen</string>
+    <string name="share_send_to_app">Naar andere app sturen</string>
+    <string name="share_with_people">Met mensen delen</string>
+    <string name="share_with_people_desc">Aan een gedeeld album toevoegen</string>
+    <string name="share_public_link">Openbare link</string>
+    <string name="share_create_link">Openbare link maken</string>
+    <string name="share_upload_create_link">Uploaden &amp; link maken</string>
+    <string name="share_creating_link">Link maken…</string>
+    <string name="share_link_busy">Even geduld…</string>
+    <string name="share_copy_link">Link kopiëren</string>
+    <string name="share_remove_link">Link verwijderen</string>
+    <string name="share_link_copied">Link gekopieerd</string>
+    <string name="share_public_link_desc">Iedereen met de link kan deze bekijken</string>
+    <string name="share_manage_link_title">Openbare link</string>
+    <string name="share_manage_link_explainer">Maak een link die iedereen kan openen om deze foto te bekijken. Je kunt op elk moment een wachtwoord toevoegen of de link verwijderen.</string>
+    <string name="share_require_password">Wachtwoord vereisen</string>
+    <string name="share_require_password_desc">Ontvangers moeten dit invoeren om de link te openen</string>
+    <string name="share_password_hint">Voer een wachtwoord in</string>
+    <string name="share_set_password">Wachtwoord instellen</string>
+    <string name="share_update_password">Bijwerken</string>
+    <string name="share_password_set">Wachtwoord bijgewerkt</string>
+    <string name="share_password_removed">Wachtwoord verwijderd</string>
+    <string name="share_password_failed">Kon het wachtwoord niet bijwerken</string>
+    <string name="share_retry">Opnieuw proberen</string>
+    <string name="share_link_local_only_note">Maak eerst een back-up van deze foto om hem via een openbare link te delen.</string>
+    <string name="share_link_failed">Kon de openbare link niet maken</string>
+    <string name="gallery_download_selected">Selectie downloaden</string>
+    <string name="gallery_delete_selected">Selectie verwijderen</string>
+    <string name="gallery_download_done">%1$d foto\'s gedownload</string>
+    <string name="gallery_download_done_singular">1 foto gedownload</string>
+    <string name="gallery_download_partial">%1$d gedownload, %2$d mislukt</string>
+    <string name="gallery_share_cloud_warning_title">Cloudfoto\'s delen?</string>
+    <string name="gallery_share_cloud_warning_body">Sommige hiervan staan alleen in de cloud. De app haalt een tijdelijke privékopie op en geeft die alleen aan de app die je kiest. Er wordt niets aan je galerij toegevoegd of zichtbaar voor andere apps.</string>
+    <string name="gallery_share_cloud_warning_continue">Delen</string>
+    <string name="gallery_add_to_album">Aan album toevoegen</string>
+    <string name="gallery_add_to_album_local_note">Deze foto\'s worden eerst geback-upt en daarna aan het album toegevoegd.</string>
+    <string name="gallery_no_albums_yet">Nog geen albums. Maak er hierboven een aan.</string>
+    <string name="gallery_add_to_album_mixed_hint">Een gemengde selectie van alleen-apparaat en alleen-cloud kan niet netjes één album delen. Kies één type.</string>
+    <string name="gallery_add_to_album_partial">%1$d toegevoegd aan %2$s, %3$d item(s) konden niet worden opgeslagen (gemengde selectie)</string>
+    <string name="gallery_strip_metadata">Metadata verwijderen</string>
+    <string name="gallery_hide_selected">Selectie verbergen</string>
+    <string name="more_label">Meer</string>
+    <string name="gallery_added_to_album">%1$d foto\'s toegevoegd aan %2$s</string>
+    <string name="gallery_add_to_album_added_and_queued">%1$d toegevoegd, %2$d volgen na de back-up</string>
+    <string name="gallery_add_to_album_queued_only">%1$d worden na de back-up aan %2$s toegevoegd</string>
+    <string name="gallery_stripped_metadata">Metadata verwijderd uit %1$d foto\'s</string>
+    <string name="gallery_stripped_with_skipped">%1$d verwijderd, %2$d overgeslagen (extern)</string>
+    <string name="strip_metadata_failed">Kon de metadata van dit bestand niet verwijderen.</string>
+    <string name="gallery_filter_favorites">Favorieten</string>
+    <string name="gallery_filter_hidden">Verborgen</string>
+    <string name="gallery_filter_categories">Categorieën</string>
+    <string name="gallery_filter_screenshots">Screenshots</string>
+    <string name="gallery_filter_live_photos">Live-foto\'s</string>
+    <string name="gallery_filter_motion_photos">Bewegingsfoto\'s</string>
+    <string name="gallery_filter_selfies">Selfies</string>
+    <string name="gallery_filter_portraits">Portretten</string>
+    <string name="gallery_filter_bursts">Burst-opnamen</string>
+    <string name="gallery_filter_panoramas">Panorama\'s</string>
+    <string name="gallery_filter_raw">RAW</string>
+    <string name="gallery_filter_photos">Foto\'s</string>
+
+    <!-- Permission -->
+    <string name="permission_grant_button">Toegang verlenen</string>
+    <string name="permission_open_settings">Instellingen openen</string>
+    <string name="permission_denied_banner">Sta toegang toe om lokale foto\'s te tonen.</string>
+    <string name="permission_permanently_denied_banner">Mediatoegang geweigerd. Open Instellingen om het toe te staan.</string>
+
+    <!-- Sync -->
+    <string name="sync_section">Synchronisatie</string>
+    <string name="sync_backed_up">Geback-upt</string>
+    <string name="sync_pending">In afwachting</string>
+    <string name="sync_none">Geen</string>
+    <string name="sync_first_run_in_progress">Eerste synchronisatie bezig…</string>
+    <string name="sync_photo_count">%1$d foto\'s</string>
+    <string name="sync_photo_count_singular">1 foto</string>
+    <!-- Sync progress (Settings card) -->
+    <string name="sync_progress_completed">%1$d%% voltooid</string>
+    <string name="sync_progress_x_of_n">%1$d van %2$d</string>
+    <string name="sync_progress_show_files">Bestanden tonen</string>
+    <string name="sync_progress_hide_files">Bestanden verbergen</string>
+    <!-- Delete after backup consent notification -->
+    <string name="delete_consent_channel_name">Foto\'s opruimen</string>
+    <string name="delete_consent_channel_desc">Vraagt toestemming om geback-upte foto\'s van dit apparaat te verwijderen.</string>
+    <string name="delete_consent_title">%1$d geback-upte foto\'s klaar om te verwijderen</string>
+    <string name="delete_consent_text">Tik om ze van dit apparaat te wissen.</string>
+
+    <!-- Sync worker foreground notification -->
+    <string name="sync_worker_channel_name">Fotoback-up</string>
+    <string name="sync_worker_channel_desc">Toont de voortgang tijdens het back-uppen van foto\'s naar Proton Drive.</string>
+    <string name="sync_worker_notification_title">Foto\'s worden geback-upt…</string>
+    <string name="sync_worker_notification_progress">%1$d van %2$d geüpload</string>
+    <string name="sync_worker_notification_checking">Zoeken naar nieuwe foto\'s…</string>
+    <string name="sync_worker_notification_cancel">Annuleren</string>
+    <!-- Background sync service. LOW-importance, idle ContentObserver only — keeps the
+         process alive on Samsung One UI so OS-level MediaStore triggers still wake the
+         upload pipeline after the user closes the app. -->
+    <string name="bg_sync_service_channel_name">Fotoback-up op de achtergrond</string>
+    <string name="bg_sync_service_channel_desc">Laat de app op de achtergrond reageren op nieuwe foto\'s.</string>
+    <string name="bg_sync_service_title">Fotoback-up</string>
+    <string name="bg_sync_service_text">Wacht op nieuwe foto\'s</string>
+
+    <!-- Delete bottom sheet -->
+    <string name="delete_album_container_warning">Hiermee verwijder je het album, maar je foto\'s blijven in Proton Drive.</string>
+    <string name="delete_button_permanently">Definitief verwijderen</string>
+    <string name="delete_multi_mixed_msg">Sommige van deze foto\'s zijn geback-upt naar Proton Drive. Kies hoe je ze wilt verwijderen.</string>
+    <string name="delete_multi_remove_device">Van apparaat verwijderen</string>
+    <string name="delete_multi_remove_device_desc">De Proton Drive-back-up blijft behouden</string>
+    <string name="delete_multi_move_trash">Naar prullenbak verplaatsen</string>
+    <string name="delete_multi_move_trash_desc">Verplaatst naar Recent verwijderd, 30 dagen herstelbaar</string>
+    <string name="delete_multi_remove_cloud">Uit de cloud verwijderen</string>
+    <string name="delete_multi_remove_cloud_desc">Bewaart de foto\'s op dit apparaat en verplaatst de back-ups naar de Drive-prullenbak</string>
+    <string name="delete_multi_move_trash_everywhere">Overal naar prullenbak verplaatsen</string>
+    <string name="delete_multi_move_trash_everywhere_desc">Verplaatst naar de apparaatprullenbak &amp; Proton Drive-prullenbak</string>
+    <string name="delete_multi_drive_trash">Naar Drive-prullenbak verplaatsen</string>
+    <string name="delete_multi_drive_trash_desc">Verplaatst naar Drive Recent verwijderd, herstelbaar</string>
+
+    <!-- Settings -->
+    <string name="settings_title">Instellingen</string>
+    <string name="settings_sync_wifi_only">Alleen synchroniseren via wifi</string>
+    <string name="settings_sync_now">Nu synchroniseren</string>
+    <string name="settings_storage_section">Opslag</string>
+    <string name="settings_storage_nav_desc">Drive-quotum, apparaatruimte, app-cache, recent verwijderd</string>
+    <string name="settings_free_up_now">Nu ruimte vrijmaken</string>
+    <string name="settings_free_up_interval_after_backup">Na de back-up</string>
+    <string name="settings_free_up_interval_1_day">1 dag</string>
+    <string name="settings_free_up_interval_1_week">1 week</string>
+    <string name="settings_free_up_interval_1_month">1 maand</string>
+    <string name="settings_account_section">Account</string>
+    <string name="settings_sign_out">Afmelden</string>
+    <string name="settings_sign_out_desc">Beëindig deze sessie op dit apparaat.</string>
+    <string name="sign_out_dialog_title">Afmelden?</string>
+    <string name="sign_out_dialog_message">Weet je zeker dat je je wilt afmelden bij je Proton-account?</string>
+    <string name="sign_out_dialog_confirm">Afmelden</string>
+    <string name="sign_out_dialog_cancel">Annuleren</string>
+    <string name="settings_account_storage">Drive-opslag</string>
+    <string name="settings_account_links">Snelkoppelingen</string>
+    <string name="settings_account_link_manage">Account beheren</string>
+    <string name="settings_account_link_manage_desc">Abonnement, facturatie, privacy en telemetrie op proton.me.</string>
+    <string name="settings_account_link_drive_web">Proton Drive op het web openen</string>
+    <string name="settings_account_link_drive_web_desc">Bekijk je foto\'s en bestanden op drive.proton.me.</string>
+    <string name="cancel">Annuleren</string>
+    <string name="settings_language_system">Systeemstandaard</string>
+    <string name="settings_sync_wifi_desc">Upload pauzeren op mobiel netwerk</string>
+    <string name="settings_fullres_wifi_only">Volle resolutie alleen via wifi</string>
+    <string name="settings_fullres_wifi_only_desc">Download foto\'s en video\'s op volle resolutie uit de cloud alleen via wifi. Miniaturen laden altijd.</string>
+    <string name="viewer_wifi_for_full_quality">Maak verbinding met wifi voor volle kwaliteit</string>
+    <string name="settings_sync_now_action">Synchroniseren →</string>
+    <string name="settings_backup_folders">Back-upmappen</string>
+    <string name="settings_backup_folders_desc">Kies welke mappen je wilt back-uppen</string>
+    <!-- Sync settings reorganisation (v1.3.2): two grouped sections. -->
+    <string name="settings_what_backed_up_section">Wat wordt geback-upt</string>
+    <string name="settings_when_section">Wanneer het gebeurt</string>
+    <string name="settings_network_section">Netwerkgebruik</string>
+    <string name="settings_continuous_backup">Doorlopende back-up</string>
+    <string name="settings_continuous_backup_desc">Foto\'s en video\'s worden binnen enkele seconden na de opname geüpload.</string>
+    <string name="settings_backup_everything">Alles back-uppen</string>
+    <string name="settings_backup_everything_desc">Elke foto en video op dit apparaat automatisch uploaden.</string>
+    <!-- Excluded folders feature (paired with backup-everything mode). -->
+    <string name="settings_excluded_folders">Uitgesloten mappen</string>
+    <string name="settings_excluded_folders_desc_none">Geen mappen uitgesloten</string>
+    <string name="settings_excluded_folders_desc_singular">1 map uitgesloten</string>
+    <string name="settings_excluded_folders_desc_count">%1$d mappen uitgesloten</string>
+    <string name="settings_excluded_folders_title">Uitgesloten mappen</string>
+    <string name="settings_excluded_folders_intro">Foto\'s in deze mappen worden niet geback-upt, ook niet wanneer \"Alles back-uppen\" aanstaat. Reeds geüploade items blijven op Drive.</string>
+    <string name="settings_excluded_folders_empty">Geen mappen op dit apparaat gevonden</string>
+    <string name="settings_excluded_folders_count_label">%1$d van %2$d mappen uitgesloten</string>
+    <string name="settings_excluded_folders_select_all">Alles uitsluiten</string>
+    <string name="settings_excluded_folders_deselect_all">Alles opnemen</string>
+    <!-- Album mirror -->
+    <string name="settings_album_mirror_folders">Apparaatmappen spiegelen als Drive-albums</string>
+    <string name="settings_album_mirror_folders_desc">Kies welke apparaatmappen ook als Drive-albums verschijnen wanneer hun foto\'s geüpload worden</string>
+    <string name="album_mirror_folders_title">Mappen spiegelen als Drive-albums</string>
+    <string name="album_mirror_folders_subtitle">Foto\'s in aangevinkte mappen verschijnen ook in bijbehorende Drive-albums. Foto\'s worden hoe dan ook naar je stroom geüpload.</string>
+    <string name="album_mirror_add_custom">Mapnaam toevoegen</string>
+    <string name="album_mirror_custom_dialog_title">Een mapnaam toevoegen</string>
+    <string name="album_mirror_custom_dialog_hint">Mapnaam (bijv. Reis 2026)</string>
+    <string name="settings_recently_deleted">Recent verwijderd</string>
+    <string name="settings_recently_deleted_subtitle">%1$d foto\'s · verwijderd binnen 30 dagen</string>
+    <string name="settings_recently_deleted_subtitle_singular">1 foto · verwijderd binnen 30 dagen</string>
+    <string name="settings_recently_deleted_empty">Leeg</string>
+    <!-- Cloud trash -->
+    <string name="trash_section_device">Op dit apparaat</string>
+    <string name="trash_section_cloud">Op Proton Drive</string>
+    <string name="trash_cloud_empty">Cloudprullenbak is leeg</string>
+    <string name="trash_cloud_error">Kon cloudprullenbak niet laden</string>
+    <string name="trash_cloud_retry">Opnieuw proberen</string>
+    <string name="trash_cloud_empty_confirm_title">Cloudprullenbak legen?</string>
+    <string name="trash_cloud_empty_confirm_message">%1$d foto(\'s) worden definitief verwijderd van Proton Drive. Dit kan niet ongedaan worden gemaakt.</string>
+    <string name="trash_cloud_empty_confirm_action">Legen</string>
+    <string name="trash_cloud_restore_done">%1$d foto(\'s) hersteld</string>
+    <string name="trash_cloud_restore_partial">%1$d hersteld, %2$d konden niet worden hersteld</string>
+    <string name="trash_cloud_restore_refresh_failed">Hersteld — trek omlaag in je galerij om te vernieuwen</string>
+    <string name="trash_cloud_restore_failed">Herstellen mislukt</string>
+    <string name="trash_cloud_emptied">Cloudprullenbak geleegd</string>
+    <string name="trash_cloud_empty_partial">%1$d verwijderd, %2$d konden niet worden verwijderd</string>
+    <string name="trash_cloud_empty_failed">Kon cloudprullenbak niet legen</string>
+    <string name="settings_recently_deleted_subtitle_device_cloud">%1$d op apparaat · %2$d op Drive</string>
+    <string name="settings_free_up_desc">Reeds geback-upte bestanden van het apparaat verwijderen</string>
+    <string name="settings_free_up_action">Verwijderen</string>
+    <string name="settings_free_up_confirm_title">Apparaatruimte vrijmaken?</string>
+    <string name="settings_free_up_confirm_message">Elke foto en video die al naar Proton Drive geback-upt is, wordt van dit apparaat verwijderd. De Drive-kopieën blijven intact en kunnen later opnieuw worden gedownload.</string>
+    <string name="settings_backup_size">%s gesynchroniseerd vanaf dit apparaat</string>
+    <!-- Storage card, Proton / Device / App-cache sub-sections -->
+    <string name="settings_storage_proton">Proton Drive</string>
+    <string name="settings_storage_device">Op dit apparaat</string>
+    <string name="settings_storage_app_cache">App-cache</string>
+    <string name="settings_storage_device_free">%1$s vrij / %2$s totaal</string>
+    <string name="settings_storage_app_cache_desc">Miniaturen, gestreamde video\'s en tijdelijke uploadblokken</string>
+    <string name="settings_storage_clear_cache">Cache wissen</string>
+    <string name="settings_storage_clear_cache_dialog_title">App-cache wissen?</string>
+    <string name="settings_storage_clear_cache_dialog_message">Hiermee verwijder je %s aan gecachete bestanden. Ze worden indien nodig opnieuw gedownload.</string>
+    <string name="settings_storage_refresh">Opslag vernieuwen</string>
+    <string name="settings_section_settings">Instellingen</string>
+    <string name="settings_privacy_metadata">Privacy &amp; metadata</string>
+    <string name="settings_privacy_metadata_desc">GPS en optionele EXIF-velden uit uploads verwijderen</string>
+    <string name="settings_security">Beveiliging</string>
+    <string name="settings_security_desc">App-vergrendeling, verborgen foto\'s</string>
+    <string name="settings_strip_metadata_upload">Metadata verwijderen bij uploaden</string>
+    <string name="settings_strip_metadata_upload_desc">Verwijder de GPS-locatie vóór het uploaden. Voeg camera-, tijdstempel- en softwarevelden toe onder Aanpassen.</string>
+    <string name="settings_rename_on_upload">Hernoemen naar opnamedatum bij uploaden</string>
+    <string name="settings_rename_on_upload_desc">Gebruik de metadata van de foto of video om de bestandsnaam vóór het uploaden in te stellen op de opnamedatum en -tijd. Het originele bestand op het apparaat blijft onaangeroerd.</string>
+    <string name="settings_delete_after_backup">Apparaatbestand verwijderen na back-up</string>
+    <string name="settings_delete_after_backup_desc">Verwijdert de lokale kopie van je apparaat zodra Drive de upload heeft — bewaart het bestand alleen in je versleutelde Proton Drive.</string>
+    <string name="settings_strip_gps">GPS-locatie verwijderen</string>
+    <string name="settings_strip_gps_desc">GPS-coördinaten en locatiegegevens verwijderen</string>
+    <string name="settings_strip_camera">Camera-info verwijderen</string>
+    <string name="settings_strip_camera_desc">Merk-, model-, lens- en belichtingsgegevens verwijderen</string>
+    <string name="settings_strip_timestamp">Tijdstempels verwijderen</string>
+    <string name="settings_strip_timestamp_desc">Opnamedatum/-tijd uit EXIF verwijderen</string>
+    <string name="settings_strip_software">Software-info verwijderen</string>
+    <string name="settings_strip_software_desc">Software-, artiest- en copyrightvelden verwijderen</string>
+    <string name="settings_app_lock">App-vergrendeling</string>
+    <string name="settings_app_lock_desc">Biometrie of pincode vereisen bij het openen van de app</string>
+    <string name="settings_app_lock_timeout">Vergrendelen na</string>
+    <string name="settings_app_lock_timeout_desc">De app opnieuw vergrendelen na zoveel tijd op de achtergrond</string>
+    <string name="settings_app_lock_timeout_immediate">Direct</string>
+    <string name="settings_app_lock_timeout_1min">1 minuut</string>
+    <string name="settings_app_lock_timeout_5min">5 minuten</string>
+    <string name="settings_app_lock_timeout_10min">10 minuten</string>
+    <string name="settings_app_lock_timeout_15min">15 minuten</string>
+    <string name="settings_app_lock_timeout_1h">1 uur</string>
+    <string name="settings_clear_cache_on_close">Cache wissen bij sluiten van app</string>
+    <string name="settings_clear_cache_on_close_desc">Wis lokale kopieën van bekeken cloudfoto\'s wanneer de app naar de achtergrond gaat. Worden bij de volgende keer openen opnieuw gedownload.</string>
+    <string name="viewer_added_to_album">Toegevoegd aan %1$s</string>
+    <string name="settings_photos_timeline_section">Fototijdlijn</string>
+    <string name="settings_hide_album_photos">Foto\'s in Drive-albums verbergen</string>
+    <string name="settings_hide_all_folders">Alle apparaatmappen verbergen</string>
+    <string name="settings_hide_all_folders_desc">Foto\'s in verborgen apparaatmappen verschijnen niet in je hoofdtijdlijn met foto\'s. Ze blijven op je apparaat.</string>
+    <string name="settings_hide_album_photos_desc">Foto\'s die aan een Drive-album (cloud) zijn toegevoegd, verschijnen niet in je hoofdtijdlijn met foto\'s. Ze blijven wel zichtbaar in de tabbladen Albums en Gedeeld.</string>
+    <string name="settings_timeline_filter">Tijdlijnfilter</string>
+    <string name="timeline_filter_title">Tijdlijnfilter</string>
+    <string name="timeline_filter_subtitle">Kies wat je wilt verbergen uit je hoofdtijdlijn met foto\'s. Verborgen foto\'s blijven op je apparaat en worden verder geback-upt.</string>
+    <string name="timeline_filter_categories_header">Categoriebalk</string>
+    <string name="timeline_filter_reorder_hint">Gebruik de pijlen om de volgorde van de categoriebalk boven je Foto\'s-tijdlijn in te stellen.</string>
+    <string name="timeline_filter_per_album_hint">Verberg afzonderlijke albums uit de tijdlijn. De schakelaar hierboven verbergt ze allemaal tegelijk.</string>
+    <string name="cd_move_up">Omhoog</string>
+    <string name="cd_move_down">Omlaag</string>
+    <string name="timeline_filter_albums_header">Drive-albums</string>
+    <string name="settings_telemetry">Telemetrie</string>
+    <string name="settings_telemetry_desc">Geregeld door je Proton-accountinstellingen. Open account.proton.me om te wijzigen.</string>
+    <string name="settings_hidden_photos">Verborgen foto\'s</string>
+    <string name="settings_hidden_photos_desc">Foto\'s verborgen uit de hoofdgalerij, ontgrendeld met je apparaatbiometrie of pincode</string>
+    <string name="settings_media_management">Mediabeheer</string>
+    <string name="settings_media_management_granted">Verleend, verwijderen vraagt niet meer telkens</string>
+    <string name="settings_media_management_grant_desc">Eenmalig verlenen om de bevestiging per verwijdering over te slaan</string>
+    <string name="settings_media_management_grant_action">Verlenen</string>
+    <string name="settings_appearance">Weergave &amp; taal</string>
+    <string name="settings_appearance_desc">Thema, palet, app-taal</string>
+    <string name="settings_strip_customize">Aanpassen wat wordt verwijderd</string>
+    <string name="settings_about_desc">Versie, credits en licenties</string>
+
+    <string name="albums_empty_title">Nog geen albums</string>
+    <string name="albums_empty_subtitle">Albums die in Drive zijn aangemaakt verschijnen hier</string>
+    <string name="albums_empty_local">Geen mappen op dit apparaat</string>
+    <string name="cd_select_month">Deze maand selecteren</string>
+    <string name="album_rename">Album hernoemen</string>
+    <string name="album_rename_confirm">Hernoemen</string>
+    <string name="album_remove_from_album">Uit album verwijderen</string>
+    <string name="album_set_as_cover">Als omslag instellen</string>
+    <string name="gallery_action_select">Selecteren</string>
+    <string name="album_cover_updated">Omslag bijgewerkt</string>
+    <string name="album_set_as_album_cover">Als albumomslag instellen</string>
+    <string name="close">Sluiten</string>
+
+    <!-- Theme mode -->
+    <string name="theme_mode_system">Systeem</string>
+    <string name="theme_mode_light">Licht</string>
+    <string name="theme_mode_dark">Donker</string>
+    <string name="theme_mode_section">Thema</string>
+    <!-- Settings page section headings (used by CollapsibleSection wrappers) -->
+    <string name="settings_privacy_section_metadata">Metadata</string>
+    <string name="settings_privacy_section_device">Op dit apparaat</string>
+    <string name="settings_security_section_lock">App-vergrendeling</string>
+    <string name="settings_security_section_media">Mediatoegang</string>
+
+    <!-- Palette -->
+    <string name="settings_palette_section">Palet</string>
+    <string name="palette_default">Standaard</string>
+    <string name="palette_forest">Bos</string>
+    <string name="palette_sunset">Zonsondergang</string>
+    <string name="palette_sea">Zee</string>
+    <string name="palette_sepia">Sepia</string>
+    <string name="palette_mono">Mono</string>
+
+    <!-- Language -->
+    <string name="language_en">English, English</string>
+    <string name="language_fr">Frans, Français</string>
+    <string name="language_de">Duits, Deutsch</string>
+    <string name="language_es">Spaans, Español</string>
+    <string name="language_hu">Hongaars, Magyar</string>
+    <string name="language_it">Italiaans, Italiano</string>
+    <string name="language_nl">Nederlands</string>
+    <string name="language_section">Weergavetaal</string>
+
+    <!-- About -->
+    <string name="about_title">Over</string>
+    <string name="about_app_title_quoted">Photos for Proton</string>
+    <string name="about_section_author">Auteur</string>
+    <string name="about_section_source">Broncode</string>
+    <string name="about_section_built_with">Gebouwd met</string>
+    <string name="about_section_disclaimer">Disclaimer</string>
+    <string name="about_version">Versie %1$s (build %2$d)</string>
+    <string name="about_description">Onofficiële Proton Drive Photos-client voor Android. Opensource en end-to-end versleuteld.</string>
+    <string name="about_disclaimer">Niet verbonden met Proton AG. Proton, Proton Drive en Proton Photos zijn handelsmerken van Proton AG. Photos for Proton is een onofficiële externe client, gebouwd op de openbaar gedocumenteerde Drive-API.</string>
+    <string name="about_author_subtitle">Maker en beheerder</string>
+    <string name="about_source_subtitle">Broncode bekijken op GitHub</string>
+    <string name="about_section_license">Licentie</string>
+    <string name="about_license_title">GPL-3.0-licentie</string>
+    <string name="about_license_subtitle">Vrije software onder de GNU GPL v3, zie het LICENSE-bestand</string>
+    <string name="about_lib_android_drive">Referentie-implementatie van de Drive-API</string>
+    <string name="about_lib_protoncore">Authenticatie-, crypto- en netwerk-SDK</string>
+    <string name="about_lib_compose">Declaratieve UI-toolkit van Google</string>
+    <string name="about_lib_hilt">Dependency injection</string>
+    <string name="about_lib_coil">Bibliotheek voor afbeeldingen laden</string>
+    <string name="about_lib_room">Lokale database</string>
+    <string name="about_lib_gopenpgp">OpenPGP-implementatie</string>
+
+    <!-- Albums -->
+    <string name="albums_new_album">Nieuw album</string>
+    <string name="albums_create_album">Album maken</string>
+    <string name="albums_create_album_hint">Albumnaam</string>
+    <string name="albums_no_photos">Geen foto\'s in dit album</string>
+    <string name="albums_download_all">Alles downloaden</string>
+    <!-- Background album-download notification. -->
+    <string name="album_download_channel_name">Albumdownloads</string>
+    <string name="album_download_channel_desc">Toont de voortgang tijdens het downloaden van een album op de achtergrond.</string>
+    <string name="album_download_notification_title">%1$s wordt gedownload</string>
+    <string name="album_download_notification_progress">%1$d van %2$d</string>
+    <string name="album_download_notification_cancel">Annuleren</string>
+    <string name="album_download_enqueued">Wordt op de achtergrond gedownload, bekijk de meldingen</string>
+    <string name="albums_share_button">Album delen</string>
+    <string name="album_link_copied">Link gekopieerd naar klembord</string>
+
+    <!-- Share -->
+    <string name="share_remove_member">Verwijderen</string>
+    <string name="share_shared_with">Gedeeld met</string>
+    <string name="share_filter_by_person">Filteren op persoon</string>
+    <string name="share_no_shared">Nog geen met mij gedeelde albums</string>
+    <string name="share_all">Alle</string>
+    <string name="share_shared_with_me">Met mij gedeeld</string>
+    <string name="share_shared_by_me">Door mij gedeeld</string>
+    <string name="share_filter_account">Filteren op account</string>
+
+    <!-- Share sheet, redesigned to mirror the Drive web dialog -->
+    <string name="share_sheet_title">%1$s delen</string>
+    <string name="share_who_has_access">Wie toegang heeft</string>
+    <string name="share_role_owner">eigenaar</string>
+    <string name="share_role_can_view">kan bekijken</string>
+    <string name="share_role_can_edit">kan bewerken</string>
+    <string name="share_role_pending">in afwachting</string>
+    <string name="share_stop_sharing">Stoppen met delen</string>
+    <string name="share_close">Sluiten</string>
+    <!-- Drive-web-style invite popup (multi-chip flow) -->
+    <string name="share_invite_email_hint">E-mailadres</string>
+    <string name="share_invite_add">Toevoegen</string>
+    <string name="share_invite_will_invite">Wordt uitgenodigd</string>
+    <string name="share_invite_message_hint">Een bericht toevoegen (optioneel)</string>
+    <string name="share_invite_send">Delen</string>
+    <string name="share_invite_cancel">Annuleren</string>
+    <string name="share_invite_email_invalid">Geen geldig e-mailadres</string>
+    <string name="share_invite_email_duplicate">Al toegevoegd</string>
+    <string name="share_invite_summary_partial">%1$d verzonden, %2$d konden niet worden verzonden</string>
+    <string name="share_invite_summary_all_failed">De uitnodigingen konden niet worden verzonden</string>
+    <!-- Album-sharing + album action error fallbacks (raw exception text stays in the log) -->
+    <string name="share_revoke_failed">Kon de uitnodiging niet intrekken</string>
+    <string name="share_remove_member_failed">Kon het lid niet verwijderen</string>
+    <string name="share_permission_change_failed">Kon de rol niet wijzigen</string>
+    <string name="share_invite_failed">Kon de uitnodiging niet verzenden</string>
+    <string name="share_stop_failed">Kon het delen niet stoppen</string>
+    <string name="share_create_link_failed">Kon de deellink niet aanmaken</string>
+    <string name="share_disable_link_failed">Kon de link niet uitschakelen</string>
+    <string name="album_leave_failed">Kon het album niet verlaten</string>
+    <string name="album_leave_missing_details">Kan dit album nu niet verlaten</string>
+    <string name="album_delete_photos_failed">Kon de foto\'s niet verwijderen</string>
+    <string name="album_remove_photos_failed">Kon de foto\'s niet verwijderen</string>
+    <string name="album_remove_partial">%1$d van %2$d verwijderd — sommige konden niet worden verwijderd</string>
+    <string name="album_rename_failed">Kon het album niet hernoemen</string>
+    <string name="album_set_cover_failed">Kon de albumomslag niet instellen</string>
+    <string name="shared_save_failed">Kon het album niet opslaan in je bibliotheek</string>
+
+    <!-- Shared albums screen -->
+    <string name="shared_pending_invitations">Uitnodigingen in afwachting</string>
+    <string name="shared_invited_to_album">heeft je uitgenodigd voor een album</string>
+    <string name="shared_decline">Weigeren</string>
+    <string name="shared_accept">Accepteren</string>
+    <string name="shared_empty_with_me_title">Nog niets met je gedeeld</string>
+    <string name="shared_empty_by_me_title">Je hebt nog niets gedeeld</string>
+    <string name="shared_empty_with_me_body">Albums die met je worden gedeeld verschijnen hier.</string>
+    <string name="shared_empty_by_me_body">Deel een album of een foto om het hier te zien.</string>
+    <string name="shared_by_email">door %1$s</string>
+    <string name="shared_photo_count">%1$d foto\'s</string>
+    <string name="shared_by_me_photos_section">Gedeelde foto\'s</string>
+
+    <!-- Content filter sheet -->
+    <string name="filter_title">Filter</string>
+    <string name="filter_type_label">Type</string>
+    <string name="filter_type_videos">Video\'s</string>
+    <string name="filter_sync_label">Synchronisatie</string>
+    <string name="filter_sync_local">Alleen lokaal</string>
+    <string name="filter_sync_backedup">Geback-upt</string>
+    <string name="filter_year_label">Jaar</string>
+    <string name="filter_any">Alle</string>
+    <string name="filter_month_label">Maand</string>
+    <string name="filter_whole_month">Hele maand</string>
+    <string name="filter_reset">Herstellen</string>
+
+    <!-- Notification permission rationale -->
+    <string name="notifications_blocked_snackbar">Meldingen staan uit. Je ziet de voortgang van uploads of downloads niet.</string>
+    <string name="notifications_blocked_open_settings">Instellingen</string>
+
+    <!-- Search -->
+    <string name="search_title">Zoeken</string>
+    <string name="search_placeholder">Zoeken op bestandsnaam</string>
+    <string name="search_empty_idle">Typ een naam om te beginnen met zoeken</string>
+    <string name="search_empty_no_results">Geen overeenkomsten</string>
+    <string name="search_section_on_this_day">Op deze dag</string>
+    <string name="search_section_on_this_day_years">%1$d jaar geleden</string>
+    <string name="search_section_on_this_day_years_plural">%1$d jaar geleden</string>
+    <string name="search_section_jump_to_month">Naar maand springen</string>
+    <string name="search_section_recent">Recent</string>
+
+    <!-- Photo viewer slideshow controls -->
+    <string name="viewer_play_slideshow">Diavoorstelling afspelen</string>
+    <string name="viewer_pause_slideshow">Diavoorstelling pauzeren</string>
+
+    <!-- Widget -->
+    <string name="widget_description">Photos for Proton, toont je foto\'s op het startscherm</string>
+    <string name="widget_setup_title">Fotowidget</string>
+    <string name="widget_setup_subtitle">Stel in hoe foto\'s op je startscherm worden weergegeven.</string>
+    <string name="widget_change_selection">Selectie wijzigen</string>
+    <string name="widget_section_choose_album">Album kiezen</string>
+    <string name="widget_mode_section">Weergavemodus</string>
+    <string name="widget_mode_all">Alle foto\'s</string>
+    <string name="widget_mode_all_desc">Kiest elke cyclus een willekeurige foto</string>
+    <string name="widget_mode_selected">Geselecteerde foto\'s</string>
+    <string name="widget_mode_selected_desc">Blader door foto\'s die je kiest</string>
+    <string name="widget_mode_album">Uit album</string>
+    <string name="widget_mode_album_desc">Blader door een specifiek album</string>
+    <string name="widget_mode_cloud">Cloudfoto\'s</string>
+    <string name="widget_mode_cloud_desc">Toon foto\'s uit je versleutelde cloudcache zonder ze aan andere apps bloot te stellen</string>
+    <string name="widget_section_choose_cloud_photos">Cloudfoto\'s kiezen</string>
+    <string name="widget_cloud_photos_selected">%d cloudfoto\'s geselecteerd</string>
+    <string name="widget_no_cloud_photos">Nog geen cloudfoto\'s</string>
+    <string name="widget_interval_section">Foto wisselen elke</string>
+    <string name="widget_interval_30min">30 min</string>
+    <string name="widget_interval_1hr">1 uur</string>
+    <string name="widget_interval_3hr">3 uur</string>
+    <string name="widget_interval_8hr">8 uur</string>
+    <string name="widget_interval_1day">1 dag</string>
+    <string name="widget_add_button">Widget toevoegen</string>
+    <string name="widget_select_photos">+ Foto\'s selecteren</string>
+    <string name="widget_photos_selected">%d foto\'s geselecteerd</string>
+    <string name="widget_no_photos">Geen foto\'s gevonden</string>
+
+    <plurals name="delete_title_plural">
+        <item quantity="one">1 foto verwijderen?</item>
+        <item quantity="other">%1$d foto\'s verwijderen?</item>
+    </plurals>
+    <plurals name="count_items_plural">
+        <item quantity="one">1 item</item>
+        <item quantity="other">%d items</item>
+    </plurals>
+
+    <plurals name="count_photos_plural">
+        <item quantity="one">1 foto</item>
+        <item quantity="other">%d foto\'s</item>
+    </plurals>
+    <plurals name="count_videos_plural">
+        <item quantity="one">1 video</item>
+        <item quantity="other">%d video\'s</item>
+    </plurals>
+    <plurals name="share_invite_sent">
+        <item quantity="one">Uitnodiging verzonden</item>
+        <item quantity="other">%1$d uitnodigingen verzonden</item>
+    </plurals>
+
+    <!-- "On this day" memories card on the Photos tab. Shown above the grid when the user
+         has photos taken on TODAY's calendar date (same month + day) in earlier years. -->
+    <string name="gallery_on_this_day">Op deze dag</string>
+    <plurals name="count_years_ago_plural">
+        <item quantity="one">%1$d jaar geleden</item>
+        <item quantity="other">%1$d jaar geleden</item>
+    </plurals>
+
+    <!-- Herinneringen-scherm -->
+    <string name="memories_title">Collectie</string>
+    <string name="memories_seasons">Seizoenen</string>
+    <string name="season_winter">Winter</string>
+    <string name="season_spring">Lente</string>
+    <string name="season_summer">Zomer</string>
+    <string name="season_autumn">Herfst</string>
+    <string name="sort_newest_first">Nieuwste eerst</string>
+    <string name="sort_oldest_first">Oudste eerst</string>
+
+    <!-- Viewer overflow menu -->
+    <string name="viewer_menu_more">Meer</string>
+    <string name="viewer_menu_save_to_device">Opslaan op apparaat</string>
+    <string name="viewer_menu_details">Details</string>
+    <string name="viewer_menu_delete">Verwijderen</string>
+    <string name="viewer_menu_hide">Verbergen</string>
+    <string name="viewer_menu_unhide">Zichtbaar maken</string>
+    <string name="viewer_hidden_label">Verborgen op dit apparaat</string>
+
+    <!-- Motion photo (Android JPEG with an embedded clip) playback in the viewer -->
+    <string name="cd_motion_photo">Bewegingsfoto</string>
+    <string name="cd_panorama">Panorama</string>
+    <string name="cd_play_motion_photo">Bewegingsfoto afspelen</string>
+    <string name="cd_stop_motion_photo">Bewegingsfoto stoppen</string>
+    <string name="cd_view_panorama">Panorama bekijken</string>
+    <string name="cd_exit_panorama">Panorama verlaten</string>
+    <string name="viewer_view_panorama">Panorama bekijken</string>
+    <string name="viewer_exit_panorama">Sluiten</string>
+    <string name="motion_photo_play_failed">Kon deze bewegingsfoto niet afspelen.</string>
+
+    <!-- Video editor -->
+    <string name="video_editor_trim">Inkorten</string>
+    <string name="video_editor_rotate">Draaien</string>
+    <string name="video_editor_save_copy">Opslaan als kopie</string>
+    <string name="video_editor_crop">Bijsnijden</string>
+    <string name="video_editor_audio">Muziek</string>
+    <string name="video_editor_add_music">Muziek toevoegen</string>
+    <string name="video_editor_remove_music">Verwijderen</string>
+    <string name="video_editor_music_start">Muziekstart</string>
+    <string name="video_editor_music_end">Muziekeinde</string>
+    <string name="video_editor_reset_crop">Bijsnijden herstellen</string>
+    <string name="video_editor_reencoding">Video wordt opnieuw gecodeerd…</string>
+    <string name="video_editor_encrypting">Versleutelen…</string>
+    <string name="video_editor_uploading">Uploaden naar Drive…</string>
+    <string name="video_editor_audio_original">Originele audio</string>
+    <string name="editor_discard_changes_title">Wijzigingen verwerpen?</string>
+    <string name="editor_discard_changes_message">Je niet-opgeslagen bewerkingen gaan verloren.</string>
+    <string name="editor_discard_changes_confirm">Verwerpen</string>
+    <string name="editor_discard_changes_keep">Verder bewerken</string>
+    <string name="editor_tool_adjust">Aanpassen</string>
+    <string name="editor_tool_filter">Filter</string>
+    <string name="editor_tool_redact">Afdekken</string>
+    <string name="editor_filter_original">Origineel</string>
+    <string name="editor_filter_bw">Z/W</string>
+    <string name="editor_filter_sepia">Sepia</string>
+    <string name="editor_filter_vintage">Vintage</string>
+    <string name="editor_filter_vivid">Levendig</string>
+    <string name="editor_filter_cool">Koel</string>
+    <string name="editor_filter_warm">Warm</string>
+    <string name="editor_redact_hint">Teken over gezichten of tekst om ze te verbergen</string>
+    <string name="editor_redact_blackout">Zwart maken</string>
+    <string name="editor_redact_pixelate">Pixelen</string>
+    <string name="editor_redact_clear">Wissen</string>
+    <string name="editor_flip_h">Horizontaal spiegelen</string>
+    <string name="editor_flip_v">Verticaal spiegelen</string>
+    <string name="editor_error_title">Editorfout</string>
+    <string name="editor_error_title_video">Video-editorfout</string>
+    <string name="editor_save_edits">Bewerkingen opslaan</string>
+    <string name="editor_save_as_new_copy">Opslaan als nieuwe kopie</string>
+    <string name="editor_save_sheet_cloud">Kies hoe je de bewerkte foto in je Drive opslaat.</string>
+    <string name="editor_save_sheet_synced">Kies hoe je de bewerkte foto opslaat. Geback-upte originelen blijven in Drive.</string>
+    <string name="editor_save_sheet_device">Kies hoe je de bewerkte foto op je apparaat opslaat.</string>
+    <string name="editor_save_sheet_cloud_video">Kies hoe de bewerking terugkomt in je Proton Drive.</string>
+    <string name="editor_save_sheet_synced_video">Kies hoe je de bewerkte video opslaat. Geback-upte originelen blijven in Drive.</string>
+    <string name="editor_save_sheet_device_video">Kies hoe je de bewerkte video op je apparaat opslaat.</string>
+    <string name="editor_save_copy_subtitle_cloud">Wordt geüpload als nieuwe foto. Het origineel blijft in Drive.</string>
+    <string name="editor_save_copy_subtitle_cloud_video">Wordt geüpload als nieuw bestand in Proton Drive — het origineel blijft behouden.</string>
+    <string name="editor_save_copy_subtitle_synced">Maakt een nieuw bestand in je galerij EN uploadt een gekoppelde kopie naar Drive.</string>
+    <string name="editor_save_copy_subtitle_device">Maakt een nieuw bestand in je galerij.</string>
+    <string name="editor_saving">Opslaan…</string>
+    <string name="editor_please_wait">Even geduld…</string>
+    <string name="editor_save_cancelled">Opslaan geannuleerd</string>
+    <string name="editor_no_permission">Geen toestemming om op te slaan</string>
+    <string name="editor_save_failed">Opslaan mislukt</string>
+    <string name="editor_invalid_video_uri">Ongeldige video-URI</string>
+    <string name="editor_video_metadata_failed">Kon de videometadata niet lezen</string>
+    <string name="editor_cloud_video_download_failed">Downloaden van cloudvideo mislukt</string>
+
+    <!-- Calendar view -->
+    <string name="calendar_title">Kalender</string>
+    <string name="calendar_no_photos">Geen foto\'s deze maand</string>
+    <string name="calendar_search_placeholder">Zoeken op datum, plaats of notitie</string>
+    <string name="calendar_search_no_results">Geen overeenkomende dagen</string>
+    <string name="calendar_view_toggle_cd">Weergavemodus wisselen</string>
+    <string name="calendar_search_cd">Kalender doorzoeken</string>
+    <string name="calendar_jump_cd">Naar maand springen</string>
+    <string name="calendar_jump_title">Naar maand springen</string>
+    <string name="day_detail_location_hint">Een plaats toevoegen</string>
+    <string name="day_detail_description_hint">Een notitie over deze dag toevoegen</string>
+    <string name="day_detail_edit_location_title">Locatie bewerken</string>
+    <string name="day_detail_edit_description_title">Beschrijving bewerken</string>
+    <string name="day_detail_save">Opslaan</string>
+    <string name="day_detail_photos_count">%1$d foto\'s</string>
+
+    <!-- In-app updater (APK update flow, Settings row + lifecycle dialog) -->
+    <string name="update_available_title">Update beschikbaar</string>
+    <string name="update_available_message">Een nieuwe versie (%1$s) is klaar om te installeren (%2$d MB).</string>
+    <string name="update_banner_message">Versie %1$s is beschikbaar. Tik om te installeren.</string>
+    <string name="update_action_update">Bijwerken</string>
+    <string name="update_action_later">Later</string>
+    <string name="update_downloading">Update wordt gedownload… %1$d%%</string>
+    <string name="update_install_prompt">Download voltooid. Nu installeren?</string>
+    <string name="update_check_settings_row">Controleren op updates</string>
+    <string name="update_check_settings_summary">Je hebt versie %1$s</string>
+    <string name="update_no_update">Je hebt de nieuwste versie.</string>
+    <string name="update_check_failed">Kon niet controleren op updates. Probeer het later opnieuw.</string>
+    <string name="update_permission_required">Sta het installeren van onbekende apps toe in de systeeminstellingen om bij te werken.</string>
+    <string name="update_verification_failed">De update kon niet worden geverifieerd en is niet geïnstalleerd. Probeer het opnieuw.</string>
+    <string name="offline_banner_message">Je bent offline. Sommige functies werken niet tot je opnieuw verbinding maakt.</string>
+    <string name="offline_banner_dismiss_cd">Offlinemelding sluiten</string>
+    <string name="network_error_offline">Je bent offline. Probeer het opnieuw zodra je weer verbinding hebt.</string>
+    <string name="network_error_transient">Verbinding mislukt. Probeer het later opnieuw.</string>
+    <string name="cd_status_backed_up_device">Geback-upt naar Drive en op apparaat</string>
+    <string name="cd_status_cloud_only">Alleen in Proton Drive</string>
+    <string name="cd_status_hidden_local">Verborgen op dit apparaat</string>
+    <string name="cd_status_device_only">Alleen op apparaat</string>
+    <string name="cd_status_backed_up">Geback-upt</string>
+    <string name="cd_status_in_album">In dit album</string>
+    <string name="cd_status_excluded">Uitgesloten</string>
+    <string name="cd_status_selected">Geselecteerd</string>
+    <string name="cd_favorite_add">Aan favorieten toevoegen</string>
+    <string name="cd_favorite_remove">Uit favorieten verwijderen</string>
+    <string name="cd_editor_undo">Ongedaan maken</string>
+    <string name="cd_editor_redo">Opnieuw</string>
+    <string name="cd_editor_reset">Herstellen</string>
+    <string name="cd_viewer_edit">Bewerken</string>
+    <string name="cd_viewer_metadata_edit">Veld bewerken</string>
+    <string name="cd_clear_search">Zoekopdracht wissen</string>
+
+    <!-- Save shared album to my library -->
+    <string name="shared_save_to_library">Opslaan in mijn bibliotheek</string>
+    <string name="shared_save_success_fmt">%1$d foto\'s opgeslagen in je bibliotheek</string>
+    <string name="shared_save_partial_fmt">%1$d van %2$d foto\'s opgeslagen in je bibliotheek</string>
+    <string name="shared_save_progress_fmt">%1$d / %2$d opslaan in je bibliotheek…</string>
+    <!-- Shared progress-pill labels (OperationProgressPill) — keep the "Verb %1$d / %2$d" shape consistent. -->
+    <string name="op_downloading_fmt">Downloaden %1$d / %2$d</string>
+    <string name="op_backing_up_fmt">Back-up %1$d / %2$d</string>
+    <string name="op_sharing_fmt">Delen %1$d / %2$d</string>
+    <string name="op_adding_to_album">Toevoegen aan album…</string>
+    <string name="op_deleting">Verwijderen…</string>
+    <string name="op_hiding">Verbergen…</string>
+    <string name="op_removing_from_album">Verwijderen uit album…</string>
+    <string name="viewer_delete_subtitle_synced">Deze foto is geback-upt naar Proton Drive. Kies wat je wilt doen:</string>
+    <string name="viewer_delete_remove_from_device">Van apparaat verwijderen</string>
+    <string name="viewer_delete_remove_from_device_desc">Bewaart de back-up in Proton Drive</string>
+    <string name="viewer_delete_remove_from_cloud">Uit de cloud verwijderen</string>
+    <string name="viewer_delete_remove_from_cloud_desc">Bewaart de foto op dit apparaat en verplaatst de back-up naar de Drive-prullenbak</string>
+    <string name="viewer_delete_everywhere">Overal verwijderen</string>
+    <string name="viewer_delete_everywhere_desc">Verplaatst naar de apparaatprullenbak ÉN de Proton Drive-prullenbak</string>
+    <string name="viewer_delete_subtitle_cloud_only">Hiermee verplaats je de foto naar de prullenbak van Proton Drive. Je kunt hem herstellen vanuit Recent verwijderd.</string>
+    <string name="viewer_delete_move_to_drive_trash">Naar Drive-prullenbak verplaatsen</string>
+    <string name="action_save">Opslaan</string>
+    <string name="gallery_picker_drive_albums">Drive-albums</string>
+    <string name="album_card_folder_badge">Map</string>
+    <string name="device_folders_title">Mappen op dit apparaat</string>
+    <string name="device_folders_entry">Mappen op dit apparaat</string>
+    <string name="device_folders_section">Mappen op dit apparaat</string>
+    <string name="albums_toggle_device_folders">Apparaatmappen tonen of verbergen</string>
+    <string name="device_folders_empty">Geen mappen op dit apparaat.</string>
+    <string name="device_folder_upload_action">Uploaden naar Drive</string>
+    <string name="device_folder_uploading_fmt">%1$d uploaden naar Drive</string>
+    <string name="device_folder_already_backed_up">Al geback-upt naar Drive</string>
+    <string name="device_folder_added_to_album">Toegevoegd aan album</string>
+    <string name="device_folder_backing_up_fmt">Back-uppen %1$d / %2$d</string>
+    <string name="device_folder_backup_all">Map back-uppen</string>
+    <string name="device_folder_backup_choice_title">Deze map back-uppen?</string>
+    <string name="device_folder_backup_choice_body">Elke foto en video in deze map wordt geback-upt naar Drive. Je kunt de map ook als album spiegelen.</string>
+    <string name="device_folder_backup_timeline">Alleen foto\'s back-uppen</string>
+    <string name="device_folder_backup_timeline_sub">Eenmalige upload van de foto\'s hier naar je tijdlijn.</string>
+    <string name="device_folder_backup_mirror">Ook een album maken</string>
+    <string name="device_folder_backup_mirror_sub">Blijft synchroniseren — nieuwe foto\'s in deze map komen ook in het album.</string>
+    <string name="sync_folders_add_dialog_title">Map toevoegen</string>
+    <string name="sync_folders_add_row_title">Map toevoegen op naam</string>
+    <string name="sync_folders_add_dialog_name_hint">Mapnaam</string>
+    <string name="rename_sheet_title">Bestand hernoemen</string>
+    <string name="rename_sheet_subtitle_cloud">Kies hoe je de nieuwe naam toepast op je cloudfoto.</string>
+    <string name="rename_sheet_subtitle_local">Kies hoe je de nieuwe naam toepast op dit apparaat.</string>
+    <string name="rename_sheet_name_label">Bestandsnaam</string>
+    <string name="rename_sheet_option_cloud_title">Hernoemen in de cloud</string>
+    <string name="rename_sheet_option_cloud_subtitle">Uploadt onder de nieuwe naam en verplaatst het origineel daarna naar Recent verwijderd.</string>
+    <string name="rename_sheet_option_local_title">Origineel hernoemen</string>
+    <string name="rename_sheet_option_local_subtitle">Werkt het bestand ter plaatse bij op je apparaat.</string>
+    <string name="rename_sheet_option_copy_title">Opslaan als kopie</string>
+    <string name="rename_sheet_option_copy_subtitle_cloud">Uploadt als een nieuwe foto. Het origineel blijft in Drive.</string>
+    <string name="rename_sheet_option_copy_subtitle_local">Maakt een nieuw bestand aan in Pictures/Proton Photos.</string>
+    <string name="save_to_library_confirm_title">Opslaan in mijn bibliotheek</string>
+    <string name="save_to_library_confirm_body_fmt">We kopiëren %1$d items naar je bibliotheek. Ze verschijnen in je Foto\'s zodra het kopiëren klaar is.</string>
+    <string name="save_to_library_action_cancel">Opslaan annuleren</string>
+    <string name="save_to_library_cancelled_fmt">Opslaan geannuleerd bij %1$d / %2$d</string>
+    <string name="albums_more_actions">Meer acties</string>
+    <string name="leave_album">Album verlaten</string>
+    <string name="leave_album_confirm_title">Dit album verlaten?</string>
+    <string name="leave_album_confirm_body">Het album verdwijnt uit je bibliotheek. De kopie van de eigenaar en de toegang van iedereen anders blijven intact. Je kunt later opnieuw worden uitgenodigd.</string>
+    <string name="leave_album_confirm_action">Verlaten</string>
+    <string name="share_shared_by">Gedeeld door</string>
+    <string name="share_invite_sending">Uitnodiging verzenden…</string>
+    <string name="gallery_deselect_all">Selectie opheffen</string>
+    <!-- Force update dialog — localized so non-English users don't get stranded if the
+         in-app updater ever decides their version is no longer supported. -->
+    <string name="force_update_title">Update vereist</string>
+    <string name="force_update_body">Deze versie wordt niet meer ondersteund. Werk bij om door te gaan.</string>
+    <string name="force_update_action">Bijwerken</string>
+    <string name="notifications_title">Meldingen</string>
+    <string name="notifications_subtitle">Kies welke meldingen de app mag tonen. Alles staat standaard aan.</string>
+    <string name="notifications_nav_desc">Kies welke meldingen je ziet</string>
+    <string name="notifications_backup_status">Permanente back-upmelding</string>
+    <string name="notifications_backup_status_desc">Toont de permanente melding terwijl de app op nieuwe foto\'s let. De back-up blijft werken en uploadmeldingen verschijnen ook als dit uit staat; nieuwe foto\'s worden alleen iets minder direct opgepikt.</string>
+    <string name="notifications_album_download">Albumdownloads</string>
+    <string name="notifications_album_download_desc">Toont voortgang en een samenvatting wanneer je een album naar je apparaat downloadt.</string>
+    <string name="notifications_delete_reminder">Herinnering verwijderen na back-up</string>
+    <string name="notifications_delete_reminder_desc">Herinner me na een back-up welke foto\'s veilig van dit apparaat kunnen worden verwijderd.</string>
+    <string name="settings_backup_how_section">Hoe back-up verloopt</string>
+    <string name="settings_theme_palette">Thema &amp; palet</string>
+    <string name="settings_privacy_security">Privacy &amp; beveiliging</string>
+    <string name="cd_scroll_to_top">Naar boven</string>
+    <string name="albums_section_header">Albums</string>
+    <string name="albums_filter_all">Alle</string>
+    <string name="albums_filter_cloud">Cloud</string>
+    <string name="albums_filter_local">Op apparaat</string>
+    <string name="albums_toggle_cloud_albums">Albums tonen of verbergen</string>
+
+    <!-- Photo viewer details / metadata sheet -->
+    <string name="viewer_meta_section_file_info">Bestandsinfo</string>
+    <string name="viewer_meta_section_camera">Camera</string>
+    <string name="viewer_meta_section_location">Locatie</string>
+    <string name="viewer_meta_section_datetime">Datum en tijd</string>
+    <string name="viewer_meta_section_software">Software en auteur</string>
+    <string name="viewer_meta_section_image">Afbeelding</string>
+    <string name="viewer_meta_full">Volledige metadata</string>
+    <string name="viewer_meta_row_file">Bestand</string>
+    <string name="viewer_meta_row_date">Datum</string>
+    <string name="viewer_meta_row_size">Grootte</string>
+    <string name="viewer_meta_row_type">Type</string>
+    <string name="viewer_meta_row_album">Album</string>
+    <string name="viewer_meta_row_source">Bron</string>
+    <string name="viewer_meta_row_make">Merk</string>
+    <string name="viewer_meta_row_model">Model</string>
+    <string name="viewer_meta_row_lens">Lens</string>
+    <string name="viewer_meta_row_focal_length">Brandpuntsafstand</string>
+    <string name="viewer_meta_row_aperture">Diafragma</string>
+    <string name="viewer_meta_row_exposure">Belichting</string>
+    <string name="viewer_meta_row_iso">ISO</string>
+    <string name="viewer_meta_row_flash">Flits</string>
+    <string name="viewer_meta_row_white_balance">Witbalans</string>
+    <string name="viewer_meta_row_latitude">Breedtegraad</string>
+    <string name="viewer_meta_row_longitude">Lengtegraad</string>
+    <string name="viewer_meta_row_altitude">Hoogte</string>
+    <string name="viewer_meta_row_taken">Gemaakt</string>
+    <string name="viewer_meta_row_modified">Gewijzigd</string>
+    <string name="viewer_meta_row_software">Software</string>
+    <string name="viewer_meta_row_artist">Maker</string>
+    <string name="viewer_meta_row_copyright">Copyright</string>
+    <string name="viewer_meta_row_dimensions">Afmetingen</string>
+    <string name="viewer_meta_row_orientation">Oriëntatie</string>
+    <string name="viewer_meta_flash_fired">Flits gebruikt</string>
+    <string name="viewer_meta_flash_none">Geen flits</string>
+    <string name="viewer_meta_wb_auto">Automatisch</string>
+    <string name="viewer_meta_wb_manual">Handmatig</string>
+    <string name="viewer_meta_orientation_normal">Normaal</string>
+    <string name="viewer_meta_orientation_180">180° gedraaid</string>
+    <string name="viewer_meta_orientation_90_cw">90° met de klok mee gedraaid</string>
+    <string name="viewer_meta_orientation_90_ccw">90° tegen de klok in gedraaid</string>
+    <string name="viewer_meta_source_device_only">Alleen op apparaat</string>
+    <string name="viewer_meta_source_backed_up">Geback-upt naar Proton Drive</string>
+    <string name="viewer_meta_source_cloud">Proton Drive</string>
+    <string name="viewer_meta_strip">Verwijderen</string>
+    <string name="viewer_meta_strip_all">Alle privémetadata verwijderen</string>
+    <string name="viewer_meta_strip_all_desc">Verwijdert GPS, camera-informatie en softwarevelden uit dit bestand</string>
+    <string name="viewer_meta_strip_confirm_title">Metadata verwijderen?</string>
+    <string name="viewer_meta_strip_confirm_message">Hiermee wordt %1$s permanent uit het bestand op je apparaat verwijderd. Dit kan niet ongedaan worden gemaakt.</string>
+    <string name="viewer_meta_strip_what_gps">GPS-locatie</string>
+    <string name="viewer_meta_strip_what_camera">camera-informatie</string>
+    <string name="viewer_meta_strip_what_timestamps">tijdstempels</string>
+    <string name="viewer_meta_strip_what_software">software-informatie</string>
+
+    <!-- Viewer delete sheet + add-to-album sheet -->
+    <string name="viewer_delete_title_local">Foto verwijderen?</string>
+    <string name="viewer_delete_title_synced">Foto verwijderen?</string>
+    <string name="viewer_delete_title_cloud">Verwijderen uit Proton Drive?</string>
+    <string name="viewer_delete_local_body">Hiermee wordt de foto verplaatst naar de map „Onlangs verwijderd” van je apparaat.</string>
+    <string name="viewer_delete_move_to_trash">Naar prullenbak verplaatsen</string>
+    <string name="viewer_add_to_album_title">Aan album toevoegen</string>
+    <string name="viewer_add_to_album_empty">Nog geen albums. Maak er een aan op het tabblad Albums.</string>
+    <string name="viewer_drive_albums_header">DRIVE-ALBUMS</string>
+    <string name="viewer_tap_to_remove_from_album">Tik om uit het album te verwijderen</string>
+
+    <!-- Viewer image/video states -->
+    <string name="viewer_error_loading_photo">Fout bij het laden van de foto</string>
+    <string name="viewer_downloading_pct">Downloaden %1$d%%</string>
+    <string name="viewer_downloading">Downloaden…</string>
+    <string name="viewer_loading">Laden…</string>
+
+    <!-- Viewer snackbar / error fallbacks -->
+    <string name="viewer_unknown_error">onbekende fout</string>
+    <string name="viewer_not_signed_in">Niet aangemeld</string>
+    <string name="viewer_not_logged_in">Niet aangemeld</string>
+    <string name="viewer_delete_drive_failed">Verwijderen uit Drive mislukt</string>
+    <string name="viewer_hide_failed">Kan bestand niet naar Verborgen verplaatsen</string>
+    <string name="viewer_name_empty">De naam mag niet leeg zijn</string>
+    <string name="viewer_rename_failed">Naam wijzigen mislukt</string>
+    <string name="viewer_load_albums_failed">Kan albums niet laden: %1$s</string>
+    <string name="viewer_remove_from_album_failed">Verwijderen uit album mislukt: %1$s</string>
+    <string name="viewer_set_cover_failed">Omslag instellen mislukt: %1$s</string>
+    <string name="viewer_add_to_album_failed">Toevoegen aan album mislukt: %1$s</string>
+    <string name="viewer_create_album_failed">Album aanmaken mislukt: %1$s</string>
+    <string name="viewer_save_to_device_failed">Opslaan op apparaat mislukt: %1$s</string>
+    <string name="viewer_share_failed">Delen mislukt: %1$s</string>
+    <plurals name="viewer_add_photos_failed">
+        <item quantity="one">Kan %1$d foto niet aan het album toevoegen</item>
+        <item quantity="other">Kan %1$d foto\'s niet aan het album toevoegen</item>
+    </plurals>
+
+    <!-- ErrorPopup dialog -->
+    <string name="err_dismiss_ok">OK</string>
+    <string name="err_show_more">Meer tonen</string>
+    <string name="err_show_less">Minder tonen</string>
+    <string name="err_copy">Kopiëren</string>
+
+    <!-- Gallery snackbar / error fallbacks -->
+    <string name="gallery_error_title">Fout</string>
+    <string name="gallery_no_local_to_hide">Geen lokale foto\'s om te verbergen</string>
+    <string name="gallery_copy_to_hidden_failed">Kopiëren naar Verborgen mislukt</string>
+    <string name="gallery_move_to_hidden_failed">Verplaatsen naar Verborgen mislukt</string>
+    <string name="gallery_add_to_cloud_album_failed">Toevoegen aan cloudalbum mislukt</string>
+    <string name="gallery_add_to_album_failed">Toevoegen aan album mislukt</string>
+    <string name="gallery_select_photos_first">Selecteer eerst foto\'s</string>
+    <string name="gallery_create_album_failed">Kan album niet aanmaken: %1$s</string>
+    <string name="gallery_enable_metadata_category">Schakel eerst een metadatacategorie in onder Instellingen → Privacy</string>
+    <string name="gallery_album_picker_count_drive">%1$s · Drive</string>
+
+    <!-- Album create/rename/delete snackbar fallbacks -->
+    <string name="albums_name_empty">De albumnaam mag niet leeg zijn</string>
+    <string name="albums_create_failed">Kan album niet aanmaken</string>
+    <string name="albums_rename_same_name">De nieuwe naam is gelijk aan de huidige naam</string>
+    <string name="albums_rename_failed">Naam wijzigen mislukt</string>
+    <string name="albums_delete_failed">Kan album niet verwijderen: %1$s</string>
+    <string name="albums_renamed_to">Hernoemd naar „%1$s”</string>
+
+    <string name="cd_album_fully_backed_up">Volledig geback-upt</string>
+    <string name="cd_album_partially_backed_up">Gedeeltelijk geback-upt</string>
+
+    <!-- Trash screen -->
+    <string name="trash_title">Onlangs verwijderd</string>
+    <string name="trash_restore">Herstellen</string>
+    <string name="trash_empty">Prullenbak legen</string>
+    <string name="select_all">Alles selecteren</string>
+    <string name="trash_device_unsupported">Prullenbak van apparaat vereist Android 11+</string>
+    <string name="trash_device_empty_title">Geen onlangs verwijderde foto\'s</string>
+    <string name="trash_device_empty_subtitle">Foto\'s die in de laatste 30 dagen zijn verwijderd,\nverschijnen hier</string>
+    <string name="trash_restore_device_message">Ze worden hersteld in de galerij van je apparaat.</string>
+    <string name="trash_delete_forever_message">Kan niet ongedaan worden gemaakt. Foto\'s worden permanent van dit apparaat verwijderd.</string>
+    <string name="trash_delete_forever_confirm">Permanent verwijderen</string>
+    <string name="trash_restore_cloud_message">Ze worden teruggezet in je Proton Drive-fotostroom.</string>
+    <plurals name="trash_restore_title">
+        <item quantity="one">%1$d foto herstellen?</item>
+        <item quantity="other">%1$d foto\'s herstellen?</item>
+    </plurals>
+    <plurals name="trash_delete_forever_title">
+        <item quantity="one">%1$d foto permanent verwijderen?</item>
+        <item quantity="other">%1$d foto\'s permanent verwijderen?</item>
+    </plurals>
+    <string name="trash_selected_count">%1$d geselecteerd</string>
+    <string name="trash_long_press_hint">Houd ingedrukt om te selecteren</string>
+
+    <!-- Backup folders (SyncFolders) screen -->
+    <string name="sync_folders_title">Back-upmappen</string>
+    <string name="sync_folders_description">Kies welke mappen naar Proton Drive worden geback-upt. Geselecteerde mappen worden bij het synchroniseren automatisch geüpload.</string>
+    <string name="sync_folders_count_selected">%1$d van %2$d mappen geselecteerd</string>
+    <string name="sync_folders_add_action">Map toevoegen</string>
+    <string name="sync_folders_add_row_subtitle">Geef vooraf een map op zodat toekomstige foto\'s erin automatisch worden geback-upt</string>
+    <string name="sync_folders_add_dialog_body">Voer de exacte mapnaam in (bijv. \"Reis 2026\"). Zodra een foto in een overeenkomende map terechtkomt, wordt deze automatisch geback-upt.</string>
+    <string name="sync_folders_selected_cd">Geselecteerd</string>
+
+    <!-- Mirror device folders as albums screen -->
+    <string name="mirror_opted_in_cd">Ingeschakeld</string>
+    <string name="mirror_custom_pending">In afwachting — wordt toegepast wanneer een map met deze naam verschijnt</string>
+    <string name="mirror_remove_cd">Verwijderen</string>
+    <string name="mirror_name_empty">Mapnaam mag niet leeg zijn</string>
+    <string name="mirror_name_invalid_chars">Naam mag geen \'/\' of \'=\' bevatten</string>
+    <string name="mirror_name_already_added">Map is al toegevoegd</string>
+
+    <!-- Settings — sync error popup + free-up snackbars -->
+    <string name="settings_sync_failed">Synchronisatie mislukt</string>
+    <string name="settings_freed_photos">%1$d foto(\'s) vrijgemaakt van apparaat</string>
+    <string name="settings_free_up_none">Geen lokaal gecachte geback-upte foto\'s om te verwijderen</string>
+    <string name="settings_free_up_error">Kon geen ruimte vrijmaken: %1$s</string>
+
+    <!-- Upload status labels (Sync progress panel) -->
+    <string name="upload_status_uploading">Uploaden…</string>
+    <string name="upload_status_encrypting">Versleutelen…</string>
+    <string name="upload_status_queued">In wachtrij</string>
+    <string name="upload_status_done">Klaar</string>
+    <string name="upload_status_failed">Mislukt</string>
+
+    <!-- Shared albums error snackbars -->
+    <string name="shared_decline_failed">Weigeren mislukt: %1$s</string>
+    <string name="shared_accept_failed">Accepteren mislukt: %1$s</string>
+    <string name="shared_load_failed">Kon gedeelde albums niet laden: %1$s</string>
+
+    <!-- Hidden photos empty state -->
+    <string name="hidden_empty_title">Geen verborgen foto\'s</string>
+    <string name="hidden_empty_subtitle">Houd een foto in de galerij ingedrukt en kies \"Verbergen\"</string>
+
+    <!-- Densest-layout performance heads-up -->
+    <string name="dense_grid_warning_title">Compactste weergave</string>
+    <string name="dense_grid_warning_message">Meer foto\'s per rij kan het scrollen minder soepel maken bij zeer grote bibliotheken.</string>
+    <string name="dense_grid_warning_dismiss">Niet meer tonen</string>
+</resources>

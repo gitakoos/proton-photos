@@ -30,14 +30,22 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -48,6 +56,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -69,36 +78,27 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-// ── Metadata sheet ─────────────────────────────────────────────────────────────
-
 @Composable
 internal fun PhotoMetadataSheet(
     item: GalleryItem?,
     exif: PhotoMetadata?,
     isStripping: Boolean,
-    /** On-disk size of the resolved full-res blob. The server batch API sometimes returns
-     *  `link.size = null` for video uploads, leaving [CloudPhoto.sizeBytes] at 0 — this
-     *  fallback fills the Size row with the real byte count once the viewer's background
-     *  download finishes. Null when the item is local-only or the download hasn't landed. */
+    /** Resolved full-res byte count, used for the Size row when [CloudPhoto.sizeBytes] is 0 (the
+     *  server batch API returns null size for some video uploads). Null until the download lands. */
     cloudSizeFallback: Long? = null,
     onStripFields: (MetadataStripConfig) -> Unit,
     onRenameClick: () -> Unit = {},
+    /** Category PhotoTag ids on the photo + toggle callback. Cloud-backed photos only. */
+    photoTags: Set<Int> = emptySet(),
+    onToggleTag: (Int, Boolean) -> Unit = { _, _ -> },
 ) {
     if (item == null) return
     val isLocal = item is GalleryItem.LocalOnly || item is GalleryItem.Synced
-    // Per-section Strip actions only apply to device-only photos. Synced items already
-    // went through Settings → Privacy & Metadata's "Strip on upload" toggle, so the
-    // local file's EXIF is the right copy and we don't want to teach users that a
-    // post-upload strip changes anything visible on Drive (it doesn't — Drive holds
-    // the already-stripped version). CloudOnly has no on-device EXIF to touch at all.
+    // Per-section Strip only applies to device-only photos: Synced already went through the
+    // "Strip on upload" toggle and CloudOnly has no on-device EXIF to touch.
     val isDeviceOnly = item is GalleryItem.LocalOnly
-    // Hidden-vault photos live under file:// in app-private storage and aren't safe to
-    // rename via the normal MediaStore path. The dedicated rename function does work
-    // but the underlying file's `__<captureMs>.ext` suffix bleeds back into the visible
-    // display-name (the file's name IS the display-name for hidden items) and produces
-    // confusing artifacts on re-rename ("file with that name already exists" hits when
-    // the user un-knowingly tries to rename to the same stem + suffix combination).
-    // Cleanest UX: hide the rename affordance entirely for hidden items.
+    // Hide rename for hidden-vault items: the file's `__<captureMs>.ext` suffix (the file name IS
+    // the display-name there) bleeds into the field and breaks re-rename.
     val itemUri = when (item) {
         is GalleryItem.LocalOnly -> item.local.uri
         is GalleryItem.Synced -> item.local.uri
@@ -108,87 +108,142 @@ internal fun PhotoMetadataSheet(
     val effectiveRenameClick: (() -> Unit)? = if (isHiddenItem) null else onRenameClick
     var showStripConfirm by remember { mutableStateOf(false) }
     var pendingStripConfig by remember { mutableStateOf<MetadataStripConfig?>(null) }
+    // The EXIF detail is hidden behind a tap so the sheet's main view stays short; tapping the
+    // "Full metadata" row reveals it, tapping again collapses back.
+    var showFullMetadata by remember { mutableStateOf(false) }
+    val hasExif = exif != null && (
+        exif.make != null || exif.model != null || exif.focalLength != null ||
+        exif.gpsLatitude != null || exif.gpsLongitude != null ||
+        exif.dateTime != null || exif.dateTimeOriginal != null ||
+        exif.software != null || exif.artist != null || exif.copyright != null ||
+        (exif.width != null && exif.height != null)
+    )
 
+    // Cap the sheet at roughly half the screen so a photo with lots of EXIF doesn't shove the
+    // panel up under the status bar; the content scrolls within that ceiling.
+    val maxSheetHeight = (LocalConfiguration.current.screenHeightDp * 0.5f).dp
     androidx.compose.foundation.rememberScrollState().let { scrollState ->
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .heightIn(max = maxSheetHeight)
                 .verticalScroll(scrollState)
                 .padding(horizontal = 20.dp)
                 .padding(bottom = 40.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Text(
-                "Details",
+                stringResource(R.string.viewer_menu_details),
                 color = FgPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
             )
 
-            // ── File info ──────────────────────────────────────────────────
-            MetadataSection("File Info") {
+            val rowFile = stringResource(R.string.viewer_meta_row_file)
+            val rowDate = stringResource(R.string.viewer_meta_row_date)
+            val rowSize = stringResource(R.string.viewer_meta_row_size)
+            val rowType = stringResource(R.string.viewer_meta_row_type)
+            val rowAlbum = stringResource(R.string.viewer_meta_row_album)
+            val rowSource = stringResource(R.string.viewer_meta_row_source)
+            MetadataSection(stringResource(R.string.viewer_meta_section_file_info)) {
                 when (item) {
                     is GalleryItem.LocalOnly -> {
-                        MetaRow("File", item.local.displayName, onEdit = effectiveRenameClick)
-                        MetaRow("Date", formatMs(item.local.dateTaken))
-                        MetaRow("Size", formatBytes(item.local.sizeBytes))
-                        MetaRow("Type", item.local.mimeType)
-                        item.local.bucketName?.let { MetaRow("Album", it) }
-                        MetaRow("Source", "On device only")
+                        MetaRow(rowFile, item.local.displayName, onEdit = effectiveRenameClick)
+                        MetaRow(rowDate, formatMs(item.local.dateTaken))
+                        MetaRow(rowSize, formatBytes(item.local.sizeBytes))
+                        MetaRow(rowType, item.local.mimeType)
+                        item.local.bucketName?.let { MetaRow(rowAlbum, it) }
+                        MetaRow(rowSource, stringResource(R.string.viewer_meta_source_device_only))
                     }
                     is GalleryItem.Synced -> {
-                        MetaRow("File", item.local.displayName, onEdit = effectiveRenameClick)
-                        // Date sourced from the CLOUD captureTime — Drive stores the original
-                        // upload-time consistently while MediaStore's DATE_TAKEN can drift to
-                        // the download moment on devices where the column gets silently reset
-                        // (Samsung One UI is the worst offender). Falls back to the local
-                        // dateTaken only when the cloud side has no captureTime (rare).
+                        MetaRow(rowFile, item.local.displayName, onEdit = effectiveRenameClick)
+                        // Prefer the cloud captureTime: MediaStore's DATE_TAKEN can drift to the
+                        // download moment on some devices (Samsung One UI). Falls back to local.
                         val displayDateMs = if (item.cloud.captureTime > 0L)
                             item.cloud.captureTime * 1000L
                         else item.local.dateTaken
-                        MetaRow("Date", formatMs(displayDateMs))
-                        MetaRow("Size", formatBytes(item.local.sizeBytes))
-                        MetaRow("Type", item.local.mimeType)
-                        item.local.bucketName?.let { MetaRow("Album", it) }
-                        MetaRow("Source", "Backed up to Proton Drive")
+                        MetaRow(rowDate, formatMs(displayDateMs))
+                        MetaRow(rowSize, formatBytes(item.local.sizeBytes))
+                        MetaRow(rowType, item.local.mimeType)
+                        item.local.bucketName?.let { MetaRow(rowAlbum, it) }
+                        MetaRow(rowSource, stringResource(R.string.viewer_meta_source_backed_up))
                     }
                     is GalleryItem.CloudOnly -> {
-                        MetaRow("File", item.cloud.displayName, onEdit = onRenameClick)
-                        MetaRow("Date", formatMs(item.cloud.captureTime * 1000L))
+                        MetaRow(rowFile, item.cloud.displayName, onEdit = onRenameClick)
+                        MetaRow(rowDate, formatMs(item.cloud.captureTime * 1000L))
                         val displaySize = item.cloud.sizeBytes.takeIf { it > 0 } ?: cloudSizeFallback ?: 0L
-                        MetaRow("Size", if (displaySize > 0) formatBytes(displaySize) else "—")
-                        MetaRow("Type", item.cloud.mimeType)
-                        MetaRow("Source", "Proton Drive")
+                        MetaRow(rowSize, if (displaySize > 0) formatBytes(displaySize) else "—")
+                        MetaRow(rowType, item.cloud.mimeType)
+                        MetaRow(rowSource, stringResource(R.string.viewer_meta_source_cloud))
                     }
                 }
             }
 
-            // ── EXIF — Camera ──────────────────────────────────────────────
-            if (exif != null && (exif.make != null || exif.model != null || exif.focalLength != null)) {
+            if (item is GalleryItem.Synced || item is GalleryItem.CloudOnly) {
+                CategoryEditor(tags = photoTags, onToggle = onToggleTag)
+            }
+
+            if (hasExif) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(CardBg, RoundedCornerShape(12.dp))
+                        .border(0.5.dp, Line2, RoundedCornerShape(12.dp))
+                        .clickable { showFullMetadata = !showFullMetadata }
+                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        stringResource(R.string.viewer_meta_full),
+                        color = FgPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium,
+                    )
+                    Icon(
+                        if (showFullMetadata) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                        contentDescription = null,
+                        tint = FgMute,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+            }
+
+            if (showFullMetadata && exif != null && (exif.make != null || exif.model != null || exif.focalLength != null)) {
                 MetadataSection(
-                    label = "Camera",
-                    actionLabel = if (isDeviceOnly) "Strip" else null,
+                    label = stringResource(R.string.viewer_meta_section_camera),
+                    actionLabel = if (isDeviceOnly) stringResource(R.string.viewer_meta_strip) else null,
                     actionEnabled = !isStripping,
                     onAction = {
                         pendingStripConfig = MetadataStripConfig(stripCameraInfo = true)
                         showStripConfirm = true
                     },
                 ) {
-                    exif.make?.let { MetaRow("Make", it) }
-                    exif.model?.let { MetaRow("Model", it) }
-                    exif.lensModel?.let { MetaRow("Lens", it) }
-                    exif.focalLength?.let { MetaRow("Focal length", "${it}mm") }
-                    exif.aperture?.let { MetaRow("Aperture", "f/$it") }
-                    exif.exposureTime?.let { MetaRow("Exposure", it) }
-                    exif.isoSpeed?.let { MetaRow("ISO", it) }
-                    exif.flash?.let { MetaRow("Flash", if (it and 0x01 != 0) "Fired" else "No flash") }
-                    exif.whiteBalance?.let { MetaRow("White balance", if (it == 0) "Auto" else "Manual") }
+                    exif.make?.let { MetaRow(stringResource(R.string.viewer_meta_row_make), it) }
+                    exif.model?.let { MetaRow(stringResource(R.string.viewer_meta_row_model), it) }
+                    exif.lensModel?.let { MetaRow(stringResource(R.string.viewer_meta_row_lens), it) }
+                    exif.focalLength?.let { MetaRow(stringResource(R.string.viewer_meta_row_focal_length), "${it}mm") }
+                    exif.aperture?.let { MetaRow(stringResource(R.string.viewer_meta_row_aperture), "f/$it") }
+                    exif.exposureTime?.let { MetaRow(stringResource(R.string.viewer_meta_row_exposure), it) }
+                    exif.isoSpeed?.let { MetaRow(stringResource(R.string.viewer_meta_row_iso), it) }
+                    exif.flash?.let {
+                        MetaRow(
+                            stringResource(R.string.viewer_meta_row_flash),
+                            if (it and 0x01 != 0) stringResource(R.string.viewer_meta_flash_fired)
+                            else stringResource(R.string.viewer_meta_flash_none),
+                        )
+                    }
+                    exif.whiteBalance?.let {
+                        MetaRow(
+                            stringResource(R.string.viewer_meta_row_white_balance),
+                            if (it == 0) stringResource(R.string.viewer_meta_wb_auto)
+                            else stringResource(R.string.viewer_meta_wb_manual),
+                        )
+                    }
                 }
             }
 
-            // ── EXIF — Location ────────────────────────────────────────────
-            if (exif != null && (exif.gpsLatitude != null || exif.gpsLongitude != null)) {
+            if (showFullMetadata && exif != null && (exif.gpsLatitude != null || exif.gpsLongitude != null)) {
                 MetadataSection(
-                    label = "Location",
-                    actionLabel = if (isDeviceOnly) "Strip" else null,
+                    label = stringResource(R.string.viewer_meta_section_location),
+                    actionLabel = if (isDeviceOnly) stringResource(R.string.viewer_meta_strip) else null,
                     actionEnabled = !isStripping,
                     onAction = {
                         pendingStripConfig = MetadataStripConfig(stripGps = true)
@@ -196,69 +251,69 @@ internal fun PhotoMetadataSheet(
                     },
                 ) {
                     exif.gpsLatitude?.let {
-                        MetaRow("Latitude", "%.6f°".format(it))
+                        MetaRow(stringResource(R.string.viewer_meta_row_latitude), "%.6f°".format(it))
                     }
                     exif.gpsLongitude?.let {
-                        MetaRow("Longitude", "%.6f°".format(it))
+                        MetaRow(stringResource(R.string.viewer_meta_row_longitude), "%.6f°".format(it))
                     }
                     exif.gpsAltitude?.let {
-                        MetaRow("Altitude", "%.1f m".format(it))
+                        MetaRow(stringResource(R.string.viewer_meta_row_altitude), "%.1f m".format(it))
                     }
                 }
             }
 
-            // ── EXIF — Date & Time ─────────────────────────────────────────
-            if (exif != null && (exif.dateTime != null || exif.dateTimeOriginal != null)) {
+            if (showFullMetadata && exif != null && (exif.dateTime != null || exif.dateTimeOriginal != null)) {
                 MetadataSection(
-                    label = "Date & Time",
-                    actionLabel = if (isDeviceOnly) "Strip" else null,
+                    label = stringResource(R.string.viewer_meta_section_datetime),
+                    actionLabel = if (isDeviceOnly) stringResource(R.string.viewer_meta_strip) else null,
                     actionEnabled = !isStripping,
                     onAction = {
                         pendingStripConfig = MetadataStripConfig(stripTimestamp = true)
                         showStripConfirm = true
                     },
                 ) {
-                    exif.dateTimeOriginal?.let { MetaRow("Taken", it) }
-                    exif.dateTime?.let { MetaRow("Modified", it) }
+                    exif.dateTimeOriginal?.let { MetaRow(stringResource(R.string.viewer_meta_row_taken), it) }
+                    exif.dateTime?.let { MetaRow(stringResource(R.string.viewer_meta_row_modified), it) }
                 }
             }
 
-            // ── EXIF — Software ────────────────────────────────────────────
-            if (exif != null && (exif.software != null || exif.artist != null || exif.copyright != null)) {
+            if (showFullMetadata && exif != null && (exif.software != null || exif.artist != null || exif.copyright != null)) {
                 MetadataSection(
-                    label = "Software & Author",
-                    actionLabel = if (isDeviceOnly) "Strip" else null,
+                    label = stringResource(R.string.viewer_meta_section_software),
+                    actionLabel = if (isDeviceOnly) stringResource(R.string.viewer_meta_strip) else null,
                     actionEnabled = !isStripping,
                     onAction = {
                         pendingStripConfig = MetadataStripConfig(stripSoftwareInfo = true)
                         showStripConfirm = true
                     },
                 ) {
-                    exif.software?.let { MetaRow("Software", it) }
-                    exif.artist?.let { MetaRow("Artist", it) }
-                    exif.copyright?.let { MetaRow("Copyright", it) }
+                    exif.software?.let { MetaRow(stringResource(R.string.viewer_meta_row_software), it) }
+                    exif.artist?.let { MetaRow(stringResource(R.string.viewer_meta_row_artist), it) }
+                    exif.copyright?.let { MetaRow(stringResource(R.string.viewer_meta_row_copyright), it) }
                 }
             }
 
-            // ── Image dimensions ───────────────────────────────────────────
-            if (exif != null && exif.width != null && exif.height != null) {
-                MetadataSection("Image") {
-                    MetaRow("Dimensions", "${exif.width} × ${exif.height}")
+            if (showFullMetadata && exif != null && exif.width != null && exif.height != null) {
+                MetadataSection(stringResource(R.string.viewer_meta_section_image)) {
+                    val orientNormal = stringResource(R.string.viewer_meta_orientation_normal)
+                    val orient180 = stringResource(R.string.viewer_meta_orientation_180)
+                    val orient90Cw = stringResource(R.string.viewer_meta_orientation_90_cw)
+                    val orient90Ccw = stringResource(R.string.viewer_meta_orientation_90_ccw)
+                    MetaRow(stringResource(R.string.viewer_meta_row_dimensions), "${exif.width} × ${exif.height}")
                     exif.orientation?.let {
                         val orientLabel = when (it) {
-                            1 -> "Normal"
-                            3 -> "Rotated 180°"
-                            6 -> "Rotated 90° CW"
-                            8 -> "Rotated 90° CCW"
+                            1 -> orientNormal
+                            3 -> orient180
+                            6 -> orient90Cw
+                            8 -> orient90Ccw
                             else -> "$it"
                         }
-                        MetaRow("Orientation", orientLabel)
+                        MetaRow(stringResource(R.string.viewer_meta_row_orientation), orientLabel)
                     }
                 }
             }
 
-            // ── Strip all — quick action for local items ───────────────────
-            if (isLocal && exif != null) {
+            if (showFullMetadata && isLocal && exif != null) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -279,11 +334,11 @@ internal fun PhotoMetadataSheet(
                 ) {
                     Column {
                         Text(
-                            "Strip all private metadata",
+                            stringResource(R.string.viewer_meta_strip_all),
                             color = ErrorColor, fontSize = 14.sp, fontWeight = FontWeight.Medium,
                         )
                         Text(
-                            "Removes GPS, camera info and software fields from this file",
+                            stringResource(R.string.viewer_meta_strip_all_desc),
                             color = FgMute, fontSize = 11.5.sp,
                         )
                     }
@@ -301,17 +356,21 @@ internal fun PhotoMetadataSheet(
 
     if (showStripConfirm && pendingStripConfig != null) {
         val config = pendingStripConfig!!
+        val whatGps = stringResource(R.string.viewer_meta_strip_what_gps)
+        val whatCamera = stringResource(R.string.viewer_meta_strip_what_camera)
+        val whatTimestamps = stringResource(R.string.viewer_meta_strip_what_timestamps)
+        val whatSoftware = stringResource(R.string.viewer_meta_strip_what_software)
         val what = buildList {
-            if (config.stripGps) add("GPS location")
-            if (config.stripCameraInfo) add("camera info")
-            if (config.stripTimestamp) add("timestamps")
-            if (config.stripSoftwareInfo) add("software info")
+            if (config.stripGps) add(whatGps)
+            if (config.stripCameraInfo) add(whatCamera)
+            if (config.stripTimestamp) add(whatTimestamps)
+            if (config.stripSoftwareInfo) add(whatSoftware)
         }.joinToString(", ")
         ConfirmDialog(
-            title = "Strip metadata?",
-            message = "This will permanently remove $what from the file on your device. This cannot be undone.",
-            confirmLabel = "Strip",
-            dismissLabel = "Cancel",
+            title = stringResource(R.string.viewer_meta_strip_confirm_title),
+            message = stringResource(R.string.viewer_meta_strip_confirm_message, what),
+            confirmLabel = stringResource(R.string.viewer_meta_strip),
+            dismissLabel = stringResource(R.string.cancel),
             onConfirm = {
                 showStripConfirm = false
                 onStripFields(config)
@@ -400,7 +459,61 @@ internal fun MetaRow(label: String, value: String, onEdit: (() -> Unit)? = null)
     }
 }
 
-// ── Helpers ────────────────────────────────────────────────────────────────────
+/** Toggleable category chips. Excludes tag 0 Favorites (own heart button) and 2 Videos (derived
+ *  from mime type); labels reuse the gallery category-filter strings. */
+private val EDITABLE_CATEGORY_TAGS = listOf(
+    1 to R.string.gallery_filter_screenshots,
+    3 to R.string.gallery_filter_live_photos,
+    4 to R.string.gallery_filter_motion_photos,
+    5 to R.string.gallery_filter_selfies,
+    6 to R.string.gallery_filter_portraits,
+    7 to R.string.gallery_filter_bursts,
+    8 to R.string.gallery_filter_panoramas,
+    9 to R.string.gallery_filter_raw,
+)
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun CategoryEditor(tags: Set<Int>, onToggle: (Int, Boolean) -> Unit) {
+    Column {
+        Text(
+            stringResource(R.string.gallery_filter_categories).uppercase(),
+            color = FgMute, fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold,
+            letterSpacing = 0.8.sp,
+            modifier = Modifier.padding(bottom = 8.dp),
+        )
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            EDITABLE_CATEGORY_TAGS.forEach { (tagId, labelRes) ->
+                val selected = tagId in tags
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(if (selected) Accent.copy(alpha = 0.18f) else CardBg)
+                        .border(0.5.dp, if (selected) Accent else Line2, RoundedCornerShape(20.dp))
+                        .clickable { onToggle(tagId, !selected) }
+                        .padding(horizontal = 12.dp, vertical = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        if (selected) Icons.Default.Check else Icons.Default.Add,
+                        contentDescription = null,
+                        tint = if (selected) Accent else FgMute,
+                        modifier = Modifier.size(14.dp),
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        stringResource(labelRes),
+                        color = if (selected) FgPrimary else FgMute,
+                        fontSize = 13.sp, fontWeight = FontWeight.Medium,
+                    )
+                }
+            }
+        }
+    }
+}
 
 internal fun formatItemDate(item: GalleryItem): String = formatMs(item.captureTimeMs)
 

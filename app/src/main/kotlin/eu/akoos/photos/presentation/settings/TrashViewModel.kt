@@ -40,6 +40,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import me.proton.core.accountmanager.domain.AccountManager
 import eu.akoos.photos.R
+import eu.akoos.photos.util.sanitizeErrorMessage
 import eu.akoos.photos.data.repository.drive.CloudTrashService
 import eu.akoos.photos.data.repository.drive.ThumbnailDecryptScheduler
 import eu.akoos.photos.domain.entity.CloudTrashItem
@@ -178,7 +179,7 @@ class TrashViewModel @Inject constructor(
                 _uiState.update {
                     it.copy(cloud = it.cloud.copy(
                         isLoading = false,
-                        errorMessage = "Not signed in",
+                        errorMessage = context.getString(R.string.viewer_not_signed_in),
                     ))
                 }
                 return@launch
@@ -199,7 +200,7 @@ class TrashViewModel @Inject constructor(
                     _uiState.update {
                         it.copy(cloud = it.cloud.copy(
                             isLoading = false,
-                            errorMessage = e.message ?: "Couldn't load cloud trash",
+                            errorMessage = sanitizeErrorMessage(e.message ?: context.getString(R.string.trash_cloud_error)),
                         ))
                     }
                 },
@@ -228,7 +229,11 @@ class TrashViewModel @Inject constructor(
     fun restoreSelectedCloud() {
         viewModelScope.launch {
             val state = _uiState.value
-            val linkIds = state.cloud.selectedLinkIds.toList()
+            // Mirror emptyCloudSelected: with no explicit selection, "Restore" acts on every
+            // trashed item. Without this fallback the action silently no-ops when nothing is
+            // ticked, since selectedLinkIds is empty.
+            val linkIds = state.cloud.selectedLinkIds.takeIf { it.isNotEmpty() }?.toList()
+                ?: state.cloud.items.map { it.linkId }
             if (linkIds.isEmpty()) return@launch
             val userId = accountManager.getPrimaryUserId().first() ?: return@launch
             val result = runCatching { cloudTrashService.restoreFromCloudTrash(userId, linkIds) }
@@ -258,7 +263,7 @@ class TrashViewModel @Inject constructor(
                 onFailure = { e ->
                     _uiState.update { st ->
                         st.copy(cloud = st.cloud.copy(
-                            errorMessage = e.message ?: context.getString(R.string.trash_cloud_restore_failed),
+                            errorMessage = sanitizeErrorMessage(e.message ?: context.getString(R.string.trash_cloud_restore_failed)),
                         ))
                     }
                 },
@@ -299,7 +304,7 @@ class TrashViewModel @Inject constructor(
                 onFailure = { e ->
                     _uiState.update { st ->
                         st.copy(cloud = st.cloud.copy(
-                            errorMessage = e.message ?: context.getString(R.string.trash_cloud_empty_failed),
+                            errorMessage = sanitizeErrorMessage(e.message ?: context.getString(R.string.trash_cloud_empty_failed)),
                         ))
                     }
                 },

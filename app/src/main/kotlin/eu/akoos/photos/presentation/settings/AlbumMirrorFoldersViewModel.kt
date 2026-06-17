@@ -28,6 +28,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import eu.akoos.photos.R
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.repository.LocalMediaRepository
@@ -150,18 +151,18 @@ class AlbumMirrorFoldersViewModel @Inject constructor(
         val raw = _uiState.value.addDialogText.trim()
         when {
             raw.isEmpty() -> {
-                _uiState.update { it.copy(addDialogError = "Folder name cannot be empty") }
+                _uiState.update { it.copy(addDialogError = context.getString(R.string.mirror_name_empty)) }
                 return
             }
             raw.contains('/') || raw.contains('=') -> {
                 // '/' would collide with path separators in any future on-disk lookup, '=' is
                 // reserved by DataStore-encoded mappings elsewhere in the app (see
                 // ALBUM_BUCKET_MAP entries which use `bucketName=albumLinkId`).
-                _uiState.update { it.copy(addDialogError = "Name cannot contain '/' or '='") }
+                _uiState.update { it.copy(addDialogError = context.getString(R.string.mirror_name_invalid_chars)) }
                 return
             }
             raw in optInNames -> {
-                _uiState.update { it.copy(addDialogError = "Folder already added") }
+                _uiState.update { it.copy(addDialogError = context.getString(R.string.mirror_name_already_added)) }
                 return
             }
         }

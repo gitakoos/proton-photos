@@ -22,10 +22,13 @@
 
 package eu.akoos.photos.presentation.viewer
 
+import eu.akoos.photos.presentation.common.DestructiveButton
+
 import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -64,6 +67,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -87,8 +91,6 @@ import eu.akoos.photos.presentation.theme.PanelChip
 import eu.akoos.photos.presentation.theme.PillBg
 import eu.akoos.photos.presentation.theme.PillBorder
 
-// ── Filmstrip ──────────────────────────────────────────────────────────────────
-
 @Composable
 internal fun Filmstrip(
     items: List<GalleryItem>,
@@ -98,15 +100,23 @@ internal fun Filmstrip(
     val listState = rememberLazyListState()
     val density   = LocalDensity.current
 
+    // True while the user is physically dragging the strip — suppresses the auto-recentre
+    // below so a manual scroll back through the thumbnails isn't yanked away from them.
+    val isDragged by listState.interactionSource.collectIsDraggedAsState()
+
     BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
         val viewportPx = constraints.maxWidth
         val itemPx     = with(density) { 54.dp.roundToPx() }
 
+        // Pager → filmstrip: keep the active thumb centred. Suppressed while the
+        // user is dragging the strip so we don't yank it out from under them.
         LaunchedEffect(currentPage) {
-            listState.animateScrollToItem(
-                index        = currentPage,
-                scrollOffset = -(viewportPx / 2 - itemPx / 2),
-            )
+            if (!isDragged) {
+                listState.animateScrollToItem(
+                    index        = currentPage,
+                    scrollOffset = -(viewportPx / 2 - itemPx / 2),
+                )
+            }
         }
 
         LazyRow(
@@ -114,7 +124,7 @@ internal fun Filmstrip(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(5.dp),
             contentPadding = PaddingValues(horizontal = 16.dp),
-            userScrollEnabled = false,
+            userScrollEnabled = true,
         ) {
             itemsIndexed(
                 items,
@@ -159,8 +169,6 @@ internal fun Filmstrip(
     }
 }
 
-// ── Bubble button ──────────────────────────────────────────────────────────────
-
 @Composable
 internal fun ViewerBubble(onClick: () -> Unit, content: @Composable () -> Unit) {
     Box(
@@ -172,8 +180,6 @@ internal fun ViewerBubble(onClick: () -> Unit, content: @Composable () -> Unit) 
         contentAlignment = Alignment.Center,
     ) { content() }
 }
-
-// ── Rename dialog ──────────────────────────────────────────────────────────────
 
 @Composable
 internal fun RenameDialog(
@@ -233,7 +239,6 @@ internal fun RenameDialog(
                 Text(errorMessage, color = ErrorColor, fontSize = 12.sp)
             }
 
-            // Two primary actions stacked, then a Cancel.
             RenameOptionButton(
                 title = if (isCloud) stringResource(R.string.rename_sheet_option_cloud_title)
                     else stringResource(R.string.rename_sheet_option_local_title),
@@ -301,8 +306,6 @@ internal fun splitName(name: String): Pair<String, String> {
            else name to ""
 }
 
-// ── Delete confirmation sheet ──────────────────────────────────────────────────
-
 @Composable
 internal fun DeleteConfirmSheet(
     item: GalleryItem,
@@ -318,9 +321,9 @@ internal fun DeleteConfirmSheet(
     ) {
         Text(
             when (item) {
-                is GalleryItem.LocalOnly  -> "Delete photo?"
-                is GalleryItem.Synced     -> "Remove photo?"
-                is GalleryItem.CloudOnly  -> "Delete from Proton Drive?"
+                is GalleryItem.LocalOnly  -> stringResource(R.string.viewer_delete_title_local)
+                is GalleryItem.Synced     -> stringResource(R.string.viewer_delete_title_synced)
+                is GalleryItem.CloudOnly  -> stringResource(R.string.viewer_delete_title_cloud)
             },
             color = FgPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
         )
@@ -328,11 +331,11 @@ internal fun DeleteConfirmSheet(
         when (item) {
             is GalleryItem.LocalOnly -> {
                 Text(
-                    "This will move the photo to your device's Recently Deleted folder.",
+                    stringResource(R.string.viewer_delete_local_body),
                     color = FgDim, fontSize = 14.sp,
                 )
                 Spacer(Modifier.height(4.dp))
-                DeleteButton("Move to trash") { onDelete(true, false) }
+                DeleteButton(stringResource(R.string.viewer_delete_move_to_trash)) { onDelete(true, false) }
             }
 
             is GalleryItem.Synced -> {
@@ -369,7 +372,6 @@ internal fun DeleteConfirmSheet(
             }
         }
 
-        // Cancel
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -391,13 +393,8 @@ internal fun DeleteConfirmSheet(
     }
 }
 
-/**
- * Two-line action row used inside [DeleteConfirmSheet] for the Synced-photo delete options
- * (Remove from device / Remove from cloud / Delete everywhere). Three near-identical
- * Column-based rows shared the same recipe before this helper unified them: fill width,
- * rounded background, thin border, clickable, title + subtitle Text pair. The destructive
- * variant swaps the neutral CardBg/CardBorder/FgPrimary palette for DeleteTint/ErrorColor.
- */
+/** Two-line action row for the Synced-photo delete options. The destructive variant swaps the
+ *  neutral palette for DeleteTint/ErrorColor. */
 @Composable
 private fun DangerRow(
     title: String,
@@ -423,24 +420,7 @@ private fun DangerRow(
 
 @Composable
 internal fun DeleteButton(label: String, onClick: () -> Unit) {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(
-                DeleteTint,
-                androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
-            )
-            .border(
-                0.5.dp,
-                ErrorColor.copy(alpha = 0.3f),
-                androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
-            )
-            .clickable(onClick = onClick)
-            .padding(vertical = 14.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(label, color = ErrorColor, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-    }
+    DestructiveButton(label = label, onClick = onClick, modifier = Modifier.fillMaxWidth())
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -465,7 +445,7 @@ internal fun AddToAlbumSheet(
                 .padding(bottom = 16.dp),
         ) {
             Text(
-                "Add to Album",
+                stringResource(R.string.viewer_add_to_album_title),
                 color = FgPrimary,
                 fontSize = 17.sp,
                 fontWeight = FontWeight.SemiBold,
@@ -473,17 +453,16 @@ internal fun AddToAlbumSheet(
             )
             if (cloudAlbums.isEmpty()) {
                 Text(
-                    "No albums yet. Create one from the Albums tab.",
+                    stringResource(R.string.viewer_add_to_album_empty),
                     color = FgMute,
                     fontSize = 14.sp,
                     modifier = Modifier.padding(horizontal = 20.dp, vertical = 24.dp),
                 )
             }
 
-            // Cloud albums (Drive) — shown when the item has a cloud counterpart.
             if (cloudAlbums.isNotEmpty()) {
                 Text(
-                    "DRIVE ALBUMS",
+                    stringResource(R.string.viewer_drive_albums_header),
                     color = FgMute,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.SemiBold,
@@ -518,16 +497,17 @@ internal fun AddToAlbumSheet(
                         }
                         Column(modifier = Modifier.weight(1f)) {
                             Text(album.name, color = FgPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                            val subtitle = if (isMember)
+                                stringResource(R.string.viewer_tap_to_remove_from_album)
+                            else
+                                pluralStringResource(R.plurals.count_photos_plural, album.photoCount, album.photoCount)
                             Text(
-                                if (isMember) "Tap to remove from album"
-                                else "${album.photoCount} photos",
+                                subtitle,
                                 color = if (isMember) Accent else FgMute,
                                 fontSize = 12.sp,
                             )
                         }
-                        // Member indicator: filled accent-coloured check tile on the trailing
-                        // edge of the row. Doubles as the "tap removes" affordance because the
-                        // whole row's onClick handles both add + remove based on this state.
+                        // Check tile marks membership; the row's onClick toggles add/remove.
                         if (isMember) {
                             Box(
                                 modifier = Modifier

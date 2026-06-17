@@ -74,6 +74,7 @@ sealed class UpdatePromptState {
     enum class ErrorKind {
         NETWORK,
         PERMISSION_DENIED,
+        VERIFICATION,
     }
 }
 
@@ -138,6 +139,8 @@ fun UpdatePromptDialog(
                             stringResource(R.string.update_check_failed)
                         UpdatePromptState.ErrorKind.PERMISSION_DENIED ->
                             stringResource(R.string.update_permission_required)
+                        UpdatePromptState.ErrorKind.VERIFICATION ->
+                            stringResource(R.string.update_verification_failed)
                     }
                     Text(body, color = colors.fgDim, fontSize = 13.sp)
                 }

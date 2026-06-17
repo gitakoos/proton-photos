@@ -202,6 +202,7 @@ class PhotosShareService @Inject constructor(
                         fallbackFailures += "getShareById returned null linkId"
                     }
                 } catch (e: Exception) {
+                    if (e is kotlinx.coroutines.CancellationException) throw e
                     Log.w(TAG, "getVolumeId: getShareById fallback failed: ${e.message}")
                     fallbackFailures += "getShareById: ${e.message ?: e.javaClass.simpleName}"
                 }
@@ -228,6 +229,7 @@ class PhotosShareService @Inject constructor(
                         fallbackFailures += "no albums to derive parentLinkId from"
                     }
                 } catch (e: Exception) {
+                    if (e is kotlinx.coroutines.CancellationException) throw e
                     Log.e(TAG, "rootLinkId derivation failed: ${e.message}")
                     fallbackFailures += "album-derive: ${e.message ?: e.javaClass.simpleName}"
                 }
@@ -362,6 +364,7 @@ class PhotosShareService @Inject constructor(
                     Log.w(TAG, "ensurePhotosVolumeReady: getPhotosShare refresh failed: ${e.message}")
                 }
             } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
                 Log.w(TAG, "ensurePhotosVolumeReady: createOrGetPhotosVolume failed: ${e.message}")
                 // ALREADY_EXISTS (Proton error code 2500 / HTTP 409) is the expected response
                 // when the account's Photos volume already exists: the server refuses
@@ -416,6 +419,7 @@ class PhotosShareService @Inject constructor(
                             }
                         }
                     } catch (recoveryEx: Exception) {
+                        if (recoveryEx is kotlinx.coroutines.CancellationException) throw recoveryEx
                         Log.e(TAG, "ensurePhotosVolumeReady: getVolumes recovery failed", recoveryEx)
                     }
                 }
@@ -437,6 +441,7 @@ class PhotosShareService @Inject constructor(
         return try {
             cryptoHelper.getOrDecryptShareKey(userId, key, passphrase)
         } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
             Log.e(TAG, "getShareKeyBytes failed", e)
             null
         }
@@ -466,7 +471,7 @@ class PhotosShareService @Inject constructor(
         }
         val shareKeyBytes = getShareKeyBytes(userId)
         if (shareKeyBytes == null) {
-            Log.w(TAG, "getRootLinkKeyBytes: shareKey=NULL cachedKey=${cachedPhotosShareKey?.take(30)} cachedPass=${cachedPhotosSharePassphrase?.take(30)}")
+            Log.w(TAG, "getRootLinkKeyBytes: shareKey=NULL hasCachedKey=${cachedPhotosShareKey != null} hasCachedPass=${cachedPhotosSharePassphrase != null}")
             return null
         }
         val shareId = cachedPhotosShareId ?: run { getVolumeId(userId); cachedPhotosShareId }
@@ -500,6 +505,7 @@ class PhotosShareService @Inject constructor(
                     }
                     Log.d(TAG, "getRootLinkKeyBytes: root NodeHashKey decrypted (${cachedRootNodeHashKeyBytes?.size} bytes)")
                 } catch (e: Exception) {
+                    if (e is kotlinx.coroutines.CancellationException) throw e
                     Log.w(TAG, "getRootLinkKeyBytes: failed to decrypt root NodeHashKey: ${e.message}")
                 }
             } else {
@@ -509,6 +515,7 @@ class PhotosShareService @Inject constructor(
             Log.d(TAG, "getRootLinkKeyBytes: root link key decrypted successfully")
             keyBytes
         } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
             Log.e(TAG, "getRootLinkKeyBytes failed", e)
             null
         }
@@ -544,6 +551,7 @@ class PhotosShareService @Inject constructor(
                 Log.w(TAG, "ensureRootNodeHashKeyLoaded: still no Folder.NodeHashKey on retry")
             }
         } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
             Log.w(TAG, "ensureRootNodeHashKeyLoaded failed: ${e.message}")
         }
     }

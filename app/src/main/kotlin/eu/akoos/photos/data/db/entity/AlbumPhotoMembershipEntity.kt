@@ -26,20 +26,15 @@ import androidx.room.Entity
 import androidx.room.Index
 
 /**
- * Many-to-many edge table between cloud albums and the photos they reference. A photo
- * physically lives in the photos root folder on Drive; the album is just a list of
- * pointers, so the gallery's `photo_listing.parentLinkId` always points at the root —
- * NOT the album — and a join through this table is the only way to enumerate the
- * photos that belong to a given album.
- *
- * Without this, `loadAlbumPhotosCached(albumLinkId)` has no source of truth to walk
- * for offline reads: the photo rows are persisted by the gallery refresh path, but
- * their album membership disappears the moment the network call returns.
+ * Album ↔ photo edge table. A photo physically lives in the photos root (photo_listing.parentLinkId
+ * points at the root, NOT the album), so this join is the only way to enumerate an album's photos
+ * for offline reads.
  */
 @Entity(
     tableName = "album_photo_membership",
     primaryKeys = ["albumLinkId", "photoLinkId"],
-    indices = [Index(value = ["photoLinkId"])],
+    // photoLinkId = reverse lookup (a photo's albums); albumLinkId = forward lookup (an album's photos).
+    indices = [Index(value = ["photoLinkId"]), Index(value = ["albumLinkId"])],
 )
 data class AlbumPhotoMembershipEntity(
     val albumLinkId: String,

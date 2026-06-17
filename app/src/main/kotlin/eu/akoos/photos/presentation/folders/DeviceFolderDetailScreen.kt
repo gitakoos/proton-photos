@@ -28,7 +28,6 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -38,28 +37,35 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.PhotoAlbum
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.SnackbarHostState
@@ -87,12 +93,16 @@ import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.presentation.common.IconBubble
 import eu.akoos.photos.presentation.gallery.PhotoCell
+import eu.akoos.photos.presentation.viewer.ManagePublicLinkSheet
+import eu.akoos.photos.presentation.viewer.PhotoShareSheet
+import eu.akoos.photos.presentation.gallery.photoCellInputsFor
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.Bg0
 import eu.akoos.photos.presentation.theme.ErrorColor
 import eu.akoos.photos.presentation.theme.FgMute
 import eu.akoos.photos.presentation.theme.FgPrimary
 import eu.akoos.photos.presentation.theme.PillBg
+import eu.akoos.photos.presentation.theme.PillBgOpaque
 import eu.akoos.photos.presentation.theme.PillBorder
 
 /**
@@ -116,6 +126,8 @@ fun DeviceFolderDetailScreen(
     val backupProgress by viewModel.backupProgress.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
+    val gridState = rememberLazyGridState()
+    val showScrollTop by remember { derivedStateOf { gridState.firstVisibleItemIndex > 4 } }
 
     val isSelectionMode = selectedUris.isNotEmpty()
     // In selection mode the back button cancels the selection instead of leaving the screen —
@@ -136,12 +148,21 @@ fun DeviceFolderDetailScreen(
     // behaviour (cloud-backed photos join now, local-only photos upload then join) stay identical.
     var showAddToAlbumSheet by remember { mutableStateOf(false) }
     val addToAlbumSheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    // Unified share drawer + manage-link sheet for the selection (Send to app / Public link).
+    var showPhotoShareSheet by remember { mutableStateOf(false) }
+    val photoShareSheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var showManageLinkSheet by remember { mutableStateOf(false) }
+    val manageLinkSheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val publicLinkState by viewModel.publicLinkState.collectAsStateWithLifecycle()
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+    val linkCopiedMsg = stringResource(R.string.album_link_copied)
     val albums by viewModel.albums.collectAsStateWithLifecycle()
 
     // Bulk delete — reuses the gallery's delete sheet + the system trash-dialog launcher, so a
     // device-folder selection deletes the same way (and with the same options) as the timeline.
     var showDeleteSheet by remember { mutableStateOf(false) }
     val pendingDeleteIntent by viewModel.pendingDeleteIntent.collectAsStateWithLifecycle()
+    val isDeleting by viewModel.isDeleting.collectAsStateWithLifecycle()
     val deletePermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartIntentSenderForResult(),
     ) { result ->
@@ -152,6 +173,13 @@ fun DeviceFolderDetailScreen(
         val pi = pendingDeleteIntent ?: return@LaunchedEffect
         deletePermissionLauncher.launch(IntentSenderRequest.Builder(pi.intentSender).build())
     }
+
+    // A multi-select delete blocks the screen behind a progress drawer so a second tap can't fire
+    // into a half-finished delete.
+    val opDeletingLabel = stringResource(R.string.op_deleting)
+    eu.akoos.photos.presentation.common.BlockingOperationSheet(
+        if (isDeleting) eu.akoos.photos.presentation.common.OperationProgress(0, 0, opDeletingLabel, indeterminate = true) else null,
+    )
 
     // Cover = the newest item's image (the list is sorted newest-first). Device folders only
     // ever hold local items, so the cover comes from the local URI.
@@ -190,6 +218,7 @@ fun DeviceFolderDetailScreen(
     ) {
         LazyVerticalGrid(
             columns = GridCells.Fixed(3),
+            state = gridState,
             contentPadding = PaddingValues(
                 bottom = 24.dp,
             ),
@@ -206,19 +235,48 @@ fun DeviceFolderDetailScreen(
                     canRename = false,
                     titleActions = if (items.isNotEmpty()) {
                         {
+                            // Back-up action mirrors the cloud-album download button: a progress
+                            // ring (with a cancel X beside it) while a back-up runs, otherwise the
+                            // upload glyph — so back-up and download read the same everywhere.
+                            val bp = backupProgress
                             Box(
                                 modifier = Modifier
                                     .size(36.dp)
                                     .clip(CircleShape)
-                                    .clickable { showBackupDialog = true },
+                                    .clickable(enabled = bp == null) { showBackupDialog = true },
                                 contentAlignment = Alignment.Center,
                             ) {
-                                Icon(
-                                    Icons.Default.CloudUpload,
-                                    contentDescription = stringResource(R.string.device_folder_backup_all),
-                                    tint = Accent,
-                                    modifier = Modifier.size(20.dp),
-                                )
+                                if (bp != null && bp.total > 0) {
+                                    CircularProgressIndicator(
+                                        progress = { bp.done.toFloat() / bp.total.toFloat() },
+                                        color = Accent, strokeWidth = 2.dp,
+                                        modifier = Modifier.size(20.dp),
+                                    )
+                                } else {
+                                    Icon(
+                                        Icons.Default.CloudUpload,
+                                        contentDescription = stringResource(R.string.device_folder_backup_all),
+                                        tint = Accent,
+                                        modifier = Modifier.size(20.dp),
+                                    )
+                                }
+                            }
+                            if (bp != null) {
+                                Spacer(Modifier.width(8.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .clip(CircleShape)
+                                        .clickable { viewModel.cancelBackup() },
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Icon(
+                                        Icons.Default.Close,
+                                        contentDescription = stringResource(R.string.cancel),
+                                        tint = ErrorColor,
+                                        modifier = Modifier.size(20.dp),
+                                    )
+                                }
                             }
                         }
                     } else null,
@@ -250,75 +308,32 @@ fun DeviceFolderDetailScreen(
                         is GalleryItem.CloudOnly -> null
                     }
                     val isSelected = itemUri != null && itemUri in selectedUris
-                    // Per-cell long-press menu (Select / Share / Back up), mirroring the cloud-album
-                    // grid. Anchored to the cell Box so it pops where the user pressed. While already
-                    // in selection mode, long-press toggles the photo instead of opening the menu.
-                    var cellMenuOpen by remember { mutableStateOf(false) }
-                    val cellCtx = androidx.compose.ui.platform.LocalContext.current
-                    Box {
-                        PhotoCell(
-                            item = item,
-                            selected = isSelected,
-                            isSelectionMode = isSelectionMode,
-                            onClick = {
-                                if (isSelectionMode) {
-                                    if (itemUri != null) viewModel.toggleSelection(itemUri)
-                                } else onPhotoClick(items, index)
-                            },
-                            onLongClick = {
-                                if (isSelectionMode) {
-                                    if (itemUri != null) viewModel.toggleSelection(itemUri)
-                                } else if (itemUri != null) cellMenuOpen = true
-                            },
-                        )
-                        if (itemUri != null) {
-                            DropdownMenu(
-                                expanded = cellMenuOpen,
-                                onDismissRequest = { cellMenuOpen = false },
-                                shape = RoundedCornerShape(16.dp),
-                                containerColor = Bg0,
-                                border = BorderStroke(0.5.dp, PillBorder),
-                            ) {
-                                // Select — the discoverable entry into multi-select.
-                                DropdownMenuItem(
-                                    text = { Text(stringResource(R.string.gallery_action_select), color = FgPrimary) },
-                                    leadingIcon = {
-                                        Icon(Icons.Default.Check, null, tint = Accent, modifier = Modifier.size(20.dp))
-                                    },
-                                    onClick = { cellMenuOpen = false; viewModel.toggleSelection(itemUri) },
-                                )
-                                // Share this one photo to other apps.
-                                DropdownMenuItem(
-                                    text = { Text(stringResource(R.string.share_action), color = FgPrimary) },
-                                    leadingIcon = {
-                                        Icon(Icons.Default.Share, null, tint = Accent, modifier = Modifier.size(20.dp))
-                                    },
-                                    onClick = { cellMenuOpen = false; viewModel.shareUris(listOf(itemUri)) },
-                                )
-                                // Back up — only meaningful for a photo that isn't already synced.
-                                if (item !is GalleryItem.Synced) {
-                                    DropdownMenuItem(
-                                        text = { Text(stringResource(R.string.device_folder_upload_action), color = FgPrimary) },
-                                        leadingIcon = {
-                                            Icon(Icons.Default.CloudUpload, null, tint = Accent, modifier = Modifier.size(20.dp))
-                                        },
-                                        onClick = {
-                                            cellMenuOpen = false
-                                            viewModel.backUpUris(listOf(itemUri)) { outcome ->
-                                                scope.launch {
-                                                    val msg = if (outcome.queued > 0)
-                                                        cellCtx.getString(R.string.device_folder_uploading_fmt, outcome.queued)
-                                                    else
-                                                        cellCtx.getString(R.string.device_folder_already_backed_up)
-                                                    snackbarHostState.showSnackbar(msg)
-                                                }
-                                            }
-                                        },
-                                    )
-                                }
-                            }
-                        }
-                    }
+                    // Long-press enters selection directly, matching the timeline and album grids.
+                    // The old per-cell Select / Share / Back-up menu is gone; in selection mode the
+                    // toolbar carries Share + Back up, so a long-press + the toolbar covers the same
+                    // actions without the extra "Select" tap.
+                    val inputs = photoCellInputsFor(item)
+                    PhotoCell(
+                        imageData = inputs.imageData,
+                        stableKey = inputs.stableKey,
+                        isVideo = inputs.isVideo,
+                        isPlaceholder = inputs.isPlaceholder,
+                        selected = isSelected,
+                        isSelectionMode = isSelectionMode,
+                        showCloudBadge = inputs.showCloudBadge,
+                        showSyncedBadge = inputs.showSyncedBadge,
+                        isFavorite = inputs.isFavorite,
+                        typeBadgeRes = inputs.typeBadgeRes,
+                        typeBadgeCdRes = inputs.typeBadgeCdRes,
+                        onClick = {
+                            if (isSelectionMode) {
+                                if (itemUri != null) viewModel.toggleSelection(itemUri)
+                            } else onPhotoClick(items, index)
+                        },
+                        onLongClick = {
+                            if (itemUri != null) viewModel.toggleSelection(itemUri)
+                        },
+                    )
                 }
             }
         }
@@ -368,6 +383,8 @@ fun DeviceFolderDetailScreen(
                 selectedVideos > 0 -> selVideosText
                 else -> selPhotosText
             }
+            // Top selection bar — cancel + count + share + delete, matching the gallery and
+            // album selection headers.
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -395,62 +412,18 @@ fun DeviceFolderDetailScreen(
                     color = FgPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.padding(start = 12.dp).weight(1f),
                 )
-                // Add selected to a cloud album — opens the gallery's picker sheet.
-                Box(
-                    modifier = Modifier
-                        .size(36.dp)
-                        .background(PillBg, CircleShape)
-                        .border(0.5.dp, PillBorder, CircleShape)
-                        .clickable { showAddToAlbumSheet = true },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        Icons.Default.PhotoAlbum,
-                        contentDescription = stringResource(R.string.gallery_add_to_album),
-                        tint = Accent,
-                        modifier = Modifier.size(18.dp),
-                    )
-                }
-                Spacer(Modifier.size(4.dp))
                 // Share selected to other apps — device files share their URI directly, no download.
                 Box(
                     modifier = Modifier
                         .size(36.dp)
                         .background(PillBg, CircleShape)
                         .border(0.5.dp, PillBorder, CircleShape)
-                        .clickable { viewModel.shareSelected() },
+                        .clickable { showPhotoShareSheet = true },
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
                         Icons.Default.Share,
                         contentDescription = stringResource(R.string.share_action),
-                        tint = Accent,
-                        modifier = Modifier.size(18.dp),
-                    )
-                }
-                Spacer(Modifier.size(4.dp))
-                // Back up selected to Drive. Resolve the snackbar copy in the handler so the count
-                // matches what was queued (already-synced selections are skipped, not uploaded).
-                val ctx = androidx.compose.ui.platform.LocalContext.current
-                Box(
-                    modifier = Modifier
-                        .size(36.dp)
-                        .background(PillBg, CircleShape)
-                        .border(0.5.dp, PillBorder, CircleShape)
-                        .clickable {
-                            viewModel.uploadSelected { outcome ->
-                                // The progress pill covers a started back-up; only speak up when
-                                // there was nothing to do (everything already on Drive).
-                                if (outcome.queued == 0) scope.launch {
-                                    snackbarHostState.showSnackbar(ctx.getString(R.string.device_folder_already_backed_up))
-                                }
-                            }
-                        },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        Icons.Default.CloudUpload,
-                        contentDescription = stringResource(R.string.device_folder_upload_action),
                         tint = Accent,
                         modifier = Modifier.size(18.dp),
                     )
@@ -471,6 +444,59 @@ fun DeviceFolderDetailScreen(
                         contentDescription = stringResource(R.string.gallery_delete_selected),
                         tint = ErrorColor,
                         modifier = Modifier.size(18.dp),
+                    )
+                }
+            }
+
+            // Bottom action dock — secondary actions (add to album, back up), the same floating
+            // PillBgOpaque pill as the gallery and album selection docks.
+            val ctx = androidx.compose.ui.platform.LocalContext.current
+            Row(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .navigationBarsPadding()
+                    .padding(bottom = 24.dp)
+                    .background(PillBgOpaque, RoundedCornerShape(999.dp))
+                    .border(0.5.dp, PillBorder, RoundedCornerShape(999.dp))
+                    .padding(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                // Add selected to a cloud album — opens the gallery's picker sheet.
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(999.dp))
+                        .clickable { showAddToAlbumSheet = true }
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.Default.PhotoAlbum,
+                        contentDescription = stringResource(R.string.gallery_add_to_album),
+                        tint = Accent,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+                // Back up selected to Drive. Already-synced selections are skipped; the progress
+                // pill covers a started back-up, so only speak up when there was nothing to do.
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(999.dp))
+                        .clickable {
+                            viewModel.uploadSelected { outcome ->
+                                if (outcome.queued == 0) scope.launch {
+                                    snackbarHostState.showSnackbar(ctx.getString(R.string.device_folder_already_backed_up))
+                                }
+                            }
+                        }
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.Default.CloudUpload,
+                        contentDescription = stringResource(R.string.device_folder_upload_action),
+                        tint = Accent,
+                        modifier = Modifier.size(20.dp),
                     )
                 }
             }
@@ -499,6 +525,43 @@ fun DeviceFolderDetailScreen(
 
         // Add-to-album sheet — reuses the gallery's picker. Cloud-backed selections join the album
         // now; local-only selections back up first and join afterwards. Inline create is off here.
+        if (showPhotoShareSheet && selectedUris.isNotEmpty()) {
+            PhotoShareSheet(
+                sheetState = photoShareSheetState,
+                canCreateLink = false,
+                showPublicLink = selectedUris.size == 1,
+                showShareWithPeople = false,
+                localUploadEnabled = true,
+                onDismiss = { showPhotoShareSheet = false },
+                onSendToApp = { showPhotoShareSheet = false; viewModel.shareSelected() },
+                onShareWithPeople = { showPhotoShareSheet = false },
+                onManagePublicLink = {
+                    showPhotoShareSheet = false
+                    viewModel.resetPublicLinkState()
+                    showManageLinkSheet = true
+                },
+            )
+        }
+
+        if (showManageLinkSheet) {
+            ManagePublicLinkSheet(
+                sheetState = manageLinkSheetState,
+                publicLinkState = publicLinkState,
+                needsUpload = selectedUris.size == 1,
+                onUploadAndCreate = { viewModel.uploadAndCreateSelectedLink() },
+                onDismiss = { showManageLinkSheet = false },
+                onCreateLink = { viewModel.uploadAndCreateSelectedLink() },
+                onCopyLink = {
+                    viewModel.currentPublicLinkUrl()?.let { url ->
+                        clipboard.setText(androidx.compose.ui.text.AnnotatedString(url))
+                        scope.launch { snackbarHostState.showSnackbar(linkCopiedMsg) }
+                    }
+                },
+                onRemoveLink = { viewModel.revokePublicLink() },
+                onSetPassword = { password -> viewModel.setLinkPassword(password) },
+            )
+        }
+
         if (showAddToAlbumSheet && selectedUris.isNotEmpty()) {
             val addCtx = androidx.compose.ui.platform.LocalContext.current
             val addItems = items.filter {
@@ -581,19 +644,26 @@ fun DeviceFolderDetailScreen(
             )
         }
 
-        // Live back-up progress — the shared floating pill, driven by the folder's own sync-state
-        // stream so it tracks real upload completion (encrypt + upload), then auto-hides.
-        backupProgress?.let { p ->
-            eu.akoos.photos.presentation.common.OperationProgressPill(
-                progress = eu.akoos.photos.presentation.common.OperationProgress(
-                    done = p.done,
-                    total = p.total,
-                    label = stringResource(R.string.device_folder_backing_up_fmt, p.done, p.total),
-                ),
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .statusBarsPadding()
-                    .padding(top = 8.dp),
+        // Jump-to-top pill — appears once scrolled down, hidden during selection so it never
+        // collides with the bottom action dock. Mirrors the cloud-album detail page.
+        AnimatedVisibility(
+            visible = showScrollTop && !isSelectionMode,
+            enter = fadeIn(),
+            exit = fadeOut(),
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(bottom = 24.dp),
+        ) {
+            IconBubble(
+                icon = Icons.Default.KeyboardArrowUp,
+                contentDescription = stringResource(R.string.cd_scroll_to_top),
+                onClick = { scope.launch { gridState.animateScrollToItem(0) } },
+                diameter = 44.dp,
+                iconSize = 24.dp,
+                background = PillBgOpaque,
+                borderColor = PillBorder,
+                tint = FgPrimary,
             )
         }
 

@@ -76,11 +76,7 @@ enum class AlbumCloudBadge {
     LocallyBackedUpPart,   // some photos backed up
 }
 
-/**
- * Single album card used everywhere — Albums tab, Shared by me, Shared with me. Keeps the
- * shared-badge / cloud-badge / title / meta arrangement consistent so the same album never
- * looks different across surfaces.
- */
+/** Single album card used across the Albums, Shared-by-me and Shared-with-me surfaces. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun UnifiedAlbumCard(
@@ -89,9 +85,7 @@ fun UnifiedAlbumCard(
     metaText: String,
     shareBadge: AlbumShareBadge = AlbumShareBadge.None,
     cloudBadge: AlbumCloudBadge = AlbumCloudBadge.None,
-    /** When true, surfaces a "Folder" pill on the top-start of the cover. Used for
-     *  bucket-derived local albums so the user can distinguish them from user-created
-     *  virtual albums at a glance — rename/delete is refused for these. */
+    /** Shows a "Folder" pill for bucket-derived local albums (rename/delete refused for these). */
     isDeviceFolder: Boolean = false,
     onClick: () -> Unit,
     onLongClick: () -> Unit = {},
@@ -133,7 +127,6 @@ fun UnifiedAlbumCard(
                 }
             }
 
-            // Bottom-end: combined badge (people-icon + cloud / backup indicator inside one pill).
             CloudCornerBadge(
                 cloud = cloudBadge,
                 share = shareBadge,
@@ -160,11 +153,7 @@ fun UnifiedAlbumCard(
     }
 }
 
-/**
- * Bottom-end corner badge: combines a sharing icon (when applicable) and the cloud/backup
- * indicator inside ONE dark pill. Matches the original design where shared albums have a
- * people-icon next to the cloud icon (no big top-left chip).
- */
+/** Bottom-end badge combining a sharing icon and the cloud/backup indicator in one pill. */
 @Composable
 private fun CloudCornerBadge(
     cloud: AlbumCloudBadge,
@@ -186,9 +175,9 @@ private fun CloudCornerBadge(
             AlbumCloudBadge.Cloud ->
                 Icon(Icons.Default.Cloud, null, tint = Color.White, modifier = Modifier.size(13.dp))
             AlbumCloudBadge.LocallyBackedUpFull ->
-                Icon(Icons.Default.CheckCircle, "Fully backed up", tint = Color(0xFF4CAF50), modifier = Modifier.size(13.dp))
+                Icon(Icons.Default.CheckCircle, stringResource(R.string.cd_album_fully_backed_up), tint = Color(0xFF4CAF50), modifier = Modifier.size(13.dp))
             AlbumCloudBadge.LocallyBackedUpPart ->
-                Icon(Icons.Default.CheckCircle, "Partially backed up", tint = Color(0xFFFF9800), modifier = Modifier.size(13.dp))
+                Icon(Icons.Default.CheckCircle, stringResource(R.string.cd_album_partially_backed_up), tint = Color(0xFFFF9800), modifier = Modifier.size(13.dp))
             AlbumCloudBadge.None -> Unit
         }
     }

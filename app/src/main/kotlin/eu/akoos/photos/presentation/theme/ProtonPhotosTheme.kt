@@ -25,7 +25,9 @@ package eu.akoos.photos.presentation.theme
 import androidx.compose.foundation.IndicationNodeFactory
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.interaction.InteractionSource
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
@@ -35,6 +37,13 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.node.DelegatableNode
+import androidx.compose.ui.text.ExperimentalTextApi
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontVariation
+import androidx.compose.ui.text.font.FontWeight
+import eu.akoos.photos.R
 import eu.akoos.photos.presentation.settings.ThemePalette
 
 // No-op indication — suppresses all press ripple/animation
@@ -86,9 +95,12 @@ private val AccentLightSepia  = Color(0xFF8B6F47); private val Accent2LightSepia
 private val AccentLightMono   = Color(0xFF424242); private val Accent2LightMono   = Color(0xFF212121)
 private val LineLight = Color(0x14000000)
 private val Line2Light = Color(0x1F000000)
-private val PillBgLight = Color(0xBEF2F2F4)
-private val PillBgOpaqueLight = Color(0xEAEAEAEC)
-private val PillBorderLight = Color(0xFFD0D0D5)
+// Light-theme pills sit over photos (info pill, motion / panorama controls in the viewer), where
+// a 75%-opaque near-white pill bled into white or busy images. Bumped to ~95% opacity so the pill
+// reads as a solid surface, and a clearly darker border so its outline stays visible over white.
+private val PillBgLight = Color(0xF2F2F2F4)
+private val PillBgOpaqueLight = Color(0xF5EAEAEC)
+private val PillBorderLight = Color(0xFFB4B4BC)
 private val ErrorColorLight = Color(0xFFD8351E)
 private val ActiveChipTextLight = Color(0xFFFFFFFF)
 
@@ -394,6 +406,37 @@ val ArcTrack: Color
     @Composable @ReadOnlyComposable
     get() = LocalAppColors.current.arcTrack
 
+// ── App font — Inter (variable .ttf; the wght axis resolves weights on API 26+). ──────
+// Applied app-wide via the Material typography + LocalTextStyle so every Text() renders in
+// Inter while keeping its own size and weight. Single family, no user choice.
+@OptIn(ExperimentalTextApi::class)
+private val InterFamily = FontFamily(
+    Font(R.font.inter, FontWeight.Normal,   variationSettings = FontVariation.Settings(FontVariation.weight(400))),
+    Font(R.font.inter, FontWeight.Medium,   variationSettings = FontVariation.Settings(FontVariation.weight(500))),
+    Font(R.font.inter, FontWeight.SemiBold, variationSettings = FontVariation.Settings(FontVariation.weight(600))),
+    Font(R.font.inter, FontWeight.Bold,     variationSettings = FontVariation.Settings(FontVariation.weight(700))),
+)
+
+private val InterTypography: Typography = Typography().let { b ->
+    b.copy(
+        displayLarge   = b.displayLarge.copy(fontFamily = InterFamily),
+        displayMedium  = b.displayMedium.copy(fontFamily = InterFamily),
+        displaySmall   = b.displaySmall.copy(fontFamily = InterFamily),
+        headlineLarge  = b.headlineLarge.copy(fontFamily = InterFamily),
+        headlineMedium = b.headlineMedium.copy(fontFamily = InterFamily),
+        headlineSmall  = b.headlineSmall.copy(fontFamily = InterFamily),
+        titleLarge     = b.titleLarge.copy(fontFamily = InterFamily),
+        titleMedium    = b.titleMedium.copy(fontFamily = InterFamily),
+        titleSmall     = b.titleSmall.copy(fontFamily = InterFamily),
+        bodyLarge      = b.bodyLarge.copy(fontFamily = InterFamily),
+        bodyMedium     = b.bodyMedium.copy(fontFamily = InterFamily),
+        bodySmall      = b.bodySmall.copy(fontFamily = InterFamily),
+        labelLarge     = b.labelLarge.copy(fontFamily = InterFamily),
+        labelMedium    = b.labelMedium.copy(fontFamily = InterFamily),
+        labelSmall     = b.labelSmall.copy(fontFamily = InterFamily),
+    )
+}
+
 @Composable
 fun ProtonPhotosTheme(
     darkTheme: Boolean = true,
@@ -402,10 +445,11 @@ fun ProtonPhotosTheme(
 ) {
     val colors  = if (darkTheme) darkAppColors(palette) else lightAppColors(palette)
     val scheme  = if (darkTheme) darkColorSchemeFor(palette) else lightColorSchemeFor(palette)
-    MaterialTheme(colorScheme = scheme) {
+    MaterialTheme(colorScheme = scheme, typography = InterTypography) {
         CompositionLocalProvider(
             LocalIndication provides NoIndication,
             LocalAppColors  provides colors,
+            LocalTextStyle  provides LocalTextStyle.current.merge(TextStyle(fontFamily = InterFamily)),
         ) {
             content()
         }

@@ -25,14 +25,7 @@ package eu.akoos.photos.data.api
 import eu.akoos.photos.data.api.model.GitHubRelease
 import retrofit2.http.GET
 
-/**
- * Read-only Retrofit binding for the GitHub Releases REST API. Public, unauthenticated —
- * GitHub rate-limits anonymous calls to 60/hour per IP, but the repository layer caches
- * the last check for 24h so a single device burns at most ~1 call/day.
- *
- * Owner + repo are baked into the path because the GitHub repo for this app is fixed;
- * if it ever moves the path here is the only thing that needs updating.
- */
+/** Public, unauthenticated binding for the GitHub Releases API (anonymous calls capped at 60/hour/IP). */
 interface GitHubReleasesApi {
 
     /** Returns the most recent NON-pre-release release. Pre-releases need a different endpoint. */

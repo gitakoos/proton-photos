@@ -52,8 +52,12 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
@@ -62,7 +66,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -70,11 +76,16 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.launch
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.entity.PendingInvitation
+import eu.akoos.photos.domain.entity.SharedPhoto
+import eu.akoos.photos.presentation.common.CloudPhotoCell
 import eu.akoos.photos.presentation.common.EmptyState
 import eu.akoos.photos.presentation.gallery.SharedFilter
+import eu.akoos.photos.presentation.viewer.ManagePublicLinkSheet
+import eu.akoos.photos.presentation.viewer.PublicLinkState
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.Bg0
 import eu.akoos.photos.presentation.theme.ErrorColor
@@ -114,6 +125,10 @@ fun SharedScreen(
     val albums = state.displayedAlbums.let { list ->
         if (activeEmailFilter != null) list.filter { it.sharedByEmail == activeEmailFilter } else list
     }
+    // Individually shared photos belong to the "Shared by me" tab only, and an email filter
+    // (which only applies to shared-WITH-me senders) hides them just like it hides own albums.
+    val sharedPhotos = if (filter == SharedFilter.SharedByMe && activeEmailFilter == null)
+        state.sharedByMePhotos else emptyList()
     val pullRefreshState = rememberPullToRefreshState()
     val snackbarHost = remember { SnackbarHostState() }
     LaunchedEffect(state.error) {
@@ -122,6 +137,16 @@ fun SharedScreen(
             viewModel.clearError()
         }
     }
+
+    // ── Manage public link sheet (a single shared photo) ─────────────────────────
+    val publicLinkState by viewModel.publicLinkState.collectAsStateWithLifecycle()
+    val clipboard = LocalClipboardManager.current
+    val sheetScope = rememberCoroutineScope()
+    val manageSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var showManageSheet by remember { mutableStateOf(false) }
+    val linkCopiedMsg = stringResource(R.string.share_link_copied)
+    val passwordSetMsg = stringResource(R.string.share_password_set)
+    val passwordRemovedMsg = stringResource(R.string.share_password_removed)
 
     Box(
         modifier = Modifier
@@ -137,9 +162,10 @@ fun SharedScreen(
             indicator = {},
         ) {
             val showPendingInvitations = filter == SharedFilter.SharedWithMe && state.pendingInvitations.isNotEmpty()
+            val isEmpty = albums.isEmpty() && sharedPhotos.isEmpty() && !showPendingInvitations
 
             when {
-                state.isLoading && albums.isEmpty() && !showPendingInvitations ->
+                state.isLoading && isEmpty ->
                     // 4 shimmer placeholders in the 2-column grid layout while loading.
                     LazyVerticalGrid(
                         columns = GridCells.Fixed(2),
@@ -158,7 +184,7 @@ fun SharedScreen(
                         }
                     }
 
-                albums.isEmpty() && !showPendingInvitations ->
+                isEmpty ->
                     EmptyState(
                         title = if (filter == SharedFilter.SharedWithMe)
                             stringResource(R.string.shared_empty_with_me_title)
@@ -207,10 +233,110 @@ fun SharedScreen(
                                 onClick = { onAlbumClick(album) },
                             )
                         }
+
+                        // Individually shared photos, beneath any shared albums.
+                        if (sharedPhotos.isNotEmpty()) {
+                            item(span = { GridItemSpan(maxLineSpan) }) {
+                                SectionHeader(
+                                    text = stringResource(R.string.shared_by_me_photos_section),
+                                    // Pull the header up a touch when albums precede it so the
+                                    // two sections read as one list, not two stacked grids.
+                                    topPadding = if (albums.isNotEmpty()) 8.dp else 0.dp,
+                                )
+                            }
+                            items(
+                                sharedPhotos,
+                                key = { "sharedphoto_${it.linkId}" },
+                            ) { photo ->
+                                SharedPhotoCell(
+                                    photo = photo,
+                                    onClick = {
+                                        viewModel.openLinkManager(photo.linkId)
+                                        showManageSheet = true
+                                    },
+                                    onRequestThumbnail = { id -> viewModel.requestThumbnail(id) },
+                                    onCancelThumbnail = { id -> viewModel.cancelThumbnail(id) },
+                                )
+                            }
+                        }
                     }
             }
         }
     }
+
+    if (showManageSheet) {
+        val mapped = when (val s = publicLinkState) {
+            is SharedViewModel.PublicLinkState.None -> PublicLinkState.None
+            is SharedViewModel.PublicLinkState.Loading -> PublicLinkState.Loading
+            is SharedViewModel.PublicLinkState.Active ->
+                PublicLinkState.Active(s.url, s.hasPassword)
+            is SharedViewModel.PublicLinkState.Error ->
+                PublicLinkState.Error(s.message)
+        }
+        ManagePublicLinkSheet(
+            sheetState = manageSheetState,
+            publicLinkState = mapped,
+            onDismiss = {
+                showManageSheet = false
+                viewModel.closeLinkManager()
+            },
+            onCreateLink = { viewModel.createLink() },
+            onCopyLink = {
+                viewModel.currentPublicLinkUrl()?.let { url ->
+                    clipboard.setText(AnnotatedString(url))
+                    sheetScope.launch { snackbarHost.showSnackbar(linkCopiedMsg) }
+                }
+            },
+            onRemoveLink = {
+                viewModel.removeLink()
+                showManageSheet = false
+            },
+            onSetPassword = { password ->
+                viewModel.setLinkPassword(password)
+                val msg = if (password.isNullOrBlank()) passwordRemovedMsg else passwordSetMsg
+                sheetScope.launch { snackbarHost.showSnackbar(msg) }
+            },
+        )
+    }
+}
+
+// ── Shared-photo grid cell + section header ─────────────────────────────────────
+
+@Composable
+private fun SectionHeader(text: String, topPadding: Dp = 0.dp) {
+    Text(
+        text,
+        color = FgPrimary,
+        fontSize = 15.sp,
+        fontWeight = FontWeight.SemiBold,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = topPadding, bottom = 2.dp),
+    )
+}
+
+@Composable
+private fun SharedPhotoCell(
+    photo: SharedPhoto,
+    onClick: () -> Unit,
+    onRequestThumbnail: (String) -> Unit,
+    onCancelThumbnail: (String) -> Unit,
+) {
+    // Reuse the unified cloud cell so a shared photo tile renders identically to the gallery —
+    // lazy thumbnail decrypt, the cloud badge, and the video play overlay all come for free.
+    CloudPhotoCell(
+        localUri = null,
+        cloudThumbnailUrl = photo.thumbnailUrl,
+        cloudLinkId = photo.linkId,
+        isVideo = photo.isVideo,
+        isSelectionMode = false,
+        isSelected = false,
+        showCloudBadge = true,
+        onClick = onClick,
+        onLongClick = onClick,
+        onRequestThumbnail = onRequestThumbnail,
+        onCancelThumbnail = onCancelThumbnail,
+    )
 }
 
 // ── Pending invitations ────────────────────────────────────────────────────────

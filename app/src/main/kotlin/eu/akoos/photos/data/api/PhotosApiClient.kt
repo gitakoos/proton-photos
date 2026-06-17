@@ -43,46 +43,26 @@ val FORCE_UPDATE_REQUIRED = booleanPreferencesKey("force_update_required")
 class PhotosApiClient @Inject constructor(
     @ApplicationContext private val context: Context,
 ) : ApiClient {
-    // The Proton API only accepts a fixed set of product identifiers (mail/drive/calendar/vpn/pass).
-    // "android-photos" is rejected with "Product 'photos' is not valid", so requests route under the
-    // Drive product.
-    //
-    // The App-Version header identifies this as an external (third-party) client to the Drive
-    // backend, per the Drive SDK operational requirements
-    // (https://github.com/ProtonDriveApps/sdk#operational-requirements). It must not impersonate
-    // an official Proton client.
-    //
-    // CONSTRAINT (do not "fix" to the hyphenated form): the bundled ProtonCore network library
-    // (network-data 36.x) runs its OWN client-side validation in ApiManagerFactory and throws
-    // `IllegalArgumentException: Invalid app version code` BEFORE any request is sent if the value
-    // doesn't match its regex. The SDK-example `external-drive-akoos-proton-photos@2.1.0`
-    // (hyphen-separated name) FAILS that validation and crashes the app on launch; this underscore
-    // form passes BOTH ProtonCore's client regex AND the auth server (sign-in confirmed working).
-    //
-    // The {semver} tracks the app's release version, derived from BuildConfig so it bumps with each
-    // release automatically. A pre-release suffix (e.g. "-test15", "-beta") is stripped so a test
-    // build still emits a clean {semver}; the channel stays `stable`.
+    // Routes under the Drive product — the API rejects "photos" ("Product 'photos' is not valid").
+    // DO NOT switch to the hyphenated name form: ProtonCore's ApiManagerFactory client-side regex
+    // throws "Invalid app version code" on launch for it. This underscore form passes both that
+    // regex and the auth server. The pre-release suffix is stripped so the {semver} stays clean.
     override val appVersionHeader =
         "external-drive-akoos_proton_photos@${BuildConfig.VERSION_NAME.substringBefore('-')}-stable"
-    // The backend validates the User-Agent shape for share-creation traffic: it needs the Android
-    // release plus the brand/model trailer, e.g. "ProtonDrive/2.39.0 (Android 14; Google Pixel 9)",
-    // rather than a bare "(Android)". Build it from android.os.Build so every device family gets the
-    // right shape without hardcoding a device.
+    // Share-creation traffic needs the brand/model trailer (e.g. "(Android 14; Google Pixel 9)"),
+    // not a bare "(Android)" — built from android.os.Build so no device is hardcoded.
     override val userAgent: String = buildString {
-        append("ProtonDrive/2.39.0 (")
+        append("AkoosProtonPhotos/").append(BuildConfig.VERSION_NAME).append(" (")
         append("Android ").append(android.os.Build.VERSION.RELEASE).append("; ")
         append(android.os.Build.BRAND).append(' ').append(android.os.Build.MODEL)
         append(')')
     }
     override val enableDebugLogging = BuildConfig.DEBUG
 
-    // Match the CoreModule DohProviderUrls config — keep both ends in sync.
-    // DoH is enabled only when DohProviderUrls is non-empty.
     override suspend fun shouldUseDoh(): Boolean = true
 
     override fun forceUpdate(errorMessage: String) {
-        // The API signaled an outdated client. Persist the flag so MainActivity can show
-        // a non-dismissible "please update" dialog on next composition.
+        // Persist the flag so MainActivity can show a non-dismissible "please update" dialog.
         scope.launch {
             context.settingsDataStore.edit { it[FORCE_UPDATE_REQUIRED] = true }
         }

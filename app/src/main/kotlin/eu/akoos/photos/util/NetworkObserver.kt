@@ -119,9 +119,16 @@ class NetworkObserver @Inject constructor(
 
     private fun currentlyUnmetered(): Boolean {
         val manager = cm ?: return false
-        val active = manager.activeNetwork ?: return false
-        val caps = manager.getNetworkCapabilities(active) ?: return false
-        return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
+        // Enumerate ALL attached networks like currentlyOnline(), NOT `activeNetwork`: the active
+        // assignment is briefly null at cold start and during a wifi handover, which wrongly
+        // reported metered (false) on a perfectly good Wi-Fi link and nagged the viewer to
+        // "connect to Wi-Fi" while already on it. An attached unmetered internet network means big
+        // downloads route over it.
+        return manager.allNetworks.any { network ->
+            val caps = manager.getNetworkCapabilities(network) ?: return@any false
+            caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+                caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
+        }
     }
 
     companion object { private const val TAG = "NetworkObserver" }

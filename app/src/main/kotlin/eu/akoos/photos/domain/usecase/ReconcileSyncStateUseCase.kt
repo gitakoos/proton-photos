@@ -42,6 +42,12 @@ import javax.inject.Inject
 
 private const val TAG = "ReconcileUseCase"
 
+/** A just-uploaded photo is marked SYNCED before the cloud listing has caught up, so its cloud
+ *  linkId is briefly absent from the local cloud DB. Don't demote such a row (which would re-queue
+ *  it for a duplicate upload and drop the green "backed up" badge) until it has been missing past
+ *  this window — by then the listing has refreshed and a true cloud-side delete is real. */
+private const val CLOUD_ABSENCE_GRACE_MS = 15 * 60 * 1000L
+
 class ReconcileSyncStateUseCase @Inject constructor(
     private val localRepo: LocalMediaRepository,
     private val cloudRepo: DrivePhotoRepository,
@@ -124,12 +130,6 @@ class ReconcileSyncStateUseCase @Inject constructor(
             .filter { it.captureTime > 0 }
             .associateBy { it.displayName to it.captureTime }
         val cloudByNameSize = cloudItems.associateBy { it.displayName to it.sizeBytes }
-        // Last-resort displayName-only index — pairs photos across reinstalls when
-        // SyncState is gone, EXIF strip diverged sizeBytes, and captureTime drift
-        // defeats byNameAndDate. Accepts the first cloud photo per displayName — cross-
-        // folder filename collisions are rare for camera-roll content and the
-        // alternative (re-upload as a duplicate) is much worse UX.
-        val cloudByName = cloudItems.associateBy { it.displayName }
         Log.d(TAG, "reconcile: ${localItems.size} local, ${cloudItems.size} cloud " +
             "(${cloudByHash.size} with hash, ${cloudByNameAndDate.size} with captureTime)")
 
@@ -162,9 +162,12 @@ class ReconcileSyncStateUseCase @Inject constructor(
             val localCaptureTimeSec = local.dateTaken / 1000L
             val byNameAndDate = cloudByNameAndDate[local.displayName to localCaptureTimeSec]
             val byName = cloudByNameSize[local.displayName to local.sizeBytes]
-            // Name-only fallback for reinstall pairing — see cloudByName comment above.
-            val byNameOnly = cloudByName[local.displayName]
-            val matchedCloud = byId ?: byHash ?: byNameAndDate ?: byName ?: byNameOnly
+            // No filename-only fallback: matching on name alone (no hash, size or capture time) can
+            // pair a unique local photo to an unrelated cloud one sharing a recurring camera name
+            // (IMG_0001.jpg), marking it SYNCED so Free-up-space could delete a file that was
+            // never backed up. Anything matching none of id / hash / name+date / name+size stays
+            // LOCAL_ONLY and re-uploads instead; a duplicate is recoverable, a deleted original isn't.
+            val matchedCloud = byId ?: byHash ?: byNameAndDate ?: byName
             if (matchedCloud == null) {
                 Log.d(TAG, "LOCAL_ONLY: ${local.displayName} (size=${local.sizeBytes}, " +
                     "captureSec=$localCaptureTimeSec, existingCloudId=${existingSync?.cloudFileId})")
@@ -202,15 +205,22 @@ class ReconcileSyncStateUseCase @Inject constructor(
         // the green "downloaded" indicator in album detail views (which rely solely on SyncState
         // unlike the main gallery, which also has a contentHash fallback).
         val localUriSet = allLocalItems.map { it.uri }.toSet()
+        val nowMs = System.currentTimeMillis()
         val syncedStates = syncStateRepo.observeAll(userId).first()
             .filter { it.status == SyncStatus.SYNCED && it.cloudFileId != null }
         for (state in syncedStates) {
             when {
-                // Cloud counterpart removed → demote to LOCAL_ONLY (still re-uploadable from device).
-                state.cloudFileId !in cloudByLinkId -> syncStateRepo.upsert(
-                    state.copy(status = SyncStatus.LOCAL_ONLY, cloudFileId = null),
-                    userId,
-                )
+                // Cloud counterpart absent from the local cloud listing. A photo just uploaded is
+                // SYNCED before the listing catches up, so demoting it now would re-queue it for a
+                // duplicate upload and drop its green badge. Only demote once it has been missing
+                // past the grace window — by then a true cloud-side delete is real.
+                state.cloudFileId !in cloudByLinkId ->
+                    if (nowMs - (state.lastSyncSuccessMs ?: 0L) > CLOUD_ABSENCE_GRACE_MS) {
+                        syncStateRepo.upsert(
+                            state.copy(status = SyncStatus.LOCAL_ONLY, cloudFileId = null),
+                            userId,
+                        )
+                    }
                 // Local file removed from MediaStore → demote to CLOUD_ONLY so we stop telling the
                 // user the photo is "on this device" when it actually isn't.
                 state.localUri !in localUriSet -> syncStateRepo.upsert(

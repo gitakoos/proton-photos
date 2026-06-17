@@ -164,6 +164,7 @@ class AlbumService @Inject constructor(
                     idsMap.getOrPut(child.linkId) { mutableSetOf() }.add(album.linkId)
                 }
             } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
                 Log.w(TAG, "membership refresh: album ${album.linkId} children failed: ${e.message}")
             }
         }
@@ -301,6 +302,7 @@ class AlbumService @Inject constructor(
                 }
                 Log.d(TAG, "loadAlbums: prefetched ${missingCoverIds.size} cover thumbnails")
             } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
                 Log.w(TAG, "loadAlbums: cover-prefetch failed (${e.message}) — albums will load without covers")
             }
         }
@@ -323,6 +325,7 @@ class AlbumService @Inject constructor(
                             nameDecrypted = true
                         }
                     } catch (e: Exception) {
+                        if (e is kotlinx.coroutines.CancellationException) throw e
                         Log.w(TAG, "album name decrypt failed for ${dto.linkId}: ${e.message}")
                     }
                 }
@@ -368,6 +371,7 @@ class AlbumService @Inject constructor(
                     cryptoHelper.decryptNodeKey(nodeKey, nodePassphrase, rootLinkKeyBytes)
                     cryptoHelper.decryptLinkName(encName, rootLinkKeyBytes)
                 } catch (e: Exception) {
+                    if (e is kotlinx.coroutines.CancellationException) throw e
                     Log.w(TAG, "album name recovery decrypt failed for ${album.linkId}: ${e.message}")
                     null
                 }
@@ -388,6 +392,10 @@ class AlbumService @Inject constructor(
         }.onFailure { e ->
             Log.w(TAG, "loadAlbums: cache persist failed (${e.message}) — in-memory result still returned")
         }
+
+        // Pin + warm the album cover thumbnails so the large-library cache trim never evicts them
+        // and the Albums grid doesn't fall back to blank covers once the cold tail starts churning.
+        thumbnailDecryptScheduler.pinCovers(userId, albums.mapNotNull { it.coverLinkId })
 
         albums
     }
@@ -461,6 +469,7 @@ class AlbumService @Inject constructor(
                 } while (anchor != null)
                 albumPhotoMembershipDao.replaceAllForAlbum(album.linkId, linkIds.distinct())
             } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
                 Log.w(TAG, "prefetchAlbumsMembership: ${album.linkId} failed (${e.message}) — continuing")
             }
         }
@@ -736,6 +745,14 @@ class AlbumService @Inject constructor(
                 null
             }
         } else null
+        // Shared-with-me album whose key never decrypted: the recipient doesn't hold the
+        // root link key the fallback used, so every per-photo passphrase/name decrypt below
+        // would silently fail and render a blank grid with no error or retry. Surface the
+        // same recoverable failure path the rest of the load uses (thrown → ViewModel banner
+        // + refresh()) instead of returning silently-empty rows.
+        if (sharingShareId != null && albumKeyBytes == null) {
+            error("loadAlbumPhotos: shared-album key unavailable for $albumLinkId")
+        }
         // Seed the lazy-thumbnail scheduler with the album key we just decrypted, so cells
         // scrolling into view skip the per-photo album-key resolution round trip.
         // For shared-with-me albums we also seed a SharingContext so the scheduler's
@@ -984,6 +1001,7 @@ class AlbumService @Inject constructor(
                 try {
                     photoListingDao.upsertAll(chunkNewEntities)
                 } catch (e: Exception) {
+                    if (e is kotlinx.coroutines.CancellationException) throw e
                     Log.w(TAG, "loadAlbumPhotos: DB upsert failed for chunk: ${e.message}")
                 }
                 // Proactively kick the thumbnail-decrypt scheduler for every just-
@@ -1187,6 +1205,7 @@ class AlbumService @Inject constructor(
                 succeeded += photoLinkId
                 Log.d(TAG, "addPhotosToAlbum: prepared entry for $photoLinkId ('$plainName')")
             } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
                 Log.e(TAG, "addPhotosToAlbum: crypto failed for $photoLinkId: ${e.message}", e)
                 failed += photoLinkId
             }
@@ -1295,6 +1314,7 @@ class AlbumService @Inject constructor(
                 }
                 removed += chunk
             } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
                 Log.w(TAG, "removePhotosFromAlbum: chunk failed (${chunk.size} ids): ${e.message}")
             }
         }

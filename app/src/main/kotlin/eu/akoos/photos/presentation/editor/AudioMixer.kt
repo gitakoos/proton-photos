@@ -37,37 +37,16 @@ import java.nio.ByteOrder
 private const val TAG = "AudioMixer"
 
 /**
- * PCM-level audio editor for [VideoReencoder]. Replaces the previous stream-copy-only
- * audio path so the user's gain sliders for original audio + overlay music actually
- * affect the saved bytes — instead of the binary mute toggle, the user can now balance
- * the two tracks at arbitrary loudness and the save mixes them sample-by-sample.
- *
- * Pipeline modes:
- *   • source-only (any gain != 1.0)          → decode source → scale samples → AAC encode
- *   • overlay-only (any gain != 1.0)         → decode overlay → scale samples → AAC encode
- *   • both with non-zero gain                → decode both → mix samples at gains → AAC encode
- *
- * The pure "source-only at gain=1.0" and "overlay-only at gain=1.0" cases still go
- * through the existing stream-copy fast path in [VideoReencoder.copyAudioSamples] — this
- * code is only invoked when actual PCM processing is required.
- *
- * Format choices kept opinionated for simplicity:
- *   • Output: AAC LC stereo (or mono, matching source channel count when source is the
- *     primary track), source's sample rate
- *   • PCM intermediate: 16-bit signed, interleaved
- *   • Resampler: linear interpolation (transparent for music backgrounds; acceptable
- *     even on speech — true polyphase resampling would gain us little for editor use)
+ * PCM-level audio editor for [VideoReencoder]: decodes source/overlay, scales or mixes at the
+ * user's gains, re-encodes AAC LC. Only invoked when PCM processing is needed — the gain=1.0
+ * single-track cases use [VideoReencoder.copyAudioSamples]'s stream-copy fast path.
+ * Intermediate PCM is 16-bit interleaved; resampling is linear (fine for 44.1↔48 kHz).
  */
 internal object AudioMixer {
 
     /**
-     * Run the mix / gain pipeline and write encoded AAC samples to [muxer] on track
-     * [audioMuxerTrackIdx]. Caller is responsible for calling [MediaMuxer.start] before
-     * invoking this (we only writeSampleData; the track must already be registered).
-     *
-     * Both [audioMuxerTrackIdx] and the format previously added to the muxer must
-     * correspond to AAC LC at [targetSampleRate] / [targetChannels] — caller pre-computes
-     * those via [synthesizeAacFormat] so addTrack can happen before muxer.start.
+     * Runs the mix/gain pipeline and writes AAC samples to [muxer] track [audioMuxerTrackIdx].
+     * Caller must have already addTrack'd an AAC LC format (via [synthesizeAacFormat]) and started the muxer.
      */
     fun mixAndEncodeAudio(
         context: Context,
@@ -106,10 +85,8 @@ internal object AudioMixer {
     }
 
     /**
-     * Synthesize an AAC LC [MediaFormat] including the `csd-0` AudioSpecificConfig blob
-     * the muxer needs to embed in the output container header. Pre-computing csd-0
-     * lets the caller addTrack BEFORE muxer.start without having to spin up a probe
-     * encoder just to read its INFO_OUTPUT_FORMAT_CHANGED event.
+     * AAC LC [MediaFormat] with a pre-computed `csd-0` so the caller can addTrack before muxer.start
+     * without spinning up a probe encoder to read INFO_OUTPUT_FORMAT_CHANGED.
      */
     fun synthesizeAacFormat(sampleRate: Int, channelCount: Int, bitRate: Int = 192_000): MediaFormat =
         MediaFormat.createAudioFormat(MediaFormat.MIMETYPE_AUDIO_AAC, sampleRate, channelCount).apply {
@@ -118,11 +95,7 @@ internal object AudioMixer {
             setByteBuffer("csd-0", ByteBuffer.wrap(aacLcCsd(sampleRate, channelCount)))
         }
 
-    /**
-     * Reads the first audio track's sample rate + channel count off [uri]. Returns null
-     * when the file has no audio track. Used to pick the mix's target format before
-     * spinning up encoders.
-     */
+    /** First audio track's (sample rate, channel count) off [uri], or null when there's no audio track. */
     fun probeAudioFormat(context: Context, uri: Uri): Pair<Int, Int>? {
         var pfd: ParcelFileDescriptor? = null
         var extractor: MediaExtractor? = null
@@ -151,10 +124,8 @@ internal object AudioMixer {
     // ── PCM decode ────────────────────────────────────────────────────────────
 
     /**
-     * Decode the audio track of [uri] into 16-bit signed PCM samples, interleaved,
-     * sliced to [trimStartUs]..[trimEndUs] (PTS of the source file). Resamples to
-     * [targetSampleRate] and remixes to [targetChannels] inline so the caller never
-     * has to think about format conversion.
+     * Decodes [uri]'s audio track to interleaved 16-bit PCM, sliced to [trimStartUs]..[trimEndUs],
+     * resampled to [targetSampleRate] and remixed to [targetChannels].
      */
     private fun decodeAudioToPcm(
         context: Context,
@@ -192,19 +163,20 @@ internal object AudioMixer {
             decoder.start()
 
             val info = MediaCodec.BufferInfo()
-            // Boxed ArrayList<Short> would consume ~16 bytes per sample (object header +
-            // pointer indirection) which turned a 90-second stereo 48 kHz clip into a
-            // ~150 MB allocation and OOM'd the editor at 99 % save. Pre-size a primitive
-            // ShortArray to the expected sample count derived from the trim window plus
-            // 5 % headroom, then grow with array-doubling if the decoder produces more.
+            // Primitive ShortArray, not ArrayList<Short> (boxing OOM'd long clips). Pre-size to the
+            // trim window + 5% headroom, then array-double if the decoder produces more. The hard cap
+            // turns a pathologically long clip into a catchable error (overlay audio is dropped)
+            // instead of an uncatchable OutOfMemoryError that would crash the whole save.
+            val maxPcmSamples = 48_000_000 // ~96 MB, roughly 9 min of 44.1 kHz stereo
             val expectedSamples = (((trimEndUs - trimStartUs).coerceAtLeast(0L) / 1_000_000.0) *
                 srcSampleRate.toDouble() * srcChannels.toDouble() * 1.05).toLong().coerceAtLeast(1024L)
-            var accum = ShortArray(expectedSamples.coerceAtMost(Int.MAX_VALUE.toLong()).toInt())
+            var accum = ShortArray(expectedSamples.coerceIn(1024L, maxPcmSamples.toLong()).toInt())
             var accumSize = 0
             fun appendShorts(src: java.nio.ShortBuffer) {
                 val need = src.remaining()
+                if (accumSize + need > maxPcmSamples) error("audio clip exceeds the in-memory mix cap")
                 if (accumSize + need > accum.size) {
-                    val newSize = maxOf(accum.size * 2, accumSize + need)
+                    val newSize = maxOf(accum.size * 2, accumSize + need).coerceAtMost(maxPcmSamples)
                     val grown = ShortArray(newSize)
                     System.arraycopy(accum, 0, grown, 0, accumSize)
                     accum = grown
@@ -248,10 +220,14 @@ internal object AudioMixer {
             }
 
             val raw = if (accumSize == accum.size) accum else accum.copyOf(accumSize)
-            // Channel conversion before sample-rate resample keeps the mid-step buffer
-            // smaller than the inverse order.
+            // Rechannel before resample to keep the mid-step buffer smaller.
             val rechannelled = convertChannels(raw, srcChannels, targetChannels)
             return resample(rechannelled, srcSampleRate, targetSampleRate, targetChannels)
+        } catch (e: kotlin.coroutines.cancellation.CancellationException) {
+            throw e
+        } catch (e: OutOfMemoryError) {
+            Log.w(TAG, "decodeAudioToPcm: clip too large to mix in memory, dropping overlay audio for $uri")
+            return ShortArray(0)
         } catch (e: Exception) {
             Log.w(TAG, "decodeAudioToPcm failed for $uri: ${e.message}")
             return ShortArray(0)
@@ -284,11 +260,7 @@ internal object AudioMixer {
         }
     }
 
-    /**
-     * Linear-interpolation resampler. Good enough for music background and speech in
-     * a phone editor — true polyphase would be more accurate but rarely audibly so for
-     * the rate ratios we hit in practice (44.1 ↔ 48 kHz).
-     */
+    /** Linear-interpolation resampler — transparent enough for the 44.1↔48 kHz ratios we hit. */
     private fun resample(input: ShortArray, srcRate: Int, dstRate: Int, channels: Int): ShortArray {
         if (srcRate == dstRate || input.isEmpty()) return input
         val srcFrames = input.size / channels
@@ -312,12 +284,7 @@ internal object AudioMixer {
 
     // ── Mix ───────────────────────────────────────────────────────────────────
 
-    /**
-     * Combine source + overlay PCM at the chosen gains, clamping to int16. When one of
-     * the inputs is shorter than the other the longer one continues alone past the end —
-     * this matches the user's mental model where a 15-second music overlay over a
-     * 60-second source clip falls silent after 15 seconds and the source carries on.
-     */
+    /** Mixes source + overlay PCM at the given gains, clamped to int16; the longer input plays on alone. */
     private fun mixPcm(src: ShortArray?, ovl: ShortArray?, srcGain: Float, ovlGain: Float): ShortArray {
         val a = src ?: ShortArray(0)
         val b = ovl ?: ShortArray(0)
@@ -344,8 +311,7 @@ internal object AudioMixer {
         val encoderFormat = MediaFormat.createAudioFormat(MediaFormat.MIMETYPE_AUDIO_AAC, sampleRate, channelCount).apply {
             setInteger(MediaFormat.KEY_BIT_RATE, 192_000)
             setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC)
-            // KEY_MAX_INPUT_SIZE lets the encoder ask for buffers big enough for our
-            // ~20 ms slices without complaining about buffer-too-small.
+            // Sized for our ~20 ms slices so the encoder doesn't reject buffer-too-small.
             setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 16 * 1024)
         }
         val encoder = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_AUDIO_AAC)
@@ -391,8 +357,7 @@ internal object AudioMixer {
                         if ((info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
                             outputDone = true
                         }
-                        // Drop the codec-config buffer — muxer already has csd-0 from the
-                        // synthesized track format and a second copy would corrupt playback.
+                        // Drop the config buffer: muxer already has csd-0; a second copy corrupts playback.
                         val isConfig = (info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0
                         if (info.size > 0 && !isConfig) {
                             val out = encoder.getOutputBuffer(outIdx)!!
@@ -404,7 +369,6 @@ internal object AudioMixer {
                     }
                 }
             }
-            // Log durationUs so callers / future debugging can correlate
             Log.d(TAG, "encodePcmToAac: encoded ${pcm.size} samples → durationUs≈$durationUs")
         } catch (e: Exception) {
             Log.w(TAG, "encodePcmToAac failed: ${e.message}")
@@ -417,15 +381,8 @@ internal object AudioMixer {
     // ── AAC LC AudioSpecificConfig (csd-0) ───────────────────────────────────
 
     /**
-     * Build a 2-byte AudioSpecificConfig for AAC LC at [sampleRate] with [channelCount]
-     * channels. Required as `csd-0` on the muxer's audio track when we addTrack BEFORE
-     * the encoder has run (no INFO_OUTPUT_FORMAT_CHANGED yet to read csd-0 from).
-     *
-     * Layout per ISO/IEC 14496-3:
-     *   5 bits  audioObjectType         (AAC LC = 2)
-     *   4 bits  samplingFrequencyIndex
-     *   4 bits  channelConfiguration
-     *   3 bits  padding
+     * 2-byte AAC LC AudioSpecificConfig used as `csd-0` when addTrack precedes the encoder.
+     * Layout per ISO/IEC 14496-3: 5b audioObjectType(LC=2), 4b samplingFreqIndex, 4b channelConfig, 3b pad.
      */
     private fun aacLcCsd(sampleRate: Int, channelCount: Int): ByteArray {
         val srIndex = when (sampleRate) {

@@ -48,14 +48,7 @@ import eu.akoos.photos.presentation.theme.FgMute
 import eu.akoos.photos.presentation.theme.FgPrimary
 import eu.akoos.photos.presentation.theme.PanelChip
 
-/**
- * Save sheet option row used by both Photo and Video editors. Renders a 14dp-rounded
- * PanelChip-filled row with a circular accent-tinted icon on the left and a two-line
- * title/subtitle stack on the right. Tap-target is the whole row.
- *
- * Lives here so PhotoEditorScreen and VideoEditorScreen share the exact same recipe —
- * the previous duplicates drifted apart silently when one side was tweaked.
- */
+/** Save sheet option row shared by the Photo and Video editors: icon bubble + title/subtitle. */
 @Composable
 internal fun SaveOptionRow(
     icon: ImageVector,

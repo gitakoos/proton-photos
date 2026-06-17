@@ -14,7 +14,7 @@
     <string name="onboarding_recommended">Recommandé</string>
 
     <string name="onboarding_welcome_title">Bienvenue dans Photos for Proton</string>
-    <string name="onboarding_welcome_subtitle">Vos photos et vidéos, chiffrées de bout en bout sur Proton Drive. Configurons quelques préférences pour que l\'app vous ressemble.</string>
+    <string name="onboarding_welcome_subtitle">Vos photos et vidéos, chiffrées de bout en bout sur Proton Drive. Réglons quelques préférences pour adapter l\'app à votre usage.</string>
 
     <string name="onboarding_backup_title">Choisissez quoi sauvegarder</string>
     <string name="onboarding_backup_subtitle">Modifiable à tout moment dans les paramètres.</string>
@@ -26,13 +26,13 @@
     <string name="onboarding_backup_nothing_desc">Parcourez ce qui est déjà sur Proton Drive sans sauvegarder de nouvelles photos.</string>
 
     <string name="onboarding_privacy_title">Contrôles de confidentialité</string>
-    <string name="onboarding_privacy_subtitle">Choisissez comment vos photos passent de l\'appareil à Drive. Tout est chiffré par dessus.</string>
-    <string name="onboarding_privacy_strip">Supprimer les métadonnées au téléchargement</string>
-    <string name="onboarding_privacy_strip_desc">Supprime la position GPS des photos avant qu\'elles atteignent le cloud. Les détails d\'appareil photo, de date et de logiciel sont facultatifs. Recommandé.</string>
+    <string name="onboarding_privacy_subtitle">Choisissez comment vos photos passent de l\'appareil à Drive. Tout est chiffré par-dessus.</string>
+    <string name="onboarding_privacy_strip">Supprimer les métadonnées à l\'envoi</string>
+    <string name="onboarding_privacy_strip_desc">Supprime la position GPS des photos avant qu\'elles n\'atteignent le cloud. Les infos d\'appareil photo, de date et de logiciel sont facultatives. Recommandé.</string>
     <string name="onboarding_privacy_rename">Renommer avec la date de prise</string>
     <string name="onboarding_privacy_rename_desc">Téléchargez les fichiers comme 2026-05-30_14-32-08.jpg au lieu de IMG_2841.jpg. Le fichier sur l\'appareil ne change pas.</string>
     <string name="onboarding_privacy_delete">Retirer de l\'appareil après sauvegarde</string>
-    <string name="onboarding_privacy_delete_desc">Une fois la photo en sécurité sur Drive, retirez la de l\'appareil pour gagner de l\'espace. Les autres apps de galerie ne la verront plus.</string>
+    <string name="onboarding_privacy_delete_desc">Une fois la photo en sécurité sur Drive, retirez-la de l\'appareil pour gagner de l\'espace. Les autres applications de galerie ne la verront plus.</string>
 
     <string name="onboarding_notif_title">Restez informé</string>
     <string name="onboarding_notif_subtitle">Autorisez les notifications pour voir la progression des sauvegardes et les demandes de nettoyage, même app fermée.</string>
@@ -61,7 +61,7 @@
     <string name="onboarding_appearance_subtitle">Choisissez thème, couleur d\'accent et langue. Tout est modifiable plus tard dans les Paramètres.</string>
 
     <string name="onboarding_lock_title">Verrouillage de l\'app</string>
-    <string name="onboarding_lock_subtitle">Biométrie ou code de l\'appareil à chaque retour au premier plan de l\'app.</string>
+    <string name="onboarding_lock_subtitle">Utilisez la biométrie ou le code de l\'appareil pour déverrouiller l\'app à chaque retour au premier plan.</string>
     <string name="onboarding_lock_enable">Activer le verrouillage</string>
     <string name="onboarding_lock_enable_desc">Demande biométrie ou code à chaque ouverture ou retour depuis l\'arrière plan.</string>
     <string name="onboarding_lock_timeout_label">Re-verrouiller après</string>
@@ -78,7 +78,7 @@
     <!-- Gallery -->
     <string name="gallery_empty_title">Aucune photo</string>
     <string name="gallery_empty_subtitle">Vos photos apparaîtront ici après la synchronisation.</string>
-    <string name="gallery_filter_all">Tous</string>
+    <string name="gallery_filter_all">Tout</string>
     <string name="gallery_tab_photos">Photos</string>
     <string name="gallery_tab_albums">Albums</string>
     <string name="gallery_tab_shared">Partagés</string>
@@ -86,6 +86,32 @@
     <string name="share_action">Partager</string>
     <string name="share_chooser_title">Partager via</string>
     <string name="share_preparing">Préparation…</string>
+    <string name="share_viewer_sheet_title">Partager la photo</string>
+    <string name="share_send_to_app">Partager avec une autre application</string>
+    <string name="share_with_people">Partager avec des personnes</string>
+    <string name="share_with_people_desc">Ajouter à un album partagé</string>
+    <string name="share_public_link">Lien public</string>
+    <string name="share_create_link">Créer un lien public</string>
+    <string name="share_upload_create_link">Importer et créer le lien</string>
+    <string name="share_creating_link">Création du lien…</string>
+    <string name="share_link_busy">Un instant…</string>
+    <string name="share_copy_link">Copier le lien</string>
+    <string name="share_remove_link">Supprimer le lien</string>
+    <string name="share_link_copied">Lien copié</string>
+    <string name="share_public_link_desc">Toute personne disposant du lien peut la voir</string>
+    <string name="share_manage_link_title">Lien public</string>
+    <string name="share_manage_link_explainer">Créez un lien que tout le monde peut ouvrir pour voir cette photo. Vous pouvez ajouter un mot de passe ou supprimer le lien à tout moment.</string>
+    <string name="share_require_password">Exiger un mot de passe</string>
+    <string name="share_require_password_desc">Les destinataires doivent le saisir pour ouvrir le lien</string>
+    <string name="share_password_hint">Saisissez un mot de passe</string>
+    <string name="share_set_password">Définir le mot de passe</string>
+    <string name="share_update_password">Mettre à jour</string>
+    <string name="share_password_set">Mot de passe mis à jour</string>
+    <string name="share_password_removed">Mot de passe supprimé</string>
+    <string name="share_password_failed">Impossible de mettre à jour le mot de passe</string>
+    <string name="share_retry">Réessayer</string>
+    <string name="share_link_local_only_note">Sauvegardez d\'abord cette photo pour la partager via un lien public.</string>
+    <string name="share_link_failed">Impossible de créer le lien public</string>
     <string name="gallery_download_selected">Télécharger la sélection</string>
     <string name="gallery_delete_selected">Supprimer la sélection</string>
     <string name="gallery_download_done">%1$d photos téléchargées</string>
@@ -97,9 +123,11 @@
     <string name="gallery_add_to_album">Ajouter à l\'album</string>
     <string name="gallery_add_to_album_local_note">Ces photos seront d\'abord sauvegardées, puis ajoutées à l\'album.</string>
     <string name="gallery_no_albums_yet">Pas encore d\'album. Créez-en un ci-dessus.</string>
-    <string name="gallery_add_to_album_mixed_hint">Éléments uniquement sur l\'appareil et uniquement dans le cloud ne peuvent pas partager d\'album</string>
+    <string name="gallery_add_to_album_mixed_hint">Une sélection mêlant éléments locaux et cloud ne peut pas former un album. Choisissez un seul type.</string>
     <string name="gallery_add_to_album_partial">%1$d ajoutées à %2$s, %3$d élément(s) n\'ont pas pu être enregistrés (sélection mixte)</string>
     <string name="gallery_strip_metadata">Supprimer les métadonnées</string>
+    <string name="gallery_hide_selected">Masquer la sélection</string>
+    <string name="more_label">Plus</string>
     <string name="gallery_added_to_album">%1$d photos ajoutées à %2$s</string>
     <string name="gallery_add_to_album_added_and_queued">%1$d ajoutées, %2$d autres le seront après la sauvegarde</string>
     <string name="gallery_add_to_album_queued_only">%1$d seront ajoutées à %2$s après la sauvegarde</string>
@@ -283,10 +311,17 @@
     <string name="viewer_added_to_album">Ajoutée à %1$s</string>
     <string name="settings_photos_timeline_section">Fil Photos</string>
     <string name="settings_hide_album_photos">Masquer les photos des albums Drive</string>
+    <string name="settings_hide_all_folders">Masquer tous les dossiers de l\'appareil</string>
+    <string name="settings_hide_all_folders_desc">Les photos des dossiers de l\'appareil masqués n\'apparaissent pas dans votre fil Photos principal. Elles restent sur votre appareil.</string>
     <string name="settings_hide_album_photos_desc">Les photos ajoutées à un album Drive (cloud) n\'apparaissent plus dans votre fil Photos principal. Elles restent visibles dans les onglets Albums et Partagés.</string>
     <string name="settings_timeline_filter">Filtre du fil</string>
     <string name="timeline_filter_title">Filtre du fil</string>
     <string name="timeline_filter_subtitle">Choisissez ce que vous voulez masquer de votre fil Photos principal. Les photos masquées restent sur l\'appareil et continuent d\'être sauvegardées.</string>
+    <string name="timeline_filter_categories_header">Barre de catégories</string>
+    <string name="timeline_filter_reorder_hint">Utilisez les flèches pour définir l\'ordre de la barre de catégories affichée au-dessus de votre fil Photos.</string>
+    <string name="timeline_filter_per_album_hint">Masquez certains albums du fil. Le bouton ci-dessus les masque tous d\'un coup.</string>
+    <string name="cd_move_up">Monter</string>
+    <string name="cd_move_down">Descendre</string>
     <string name="timeline_filter_albums_header">Albums Drive</string>
     <string name="settings_telemetry">Télémétrie</string>
     <string name="settings_telemetry_desc">Contrôlée par les paramètres de votre compte Proton. Ouvrez account.proton.me pour la modifier.</string>
@@ -303,6 +338,8 @@
 
     <string name="albums_empty_title">Aucun album</string>
     <string name="albums_empty_subtitle">Les albums créés dans Drive apparaîtront ici</string>
+    <string name="albums_empty_local">Aucun dossier sur l\'appareil</string>
+    <string name="cd_select_month">Sélectionner ce mois</string>
     <string name="selection_photos_only">%d photos</string>
     <string name="selection_videos_only">%d vidéos</string>
     <string name="selection_mixed">%1$d photos, %2$d vidéos</string>
@@ -368,6 +405,7 @@
     <string name="language_es">Espagnol, Español</string>
     <string name="language_hu">Hongrois, Magyar</string>
     <string name="language_it">Italien, Italiano</string>
+    <string name="language_nl">Néerlandais, Nederlands</string>
     <string name="language_section">Langue d\'affichage</string>
 
     <!-- About -->
@@ -415,7 +453,7 @@
     <string name="sync_worker_channel_name">Sauvegarde des photos</string>
     <string name="sync_worker_channel_desc">Affiche la progression de la sauvegarde des photos vers Proton Drive.</string>
     <string name="sync_worker_notification_title">Sauvegarde des photos…</string>
-    <string name="sync_worker_notification_progress">%1$d envoyées / %2$d en attente</string>
+    <string name="sync_worker_notification_progress">%1$d sur %2$d envoyées</string>
     <string name="sync_worker_notification_cancel">Annuler</string>
     <string name="albums_share_button">Partager l\'album</string>
     <string name="album_link_copied">Lien copié dans le presse-papiers</string>
@@ -475,8 +513,9 @@
     <string name="filter_sync_local">Local uniquement</string>
     <string name="filter_sync_backedup">Sauvegardés</string>
     <string name="filter_year_label">Année</string>
-    <string name="filter_any">Tous</string>
+    <string name="filter_any">Toutes</string>
     <string name="filter_month_label">Mois</string>
+    <string name="filter_whole_month">Mois entier</string>
     <string name="filter_reset">Réinitialiser</string>
 
     <!-- Albums partagés -->
@@ -485,20 +524,21 @@
     <string name="shared_decline">Refuser</string>
     <string name="shared_accept">Accepter</string>
     <string name="shared_empty_with_me_title">Rien partagé avec vous pour l\'instant</string>
-    <string name="shared_empty_by_me_title">Vous n\'avez partagé aucun album</string>
+    <string name="shared_empty_by_me_title">Vous n\'avez encore rien partagé</string>
     <string name="shared_empty_with_me_body">Les albums partagés avec vous apparaîtront ici.</string>
-    <string name="shared_empty_by_me_body">Partage un album depuis l\'onglet Albums pour le voir ici.</string>
+    <string name="shared_empty_by_me_body">Partagez un album ou une photo pour le voir ici.</string>
     <string name="shared_by_email">par %1$s</string>
     <string name="shared_photo_count">%1$d photos</string>
+    <string name="shared_by_me_photos_section">Photos partagées</string>
 
     <!-- Permission notifications -->
-    <string name="notifications_blocked_snackbar">Notifications désactivées. Tu ne verras pas la progression des transferts.</string>
+    <string name="notifications_blocked_snackbar">Notifications désactivées. Vous ne verrez pas la progression des transferts.</string>
     <string name="notifications_blocked_open_settings">Paramètres</string>
 
     <!-- Recherche -->
     <string name="search_title">Rechercher</string>
     <string name="search_placeholder">Rechercher par nom de fichier</string>
-    <string name="search_empty_idle">Saisis un nom pour rechercher</string>
+    <string name="search_empty_idle">Saisissez un nom pour lancer la recherche</string>
     <string name="search_empty_no_results">Aucun résultat</string>
 
     <string name="viewer_play_slideshow">Lancer le diaporama</string>
@@ -535,37 +575,41 @@
 
     <plurals name="delete_title_plural">
         <item quantity="one">Supprimer %1$d photo ?</item>
-        <item quantity="many">Supprimer %1$d de photos ?</item>
         <item quantity="other">Supprimer %1$d photos ?</item>
     </plurals>
     <plurals name="count_items_plural">
         <item quantity="one">%d élément</item>
-        <item quantity="many">%d éléments</item>
         <item quantity="other">%d éléments</item>
     </plurals>
 
     <plurals name="count_photos_plural">
         <item quantity="one">%d photo</item>
-        <item quantity="many">%d de photos</item>
         <item quantity="other">%d photos</item>
     </plurals>
     <plurals name="count_videos_plural">
         <item quantity="one">%d vidéo</item>
-        <item quantity="many">%d de vidéos</item>
         <item quantity="other">%d vidéos</item>
     </plurals>
     <plurals name="share_invite_sent">
         <item quantity="one">%1$d invitation envoyée</item>
-        <item quantity="many">%1$d invitations envoyées</item>
         <item quantity="other">%1$d invitations envoyées</item>
     </plurals>
 
     <string name="gallery_on_this_day">Ce jour-là</string>
     <plurals name="count_years_ago_plural">
         <item quantity="one">il y a %1$d an</item>
-        <item quantity="many">il y a %1$d d\'années</item>
         <item quantity="other">il y a %1$d ans</item>
     </plurals>
+
+    <!-- Écran Souvenirs -->
+    <string name="memories_title">Collection</string>
+    <string name="memories_seasons">Saisons</string>
+    <string name="season_winter">Hiver</string>
+    <string name="season_spring">Printemps</string>
+    <string name="season_summer">Été</string>
+    <string name="season_autumn">Automne</string>
+    <string name="sort_newest_first">Plus récents d\'abord</string>
+    <string name="sort_oldest_first">Plus anciens d\'abord</string>
 
     <!-- Menu de la visionneuse -->
     <string name="viewer_menu_more">Plus</string>
@@ -575,6 +619,17 @@
     <string name="viewer_menu_hide">Masquer</string>
     <string name="viewer_menu_unhide">Afficher</string>
     <string name="viewer_hidden_label">Masqué sur cet appareil</string>
+
+    <!-- Motion photo (Android JPEG with an embedded clip) playback in the viewer -->
+    <string name="cd_motion_photo">Photo animée</string>
+    <string name="cd_panorama">Panorama</string>
+    <string name="cd_play_motion_photo">Lire la photo animée</string>
+    <string name="cd_stop_motion_photo">Arrêter la photo animée</string>
+    <string name="cd_view_panorama">Voir le panorama</string>
+    <string name="cd_exit_panorama">Quitter le panorama</string>
+    <string name="viewer_view_panorama">Voir le panorama</string>
+    <string name="viewer_exit_panorama">Quitter</string>
+    <string name="motion_photo_play_failed">Impossible de lire cette photo animée.</string>
 
     <!-- Éditeur vidéo -->
     <string name="video_editor_trim">Rogner</string>
@@ -595,6 +650,44 @@
     <string name="editor_discard_changes_message">Les modifications non enregistrées seront perdues.</string>
     <string name="editor_discard_changes_confirm">Abandonner</string>
     <string name="editor_discard_changes_keep">Continuer l\'édition</string>
+    <string name="editor_tool_adjust">Ajuster</string>
+    <string name="editor_tool_filter">Filtre</string>
+    <string name="editor_tool_redact">Masquer</string>
+    <string name="editor_filter_original">Original</string>
+    <string name="editor_filter_bw">N&amp;B</string>
+    <string name="editor_filter_sepia">Sépia</string>
+    <string name="editor_filter_vintage">Vintage</string>
+    <string name="editor_filter_vivid">Éclatant</string>
+    <string name="editor_filter_cool">Froid</string>
+    <string name="editor_filter_warm">Chaud</string>
+    <string name="editor_redact_hint">Dessinez sur les visages ou le texte pour les masquer</string>
+    <string name="editor_redact_blackout">Noircir</string>
+    <string name="editor_redact_pixelate">Pixelliser</string>
+    <string name="editor_redact_clear">Effacer</string>
+    <string name="editor_flip_h">Retourner horizontalement</string>
+    <string name="editor_flip_v">Retourner verticalement</string>
+    <string name="editor_error_title">Erreur de l\'éditeur</string>
+    <string name="editor_error_title_video">Erreur de l\'éditeur vidéo</string>
+    <string name="editor_save_edits">Enregistrer les modifications</string>
+    <string name="editor_save_as_new_copy">Enregistrer comme nouvelle copie</string>
+    <string name="editor_save_sheet_cloud">Choisissez comment enregistrer la photo modifiée dans votre Drive.</string>
+    <string name="editor_save_sheet_synced">Choisissez comment enregistrer la photo modifiée. Les originaux sauvegardés restent dans Drive.</string>
+    <string name="editor_save_sheet_device">Choisissez comment enregistrer la photo modifiée sur votre appareil.</string>
+    <string name="editor_save_sheet_cloud_video">Choisissez comment la modification revient dans votre Proton Drive.</string>
+    <string name="editor_save_sheet_synced_video">Choisissez comment enregistrer la vidéo modifiée. Les originaux sauvegardés restent dans Drive.</string>
+    <string name="editor_save_sheet_device_video">Choisissez comment enregistrer la vidéo modifiée sur votre appareil.</string>
+    <string name="editor_save_copy_subtitle_cloud">Téléversée comme nouvelle photo. L\'original reste dans Drive.</string>
+    <string name="editor_save_copy_subtitle_cloud_video">Téléversée comme nouveau fichier dans Proton Drive — l\'original est conservé.</string>
+    <string name="editor_save_copy_subtitle_synced">Crée un nouveau fichier dans votre galerie ET téléverse une copie associée dans Drive.</string>
+    <string name="editor_save_copy_subtitle_device">Crée un nouveau fichier dans votre galerie.</string>
+    <string name="editor_saving">Enregistrement…</string>
+    <string name="editor_please_wait">Veuillez patienter…</string>
+    <string name="editor_save_cancelled">Enregistrement annulé</string>
+    <string name="editor_no_permission">Pas d\'autorisation pour enregistrer</string>
+    <string name="editor_save_failed">Échec de l\'enregistrement</string>
+    <string name="editor_invalid_video_uri">URI vidéo non valide</string>
+    <string name="editor_video_metadata_failed">Impossible de lire les métadonnées de la vidéo</string>
+    <string name="editor_cloud_video_download_failed">Échec du téléchargement de la vidéo du cloud</string>
 
     <!-- v1.3.2 missing-translation backfill -->
     <string name="sync_worker_notification_checking">Recherche de nouvelles photos…</string>
@@ -625,6 +718,7 @@
     <!-- Programme de mise à jour intégré -->
     <string name="update_available_title">Mise à jour disponible</string>
     <string name="update_available_message">Une nouvelle version (%1$s) est prête à installer (%2$d Mo).</string>
+    <string name="update_banner_message">La version %1$s est disponible. Touchez pour installer.</string>
     <string name="update_action_update">Mettre à jour</string>
     <string name="update_action_later">Plus tard</string>
     <string name="update_downloading">Téléchargement… %1$d%%</string>
@@ -634,6 +728,7 @@
     <string name="update_no_update">Vous avez la dernière version.</string>
     <string name="update_check_failed">Impossible de vérifier les mises à jour. Réessayez plus tard.</string>
     <string name="update_permission_required">Autorisez l\'installation d\'applications inconnues dans les paramètres système.</string>
+    <string name="update_verification_failed">La mise à jour n\'a pas pu être vérifiée et n\'a pas été installée. Réessaie.</string>
     <string name="offline_banner_message">Vous êtes hors ligne. Certaines fonctionnalités seront indisponibles jusqu\'à la reconnexion.</string>
     <string name="offline_banner_dismiss_cd">Fermer la notification</string>
     <string name="network_error_offline">Vous êtes hors ligne. Réessayez une fois reconnecté.</string>
@@ -660,8 +755,12 @@
     <string name="shared_save_partial_fmt">%1$d sur %2$d photos enregistrées dans votre bibliothèque</string>
     <string name="shared_save_progress_fmt">Enregistrement %1$d / %2$d dans votre bibliothèque…</string>
     <string name="op_downloading_fmt">Téléchargement %1$d / %2$d</string>
+    <string name="op_backing_up_fmt">Sauvegarde %1$d / %2$d</string>
     <string name="op_sharing_fmt">Partage %1$d / %2$d</string>
     <string name="op_adding_to_album">Ajout à l\'album…</string>
+    <string name="op_deleting">Suppression…</string>
+    <string name="op_hiding">Masquage…</string>
+    <string name="op_removing_from_album">Retrait de l\'album…</string>
     <string name="viewer_delete_subtitle_synced">Cette photo est sauvegardée sur Proton Drive. Choisissez :</string>
     <string name="viewer_delete_remove_from_device">Retirer de l\'appareil</string>
     <string name="viewer_delete_remove_from_device_desc">Conserver la sauvegarde sur Proton Drive</string>
@@ -720,4 +819,209 @@
     <string name="force_update_title">Mise à jour requise</string>
     <string name="force_update_body">Cette version n\'est plus prise en charge. Veuillez mettre à jour pour continuer.</string>
     <string name="force_update_action">Mettre à jour</string>
+    <string name="notifications_title">Notifications</string>
+    <string name="notifications_subtitle">Choisissez les notifications que l\'application peut afficher. Tout est activé par défaut.</string>
+    <string name="notifications_nav_desc">Choisissez les notifications que vous voyez</string>
+    <string name="notifications_backup_status">Notification de sauvegarde permanente</string>
+    <string name="notifications_backup_status_desc">Affiche la notification permanente pendant que l\'application surveille les nouvelles photos. La sauvegarde continue et les notifications d\'envoi apparaissent même lorsque c\'est désactivé ; les nouvelles photos sont simplement détectées un peu moins instantanément.</string>
+    <string name="notifications_album_download">Téléchargements d\'albums</string>
+    <string name="notifications_album_download_desc">Affiche la progression et un résumé lorsque vous téléchargez un album sur votre appareil.</string>
+    <string name="notifications_delete_reminder">Rappel de suppression après sauvegarde</string>
+    <string name="notifications_delete_reminder_desc">Après une sauvegarde, rappelez-moi quelles photos peuvent être retirées de cet appareil en toute sécurité.</string>
+    <string name="settings_backup_how_section">Déroulement de la sauvegarde</string>
+    <string name="settings_theme_palette">Thème et palette</string>
+    <string name="settings_privacy_security">Confidentialité et sécurité</string>
+    <string name="cd_scroll_to_top">Revenir en haut</string>
+    <string name="albums_section_header">Albums</string>
+    <string name="albums_filter_all">Tous</string>
+    <string name="albums_filter_cloud">Cloud</string>
+    <string name="albums_filter_local">Sur l\'appareil</string>
+    <string name="albums_toggle_cloud_albums">Afficher ou masquer les albums</string>
+
+    <!-- Photo viewer details / metadata sheet -->
+    <string name="viewer_meta_section_file_info">Infos du fichier</string>
+    <string name="viewer_meta_section_camera">Appareil photo</string>
+    <string name="viewer_meta_section_location">Lieu</string>
+    <string name="viewer_meta_section_datetime">Date et heure</string>
+    <string name="viewer_meta_section_software">Logiciel et auteur</string>
+    <string name="viewer_meta_section_image">Image</string>
+    <string name="viewer_meta_full">Métadonnées complètes</string>
+    <string name="viewer_meta_row_file">Fichier</string>
+    <string name="viewer_meta_row_date">Date</string>
+    <string name="viewer_meta_row_size">Taille</string>
+    <string name="viewer_meta_row_type">Type</string>
+    <string name="viewer_meta_row_album">Album</string>
+    <string name="viewer_meta_row_source">Source</string>
+    <string name="viewer_meta_row_make">Marque</string>
+    <string name="viewer_meta_row_model">Modèle</string>
+    <string name="viewer_meta_row_lens">Objectif</string>
+    <string name="viewer_meta_row_focal_length">Distance focale</string>
+    <string name="viewer_meta_row_aperture">Ouverture</string>
+    <string name="viewer_meta_row_exposure">Exposition</string>
+    <string name="viewer_meta_row_iso">ISO</string>
+    <string name="viewer_meta_row_flash">Flash</string>
+    <string name="viewer_meta_row_white_balance">Balance des blancs</string>
+    <string name="viewer_meta_row_latitude">Latitude</string>
+    <string name="viewer_meta_row_longitude">Longitude</string>
+    <string name="viewer_meta_row_altitude">Altitude</string>
+    <string name="viewer_meta_row_taken">Prise le</string>
+    <string name="viewer_meta_row_modified">Modifiée</string>
+    <string name="viewer_meta_row_software">Logiciel</string>
+    <string name="viewer_meta_row_artist">Auteur</string>
+    <string name="viewer_meta_row_copyright">Droits d\'auteur</string>
+    <string name="viewer_meta_row_dimensions">Dimensions</string>
+    <string name="viewer_meta_row_orientation">Orientation</string>
+    <string name="viewer_meta_flash_fired">Déclenché</string>
+    <string name="viewer_meta_flash_none">Pas de flash</string>
+    <string name="viewer_meta_wb_auto">Automatique</string>
+    <string name="viewer_meta_wb_manual">Manuel</string>
+    <string name="viewer_meta_orientation_normal">Normale</string>
+    <string name="viewer_meta_orientation_180">Pivotée de 180°</string>
+    <string name="viewer_meta_orientation_90_cw">Pivotée de 90° dans le sens horaire</string>
+    <string name="viewer_meta_orientation_90_ccw">Pivotée de 90° dans le sens antihoraire</string>
+    <string name="viewer_meta_source_device_only">Sur l\'appareil uniquement</string>
+    <string name="viewer_meta_source_backed_up">Sauvegardée sur Proton Drive</string>
+    <string name="viewer_meta_source_cloud">Proton Drive</string>
+    <string name="viewer_meta_strip">Supprimer</string>
+    <string name="viewer_meta_strip_all">Supprimer toutes les métadonnées privées</string>
+    <string name="viewer_meta_strip_all_desc">Supprime le GPS, les infos de l\'appareil photo et les champs logiciels de ce fichier</string>
+    <string name="viewer_meta_strip_confirm_title">Supprimer les métadonnées ?</string>
+    <string name="viewer_meta_strip_confirm_message">Cela supprimera définitivement %1$s du fichier sur votre appareil. Cette action est irréversible.</string>
+    <string name="viewer_meta_strip_what_gps">la position GPS</string>
+    <string name="viewer_meta_strip_what_camera">les infos de l\'appareil photo</string>
+    <string name="viewer_meta_strip_what_timestamps">les horodatages</string>
+    <string name="viewer_meta_strip_what_software">les infos logicielles</string>
+
+    <!-- Viewer delete sheet + add-to-album sheet -->
+    <string name="viewer_delete_title_local">Supprimer la photo ?</string>
+    <string name="viewer_delete_title_synced">Retirer la photo ?</string>
+    <string name="viewer_delete_title_cloud">Supprimer de Proton Drive ?</string>
+    <string name="viewer_delete_local_body">La photo sera déplacée dans le dossier « Supprimés récemment » de votre appareil.</string>
+    <string name="viewer_delete_move_to_trash">Mettre à la corbeille</string>
+    <string name="viewer_add_to_album_title">Ajouter à l\'album</string>
+    <string name="viewer_add_to_album_empty">Aucun album pour l\'instant. Créez-en un depuis l\'onglet Albums.</string>
+    <string name="viewer_drive_albums_header">ALBUMS DRIVE</string>
+    <string name="viewer_tap_to_remove_from_album">Touchez pour retirer de l\'album</string>
+
+    <!-- Viewer image/video states -->
+    <string name="viewer_error_loading_photo">Erreur lors du chargement de la photo</string>
+    <string name="viewer_downloading_pct">Téléchargement %1$d%%</string>
+    <string name="viewer_downloading">Téléchargement…</string>
+    <string name="viewer_loading">Chargement…</string>
+
+    <!-- Viewer snackbar / error fallbacks -->
+    <string name="viewer_unknown_error">erreur inconnue</string>
+    <string name="viewer_not_signed_in">Non connecté</string>
+    <string name="viewer_not_logged_in">Non connecté</string>
+    <string name="viewer_delete_drive_failed">Impossible de supprimer de Drive</string>
+    <string name="viewer_hide_failed">Impossible de déplacer le fichier vers Masqués</string>
+    <string name="viewer_name_empty">Le nom ne peut pas être vide</string>
+    <string name="viewer_rename_failed">Échec du renommage</string>
+    <string name="viewer_load_albums_failed">Impossible de charger les albums : %1$s</string>
+    <string name="viewer_remove_from_album_failed">Échec du retrait de l\'album : %1$s</string>
+    <string name="viewer_set_cover_failed">Échec de la définition de la couverture : %1$s</string>
+    <string name="viewer_add_to_album_failed">Échec de l\'ajout à l\'album : %1$s</string>
+    <string name="viewer_create_album_failed">Échec de la création de l\'album : %1$s</string>
+    <string name="viewer_save_to_device_failed">Échec de l\'enregistrement sur l\'appareil : %1$s</string>
+    <string name="viewer_share_failed">Échec du partage : %1$s</string>
+    <plurals name="viewer_add_photos_failed">
+        <item quantity="one">Impossible d\'ajouter %1$d photo à l\'album</item>
+        <item quantity="other">Impossible d\'ajouter %1$d photos à l\'album</item>
+    </plurals>
+
+    <!-- ErrorPopup dialog -->
+    <string name="err_dismiss_ok">OK</string>
+    <string name="err_show_more">Afficher plus</string>
+    <string name="err_show_less">Afficher moins</string>
+    <string name="err_copy">Copier</string>
+
+    <!-- Gallery snackbar / error fallbacks -->
+    <string name="gallery_error_title">Erreur</string>
+    <string name="gallery_no_local_to_hide">Aucune photo locale à masquer</string>
+    <string name="gallery_copy_to_hidden_failed">Impossible de copier vers Masqués</string>
+    <string name="gallery_move_to_hidden_failed">Impossible de déplacer vers Masqués</string>
+    <string name="gallery_add_to_cloud_album_failed">Impossible d\'ajouter à l\'album cloud</string>
+    <string name="gallery_add_to_album_failed">Impossible d\'ajouter à l\'album</string>
+    <string name="gallery_select_photos_first">Sélectionnez d\'abord des photos</string>
+    <string name="gallery_create_album_failed">Impossible de créer l\'album : %1$s</string>
+    <string name="gallery_enable_metadata_category">Activez d\'abord une catégorie de métadonnées dans Paramètres → Confidentialité</string>
+    <string name="gallery_album_picker_count_drive">%1$s · Drive</string>
+
+    <!-- Album create/rename/delete snackbar fallbacks -->
+    <string name="albums_name_empty">Le nom de l\'album ne peut pas être vide</string>
+    <string name="albums_create_failed">Impossible de créer l\'album</string>
+    <string name="albums_rename_same_name">Le nouveau nom est identique au nom actuel</string>
+    <string name="albums_rename_failed">Échec du renommage</string>
+    <string name="albums_delete_failed">Impossible de supprimer l\'album : %1$s</string>
+    <string name="albums_renamed_to">Renommé en « %1$s »</string>
+
+    <string name="cd_album_fully_backed_up">Entièrement sauvegardé</string>
+    <string name="cd_album_partially_backed_up">Partiellement sauvegardé</string>
+
+    <!-- Trash screen -->
+    <string name="trash_title">Supprimés récemment</string>
+    <string name="trash_restore">Restaurer</string>
+    <string name="trash_empty">Vider la corbeille</string>
+    <string name="select_all">Tout sélectionner</string>
+    <string name="trash_device_unsupported">La corbeille de l\'appareil nécessite Android 11+</string>
+    <string name="trash_device_empty_title">Aucune photo supprimée récemment</string>
+    <string name="trash_device_empty_subtitle">Les photos supprimées au cours des 30 derniers jours\napparaîtront ici</string>
+    <string name="trash_restore_device_message">Elles seront restaurées dans la galerie de votre appareil.</string>
+    <string name="trash_delete_forever_message">Action irréversible. Les photos seront définitivement supprimées de cet appareil.</string>
+    <string name="trash_delete_forever_confirm">Supprimer définitivement</string>
+    <string name="trash_restore_cloud_message">Elles seront replacées dans votre flux de photos Proton Drive.</string>
+    <plurals name="trash_restore_title">
+        <item quantity="one">Restaurer %1$d photo ?</item>
+        <item quantity="other">Restaurer %1$d photos ?</item>
+    </plurals>
+    <plurals name="trash_delete_forever_title">
+        <item quantity="one">Supprimer définitivement %1$d photo ?</item>
+        <item quantity="other">Supprimer définitivement %1$d photos ?</item>
+    </plurals>
+    <string name="trash_selected_count">%1$d sélectionnée(s)</string>
+    <string name="trash_long_press_hint">Appui long pour sélectionner</string>
+
+    <!-- Backup folders (SyncFolders) screen -->
+    <string name="sync_folders_title">Dossiers de sauvegarde</string>
+    <string name="sync_folders_description">Choisissez les dossiers à sauvegarder sur Proton Drive. Les dossiers sélectionnés seront téléversés automatiquement lors de la synchronisation.</string>
+    <string name="sync_folders_count_selected">%1$d dossier(s) sur %2$d sélectionné(s)</string>
+    <string name="sync_folders_add_action">Ajouter un dossier</string>
+    <string name="sync_folders_add_row_subtitle">Déclarez un dossier à l\'avance pour que les futures photos qu\'il contient soient sauvegardées automatiquement</string>
+    <string name="sync_folders_add_dialog_body">Saisissez le nom exact du dossier (par ex. \"Voyage 2026\"). Dès qu\'une photo arrive dans un dossier correspondant, elle est sauvegardée automatiquement.</string>
+    <string name="sync_folders_selected_cd">Sélectionné</string>
+
+    <!-- Mirror device folders as albums screen -->
+    <string name="mirror_opted_in_cd">Activé</string>
+    <string name="mirror_custom_pending">En attente — s\'applique lorsqu\'un dossier portant ce nom apparaît</string>
+    <string name="mirror_remove_cd">Supprimer</string>
+    <string name="mirror_name_empty">Le nom du dossier ne peut pas être vide</string>
+    <string name="mirror_name_invalid_chars">Le nom ne peut pas contenir \'/\' ni \'=\'</string>
+    <string name="mirror_name_already_added">Dossier déjà ajouté</string>
+
+    <!-- Settings — sync error popup + free-up snackbars -->
+    <string name="settings_sync_failed">Échec de la synchronisation</string>
+    <string name="settings_freed_photos">%1$d photo(s) libérée(s) de l\'appareil</string>
+    <string name="settings_free_up_none">Aucune photo sauvegardée en cache local à supprimer</string>
+    <string name="settings_free_up_error">Impossible de libérer de l\'espace : %1$s</string>
+
+    <!-- Upload status labels (Sync progress panel) -->
+    <string name="upload_status_uploading">Téléversement…</string>
+    <string name="upload_status_encrypting">Chiffrement…</string>
+    <string name="upload_status_queued">En file d\'attente</string>
+    <string name="upload_status_done">Terminé</string>
+    <string name="upload_status_failed">Échec</string>
+
+    <!-- Shared albums error snackbars -->
+    <string name="shared_decline_failed">Échec du refus : %1$s</string>
+    <string name="shared_accept_failed">Échec de l\'acceptation : %1$s</string>
+    <string name="shared_load_failed">Impossible de charger les albums partagés : %1$s</string>
+
+    <!-- Hidden photos empty state -->
+    <string name="hidden_empty_title">Aucune photo masquée</string>
+    <string name="hidden_empty_subtitle">Appui long sur une photo dans la galerie, puis choisissez \"Masquer\"</string>
+
+    <!-- Densest-layout performance heads-up -->
+    <string name="dense_grid_warning_title">Affichage le plus dense</string>
+    <string name="dense_grid_warning_message">Afficher plus de photos par ligne peut rendre le défilement moins fluide dans les très grandes bibliothèques.</string>
+    <string name="dense_grid_warning_dismiss">Ne plus afficher</string>
 </resources>

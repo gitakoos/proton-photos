@@ -52,7 +52,9 @@ import eu.akoos.photos.domain.repository.LocalMediaRepository
 import eu.akoos.photos.domain.repository.SyncStateRepository
 import eu.akoos.photos.util.ExifHelper
 import eu.akoos.photos.util.MetadataStripConfig
+import eu.akoos.photos.util.MotionPhotoUtil
 import java.io.File
+import java.io.RandomAccessFile
 import java.security.MessageDigest
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -252,6 +254,7 @@ class UploadPendingUseCase @Inject constructor(
             cloudRepo.loadAlbums(userId).associate { it.name.lowercase() to it.linkId }
                 .toMutableMap()
         } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
             Log.w(UPLOAD_TAG, "Could not load existing albums for name matching: ${e.message}")
             mutableMapOf()
         }
@@ -456,12 +459,27 @@ class UploadPendingUseCase @Inject constructor(
             // fall back to the original URI when the temp couldn't be produced — a strip
             // failure must never block the backup of the file itself.
             val uploadUri: String = if (stripOnUpload && localItem.mimeType.startsWith("image/")) {
-                strippedFile = ExifHelper.stripToTempFile(context, state.localUri, stripConfig)
-                if (strippedFile != null) {
-                    Log.d(UPLOAD_TAG, "Metadata stripped for ${localItem.displayName}")
-                    android.net.Uri.fromFile(strippedFile).toString()
+                // Motion Photos carry an MP4 appended after the primary still. A plain
+                // ExifInterface rewrite-strip drops that trailer (and the motion is lost), so
+                // detect first and, for a motion photo, strip only the primary's EXIF while
+                // re-attaching the original trailer byte-for-byte.
+                val motionTemp = stripImagePreservingMotion(state.localUri, stripConfig)
+                if (motionTemp != null) {
+                    strippedFile = motionTemp
+                    Log.d(UPLOAD_TAG, "Motion Photo primary stripped, trailer preserved for ${localItem.displayName}")
+                    android.net.Uri.fromFile(motionTemp).toString()
                 } else {
-                    state.localUri
+                    // Not a motion photo — take the ordinary EXIF tag wipe. (A confirmed motion
+                    // photo never reaches here: the helper returns a byte-exact temp instead of
+                    // null when its split can't complete.) stripToTempFile returning null then
+                    // means nothing to strip or a strip error, so the original URI uploads untouched.
+                    strippedFile = ExifHelper.stripToTempFile(context, state.localUri, stripConfig)
+                    if (strippedFile != null) {
+                        Log.d(UPLOAD_TAG, "Metadata stripped for ${localItem.displayName}")
+                        android.net.Uri.fromFile(strippedFile).toString()
+                    } else {
+                        state.localUri
+                    }
                 }
             } else if (stripOnUpload && stripConfig.stripGps && localItem.mimeType.startsWith("video/")) {
                 val tmp = File.createTempFile("stripped_", ".mp4", context.cacheDir)
@@ -528,7 +546,16 @@ class UploadPendingUseCase @Inject constructor(
                     )
                 }
             }
-            val cloudId = cloudRepo.uploadFile(userId, uploadItem, hash, uploadUri, onProgressForFile)
+            // Resolve Camera/Location + rotation-corrected dimensions from the ORIGINAL source
+            // (pre-strip), gated against the strip config so the xAttr never re-leaks a field the
+            // file had erased. uploadItem.dateTaken is already floored when timestamps are stripped.
+            val xAttrMetadata = buildXAttrMetadata(
+                sourceUri = state.localUri,
+                item = uploadItem,
+                stripOnUpload = stripOnUpload,
+                stripConfig = stripConfig,
+            )
+            val cloudId = cloudRepo.uploadFile(userId, uploadItem, hash, uploadUri, xAttrMetadata, onProgressForFile)
 
             strippedFile?.delete()
             strippedFile = null
@@ -629,6 +656,7 @@ class UploadPendingUseCase @Inject constructor(
                         .onSuccess { Log.d(UPLOAD_TAG, "Added $cloudId to album '$albumName' ($albumLinkId)") }
                         .onFailure { e -> Log.w(UPLOAD_TAG, "addPhotosToAlbum failed for '$albumName': ${e.message}") }
                 } catch (e: Exception) {
+                    if (e is kotlinx.coroutines.CancellationException) throw e
                     Log.w(UPLOAD_TAG, "Album sync failed for '$albumName': ${e.message}")
                     // Non-fatal: photo is uploaded, album sync is best-effort
                 }
@@ -722,6 +750,191 @@ class UploadPendingUseCase @Inject constructor(
         }
     }
 
+    /**
+     * Strip path for Motion Photos. Returns a temp upload file when [localUri] is a motion photo,
+     * or null when it is not (so the caller runs the ordinary EXIF strip instead).
+     *
+     * For a motion photo the bytes split into primary = `[0, videoOffset)` and trailer =
+     * `[videoOffset, EOF)`. The primary is written to a temp, GPS/EXIF-stripped via [ExifHelper],
+     * then the original trailer is appended byte-for-byte. The trailer length is unchanged, so a
+     * recipient's `fileSize - videoLength` math still resolves and the motion (plus the motion XMP
+     * the primary still carries) survives.
+     *
+     * Safety: if the file is a confirmed motion photo but the split or primary strip can't complete
+     * cleanly, the byte-exact materialized copy is returned so the upload preserves the motion
+     * rather than risk a corrupt primary. Returns null only when detection finds no motion photo.
+     */
+    private fun stripImagePreservingMotion(localUri: String, stripConfig: MetadataStripConfig): File? {
+        // Materialize the source so the tail scan and the split read real bytes, not a stream.
+        val source = try {
+            val tmp = File.createTempFile("motion_src_", ".bin", context.cacheDir)
+            context.contentResolver.openInputStream(Uri.parse(localUri))?.use { input ->
+                tmp.outputStream().use { input.copyTo(it) }
+            } ?: run { tmp.delete(); return null }
+            tmp
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            Log.w(UPLOAD_TAG, "Motion-photo materialize failed for $localUri: ${e.message}")
+            return null
+        }
+
+        val info = MotionPhotoUtil.detect(source)
+        if (info == null) {
+            // Not a motion photo — let the caller take the ordinary strip path.
+            source.delete()
+            return null
+        }
+
+        // From here the file IS a motion photo: never return null (that would invite the
+        // destructive plain strip). On any failure fall back to the byte-exact source copy.
+        var primary: File? = null
+        try {
+            primary = File.createTempFile("motion_primary_", ".jpg", context.cacheDir)
+            RandomAccessFile(source, "r").use { raf ->
+                primary!!.outputStream().use { out ->
+                    val buffer = ByteArray(64 * 1024)
+                    var remaining = info.videoOffset
+                    while (remaining > 0) {
+                        val toRead = minOf(buffer.size.toLong(), remaining).toInt()
+                        val read = raf.read(buffer, 0, toRead)
+                        if (read < 0) break
+                        out.write(buffer, 0, read)
+                        remaining -= read
+                    }
+                }
+            }
+
+            // Strip GPS/EXIF from the primary only. Feed it through the existing temp-file strip
+            // via a file:// URI so the same tag set + behaviour applies.
+            val strippedPrimary = ExifHelper.stripToTempFile(
+                context, Uri.fromFile(primary).toString(), stripConfig,
+            )
+            // stripToTempFile returns null on no-op or error; in either case keep the primary bytes
+            // we already split so the concatenation still yields an intact motion photo.
+            val primaryForJoin = strippedPrimary ?: primary!!
+
+            val joined = File.createTempFile("motion_out_", ".jpg", context.cacheDir)
+            joined.outputStream().use { out ->
+                primaryForJoin.inputStream().use { it.copyTo(out) }
+                RandomAccessFile(source, "r").use { raf ->
+                    raf.seek(info.videoOffset)
+                    val buffer = ByteArray(64 * 1024)
+                    while (true) {
+                        val read = raf.read(buffer)
+                        if (read < 0) break
+                        out.write(buffer, 0, read)
+                    }
+                }
+            }
+            strippedPrimary?.delete()
+            primary?.delete()
+            source.delete()
+            return joined
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            Log.w(UPLOAD_TAG, "Motion-photo split/strip failed for $localUri; uploading byte-exact: ${e.message}")
+            primary?.delete()
+            // Byte-exact fallback: the untouched materialized copy keeps the motion intact.
+            return source
+        }
+    }
+
+    /**
+     * Builds the photo xAttr Camera/Location + display-dimension metadata for [item] from its
+     * ORIGINAL [sourceUri] (read before any strip pass). Every field is gated against the strip
+     * config so the encrypted xAttr can never carry data the on-file strip removed:
+     *
+     *  - Camera.Orientation: always emitted when known (never stripped; the web needs it to display).
+     *  - Camera.Device: only when camera info is NOT stripped.
+     *  - Camera.CaptureTime: [item].dateTaken — already floored to upload time when timestamps are
+     *    stripped (see [uploadOne]), else the real capture time.
+     *  - Location: only when GPS is NOT stripped.
+     *  - displayWidth/Height: W/H swapped when EXIF orientation / video rotation is 90/270.
+     */
+    private fun buildXAttrMetadata(
+        sourceUri: String,
+        item: eu.akoos.photos.domain.entity.LocalMediaItem,
+        stripOnUpload: Boolean,
+        stripConfig: MetadataStripConfig,
+    ): eu.akoos.photos.data.repository.drive.UploadXAttrMetadata {
+        val stripGps = stripOnUpload && stripConfig.stripGps
+        val stripCamera = stripOnUpload && stripConfig.stripCameraInfo
+        // ISO_INSTANT (e.g. 2023-01-15T10:30:00Z), matching Drive Android's DateTimeFormatter.
+        val captureTimeIso = item.dateTaken.takeIf { it > 0L }?.let { ms ->
+            java.time.format.DateTimeFormatter.ISO_INSTANT.format(java.time.Instant.ofEpochMilli(ms))
+        }
+        return when {
+            item.mimeType.startsWith("video/") -> {
+                var rotation = 0
+                runCatching {
+                    android.media.MediaMetadataRetriever().use { r ->
+                        r.setDataSource(context, Uri.parse(sourceUri))
+                        rotation = r.extractMetadata(
+                            android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION
+                        )?.toIntOrNull() ?: 0
+                    }
+                }
+                val swap = rotation == 90 || rotation == 270
+                eu.akoos.photos.data.repository.drive.UploadXAttrMetadata(
+                    // Video carries no EXIF GPS/camera tags here; the container location atom is
+                    // stripped separately. Map rotation→EXIF orientation so Camera.Orientation
+                    // still describes the displayed frame.
+                    cameraOrientation = rotationToExifOrientation(rotation),
+                    cameraCaptureTimeIso = captureTimeIso,
+                    displayWidth = if (swap) item.height.takeIf { it > 0 } else item.width.takeIf { it > 0 },
+                    displayHeight = if (swap) item.width.takeIf { it > 0 } else item.height.takeIf { it > 0 },
+                )
+            }
+            item.mimeType.startsWith("image/") -> {
+                val meta = ExifHelper.readMetadata(context, sourceUri)
+                val orientation = meta.orientation
+                    ?: androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL
+                val swap = orientation == androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_90 ||
+                    orientation == androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_270 ||
+                    orientation == androidx.exifinterface.media.ExifInterface.ORIENTATION_TRANSPOSE ||
+                    orientation == androidx.exifinterface.media.ExifInterface.ORIENTATION_TRANSVERSE
+                eu.akoos.photos.data.repository.drive.UploadXAttrMetadata(
+                    latitude = if (!stripGps) meta.gpsLatitude else null,
+                    longitude = if (!stripGps) meta.gpsLongitude else null,
+                    cameraOrientation = orientation,
+                    cameraCaptureTimeIso = captureTimeIso,
+                    cameraDevice = if (!stripCamera) meta.model else null,
+                    subjectCoordinates = if (!stripCamera) readSubjectCoordinates(sourceUri) else null,
+                    displayWidth = if (swap) item.height.takeIf { it > 0 } else item.width.takeIf { it > 0 },
+                    displayHeight = if (swap) item.width.takeIf { it > 0 } else item.height.takeIf { it > 0 },
+                )
+            }
+            else -> eu.akoos.photos.data.repository.drive.UploadXAttrMetadata()
+        }
+    }
+
+    /** Maps a video container rotation (degrees) to the equivalent EXIF orientation tag so the
+     *  xAttr Camera.Orientation field uses the same 1..8 vocabulary as photos. */
+    private fun rotationToExifOrientation(degrees: Int): Int = when (((degrees % 360) + 360) % 360) {
+        90 -> androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_90
+        180 -> androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_180
+        270 -> androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_270
+        else -> androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL
+    }
+
+    /** Reads EXIF SubjectArea (3 or 4 comma-separated ints) and converts it to the
+     *  [Top,Left,Bottom,Right] rectangle Drive's xAttr SubjectCoordinates expects, matching
+     *  Drive Android's Rectangle.fromCenter. Returns null when absent or malformed. */
+    private fun readSubjectCoordinates(uri: String): IntArray? = runCatching {
+        val raw = context.contentResolver.openInputStream(Uri.parse(uri))?.use {
+            androidx.exifinterface.media.ExifInterface(it)
+                .getAttribute(androidx.exifinterface.media.ExifInterface.TAG_SUBJECT_AREA)
+        }?.takeUnless { it.isEmpty() } ?: return null
+        val a = raw.split(",").map { it.trim().toInt() }
+        val (cx, cy, w, h) = when (a.size) {
+            3 -> listOf(a[0], a[1], a[2], a[2])
+            4 -> listOf(a[0], a[1], a[2], a[3])
+            else -> return null
+        }
+        // Rectangle.fromCenter: top, left, bottom, right.
+        intArrayOf(cy - h / 2, cx - w / 2, cy + h / 2, cx + w / 2)
+    }.getOrNull()
+
     private fun computeSha1(uri: String): String {
         val digest = MessageDigest.getInstance("SHA-1")
         try {
@@ -733,6 +946,7 @@ class UploadPendingUseCase @Inject constructor(
                 }
             }
         } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
             return ""
         }
         return digest.digest().joinToString("") { "%02x".format(it) }

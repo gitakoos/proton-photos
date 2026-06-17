@@ -64,6 +64,7 @@ import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.SwapHoriz
+import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -79,6 +80,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -89,6 +91,7 @@ import coil.compose.AsyncImage
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.CloudTrashItem
 import eu.akoos.photos.presentation.common.ConfirmDialog
+import eu.akoos.photos.presentation.common.EmptyState
 import eu.akoos.photos.presentation.common.IconBubble
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.AppColorsTokens
@@ -175,7 +178,7 @@ fun TrashScreen(
             )
             Spacer(Modifier.weight(1f))
             Text(
-                "Recently Deleted",
+                stringResource(R.string.trash_title),
                 color = FgPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
             )
             Spacer(Modifier.weight(1f))
@@ -238,7 +241,7 @@ fun TrashScreen(
             item(key = "trash_restore") {
                 TrashPillButton(
                     icon = Icons.Default.Restore,
-                    contentDescription = "Restore",
+                    contentDescription = stringResource(R.string.trash_restore),
                     enabled = activeHasItems,
                     accent = colors.accent,
                     onClick = {
@@ -251,7 +254,7 @@ fun TrashScreen(
             item(key = "trash_empty") {
                 TrashPillButton(
                     icon = Icons.Default.DeleteForever,
-                    contentDescription = "Empty trash",
+                    contentDescription = stringResource(R.string.trash_empty),
                     enabled = activeHasItems,
                     accent = colors.errorColor,
                     onClick = {
@@ -267,7 +270,7 @@ fun TrashScreen(
                     val allSel = if (activeIsDevice) state.device.allSelected else state.cloud.allSelected
                     TrashPillButton(
                         icon = if (allSel) Icons.Default.Deselect else Icons.Default.SelectAll,
-                        contentDescription = if (allSel) "Deselect all" else "Select all",
+                        contentDescription = if (allSel) stringResource(R.string.gallery_deselect_all) else stringResource(R.string.select_all),
                         enabled = true,
                         accent = colors.accent,
                         onClick = {
@@ -302,14 +305,16 @@ fun TrashScreen(
                     }
                     state.device.apiUnsupported -> {
                         item(span = { GridItemSpan(3) }) {
-                            TrashInfoRow("Device trash requires Android 11+", FgMute)
+                            TrashInfoRow(stringResource(R.string.trash_device_unsupported), FgMute)
                         }
                     }
                     state.device.items.isEmpty() -> {
                         item(span = { GridItemSpan(3) }) {
-                            TrashEmptyMessage(
-                                title = "No recently deleted photos",
-                                subtitle = "Photos deleted within the last 30 days\nwill appear here",
+                            EmptyState(
+                                title = stringResource(R.string.trash_device_empty_title),
+                                subtitle = stringResource(R.string.trash_device_empty_subtitle),
+                                icon = Icons.Outlined.Delete,
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 32.dp, vertical = 48.dp),
                             )
                         }
                     }
@@ -374,7 +379,11 @@ fun TrashScreen(
                     }
                     state.cloud.items.isEmpty() -> {
                         item(span = { GridItemSpan(3) }) {
-                            TrashInfoRow(stringResource(R.string.trash_cloud_empty), FgMute)
+                            EmptyState(
+                                title = stringResource(R.string.trash_cloud_empty),
+                                icon = Icons.Outlined.Delete,
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 32.dp, vertical = 48.dp),
+                            )
                         }
                     }
                     else -> {
@@ -404,10 +413,10 @@ fun TrashScreen(
     if (showDeviceRestoreDialog) {
         val n = if (state.device.isSelectionMode) state.device.selectedCount else state.device.items.size
         ConfirmDialog(
-            title = "Restore $n photo${if (n != 1) "s" else ""}?",
-            message = "They will be restored to your device gallery.",
-            confirmLabel = "Restore",
-            dismissLabel = "Cancel",
+            title = pluralStringResource(R.plurals.trash_restore_title, n, n),
+            message = stringResource(R.string.trash_restore_device_message),
+            confirmLabel = stringResource(R.string.trash_restore),
+            dismissLabel = stringResource(R.string.cancel),
             onConfirm = { showDeviceRestoreDialog = false; launchDeviceRestore() },
             onDismiss = { showDeviceRestoreDialog = false },
         )
@@ -416,10 +425,10 @@ fun TrashScreen(
     if (showDeviceEmptyDialog) {
         val n = if (state.device.isSelectionMode) state.device.selectedCount else state.device.items.size
         ConfirmDialog(
-            title = "Delete $n photo${if (n != 1) "s" else ""} forever?",
-            message = "Cannot be undone. Photos will be permanently removed from this device.",
-            confirmLabel = "Delete forever",
-            dismissLabel = "Cancel",
+            title = pluralStringResource(R.plurals.trash_delete_forever_title, n, n),
+            message = stringResource(R.string.trash_delete_forever_message),
+            confirmLabel = stringResource(R.string.trash_delete_forever_confirm),
+            dismissLabel = stringResource(R.string.cancel),
             onConfirm = { showDeviceEmptyDialog = false; launchDeviceDeleteForever() },
             onDismiss = { showDeviceEmptyDialog = false },
             destructive = true,
@@ -429,10 +438,10 @@ fun TrashScreen(
     if (showCloudRestoreDialog) {
         val n = if (state.cloud.isSelectionMode) state.cloud.selectedCount else state.cloud.items.size
         ConfirmDialog(
-            title = "Restore $n photo${if (n != 1) "s" else ""}?",
-            message = "They will be moved back to your Proton Drive photo stream.",
-            confirmLabel = "Restore",
-            dismissLabel = "Cancel",
+            title = pluralStringResource(R.plurals.trash_restore_title, n, n),
+            message = stringResource(R.string.trash_restore_cloud_message),
+            confirmLabel = stringResource(R.string.trash_restore),
+            dismissLabel = stringResource(R.string.cancel),
             onConfirm = {
                 showCloudRestoreDialog = false
                 viewModel.restoreSelectedCloud()
@@ -447,7 +456,7 @@ fun TrashScreen(
             title = stringResource(R.string.trash_cloud_empty_confirm_title),
             message = stringResource(R.string.trash_cloud_empty_confirm_message, n),
             confirmLabel = stringResource(R.string.trash_cloud_empty_confirm_action),
-            dismissLabel = "Cancel",
+            dismissLabel = stringResource(R.string.cancel),
             onConfirm = {
                 showCloudEmptyDialog = false
                 viewModel.emptyCloudSelected()
@@ -471,74 +480,6 @@ private fun TrashInfoRow(text: String, color: Color) {
     }
 }
 
-@Composable
-private fun TrashActionBar(
-    colors: AppColorsTokens,
-    selectionMode: Boolean,
-    selectedCount: Int,
-    totalCount: Int,
-    allSelected: Boolean,
-    onRestoreClick: () -> Unit,
-    onDeleteClick: () -> Unit,
-    onSelectAll: () -> Unit,
-    onDeselectAll: () -> Unit,
-    restoreLabel: String,
-    deleteLabel: String,
-) {
-    Column(Modifier.padding(horizontal = 20.dp).padding(bottom = 8.dp)) {
-        Text(
-            "$totalCount item${if (totalCount != 1) "s" else ""}",
-            color = colors.fgMute, fontSize = 11.sp,
-            modifier = Modifier.padding(bottom = 8.dp),
-        )
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .background(colors.cardBg, RoundedCornerShape(10.dp))
-                    .border(0.5.dp, colors.cardBorder, RoundedCornerShape(10.dp))
-                    .clickable(onClick = onRestoreClick)
-                    .padding(vertical = 11.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    if (selectionMode) "$restoreLabel ($selectedCount)" else restoreLabel,
-                    color = colors.accent, fontSize = 13.sp, fontWeight = FontWeight.Medium,
-                )
-            }
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .background(colors.deleteTint, RoundedCornerShape(10.dp))
-                    .border(0.5.dp, colors.errorColor.copy(alpha = 0.3f), RoundedCornerShape(10.dp))
-                    .clickable(onClick = onDeleteClick)
-                    .padding(vertical = 11.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    if (selectionMode) "$deleteLabel ($selectedCount)" else deleteLabel,
-                    color = colors.errorColor, fontSize = 13.sp, fontWeight = FontWeight.Medium,
-                )
-            }
-        }
-        Row(
-            Modifier.fillMaxWidth().padding(top = 8.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            if (selectionMode) {
-                Text("$selectedCount selected", color = colors.fgDim, fontSize = 12.sp)
-                Text(
-                    if (allSelected) "Deselect all" else "Select all",
-                    color = colors.accent, fontSize = 12.sp, fontWeight = FontWeight.Medium,
-                    modifier = Modifier.clickable { if (allSelected) onDeselectAll() else onSelectAll() },
-                )
-            } else {
-                Text("Long-press to select", color = colors.fgMute, fontSize = 12.sp)
-            }
-        }
-    }
-}
 
 /**
  * Cloud-trash grid cell content. When the ViewModel has already decrypted this entry's
@@ -623,29 +564,6 @@ private fun TrashPillButton(
             tint = accent.copy(alpha = alpha),
             modifier = Modifier.size(18.dp),
         )
-    }
-}
-
-/** Empty-state placeholder shown when the active tab has no items. */
-@Composable
-private fun TrashEmptyMessage(title: String, subtitle: String) {
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 32.dp, vertical = 48.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("🗑️", fontSize = 40.sp)
-            Spacer(Modifier.height(12.dp))
-            Text(title, color = FgPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium)
-            Spacer(Modifier.height(4.dp))
-            Text(
-                subtitle,
-                color = FgMute, fontSize = 12.sp,
-                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-            )
-        }
     }
 }
 

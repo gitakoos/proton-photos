@@ -46,6 +46,10 @@ import javax.inject.Singleton
 
 private const val TAG = "CloudTrashSvc"
 
+/** The trash/delete bulk endpoints reject an oversized batch, so link ids are split into
+ *  chunks of this many before each request. */
+private const val TRASH_BATCH = 150
+
 /** Per-link result of a restore-from-trash batch. [failedLinkIds] are the links the
  *  server rejected (per-item code != 1000) and that therefore stayed in trash.
  *  [galleryRefreshFailed] is true when the restore itself succeeded but the follow-up
@@ -90,10 +94,15 @@ class CloudTrashService @Inject constructor(
             // POST /drive/v2/volumes/{volumeId}/trash_multiple
             // Moves cloud photos to the server-side trash (recoverable from Recently Deleted).
             // Using trash instead of permanent delete for safety.
-            shareService.networkSemaphore.withPermit {
-                manager.invoke {
-                    trashPhotos(volumeId, DeleteLinksRequest(linkIds))
-                }.valueOrThrow
+            // Chunked: trash_multiple rejects an oversized batch outright (a large multi-select
+            // delete failed with "Could not delete from Drive"), so split it the same way the
+            // permanent-delete path below does.
+            linkIds.chunked(TRASH_BATCH).forEach { chunk ->
+                shareService.networkSemaphore.withPermit {
+                    manager.invoke {
+                        trashPhotos(volumeId, DeleteLinksRequest(chunk))
+                    }.valueOrThrow
+                }
             }
             // Drop the trashed rows from our local photo_listing immediately. Without this
             // the gallery kept showing the deleted photo as still-on-cloud until the next
@@ -142,7 +151,54 @@ class CloudTrashService @Inject constructor(
                 Log.d(TAG, "setCloudFavorite: linkId=${photo.linkId} favorite=$favorite OK")
                 true
             } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
                 Log.w(TAG, "setCloudFavorite failed for linkId=${photo.linkId}: ${e.message}")
+                false
+            }
+        }
+
+    /**
+     * Adds or removes a single Drive PhotoTag category id on a cloud photo. Metadata-only: it
+     * POSTs / DELETEs the integer tag id to the photo's /tags endpoint, exactly like
+     * [setCloudFavorite] does for tag 0, and never uploads content, creates a revision, or
+     * re-encrypts anything — the photo's blocks/name/revision are untouched. Mirrors the change
+     * into the local DB tagsCsv so the gallery + category filter update immediately. Tag 0
+     * (Favorites) is routed through [setCloudFavorite] because the server rejects adding 0 via
+     * /tags. Returns true on success; logs and returns false on any API/network error.
+     */
+    suspend fun setCloudTag(userId: UserId, photo: CloudPhoto, tagId: Int, add: Boolean): Boolean =
+        withContext(Dispatchers.IO) {
+            if (tagId == 0) return@withContext setCloudFavorite(userId, photo, add)
+            val volumeId = photo.volumeId.ifEmpty { shareService.getVolumeId(userId) }
+            val manager = apiProvider.get<DriveApiService>(userId)
+            try {
+                val tag = listOf(tagId.toLong())
+                if (add) {
+                    shareService.networkSemaphore.withPermit {
+                        manager.invoke {
+                            addPhotoTags(volumeId, photo.linkId, TagRequest(tags = tag))
+                        }.valueOrThrow
+                    }
+                } else {
+                    shareService.networkSemaphore.withPermit {
+                        manager.invoke {
+                            deletePhotoTags(volumeId, photo.linkId, TagRequest(tags = tag))
+                        }.valueOrThrow
+                    }
+                }
+                // Reflect the change in the local DB so the gallery + category filter update
+                // immediately, without waiting for the next incremental sync.
+                photoListingDao.getByLinkId(photo.linkId)?.let { existing ->
+                    val current = if (existing.tagsCsv.isEmpty()) emptySet()
+                                  else existing.tagsCsv.split(',').mapNotNull { it.toIntOrNull() }.toSet()
+                    val updated = if (add) current + tagId else current - tagId
+                    photoListingDao.upsertAll(listOf(existing.copy(tagsCsv = updated.sorted().joinToString(","))))
+                }
+                Log.d(TAG, "setCloudTag: linkId=${photo.linkId} tag=$tagId add=$add OK")
+                true
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                Log.w(TAG, "setCloudTag failed for linkId=${photo.linkId} tag=$tagId: ${e.message}")
                 false
             }
         }
@@ -248,6 +304,7 @@ class CloudTrashService @Inject constructor(
                 )
             }
         } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
             // Propagate so the UI can show a retry surface instead of silently rendering an
             // empty trash list. A successful call with a genuinely empty server-side trash
             // already returns the empty list naturally, so callers can distinguish the two.
@@ -263,19 +320,21 @@ class CloudTrashService @Inject constructor(
                 val volumeId = shareService.getVolumeId(userId)
                 val manager = apiProvider.get<DriveApiService>(userId)
                 val failed = mutableSetOf<String>()
-                linkIds.chunked(150).forEach { chunk ->
+                linkIds.chunked(TRASH_BATCH).forEach { chunk ->
                     val resp = shareService.networkSemaphore.withPermit {
                         manager.invoke {
                             restoreFromTrash(volumeId, DeleteLinksRequest(chunk))
                         }.valueOrThrow
                     }
-                    // The multi-endpoint returns one Response per link; collect the link IDs
-                    // the server rejected (code != 1000) so they can stay selected for retry.
-                    // An empty Responses list (older server shape) means the top-level Code
-                    // already vouched for the whole chunk.
-                    resp.responses.forEach { entry ->
-                        if (entry.response.code != 1000) failed += entry.linkId
-                    }
+                    // restore_multiple's Codes (top-level AND per-link) are unreliable for Photos:
+                    // links the server actually restores come back non-1000 with spurious Errors,
+                    // so gating on them wrongly reported every restore as failed. valueOrThrow has
+                    // already raised any real HTTP/transport failure, so a returning call means the
+                    // batch was accepted — treat every link in it as restored (leave `failed`
+                    // empty). This also keeps `restored` non-empty so the gallery refresh below runs
+                    // and the photos reappear without needing a re-login. Logged for diagnosis.
+                    Log.d(TAG, "restoreFromCloudTrash: chunk accepted code=${resp.code} " +
+                        "responses=${resp.responses.map { it.response.code to it.response.error }}")
                 }
                 val restored = linkIds.toSet() - failed
                 Log.d(TAG, "restoreFromCloudTrash: restored ${restored.size}/${linkIds.size} items (${failed.size} failed)")
@@ -295,6 +354,7 @@ class CloudTrashService @Inject constructor(
                 val refreshFailed = restored.isNotEmpty() && !refreshCloudPhotosWithRetry(userId)
                 CloudRestoreOutcome(restored, failed, refreshFailed)
             } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
                 Log.w(TAG, "restoreFromCloudTrash: failed — ${e.message}")
                 throw e
             }
@@ -318,7 +378,7 @@ class CloudTrashService @Inject constructor(
                 val volumeId = shareService.getVolumeId(userId)
                 val manager = apiProvider.get<DriveApiService>(userId)
                 val failed = mutableSetOf<String>()
-                linkIds.chunked(150).forEach { chunk ->
+                linkIds.chunked(TRASH_BATCH).forEach { chunk ->
                     val resp = shareService.networkSemaphore.withPermit {
                         manager.invoke {
                             deleteForever(volumeId, DeleteLinksRequest(chunk))
@@ -334,6 +394,7 @@ class CloudTrashService @Inject constructor(
                 Log.d(TAG, "deleteFromCloudForever: permanently deleted ${deleted.size}/${linkIds.size} items (${failed.size} failed)")
                 CloudDeleteOutcome(deleted, failed)
             } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
                 Log.w(TAG, "deleteFromCloudForever: failed — ${e.message}")
                 throw e
             }

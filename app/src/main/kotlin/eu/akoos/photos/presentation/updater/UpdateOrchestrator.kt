@@ -55,12 +55,17 @@ import javax.inject.Singleton
 class UpdateOrchestrator @Inject constructor(
     private val repository: UpdateCheckerRepository,
     private val downloader: UpdateDownloader,
-    @Suppress("unused") private val installer: UpdateInstaller,
+    private val installer: UpdateInstaller,
 ) {
 
     private val _state = MutableStateFlow<UpdatePromptState?>(null)
     /** Hot state surface for the Compose layer. null = no dialog visible. */
     val state: StateFlow<UpdatePromptState?> = _state.asStateFlow()
+
+    /** Version name of an available update the user pushed aside with "Not now". Drives the
+     *  dismissable gallery update banner; null = no banner. */
+    private val _banner = MutableStateFlow<String?>(null)
+    val banner: StateFlow<String?> = _banner.asStateFlow()
 
     /**
      * Held between phases so we can recover the install URL after the user grants
@@ -142,8 +147,19 @@ class UpdateOrchestrator @Inject constructor(
                         )
                     }
                     is DownloadProgress.Complete -> {
-                        pendingFile = progress.file
-                        _state.value = UpdatePromptState.InstallReady(available.versionName)
+                        // Only offer to install an APK signed by our own certificate — a
+                        // substituted/tampered download is rejected here, not mid-install.
+                        if (installer.verifyApkSignature(progress.file)) {
+                            pendingFile = progress.file
+                            _state.value = UpdatePromptState.InstallReady(available.versionName)
+                        } else {
+                            runCatching { progress.file.delete() }
+                            pendingFile = null
+                            _state.value = UpdatePromptState.Error(
+                                versionName = available.versionName,
+                                errorKind = UpdatePromptState.ErrorKind.VERIFICATION,
+                            )
+                        }
                     }
                     is DownloadProgress.Failed -> {
                         _state.value = UpdatePromptState.Error(
@@ -161,18 +177,31 @@ class UpdateOrchestrator @Inject constructor(
      * doesn't re-pester them until a newer release ships) and clears the dialog. Caller
      * passes the scope so the DataStore write is bound to the host's lifecycle.
      */
-    fun dismiss(scope: CoroutineScope) {
-        val version = pendingAvailable?.versionName
-        pendingAvailable = null
-        pendingFile = null
+    /** "Not now" on the dialog: close it but keep the update around as a dismissable banner (and
+     *  keep [pendingAvailable] so the banner can re-open the dialog). The version is NOT persisted
+     *  as dismissed here — only the banner's X does that (see [hardDismissBanner]). */
+    fun dismiss(@Suppress("UNUSED_PARAMETER") scope: CoroutineScope) {
         downloadJob?.cancel()
         downloadJob = null
+        pendingFile = null
+        _banner.value = pendingAvailable?.versionName
         _state.value = null
+    }
+
+    /** Banner X: drop the banner and record the version as dismissed so the silent check stops
+     *  re-offering it until a newer release ships. */
+    fun hardDismissBanner(scope: CoroutineScope) {
+        val version = pendingAvailable?.versionName
+        pendingAvailable = null
+        _banner.value = null
         if (version != null) {
-            scope.launch {
-                runCatching { repository.dismissVersion(version) }
-            }
+            scope.launch { runCatching { repository.dismissVersion(version) } }
         }
+    }
+
+    /** Banner tap: re-open the update dialog from the still-pending available update. */
+    fun reopenFromBanner() {
+        pendingAvailable?.let { showAvailable(it) }
     }
 
     /**
@@ -189,6 +218,7 @@ class UpdateOrchestrator @Inject constructor(
      */
     private fun showAvailable(status: UpdateStatus.Available) {
         pendingAvailable = status
+        _banner.value = null
         val sizeMb = ((status.apkSizeBytes + 1024L * 1024L - 1L) / (1024L * 1024L))
             .toInt()
             .coerceAtLeast(0)

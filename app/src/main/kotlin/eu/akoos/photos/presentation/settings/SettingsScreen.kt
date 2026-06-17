@@ -143,8 +143,8 @@ fun SettingsScreen(
     onBack: () -> Unit,
     onSyncSettingsClick: () -> Unit = {},
     onStorageClick: () -> Unit = {},
-    onPrivacySettingsClick: () -> Unit = {},
-    onSecuritySettingsClick: () -> Unit = {},
+    onPrivacySecurityClick: () -> Unit = {},
+    onNotificationsClick: () -> Unit = {},
     onRecentlyDeletedClick: () -> Unit = {},
     onAppearanceClick: () -> Unit = {},
     onLanguageClick: () -> Unit = {},
@@ -157,15 +157,13 @@ fun SettingsScreen(
     val colors = AppColors.current
     val snackbarHostState = remember { SnackbarHostState() }
 
-    // Sync errors render in a copyable [ErrorPopup] now instead of a transient
-    // snackbar — `state.syncError` is set from raw exception messages whose payload
-    // can be a multi-line backend response (and previously included the user's
-    // filename / linkId before sanitisation), so a 4-second auto-dismiss snackbar
-    // wasn't enough time to read or act on it. We keep the snackbarHost mounted
-    // below for other transient confirmations.
+    // Sync errors render in a copyable [ErrorPopup]: `state.syncError` is set from raw
+    // exception messages whose payload can be a multi-line backend response, so a
+    // 4-second auto-dismiss snackbar isn't enough time to read or act on it. The
+    // snackbarHost stays mounted below for other transient confirmations.
     if (state.syncError != null) {
         ErrorPopup(
-            title = "Sync failed",
+            title = stringResource(R.string.settings_sync_failed),
             message = sanitizeErrorMessage(state.syncError),
             onDismiss = viewModel::clearSyncError,
             onCopy = {},
@@ -375,15 +373,14 @@ fun SettingsScreen(
             CollapsibleSection(label = stringResource(R.string.settings_section_settings)) {
             SettingsCard {
                 NavRow(
-                    label = stringResource(R.string.settings_privacy_metadata),
-                    description = stringResource(R.string.settings_privacy_metadata_desc),
-                    onClick = onPrivacySettingsClick,
+                    label = stringResource(R.string.settings_privacy_security),
+                    onClick = onPrivacySecurityClick,
                 )
                 RowDivider()
                 NavRow(
-                    label = stringResource(R.string.settings_security),
-                    description = stringResource(R.string.settings_security_desc),
-                    onClick = onSecuritySettingsClick,
+                    label = stringResource(R.string.notifications_title),
+                    description = stringResource(R.string.notifications_nav_desc),
+                    onClick = onNotificationsClick,
                 )
                 RowDivider()
                 // Appearance + Language merged into one entry — the destination is the
@@ -416,6 +413,13 @@ fun SettingsScreen(
                 )
             }
             }
+
+            // Debug-only large-library simulator. Compiled out of release by the BuildConfig.DEBUG
+            // guard — invisible and unreachable in production builds.
+            if (BuildConfig.DEBUG) {
+                Spacer(Modifier.height(20.dp))
+                LargeLibrarySimCard()
+            }
         }
 
         eu.akoos.photos.presentation.common.ThemedSnackbarHost(snackbarHostState, modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding())
@@ -428,115 +432,38 @@ fun SettingsScreen(
 @Composable
 fun SyncSettingsScreen(
     onBack: () -> Unit,
-    onBackupFoldersClick: () -> Unit = {},
-    onExcludedFoldersClick: () -> Unit = {},
-    onAlbumMirrorFoldersClick: () -> Unit = {},
-    onRecentlyDeletedClick: () -> Unit = {},
+    onBackupContentClick: () -> Unit = {},
+    onBackupBehaviorClick: () -> Unit = {},
+    onNetworkClick: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val colors = AppColors.current
     SettingsSubPageScaffold(title = stringResource(R.string.sync_section), onBack = onBack) {
-        // ── WHAT GETS BACKED UP ───────────────────────────────────────────────
-        // Backup-scope decisions live here: the everything-toggle and either the
-        // include drilldown (off) or the exclude drilldown (on). Sync cadence /
-        // network gating live in the WHEN section below. Sections open by default;
-        // user can collapse via the animated chevron.
-        CollapsibleSection(label = stringResource(R.string.settings_what_backed_up_section)) {
+        // Hub: each backup concern opens its own focused sub-page instead of one
+        // long mixed scroll (what gets backed up / how it runs / network usage).
         SettingsCard {
-            ToggleRow(
-                label = stringResource(R.string.settings_backup_everything),
-                description = stringResource(R.string.settings_backup_everything_desc),
-                checked = state.backupEverything,
-                onCheckedChange = viewModel::setBackupEverything,
-                enabled = state.autoSync,
-            )
-            // The two drilldown rows are mutually exclusive — only one is visible at
-            // a time depending on the everything-toggle. Indented (28.dp) so the eye
-            // groups them as children of the parent toggle.
-            if (state.backupEverything) {
-                RowDivider()
-                val excludedCount = state.excludedFolderNames.size
-                val excludedDesc = when (excludedCount) {
-                    0 -> stringResource(R.string.settings_excluded_folders_desc_none)
-                    1 -> stringResource(R.string.settings_excluded_folders_desc_singular)
-                    else -> stringResource(R.string.settings_excluded_folders_desc_count, excludedCount)
-                }
-                IndentedNavRow(
-                    label = stringResource(R.string.settings_excluded_folders),
-                    description = excludedDesc,
-                    onClick = onExcludedFoldersClick,
-                    enabled = state.autoSync,
-                )
-            } else {
-                RowDivider()
-                IndentedNavRow(
-                    label = stringResource(R.string.settings_backup_folders),
-                    description = stringResource(R.string.settings_backup_folders_desc),
-                    onClick = onBackupFoldersClick,
-                    enabled = state.autoSync,
-                )
-            }
-            // Album-mirror drilldown sits alongside the include/exclude rows because
-            // it answers the related question "which device folders also surface as
-            // Drive albums when their photos upload?" — orthogonal to the everything
-            // toggle, so it stays visible in both branches.
-            RowDivider()
-            IndentedNavRow(
-                label = stringResource(R.string.settings_album_mirror_folders),
-                description = stringResource(R.string.settings_album_mirror_folders_desc),
-                onClick = onAlbumMirrorFoldersClick,
-                enabled = state.autoSync,
-            )
-        }
-        }
-
-        Spacer(Modifier.height(20.dp))
-
-        // ── WHEN IT HAPPENS ───────────────────────────────────────────────────
-        // Continuous backup is the only top-level cadence knob now: the periodic
-        // interval picker is gone because the OS content-URI trigger plus
-        // BackgroundSyncService observer kick the upload pipeline within seconds of
-        // a new photo, so the interval was misleading. Sync Wi-Fi only and Delete
-        // after backup live as children here because they're meaningless when
-        // continuous backup is off.
-        CollapsibleSection(label = stringResource(R.string.settings_when_section)) {
-        SettingsCard {
-            ToggleRow(
-                label = stringResource(R.string.settings_continuous_backup),
-                description = stringResource(R.string.settings_continuous_backup_desc),
-                checked = state.autoSync,
-                onCheckedChange = viewModel::setAutoSync,
+            NavRow(
+                label = stringResource(R.string.settings_what_backed_up_section),
+                onClick = onBackupContentClick,
             )
             RowDivider()
-            ToggleRow(
-                label = stringResource(R.string.settings_sync_wifi_only),
-                description = stringResource(R.string.settings_sync_wifi_desc),
-                checked = state.syncWifiOnly,
-                onCheckedChange = viewModel::setSyncWifiOnly,
-                indented = true,
-                enabled = state.autoSync,
+            NavRow(
+                label = stringResource(R.string.settings_backup_how_section),
+                onClick = onBackupBehaviorClick,
             )
             RowDivider()
-            ToggleRow(
-                label = stringResource(R.string.settings_delete_after_backup),
-                description = stringResource(R.string.settings_delete_after_backup_desc),
-                checked = state.deleteLocalAfterBackup,
-                onCheckedChange = viewModel::setDeleteLocalAfterBackup,
-                indented = true,
-                enabled = state.autoSync,
+            NavRow(
+                label = stringResource(R.string.settings_network_section),
+                onClick = onNetworkClick,
             )
-        }
         }
 
         Spacer(Modifier.height(20.dp))
 
         // ── Sync now action row ──────────────────────────────────────────────
-        // Separated from the When card because it's an imperative one-tap action
-        // rather than a setting: putting it alongside persistent toggles confused
-        // users into thinking the button was a "saved" state. Standalone card +
-        // accent label reads as a button now.
-        CollapsibleSection(label = stringResource(R.string.settings_sync_now)) {
+        // Imperative one-tap action (not a persistent setting), so it sits on its
+        // own card with an accent label that reads as a button.
         SettingsCard {
             Row(
                 modifier = Modifier
@@ -564,24 +491,122 @@ fun SyncSettingsScreen(
                 }
             }
         }
-        }
+    }
+}
 
-        Spacer(Modifier.height(20.dp))
+// ── Backup content sub-page (what gets backed up) ────────────────────────────
 
-        // ── NETWORK USAGE ────────────────────────────────────────────────────
-        // Full-res Wi-Fi only is about CONSUMING Drive (downloading full-resolution
-        // photos for the viewer) rather than backing up to it, so it doesn't belong
-        // under "When backup happens". Promoted to its own section so users don't
-        // assume disabling continuous backup also stops full-res viewer downloads.
-        CollapsibleSection(label = stringResource(R.string.settings_network_section)) {
-            SettingsCard {
-                ToggleRow(
-                    label = stringResource(R.string.settings_fullres_wifi_only),
-                    description = stringResource(R.string.settings_fullres_wifi_only_desc),
-                    checked = state.fullresWifiOnly,
-                    onCheckedChange = viewModel::setFullresWifiOnly,
+@Composable
+fun BackupContentSettingsScreen(
+    onBack: () -> Unit,
+    onBackupFoldersClick: () -> Unit = {},
+    onExcludedFoldersClick: () -> Unit = {},
+    onAlbumMirrorFoldersClick: () -> Unit = {},
+    viewModel: SettingsViewModel = hiltViewModel(),
+) {
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    SettingsSubPageScaffold(title = stringResource(R.string.settings_what_backed_up_section), onBack = onBack) {
+        SettingsCard {
+            ToggleRow(
+                label = stringResource(R.string.settings_backup_everything),
+                description = stringResource(R.string.settings_backup_everything_desc),
+                checked = state.backupEverything,
+                onCheckedChange = viewModel::setBackupEverything,
+                enabled = state.autoSync,
+            )
+            // Include/exclude drilldown is mutually exclusive on the everything-toggle.
+            if (state.backupEverything) {
+                RowDivider()
+                val excludedCount = state.excludedFolderNames.size
+                val excludedDesc = when (excludedCount) {
+                    0 -> stringResource(R.string.settings_excluded_folders_desc_none)
+                    1 -> stringResource(R.string.settings_excluded_folders_desc_singular)
+                    else -> stringResource(R.string.settings_excluded_folders_desc_count, excludedCount)
+                }
+                IndentedNavRow(
+                    label = stringResource(R.string.settings_excluded_folders),
+                    description = excludedDesc,
+                    onClick = onExcludedFoldersClick,
+                    enabled = state.autoSync,
+                )
+            } else {
+                RowDivider()
+                IndentedNavRow(
+                    label = stringResource(R.string.settings_backup_folders),
+                    description = stringResource(R.string.settings_backup_folders_desc),
+                    onClick = onBackupFoldersClick,
+                    enabled = state.autoSync,
                 )
             }
+            // Album-mirror drilldown answers "which device folders also surface as Drive
+            // albums when their photos upload?" — orthogonal to the everything toggle.
+            RowDivider()
+            IndentedNavRow(
+                label = stringResource(R.string.settings_album_mirror_folders),
+                description = stringResource(R.string.settings_album_mirror_folders_desc),
+                onClick = onAlbumMirrorFoldersClick,
+                enabled = state.autoSync,
+            )
+        }
+    }
+}
+
+// ── Backup behaviour sub-page (how backup runs) ───────────────────────────────
+
+@Composable
+fun BackupBehaviorSettingsScreen(
+    onBack: () -> Unit,
+    viewModel: SettingsViewModel = hiltViewModel(),
+) {
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    SettingsSubPageScaffold(title = stringResource(R.string.settings_backup_how_section), onBack = onBack) {
+        SettingsCard {
+            ToggleRow(
+                label = stringResource(R.string.settings_continuous_backup),
+                description = stringResource(R.string.settings_continuous_backup_desc),
+                checked = state.autoSync,
+                onCheckedChange = viewModel::setAutoSync,
+            )
+            RowDivider()
+            ToggleRow(
+                label = stringResource(R.string.settings_delete_after_backup),
+                description = stringResource(R.string.settings_delete_after_backup_desc),
+                checked = state.deleteLocalAfterBackup,
+                onCheckedChange = viewModel::setDeleteLocalAfterBackup,
+                indented = true,
+                enabled = state.autoSync,
+            )
+        }
+    }
+}
+
+// ── Backup network sub-page (network usage) ───────────────────────────────────
+
+@Composable
+fun BackupNetworkSettingsScreen(
+    onBack: () -> Unit,
+    viewModel: SettingsViewModel = hiltViewModel(),
+) {
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    SettingsSubPageScaffold(title = stringResource(R.string.settings_network_section), onBack = onBack) {
+        SettingsCard {
+            // Sync Wi-Fi only gates backing UP to Drive (meaningful only while continuous
+            // backup is on); full-res Wi-Fi only gates downloading full-resolution photos
+            // for the viewer. Both are network-consumption choices, grouped here.
+            ToggleRow(
+                label = stringResource(R.string.settings_sync_wifi_only),
+                description = stringResource(R.string.settings_sync_wifi_desc),
+                checked = state.syncWifiOnly,
+                onCheckedChange = viewModel::setSyncWifiOnly,
+                enabled = state.autoSync,
+            )
+            RowDivider()
+            ToggleRow(
+                label = stringResource(R.string.settings_fullres_wifi_only),
+                description = stringResource(R.string.settings_fullres_wifi_only_desc),
+                checked = state.fullresWifiOnly,
+                onCheckedChange = viewModel::setFullresWifiOnly,
+            )
         }
     }
 }
@@ -648,6 +673,32 @@ fun StorageSettingsScreen(
             cloudCount = state.cloudTrashCount,
             onClick = onRecentlyDeletedClick,
         )
+    }
+}
+
+// ── Privacy & Security hub ────────────────────────────────────────────────────
+
+/** Hub that groups the privacy/metadata and security sub-pages under one Settings entry. */
+@Composable
+fun PrivacySecuritySettingsScreen(
+    onBack: () -> Unit,
+    onPrivacyClick: () -> Unit,
+    onSecurityClick: () -> Unit,
+) {
+    SettingsSubPageScaffold(title = stringResource(R.string.settings_privacy_security), onBack = onBack) {
+        SettingsCard {
+            NavRow(
+                label = stringResource(R.string.settings_privacy_metadata),
+                description = stringResource(R.string.settings_privacy_metadata_desc),
+                onClick = onPrivacyClick,
+            )
+            RowDivider()
+            NavRow(
+                label = stringResource(R.string.settings_security),
+                description = stringResource(R.string.settings_security_desc),
+                onClick = onSecurityClick,
+            )
+        }
     }
 }
 
@@ -1015,14 +1066,14 @@ private fun UploadEventRow(evt: UploadEvent) {
             }
         }
         Spacer(Modifier.width(10.dp))
-        // Trailing status label — kept English: status copy not yet localized. The label
-        // colour mirrors the icon so the eye reads icon + label as a single status token.
+        // Trailing status label — the label colour mirrors the icon so the eye reads
+        // icon + label as a single status token.
         val (label, labelColor) = when (evt.status) {
-            UploadEventStatus.Uploading -> "Uploading…" to colors.accent
-            UploadEventStatus.Encrypting -> "Encrypting…" to colors.fgDim
-            UploadEventStatus.Queued -> "Queued" to colors.fgMute
-            UploadEventStatus.Done -> "Done" to StatusSynced
-            UploadEventStatus.Failed -> "Failed" to colors.errorColor
+            UploadEventStatus.Uploading -> stringResource(R.string.upload_status_uploading) to colors.accent
+            UploadEventStatus.Encrypting -> stringResource(R.string.upload_status_encrypting) to colors.fgDim
+            UploadEventStatus.Queued -> stringResource(R.string.upload_status_queued) to colors.fgMute
+            UploadEventStatus.Done -> stringResource(R.string.upload_status_done) to StatusSynced
+            UploadEventStatus.Failed -> stringResource(R.string.upload_status_failed) to colors.errorColor
         }
         Text(
             text = label,
@@ -1066,44 +1117,53 @@ private fun StorageContent(
     // ── 4. Free up space now (existing) ─────────────────────────────────────────
     RowDivider()
     var showFreeUpConfirm by remember { mutableStateOf(false) }
-    Row(
+    val colors = AppColors.current
+    Column(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
     ) {
-        val colors = AppColors.current
-        Column(modifier = Modifier.weight(1f)) {
-            Text(stringResource(R.string.settings_free_up_now), color = colors.fgPrimary, fontSize = 13.5.sp)
-            Text(stringResource(R.string.settings_free_up_desc), color = colors.fgMute, fontSize = 11.5.sp)
-        }
-        Spacer(Modifier.width(12.dp))
-        if (isFreeingUp) {
-            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = colors.accent)
-        } else {
-            // Pill-style destructive button — confirm dialog gates the actual delete so
-            // an accidental tap doesn't immediately wipe device copies of every
-            // backed-up file. The dialog text spells out the irreversible scope.
-            Box(
-                modifier = Modifier
-                    .background(colors.deleteTint, RoundedCornerShape(10.dp))
-                    .border(0.5.dp, colors.errorColor.copy(alpha = 0.3f), RoundedCornerShape(10.dp))
-                    .clickable(enabled = !isFreeingUp) { showFreeUpConfirm = true }
-                    .padding(horizontal = 14.dp, vertical = 7.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Icon(
-                        imageVector = Icons.Default.Delete,
-                        contentDescription = null,
-                        tint = colors.errorColor,
-                        modifier = Modifier.size(14.dp),
-                    )
-                    Text(
-                        stringResource(R.string.settings_free_up_action),
-                        color = colors.errorColor, fontSize = 13.sp, fontWeight = FontWeight.Medium,
-                    )
+        // Title + action button on top, the explanatory description full-width underneath so
+        // it doesn't get squeezed against the button on narrow screens.
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                stringResource(R.string.settings_free_up_now),
+                color = colors.fgPrimary, fontSize = 13.5.sp,
+                modifier = Modifier.weight(1f),
+            )
+            Spacer(Modifier.width(12.dp))
+            if (isFreeingUp) {
+                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = colors.accent)
+            } else {
+                // Pill-style destructive button — confirm dialog gates the actual delete so
+                // an accidental tap doesn't immediately wipe device copies of every
+                // backed-up file. The dialog text spells out the irreversible scope.
+                Box(
+                    modifier = Modifier
+                        .background(colors.deleteTint, RoundedCornerShape(10.dp))
+                        .border(0.5.dp, colors.errorColor.copy(alpha = 0.3f), RoundedCornerShape(10.dp))
+                        .clickable(enabled = !isFreeingUp) { showFreeUpConfirm = true }
+                        .padding(horizontal = 14.dp, vertical = 7.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Icon(
+                            imageVector = Icons.Default.Delete,
+                            contentDescription = null,
+                            tint = colors.errorColor,
+                            modifier = Modifier.size(14.dp),
+                        )
+                        Text(
+                            stringResource(R.string.settings_free_up_action),
+                            color = colors.errorColor, fontSize = 13.sp, fontWeight = FontWeight.Medium,
+                        )
+                    }
                 }
             }
         }
+        Spacer(Modifier.height(8.dp))
+        Text(
+            stringResource(R.string.settings_free_up_desc),
+            color = colors.fgMute, fontSize = 11.5.sp,
+        )
     }
     if (showFreeUpConfirm) {
         ConfirmDialog(
@@ -1211,46 +1271,49 @@ private fun DeviceStorageRow(state: SettingsUiState) {
 private fun AppCacheRow(state: SettingsUiState, onClearCache: () -> Unit) {
     val colors = AppColors.current
     var showConfirm by remember { mutableStateOf(false) }
-    // Color hint: amber over ~1 GB to nudge users without screaming-red.
-    // Cache is benign — losing it just costs re-download bandwidth.
-    val warn = state.appCacheBytes > 1L * 1024 * 1024 * 1024
-    val valueColor = if (warn) StatusPending else colors.fgPrimary
+    // The cache is self-managing (Coil's image cache is hard-capped + evicts oldest; the rest is
+    // temporary and cleared automatically) and grows naturally with the library, so its size is
+    // never flagged as a problem — just shown so the user can clear it to reclaim space if wanted.
+    val valueColor = colors.fgPrimary
 
-    Row(
+    Column(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                stringResource(R.string.settings_storage_app_cache),
-                color = colors.fgMute, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
-            )
-            Spacer(Modifier.height(4.dp))
-            Text(
-                formatBytes(state.appCacheBytes),
-                color = valueColor, fontSize = 22.sp, fontWeight = FontWeight.Bold,
-            )
-            Spacer(Modifier.height(4.dp))
-            Text(
-                stringResource(R.string.settings_storage_app_cache_desc),
-                color = colors.fgMute, fontSize = 11.5.sp,
-            )
+        // Label + size on the left, the Clear-cache pill aligned to them on the right; the
+        // longer description sits on its own full-width line below so it never crowds the pill.
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    stringResource(R.string.settings_storage_app_cache),
+                    color = colors.fgMute, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    formatBytes(state.appCacheBytes),
+                    color = valueColor, fontSize = 22.sp, fontWeight = FontWeight.Bold,
+                )
+            }
+            Spacer(Modifier.width(12.dp))
+            Box(
+                modifier = Modifier
+                    .background(colors.surfaceWeak, RoundedCornerShape(10.dp))
+                    .border(0.5.dp, colors.pillBorder, RoundedCornerShape(10.dp))
+                    .clickable(enabled = state.appCacheBytes > 0L) { showConfirm = true }
+                    .padding(horizontal = 14.dp, vertical = 7.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    stringResource(R.string.settings_storage_clear_cache),
+                    color = if (state.appCacheBytes > 0L) colors.accent else colors.fgMute,
+                    fontSize = 13.sp, fontWeight = FontWeight.Medium,
+                )
+            }
         }
-        Spacer(Modifier.width(12.dp))
-        Box(
-            modifier = Modifier
-                .background(colors.surfaceWeak, RoundedCornerShape(10.dp))
-                .border(0.5.dp, colors.pillBorder, RoundedCornerShape(10.dp))
-                .clickable(enabled = state.appCacheBytes > 0L) { showConfirm = true }
-                .padding(horizontal = 14.dp, vertical = 7.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                stringResource(R.string.settings_storage_clear_cache),
-                color = if (state.appCacheBytes > 0L) colors.accent else colors.fgMute,
-                fontSize = 13.sp, fontWeight = FontWeight.Medium,
-            )
-        }
+        Spacer(Modifier.height(8.dp))
+        Text(
+            stringResource(R.string.settings_storage_app_cache_desc),
+            color = colors.fgMute, fontSize = 11.5.sp,
+        )
     }
     if (showConfirm) {
         ConfirmDialog(
@@ -1268,6 +1331,76 @@ private fun AppCacheRow(state: SettingsUiState, onClearCache: () -> Unit) {
 }
 
 // ── Shared composables ────────────────────────────────────────────────────────
+
+// ── Debug-only large-library simulator card ───────────────────────────────────
+
+/**
+ * DEBUG-only card to drive the [eu.akoos.photos.data.repository.drive.LargeLibrarySimulator].
+ * Set N, Populate to generate N synthetic photos that exercise the real decrypt + cache treadmill
+ * with no CDN traffic, or Clear to remove them. Only ever rendered behind a BuildConfig.DEBUG guard.
+ * Strings are inline English — this surface never ships, so it isn't localized.
+ */
+@Composable
+private fun LargeLibrarySimCard(
+    viewModel: LargeLibrarySimViewModel = hiltViewModel(),
+) {
+    val colors = AppColors.current
+    val state by viewModel.state.collectAsStateWithLifecycle()
+    var text by remember(state.count) { mutableStateOf(if (state.count > 0) state.count.toString() else "") }
+
+    SectionLabel("Developer — large library simulator")
+    Spacer(Modifier.height(8.dp))
+    SettingsCard {
+        Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+            Text(
+                "Generate synthetic photos that run the real decrypt + cache pipeline with no Proton traffic.",
+                color = colors.fgMute, fontSize = 12.sp,
+            )
+            Spacer(Modifier.height(12.dp))
+            androidx.compose.material3.OutlinedTextField(
+                value = text,
+                onValueChange = { raw ->
+                    val digits = raw.filter { it.isDigit() }.take(7)
+                    text = digits
+                    viewModel.setCount(digits.toIntOrNull() ?: 0)
+                },
+                label = { Text("Photo count (e.g. 21000)") },
+                singleLine = true,
+                enabled = !state.running,
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                    keyboardType = androidx.compose.ui.text.input.KeyboardType.Number,
+                ),
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(12.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                androidx.compose.material3.Button(
+                    onClick = { viewModel.populate() },
+                    enabled = !state.running && state.count > 0,
+                    modifier = Modifier.weight(1f),
+                ) { Text("Populate") }
+                Spacer(Modifier.width(12.dp))
+                androidx.compose.material3.OutlinedButton(
+                    onClick = { viewModel.clear() },
+                    enabled = !state.running,
+                    modifier = Modifier.weight(1f),
+                ) { Text("Clear simulation") }
+            }
+            if (state.running) {
+                Spacer(Modifier.height(12.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = colors.accent)
+                    Spacer(Modifier.width(10.dp))
+                    Text("Working…", color = colors.fgMute, fontSize = 12.sp)
+                }
+            }
+            state.message?.let { msg ->
+                Spacer(Modifier.height(10.dp))
+                Text(msg, color = colors.fgDim, fontSize = 12.sp)
+            }
+        }
+    }
+}
 
 @Composable
 private fun RecentlyDeletedCard(

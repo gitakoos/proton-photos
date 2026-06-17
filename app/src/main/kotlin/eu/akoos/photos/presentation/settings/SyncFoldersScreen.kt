@@ -61,6 +61,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -113,7 +114,7 @@ fun SyncFoldersScreen(
             )
             Spacer(Modifier.weight(1f))
             Text(
-                "Backup Folders",
+                stringResource(R.string.sync_folders_title),
                 color = FgPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
             )
             Spacer(Modifier.weight(1f))
@@ -160,8 +161,7 @@ fun SyncFoldersScreen(
                 // ── Description ──────────────────────────────────────────────
                 item {
                     Text(
-                        "Choose which folders to back up to Proton Drive. " +
-                            "Selected folders will be uploaded automatically when syncing.",
+                        stringResource(R.string.sync_folders_description),
                         color = FgMute,
                         fontSize = 12.sp,
                         lineHeight = 17.sp,
@@ -182,11 +182,11 @@ fun SyncFoldersScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                     ) {
                         Text(
-                            "${state.selectedCount} of ${state.folders.size} folders selected",
+                            stringResource(R.string.sync_folders_count_selected, state.selectedCount, state.folders.size),
                             color = FgDim, fontSize = 12.sp,
                         )
                         Text(
-                            if (state.allSelected) "Deselect all" else "Select all",
+                            if (state.allSelected) stringResource(R.string.gallery_deselect_all) else stringResource(R.string.select_all),
                             color = Accent,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Medium,
@@ -229,7 +229,7 @@ fun SyncFoldersScreen(
                                 contentAlignment = Alignment.Center,
                             ) {
                                 Text(
-                                    "No folders found on this device",
+                                    stringResource(R.string.settings_excluded_folders_empty),
                                     color = FgMute, fontSize = 13.sp,
                                 )
                             }
@@ -254,12 +254,12 @@ fun SyncFoldersScreen(
                                 .background(Accent.copy(alpha = 0.18f), CircleShape),
                             contentAlignment = Alignment.Center,
                         ) {
-                            Icon(Icons.Default.Add, "Add folder", tint = Accent, modifier = Modifier.size(20.dp))
+                            Icon(Icons.Default.Add, stringResource(R.string.sync_folders_add_action), tint = Accent, modifier = Modifier.size(20.dp))
                         }
                         Column(Modifier.weight(1f)) {
                             Text(stringResource(R.string.sync_folders_add_row_title), color = FgPrimary, fontSize = 14.sp)
                             Text(
-                                "Pre-declare a folder so future photos in it back up automatically",
+                                stringResource(R.string.sync_folders_add_row_subtitle),
                                 color = FgMute, fontSize = 11.sp,
                             )
                         }
@@ -272,9 +272,7 @@ fun SyncFoldersScreen(
                             text = {
                                 Column {
                                     Text(
-                                        "Enter the exact folder name (e.g. \"Trip 2026\"). " +
-                                            "Once a photo lands in a matching folder it will " +
-                                            "back up automatically.",
+                                        stringResource(R.string.sync_folders_add_dialog_body),
                                         color = FgMute, fontSize = 12.sp,
                                     )
                                     Spacer(Modifier.height(12.dp))
@@ -358,7 +356,7 @@ private fun FolderRow(
                 fontWeight = FontWeight.Medium,
             )
             Text(
-                "${folder.itemCount} photos",
+                pluralStringResource(R.plurals.count_photos_plural, folder.itemCount, folder.itemCount),
                 color    = FgMute,
                 fontSize = 12.sp,
             )
@@ -367,7 +365,7 @@ private fun FolderRow(
         // Selection indicator
         if (folder.isSelected) {
             Icon(
-                Icons.Default.CheckCircle, "Selected",
+                Icons.Default.CheckCircle, stringResource(R.string.sync_folders_selected_cd),
                 tint     = Accent,
                 modifier = Modifier.size(22.dp),
             )

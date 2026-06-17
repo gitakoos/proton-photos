@@ -30,6 +30,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.LocalMediaRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -57,6 +58,7 @@ import javax.inject.Inject
 class TimelineFilterViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val localMediaRepo: LocalMediaRepository,
+    private val driveRepo: DrivePhotoRepository,
 ) : ViewModel() {
 
     data class TimelineFolder(
@@ -67,8 +69,19 @@ class TimelineFilterViewModel @Inject constructor(
         val isExcluded: Boolean,
     )
 
+    /** A cloud album the user can individually hide from the timeline. */
+    data class TimelineAlbum(
+        val linkId: String,
+        val name: String,
+        val coverUrl: String?,
+        val itemCount: Int,
+        /** True = this album's photos are hidden from the timeline. */
+        val isExcluded: Boolean,
+    )
+
     data class UiState(
         val folders: List<TimelineFolder> = emptyList(),
+        val albums: List<TimelineAlbum> = emptyList(),
         val isLoading: Boolean = true,
         /** Master toggle — hide every photo that belongs to any album from the timeline. */
         val hideAlbumPhotos: Boolean = false,
@@ -78,6 +91,7 @@ class TimelineFilterViewModel @Inject constructor(
     }
 
     private var excludedNames: Set<String> = emptySet()
+    private var excludedAlbumIds: Set<String> = emptySet()
     private var hideAlbumPhotos: Boolean = false
 
     private val _uiState = MutableStateFlow(UiState())
@@ -85,11 +99,25 @@ class TimelineFilterViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
-            // Seed excluded set + album-hide toggle BEFORE the first media emission so the
-            // initial UI already carries the persisted state.
+            // Seed persisted state BEFORE the first media emission so the initial UI already
+            // carries it.
             val seedPrefs = context.settingsDataStore.data.first()
             excludedNames = seedPrefs[SettingsKeys.TIMELINE_EXCLUDED_FOLDER_NAMES] ?: emptySet()
             hideAlbumPhotos = seedPrefs[SettingsKeys.HIDE_PHOTOS_IN_ALBUMS] ?: false
+            excludedAlbumIds = seedPrefs[SettingsKeys.TIMELINE_EXCLUDED_ALBUM_IDS] ?: emptySet()
+
+            // Cloud album list for the per-album filter — DB-only cached read, offline-safe.
+            val albumRows = runCatching { driveRepo.loadAlbumsCached() }.getOrDefault(emptyList())
+                .map { a ->
+                    TimelineAlbum(
+                        linkId = a.linkId,
+                        name = a.name,
+                        coverUrl = a.coverThumbnailUrl,
+                        itemCount = a.photoCount,
+                        isExcluded = a.linkId in excludedAlbumIds,
+                    )
+                }
+                .sortedBy { it.name.lowercase() }
 
             localMediaRepo.observeLocalMedia().collectLatest { items ->
                 val populated = items
@@ -117,6 +145,9 @@ class TimelineFilterViewModel @Inject constructor(
 
                 _uiState.value = UiState(
                     folders = populated.sortedByDescending { it.itemCount } + emptyExcluded,
+                    // Recompute isExcluded from the live set so a per-album toggle survives the
+                    // next media re-emission.
+                    albums = albumRows.map { it.copy(isExcluded = it.linkId in excludedAlbumIds) },
                     isLoading = false,
                     hideAlbumPhotos = hideAlbumPhotos,
                 )
@@ -131,6 +162,21 @@ class TimelineFilterViewModel @Inject constructor(
         _uiState.update { it.copy(hideAlbumPhotos = enabled) }
         viewModelScope.launch {
             context.settingsDataStore.edit { it[SettingsKeys.HIDE_PHOTOS_IN_ALBUMS] = enabled }
+        }
+    }
+
+    /** Per-album toggle — flip whether this album's photos are hidden from the timeline. */
+    fun toggleAlbum(albumLinkId: String) {
+        val newSet = if (albumLinkId in excludedAlbumIds)
+            excludedAlbumIds - albumLinkId
+        else
+            excludedAlbumIds + albumLinkId
+        excludedAlbumIds = newSet
+        _uiState.update { s ->
+            s.copy(albums = s.albums.map { a -> a.copy(isExcluded = a.linkId in newSet) })
+        }
+        viewModelScope.launch {
+            context.settingsDataStore.edit { it[SettingsKeys.TIMELINE_EXCLUDED_ALBUM_IDS] = newSet }
         }
     }
 

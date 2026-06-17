@@ -51,7 +51,7 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:configChanges="locale|layoutDirection"
+            android:configChanges="orientation|screenSize|smallestScreenSize|keyboardHidden|locale|layoutDirection"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -77,10 +77,21 @@
                 <data android:mimeType="video/webm" />
                 <data android:mimeType="video/3gpp" />
             </intent-filter>
+            <!--
+                ACTION_VIEW for local image/video URIs so the app appears in another app's
+                "Open with" chooser. The content:// and file:// schemes are stated explicitly:
+                they are already the implicit default for a MIME-type-only filter (Android only
+                matches content/file URIs when no scheme is given), but ACTION_VIEW with a data
+                type and no scheme trips the AppLinkUrlError lint, which treats a bare VIEW filter
+                as an incomplete web link. No BROWSABLE / http(s) here: this is not a web link or
+                App Link, only local media handed over by another app, so naming the two real
+                schemes both keeps the behaviour identical and satisfies the check.
+            -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="content" />
+                <data android:scheme="file" />
                 <data android:mimeType="image/jpeg" />
                 <data android:mimeType="image/png" />
                 <data android:mimeType="image/webp" />
@@ -214,6 +225,16 @@
             android:name=".service.BackgroundSyncService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <!-- Drive thumbnail decryption isolated into its own process. The native
+             OpenPGP runtime can abort its host process under Android-16 GC when
+             ProtonCore's key-unlock crypto races the bulk thumbnail decrypts; running
+             those decrypts here keeps a residual SIGABRT off the main UI process. The
+             client falls back to in-process decrypt if this service can't bind. -->
+        <service
+            android:name=".crypto.CryptoService"
+            android:process=":crypto"
+            android:exported="false" />
 
     </application>
 

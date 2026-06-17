@@ -29,6 +29,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -37,15 +38,19 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import java.text.Normalizer
 import me.proton.core.accountmanager.domain.AccountManager
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.GalleryItem
+import eu.akoos.photos.domain.usecase.CategorizeItem
 import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
 import eu.akoos.photos.presentation.gallery.ContentFilter
+import eu.akoos.photos.presentation.gallery.GalleryFilter
 import eu.akoos.photos.presentation.gallery.MediaType
 import eu.akoos.photos.presentation.gallery.SyncStatusFilter
 import java.util.Calendar
@@ -82,6 +87,11 @@ class SearchViewModel @Inject constructor(
     private val _contentFilter = MutableStateFlow(ContentFilter())
     val contentFilter: StateFlow<ContentFilter> = _contentFilter.asStateFlow()
 
+    /** Category chip selection — mirrors the gallery's [GalleryFilter] so the shared filter
+     *  sheet drives both surfaces. [GalleryFilter.All] means no category constraint. */
+    private val _selectedCategory = MutableStateFlow(GalleryFilter.All)
+    val selectedCategory: StateFlow<GalleryFilter> = _selectedCategory.asStateFlow()
+
     /**
      * Unfiltered gallery source. The search page's empty state surfaces "On this day"
      * memories and a "Jump to month" grid that must reflect the user's entire library
@@ -96,6 +106,7 @@ class SearchViewModel @Inject constructor(
                 all.dropHidden(hidden)
             }
         }
+        .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     /** The text field updates [_query] on every keystroke for instant echo, but the heavy
@@ -110,27 +121,62 @@ class SearchViewModel @Inject constructor(
                 getGalleryItems.invoke(userId),
                 debouncedQuery,
                 _contentFilter,
+                _selectedCategory,
                 hiddenUrisFlow,
-            ) { all, q, filter, hidden -> applyAll(all.dropHidden(hidden), q, filter) }
+            ) { all, q, filter, category, hidden ->
+                applyAll(all.dropHidden(hidden), q, filter, category)
+            }
         }
+        // Fold/normalize + per-item category checks over the whole library are heavy; run them off
+        // the main thread so typing stays smooth on large libraries.
+        .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     fun setQuery(value: String) { _query.value = value }
     fun setContentFilter(filter: ContentFilter) { _contentFilter.value = filter }
+    fun onCategorySelected(filter: GalleryFilter) { _selectedCategory.value = filter }
     fun clearAll() {
         _query.value = ""
         _contentFilter.value = ContentFilter()
+        _selectedCategory.value = GalleryFilter.All
     }
 
-    private fun applyAll(items: List<GalleryItem>, q: String, filter: ContentFilter): List<GalleryItem> {
+    private fun applyAll(
+        items: List<GalleryItem>,
+        q: String,
+        filter: ContentFilter,
+        category: GalleryFilter,
+    ): List<GalleryItem> {
         val qTrimmed = q.trim()
-        if (qTrimmed.isEmpty() && filter == ContentFilter()) return emptyList()
+        if (qTrimmed.isEmpty() && filter == ContentFilter() && category == GalleryFilter.All) {
+            return emptyList()
+        }
         var out = items
         if (qTrimmed.isNotEmpty()) {
-            val needle = fold(qTrimmed)
-            out = out.filter { fold(displayNameOf(it)).contains(needle) }
+            // Match every query word against the item's folded metadata haystack (name + date +
+            // type + categories) so multi-word queries like "june 2024" or "beach video" work too.
+            val needleWords = fold(qTrimmed).split(' ').filter { it.isNotBlank() }
+            val cal = Calendar.getInstance()
+            out = out.filter { item ->
+                // A word matches if it is in the file name OR the full date/type/tag haystack.
+                // Test the cheap folded name first and only build the heavier haystack when the
+                // name misses — for plain name queries the haystack is never built. Cache it per
+                // item so multi-word queries build it at most once.
+                val foldedName = fold(displayNameOf(item))
+                var haystack: String? = null
+                needleWords.all { word ->
+                    foldedName.contains(word) || run {
+                        val full = haystack ?: searchHaystack(item, cal).also { haystack = it }
+                        full.contains(word)
+                    }
+                }
+            }
         }
         out = applyContentFilter(out, filter)
+        val tagId = category.tagId
+        if (category != GalleryFilter.All && tagId != null) {
+            out = out.filter { CategorizeItem.belongsTo(it, tagId) }
+        }
         return out
     }
 
@@ -162,12 +208,14 @@ class SearchViewModel @Inject constructor(
         val year = filter.year
         if (year != null) {
             val month = filter.month
+            val day = filter.day
             val cal = Calendar.getInstance()
             out = out.filter {
                 cal.timeInMillis = it.captureTimeMs
                 val y = cal.get(Calendar.YEAR)
                 val m = cal.get(Calendar.MONTH) + 1
-                y == year && (month == null || m == month)
+                val d = cal.get(Calendar.DAY_OF_MONTH)
+                y == year && (month == null || m == month) && (day == null || d == day)
             }
         }
         return out
@@ -177,6 +225,50 @@ class SearchViewModel @Inject constructor(
         is GalleryItem.LocalOnly -> item.local.mimeType
         is GalleryItem.Synced    -> item.local.mimeType
         is GalleryItem.CloudOnly -> item.cloud.mimeType
+    }
+
+    /** Localized month names, pre-folded once, so a "june" / "június" query matches by capture month. */
+    private val foldedMonths: List<String> by lazy {
+        val fmt = java.text.SimpleDateFormat("LLLL", java.util.Locale.getDefault())
+        val cal = Calendar.getInstance().apply { set(Calendar.DAY_OF_MONTH, 1) }
+        (0..11).map { m -> cal.set(Calendar.MONTH, m); fold(fmt.format(cal.time)) }
+    }
+
+    /** PhotoTag id → pre-folded localized category name, so "screenshot" / "selfie" etc. match. */
+    private val foldedCategoryNames: Map<Int, String> by lazy {
+        mapOf(
+            0 to R.string.gallery_filter_favorites,
+            1 to R.string.gallery_filter_screenshots,
+            2 to R.string.filter_type_videos,
+            3 to R.string.gallery_filter_live_photos,
+            5 to R.string.gallery_filter_selfies,
+            6 to R.string.gallery_filter_portraits,
+            7 to R.string.gallery_filter_bursts,
+            8 to R.string.gallery_filter_panoramas,
+            9 to R.string.gallery_filter_raw,
+        ).mapValues { fold(context.getString(it.value)) }
+    }
+
+    /** Folded text a typed query matches against — file name + capture year + month name + media
+     *  type + file extension + category names — so the search box finds photos by metadata, not just
+     *  the file name. Month/category names are pre-folded; only the per-item name is folded here. */
+    private fun searchHaystack(item: GalleryItem, cal: Calendar): String {
+        cal.timeInMillis = item.captureTimeMs
+        val mime = mimeOf(item)
+        val ext = mime.substringAfterLast('/', "")
+        val tags = when (item) {
+            is GalleryItem.Synced    -> item.cloud.tags
+            is GalleryItem.CloudOnly -> item.cloud.tags
+            is GalleryItem.LocalOnly -> emptySet()
+        }
+        return buildString {
+            append(fold(displayNameOf(item)))
+            append(' ').append(cal.get(Calendar.YEAR))
+            append(' ').append(foldedMonths[cal.get(Calendar.MONTH)])
+            append(if (mime.startsWith("video/")) " video" else " photo")
+            if (ext.isNotEmpty()) { append(' '); append(ext) }
+            tags.forEach { id -> foldedCategoryNames[id]?.let { append(' '); append(it) } }
+        }
     }
 
     private companion object {

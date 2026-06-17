@@ -20,12 +20,8 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-// ProtonCore 36.6 deprecates PublicAddressEntity / PublicAddressKeyEntity in favour of
-// PublicAddressInfoEntity + PublicAddressKeyDataEntity (already listed alongside), but
-// the PublicAddressDatabase interface STILL requires DAOs backed by the old entities
-// (publicAddressDao / publicAddressKeyDao / publicAddressWithKeysDao). Until the SDK
-// drops those interface members we have to keep the deprecated entities here — suppress
-// the noise at the file level so the schema list stays honest about the SDK contract.
+// PublicAddressEntity / PublicAddressKeyEntity are deprecated, but PublicAddressDatabase still
+// requires DAOs backed by them — keep until the SDK drops those interface members.
 @file:Suppress("DEPRECATION")
 
 package eu.akoos.photos.data.db
@@ -117,11 +113,13 @@ import me.proton.core.usersettings.data.entity.UserSettingsEntity
 import eu.akoos.photos.data.db.dao.AlbumPhotoMembershipDao
 import eu.akoos.photos.data.db.dao.CloudAlbumDao
 import eu.akoos.photos.data.db.dao.DayMetaDao
+import eu.akoos.photos.data.db.dao.LocalTagDao
 import eu.akoos.photos.data.db.dao.PhotoListingDao
 import eu.akoos.photos.data.db.dao.SyncStateDao
 import eu.akoos.photos.data.db.entity.AlbumPhotoMembershipEntity
 import eu.akoos.photos.data.db.entity.CloudAlbumEntity
 import eu.akoos.photos.data.db.entity.DayMetaEntity
+import eu.akoos.photos.data.db.entity.LocalTagEntity
 import eu.akoos.photos.data.db.entity.PhotoListingEntity
 import eu.akoos.photos.data.db.entity.SyncStateEntity
 
@@ -144,6 +142,7 @@ import eu.akoos.photos.data.db.entity.SyncStateEntity
         DayMetaEntity::class,
         CloudAlbumEntity::class,
         AlbumPhotoMembershipEntity::class,
+        LocalTagEntity::class,
         // Account
         AccountEntity::class,
         AccountMetadataEntity::class,
@@ -183,7 +182,7 @@ import eu.akoos.photos.data.db.entity.SyncStateEntity
         // Telemetry
         TelemetryEventEntity::class,
     ],
-    version = 8,
+    version = 11,
     exportSchema = true,
 )
 abstract class AppDatabase : BaseDatabase(),
@@ -208,6 +207,7 @@ abstract class AppDatabase : BaseDatabase(),
     abstract fun dayMetaDao(): DayMetaDao
     abstract fun cloudAlbumDao(): CloudAlbumDao
     abstract fun albumPhotoMembershipDao(): AlbumPhotoMembershipDao
+    abstract fun localTagDao(): LocalTagDao
 
     abstract override fun accountDao(): AccountDao
     abstract override fun sessionDao(): SessionDao

@@ -63,24 +63,20 @@ import javax.inject.Inject
 sealed class EditorSource {
     data class Local(val uri: String, val displayName: String, val mimeType: String) : EditorSource()
     data class Cloud(val photo: CloudPhoto) : EditorSource()
-    /**
-     * Set when the photo arrived via an Intent.ACTION_EDIT or ACTION_VIEW from outside
-     * the app. Save flow is forced to copy-to-MediaStore (Pictures/Photos for Proton/)
-     * because the foreign URI may be read-only and we should not mutate files we
-     * didn't create.
-     */
+    /** Photo opened from a foreign ACTION_EDIT/VIEW intent. Save is forced to copy-to-MediaStore
+     *  since the foreign URI may be read-only. */
     data class External(val uri: String, val displayName: String, val mimeType: String) : EditorSource()
 }
 
-/** Built-in filter presets — each is a 4x5 ColorMatrix. */
-enum class FilterPreset(val displayName: String) {
-    None("Original"),
-    BlackWhite("B&W"),
-    Sepia("Sepia"),
-    Vintage("Vintage"),
-    Vivid("Vivid"),
-    Cool("Cool"),
-    Warm("Warm"),
+/** Built-in filter presets, each a 4x5 ColorMatrix; [labelRes] is the chip label. */
+enum class FilterPreset(@androidx.annotation.StringRes val labelRes: Int) {
+    None(R.string.editor_filter_original),
+    BlackWhite(R.string.editor_filter_bw),
+    Sepia(R.string.editor_filter_sepia),
+    Vintage(R.string.editor_filter_vintage),
+    Vivid(R.string.editor_filter_vivid),
+    Cool(R.string.editor_filter_cool),
+    Warm(R.string.editor_filter_warm),
 }
 
 /** Redact stroke mode — what to draw under the user's finger. */
@@ -115,11 +111,10 @@ data class EditorAdjustments(
     val flipHorizontal: Boolean = false,
     val flipVertical: Boolean = false,
     val filter: FilterPreset = FilterPreset.None,
-    /** Crop in display-space coordinates — the rotated / flipped orientation the user sees
-     *  in the Crop tab, not the raw decoded bitmap. The pipeline rotates before it crops so
-     *  this rect is consumed in the same space it was authored in. null = no crop. */
+    /** Crop in display-space coords (the rotated/flipped orientation the user sees), consumed after
+     *  the pipeline's rotate step so it stays in its authoring space. null = no crop. */
     val cropRect: Rect? = null,
-    /** Black-out / pixelate strokes applied AFTER all color and geometry transforms. */
+    /** Black-out / pixelate strokes applied after all color and geometry transforms. */
     val redactStrokes: List<RedactionStroke> = emptyList(),
 )
 
@@ -128,16 +123,9 @@ data class EditorUiState(
     val originalBitmap: Bitmap? = null,
     val previewBitmap: Bitmap? = null,
     /**
-     * Original bitmap with brightness / contrast / saturation / exposure / highlights /
-     * shadows / temperature / tone / filter AND rotation / flip baked in, but WITHOUT crop
-     * or redact strokes. Pixel dimensions match the rotated orientation (width / height swap
-     * on the 90°/270° turns), which is the same display space the crop rect lives in.
-     *
-     * The Crop tool renders against this instead of [originalBitmap] so colour edits AND any
-     * rotation the user already applied stay visible while they pick a crop rectangle — the
-     * Crop tab then shows the very same picture the other tabs do. The full-pipeline
-     * [previewBitmap] is unsuitable here because it has crop already applied — handing it to
-     * the overlay would put the rect on the wrong canvas size and produce out-of-bounds reads.
+     * Colour edits + rotation/flip baked in, but WITHOUT crop or redact strokes, in rotated
+     * display orientation. The Crop tool renders against this so its rect lands on the right
+     * canvas size; the cropped [previewBitmap] would cause out-of-bounds reads.
      */
     val adjustedBitmapNoCrop: Bitmap? = null,
     val adjustments: EditorAdjustments = EditorAdjustments(),
@@ -145,40 +133,24 @@ data class EditorUiState(
     val saveResult: SaveResult? = null,
     val isLoading: Boolean = true,
     val errorMessage: String? = null,
-    /** Latched true after an [EditorSource.External] save lands so the screen can
-     *  surface "Saved as copy" feedback without inspecting the result Uri scheme.
-     *  Reset implicitly when a fresh load clears [source]. */
+    /** Latched after an [EditorSource.External] save so the screen can show "Saved as copy". */
     val savedAsCopy: Boolean = false,
     val pendingWriteIntent: android.app.PendingIntent? = null,
-    /**
-     * Surfaces the OS consent dialog produced by [MediaStore.createDeleteRequest] when
-     * a Synced photo's Overwrite-mode save falls back to "save as copy" — without it
-     * the original device file would orphan next to the edit and the gallery would
-     * keep showing both. One Allow tap on the system prompt removes the original; on
-     * Deny the duplicate persists (but the save still succeeded, so the user just
-     * sees "Saved as copy" with no nasty re-edit prompt). Mirrors [pendingWriteIntent]
-     * end-to-end (launcher in the screen, resolved by [PhotoEditorViewModel.onDeletePermissionResolved]).
-     */
+    /** OS delete-consent dialog ([MediaStore.createDeleteRequest]) when a Synced Overwrite falls back
+     *  to copy, so the orphaned original can be removed. Mirrors [pendingWriteIntent]. */
     val pendingDeleteIntent: android.app.PendingIntent? = null,
 )
 
 sealed class SaveResult {
     data class Success(val uri: Uri?) : SaveResult()
-    /**
-     * The Overwrite path fell back to inserting a new file because the source URI is
-     * read-only for this app (foreign owner or pending/trashed state). The original photo
-     * is untouched; the edit lives at [uri] in our `Pictures/Proton Photos/` folder. The
-     * screen surfaces a snackbar so the user knows what happened.
-     */
+    /** Overwrite fell back to a new file (source URI read-only); original untouched, edit at [uri]. */
     data class SuccessAsCopy(val uri: Uri?) : SaveResult()
     data class Failed(val message: String) : SaveResult()
 }
 
 /**
- * What the user picked in the Save dialog. The available options depend on [EditorSource]:
- *  - Local source → [Overwrite] writes back to the source URI in-place; [Copy] inserts a new MediaStore entry.
- *  - Cloud source → [Overwrite] uploads as new linkId AND trashes the old cloud photo (replacement);
- *                   [Copy] just uploads as new without touching the original.
+ * Save dialog choice. Local: [Overwrite] writes back in-place, [Copy] inserts a new MediaStore entry.
+ * Cloud: [Overwrite] uploads a new linkId and trashes the old one, [Copy] uploads without touching it.
  */
 enum class SaveMode { Overwrite, Copy }
 
@@ -198,12 +170,8 @@ class PhotoEditorViewModel @Inject constructor(
     private var sourceAlbumLinkId: String? = null
     fun setSourceAlbumLinkId(linkId: String?) { sourceAlbumLinkId = linkId }
 
-    // ── Undo / redo stacks ────────────────────────────────────────────────────
-    // Snapshots of EditorAdjustments captured BEFORE a mutating call. Soft cap = 30.
-    // The fast slider path (updateAdjustmentsFast) is DRAFT — it does not push here.
-    // Only finalizeAdjustments() (slider release) pushes a slider edit, and the other
-    // mutating calls (rotate90Cw, toggleFlipH, toggleFlipV, applyCrop, selectFilter,
-    // addRedactStroke, undoLastRedactStroke, clearRedactStrokes) push directly.
+    // Undo/redo: pre-mutation EditorAdjustments snapshots, soft-capped at 30. The slider drag is a
+    // draft (updateAdjustmentsFast doesn't push); finalizeAdjustments pushes it on release.
     private val undoStack: ArrayDeque<EditorAdjustments> = ArrayDeque()
     private val redoStack: ArrayDeque<EditorAdjustments> = ArrayDeque()
     private val _canUndo = MutableStateFlow(false)
@@ -272,18 +240,12 @@ class PhotoEditorViewModel @Inject constructor(
     }
 
 
-    /** Downsampled (max 720px on the long edge) copy of [EditorUiState.originalBitmap]. While
-     *  the user is dragging an Adjust slider we re-render this small bitmap on every tick —
-     *  20×-100× faster than rendering the full-res photo for every onDrag event. Filter chip
-     *  previews also derive from this bitmap. Built lazily on first slider touch. */
+    /** Downsampled (max 720px) copy of the source for fast per-tick slider/filter-chip previews. */
     private var previewSourceSmall: Bitmap? = null
-    /** Most-recent slider-drag render job. Cancelled when the next tick fires so we never have
-     *  more than one bitmap recompute in flight. */
+    /** Most-recent slider-drag render job; cancelled on the next tick to keep only one in flight. */
     private var sliderRenderJob: kotlinx.coroutines.Job? = null
 
-    /** Build (or return cached) downsampled copy of the source bitmap for fast slider previews
-     *  and filter chip thumbnails. Max edge 720px keeps the per-tick render under ~5 ms on
-     *  mid-range hardware. */
+    /** Build (or return cached) downsampled source for fast previews. Max edge 720px → ~5 ms/tick. */
     private fun ensureSmallSource(src: Bitmap): Bitmap {
         previewSourceSmall?.let { return it }
         val maxEdge = 720f
@@ -299,19 +261,10 @@ class PhotoEditorViewModel @Inject constructor(
         return small
     }
 
-    /** Called when the user releases a slider. Triggers a final full-res render so the saved
-     *  output matches what the user sees at preview time. Until called we keep the cheap
-     *  downsampled preview on screen, even after the gesture ends — switching is invisible at
-     *  display resolution but commits a faithful bitmap for [save].
-     *
-     *  We intentionally do NOT recycle the previous previewBitmap here. Compose's draw pass
-     *  may still hold a reference to it for one frame past the state.update, and calling
-     *  recycle() on that frame's bitmap throws "Canvas: trying to use a recycled bitmap" on
-     *  the UI thread. The orphaned bitmap will be GC'd shortly.
-     *
-     *  Undo behavior: the entire slider drag is folded into ONE undo entry, captured at the
-     *  START of the drag in [updateAdjustmentsFast] and pushed here on release. If the drag
-     *  ended up being a no-op (same values as before) we drop the snapshot. */
+    /** On slider release: full-res re-render so the saved output matches the preview, and the whole
+     *  drag is folded into one undo entry (snapshot taken at drag start, dropped if it was a no-op).
+     *  Preview bitmaps are never recycled here — Compose may still draw the old one one frame past
+     *  the state update, and recycling it throws "trying to use a recycled bitmap"; GC handles it. */
     fun finalizeAdjustments() {
         val orig = _state.value.originalBitmap ?: return
         val adj = _state.value.adjustments
@@ -328,17 +281,10 @@ class PhotoEditorViewModel @Inject constructor(
         }
     }
 
-    /**
-     * Set when the editor was opened on a Synced photo (device + cloud). The local-save
-     * paths consult this on success to ALSO replace the cloud version — without that, an
-     * Overwrite would only update the device file and the cloud counterpart stays stale.
-     */
+    /** Set for a Synced photo (device + cloud); local saves consult it to also replace the cloud copy. */
     private var cloudCounterpart: CloudPhoto? = null
 
-    /** Mirrored into UiState so the save dialog can adjust its subtitle when a Synced
-     *  edit will fan out to both device and cloud. Without this flag, the subtitle would
-     *  describe only the device-side file creation and omit the cloud-counterpart upload
-     *  that also kicks off for Synced photos. */
+    /** Mirrors [cloudCounterpart] presence so the save dialog can show a "device + cloud" subtitle. */
     private val _hasCloudCounterpart = MutableStateFlow(false)
 
     fun setCloudCounterpart(photo: CloudPhoto?) {
@@ -346,30 +292,57 @@ class PhotoEditorViewModel @Inject constructor(
         _hasCloudCounterpart.value = photo != null
     }
 
-    /** Exposed for PhotoEditorScreen.SaveSheet so it can show a "both device + cloud"
-     *  subtitle instead of the device-only one. */
     val hasCloudCounterpart: StateFlow<Boolean> = _hasCloudCounterpart.asStateFlow()
 
+    /** Longest-edge cap on decode: a 50 MP photo as ARGB_8888 (~200 MB) exceeds the ~100 MB a hardware
+     *  Canvas can draw ("too large bitmap"). ~12 MP photos pass through untouched. */
+    private val editorMaxDim = 4096
+
+    private fun editorSampleSize(width: Int, height: Int): Int {
+        var sample = 1
+        while (maxOf(width, height) / sample > editorMaxDim) sample *= 2
+        return sample
+    }
+
+    /** Decode [uri] downsampled so its longest edge stays within [editorMaxDim]. Falls back to a
+     *  plain decode if the bounds pass reports no dimensions. */
+    private fun decodeDownsampled(uri: Uri): Bitmap? {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
+            return context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it) }
+        }
+        val opts = BitmapFactory.Options().apply {
+            inSampleSize = editorSampleSize(bounds.outWidth, bounds.outHeight)
+        }
+        return context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, opts) }
+    }
+
+    /** File variant of [decodeDownsampled] for the downloaded cloud full-res. */
+    private fun decodeDownsampled(path: String): Bitmap? {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(path, bounds)
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return BitmapFactory.decodeFile(path)
+        val opts = BitmapFactory.Options().apply {
+            inSampleSize = editorSampleSize(bounds.outWidth, bounds.outHeight)
+        }
+        return BitmapFactory.decodeFile(path, opts)
+    }
+
     fun loadLocal(uri: String, displayName: String, mimeType: String) {
-        // Drop any cached small-source bitmap from a previous photo — otherwise the slider
-        // path would render the new photo's adjustments against the OLD photo's downscale.
+        // Drop the previous photo's cached small-source, else the slider renders against the old downscale.
         previewSourceSmall = null
         clearUndoStacks()
         _state.update { it.copy(source = EditorSource.Local(uri, displayName, mimeType), isLoading = true, errorMessage = null) }
         viewModelScope.launch(Dispatchers.IO) {
-            val bmp = runCatching {
-                context.contentResolver.openInputStream(Uri.parse(uri))?.use {
-                    BitmapFactory.decodeStream(it)
-                }
-            }.getOrNull()
+            val bmp = runCatching { decodeDownsampled(Uri.parse(uri)) }.getOrNull()
             if (bmp == null) {
                 _state.update { it.copy(isLoading = false,
                     errorMessage = context.getString(R.string.editor_error_load_local)) }
                 return@launch
             }
-            // BitmapFactory ignores EXIF orientation; bake it into the pixels so the editor
-            // shows the photo upright (matching the viewer). Save paths re-encode from this
-            // displayed bitmap with no EXIF, so baking here avoids a double-rotation.
+            // BitmapFactory ignores EXIF orientation; bake it into pixels (save re-encodes without EXIF,
+            // so baking here avoids double-rotation).
             val oriented = ExifHelper.applyOrientation(bmp, ExifHelper.readOrientation(context, uri))
             _state.update { it.copy(
                 originalBitmap = oriented,
@@ -380,12 +353,7 @@ class PhotoEditorViewModel @Inject constructor(
         }
     }
 
-    /**
-     * Loads an externally-supplied image (system "Open with" / "Edit with" chooser entry).
-     * Identical to [loadLocal] except the source is tagged External so [save] always
-     * writes a fresh MediaStore copy under Pictures/Photos for Proton rather than
-     * attempting an in-place overwrite.
-     */
+    /** Like [loadLocal] but tags the source External so [save] always writes a fresh copy, never in-place. */
     fun loadExternal(uri: String, displayName: String, mimeType: String) {
         previewSourceSmall = null
         clearUndoStacks()
@@ -396,11 +364,7 @@ class PhotoEditorViewModel @Inject constructor(
             savedAsCopy = false,
         ) }
         viewModelScope.launch(Dispatchers.IO) {
-            val bmp = runCatching {
-                context.contentResolver.openInputStream(Uri.parse(uri))?.use {
-                    BitmapFactory.decodeStream(it)
-                }
-            }.getOrNull()
+            val bmp = runCatching { decodeDownsampled(Uri.parse(uri)) }.getOrNull()
             if (bmp == null) {
                 _state.update { it.copy(
                     isLoading = false,
@@ -431,7 +395,7 @@ class PhotoEditorViewModel @Inject constructor(
                     errorMessage = context.getString(R.string.editor_error_download_failed)) }
                 return@launch
             }
-            val bmp = runCatching { BitmapFactory.decodeFile(file.absolutePath) }.getOrNull()
+            val bmp = runCatching { decodeDownsampled(file.absolutePath) }.getOrNull()
             if (bmp == null) {
                 _state.update { it.copy(isLoading = false,
                     errorMessage = context.getString(R.string.editor_error_decode_failed)) }
@@ -456,15 +420,8 @@ class PhotoEditorViewModel @Inject constructor(
     fun updateShadows(v: Int) = updateAdjustmentsFast { it.copy(shadows = v.coerceIn(-100, 100)) }
     fun updateTemperature(v: Int) = updateAdjustmentsFast { it.copy(temperature = v.coerceIn(-100, 100)) }
     fun updateTone(v: Int) = updateAdjustmentsFast { it.copy(tone = v.coerceIn(-100, 100)) }
-    /**
-     * Adds a 90° clockwise turn. Because the crop rect lives in display space (see
-     * [EditorAdjustments.cropRect]), the turn changes the canvas dimensions and the existing
-     * rect has to be carried into the new orientation so the same visual region stays
-     * selected — otherwise the next visit to the Crop tab would show the rect on a transposed
-     * canvas and save would cut the wrong area. A pixel at old display (x, y) lands at
-     * (oldDisplayH - 1 - y, x) after a CW turn, which sends rect (L,T,R,B) to
-     * (oldDisplayH - B, L, oldDisplayH - T, R).
-     */
+    /** 90° CW turn. The display-space crop rect ([EditorAdjustments.cropRect]) must be carried into the
+     *  new orientation, else it cuts the wrong region: (L,T,R,B) → (oldDisplayH-B, L, oldDisplayH-T, R). */
     fun rotate90Cw() {
         val orig = _state.value.originalBitmap
         updateAdjustments { adj ->
@@ -513,21 +470,13 @@ class PhotoEditorViewModel @Inject constructor(
         updateAdjustmentsNoUndo { EditorAdjustments() }
     }
 
-    /** Clears the error popup state so the screen can hide it. Called from the
-     *  ErrorPopup's OK action — the screen itself usually pops the back stack right
-     *  after, but if the user lands here again (NavBackStackEntry reuse) the cleared
-     *  state ensures the popup doesn't re-appear without a new failure. */
+    /** Clears the error popup so a reused NavBackStackEntry doesn't re-show it without a new failure. */
     fun clearError() {
         _state.update { it.copy(errorMessage = null) }
     }
 
-    /**
-     * One-tap auto-fix. Inspects the mean luminance + spread of a 100×100 downsample
-     * of [EditorUiState.originalBitmap] and picks brightness / contrast / saturation
-     * deltas that bring the image to a tuned baseline. Result is committed via
-     * [updateAdjustments] (so it goes through the normal undo path) — call [resetAll]
-     * to undo.
-     */
+    /** One-tap auto-fix: reads mean luminance + spread off a 100×100 downsample and picks
+     *  brightness/contrast/saturation/tonal deltas. Committed via [updateAdjustments] (undoable). */
     fun autoFix() {
         val orig = _state.value.originalBitmap ?: return
         viewModelScope.launch(Dispatchers.Default) {
@@ -556,14 +505,8 @@ class PhotoEditorViewModel @Inject constructor(
             }
             val contrastDelta = if (spread >= 220) 0 else 12
             val saturationDelta = 10
-            // Per-channel histogram-derived nudges for the five tonal adjustments. Each
-            // is a conservative auto-fix value the user can dial in further by dragging
-            // the matching pill's slider afterwards.
-            //   exposure   — neutral default; raise slightly when scene mean is dark
-            //   highlights — pull DOWN when the brightest pixels are blown
-            //   shadows    — lift when the darkest pixels are crushed
-            //   temperature, tone — leave at zero (auto WB is too unreliable from a
-            //                       single luma histogram; user can warm/cool manually)
+            // Conservative tonal nudges: raise exposure on dark scenes, pull blown highlights down,
+            // lift crushed shadows. Temperature/tone stay 0 — auto-WB off one luma histogram is unreliable.
             val exposureDelta = if (mean < 90) 8 else 0
             val highlightsDelta = if (maxL > 240) -15 else 0
             val shadowsDelta = if (minL < 15) 15 else 0
@@ -595,15 +538,11 @@ class PhotoEditorViewModel @Inject constructor(
                 previewBitmap = newPreview,
                 adjustedBitmapNoCrop = noCropPreview,
             ) }
-            // No eager recycle on the previous previewBitmap: Compose's draw pipeline may
-            // still hold a reference to it for one frame past the state update, and
-            // recycling it then crashes the UI thread with "Canvas: trying to use a
-            // recycled bitmap". Orphaned previews get GC'd shortly.
+            // No eager recycle of the old previewBitmap — see finalizeAdjustments.
         }
     }
 
-    /** Variant of [updateAdjustments] that bypasses the undo stack — used by [resetAll]
-     *  which already cleared the stacks itself, and by [undo]/[redo] internals. */
+    /** [updateAdjustments] without the undo push — for [resetAll] (already cleared stacks) and undo/redo. */
     private fun updateAdjustmentsNoUndo(transform: (EditorAdjustments) -> EditorAdjustments) {
         val orig = _state.value.originalBitmap ?: return
         val newAdj = transform(_state.value.adjustments)
@@ -619,21 +558,13 @@ class PhotoEditorViewModel @Inject constructor(
     }
 
     /**
-     * Fast slider variant: renders against a 720px downsampled bitmap so the on-screen preview
-     * keeps up with onDrag events without recomputing a 12MP buffer per tick. The save path
-     * always re-renders from [EditorUiState.originalBitmap], so the lower-res preview only
-     * affects what the user *sees during the gesture* — the saved bytes are still full-res.
-     *
-     * Cancels any previous in-flight slider render so we never have more than one bitmap
-     * recompute in flight at a time. Like [updateAdjustments] we do NOT recycle the previous
-     * preview here — Compose may still be drawing with it.
+     * Fast slider variant: renders against the 720px downsample so onDrag keeps up; save always
+     * re-renders full-res from [EditorUiState.originalBitmap]. Cancels the prior in-flight render.
      */
     private fun updateAdjustmentsFast(transform: (EditorAdjustments) -> EditorAdjustments) {
         val orig = _state.value.originalBitmap ?: return
         val previous = _state.value.adjustments
-        // Capture the pre-drag adjustments on the FIRST tick — undo treats a whole drag as
-        // one entry, pushed in finalizeAdjustments() on release. Subsequent ticks within the
-        // same drag must NOT overwrite this snapshot.
+        // Snapshot the pre-drag state on the first tick only; finalizeAdjustments pushes it on release.
         if (sliderUndoSnapshot == null) sliderUndoSnapshot = previous
         val newAdj = transform(previous)
         sliderRenderJob?.cancel()
@@ -644,18 +575,13 @@ class PhotoEditorViewModel @Inject constructor(
         }
     }
 
-    /** Source bitmap dimensions after [adj]'s rotation is applied — width and height swap
-     *  for the 90°/270° quarter turns. The Crop tool's rect lives in this rotated display
-     *  space (the canvas the user sees and drags on), so chip seeds and bounds clamps read
-     *  these instead of the raw bitmap dimensions. */
+    /** Source dimensions after [adj]'s rotation (swapped on 90°/270°) — the display space the crop rect lives in. */
     private fun displayWidth(source: Bitmap, adj: EditorAdjustments): Int =
         if (adj.rotationDegrees % 180 != 0) source.height else source.width
     private fun displayHeight(source: Bitmap, adj: EditorAdjustments): Int =
         if (adj.rotationDegrees % 180 != 0) source.width else source.height
 
-    /** Applies [adj]'s rotation and flips to [source], returning a bitmap in display
-     *  orientation. Returns [source] unchanged when no geometry is active, so call-sites
-     *  must not treat the result as a fresh bitmap they own. */
+    /** Applies [adj]'s rotation/flips, or returns [source] unchanged (don't treat the result as owned). */
     private fun rotateAndFlip(source: Bitmap, adj: EditorAdjustments): Bitmap {
         val matrix = Matrix().apply {
             if (adj.rotationDegrees != 0) postRotate(adj.rotationDegrees.toFloat())
@@ -668,15 +594,8 @@ class PhotoEditorViewModel @Inject constructor(
     }
 
     /**
-     * Renders the colour-matrix adjustments (brightness / contrast / saturation / exposure /
-     * highlights / shadows / temperature / tone / filter) AND the rotation / flip geometry on
-     * top of [source] — skips only crop and redact strokes. The result is in display
-     * orientation (rotated / flipped) so the Crop overlay shows the same picture the rest of
-     * the editor does; the crop rect the user drags lives in this same rotated space and the
-     * full pipeline's crop step consumes it as-is.
-     *
-     * May return [source] itself when nothing is active, so call-sites must not treat the
-     * result as a fresh bitmap they own. Always run on a background dispatcher.
+     * Colour matrix + rotation/flip, but not crop or redact strokes, in display orientation — what the
+     * Crop overlay renders. May return [source] (don't treat as owned). Run on a background dispatcher.
      */
     private fun applyColorOnly(source: Bitmap, adj: EditorAdjustments): Bitmap {
         val oriented = rotateAndFlip(source, adj)
@@ -691,13 +610,9 @@ class PhotoEditorViewModel @Inject constructor(
     }
 
     /**
-     * Renders all current adjustments onto a fresh bitmap derived from [source].
-     * Heavy operation — always call from a background dispatcher.
-     *
-     * [recycleIntermediates] frees each transient stage (`rotated`, `cropped`, `colored`)
-     * as soon as the next stage stops aliasing it. Only the save path may set it: those
-     * locals are produced and consumed entirely off-screen, so nothing in Compose's draw
-     * pipeline holds them. Preview callers leave it false — see the note below.
+     * Renders all adjustments onto a fresh bitmap. Heavy — call from a background dispatcher.
+     * [recycleIntermediates] frees each transient stage; only the off-screen save path may set it,
+     * since preview callers' bitmaps may still be held by Compose's draw pipeline.
      */
     private fun applyAdjustments(
         source: Bitmap,
@@ -711,10 +626,8 @@ class PhotoEditorViewModel @Inject constructor(
             }
         }
 
-        // 1. rotate + flip — done BEFORE crop so the crop rect (which the user picked on the
-        //    rotated display canvas, the same orientation applyColorOnly feeds the Crop tab)
-        //    is consumed in the coordinate space it was authored in. Cropping first would put
-        //    the rect on the pre-rotation bitmap and cut a different region after the turn.
+        // 1. rotate + flip BEFORE crop, so the display-space crop rect is consumed in its authoring
+        //    space; cropping first would put the rect on the pre-rotation bitmap and cut the wrong region.
         val rotated = rotateAndFlip(source, adj)
         recycle(source, rotated)
 
@@ -750,11 +663,7 @@ class PhotoEditorViewModel @Inject constructor(
             else applyRedactStrokes(colored, adj.redactStrokes, recycleIntermediates)
         recycle(colored, final)
 
-        // When [recycleIntermediates] is false (every preview call) the transient bitmaps are
-        // intentionally left to GC. Even though these locals leave scope when this function
-        // returns, Compose's draw pipeline can still hold a reference for one frame past a
-        // state update, and recycling an intermediate that's also referenced by the in-flight
-        // render crashes the UI thread with "Canvas: trying to use a recycled bitmap".
+        // Preview calls (recycleIntermediates=false) leave transients to GC — see finalizeAdjustments.
         return final
     }
 
@@ -780,8 +689,7 @@ class PhotoEditorViewModel @Inject constructor(
             val downscale = 24 // larger = chunkier mosaic
             val small = Bitmap.createScaledBitmap(src, (w / downscale).coerceAtLeast(1), (h / downscale).coerceAtLeast(1), false)
             val up = Bitmap.createScaledBitmap(small, w, h, false)
-            // `small` is fully consumed by the upscale above. Off the save path we leave it to
-            // GC (see applyAdjustments): an explicit recycle can race Compose's in-flight draw.
+            // Off the save path leave `small` to GC — see finalizeAdjustments.
             if (recycleIntermediates && small !== up && !small.isRecycled) small.recycle()
             up
         }
@@ -807,8 +715,7 @@ class PhotoEditorViewModel @Inject constructor(
                     val maskBmp = Bitmap.createBitmap(w, h, Bitmap.Config.ALPHA_8)
                     Canvas(maskBmp).drawCircle(p.x, p.y, stroke.brushSize / 2f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = android.graphics.Color.BLACK })
                     drawPixelatedThroughMask(canvas, pixelated, maskBmp)
-                    // The mask is fully consumed by the masked draw above; off the save path
-                    // it's left to GC (see applyAdjustments) to avoid racing Compose's draw.
+                    // Off the save path leave the mask to GC — see finalizeAdjustments.
                     if (recycleIntermediates && !maskBmp.isRecycled) maskBmp.recycle()
                 }
                 continue
@@ -823,8 +730,7 @@ class PhotoEditorViewModel @Inject constructor(
                 }
             }
         }
-        // `pixelated` is a save-path local once strokes are burned in; free it when asked.
-        // Guard on a Pixelate stroke existing so we don't force the lazy to build here.
+        // Free `pixelated` on the save path; guard on a Pixelate stroke so we don't force the lazy here.
         if (recycleIntermediates && strokes.any { it.mode == RedactMode.Pixelate } &&
             pixelated !== out && !pixelated.isRecycled) {
             pixelated.recycle()
@@ -868,9 +774,7 @@ class PhotoEditorViewModel @Inject constructor(
         combined.postConcat(mSat)
         combined.postConcat(mAdjust)
 
-        // Exposure: scale all RGB by (1 + exposure/100). Multiplicative gain — similar
-        // to brightness but proportional instead of additive, so highlights bloom and
-        // shadows stay relatively darker like a real EV bump.
+        // Exposure: multiplicative RGB gain (1 + exposure/100) — proportional, unlike additive brightness.
         if (adj.exposure != 0) {
             val expScale = 1f + adj.exposure / 100f
             val mExposure = ColorMatrix(floatArrayOf(
@@ -882,10 +786,8 @@ class PhotoEditorViewModel @Inject constructor(
             combined.postConcat(mExposure)
         }
 
-        // Highlights: bias the scale toward bright by multiplying RGB by (1 - h/200)
-        // and adding a small constant. Pulls bright pixels down without crushing
-        // the midtones to near-zero. Approximation — a real highlight tool needs a
-        // per-pixel curve, but this gets us 80% of the visual effect within a ColorMatrix.
+        // Highlights: scale RGB by (1 - h/200) plus a small offset — pulls brights down without crushing
+        // midtones. ColorMatrix approximation of a real per-pixel highlight curve.
         if (adj.highlights != 0) {
             val hScale = 1f - adj.highlights / 200f  // -0.5..+0.5 → 1.5..0.5 scale
             val hOffset = -adj.highlights * 0.3f      // tiny additive push back
@@ -898,8 +800,7 @@ class PhotoEditorViewModel @Inject constructor(
             combined.postConcat(mHigh)
         }
 
-        // Shadows: opposite bias — lifts the dark end. Slight positive scale + positive
-        // offset together push low values up without saturating the top.
+        // Shadows: opposite of highlights — positive scale + offset lift the dark end.
         if (adj.shadows != 0) {
             val sScale = 1f + adj.shadows / 200f      // -0.5..+0.5 → 0.5..1.5 scale
             val sOffset = adj.shadows * 0.3f          // additive lift on darks
@@ -912,8 +813,7 @@ class PhotoEditorViewModel @Inject constructor(
             combined.postConcat(mShadow)
         }
 
-        // Temperature: warm (+) shifts R up and B down; cool (-) flips. 0.5 multiplier
-        // keeps the slider sensitivity reasonable — at +100 R gains 50, B loses 50.
+        // Temperature: warm (+) shifts R up / B down, cool (-) the reverse; 0.5 scale (+100 → ±50).
         if (adj.temperature != 0) {
             val t = adj.temperature * 0.5f
             val mTemp = ColorMatrix(floatArrayOf(
@@ -925,8 +825,7 @@ class PhotoEditorViewModel @Inject constructor(
             combined.postConcat(mTemp)
         }
 
-        // Tone: green (+) / magenta (-) — shifts only the G channel. Same 0.5 scaling
-        // as temperature so the two feel balanced when paired.
+        // Tone: green (+) / magenta (-) shifts only G; 0.5 scale to match temperature.
         if (adj.tone != 0) {
             val g = adj.tone * 0.5f
             val mTone = ColorMatrix(floatArrayOf(
@@ -978,17 +877,9 @@ class PhotoEditorViewModel @Inject constructor(
     }
 
     /**
-     * Saves the edited bitmap according to [mode].
-     *
-     * Local source:
-     *   • [SaveMode.Overwrite] — writes the edited bytes back to the source URI (in place).
-     *     MediaStore IS_PENDING dance ensures the change is visible immediately.
-     *   • [SaveMode.Copy] — inserts a new MediaStore entry under Pictures/Proton Photos.
-     *
-     * Cloud source:
-     *   • [SaveMode.Overwrite] — uploads the edit as a NEW Drive linkId, then trashes the
-     *     original linkId. The web client will then show only the edited version.
-     *   • [SaveMode.Copy] — uploads the edit as a new linkId; the original stays untouched.
+     * Saves the edited bitmap per [mode] and [EditorSource]. Local: Overwrite writes back to the
+     * source URI, Copy inserts a new MediaStore entry. Cloud: Overwrite uploads a new linkId then
+     * trashes the original, Copy uploads without touching it.
      */
     private var pendingWriteMode: SaveMode? = null
     private var pendingWriteQuality: Int = 92
@@ -999,29 +890,19 @@ class PhotoEditorViewModel @Inject constructor(
         val orig = s.originalBitmap ?: return
         viewModelScope.launch(Dispatchers.IO) {
             _state.update { it.copy(isSaving = true, saveResult = null) }
-            // Always re-render from the full-resolution original — the on-screen preview may
-            // be a 720px downsampled bitmap from the fast slider path, and saving that would
-            // silently degrade the user's photo. applyAdjustments is the same logic the live
-            // preview uses, so the saved bytes match what the user sees. Intermediates are
-            // safe to recycle here — this render is off-screen, so no Compose draw aliases them.
+            // Re-render full-res from the original, not the 720px slider preview (which would degrade the
+            // save). Off-screen, so intermediates are safe to recycle.
             val bitmap = applyAdjustments(orig, s.adjustments, recycleIntermediates = true)
-            // Single timestamp shared across the device save AND the cloud upload for
-            // Synced photos. Used to derive both the stamped filename and the
-            // DATE_TAKEN / captureTime metadata so ReconcileSyncStateUseCase's
-            // byNameAndDate match can pair the two fresh copies as Synced (green-cloud)
-            // without waiting for a manual download. Computing System.currentTimeMillis()
-            // independently in each save path drifts by a few ms — different filenames,
-            // different captureTime seconds, no match.
+            // One timestamp shared by the device save AND the cloud upload so they get the same filename +
+            // DATE_TAKEN second; reconcile's byNameAndDate then pairs them as Synced without a download.
             val editTimestampMs = System.currentTimeMillis()
             val saveResult: SaveResult = try {
                 val uri = when (source) {
                     is EditorSource.Local -> saveLocal(bitmap, source, mode, quality, editTimestampMs)
                     is EditorSource.Cloud -> saveCloud(bitmap, source, mode, quality, editTimestampMs)
                     is EditorSource.External -> {
-                        // Always insert as a fresh MediaStore copy — we don't own the foreign
-                        // URI so an overwrite is forbidden, and external entry is a device-only
-                        // flow so no Drive upload either. Forge a Local-shaped value just so
-                        // [insertLocalCopy] can read displayName / uri without a second helper.
+                        // Always a fresh MediaStore copy (foreign URI, no overwrite; device-only, no upload).
+                        // Forge a Local-shaped value so [insertLocalCopy] can read displayName/uri.
                         val pseudoLocal = EditorSource.Local(source.uri, source.displayName, source.mimeType)
                         val resultUri = insertLocalCopy(
                             bitmap = bitmap,
@@ -1036,21 +917,14 @@ class PhotoEditorViewModel @Inject constructor(
                         resultUri
                     }
                 }
-                // Invalidate Coil caches for the saved URI on EVERY successful local save —
-                // Overwrite reuses the original URI (stale bytes in cache), Copy creates a
-                // new URI (no stale risk, but a notifyChange wakes MediaStore observers up
-                // immediately). Cloud uploads create a brand-new linkId, so there's no
-                // existing key to nuke; the cloud listing refresh on viewer return picks it up.
+                // Invalidate Coil caches on every local save — Overwrite reuses the URI (stale bytes),
+                // Copy's notifyChange wakes MediaStore observers. Cloud uploads have no existing key.
                 if (uri != null && source is EditorSource.Local) {
                     invalidateImageCache(uri)
                 }
-                // Synced photo path: if a cloud counterpart was registered, also push the
-                // edited bitmap up so the cloud version doesn't stay stale. The MediaStore
-                // insert above already fired BackgroundSyncService's content observer —
-                // without the UPLOADING placeholder row below, SyncWorker would race this
-                // fanout and upload the same edited bytes a second time (duplicate Drive
-                // entry). Reconcile and SyncWorker both skip rows in UPLOADING state, so
-                // the editor owns the row until the fanout completes (or fails and demotes).
+                // Synced photo: also push the edit to the cloud counterpart. The MediaStore insert already
+                // fired the sync observer, so an UPLOADING placeholder row claims it (Reconcile/SyncWorker
+                // skip UPLOADING) — else SyncWorker would race and upload a duplicate.
                 val counterpart = cloudCounterpart
                 if (source is EditorSource.Local && counterpart != null && uri != null) {
                     val userId = accountManager.getPrimaryUserId().first()
@@ -1096,9 +970,8 @@ class PhotoEditorViewModel @Inject constructor(
                 }
                 SaveResult.Success(uri)
             } catch (e: SecurityException) {
-                // Foreign MediaStore URI — try createWriteRequest for one-shot consent so the
-                // user can actually overwrite the original. IS_PENDING/IS_TRASHED items skip
-                // straight to copy because the consent dialog refuses them.
+                // Foreign MediaStore URI — try createWriteRequest for one-shot overwrite consent.
+                // IS_PENDING/IS_TRASHED items skip to copy (the consent dialog refuses them).
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
                     && allowWriteRequestRecovery
                     && source is EditorSource.Local
@@ -1125,13 +998,9 @@ class PhotoEditorViewModel @Inject constructor(
                         insertLocalCopy(bitmap, source, quality, useOriginalName = true)
                     }.fold(
                         onSuccess = { uri ->
-                            // Synced + Overwrite + fallback-to-Copy = the original device
-                            // file is otherwise stranded next to the edit. Quiet delete
-                            // succeeds for app-owned files; foreign URIs (camera roll,
-                            // screenshots) need OS consent — surface createDeleteRequest
-                            // and the screen launches it. On Allow the original is gone,
-                            // sync logic re-pairs the new device file with the new cloud
-                            // linkId by hash, and the green-cloud badge stays accurate.
+                            // Synced Overwrite that fell back to Copy strands the original next to the edit.
+                            // Quiet delete works for app-owned files; foreign URIs need OS consent
+                            // (createDeleteRequest, launched by the screen). Sync re-pairs by hash afterwards.
                             if (cloudCounterpart != null) {
                                 val srcUri = Uri.parse(source.uri)
                                 val rowsDeleted = runCatching {
@@ -1154,11 +1023,11 @@ class PhotoEditorViewModel @Inject constructor(
                         onFailure = { e2 -> SaveResult.Failed(eu.akoos.photos.util.sanitizeErrorMessage(e2.message ?: e.message)) },
                     )
                 } else {
-                    SaveResult.Failed(eu.akoos.photos.util.sanitizeErrorMessage(e.message ?: "No permission to save"))
+                    SaveResult.Failed(eu.akoos.photos.util.sanitizeErrorMessage(e.message ?: context.getString(R.string.editor_no_permission)))
                 }
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
-                SaveResult.Failed(eu.akoos.photos.util.sanitizeErrorMessage(e.message ?: "Save failed"))
+                SaveResult.Failed(eu.akoos.photos.util.sanitizeErrorMessage(e.message ?: context.getString(R.string.editor_save_failed)))
             }
             _state.update { it.copy(isSaving = false, saveResult = saveResult) }
         }
@@ -1172,9 +1041,7 @@ class PhotoEditorViewModel @Inject constructor(
         save(mode, quality, allowWriteRequestRecovery = false)
     }
 
-    /** Called once the OS delete-consent dialog closes (regardless of Allow/Deny — the
-     *  system has already actioned the choice by then). Clears the pending intent so the
-     *  screen's saveResult Effect proceeds with toast + navigation. */
+    /** Clears the pending delete intent once the OS consent dialog closes (Allow or Deny). */
     fun onDeletePermissionResolved() {
         _state.update { it.copy(pendingDeleteIntent = null) }
     }
@@ -1185,7 +1052,7 @@ class PhotoEditorViewModel @Inject constructor(
             it.copy(
                 pendingWriteIntent = null,
                 isSaving = false,
-                saveResult = SaveResult.Failed("Save cancelled"),
+                saveResult = SaveResult.Failed(context.getString(R.string.editor_save_cancelled)),
             )
         }
     }
@@ -1197,9 +1064,8 @@ class PhotoEditorViewModel @Inject constructor(
         }
     }
 
-    // Throws SecurityException on foreign MediaStore URIs (caller handles via createWriteRequest
-    // recovery + copy fallback). No IS_PENDING dance — setting it on a foreign URI traps the
-    // file in pending state and blocks the very write we are about to do.
+    // Throws SecurityException on foreign URIs (caller recovers). No IS_PENDING dance — on a foreign
+    // URI it traps the file in pending state and blocks the write.
     private fun overwriteLocal(bitmap: Bitmap, source: EditorSource.Local, quality: Int): Uri {
         val srcUri = Uri.parse(source.uri)
         context.contentResolver.openOutputStream(srcUri, "wt")?.use { out ->
@@ -1210,11 +1076,9 @@ class PhotoEditorViewModel @Inject constructor(
 
     @OptIn(coil.annotation.ExperimentalCoilApi::class)
     private fun invalidateImageCache(uri: Uri) {
-        // Coil 2 memory-caches under MemoryCache.Key(key, extras). The plain remove(Key(key))
-        // only strips the bare entry; variants requested with a Size or transformations land
-        // under the same key but with a non-empty extras map and survive. Scan the live key
-        // set and nuke every entry whose primary string matches — otherwise the viewer keeps
-        // serving the pre-edit bitmap from one of those sized variants.
+        // Coil 2 keys are Key(key, extras); plain remove(Key(key)) leaves sized/transformed variants.
+        // Scan the live key set and drop every entry matching the primary string, else the viewer
+        // keeps serving a pre-edit variant.
         val key = uri.toString()
         val loader = context.imageLoader
         val mc = loader.memoryCache
@@ -1248,16 +1112,10 @@ class PhotoEditorViewModel @Inject constructor(
         bitmap: Bitmap,
         source: EditorSource.Local,
         quality: Int,
-        /** When true, save with the original display name (used as the auto-fallback path
-         *  from [save] when Overwrite isn't possible). Otherwise stamp `_edit_YYYYMMDD_HHMMSS`
-         *  onto the name so a manual "Save as Copy" produces a clearly-distinct file. */
+        /** Keep the original name (the Overwrite-fallback path); otherwise stamp `_edit_<ts>` for a distinct copy. */
         useOriginalName: Boolean = false,
-        /** Shared timestamp used to derive both the stamped filename AND the explicit
-         *  DATE_TAKEN row value. Letting MediaStore auto-pick DATE_TAKEN (= now) made it
-         *  drift by a few ms vs the cloud upload's captureTime, so reconcile's
-         *  byNameAndDate match (second-precision) sometimes landed on different seconds.
-         *  Passing the exact same Long to insertLocalCopy AND uploadEditAsCloudReplacement
-         *  guarantees they share the same name + DATE_TAKEN second. */
+        /** Shared timestamp for the filename AND explicit DATE_TAKEN; pass the same Long to the cloud
+         *  upload so reconcile's second-precision byNameAndDate match pairs them. */
         editTimestampMs: Long = System.currentTimeMillis(),
     ): Uri? {
         val collection = MediaStore.Images.Media.EXTERNAL_CONTENT_URI
@@ -1265,9 +1123,7 @@ class PhotoEditorViewModel @Inject constructor(
         val values = ContentValues().apply {
             put(MediaStore.Images.Media.DISPLAY_NAME, newName)
             put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
-            // Explicit DATE_TAKEN so reconcile.byNameAndDate finds the cloud sibling — see
-            // editTimestampMs doc-comment above. DATE_MODIFIED is in seconds (the MediaStore
-            // legacy unit); DATE_TAKEN is in milliseconds.
+            // Explicit DATE_TAKEN (ms) so reconcile.byNameAndDate finds the cloud sibling; DATE_MODIFIED is seconds.
             put(MediaStore.Images.Media.DATE_TAKEN, editTimestampMs)
             put(MediaStore.Images.Media.DATE_MODIFIED, editTimestampMs / 1000L)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -1298,10 +1154,7 @@ class PhotoEditorViewModel @Inject constructor(
             val userId = accountManager.getPrimaryUserId().first()
                 ?: error("Not signed in")
             val tempUri = Uri.fromFile(tempFile)
-            // Overwrite keeps the original filename; Copy stamps a new one so both
-            // versions are distinguishable in the cloud listing. The stamp uses the
-            // same editTimestampMs the caller picked so a synced edit-copy round-trip
-            // ends up at the SAME filename + captureTime on device + cloud.
+            // Overwrite keeps the name; Copy stamps a distinct one (same editTimestampMs as the device copy).
             val displayName = when (mode) {
                 SaveMode.Overwrite -> source.photo.displayName
                 SaveMode.Copy      -> stamp(source.photo.displayName, editTimestampMs)
@@ -1327,7 +1180,6 @@ class PhotoEditorViewModel @Inject constructor(
             }
 
             if (mode == SaveMode.Overwrite) {
-                // Trash the original — Overwrite semantics require the edit to replace it.
                 runCatching { cloudRepo.deleteFiles(userId, listOf(source.photo.linkId)) }
             }
             return Uri.parse("proton://drive/$newLinkId")
@@ -1337,22 +1189,16 @@ class PhotoEditorViewModel @Inject constructor(
     }
 
     /**
-     * Synced-photo helper. After a successful local save, ALSO write the edit up to
-     * Drive as a new linkId so the cloud counterpart of the Synced item reflects the
-     * change. The mode semantics are:
-     *   • Overwrite — upload + trash the old linkId (cloud "replace original")
-     *   • Copy      — upload as a new linkId, leave the old one alone (cloud "keep both")
+     * Synced-photo helper: after a local save, also push the edit to Drive. Overwrite uploads + trashes
+     * the old linkId; Copy uploads a new linkId and leaves the old one.
      */
     private suspend fun uploadEditAsCloudReplacement(
         bitmap: Bitmap,
         cloud: CloudPhoto,
         mode: SaveMode,
         quality: Int,
-        /** Same instant the matching device-side insertLocalCopy used, so the freshly
-         *  uploaded cloud linkId carries the SAME displayName + captureTime second as
-         *  the new device file. Reconcile's byNameAndDate then pairs them automatically
-         *  — the user gets the green-cloud Synced badge without having to download the
-         *  cloud copy back first. */
+        /** Same instant as the device-side insertLocalCopy so both share a name + captureTime second
+         *  and reconcile's byNameAndDate pairs them as Synced. */
         editTimestampMs: Long,
         userId: me.proton.core.domain.entity.UserId,
     ): String {
@@ -1393,16 +1239,8 @@ class PhotoEditorViewModel @Inject constructor(
     }
 
     /**
-     * Hex-encodes the SHA-1 of the file's plaintext bytes. The upload pipeline
-     * feeds this into `Common.Digests.SHA1` of the encrypted xAttr blob AND into
-     * the `HMAC-SHA256(rootNodeHashKey, ...)` that produces the wire ContentHash.
-     * Drive Android pins the digest algorithm to SHA-1 in
-     * ConfigurationProvider.contentDigestAlgorithm, and Drive web's
-     * photosTransferPayloadBuilder rejects payloads whose ContentHash was
-     * derived from a different algorithm with the misleading
-     * "Cannot build photo payload without a content hash" message. Any SHA-256
-     * variant here would land an editor cloud-save that nothing else in the
-     * Drive ecosystem accepts.
+     * Hex SHA-1 of the file's plaintext. Must stay SHA-1 (not SHA-256): Drive pins the digest algorithm,
+     * and Drive web rejects a differently-derived ContentHash ("Cannot build photo payload...").
      */
     private fun sha1(file: File): String {
         val digest = java.security.MessageDigest.getInstance("SHA-1")
@@ -1415,12 +1253,8 @@ class PhotoEditorViewModel @Inject constructor(
     }
 
     /**
-     * Stamp a "_edit_<ts>" suffix onto the source filename, where <ts> is a formatted
-     * timestamp the caller chooses. Default = now, but for save flows that need the
-     * device-copy AND cloud-copy to share an identical filename (so [ReconcileSyncStateUseCase]
-     * can pair them via byNameAndDate later), pass the SAME timestamp to both calls:
-     * each independent SimpleDateFormat#format(Date()) would otherwise drift by a few
-     * milliseconds and produce different filenames that look unrelated to reconcile.
+     * Appends a "_edit_<ts>" suffix to the filename. Pass the SAME [atMs] to the device + cloud
+     * saves so they get identical names (independent format(Date()) calls drift) and reconcile pairs them.
      */
     private fun stamp(displayName: String, atMs: Long = System.currentTimeMillis()): String {
         val dotIdx = displayName.lastIndexOf('.')

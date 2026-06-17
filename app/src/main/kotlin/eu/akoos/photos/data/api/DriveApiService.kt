@@ -97,10 +97,8 @@ interface DriveApiService : BaseRetrofitApi {
     @GET("drive/v2/shares/{shareId}")
     suspend fun getShareById(@Path("shareId") shareId: String): ShareDetailsResponse
 
-    // v1 share-bootstrap endpoint — returns a flat Share object (Key, Passphrase, AddressID,
-    // LinkID, VolumeID at the top level, no wrapper). Use this for shares that the v2 path
-    // 404s on — newly created album/photo shares fall into that bucket; the v2 endpoint
-    // appears to only work for already-migrated main shares.
+    // v1 share-bootstrap: flat Share (Key/Passphrase/LinkID/VolumeID at top level). Needed for
+    // newly created album/photo shares — the v2 path 404s until a share is migrated.
     @GET("drive/shares/{shareId}")
     suspend fun getShareBootstrap(@Path("shareId") shareId: String): eu.akoos.photos.data.api.dto.ShareBootstrapResponse
 
@@ -130,11 +128,8 @@ interface DriveApiService : BaseRetrofitApi {
     ): CreateAlbumResponse
 
     /**
-     * Server-side photo / link copy. The endpoint takes the SOURCE volume + link in
-     * the path (we copy from a shared volume into the caller's own volume), the
-     * TARGET volume + parent link inside the body, and re-encrypted metadata —
-     * node passphrase, link name, hash — so the backend can rewrap the existing
-     * encrypted blob under the new target tree without ever returning the bytes.
+     * Server-side link copy: SOURCE volume+link in the path, TARGET volume+parent + re-encrypted
+     * metadata in the body, so the backend rewraps the existing blob without returning the bytes.
      * Powers "Save shared album to my library" on the recipient side.
      */
     @POST("drive/volumes/{volumeId}/links/{linkId}/copy")
@@ -151,8 +146,7 @@ interface DriveApiService : BaseRetrofitApi {
         @Body request: AddAlbumMultipleRequest,
     ): eu.akoos.photos.data.api.dto.AddAlbumMultipleResponse
 
-    // POST /drive/photos/volumes/{volumeId}/albums/{albumLinkId}/remove-multiple
-    // Removes the album-reference for each listed linkId. Photos stay in Photos root.
+    // Removes the album reference for each listed linkId. Photos stay in Photos root.
     @POST("drive/photos/volumes/{volumeId}/albums/{albumLinkId}/remove-multiple")
     suspend fun removePhotosFromAlbum(
         @Path("volumeId") volumeId: String,
@@ -160,8 +154,7 @@ interface DriveApiService : BaseRetrofitApi {
         @Body request: eu.akoos.photos.data.api.dto.RemoveFromAlbumRequest,
     ): BaseResponse
 
-    // PUT /drive/photos/volumes/{volumeId}/albums/{albumLinkId}
-    // Updates the album: rename (via Link.Name + Hash + …), set CoverLinkID, or both.
+    // Rename (Link.Name + Hash + …), set CoverLinkID, or both.
     @PUT("drive/photos/volumes/{volumeId}/albums/{albumLinkId}")
     suspend fun updateAlbum(
         @Path("volumeId") volumeId: String,
@@ -169,8 +162,7 @@ interface DriveApiService : BaseRetrofitApi {
         @Body request: eu.akoos.photos.data.api.dto.UpdateAlbumRequest,
     ): BaseResponse
 
-    // DELETE /drive/photos/volumes/{volumeId}/albums/{albumLinkId}?DeleteAlbumPhotos=0
-    // Deletes the album; photos are NOT deleted when DeleteAlbumPhotos=0.
+    // Photos are NOT deleted when DeleteAlbumPhotos=0.
     @DELETE("drive/photos/volumes/{volumeId}/albums/{albumLinkId}")
     suspend fun deleteAlbum(
         @Path("volumeId") volumeId: String,
@@ -178,7 +170,6 @@ interface DriveApiService : BaseRetrofitApi {
         @Query("DeleteAlbumPhotos") deleteAlbumPhotos: Int = 0,
     ): BaseResponse
 
-    // POST /drive/v2/volumes/{volumeId}/trash_multiple
     // Moves cloud photos to server-side trash (recoverable from recently deleted).
     @POST("drive/v2/volumes/{volumeId}/trash_multiple")
     suspend fun trashPhotos(
@@ -186,11 +177,8 @@ interface DriveApiService : BaseRetrofitApi {
         @Body request: DeleteLinksRequest,
     ): BaseResponse
 
-    // ── Favorites / Tags ──────────────────────────────────────────────────────
-    // POST /drive/photos/volumes/{volumeID}/links/{linkID}/favorite
-    // Marks a photo as Favorite. PhotoData may be null for the simple case (server
-    // handles the re-encryption to the automatic Favorites collection); when set, it
-    // carries the re-encrypted passphrase/name/hash. Match the official Drive Android API.
+    // Marks a photo as Favorite. PhotoData may be null (server re-encrypts to the automatic
+    // Favorites collection); when set it carries the re-encrypted passphrase/name/hash.
     @POST("drive/photos/volumes/{volumeId}/links/{linkId}/favorite")
     suspend fun addFavorite(
         @Path("volumeId") volumeId: String,
@@ -198,7 +186,6 @@ interface DriveApiService : BaseRetrofitApi {
         @Body request: eu.akoos.photos.data.api.dto.FavoriteRequest,
     ): BaseResponse
 
-    // POST /drive/photos/volumes/{volumeID}/links/{linkID}/tags
     @POST("drive/photos/volumes/{volumeId}/links/{linkId}/tags")
     suspend fun addPhotoTags(
         @Path("volumeId") volumeId: String,
@@ -206,8 +193,7 @@ interface DriveApiService : BaseRetrofitApi {
         @Body request: eu.akoos.photos.data.api.dto.TagRequest,
     ): BaseResponse
 
-    // DELETE /drive/photos/volumes/{volumeID}/links/{linkID}/tags (with body)
-    // Used to remove the favorite tag (id 0) from a photo when un-favoriting.
+    // Removes the favorite tag (id 0) from a photo when un-favoriting.
     @retrofit2.http.HTTP(method = "DELETE", path = "drive/photos/volumes/{volumeId}/links/{linkId}/tags", hasBody = true)
     suspend fun deletePhotoTags(
         @Path("volumeId") volumeId: String,
@@ -215,34 +201,30 @@ interface DriveApiService : BaseRetrofitApi {
         @Body request: eu.akoos.photos.data.api.dto.TagRequest,
     ): BaseResponse
 
-    // GET drive/volumes/{volumeId}/trash — full Drive trash (all link types), page-based.
-    // Web client confirmed path: /api/drive/volumes/{id}/trash?Page=N (0-indexed, no "v2").
-    // Filter client-side for image/* / video/* to show only photos/videos.
+    // Full Drive trash (all link types). Page is 0-indexed, no "v2". Filter client-side
+    // for image/* / video/* to show only photos.
     @GET("drive/volumes/{volumeId}/trash")
     suspend fun getVolumeTrash(
         @Path("volumeId") volumeId: String,
         @Query("Page") page: Int = 0,
     ): VolumeTrashResponse
 
-    // PUT drive/v2/volumes/{volumeId}/trash/restore_multiple — move trashed items back to Photos stream.
-    // Verb + path confirmed via ProtonDriveApps/android-drive DriveTrashApi.
+    // Moves trashed items back to the Photos stream.
     @PUT("drive/v2/volumes/{volumeId}/trash/restore_multiple")
     suspend fun restoreFromTrash(
         @Path("volumeId") volumeId: String,
         @Body request: DeleteLinksRequest,
     ): eu.akoos.photos.data.api.dto.TrashActionResponse
 
-    // POST drive/v2/volumes/{volumeId}/trash/delete_multiple — permanently delete trashed items.
-    // Path confirmed via ProtonDriveApps/android-drive DriveTrashApi (the prior
-    // .../delete_multiple path returned 200 but silently no-op'd).
+    // Permanently delete trashed items. Must be under v2/.../trash/ — the non-trash
+    // delete_multiple path returned 200 but silently no-op'd.
     @POST("drive/v2/volumes/{volumeId}/trash/delete_multiple")
     suspend fun deleteForever(
         @Path("volumeId") volumeId: String,
         @Body request: DeleteLinksRequest,
     ): eu.akoos.photos.data.api.dto.TrashActionResponse
 
-    // Correct endpoint confirmed from HAR: drive/volumes/{id}/photos (no "photos/" prefix).
-    // drive/photos/volumes/{id}/photos returns 404 on most accounts.
+    // No "photos/" prefix here — drive/photos/volumes/{id}/photos returns 404 on most accounts.
     @GET("drive/volumes/{volumeId}/photos")
     suspend fun getPhotoLinks(
         @Path("volumeId") volumeId: String,
@@ -251,8 +233,6 @@ interface DriveApiService : BaseRetrofitApi {
     ): PhotoLinksResponse
 
     // Batch fetch thumbnail download URLs by ThumbnailID.
-    // POST /drive/volumes/{volumeId}/thumbnails
-    // Request: {"ThumbnailIDs": [...]}  Response: {"Thumbnails": [{ThumbnailID, BareURL, Token}]}
     @POST("drive/volumes/{volumeId}/thumbnails")
     suspend fun getThumbnailUrls(
         @Path("volumeId") volumeId: String,
@@ -273,17 +253,15 @@ interface DriveApiService : BaseRetrofitApi {
         @Path("linkId") linkId: String,
     ): LinkDetailsResponse
 
-    // Canonical single-link endpoint per official Proton Drive Android SDK:
-    // GET "drive/shares/{shareId}/links/{linkId}" — NO "v2" prefix.
-    // This returns LinkDto with FileProperties.ContentKeyPacket.
+    // No "v2" prefix here — returns LinkDto with FileProperties.ContentKeyPacket (the v2 path doesn't).
     @GET("drive/shares/{shareId}/links/{linkId}")
     suspend fun getFullLinkDetails(
         @Path("shareId") shareId: String,
         @Path("linkId") linkId: String,
     ): FullLinkResponse
 
-    // Batch link metadata — official SDK path (non-Photos, regular Drive shares).
-    // Returns links directly (not wrapped) with full FileProperties.ContentKeyPacket.
+    // Batch link metadata for regular (non-Photos) Drive shares. Returns links unwrapped,
+    // with full FileProperties.ContentKeyPacket.
     @POST("drive/shares/{shareId}/links/fetch_metadata")
     suspend fun fetchLinkMetadata(
         @Path("shareId") shareId: String,
@@ -335,15 +313,14 @@ interface DriveApiService : BaseRetrofitApi {
         @Body request: CreateFileRequest,
     ): CreateFileResponse
 
-    // Photos volume photo creation — try all known API variants in fallback order.
-    // Primary: drive/photos/volumes/{volumeId}/photos (stream-enabled accounts)
+    // Primary photo-creation path (stream-enabled accounts); falls back to createFileByVolume.
     @POST("drive/photos/volumes/{volumeId}/photos")
     suspend fun createPhoto(
         @Path("volumeId") volumeId: String,
         @Body request: CreatePhotoRequest,
     ): CreatePhotoResponse
 
-    // Fallback: standard volume-based file creation (v2 volume path)
+    // Fallback for createPhoto: standard volume-based file creation.
     @POST("drive/v2/volumes/{volumeId}/files")
     suspend fun createFileByVolume(
         @Path("volumeId") volumeId: String,
@@ -356,7 +333,6 @@ interface DriveApiService : BaseRetrofitApi {
         @Path("linkId") linkId: String,
     ): CreateRevisionResponse
 
-    // GET drive/shares/{shareId}/links/{linkId}/revisions/{revisionId}/verification
     // Returns a VerificationCode token that must be included in each block's Verifier.Token field.
     @GET("drive/shares/{shareId}/links/{linkId}/revisions/{revisionId}/verification")
     suspend fun getVerificationData(
@@ -365,8 +341,7 @@ interface DriveApiService : BaseRetrofitApi {
         @Path("revisionId") revisionId: String,
     ): VerificationDataResponse
 
-    // Upload a block to CDN bare URL (dynamic URL, multipart POST).
-    // Routing through ApiProvider ensures all Proton auth headers (Authorization, x-pm-appversion) are added.
+    // Upload a block to a CDN bare URL. Routing through ApiProvider adds the Proton auth headers.
     @Multipart
     @POST
     suspend fun uploadBlockCdn(
@@ -375,14 +350,13 @@ interface DriveApiService : BaseRetrofitApi {
         @Header("pm-storage-token") storageToken: String,
     ): BaseResponse
 
-    // POST drive/blocks — official Proton Drive blocks upload endpoint.
-    // All file context (ShareID, LinkID, RevisionID, AddressID) is passed in the request body.
+    // All file context (ShareID, LinkID, RevisionID, AddressID) goes in the body, not the path.
     @POST("drive/blocks")
     suspend fun requestUploadLinks(
         @Body request: UploadBlockRequest,
     ): UploadBlockResponse
 
-    // Official Proton Drive endpoint for committing a revision (no v2 prefix).
+    // No v2 prefix on this commit path.
     @PUT("drive/shares/{shareId}/files/{linkId}/revisions/{revisionId}")
     suspend fun commitRevision(
         @Path("shareId") shareId: String,
@@ -391,9 +365,8 @@ interface DriveApiService : BaseRetrofitApi {
         @Body request: CommitRevisionRequest,
     ): BaseResponse
 
-    // v2 volume-based commit — matches what the web client uses for Photos uploads.
-    // Thumbnails are committed implicitly (no ThumbnailList needed) because the CDN
-    // already associates them with the revision via RevisionID in POST drive/blocks.
+    // v2 volume-based commit (Photos uploads). Thumbnails commit implicitly — the CDN already
+    // associates them with the revision via the RevisionID sent in POST drive/blocks.
     @PUT("drive/v2/volumes/{volumeId}/files/{linkId}/revisions/{revisionId}")
     suspend fun commitRevisionByVolume(
         @Path("volumeId") volumeId: String,
@@ -408,45 +381,46 @@ interface DriveApiService : BaseRetrofitApi {
         @Body request: DeleteLinksRequest,
     ): BaseResponse
 
-    // Album sharing — create a brand-new Drive share rooted at [linkId] (the album).
-    // Endpoint and body shape match ProtonDriveApps/android-drive ShareApi exactly. The
-    // legacy "drive/v2/shares/{shareId}/links/{linkId}/share" path returns 404 "Path not found"
-    // — the server only accepts share creation through the volume-level POST.
+    // Creates a new Drive share rooted at an album. Must go through this volume-level POST —
+    // the legacy "drive/v2/shares/{shareId}/links/{linkId}/share" path returns 404 "Path not found".
     @POST("drive/volumes/{volumeId}/shares")
     suspend fun createVolumeShare(
         @Path("volumeId") volumeId: String,
         @Body request: eu.akoos.photos.data.api.dto.CreateShareRequest,
     ): eu.akoos.photos.data.api.dto.CreateShareResponse
 
-    // Create a public share URL from a share ID
     @POST("drive/shares/{shareId}/urls")
     suspend fun createShareUrl(
         @Path("shareId") shareId: String,
         @Body request: CreateShareUrlRequest,
     ): CreateShareUrlResponse
 
-    // List URLs for a share
     @GET("drive/shares/{shareId}/urls")
     suspend fun getShareUrls(
         @Path("shareId") shareId: String,
     ): ShareUrlsResponse
 
+    // Update a public share URL's password (custom vs random).
+    @PUT("drive/shares/{shareId}/urls/{shareUrlId}")
+    suspend fun updateShareUrl(
+        @Path("shareId") shareId: String,
+        @Path("shareUrlId") shareUrlId: String,
+        @Body request: eu.akoos.photos.data.api.dto.UpdateShareUrlRequest,
+    ): CreateShareUrlResponse
+
     // Disable a single public share URL without touching member shares.
-    // Path matches the official Drive Android client (drive/share-url/.../ShareUrlApi.kt).
     @DELETE("drive/shares/{shareId}/urls/{shareUrlId}")
     suspend fun deleteShareUrl(
         @Path("shareId") shareId: String,
         @Path("shareUrlId") shareUrlId: String,
     ): BaseResponse
 
-    // Delete a share
     @DELETE("drive/shares/{shareId}")
     suspend fun deleteShare(
         @Path("shareId") shareId: String,
     ): BaseResponse
 
     // Change a member's permission bitmap on a share (viewer 4 ↔ editor 6).
-    // Path matches the official Drive Android client (drive/share-user/.../ShareMemberApi.kt).
     @PUT("drive/v2/shares/{shareId}/members/{shareMemberId}")
     suspend fun updateShareMember(
         @Path("shareId") shareId: String,
@@ -454,18 +428,15 @@ interface DriveApiService : BaseRetrofitApi {
         @Body request: eu.akoos.photos.data.api.dto.UpdateShareMemberRequest,
     ): BaseResponse
 
-    // Invite a Proton user to an album share. The body carries the share session key
-    // re-encrypted to the invitee + a detached signature; see [DrivePhotoRepositoryImpl.inviteToAlbum]
-    // for the crypto pipeline.
+    // Body carries the share session key re-encrypted to the invitee + a detached signature; see
+    // [DrivePhotoRepositoryImpl.inviteToAlbum] for the crypto pipeline.
     @POST("drive/v2/shares/{shareId}/invitations")
     suspend fun inviteToShare(
         @Path("shareId") shareId: String,
         @Body request: eu.akoos.photos.data.api.dto.CreateInvitationRequest,
     ): BaseResponse
 
-    // Change a PENDING invitation's permission bitmap before the invitee accepts
-    // (viewer 4 ↔ editor 6). Same body shape as the member update; path matches the
-    // official Drive Android client (drive/share-user/.../ShareInvitationApi.kt).
+    // Change a PENDING invitation's permission bitmap before the invitee accepts (viewer 4 ↔ editor 6).
     @PUT("drive/v2/shares/{shareId}/invitations/{invitationId}")
     suspend fun updateShareInvitation(
         @Path("shareId") shareId: String,
@@ -484,6 +455,16 @@ interface DriveApiService : BaseRetrofitApi {
         @Query("AnchorID") anchorId: String? = null,
     ): SharedWithMeResponse
 
+    /**
+     * "Shared by me" feed — every share the current user created in this volume, across all link
+     * types. Carries only ShareID / LinkID / ContextShareID, so the caller resolves each link type.
+     */
+    @GET("drive/v2/volumes/{volumeId}/shares")
+    suspend fun getSharedByMeListings(
+        @Path("volumeId") volumeId: String,
+        @Query("AnchorID") anchorId: String? = null,
+    ): eu.akoos.photos.data.api.dto.SharedByMeResponse
+
     /** Global pending invitations for the current user (invitee-side). */
     @GET("drive/v2/shares/invitations")
     suspend fun getPendingInvitations(
@@ -496,11 +477,8 @@ interface DriveApiService : BaseRetrofitApi {
         @Path("invitationId") invitationId: String,
     ): InvitationDetailResponse
 
-    /**
-     * Decline (reject) a pending invitation. The Drive API only allows GET on the bare
-     * `/invitations/{id}` URL — DELETE returns "Method Not Allowed". The rejection lives at
-     * the `/reject` suffix with a POST.
-     */
+    // Decline a pending invitation. Must POST to /reject — DELETE on the bare /invitations/{id}
+    // URL returns "Method Not Allowed".
     @POST("drive/v2/shares/invitations/{invitationId}/reject")
     suspend fun declineInvitation(
         @Path("invitationId") invitationId: String,

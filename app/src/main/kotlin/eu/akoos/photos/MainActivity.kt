@@ -114,47 +114,34 @@ class MainActivity : AppCompatActivity() {
 
     private var isLocked by mutableStateOf(false)
     private var lockEnabled = false
-    /** Set when the user taps the home-screen photo widget — carries the URI of the photo
-     *  the widget was showing at tap time. The NavGraph reads + clears this so the gallery
-     *  can route straight to the viewer for that photo. `null` for regular cold starts. */
+    /** Photo URI from a home-screen widget tap; NavGraph reads + clears it to route to the viewer. */
     private var widgetPhotoUri by mutableStateOf<String?>(null)
-    /** Set when the user opens an external image/video via the system "Open with" / "Edit with"
-     *  chooser. The NavGraph reads this and routes straight to the editor for that URI. `null`
-     *  for cold starts without an EDIT/VIEW intent. */
+    /** Request from a system "Open with" / "Edit with" intent; NavGraph routes to the editor. */
     private var externalEditRequest by mutableStateOf<ExternalEditRequest?>(null)
-    /** Wall-clock timestamp of the last ON_STOP (real backgrounding). Compared against the
-     *  user-configured timeout (read from DataStore inside the lifecycle check) to decide
-     *  whether enough time has elapsed to re-lock the app. */
+    /** Wall-clock of the last ON_STOP, compared against the configured timeout to decide re-lock. */
     private var lastBackgroundMs = 0L
-    /** Timestamp of the last successful unlock. Used to gate the re-lock check below: the
-     *  Android BiometricPrompt internally cycles the host activity through ON_STOP / ON_RESTART
-     *  on success, which would re-fire the lock guard and lock the app right after unlock
-     *  without this grace window. A short grace window after [onUnlocked] suppresses the
-     *  re-entry. */
+    /** Last successful unlock. BiometricPrompt cycles the host through ON_STOP/ON_RESTART on
+     *  success, which would re-fire the lock guard; [unlockGraceMs] after this suppresses that. */
     private var lastUnlockMs = 0L
     private val unlockGraceMs = 2000L
 
-    /** Foreground-resume guard: silent refresh fires only when this much time has passed since
-     *  the last successful sync. Mirrors the threshold the user sees as "fresh enough". */
-    private val resumeRefreshThresholdMs = 5L * 60L * 1000L
+    /** Foreground-resume silent refresh fires only after this long since the last successful sync. */
+    // Short floor (not minutes) because the on-resume refresh is now a cheap newest-page poll for
+    // accounts without an event anchor, so it can run on almost every return without a battery cost.
+    private val resumeRefreshThresholdMs = 60L * 1000L
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         authOrchestrator.register(this)
         enableEdgeToEdge()
 
-        // Pull the widget-tap photo URI out of the launching intent (if any). The same
-        // path is mirrored in onNewIntent so a re-tap while the app is foregrounded also
-        // routes correctly.
+        // Widget-tap URI from the launching intent (mirrored in onNewIntent for a foregrounded re-tap).
         widgetPhotoUri = intent?.getStringExtra(EXTRA_WIDGET_PHOTO_URI)
         externalEditRequest = parseExternalEditRequest(intent)
 
-        // ProtonCore account-state handler. Without this, accounts with 2FA or two-pass mode
-        // enabled get stuck after entering the password: the LoginActivity closes (because
-        // first-factor auth succeeded), the AccountManager transitions to SessionSecondFactorNeeded
-        // / AccountTwoPassModeNeeded, but nothing observes those states and the user is left
-        // staring at the sign-in screen with no way forward. Wiring the observers here triggers
-        // the corresponding workflows (which open the right ProtonCore activity).
+        // ProtonCore account-state handler. Without it, 2FA / two-pass accounts stall after the
+        // password: LoginActivity closes on first-factor success but nothing observes the resulting
+        // SecondFactorNeeded / TwoPassModeNeeded state. These observers open the right workflow.
         accountManager.observe(this.lifecycle, Lifecycle.State.CREATED)
             .onAccountTwoPassModeNeeded { authOrchestrator.startTwoPassModeWorkflow(it) }
             .onAccountTwoPassModeFailed {
@@ -176,49 +163,35 @@ class MainActivity : AppCompatActivity() {
             .onUserAddressKeyCheckFailed { /* same */ }
 
         lifecycleScope.launch {
-            // Login gate: don't surface the BG "Watching for new photos" notification
-            // until the user has actually signed in. A pre-login start meant a fresh
-            // install that never completed login would show a permanent BG notif
-            // pointing at an app that does no work — confusing and battery-curious.
+            // Login gate: don't arm the BG "Watching for new photos" notification before sign-in,
+            // or a never-completed install shows a permanent notif for an app doing no work.
             val userId = accountManager.getPrimaryUserId().first()
             if (userId == null) return@launch
 
             val prefs = settingsDataStore.data.first()
             val autoSync = prefs[SettingsKeys.AUTO_SYNC] != false
             val wifiOnly = prefs[SettingsKeys.SYNC_WIFI_ONLY] != false
-            // Periodic 15-min run + OS content URI trigger + persistent BG service. The
-            // content trigger gives sub-second reaction on stock Android; the periodic
-            // is the OEM-throttle safety net; the BG service keeps the in-process
-            // MediaStore observer alive on Samsung One UI where the content trigger
-            // doesn't survive Recents-swipe.
+            // Three triggers: content-URI (sub-second on stock Android), periodic 15-min (OEM-throttle
+            // safety net), and the BG service (keeps the observer alive on Samsung One UI where the
+            // content trigger doesn't survive a Recents-swipe).
             if (autoSync) {
                 SyncWorker.schedule(workManager, wifiOnly, SyncWorker.MIN_INTERVAL_MINUTES)
-                // Don't wait for the first periodic fire — kick off a OneTime run immediately
-                // so any pending uploads (including newly-imported photos) start backing up
-                // the moment the app launches. APPEND_OR_REPLACE inside SyncWorker.runNow
-                // coalesces with the periodic run if it's already active.
+                // Kick a OneTime run now so pending uploads start at launch; APPEND_OR_REPLACE coalesces
+                // with the periodic run.
                 SyncWorker.runNow(this@MainActivity, wifiOnly)
                 SyncWorker.scheduleContentObserver(this@MainActivity, wifiOnly)
-                eu.akoos.photos.service.BackgroundSyncService.start(this@MainActivity)
+                // The foreground service needs its notification shown — skip it when the backup-status
+                // notification is opted out; the worker + content trigger still keep backups flowing.
+                val backupNotif = prefs[SettingsKeys.NOTIFY_BACKUP_STATUS] != false
+                if (backupNotif) eu.akoos.photos.service.BackgroundSyncService.start(this@MainActivity)
             }
         }
 
-        // Early cloud-photo refresh kicked off the moment a primary user resolves — runs
-        // pre-Gallery for BOTH a first-install onboarding user (the wizard is on screen for
-        // many seconds) AND a returning user who skips straight to the gallery. Starting it
-        // here (app/activity scope, not onboarding scope) means the first thumbnails are
-        // already landing by the time the gallery appears, and the gopenpgp decrypt burst
-        // begins spread out at the gentle cadence.
-        //
-        // setGentleSync(true) makes the in-flight loop pace slowly while a heavy first screen
-        // is shown; GalleryViewModel flips it back to false when the gallery becomes visible so
-        // the remainder speeds up. The full refresh is single-flighted by refreshFullMutex, so
-        // GalleryViewModel.syncOnLaunch's later refresh just awaits this one — no second
-        // concurrent full refresh.
-        //
-        // Gated to respect the same backup constraints the sync workers honour: only when
-        // auto-sync is on, never on low battery (mirrors SyncWorker's batteryNotLow), and never
-        // on a metered network when Wi-Fi-only is set (mirrors the UNMETERED network constraint).
+        // Early cloud-photo refresh once a primary user resolves, so thumbnails are landing by the
+        // time the gallery appears. setGentleSync(true) paces the decrypt burst slowly under the
+        // heavy first screen; GalleryViewModel flips it off when visible. refreshFullMutex single-
+        // flights it, so the later syncOnLaunch refresh just awaits this one. Gated on the same
+        // constraints as the sync workers: auto-sync on, not low battery, not metered when Wi-Fi-only.
         lifecycleScope.launch {
             val userId = accountManager.getPrimaryUserId().first() ?: return@launch
             val prefs = settingsDataStore.data.first()
@@ -231,23 +204,23 @@ class MainActivity : AppCompatActivity() {
             runCatching { driveRepo.refreshCloudPhotos(userId) }
         }
 
-        // Observe lock setting changes. The DataStore-backed flow re-emits on every preference
-        // write (e.g. LAST_SYNC_MS bumps every sync), so without distinctUntilChanged this
-        // collector would re-assert isLocked=true on every sync tick — manifesting as the lock
-        // screen reappearing repeatedly after the user already unlocked.
-        //
-        // Track previous value so a user-driven OFF→ON toggle in Settings re-locks immediately,
-        // but a same-value emission (the spurious one we're guarding against) does nothing.
+        // Observe lock setting changes. distinctUntilChanged is essential: the DataStore flow
+        // re-emits on every preference write (e.g. LAST_SYNC_MS each sync), which would otherwise
+        // re-assert isLocked=true on every tick and pop the lock screen after the user unlocked.
+        // Tracking previousEnabled lets a real OFF→ON toggle re-lock while same-value emits don't.
         var sawFirstEmission = false
         var previousEnabled = false
         lifecycleScope.launch {
             appLockManager.isLockEnabled.distinctUntilChanged().collect { enabled ->
                 lockEnabled = enabled
                 if (!sawFirstEmission) {
-                    // Initial state on cold start: lock if enabled and there's no saved state.
-                    if (enabled && savedInstanceState == null) isLocked = true
+                    // Lock on the first emission of every fresh Activity create when the lock is on,
+                    // including an OS process-death restore (savedInstanceState != null). Rotation is
+                    // handled via configChanges (no recreate), so a recreate only happens on a real
+                    // cold / death start, where re-locking is exactly right. Guarding on
+                    // savedInstanceState == null instead would let a process-death restore reopen unlocked.
+                    if (enabled) isLocked = true
                 } else if (enabled && !previousEnabled) {
-                    // User just turned the lock ON from Settings — apply immediately.
                     isLocked = true
                 }
                 previousEnabled = enabled
@@ -255,19 +228,8 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // Re-lock on foreground when the user has been backgrounded longer than the configured
-        // timeout. The lifecycle re-enters STARTED on every resume; the check itself is cheap
-        // (a couple of Long comparisons + one DataStore read) so it's fine to run on every
-        // STARTED entry.
-        //
-        // We suspend-read the timeout INSIDE the block instead of caching it in a field. The
-        // cached approach raced against the DataStore-backed flow: if the STARTED block fired
-        // before the flow's initial emission, lockTimeoutMs was still 0 (the field default),
-        // and a "Lock after 5 minutes" preference would behave as "Lock immediately". Reading
-        // the current value at check time eliminates the race.
-        // Sign-out drops the timestamps belonging to the previous user's session
-        // so a re-login as a different account can't inherit a sinceBackground window
-        // that fires the re-lock guard before the new account's preferences settle.
+        // Sign-out drops the previous session's timestamps so a re-login as another account can't
+        // inherit a sinceBackground window that fires the re-lock guard before its prefs settle.
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 appLockManager.resetLockTimestamps.collect {
@@ -276,17 +238,17 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
+        // Re-lock on foreground when backgrounded longer than the configured timeout. The timeout is
+        // suspend-read INSIDE the block, not cached in a field: a cached default of 0 raced the
+        // DataStore flow's first emission and turned "Lock after 5 min" into "Lock immediately".
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 val timeoutMs = appLockManager.lockTimeoutMinutes.first().toLong() * 60_000L
                 val now = System.currentTimeMillis()
                 val sinceUnlock = now - lastUnlockMs
                 val sinceBackground = if (lastBackgroundMs == 0L) 0L else now - lastBackgroundMs
-                // Conditions to re-lock:
-                //   - lock feature on at all
-                //   - the activity actually was backgrounded since the last unlock (lastBackgroundMs != 0)
-                //   - background duration >= the user-configured timeout
-                //   - not inside the post-unlock biometric-prompt grace window
+                // Re-lock only if: lock on, actually backgrounded since last unlock, past the timeout,
+                // and outside the post-unlock biometric grace window.
                 if (lockEnabled
                     && lastBackgroundMs != 0L
                     && sinceBackground >= timeoutMs
@@ -294,14 +256,12 @@ class MainActivity : AppCompatActivity() {
                 ) {
                     isLocked = true
                 }
-                // Always clear the background marker on STARTED entry — fresh resume cycle.
                 lastBackgroundMs = 0L
             }
         }
 
         setContent {
-            // Theme mode lives in DataStore — re-collect when the user changes it so the UI
-            // re-themes immediately without an app restart.
+            // Theme mode lives in DataStore — re-collect so a change re-themes without a restart.
             val themeKeyFlow = remember {
                 settingsDataStore.data.map { prefs ->
                     prefs[SettingsKeys.THEME_MODE]
@@ -321,18 +281,15 @@ class MainActivity : AppCompatActivity() {
                 ThemeMode.Dark   -> true
             }
 
-            // Accent-color palette — DataStore-backed, re-collected so changes apply live
-            // without an app restart. Independent of light/dark.
+            // Accent-color palette — DataStore-backed, re-collected so changes apply live.
             val paletteFlow = remember {
                 settingsDataStore.data.map { it[SettingsKeys.THEME_PALETTE] }
             }
             val paletteKey by paletteFlow.collectAsState(initial = null)
             val palette = ThemePalette.fromKey(paletteKey)
 
-            // Active locale — driven by DataStore so a user change reflows the in-app
-            // string-resource resolution without an Activity recreate. Initial value
-            // comes from the boot-mirror so the first composition uses the right locale
-            // without a Flow round-trip flash.
+            // Active locale — DataStore-driven so a change reflows string resolution without an
+            // Activity recreate. Initial value from the boot-mirror to avoid a first-composition flash.
             val languageFlow = remember {
                 settingsDataStore.data.map { prefs ->
                     prefs[SettingsKeys.LANGUAGE] ?: "system"
@@ -342,8 +299,7 @@ class MainActivity : AppCompatActivity() {
                 initial = LanguagePrefsBoot.read(this@MainActivity),
             )
 
-            // Flip status/navigation-bar icon contrast to match the active theme so they stay
-            // legible on light backgrounds.
+            // Match status/navigation-bar icon contrast to the active theme.
             val view = LocalView.current
             if (!view.isInEditMode) {
                 SideEffect {
@@ -385,20 +341,16 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * Compose surface for the in-app updater dialog. Subscribes to the singleton
-     * [UpdateOrchestrator]'s state and renders [UpdatePromptDialog] whenever a phase
-     * (Available / Downloading / InstallReady / Error) is active. Lives inside the host
-     * Activity (not inside a screen) because the prompt is global — the user might be on
-     * the gallery, in the editor, or browsing an album when the silent check completes,
-     * and the prompt should layer on top of whichever route is rendered.
+     * Compose surface for the in-app updater dialog. Renders [UpdatePromptDialog] for whatever
+     * [UpdateOrchestrator] phase is active. Lives in the host Activity, not a screen, so the
+     * global prompt layers over whichever route is rendered when the silent check completes.
      */
     @androidx.compose.runtime.Composable
     private fun UpdaterHost() {
         val current by updateOrchestrator.state.collectAsStateWithLifecycle()
         val scope = rememberCoroutineScope()
-        // Returns from the "Install unknown apps" permission screen. We re-check whether
-        // the OS now allows installs; if so, fire the install intent immediately so the
-        // user doesn't have to tap Update a second time.
+        // Back from the "Install unknown apps" permission screen — fire the install immediately if
+        // the OS now allows it, so the user needn't tap Update again.
         val installLauncher = rememberLauncherForActivityResult(
             ActivityResultContracts.StartActivityForResult()
         ) {
@@ -434,10 +386,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * Fired from the Settings "Check for updates" row. Runs a forced (cache-bypassing)
-     * check; success-with-no-update surfaces a brief Toast, a network flake surfaces a
-     * different one. New-version-available implicitly transitions through
-     * [UpdatePromptDialog] because the orchestrator updates its state flow.
+     * Settings "Check for updates" — runs a forced check; up-to-date and network-flake each show a
+     * Toast. A new version surfaces via [UpdatePromptDialog] through the orchestrator's state flow.
      */
     private fun runManualUpdateCheck() {
         lifecycleScope.launch {
@@ -485,27 +435,22 @@ class MainActivity : AppCompatActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        // Widget re-tap while the app is foregrounded → grab the new photo URI so the
-        // NavGraph LaunchedEffect picks it up and forwards to the viewer.
+        // Foregrounded widget re-tap → grab the new URI for NavGraph's LaunchedEffect.
         intent.getStringExtra(EXTRA_WIDGET_PHOTO_URI)?.let { widgetPhotoUri = it }
         parseExternalEditRequest(intent)?.let { externalEditRequest = it }
     }
 
     /**
-     * Inspect the intent for an ACTION_EDIT or ACTION_VIEW carrying an image/video URI.
-     * Returns null if the intent doesn't match (regular launches, widget taps, etc.).
-     * Display name is resolved via OpenableColumns; falls back to "image" / "video" plus
-     * a timestamp when the content provider doesn't expose one (some providers don't).
-     * The two actions land on different downstream routes: VIEW → photo viewer, EDIT →
-     * editor — the flag is captured here so the NavGraph branch is unambiguous.
+     * Parses an ACTION_EDIT / ACTION_VIEW intent carrying an image/video URI into an
+     * [ExternalEditRequest], or null for non-matching intents. The isViewOnly flag splits the
+     * downstream route (VIEW → viewer, EDIT → editor).
      */
     private fun parseExternalEditRequest(intent: Intent?): ExternalEditRequest? {
         intent ?: return null
         val action = intent.action ?: return null
         if (action != Intent.ACTION_EDIT && action != Intent.ACTION_VIEW) return null
         val uri = intent.data ?: return null
-        // Prefer the type the launching app explicitly set on the intent; fall back to
-        // asking the ContentResolver if it's missing (some apps omit the type).
+        // Prefer the intent's type; fall back to the ContentResolver (some apps omit it).
         val mimeType = intent.type
             ?: runCatching { contentResolver.getType(uri) }.getOrNull()
             ?: return null
@@ -533,8 +478,7 @@ class MainActivity : AppCompatActivity() {
                 }
         }.getOrNull()
         if (!fromResolver.isNullOrBlank()) return fromResolver
-        // Fall back to last path segment (often a sane filename for file:// URIs and many
-        // FileProvider URIs). If that fails too, synthesise a name from the timestamp.
+        // Fall back to the last path segment, then to a timestamp-synthesised name.
         val segment = uri.lastPathSegment
         if (!segment.isNullOrBlank() && segment.contains('.')) return segment
         val ts = System.currentTimeMillis()
@@ -542,12 +486,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * Whether the device is in a low-battery state, the runtime analogue of the
-     * `setRequiresBatteryNotLow(true)` constraint the sync workers use. Read off the sticky
-     * ACTION_BATTERY_CHANGED broadcast (no receiver to register/unregister) and compared to a
-     * 15% floor, the level at which the OS itself reports the "battery low" condition. Returns
-     * false (don't block) when the level can't be read, so a missing broadcast never suppresses
-     * the early refresh.
+     * Runtime analogue of the workers' `setRequiresBatteryNotLow(true)`: reads the sticky
+     * ACTION_BATTERY_CHANGED broadcast and compares to the OS's 15% "battery low" floor. Returns
+     * false (don't block) when the level can't be read, so a missing broadcast never suppresses refresh.
      */
     private fun isBatteryLow(): Boolean {
         val status = runCatching {
@@ -561,34 +502,23 @@ class MainActivity : AppCompatActivity() {
 
     override fun onStop() {
         super.onStop()
-        // Record the wall-clock time the activity stopped being visible — the re-lock check
-        // in repeatOnLifecycle compares this against the configured timeout. We deliberately
-        // use System.currentTimeMillis (not elapsedRealtime) so a clock change while the app
-        // is in the background still does the sensible thing — clock-forward locks the app,
-        // clock-backward leaves it unlocked (the right safe default).
+        // Wall-clock (not elapsedRealtime) so a background clock change stays safe: forward locks,
+        // backward leaves unlocked. The re-lock check compares this against the configured timeout.
         lastBackgroundMs = System.currentTimeMillis()
     }
 
     override fun onResume() {
         super.onResume()
-        // Reconcile the delete-after-backup pending queue against MediaStore the
-        // moment the user opens the app. Covers the offline scenario where the
-        // user deleted a queued file via the file manager: the worker's content
-        // URI trigger needs network to fire, but a foreground resume always runs.
-        // The prune drops stale URIs from the queue, collapses their SyncState to
-        // CLOUD_ONLY, and refreshes or cancels the consent notification — so the
-        // user never sees a stale "X photos ready to remove" banner or trips the
-        // createDeleteRequest stale URI bug.
+        // Reconcile the delete-after-backup queue against MediaStore on open. Covers the offline
+        // case where a queued file was deleted via the file manager (the worker's content trigger
+        // needs network, but resume always runs): stale URIs are dropped to CLOUD_ONLY and the
+        // consent notification refreshed, avoiding a stale banner and the createDeleteRequest bug.
         lifecycleScope.launch {
             runCatching { pendingDeleteNotif() }
         }
-        // Auto-refresh on foreground resume when the last sync is stale. Silent (no spinner,
-        // no error toasts) — purely background work that the gallery's DB observer picks up.
-        //
-        // Why this exists: WorkManager is throttled on aggressive OEMs; without an in-process
-        // poke, a user who left the app for an hour can come back to a stale gallery showing
-        // photos that were deleted on Drive web in the meantime. The pull-to-refresh gesture
-        // covers the explicit case; this covers the implicit "just opened the app" case.
+        // Silent auto-refresh on resume when the last sync is stale. WorkManager is throttled on
+        // aggressive OEMs, so without this poke a gallery left for an hour can show photos already
+        // deleted on Drive web. Pull-to-refresh covers the explicit case; this covers "just opened".
         lifecycleScope.launch {
             try {
                 val prefs = settingsDataStore.data.first()
@@ -597,24 +527,19 @@ class MainActivity : AppCompatActivity() {
                 val userId = accountManager.getPrimaryUserId().first() ?: return@launch
                 val autoSync = prefs[SettingsKeys.AUTO_SYNC] != false
                 val wifiOnly = prefs[SettingsKeys.SYNC_WIFI_ONLY] != false
-                // Incremental + reconcile is the lightweight pair: events-based delta from
-                // Drive, then a single SyncState pass.
+                // Lightweight pair: events-based Drive delta, then one SyncState pass.
                 driveRepo.refreshCloudPhotosIncremental(userId)
                 reconcile(userId).collect {}
-                // Kick off a OneTime sync if backup is enabled — picks up any LOCAL_ONLY
-                // entries that reconcile just flagged. Coalesces with anything already
-                // running via the unique-work KEEP policy.
+                // OneTime sync if backup is on — picks up LOCAL_ONLY entries reconcile just flagged.
                 if (autoSync) SyncWorker.runNow(this@MainActivity, wifiOnly)
             } catch (_: Exception) {
-                // Silent — onResume must never crash the activity. The next user-driven
-                // refresh (or the next SyncWorker tick) will retry.
+                // Silent — onResume must never crash; the next refresh or SyncWorker tick retries.
             }
         }
     }
 
     companion object {
-        /** Intent extra key — carries a MediaStore URI string when the user taps the
-         *  home-screen photo widget. NavGraph + GalleryScreen route to the viewer. */
+        /** Intent extra: MediaStore URI string from a home-screen widget tap. */
         const val EXTRA_WIDGET_PHOTO_URI = "widget_photo_uri"
     }
 }

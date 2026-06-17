@@ -31,6 +31,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -54,6 +55,7 @@ import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.outlined.Collections
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ModalBottomSheet
 import eu.akoos.photos.presentation.common.ConfirmDialog
@@ -96,6 +98,7 @@ import androidx.compose.ui.res.stringResource
 import eu.akoos.photos.R
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.AppColors
+import eu.akoos.photos.presentation.theme.Bg2
 import eu.akoos.photos.presentation.theme.FgDim
 import eu.akoos.photos.presentation.theme.FgMute
 import eu.akoos.photos.presentation.theme.FgPrimary
@@ -110,6 +113,12 @@ fun AlbumsScreen(
     gridState: LazyGridState = rememberLazyGridState(),
     onAlbumClick: (Album) -> Unit = {},
     onDeviceFolderClick: (bucketName: String) -> Unit = {},
+    onMemoriesClick: () -> Unit = {},
+    /** Increments each time the Albums-tab header "New album" pill is tapped; opens the create
+     *  dialog. The in-grid New album row opens it directly, so 0 (no external trigger) is fine. */
+    createRequestSignal: Int = 0,
+    displayFilter: eu.akoos.photos.presentation.gallery.AlbumDisplayFilter =
+        eu.akoos.photos.presentation.gallery.AlbumDisplayFilter.All,
     viewModel: AlbumsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -117,6 +126,13 @@ fun AlbumsScreen(
     val pullRefreshState = rememberPullToRefreshState()
     val scope = rememberCoroutineScope()
     var showCreateDialog by remember { mutableStateOf(false) }
+    // Open the create dialog when the header pill fires (each tap increments the signal).
+    LaunchedEffect(createRequestSignal) {
+        if (createRequestSignal > 0) showCreateDialog = true
+    }
+    // Switching the All / Cloud / Device filter changes the list under the same scroll index, which
+    // reads as the grid jumping — snap back to the top whenever the filter changes.
+    LaunchedEffect(displayFilter) { gridState.scrollToItem(0) }
     var albumToDelete by remember { mutableStateOf<Album?>(null) }
 
     // Cloud-album long-press surfaces a Rename + Delete bottom sheet. Holding the in-flight
@@ -177,66 +193,36 @@ fun AlbumsScreen(
                         verticalArrangement = Arrangement.spacedBy(20.dp),
                         modifier = Modifier.fillMaxSize(),
                     ) {
-                        // Render the real "New Album" row even while loading — the button
-                        // isn't data-dependent and rendering the header pre-empts the layout
-                        // shift you'd otherwise get when the first real entry appears.
-                        item(span = { GridItemSpan(maxLineSpan) }) {
-                            NewAlbumRow(
-                                isCreating = state.isCreatingAlbum,
-                                onClick    = { showCreateDialog = true },
-                                modifier   = Modifier.padding(bottom = 4.dp),
-                            )
-                        }
                         items(6) {
                             eu.akoos.photos.presentation.common.ShimmerAlbumCard()
                         }
                     }
 
-                // No cloud albums. When the device still has folders, show the New Album row
-                // plus the "Folders on this device" section in a grid so the page isn't bare.
-                // Otherwise fall back to the centred empty-state copy.
-                albums.isEmpty() && state.deviceFolders.isNotEmpty() ->
-                    LazyVerticalGrid(
-                        columns = GridCells.Fixed(2),
-                        state = gridState,
-                        contentPadding = PaddingValues(
-                            top = topPadding + 12.dp,
-                            start = 20.dp,
-                            end = 20.dp,
-                            bottom = 120.dp,
-                        ),
-                        horizontalArrangement = Arrangement.spacedBy(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(20.dp),
-                        modifier = Modifier.fillMaxSize(),
-                    ) {
-                        item(span = { GridItemSpan(maxLineSpan) }) {
-                            NewAlbumRow(
-                                isCreating = state.isCreatingAlbum,
-                                onClick    = { showCreateDialog = true },
-                                modifier   = Modifier.padding(bottom = 4.dp),
-                            )
-                        }
-                        deviceFoldersSection(state.deviceFolders, state.hideDeviceFolders, { viewModel.setHideDeviceFolders(!state.hideDeviceFolders) }, onDeviceFolderClick)
-                    }
-
-                albums.isEmpty() ->
+                // Nothing matches the active filter → centred empty state.
+                !(displayFilter != eu.akoos.photos.presentation.gallery.AlbumDisplayFilter.Local && albums.isNotEmpty()) &&
+                    !(displayFilter != eu.akoos.photos.presentation.gallery.AlbumDisplayFilter.Cloud && state.deviceFolders.isNotEmpty()) ->
                     Column(
                         modifier = Modifier
                             .align(Alignment.Center)
                             .padding(horizontal = 32.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
-                        // "New Album" button even when empty
-                        NewAlbumRow(
-                            isCreating = state.isCreatingAlbum,
-                            onClick    = { showCreateDialog = true },
+                        // Device-only filter has no Drive albums, so the cloud-worded copy would be
+                        // wrong — show a device-folder line instead.
+                        val localOnly = displayFilter == eu.akoos.photos.presentation.gallery.AlbumDisplayFilter.Local
+                        Text(
+                            stringResource(if (localOnly) R.string.albums_empty_local else R.string.albums_empty_title),
+                            color = FgPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
                         )
-                        Spacer(Modifier.height(24.dp))
-                        Text(stringResource(R.string.albums_empty_title), color = FgPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
-                        Spacer(Modifier.height(6.dp))
-                        Text(stringResource(R.string.albums_empty_subtitle), color = FgDim, fontSize = 14.sp)
+                        if (!localOnly) {
+                            Spacer(Modifier.height(6.dp))
+                            Text(stringResource(R.string.albums_empty_subtitle), color = FgDim, fontSize = 14.sp)
+                        }
                     }
 
+                // Common stream: cloud albums + device folders in one flat grid, narrowed by the
+                // Albums-tab toggle pill (All / Cloud / Local). No section headers — the pill is
+                // the only grouping control now.
                 else ->
                     LazyVerticalGrid(
                         columns = GridCells.Fixed(2),
@@ -251,28 +237,37 @@ fun AlbumsScreen(
                         verticalArrangement = Arrangement.spacedBy(20.dp),
                         modifier = Modifier.fillMaxSize(),
                     ) {
-                        // ── "New Album" header ─────────────────────────────────
-                        item(span = { GridItemSpan(maxLineSpan) }) {
-                            NewAlbumRow(
-                                isCreating = state.isCreatingAlbum,
-                                onClick    = { showCreateDialog = true },
-                                modifier   = Modifier.padding(bottom = 4.dp),
-                            )
+                        item {
+                            MemoriesPinnedCard(onClick = onMemoriesClick)
                         }
-
-                        items(
-                            albums,
-                            key = { "cloud_${it.linkId}" },
-                        ) { album ->
-                            CloudAlbumCard(
-                                album       = album,
-                                onClick     = { onAlbumClick(album) },
-                                onLongClick = { cloudAlbumSheetFor = album },
-                            )
+                        if (displayFilter != eu.akoos.photos.presentation.gallery.AlbumDisplayFilter.Local) {
+                            items(
+                                albums,
+                                key = { "cloud_${it.linkId}" },
+                            ) { album ->
+                                CloudAlbumCard(
+                                    album       = album,
+                                    onClick     = { onAlbumClick(album) },
+                                    onLongClick = { cloudAlbumSheetFor = album },
+                                )
+                            }
                         }
-
-                        // ── "Folders on this device" section ───────────────────
-                        deviceFoldersSection(state.deviceFolders, state.hideDeviceFolders, { viewModel.setHideDeviceFolders(!state.hideDeviceFolders) }, onDeviceFolderClick)
+                        if (displayFilter != eu.akoos.photos.presentation.gallery.AlbumDisplayFilter.Cloud) {
+                            items(
+                                state.deviceFolders,
+                                key = { "devfolder_${it.name}" },
+                            ) { folder ->
+                                UnifiedAlbumCard(
+                                    coverModel = folder.coverUri?.let(Uri::parse),
+                                    title = folder.name,
+                                    metaText = pluralStringResource(
+                                        R.plurals.count_photos_plural, folder.itemCount, folder.itemCount,
+                                    ),
+                                    isDeviceFolder = true,
+                                    onClick = { onDeviceFolderClick(folder.name) },
+                                )
+                            }
+                        }
                     }
             }
         }
@@ -378,6 +373,9 @@ fun AlbumsScreen(
     // ── Cloud-album rename dialog ────────────────────────────────────────────
     cloudAlbumRenameFor?.let { album ->
         var newName by remember(album.linkId) { mutableStateOf(album.name) }
+        // Resolved here (composable scope) so the scope.launch lambdas below — which run off
+        // the composition — can format it without calling stringResource in a non-composable.
+        val renamedToTemplate = stringResource(R.string.albums_renamed_to)
         AlertDialog(
             onDismissRequest = { cloudAlbumRenameFor = null },
             containerColor = AppColors.current.cardBg,
@@ -395,7 +393,7 @@ fun AlbumsScreen(
                         scope.launch {
                             handleAlbumActionFlow(
                                 actionFlow = viewModel.renameCloudAlbum(album.linkId, album.name, target),
-                                doneMessage = "Renamed to \"$target\"",
+                                doneMessage = renamedToTemplate.format(target),
                             )
                         }
                     }),
@@ -418,7 +416,7 @@ fun AlbumsScreen(
                         scope.launch {
                             handleAlbumActionFlow(
                                 actionFlow = viewModel.renameCloudAlbum(album.linkId, album.name, target),
-                                doneMessage = "Renamed to \"$target\"",
+                                doneMessage = renamedToTemplate.format(target),
                             )
                         }
                     },
@@ -511,47 +509,6 @@ private fun AlbumActionRow(
     }
 }
 
-// ── "New Album" row ────────────────────────────────────────────────────────────
-
-@Composable
-private fun NewAlbumRow(
-    isCreating: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val colors = AppColors.current
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(colors.cardBg)
-            .border(0.5.dp, colors.cardBorder, RoundedCornerShape(12.dp))
-            .clickable(enabled = !isCreating, onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Box(
-            modifier = Modifier
-                .size(36.dp)
-                .background(Accent.copy(alpha = 0.15f), RoundedCornerShape(9.dp)),
-            contentAlignment = Alignment.Center,
-        ) {
-            if (isCreating) {
-                CircularProgressIndicator(color = Accent, strokeWidth = 2.dp, modifier = Modifier.size(18.dp))
-            } else {
-                Icon(Icons.Default.Add, stringResource(R.string.albums_new_album), tint = Accent, modifier = Modifier.size(20.dp))
-            }
-        }
-        Text(
-            if (isCreating) "${stringResource(R.string.albums_create_album)}…" else stringResource(R.string.albums_new_album),
-            color = if (isCreating) FgMute else Accent,
-            fontSize = 14.sp,
-            fontWeight = FontWeight.Medium,
-        )
-    }
-}
-
 /**
  * Appends the "Folders on this device" section to an albums grid: a full-span header followed
  * by one [UnifiedAlbumCard] per MediaStore bucket. Tapping a card opens the per-folder detail
@@ -631,4 +588,43 @@ private fun CloudAlbumCard(album: Album, onClick: () -> Unit, onLongClick: () ->
         onClick     = onClick,
         onLongClick = onLongClick,
     )
+}
+
+/**
+ * First cell in the album grid. Mirrors [UnifiedAlbumCard]'s shape, corner radius and title
+ * typography, but with a neutral cover holding a single centred Collections glyph — a normal
+ * album card labelled "Memories" that opens the Memories screen.
+ */
+@Composable
+private fun MemoriesPinnedCard(onClick: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(1f)
+                .clip(RoundedCornerShape(14.dp))
+                .background(Bg2),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                Icons.Outlined.Collections,
+                contentDescription = null,
+                tint = FgDim,
+                modifier = Modifier.size(36.dp),
+            )
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = stringResource(R.string.memories_title),
+            color = FgPrimary,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
 }

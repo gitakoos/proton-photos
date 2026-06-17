@@ -36,7 +36,7 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import me.proton.core.domain.entity.UserId
-import eu.akoos.photos.data.crypto.DriveCryptoHelper
+import eu.akoos.photos.crypto.CryptoServiceClient
 import eu.akoos.photos.data.db.dao.PhotoListingDao
 import eu.akoos.photos.data.db.entity.PhotoListingEntity
 import java.io.File
@@ -96,7 +96,7 @@ private const val TAG = "ThumbDecryptSched"
  */
 @Singleton
 class ThumbnailDecryptScheduler @Inject constructor(
-    private val cryptoHelper: DriveCryptoHelper,
+    private val cryptoServiceClient: CryptoServiceClient,
     private val thumbnailHelpers: ThumbnailHelpers,
     private val photoListingDao: PhotoListingDao,
     private val linkDetailHelpers: LinkDetailHelpers,
@@ -167,6 +167,10 @@ class ThumbnailDecryptScheduler @Inject constructor(
     /** Guards [trimThumbnailCache] so at most one eviction pass runs at a time. */
     private val trimming = AtomicBoolean(false)
 
+    /** One background warm-up at a time — a second trigger (resume, refresh) while one is running is
+     *  a no-op instead of stacking another full library walk and its row set in memory. */
+    private val backfilling = AtomicBoolean(false)
+
     /**
      * Current viewport generation. Advanced by [bumpGeneration] on each viewport change so
      * a fresh burst of visible requests sorts ahead of stale work in the same band. Reads
@@ -192,6 +196,13 @@ class ThumbnailDecryptScheduler @Inject constructor(
      * right scope for now.
      */
     private val sharedAlbumContext = ConcurrentHashMap<String, AlbumCryptoChain.SharingContext>()
+
+    /**
+     * Album + Collection cover linkIds: warmed ahead of the bulk library and never LRU-evicted,
+     * so covers stay populated even when the full thumbnail set exceeds the cache budget. Bounded
+     * by [MAX_PINNED_COVERS] so the never-evicted set can't itself crowd the cache.
+     */
+    private val pinnedCoverLinkIds = ConcurrentHashMap.newKeySet<String>()
 
     init {
         repeat(WORKER_COUNT) { worker() }
@@ -259,8 +270,26 @@ class ThumbnailDecryptScheduler @Inject constructor(
     }
 
     /**
-     * Warm the background thumbnail cache, newest photos first, stopping once it reaches
-     * [TRIM_TARGET_BYTES]. The size is sampled (not estimated) every [BACKFILL_SAMPLE_EVERY]
+     * Mark [linkIds] as album / Collection cover thumbnails: warm any not-yet-cached one at
+     * [Band.PREFETCH] (ahead of the bulk [backfillAll] warm-up) and exempt them all from LRU
+     * eviction. Keeps album and Collection covers populated on a large library whose full
+     * thumbnail set can't fit the cache budget, where the cold tail would otherwise never warm
+     * or get evicted. The pinned set is capped at [MAX_PINNED_COVERS] as a backstop.
+     */
+    fun pinCovers(userId: UserId, linkIds: Collection<String>) {
+        if (linkIds.isEmpty()) return
+        scope.launch {
+            for (linkId in linkIds) {
+                if (pinnedCoverLinkIds.size < MAX_PINNED_COVERS) pinnedCoverLinkIds.add(linkId)
+                val row = runCatching { photoListingDao.getByLinkId(linkId) }.getOrNull() ?: continue
+                enqueue(userId, row, Band.PREFETCH)
+            }
+        }
+    }
+
+    /**
+     * Warm the background thumbnail cache, newest photos first, stopping once it reaches the
+     * adaptive budget ([trimTargetBytes]). The size is sampled (not estimated) every [BACKFILL_SAMPLE_EVERY]
      * enqueues while pacing enqueue to the decrypt rate, so the guard tracks real on-disk growth
      * and the warm-up stops near the budget regardless of how large each photo's HD thumbnail is.
      *
@@ -269,23 +298,37 @@ class ThumbnailDecryptScheduler @Inject constructor(
      * evicted. The cold tail beyond the budget decrypts on demand when scrolled into view.
      */
     fun backfillAll(userId: UserId) {
+        if (!backfilling.compareAndSet(false, true)) return
         scope.launch {
-            val rows = runCatching { photoListingDao.getUndecryptedThumbnails(userId.id) }
-                .getOrElse { e -> Log.w(TAG, "backfillAll: query failed: ${e.message}"); emptyList() }
-            if (rows.isEmpty()) return@launch
-            var cacheBytes = thumbnailCacheBytes()
-            var enqueuedCount = 0
-            for (row in rows) {
-                if (cacheBytes >= TRIM_TARGET_BYTES) break
-                enqueue(userId, row, Band.BACKGROUND)
-                // Every sample interval, let the workers catch up (so in-flight decrypts can't
-                // outrun the budget guard) and re-measure the cache off disk.
-                if (++enqueuedCount % BACKFILL_SAMPLE_EVERY == 0) {
-                    while (queueLock.withLock { queue.size } > BACKFILL_QUEUE_HIGH_WATER) delay(150)
-                    cacheBytes = thumbnailCacheBytes()
+            try {
+                val budget = trimTargetBytes()
+                var cacheBytes = thumbnailCacheBytes()
+                // Walk the library newest-first in bounded pages so only one page of rows (and their
+                // crypto material) is ever resident, instead of the whole undecrypted set at once.
+                var beforeTime = Long.MAX_VALUE
+                var enqueuedCount = 0
+                page@ while (cacheBytes < budget) {
+                    val batch = runCatching {
+                        photoListingDao.getUndecryptedThumbnailsBefore(userId.id, beforeTime, BACKFILL_PAGE_SIZE)
+                    }.getOrElse { e -> Log.w(TAG, "backfillAll: query failed: ${e.message}"); break@page }
+                    if (batch.isEmpty()) break
+                    for (row in batch) {
+                        if (cacheBytes >= budget) break@page
+                        enqueue(userId, row, Band.BACKGROUND)
+                        // Every sample interval, let the workers catch up (so in-flight decrypts can't
+                        // outrun the budget guard) and re-measure the cache off disk.
+                        if (++enqueuedCount % BACKFILL_SAMPLE_EVERY == 0) {
+                            while (queueLock.withLock { queue.size } > BACKFILL_QUEUE_HIGH_WATER) delay(150)
+                            cacheBytes = thumbnailCacheBytes()
+                        }
+                    }
+                    if (batch.size < BACKFILL_PAGE_SIZE) break
+                    beforeTime = batch.last().captureTime
                 }
+                Log.d(TAG, "backfillAll: enqueued $enqueuedCount thumbnail(s), cache ~${cacheBytes / (1024 * 1024)}MB")
+            } finally {
+                backfilling.set(false)
             }
-            Log.d(TAG, "backfillAll: enqueued $enqueuedCount thumbnail(s), cache ~${cacheBytes / (1024 * 1024)}MB")
         }
     }
 
@@ -309,7 +352,15 @@ class ThumbnailDecryptScheduler @Inject constructor(
         // session before the DB write landed, or persisted then evicted from memory) we just
         // re-point the row at the cached file — a cheap DB write, no JNI — so the cell binds.
         cachedThumbnailUrl(linkId)?.let { url ->
-            scope.launch { runCatching { photoListingDao.updateThumbnailUrl(linkId, url) } }
+            scope.launch {
+                runCatching { photoListingDao.updateThumbnailUrl(linkId, url) }
+                // Touch so a re-viewed thumbnail counts as young and survives LRU eviction —
+                // otherwise the warm-up's decrypt order, not actual use, decides what gets dropped.
+                runCatching {
+                    File(File(context.cacheDir, "thumbnails"), "thumb_$linkId.jpg")
+                        .setLastModified(System.currentTimeMillis())
+                }
+            }
             return
         }
 
@@ -427,6 +478,7 @@ class ThumbnailDecryptScheduler @Inject constructor(
         }
         parentKeyCache.values.forEach { it.fill(0) }
         parentKeyCache.clear()
+        pinnedCoverLinkIds.clear()
     }
 
     /** The `file://` URL of the decrypted thumbnail for [linkId] when it is already cached
@@ -438,10 +490,10 @@ class ThumbnailDecryptScheduler @Inject constructor(
     }
 
     /**
-     * Evict the oldest decrypted thumbnails once the on-disk cache passes
-     * [MAX_THUMB_CACHE_BYTES], down to [TRIM_TARGET_BYTES]. Files are ranked by last-modified
-     * time, so a freshly decrypted (or re-viewed, hence re-decrypted) thumbnail sits at the
-     * young end and the cold tail of a large library is dropped first. Each evicted file's row
+     * Evict the oldest decrypted thumbnails once the on-disk cache passes the adaptive budget
+     * ([maxThumbCacheBytes]), down to 90% of it. Files are ranked by last-modified time, and a
+     * re-viewed thumbnail is touched so it counts as young, so genuine least-recently-used entries
+     * (the cold tail of a large library) are dropped first. Each evicted file's row
      * has its thumbnailUrl nulled so the cell re-decrypts the next time it scrolls into view —
      * a re-warm is one local decrypt, never a network round-trip, because the crypto material
      * stays on the row. Only the final `thumb_<linkId>.jpg` files count toward the cap; the
@@ -452,14 +504,19 @@ class ThumbnailDecryptScheduler @Inject constructor(
         try {
             val files = thumbnailFiles()
             var total = files.sumOf { it.length() }
-            if (total <= MAX_THUMB_CACHE_BYTES) return
+            val cap = maxThumbCacheBytes()
+            if (total <= cap) return
+            val target = (cap / 10) * 9
             val evicted = ArrayList<String>()
             for (f in files.sortedBy { it.lastModified() }) {
-                if (total <= TRIM_TARGET_BYTES) break
+                if (total <= target) break
+                val lid = f.name.removePrefix("thumb_").removeSuffix(".jpg")
+                // Never evict a pinned album / Collection cover, even if it is the oldest file.
+                if (lid in pinnedCoverLinkIds) continue
                 val len = f.length()
                 if (f.delete()) {
                     total -= len
-                    evicted += f.name.removePrefix("thumb_").removeSuffix(".jpg")
+                    evicted += lid
                 }
             }
             if (evicted.isNotEmpty()) {
@@ -479,8 +536,42 @@ class ThumbnailDecryptScheduler @Inject constructor(
             f.isFile && f.name.startsWith("thumb_") && f.name.endsWith(".jpg")
         } ?: emptyArray()
 
-    /** Current total size of the decrypted-thumbnail cache on disk, in bytes. */
-    private fun thumbnailCacheBytes(): Long = thumbnailFiles().sumOf { it.length() }
+    /** Current total size of the decrypted-thumbnail cache on disk, in bytes. Streams the directory
+     *  so the frequently-sampled warm-up path never materialises a File[] for every cached thumbnail
+     *  (a 30k-file listing was the allocation that tipped a near-full heap into OOM). */
+    private fun thumbnailCacheBytes(): Long {
+        val dir = File(context.cacheDir, "thumbnails")
+        if (!dir.isDirectory) return 0L
+        var total = 0L
+        runCatching {
+            java.nio.file.Files.newDirectoryStream(dir.toPath()).use { stream ->
+                for (path in stream) {
+                    val name = path.fileName.toString()
+                    if (name.startsWith("thumb_") && name.endsWith(".jpg")) {
+                        total += runCatching { java.nio.file.Files.size(path) }.getOrDefault(0L)
+                    }
+                }
+            }
+        }.onFailure { Log.w(TAG, "thumbnailCacheBytes: ${it.message}") }
+        return total
+    }
+
+    /**
+     * Adaptive disk budget for decrypted thumbnails: up to a 1/[FREE_SPACE_DIVISOR] slice of the
+     * cache volume's free space, floored at [MIN_THUMB_CACHE_BYTES] so small libraries always fit
+     * and capped at [MAX_THUMB_CACHE_CEILING] so a huge library on a roomy device warms fully
+     * without monopolising storage. The old fixed 1 GB cap was smaller than a 10k+ photo library's
+     * thumbnail set, which forced perpetual evict-then-re-decrypt churn (older photos never kept a
+     * thumbnail and re-scrolling re-decrypted them endlessly).
+     */
+    private fun maxThumbCacheBytes(): Long {
+        val usable = runCatching { File(context.cacheDir, "thumbnails").usableSpace }.getOrDefault(0L)
+        return (usable / FREE_SPACE_DIVISOR).coerceIn(MIN_THUMB_CACHE_BYTES, MAX_THUMB_CACHE_CEILING)
+    }
+
+    /** Low-water mark a trim evicts down to — 90% of the current budget, leaving headroom so the
+     *  cache isn't re-trimmed on every subsequent decrypt once it first reaches the cap. */
+    private fun trimTargetBytes(): Long = (maxThumbCacheBytes() / 10) * 9
 
     private suspend fun decryptOne(userId: UserId, photo: PhotoListingEntity) {
         val linkId = photo.linkId
@@ -525,20 +616,49 @@ class ThumbnailDecryptScheduler @Inject constructor(
             return null
         }
         val nodeKeyBytes = runCatching {
-            cryptoHelper.decryptNodeKey(encNodeKey, encNodePass, parentKey)
+            cryptoServiceClient.decryptNodeKey(encNodeKey, encNodePass, parentKey)
         }.getOrElse { e ->
             Log.w(TAG, "decryptThumbnailToFile $linkId: decryptNodeKey failed: ${e.message}")
             return null
         }
-        val sessionKey = cryptoHelper.decryptSessionKey(contentKeyPacketBase64, nodeKeyBytes)
-        val info = ThumbnailUrlInfo(bareUrl = serverUrl, token = serverToken)
-        return thumbnailHelpers.downloadAndDecryptBinary(
-            info = info,
+        val sessionKey = cryptoServiceClient.decryptSessionKey(contentKeyPacketBase64, nodeKeyBytes)
+        val first = thumbnailHelpers.downloadAndDecryptBinary(
+            info = ThumbnailUrlInfo(bareUrl = serverUrl, token = serverToken),
             nodeKeyBytes = nodeKeyBytes,
             sessionKey = sessionKey,
             linkId = linkId,
             cacheDir = cacheDir,
         )
+        if (first != null) return first
+        // The stored CDN url may have expired — signed thumbnail urls return HTTP 404 after a while,
+        // which hits any row listed long before it scrolled into view, and every row after a cache
+        // clear. Fetch a fresh url for this photo and retry once (node + session keys are unchanged,
+        // only the download location), so the lazy fast path never has to rebuild a whole row just to
+        // refresh a url.
+        val fresh = runCatching { fetchFreshThumbnailInfo(userId, linkId, volumeId) }
+            .getOrNull() ?: return null
+        return thumbnailHelpers.downloadAndDecryptBinary(
+            info = fresh,
+            nodeKeyBytes = nodeKeyBytes,
+            sessionKey = sessionKey,
+            linkId = linkId,
+            cacheDir = cacheDir,
+        )
+    }
+
+    /** Re-fetch a fresh CDN url + token for [linkId]'s thumbnail when the stored one has expired
+     *  (HTTP 404). Signed thumbnail urls are short-lived, but the lazy path keeps the url first seen
+     *  at listing time, so the decrypt refreshes it on demand instead of forcing a full row rebuild.
+     *  Public so the debug large-library simulator can refresh a seed's expired url the same way. */
+    suspend fun fetchFreshThumbnailInfo(userId: UserId, linkId: String, volumeId: String): ThumbnailUrlInfo? {
+        val detail = linkDetailHelpers.batchFetchLinkDetails(userId, volumeId, listOf(linkId))[linkId] ?: return null
+        val thumbs = detail.link.fileProperties?.activeRevision?.thumbnails
+            ?: detail.photo?.activeRevision?.thumbnails
+        val tid = thumbs?.firstOrNull { it.type == 1 }?.thumbnailId
+            ?: thumbs?.firstOrNull { it.type == 2 }?.thumbnailId
+            ?: thumbs?.firstOrNull()?.thumbnailId
+            ?: return null
+        return linkDetailHelpers.batchFetchThumbnailUrls(userId, volumeId, listOf(tid))[tid]
     }
 
     /** Permit-bounded variant of [decryptThumbnailToFile] so ad-hoc callers ride the same
@@ -643,16 +763,20 @@ class ThumbnailDecryptScheduler @Inject constructor(
         const val WORKER_COUNT = 3
 
         /**
-         * Upper bound on the decrypted-thumbnail disk cache. Thumbnails average a few hundred KB
-         * (the HD variants Proton stores for photos uploaded by its own apps run up to ~800 KB),
-         * so a very large library could otherwise warm-cache several GB. At the cap the oldest
-         * entries are evicted by [trimThumbnailCache]; re-viewing one re-decrypts it on demand.
+         * Floor for the adaptive thumbnail-cache budget (see [maxThumbCacheBytes]). A fixed 1 GB
+         * cap used to be smaller than a large (10k+ photo) library's thumbnail set, which forced a
+         * perpetual evict-then-re-decrypt churn so older photos never kept a thumbnail. The budget
+         * now scales with free space and only falls back to this floor on a nearly-full device.
          */
-        const val MAX_THUMB_CACHE_BYTES = 1024L * 1024 * 1024
+        const val MIN_THUMB_CACHE_BYTES = 1024L * 1024 * 1024
 
-        /** Low-water mark a trim pass evicts down to, leaving headroom so the cache isn't
-         *  re-trimmed on every subsequent decrypt once it first reaches the cap. */
-        const val TRIM_TARGET_BYTES = 900L * 1024 * 1024
+        /** Hard ceiling on the adaptive budget so a huge library on a roomy device still can't
+         *  monopolise storage. */
+        const val MAX_THUMB_CACHE_CEILING = 6L * 1024 * 1024 * 1024
+
+        /** The adaptive budget is at most a 1/[FREE_SPACE_DIVISOR] slice of the cache volume's
+         *  free space, so the warm cache grows with available storage instead of a fixed cap. */
+        const val FREE_SPACE_DIVISOR = 4L
 
         /** Run the size check once every this many decrypts — frequent enough that the cap is
          *  never overshot by more than a few tens of MB, rare enough to stay off the hot path. */
@@ -666,5 +790,13 @@ class ThumbnailDecryptScheduler @Inject constructor(
         /** Pause the background warm-up's enqueue loop while more than this many tasks are still
          *  queued, pacing it to the decrypt rate instead of dumping the whole library at once. */
         const val BACKFILL_QUEUE_HIGH_WATER = 64
+
+        /** Library-walk page size for the warm-up — bounds how many rows (and their crypto material)
+         *  are resident at once while still warming the whole library across successive pages. */
+        const val BACKFILL_PAGE_SIZE = 2000
+
+        /** Cap on pinned cover linkIds so the never-evicted cover set can't itself crowd the cache
+         *  budget. Real album + Collection cover counts sit far below this; it is only a backstop. */
+        const val MAX_PINNED_COVERS = 2000
     }
 }

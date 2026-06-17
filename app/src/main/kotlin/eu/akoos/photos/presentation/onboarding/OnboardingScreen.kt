@@ -87,6 +87,8 @@ import eu.akoos.photos.presentation.onboarding.components.ProgressDots
 import eu.akoos.photos.presentation.onboarding.steps.AboutStep
 import eu.akoos.photos.presentation.onboarding.steps.AlbumMirrorStep
 import eu.akoos.photos.presentation.onboarding.steps.AppLockStep
+import eu.akoos.photos.presentation.common.PrimaryButton
+import eu.akoos.photos.presentation.common.SecondaryButton
 import eu.akoos.photos.presentation.onboarding.steps.AppearanceStep
 import eu.akoos.photos.presentation.onboarding.steps.BackupModeStep
 import eu.akoos.photos.presentation.onboarding.steps.DoneStep
@@ -320,7 +322,7 @@ fun OnboardingScreen(
     val scope = rememberCoroutineScope()
 
     // ── User choices ────────────────────────────────────────────────────────
-    var backupMode by rememberSaveable { mutableStateOf(BackupMode.Everything) }
+    var backupMode by rememberSaveable { mutableStateOf(BackupMode.NothingForNow) }
     var selectedFolders by rememberSaveable { mutableStateOf<Set<String>>(emptySet()) }
     var excludedFolders by rememberSaveable { mutableStateOf<Set<String>>(emptySet()) }
     var albumMirrorSelection by rememberSaveable { mutableStateOf<Set<String>>(emptySet()) }
@@ -548,16 +550,21 @@ fun OnboardingScreen(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 if (currentPage > 0 && !isLastStep) {
-                    TextButton(
-                        onClick = {
-                            scope.launch { pagerState.animateScrollToPage(currentPage - 1) }
-                        },
+                    SecondaryButton(
+                        label = stringResource(R.string.onboarding_back),
+                        onClick = { scope.launch { pagerState.animateScrollToPage(currentPage - 1) } },
                         modifier = Modifier.weight(1f),
-                    ) {
-                        Text(stringResource(R.string.onboarding_back), color = colors.fgDim, fontSize = 14.sp)
-                    }
+                    )
                 } else {
                     Spacer(Modifier.weight(1f))
+                }
+                // A permission step's CTA reads "Continue" once its permission is granted,
+                // "Skip" while it's still outstanding.
+                val currentStepGranted = when (currentStep) {
+                    OnboardingStep.Notifications -> notificationGranted
+                    OnboardingStep.PhotosAccess  -> mediaGranted
+                    OnboardingStep.ManageMedia   -> manageMediaGranted
+                    else -> false
                 }
                 val ctaLabel: String
                 val ctaAction: () -> Unit
@@ -588,7 +595,10 @@ fun OnboardingScreen(
                         }
                     }
                     isPermissionStep -> {
-                        ctaLabel = stringResource(R.string.onboarding_skip)
+                        ctaLabel = stringResource(
+                            if (currentStepGranted) R.string.onboarding_continue
+                            else R.string.onboarding_skip,
+                        )
                         ctaAction = {
                             scope.launch { pagerState.animateScrollToPage(currentPage + 1) }
                         }
@@ -600,17 +610,11 @@ fun OnboardingScreen(
                         }
                     }
                 }
-                Button(
+                PrimaryButton(
+                    label = ctaLabel,
                     onClick = ctaAction,
-                    modifier = Modifier.weight(1.5f).height(48.dp),
-                    shape = RoundedCornerShape(14.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = colors.accent,
-                        contentColor = Color.White,
-                    ),
-                ) {
-                    Text(ctaLabel, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                }
+                    modifier = Modifier.weight(1.5f),
+                )
             }
         }
     }

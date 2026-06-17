@@ -38,6 +38,7 @@ import me.proton.core.domain.entity.UserId
 import me.proton.core.network.data.ApiProvider
 import eu.akoos.photos.data.api.DriveApiService
 import eu.akoos.photos.data.api.dto.RevisionBlockDto
+import eu.akoos.photos.crypto.CryptoServiceClient
 import eu.akoos.photos.data.crypto.DriveCryptoHelper
 import eu.akoos.photos.domain.entity.CloudPhoto
 import java.io.File
@@ -68,6 +69,7 @@ private const val DEFAULT_BLOCK_SIZE = 4L * 1024 * 1024
 class PhotoDownloadService @Inject constructor(
     private val apiProvider: ApiProvider,
     private val cryptoHelper: DriveCryptoHelper,
+    private val cryptoServiceClient: CryptoServiceClient,
     private val shareService: PhotosShareService,
     private val linkDetailHelpers: LinkDetailHelpers,
     private val cdnBlockFetcher: CdnBlockFetcher,
@@ -192,14 +194,15 @@ class PhotoDownloadService @Inject constructor(
             val albumLink = albumDetailMap[parentLinkId]?.link
             if (albumLink?.nodeKey != null && albumLink.nodePassphrase != null) {
                 try {
-                    cryptoHelper.decryptNodeKey(albumLink.nodeKey, albumLink.nodePassphrase, rootLinkKeyBytes)
+                    cryptoServiceClient.decryptNodeKey(albumLink.nodeKey, albumLink.nodePassphrase, rootLinkKeyBytes)
                 } catch (e: Exception) {
+                    if (e is kotlinx.coroutines.CancellationException) throw e
                     Log.w(TAG, "downloadFullResPhoto: album key decrypt failed: ${e.message}")
                     rootLinkKeyBytes
                 }
             } else rootLinkKeyBytes
         }
-        val nodeKeyBytes = cryptoHelper.decryptNodeKey(nodeKeyArmored, nodePassphraseArmored, parentKeyBytes)
+        val nodeKeyBytes = cryptoServiceClient.decryptNodeKey(nodeKeyArmored, nodePassphraseArmored, parentKeyBytes)
 
         // ── Revision ID ───────────────────────────────────────────────────────────
         // Priority:
@@ -220,6 +223,7 @@ class PhotoDownloadService @Inject constructor(
                 }
                 (revList.revisions.firstOrNull { it.state == 1 } ?: revList.revisions.firstOrNull())?.id
             } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
                 Log.w(TAG, "downloadFullResPhoto: listRevisions failed: ${e.message}")
                 null
             }
@@ -230,6 +234,7 @@ class PhotoDownloadService @Inject constructor(
             try {
                 manager.invoke { getRevisionByVolume(photo.volumeId, photo.linkId, revisionId) }.valueOrThrow
             } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
                 Log.w(TAG, "downloadFullResPhoto: volume getRevision failed (${e.message}), trying share-based")
                 manager.invoke { getRevision(photo.shareId, photo.linkId, revisionId) }.valueOrThrow
             }
@@ -274,7 +279,7 @@ class PhotoDownloadService @Inject constructor(
             }
         }
 
-        val sessionKey = ckp?.let { cryptoHelper.decryptSessionKey(it, nodeKeyBytes) }
+        val sessionKey = ckp?.let { cryptoServiceClient.decryptSessionKey(it, nodeKeyBytes) }
         if (ckp != null) Log.d(TAG, "downloadFullResPhoto: CKP present (${ckp.take(20)}…), sessionKey=${if (sessionKey != null) "OK" else "FAILED"}")
         else Log.d(TAG, "downloadFullResPhoto: no CKP in any source — will attempt per-block binary-PGP (thumbnails only)")
 
@@ -552,25 +557,28 @@ class PhotoDownloadService @Inject constructor(
         val encFile = File(cacheDir, "enc_${linkId}_${block.index}.bin")
         val decryptedBytes: ByteArray = if (sessionKey != null) {
             encFile.writeBytes(encBytes)
-            val result = runCatching { cryptoHelper.decryptFileToDestination(sessionKey, encFile, decFile) }
+            val result = runCatching { cryptoServiceClient.decryptFileToDestination(sessionKey, encFile, decFile) }
             encFile.delete()
             if (result.isSuccess) {
                 decFile.readBytes()
             } else {
                 decFile.delete()
-                // Try binary-PGP as last resort before giving up
-                val fallback = cryptoHelper.decryptBinaryPgpWithNodeKey(encBytes, nodeKeyBytes)
-                    ?: error("Block ${block.index} decrypt failed: sessionKey path: ${result.exceptionOrNull()?.message}")
-                // Persist the fallback decrypt so resume + concat work uniformly.
-                decFile.writeBytes(fallback)
-                fallback
+                // Try binary-PGP as last resort before giving up. File-based so a multi-MB
+                // block stays under the binder limit when the decrypt runs in :crypto.
+                encFile.writeBytes(encBytes)
+                val ok = cryptoServiceClient.decryptBinaryToFile(encFile, decFile, nodeKeyBytes)
+                encFile.delete()
+                if (!ok) error("Block ${block.index} decrypt failed: sessionKey path: ${result.exceptionOrNull()?.message}")
+                decFile.readBytes()
             }
         } else {
-            // No session key — try binary-PGP (only works if block has embedded PKESK)
-            val plain = cryptoHelper.decryptBinaryPgpWithNodeKey(encBytes, nodeKeyBytes)
-                ?: error("Block ${block.index} decrypt failed: no session key and binary-PGP returned null")
-            decFile.writeBytes(plain)
-            plain
+            // No session key — try binary-PGP (only works if block has embedded PKESK).
+            // File-based so a multi-MB block stays under the binder limit in :crypto.
+            encFile.writeBytes(encBytes)
+            val ok = cryptoServiceClient.decryptBinaryToFile(encFile, decFile, nodeKeyBytes)
+            encFile.delete()
+            if (!ok) error("Block ${block.index} decrypt failed: no session key and binary-PGP returned null")
+            decFile.readBytes()
         }
 
         val decHash = cryptoHelper.sha256(decryptedBytes)
@@ -636,6 +644,7 @@ class PhotoDownloadService @Inject constructor(
                 tmp.delete()
             }
         } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
             Log.w(TAG, "writeBlockHashSidecar: $linkId failed: ${e.message}")
             // Best-effort cleanup of any partial write.
             File(cacheDir, "$linkId.hashes.tmp").delete()
@@ -670,6 +679,7 @@ class PhotoDownloadService @Inject constructor(
                 BlockHashes(parts[0].hexToByteArray(), parts[1].hexToByteArray())
             }
         } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
             Log.w(TAG, "readBlockHashSidecar: $linkId failed: ${e.message}")
             null
         }

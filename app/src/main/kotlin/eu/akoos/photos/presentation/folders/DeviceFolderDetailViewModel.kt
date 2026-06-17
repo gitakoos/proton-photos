@@ -51,15 +51,13 @@ import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.usecase.DeletePhotoUseCase
 import eu.akoos.photos.domain.usecase.ForceUploadLocalUrisUseCase
 import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
+import eu.akoos.photos.presentation.viewer.PublicLinkState
+import eu.akoos.photos.R
 import javax.inject.Inject
 
 /**
- * Backs [DeviceFolderDetailScreen]: the device-resident photos of one MediaStore bucket, with
- * uri-keyed selection and an "upload selected to Drive" action. The grid shows only photos that
- * physically live on the device (LocalOnly + Synced) in this bucket — a CloudOnly entry has no
- * device file to upload, so it never appears here. The sync badge on each cell reflects the live
- * [eu.akoos.photos.domain.entity.SyncState], so a freshly uploaded photo flips to the green-cloud
- * badge on its own.
+ * Backs [DeviceFolderDetailScreen]: device-resident photos of one MediaStore bucket (LocalOnly + Synced
+ * only — CloudOnly has no device file), with uri-keyed selection and upload-to-Drive actions.
  */
 @HiltViewModel
 class DeviceFolderDetailViewModel @Inject constructor(
@@ -69,6 +67,7 @@ class DeviceFolderDetailViewModel @Inject constructor(
     private val forceUploadLocalUris: ForceUploadLocalUrisUseCase,
     private val deletePhotoUseCase: DeletePhotoUseCase,
     private val driveRepo: DrivePhotoRepository,
+    private val publicLink: eu.akoos.photos.presentation.common.PublicLinkController,
 ) : ViewModel() {
 
     private val _items = MutableStateFlow<List<GalleryItem>>(emptyList())
@@ -97,11 +96,7 @@ class DeviceFolderDetailViewModel @Inject constructor(
      *  queued photo has finished uploading (or when the screen leaves). */
     private val _backupTarget = MutableStateFlow<Set<String>>(emptySet())
 
-    /**
-     * `done / total` for the active back-up, or null when none is running. Derived from the same
-     * live item stream the grid observes: a queued photo counts as done once its row flips to
-     * [GalleryItem.Synced], so the bar fills as uploads land without any extra pipeline plumbing.
-     */
+    /** done/total for the active back-up (null when idle). A queued photo counts done once its row flips to Synced. */
     val backupProgress: StateFlow<BackupProgress?> = combine(_items, _backupTarget) { items, target ->
         if (target.isEmpty()) return@combine null
         val done = items.count { it is GalleryItem.Synced && localUriOf(it) in target }
@@ -118,10 +113,12 @@ class DeviceFolderDetailViewModel @Inject constructor(
         }
     }
 
-    /**
-     * Observe device photos in [bucketName], newest first, excluding hidden-vault items (same
-     * DataStore key the gallery uses). CloudOnly items are dropped — they have no local file.
-     */
+    /** Cancel an in-flight folder back-up — stops the upload worker and clears progress. */
+    fun cancelBackup() {
+        eu.akoos.photos.worker.SyncWorker.cancel(androidx.work.WorkManager.getInstance(context))
+        _backupTarget.value = emptySet()
+    }
+
     fun load(bucketName: String) {
         this.bucketName = bucketName
         loadAlbums()
@@ -167,11 +164,8 @@ class DeviceFolderDetailViewModel @Inject constructor(
     }
 
     /**
-     * Add the current selection to the cloud album [albumLinkId]. Synced (and, defensively,
-     * CloudOnly) selections carry a Drive linkId and join the album immediately; LocalOnly
-     * selections have no linkId yet, so they are queued to back up and join afterwards. Clears
-     * the selection and reports `(joined, queued)` so the screen can word its snackbar — [joined]
-     * is how many cloud photos joined now, [queued] how many local photos will join after upload.
+     * Add the selection to album [albumLinkId]: cloud-backed selections join now; LocalOnly ones are
+     * queued to upload and join after. Reports (joined now, queued for after) for the snackbar.
      */
     fun addSelectedToAlbum(albumLinkId: String, onResult: (joined: Int, queued: Int) -> Unit) {
         val userId = primaryUserId ?: return
@@ -203,18 +197,13 @@ class DeviceFolderDetailViewModel @Inject constructor(
     /** Outcome of an upload action, so the screen can word its snackbar. */
     data class UploadOutcome(val queued: Int, val alreadyBackedUp: Int)
 
-    /**
-     * Force every selected LocalOnly photo to back up to Drive; already-synced selections are
-     * skipped (they are reported as [UploadOutcome.alreadyBackedUp]). Clears the selection and
-     * hands the count back via [onResult] so the caller can show a snackbar.
-     */
+    /** Back up every selected LocalOnly photo; already-synced selections are skipped (reported as alreadyBackedUp). */
     fun uploadSelected(onResult: (UploadOutcome) -> Unit) {
         val userId = primaryUserId ?: return
         val selected = _selectedUris.value
         if (selected.isEmpty()) return
         viewModelScope.launch {
-            // Only LocalOnly items need uploading. A Synced selection is already on Drive, so it
-            // is counted as already-backed-up and left alone.
+            // Only LocalOnly items upload; Synced selections are counted as already-backed-up.
             val syncedUris = _items.value
                 .filterIsInstance<GalleryItem.Synced>()
                 .map { it.local.uri }
@@ -238,10 +227,7 @@ class DeviceFolderDetailViewModel @Inject constructor(
         is GalleryItem.CloudOnly -> null
     }
 
-    /**
-     * Share the selected photos to other apps via the system chooser. Device-folder items are
-     * always local files, so the content URIs are shareable directly with no download step.
-     */
+    /** Share the selection to other apps. Device-folder items are local files, so no download step. */
     fun shareSelected() {
         val sel = _selectedUris.value
         if (sel.isEmpty()) return
@@ -249,10 +235,7 @@ class DeviceFolderDetailViewModel @Inject constructor(
         _selectedUris.value = emptySet()
     }
 
-    /**
-     * Share specific device photos (keyed by local uri) to other apps — used by the per-cell
-     * long-press menu. Resolves the matching items to content URIs and emits the send intent.
-     */
+    /** Share specific device photos (by local uri) to other apps — used by the per-cell long-press menu. */
     fun shareUris(uris: List<String>) {
         if (uris.isEmpty()) return
         val uriSet = uris.toSet()
@@ -263,10 +246,26 @@ class DeviceFolderDetailViewModel @Inject constructor(
         _shareIntent.tryEmit(eu.akoos.photos.util.ShareIntentBuilder.buildSendIntent(context, parsed, mime))
     }
 
-    /**
-     * Force-upload specific device photos (keyed by local uri) to Drive — used by the per-cell
-     * long-press menu. Already-synced uris are skipped and reported as [UploadOutcome.alreadyBackedUp].
-     */
+    // ── Public link for the single selected (local) photo — delegated to the shared
+    // [PublicLinkController]. Device-folder photos are always local, so the manage sheet starts at
+    // the "upload & create" step. ──────────────────────────────────────────────────────────────────
+    val publicLinkState: StateFlow<PublicLinkState> = publicLink.state
+
+    fun singleSelectedLocalUri(): String? = _selectedUris.value.takeIf { it.size == 1 }?.first()
+
+    fun resetPublicLinkState() = publicLink.reset()
+
+    fun uploadAndCreateSelectedLink() {
+        singleSelectedLocalUri()?.let { publicLink.uploadAndCreate(viewModelScope, it) }
+    }
+
+    fun revokePublicLink() = publicLink.revoke(viewModelScope)
+
+    fun setLinkPassword(password: String?) = publicLink.setPassword(viewModelScope, password)
+
+    fun currentPublicLinkUrl(): String? = publicLink.currentUrl()
+
+    /** Back up specific device photos (by local uri) — used by the per-cell long-press menu. */
     fun backUpUris(uris: List<String>, onResult: (UploadOutcome) -> Unit) {
         val userId = primaryUserId ?: return
         if (uris.isEmpty()) return
@@ -283,10 +282,8 @@ class DeviceFolderDetailViewModel @Inject constructor(
     }
 
     /**
-     * Back up every photo in this folder to Drive. When [asMirror] is true the folder is added to
-     * the album-mirror opt-in set first, so the upload pipeline creates a matching Drive album and
-     * each uploaded photo joins it; otherwise the photos just back up to the timeline. Already-synced
-     * photos are skipped and reported as [UploadOutcome.alreadyBackedUp].
+     * Back up every photo in this folder. [asMirror] adds the folder to the album-mirror opt-in set first,
+     * so uploads also join a matching Drive album; otherwise they just back up to the timeline.
      */
     fun backUpAll(asMirror: Boolean, onResult: (UploadOutcome) -> Unit) {
         val userId = primaryUserId ?: return
@@ -314,6 +311,10 @@ class DeviceFolderDetailViewModel @Inject constructor(
     private val _pendingDeleteIntent = MutableStateFlow<android.app.PendingIntent?>(null)
     val pendingDeleteIntent: StateFlow<android.app.PendingIntent?> = _pendingDeleteIntent.asStateFlow()
 
+    /** True while a multi-select delete runs, so the screen can block the UI behind a progress drawer. */
+    private val _isDeleting = MutableStateFlow(false)
+    val isDeleting: StateFlow<Boolean> = _isDeleting.asStateFlow()
+
     /** Deferred cloud-delete work, held while the system trash dialog is up. */
     private var pendingPermissionResult: DeletePhotoUseCase.Result.NeedsMediaWritePermission? = null
 
@@ -323,24 +324,26 @@ class DeviceFolderDetailViewModel @Inject constructor(
     }
 
     /**
-     * Delete the selected device photos. [freeUpSpace] removes the on-device copy; [deleteFromCloud]
-     * also removes the Drive copy of any backed-up (Synced) selection. On Android 11+ a local delete
-     * routes through the system trash dialog first ([DeletePhotoUseCase]); the cloud delete is
-     * deferred until the user confirms. The grid empties itself as the deleted rows leave the
-     * observed media stream, so there is no separate "done" state to clear.
+     * Delete selected device photos: [freeUpSpace] removes on-device, [deleteFromCloud] also trashes the
+     * Drive copy. On Android 11+ the local delete routes through the system trash dialog and defers the cloud delete.
      */
     fun deleteSelected(freeUpSpace: Boolean, deleteFromCloud: Boolean) {
         val items = selectedGalleryItems()
         if (items.isEmpty()) return
         viewModelScope.launch {
             val userId = primaryUserId ?: accountManager.getPrimaryUserId().first() ?: return@launch
-            when (val result = deletePhotoUseCase(userId, items, freeUpSpace, deleteFromCloud)) {
-                is DeletePhotoUseCase.Result.Success -> _selectedUris.value = emptySet()
-                is DeletePhotoUseCase.Result.NeedsMediaWritePermission -> {
-                    pendingPermissionResult = result
-                    _pendingDeleteIntent.value = result.pendingIntent
+            _isDeleting.value = true
+            try {
+                when (val result = deletePhotoUseCase(userId, items, freeUpSpace, deleteFromCloud)) {
+                    is DeletePhotoUseCase.Result.Success -> _selectedUris.value = emptySet()
+                    is DeletePhotoUseCase.Result.NeedsMediaWritePermission -> {
+                        pendingPermissionResult = result
+                        _pendingDeleteIntent.value = result.pendingIntent
+                    }
+                    is DeletePhotoUseCase.Result.CloudDeleteFailed -> Unit
                 }
-                is DeletePhotoUseCase.Result.CloudDeleteFailed -> Unit
+            } finally {
+                _isDeleting.value = false
             }
         }
     }

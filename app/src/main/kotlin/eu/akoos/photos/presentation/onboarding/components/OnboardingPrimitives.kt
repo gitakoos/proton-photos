@@ -22,6 +22,9 @@
 
 package eu.akoos.photos.presentation.onboarding.components
 
+import eu.akoos.photos.presentation.common.PrimaryButton
+import eu.akoos.photos.presentation.common.SecondaryButton
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -290,21 +293,17 @@ internal fun onboardingSwitchColors() = SwitchDefaults.colors(
 
 @Composable
 internal fun AllowButton(label: String, granted: Boolean, onClick: () -> Unit) {
-    val colors = AppColors.current
-    Button(
-        onClick = onClick,
-        modifier = Modifier.fillMaxWidth().height(50.dp),
-        shape = RoundedCornerShape(14.dp),
-        colors = ButtonDefaults.buttonColors(
-            containerColor = if (granted) colors.surfaceWeak else colors.accent,
-            contentColor = if (granted) colors.fgPrimary else Color.White,
-        ),
-        enabled = !granted,
-    ) {
-        if (granted) {
-            Icon(Icons.Default.Check, null, tint = colors.accent, modifier = Modifier.size(20.dp))
-            Spacer(Modifier.width(8.dp))
-        }
-        Text(label, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+    // Granted shows a neutral "done" state with a check; not-yet-granted is the accent CTA.
+    // Both route through the shared buttons so onboarding matches the rest of the app.
+    if (granted) {
+        SecondaryButton(
+            label = label,
+            onClick = {},
+            modifier = Modifier.fillMaxWidth(),
+            icon = Icons.Default.Check,
+            enabled = false,
+        )
+    } else {
+        PrimaryButton(label = label, onClick = onClick, modifier = Modifier.fillMaxWidth())
     }
 }

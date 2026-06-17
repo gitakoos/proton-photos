@@ -30,6 +30,7 @@ import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.PendingInvitation
 import eu.akoos.photos.domain.entity.ShareInvitation
 import eu.akoos.photos.domain.entity.ShareMember
+import eu.akoos.photos.domain.entity.SharedPhoto
 import eu.akoos.photos.domain.entity.CloudTrashItem
 import eu.akoos.photos.domain.entity.LocalMediaItem
 import java.io.File
@@ -39,7 +40,7 @@ interface DrivePhotoRepository {
     suspend fun getShareId(userId: UserId, volumeId: String): String
     fun observeCloudPhotos(userId: UserId): Flow<List<CloudPhoto>>
     fun observePhotosByLinkIds(linkIds: List<String>): Flow<List<CloudPhoto>>
-    suspend fun refreshCloudPhotos(userId: UserId)
+    suspend fun refreshCloudPhotos(userId: UserId, force: Boolean = false)
     suspend fun refreshCloudPhotosIncremental(userId: UserId)
     suspend fun loadAlbums(userId: UserId): List<Album>
 
@@ -130,6 +131,10 @@ interface DrivePhotoRepository {
         item: LocalMediaItem,
         sha1HexContentDigest: String,
         uploadUri: String = item.uri,
+        // Source-derived Camera/Location + rotation-corrected dimensions for the photo xAttr,
+        // already gated against the strip config by the caller (see UploadPendingUseCase).
+        xAttrMetadata: eu.akoos.photos.data.repository.drive.UploadXAttrMetadata =
+            eu.akoos.photos.data.repository.drive.UploadXAttrMetadata(),
         onProgress: ((
             phase: eu.akoos.photos.data.repository.drive.UploadPhase,
             doneBytes: Long,
@@ -180,6 +185,13 @@ interface DrivePhotoRepository {
      * can still apply local optimistic state.
      */
     suspend fun setCloudFavorite(userId: UserId, photo: CloudPhoto, favorite: Boolean): Boolean
+
+    /**
+     * Adds or removes a single Drive PhotoTag category id on a cloud photo (metadata-only, the
+     * same harmless write path as [setCloudFavorite] — no content, revision, or re-encryption).
+     * Tag 0 (Favorites) routes through the favorite path. Returns true on success.
+     */
+    suspend fun setCloudTag(userId: UserId, photo: CloudPhoto, tagId: Int, add: Boolean): Boolean
     suspend fun deleteAlbum(userId: UserId, albumLinkId: String)
 
     /**
@@ -225,6 +237,32 @@ interface DrivePhotoRepository {
     ): eu.akoos.photos.data.repository.drive.CloudDeleteOutcome
     /** Creates a public share link for an album; returns the public URL. */
     suspend fun createAlbumShareLink(userId: UserId, albumLinkId: String): String
+
+    /**
+     * Creates (or reuses) a public share link for a single photo; returns the public URL.
+     * If the photo is already shared by link the existing URL is returned rather than
+     * minting a duplicate. Only share metadata is created — the photo's content is untouched.
+     */
+    suspend fun createPhotoShareLink(userId: UserId, photoLinkId: String): String
+
+    /** Returns the existing public share-URL for a single photo, or null if it isn't shared. */
+    suspend fun getPhotoShareLink(userId: UserId, photoLinkId: String): String?
+
+    /**
+     * Stops sharing a single photo by link: deletes the photo's share URL(s) and then the
+     * share itself. Tolerant of an already-unshared photo. Only share metadata is removed.
+     */
+    suspend fun revokePhotoShareLink(userId: UserId, photoLinkId: String)
+
+    /**
+     * Sets or clears the custom password on a photo's existing public link, returning the new
+     * full link string. A null/blank [password] clears it back to a random "anyone with the
+     * link" share (the returned URL carries the password in its `#fragment`); a non-blank
+     * [password] makes the link require that typed password (the returned URL is bare).
+     * Only share metadata is touched. The photo must already have a public link.
+     */
+    suspend fun setPhotoLinkPassword(userId: UserId, photoLinkId: String, password: String?): String
+
     /** Invites a Proton user (by email) to an album with read permissions. */
     suspend fun inviteToAlbum(userId: UserId, albumLinkId: String, email: String)
 
@@ -324,6 +362,16 @@ interface DrivePhotoRepository {
     suspend fun changeInvitationPermission(userId: UserId, shareId: String, invitationId: String, permissions: Int)
     /** Returns albums that other users have shared with the current user. */
     suspend fun loadSharedWithMeAlbums(userId: UserId): List<Album>
+    /** Returns individual library photos the current user has shared via a public link. */
+    suspend fun loadSharedByMePhotos(userId: UserId): List<SharedPhoto>
+
+    /**
+     * Live view of the given shared-photo [linkIds] from the local listing DB, re-emitting
+     * whenever a row's lazily-decrypted `thumbnailUrl` lands so the Shared grid fills in its
+     * tiles without a manual refresh. Order follows [linkIds]; rows not (yet) in the DB are
+     * dropped. Read-only.
+     */
+    fun observeSharedByMePhotos(linkIds: List<String>): kotlinx.coroutines.flow.Flow<List<SharedPhoto>>
     /** Returns the list of users invited to a share. */
     suspend fun loadShareInvitations(userId: UserId, shareId: String): List<ShareInvitation>
     /** Revokes a specific invitation from a share. */
@@ -347,11 +395,15 @@ interface DrivePhotoRepository {
     suspend fun acceptInvitation(userId: UserId, invitationId: String)
 
     /**
-     * Wipes every plaintext crypto secret (share key, root link key, node hash key) from memory.
-     * Call before [me.proton.core.accountmanager.domain.AccountManager.disableAccount] or when a
-     * user switch is detected, so heap inspection cannot recover key material across sessions.
+     * Wipes the signed-out user's state so a re-login (same or different account) starts clean:
+     * every plaintext crypto secret in memory (share key, root link key, node hash key) PLUS the
+     * cached cloud rows for this user (photo_listing, sync_state, day_meta, albums). Call before
+     * [me.proton.core.accountmanager.domain.AccountManager.disableAccount]. Decrypted disk caches,
+     * Coil caches, and the per-user DataStore anchors are cleared by the caller (it owns the
+     * Context + WorkManager). Leaving the cloud rows behind caused stale photos to reappear with
+     * black thumbnails and an occasional 404 on re-login (the events anchor pointed at old state).
      */
-    fun clearCacheForSignOut()
+    suspend fun clearCacheForSignOut(userId: UserId)
 
     // ── Lazy thumbnail decrypt ────────────────────────────────────────────
     //

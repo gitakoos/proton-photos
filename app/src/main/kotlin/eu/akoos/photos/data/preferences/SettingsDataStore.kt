@@ -38,6 +38,9 @@ object SettingsKeys {
     val AUTO_SYNC = booleanPreferencesKey("auto_sync")
     val SYNC_WIFI_ONLY = booleanPreferencesKey("sync_wifi_only")
 
+    /** When false, the gallery hides the "On this day" memories carousel. Default true. */
+    val SHOW_ON_THIS_DAY = booleanPreferencesKey("show_on_this_day")
+
     /** When true (default), the viewer + editor will NOT auto-download cloud full-res
      *  blobs on metered networks. Wifi-only is the data-conscious default; users on
      *  unlimited mobile plans can flip it off in Settings → Sync. Does not affect the
@@ -78,6 +81,10 @@ object SettingsKeys {
      *  Cleared (overwritten) when a NEWER version appears, so dismissing 2.0.1 still
      *  lets 2.0.2 prompt again. */
     val UPDATE_DISMISSED_VERSION = stringPreferencesKey("update_dismissed_version")
+
+    /** User's custom order for the timeline category rail, a CSV of GalleryFilter enum names.
+     *  Absent = the default Drive-web order. Reordered by long-pressing a chip and dragging. */
+    val CATEGORY_RAIL_ORDER = stringPreferencesKey("category_rail_order")
 
     val LANGUAGE = stringPreferencesKey("language")
     /** Folders selected for backup. null (key absent) = back up nothing (first-run default). */
@@ -183,6 +190,28 @@ object SettingsKeys {
     fun eventAnchorKey(userId: String, volumeId: String) =
         stringPreferencesKey("event_anchor_${userId}_$volumeId")
 
+    /** Resume cursor for the full photo-stream listing walk: the PreviousPageLastLinkID to send
+     *  on the next page fetch. Persisted after every page so an interrupted walk (a page that
+     *  throws partway through a large library) continues from where it stopped on the next run
+     *  instead of restarting from the newest photo each time. Cleared once the walk reaches the
+     *  final page. */
+    fun photoListingCursorKey(userId: String, volumeId: String) =
+        stringPreferencesKey("photo_listing_cursor_${userId}_$volumeId")
+
+    /** True once the photo-stream listing has been walked end to end (every page fetched without
+     *  a failure). Gates the incremental event anchor — future deltas are only safe to track once
+     *  the whole library is in the DB. Reset to false at the start of a walk and left false on any
+     *  page failure so the next run keeps walking older photos. */
+    fun photoListingCompleteKey(userId: String, volumeId: String) =
+        booleanPreferencesKey("photo_listing_complete_${userId}_$volumeId")
+
+    /** Notification opt-outs. Absent = true (shown). Producers read these before posting; the
+     *  Notifications settings screen toggles them. NOTIFY_BACKUP_STATUS also controls whether the
+     *  persistent background-sync service runs at all (it cannot be foreground without a notification). */
+    val NOTIFY_BACKUP_STATUS = booleanPreferencesKey("notify_backup_status")
+    val NOTIFY_ALBUM_DOWNLOAD = booleanPreferencesKey("notify_album_download")
+    val NOTIFY_DELETE_REMINDER = booleanPreferencesKey("notify_delete_reminder")
+
     // Metadata stripping — which fields to strip when uploading photos
     val STRIP_GPS = booleanPreferencesKey("strip_gps")
     val STRIP_CAMERA_INFO = booleanPreferencesKey("strip_camera_info")
@@ -218,6 +247,11 @@ object SettingsKeys {
     // Timeline grouping preference
     val TIMELINE_GROUPING = stringPreferencesKey("timeline_grouping")
 
+    /** True once the user dismissed the "densest layout may slow scrolling" heads-up with
+     *  "Don't show again". Absent/false = the one-time notice still appears the first time the
+     *  timeline is zoomed out to the densest grid in a session. */
+    val DENSE_GRID_WARNING_DISMISSED = booleanPreferencesKey("dense_grid_warning_dismissed")
+
     // App lock — biometric/device credential lock for the entire app
     val APP_LOCK_ENABLED = booleanPreferencesKey("app_lock_enabled")
 
@@ -247,6 +281,7 @@ object SettingsKeys {
      *  and Shared tabs are untouched — only the Photos tab honours this filter. */
     val HIDE_PHOTOS_IN_ALBUMS = booleanPreferencesKey("hide_photos_in_albums")
     val HIDE_DEVICE_FOLDERS_IN_ALBUMS = booleanPreferencesKey("hide_device_folders_in_albums")
+    val HIDE_CLOUD_ALBUMS_IN_ALBUMS = booleanPreferencesKey("hide_cloud_albums_in_albums")
 
     /**
      * Bucket display names the user has chosen to keep OUT of the main Photos timeline.
@@ -259,6 +294,9 @@ object SettingsKeys {
      * same cross-path collision caveat as [EXCLUDED_FOLDER_NAMES].
      */
     val TIMELINE_EXCLUDED_FOLDER_NAMES = stringSetPreferencesKey("timeline_excluded_folder_names")
+    /** Cloud album linkIds individually hidden from the timeline (per-album toggle), separate from
+     *  the [HIDE_PHOTOS_IN_ALBUMS] master switch which hides photos in ALL albums at once. */
+    val TIMELINE_EXCLUDED_ALBUM_IDS = stringSetPreferencesKey("timeline_excluded_album_ids")
 
     // Favorites — stores URIs (local) or linkIds (cloud) of favorited photos
     val FAVORITE_IDS = stringSetPreferencesKey("favorite_ids")
@@ -273,4 +311,12 @@ object SettingsKeys {
 
     /** TTL after which a [RECENT_UPLOAD_IDS] entry is considered stale and dropped. */
     const val RECENT_UPLOAD_TTL_MS = 60L * 60L * 1000L
+
+    /**
+     * DEBUG-only large-library simulator size. N synthetic photo_listing rows are generated
+     * (0 = off / not simulating). Only read by the BuildConfig.DEBUG-gated simulator UI +
+     * [eu.akoos.photos.data.repository.drive.LargeLibrarySimulator]; the production
+     * listing / decrypt / cache paths never consult it.
+     */
+    val SIM_LARGE_LIBRARY_COUNT = intPreferencesKey("sim_large_library_count")
 }

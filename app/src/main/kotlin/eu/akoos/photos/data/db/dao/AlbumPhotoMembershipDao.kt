@@ -36,11 +36,13 @@ interface AlbumPhotoMembershipDao {
     @Query("SELECT photoLinkId FROM album_photo_membership WHERE albumLinkId = :albumLinkId")
     suspend fun getPhotoLinkIds(albumLinkId: String): List<String>
 
-    /** Cloud linkIds that appear in ANY album — used by the "hide photos already in
-     *  albums" Photos-tab filter. Emits a fresh snapshot whenever the membership
-     *  table changes (album opened, photo added/removed, etc.). */
+    /** Cloud linkIds in ANY album — backs the "hide photos already in albums" Photos-tab filter. */
     @Query("SELECT DISTINCT photoLinkId FROM album_photo_membership")
     fun observeAllAssociatedPhotoLinkIds(): Flow<List<String>>
+
+    /** Cloud linkIds in ANY of the given albums — backs the per-album timeline-hide filter. */
+    @Query("SELECT DISTINCT photoLinkId FROM album_photo_membership WHERE albumLinkId IN (:albumIds)")
+    fun observeAssociatedPhotoLinkIdsForAlbums(albumIds: Set<String>): Flow<List<String>>
 
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun upsertAll(entries: List<AlbumPhotoMembershipEntity>)
@@ -48,15 +50,12 @@ interface AlbumPhotoMembershipDao {
     @Query("DELETE FROM album_photo_membership WHERE albumLinkId = :albumLinkId")
     suspend fun deleteAllForAlbum(albumLinkId: String)
 
-    /** Targeted delete used by remove-from-album so the gallery filter re-fires
-     *  instantly without dropping every other photo's membership row. */
+    /** Targeted delete for remove-from-album, so the gallery filter re-fires without
+     *  dropping every other photo's membership row. */
     @Query("DELETE FROM album_photo_membership WHERE albumLinkId = :albumLinkId AND photoLinkId IN (:photoLinkIds)")
     suspend fun deleteForAlbumPhotos(albumLinkId: String, photoLinkIds: List<String>)
 
-    /**
-     * Atomically replaces the membership rows for an album so the offline list matches
-     * the network truth without leaving deleted-on-Drive references behind.
-     */
+    /** Atomically replaces an album's membership rows so the offline list matches network truth. */
     @Transaction
     suspend fun replaceAllForAlbum(albumLinkId: String, photoLinkIds: List<String>) {
         deleteAllForAlbum(albumLinkId)

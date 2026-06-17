@@ -29,6 +29,7 @@ import android.graphics.Matrix
 import android.net.Uri
 import android.os.Build
 import android.util.Log
+import android.webkit.MimeTypeMap
 import androidx.exifinterface.media.ExifInterface
 import java.io.File
 import java.io.FileOutputStream
@@ -169,6 +170,22 @@ object ExifHelper {
     }
 
     /**
+     * Picks the temp-file extension for a strip copy from the source [uri]. Prefers the
+     * extension on the URI path; falls back to the ContentResolver MIME type mapped through
+     * [MimeTypeMap]. Defaults to ".jpg" so the common JPEG case is unchanged.
+     */
+    private fun tempSuffixFor(context: Context, uri: Uri): String {
+        val pathExt = MimeTypeMap.getFileExtensionFromUrl(uri.toString())
+            .takeIf { it.isNotBlank() }
+            ?: uri.lastPathSegment?.substringAfterLast('.', "")?.takeIf { it.isNotBlank() }
+        if (pathExt != null) return ".${pathExt.lowercase()}"
+
+        val mime = runCatching { context.contentResolver.getType(uri) }.getOrNull()
+        val mimeExt = mime?.let { MimeTypeMap.getSingleton().getExtensionFromMimeType(it) }
+        return if (mimeExt != null) ".${mimeExt.lowercase()}" else ".jpg"
+    }
+
+    /**
      * Copies the file from [uri] to a temp file, strips the configured metadata fields,
      * and returns the temp file path. Caller must delete the temp file after use.
      * Returns null if nothing needs stripping or the operation fails.
@@ -177,8 +194,12 @@ object ExifHelper {
     fun stripToTempFile(context: Context, uri: String, config: MetadataStripConfig): File? {
         if (config.isNoOp) return null
         return try {
-            val inputStream = context.contentResolver.openInputStream(Uri.parse(uri)) ?: return null
-            val tmpFile = File.createTempFile("stripped_", ".jpg", context.cacheDir)
+            val parsed = Uri.parse(uri)
+            val inputStream = context.contentResolver.openInputStream(parsed) ?: return null
+            // The temp must keep the source container's extension. A hardcoded ".jpg" mislabels
+            // HEIC / RAW / motion-photo bytes, which then upload (and decode) under the wrong type.
+            val suffix = tempSuffixFor(context, parsed)
+            val tmpFile = File.createTempFile("stripped_", suffix, context.cacheDir)
             FileOutputStream(tmpFile).use { out -> inputStream.use { it.copyTo(out) } }
             val exif = ExifInterface(tmpFile)
             if (config.stripGps) {

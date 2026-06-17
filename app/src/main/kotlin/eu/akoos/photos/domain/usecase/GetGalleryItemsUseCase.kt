@@ -22,9 +22,16 @@
 
 package eu.akoos.photos.domain.usecase
 
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.shareIn
 import me.proton.core.domain.entity.UserId
+import eu.akoos.photos.di.AppScope
 import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.entity.LocalMediaItem
@@ -32,20 +39,34 @@ import eu.akoos.photos.domain.entity.SyncState
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.LocalMediaRepository
 import eu.akoos.photos.domain.repository.SyncStateRepository
+import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
+import javax.inject.Singleton
 
+@Singleton
 class GetGalleryItemsUseCase @Inject constructor(
     private val localRepo: LocalMediaRepository,
     private val cloudRepo: DrivePhotoRepository,
     private val syncStateRepo: SyncStateRepository,
+    @AppScope private val appScope: CoroutineScope,
 ) {
+    // One shared upstream merge per user, so the associateBy/groupBy/sort runs ONCE across all
+    // collectors (Gallery, Search, Calendar, …) instead of re-running per cold subscription.
+    private val cache = ConcurrentHashMap<UserId, SharedFlow<List<GalleryItem>>>()
+
     fun invoke(userId: UserId): Flow<List<GalleryItem>> =
-        combine(
-            localRepo.observeLocalMedia(),
-            cloudRepo.observeCloudPhotos(userId),
-            syncStateRepo.observeAll(userId),
-        ) { local, cloud, syncStates ->
-            merge(local, cloud, syncStates)
+        cache.getOrPut(userId) {
+            combine(
+                localRepo.observeLocalMedia(),
+                cloudRepo.observeCloudPhotos(userId),
+                syncStateRepo.observeAll(userId),
+            ) { local, cloud, syncStates ->
+                merge(local, cloud, syncStates)
+            }
+                // The merge/sort over the full library is CPU work that must not run on the
+                // collector's Main dispatcher — a decrypt burst re-emits this per write.
+                .flowOn(Dispatchers.Default)
+                .shareIn(appScope, SharingStarted.WhileSubscribed(5_000), replay = 1)
         }
 
     private fun merge(
@@ -61,6 +82,14 @@ class GetGalleryItemsUseCase @Inject constructor(
         val cloudByLinkId = cloud.associateBy { it.linkId }
         val cloudByHash = cloud.filter { !it.contentHash.isNullOrEmpty() }
             .associateBy { it.contentHash!! }
+        // Content-based pairing fallback for cloud photos THIS app never uploaded — e.g. a library
+        // backed up by Proton Drive's own app. With no SyncState row, neither cloudFileId nor
+        // localHash resolves, so a device photo that also lives on Drive would otherwise render
+        // twice (LocalOnly + CloudOnly). Group by (lower-case name, capture second); a local item
+        // with exactly ONE unclaimed match there pairs as Synced. Grouping (not associateBy) lets
+        // the loop REFUSE to guess when two cloud photos share the key, rather than merge a wrong pair.
+        val cloudByNameAndDate: Map<Pair<String, Long>, List<CloudPhoto>> =
+            cloud.groupBy { it.displayName.lowercase() to it.captureTime }
 
         val result = mutableListOf<GalleryItem>()
         val usedCloudIds = mutableSetOf<String>()
@@ -71,6 +100,8 @@ class GetGalleryItemsUseCase @Inject constructor(
             // Resolve the matching cloud photo in priority order:
             //   1. SyncState.cloudFileId (most reliable, set explicitly on upload + download)
             //   2. contentHash equality (covers downloads without a SyncState row + restores)
+            //   3. name + capture-second (covers cloud photos this app never uploaded, e.g. backed
+            //      up by Proton Drive's own app — only when the match is unambiguous)
             // Each cloud entry can only be claimed by ONE local item — that's why we check
             // [usedCloudIds] before pairing. Without this, a download that races a sync can
             // produce two Synced entries pointing at the same cloud linkId.
@@ -82,8 +113,16 @@ class GetGalleryItemsUseCase @Inject constructor(
                     ?.let { cloudByHash[it] }
                     ?.takeIf { it.linkId !in usedCloudIds }
             else null
+            // Only when our own bookkeeping gave us nothing: pair ONLY if exactly one unclaimed
+            // cloud photo carries this name+second, so an ambiguous burst/duplicate falls back to
+            // the LocalOnly + CloudOnly behaviour instead of merging the wrong pair.
+            val cloudFromContent = if (cloudFromSync == null && cloudFromHash == null)
+                cloudByNameAndDate[localItem.displayName.lowercase() to (localItem.dateTaken / 1000L)]
+                    ?.filter { it.linkId !in usedCloudIds }
+                    ?.singleOrNull()
+            else null
 
-            val cloudPhoto = cloudFromSync ?: cloudFromHash
+            val cloudPhoto = cloudFromSync ?: cloudFromHash ?: cloudFromContent
 
             if (cloudPhoto != null) {
                 usedCloudIds += cloudPhoto.linkId
@@ -103,8 +142,16 @@ class GetGalleryItemsUseCase @Inject constructor(
         // TimestampSanity, so a sub-floor cloud value falls back to its local twin's DATE_TAKEN
         // instead of sinking to the list tail. linkId/uri tiebreak keeps equal-timestamp bursts
         // in a stable total order across re-emissions.
-        return result.sortedWith(
-            compareByDescending<GalleryItem> { it.captureTimeMs }.thenBy { it.stableId }
-        )
+        //
+        // captureTimeMs and stableId are computed getters; evaluate each exactly once by
+        // precomputing a lightweight (captureTimeMs, stableId, item) key per item, then sort the
+        // keys. Identical ordering to compareByDescending(captureTimeMs).thenBy(stableId).
+        return result
+            .map { Triple(it.captureTimeMs, it.stableId, it) }
+            .sortedWith(
+                compareByDescending<Triple<Long, String, GalleryItem>> { it.first }
+                    .thenBy { it.second }
+            )
+            .map { it.third }
     }
 }

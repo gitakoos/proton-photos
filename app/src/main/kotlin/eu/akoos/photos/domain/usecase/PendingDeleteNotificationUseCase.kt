@@ -63,7 +63,10 @@ class PendingDeleteNotificationUseCase @Inject constructor(
 ) {
     suspend operator fun invoke() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
-        val pendingRaw = context.settingsDataStore.data.first()[SettingsKeys.PENDING_DELETE_URIS] ?: emptySet()
+        val prefs = context.settingsDataStore.data.first()
+        // User opted out of the delete-after-backup reminder — don't post or prune.
+        if (prefs[SettingsKeys.NOTIFY_DELETE_REMINDER] == false) return
+        val pendingRaw = prefs[SettingsKeys.PENDING_DELETE_URIS] ?: emptySet()
         if (pendingRaw.isEmpty()) return
 
         // Probe each URI with a cheap _ID query — anything MediaProvider doesn't

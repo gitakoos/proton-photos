@@ -52,6 +52,7 @@ import eu.akoos.photos.data.db.Migrations
 import eu.akoos.photos.data.db.dao.AlbumPhotoMembershipDao
 import eu.akoos.photos.data.db.dao.CloudAlbumDao
 import eu.akoos.photos.data.db.dao.DayMetaDao
+import eu.akoos.photos.data.db.dao.LocalTagDao
 import eu.akoos.photos.data.db.dao.PhotoListingDao
 import eu.akoos.photos.data.db.dao.SyncStateDao
 import javax.inject.Singleton
@@ -140,5 +141,9 @@ abstract class DatabaseModule {
         @Singleton
         fun provideAlbumPhotoMembershipDao(db: AppDatabase): AlbumPhotoMembershipDao =
             db.albumPhotoMembershipDao()
+
+        @Provides
+        @Singleton
+        fun provideLocalTagDao(db: AppDatabase): LocalTagDao = db.localTagDao()
     }
 }

@@ -34,7 +34,9 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.Panorama
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.automirrored.filled.VolumeOff
@@ -43,7 +45,9 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
 import androidx.media3.exoplayer.ExoPlayer
@@ -89,6 +93,7 @@ import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.MotionPhotosOn
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -113,6 +118,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.res.stringResource
 import eu.akoos.photos.R
 import eu.akoos.photos.presentation.common.ConfirmDialog
+import eu.akoos.photos.presentation.common.SecureScreenEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -172,24 +178,24 @@ fun PhotoViewerScreen(
     onBack: () -> Unit,
     showSaveToDevice: Boolean = true,
     sourceAlbumLinkId: String? = null,
-    /** True when the viewer was opened from a shared-with-me album. Suppresses every
-     *  destructive / mutating affordance (Move to trash, Delete from device, Delete
-     *  everywhere, Set as album cover, Rename, Edit) — the user is a guest on someone
-     *  else's album and the backend rejects those operations from the wrong share id
-     *  anyway. Save-to-device + Info stay visible because they're purely local. */
+    /** True for a shared-with-me album: suppresses every mutating affordance (delete, set cover,
+     *  rename, edit) since the backend rejects them from the wrong share id. Save + Info stay. */
     isReadOnlyAlbum: Boolean = false,
-    /** Timestamp from the editor pop-back signal — keyed into the page-load effect so the
-     *  viewer drops its bitmap cache + re-asks the VM for fresh bytes after a save. */
+    /** Editor pop-back timestamp, keyed into the page-load effect so the viewer drops its bitmap
+     *  cache and re-reads fresh bytes after a save. */
     editedAt: Long = 0L,
-    /** Cloud linkIds whose local-side photo lives in the Hidden vault on this device.
-     *  When a viewer item's linkId is in this set we paint a blur + "Hidden" label over
-     *  the full-res surface — same UX as the gallery cell, just zoomed up. Empty set =
-     *  no item gets the treatment. */
+    /** Cloud linkIds whose local twin is in the Hidden vault; those items get a blur + "Hidden"
+     *  overlay over the full-res surface. */
     hiddenCloudLinkIds: Set<String> = emptySet(),
+    /** Hidden-vault session: marks the viewer window FLAG_SECURE so full-res hidden photos stay
+     *  out of screenshots and the recent-apps preview, like the vault grid itself. */
+    secure: Boolean = false,
     onEditItem: (GalleryItem) -> Unit = {},
     viewModel: PhotoViewerViewModel = hiltViewModel(),
 ) {
     if (items.isEmpty()) { onBack(); return }
+
+    if (secure) SecureScreenEffect()
 
     val clampedInitial = initialIndex.coerceIn(0, items.lastIndex)
     val pagerState = rememberPagerState(initialPage = clampedInitial) { items.size }
@@ -197,22 +203,28 @@ fun PhotoViewerScreen(
     val isDownloading by viewModel.isDownloading.collectAsStateWithLifecycle()
     val downloadProgress by viewModel.downloadProgress.collectAsStateWithLifecycle()
     val fullResBlockedByMetered by viewModel.fullResBlockedByMetered.collectAsStateWithLifecycle()
+    // The metered "full quality" hint is dismissable per viewer session — once X'd it stays gone
+    // while the user keeps browsing on the same metered link.
+    var meteredHintDismissed by remember { mutableStateOf(false) }
     val metadata by viewModel.metadata.collectAsStateWithLifecycle()
     val cloudFullResSize by viewModel.cloudFullResSize.collectAsStateWithLifecycle()
     val isStrippingMetadata by viewModel.isStrippingMetadata.collectAsStateWithLifecycle()
+    val photoTags by viewModel.currentPhotoTags.collectAsStateWithLifecycle()
     val isHidden by viewModel.isHidden.collectAsStateWithLifecycle()
     val isFavorite by viewModel.isFavorite.collectAsStateWithLifecycle()
+    val isMotionPhoto by viewModel.isMotionPhoto.collectAsStateWithLifecycle()
+    val motionVideoFile by viewModel.motionVideoFile.collectAsStateWithLifecycle()
+    val isExtractingMotion by viewModel.isExtractingMotion.collectAsStateWithLifecycle()
+    val isPanorama by viewModel.isPanorama.collectAsStateWithLifecycle()
+    val isPanoramaMode by viewModel.isPanoramaMode.collectAsStateWithLifecycle()
     val albums by viewModel.albums.collectAsStateWithLifecycle()
     val isAddingToAlbum by viewModel.isAddingToAlbum.collectAsStateWithLifecycle()
     val isSavingToDevice by viewModel.isSavingToDevice.collectAsStateWithLifecycle()
     val isSharing by viewModel.isSharing.collectAsStateWithLifecycle()
-    // Live cloud→device twin map. Lets the bottom badge flip from "cloud only" to
-    // "synced" the moment downloadToDevice persists a SyncState, instead of waiting
-    // for the user to leave + re-enter the viewer (which is what the static `items`
-    // snapshot would otherwise require).
+    // Live cloud→device twin map: flips the bottom badge to "synced" once a download persists a
+    // SyncState, which the static `items` snapshot can't reflect.
     val localUriByLinkId by viewModel.localUriByLinkId.collectAsStateWithLifecycle()
 
-    // Check hide + favorite status when settled page changes
     LaunchedEffect(pagerState.settledPage) {
         val item = items.getOrNull(pagerState.settledPage)
         val localUri = when (item) {
@@ -224,24 +236,18 @@ fun PhotoViewerScreen(
         if (item != null) viewModel.checkIfFavorite(item)
     }
 
-    // Load albums once for Add to Album feature
     LaunchedEffect(Unit) { viewModel.loadAlbums() }
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
 
-    // Surface add-to-album / save / load-albums failures as a themed snackbar so
-    // the viewer's success+error feedback all share the same in-app look (instead
-    // of half being system Toast popups outside the app's theme).
     val transientError by viewModel.transientError.collectAsStateWithLifecycle()
     LaunchedEffect(transientError) {
         val msg = transientError ?: return@LaunchedEffect
         snackbarHostState.showSnackbar(msg)
         viewModel.clearTransientError()
     }
-    // Success feedback for "Add to album" + "Set as album cover" — both collectors share a
-    // single repeatOnLifecycle(STARTED) wrap so they pause together when the viewer is
-    // backgrounded. Without this, an album-cover update mid-background would fire a
-    // snackbar against a host that's no longer visible.
+    // These collectors share one repeatOnLifecycle(STARTED) wrap so they pause together when the
+    // viewer is backgrounded (otherwise a mid-background emit snackbars against a hidden host).
     val addedToAlbumTemplate = stringResource(R.string.viewer_added_to_album)
     val coverUpdatedMessage = stringResource(R.string.album_cover_updated)
     val shareChooserTitle = stringResource(R.string.share_chooser_title)
@@ -259,9 +265,7 @@ fun PhotoViewerScreen(
                     snackbarHostState.showSnackbar(coverUpdatedMessage)
                 }
             }
-            // The VM resolved a shareable URI and handed us the send intent — wrap it in the
-            // chooser and launch. Lives in this STARTED block so a backgrounded viewer doesn't
-            // pop the share sheet over another screen.
+            // In the STARTED block so a backgrounded viewer doesn't pop the chooser over another screen.
             launch {
                 viewModel.shareIntent.collect { intent ->
                     shareContext.startActivity(Intent.createChooser(intent, shareChooserTitle))
@@ -271,9 +275,8 @@ fun PhotoViewerScreen(
     }
 
     LaunchedEffect(pagerState.settledPage, editedAt) {
-        // editedAt bumps when the editor pops back after a save — re-running this effect
-        // re-asks the VM for fresh bytes (Coil's memory cache for the URI was nuked in
-        // PhotoEditorViewModel.invalidateImageCache, so this reload reads from disk).
+        // editedAt bumps after an editor save, re-running this effect to re-read fresh bytes
+        // (the URI's Coil memory cache was nuked in invalidateImageCache, so this reads from disk).
         when (val item = items.getOrNull(pagerState.settledPage)) {
             is GalleryItem.LocalOnly  -> viewModel.loadLocal(item.local.uri, item.local.mimeType)
             is GalleryItem.Synced     -> viewModel.loadLocal(item.local.uri, item.local.mimeType)
@@ -282,22 +285,62 @@ fun PhotoViewerScreen(
         }
     }
 
+    // Keyed on `state` (not just the page) so detection runs once the still is actually showing —
+    // a cloud image only becomes a file:// after the full-res download lands.
+    LaunchedEffect(state, pagerState.settledPage) {
+        val item = items.getOrNull(pagerState.settledPage) ?: return@LaunchedEffect
+        val s = state as? PhotoViewerViewModel.ViewerState.ShowImage ?: return@LaunchedEffect
+        val mime = when (item) {
+            is GalleryItem.LocalOnly -> item.local.mimeType
+            is GalleryItem.Synced    -> item.local.mimeType
+            is GalleryItem.CloudOnly -> item.cloud.mimeType
+        }
+        if (!mime.startsWith("image/")) return@LaunchedEffect
+        // Only a real on-disk/content URI is probeable — the CDN thumbnail URL (a remote
+        // String model) isn't a motion-photo source, so skip until the full-res lands.
+        val model = s.model
+        if (model is Uri) {
+            viewModel.detectMotionPhoto(
+                uri = model.toString(),
+                itemKey = s.itemKey,
+            )
+        }
+    }
+    // Stop inline motion playback (and delete the extracted temp) when the viewer leaves the
+    // composition, so a clip can't outlive the screen.
+    DisposableEffect(Unit) { onDispose { viewModel.stopMotionPhoto() } }
+
+    // Panorama probe (image items only); the VM scans off-thread, guarded against a mid-scan swipe.
+    LaunchedEffect(pagerState.settledPage) {
+        val item = items.getOrNull(pagerState.settledPage)
+        val (uri, itemKey, isImage) = when (item) {
+            is GalleryItem.LocalOnly -> Triple(
+                Uri.parse(item.local.uri), item.local.uri, item.local.mimeType.startsWith("image/"),
+            )
+            is GalleryItem.Synced -> Triple(
+                Uri.parse(item.local.uri), item.local.uri, item.local.mimeType.startsWith("image/"),
+            )
+            is GalleryItem.CloudOnly -> Triple(
+                null, item.cloud.linkId, item.cloud.mimeType.startsWith("image/"),
+            )
+            null -> Triple(null, null, false)
+        }
+        // For a cloud-only photo there's no local Uri to scan; detectPanorama still inspects
+        // the Panoramas server tag in that branch.
+        if (isImage) viewModel.detectPanorama(item, uri, itemKey)
+    }
+
     var scale  by remember { mutableFloatStateOf(1f) }
     var offset by remember { mutableStateOf(Offset.Zero) }
-    // Viewport size in px — bounds for pan clamping and the double-tap focal math.
     var containerSize by remember { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
-    // Accumulated pan distance past the image edge while zoomed. Once it crosses the
-    // threshold we page to the neighbour instead of letting the user drag the photo
-    // into empty background forever.
+    // Pan distance accumulated past the image edge while zoomed; crossing the threshold pages.
     var edgeOverpan by remember { mutableFloatStateOf(0f) }
     LaunchedEffect(pagerState.settledPage) { scale = 1f; offset = Offset.Zero; edgeOverpan = 0f }
 
     val transformState = rememberTransformableState { zoomChange, panChange, _ ->
         scale = (scale * zoomChange).coerceIn(1f, 6f)
         if (scale > 1f) {
-            // Clamp the pan so the (scaled) content never detaches from the viewport —
-            // graphicsLayer scales around the center, so the reachable translation range
-            // is symmetric: ±(viewport * (scale-1) / 2) per axis.
+            // graphicsLayer scales around center, so the reachable pan is ±(viewport*(scale-1)/2).
             val maxX = (containerSize.width  * (scale - 1f)) / 2f
             val maxY = (containerSize.height * (scale - 1f)) / 2f
             val unclamped = offset + panChange
@@ -464,6 +507,18 @@ fun PhotoViewerScreen(
     val addToAlbumSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val deleteState by viewModel.deleteState.collectAsStateWithLifecycle()
 
+    // Unified single-photo share drawer (Send to app / Share with people / Public link).
+    var showShareSheet by remember { mutableStateOf(false) }
+    val shareSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    // The dedicated public-link management sheet, opened from the drawer's "Public link" row.
+    var showManageLinkSheet by remember { mutableStateOf(false) }
+    val manageLinkSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val publicLinkState by viewModel.publicLinkState.collectAsStateWithLifecycle()
+    val clipboard = LocalClipboardManager.current
+    val linkCopiedMsg = stringResource(R.string.share_link_copied)
+    val passwordSetMsg = stringResource(R.string.share_password_set)
+    val passwordRemovedMsg = stringResource(R.string.share_password_removed)
+
     // Android 11+ system trash dialog launcher
     val deletePermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartIntentSenderForResult()
@@ -537,7 +592,9 @@ fun PhotoViewerScreen(
         HorizontalPager(
             state = pagerState,
             modifier = Modifier.fillMaxSize(),
-            userScrollEnabled = scale == 1f,
+            // Page-swipe is suppressed while zoomed (scale > 1f) and while panorama mode
+            // is active, so the panorama's own horizontal drag doesn't fight the pager.
+            userScrollEnabled = scale == 1f && !isPanoramaMode,
         ) { page ->
             val item      = items.getOrNull(page)
             val isSettled = page == pagerState.settledPage
@@ -676,18 +733,41 @@ fun PhotoViewerScreen(
                     when (val s = state) {
                         is PhotoViewerViewModel.ViewerState.ShowImage ->
                             if (stateMatchesPage) {
-                                AsyncImage(
-                                    model = s.model,
-                                    contentDescription = null,
-                                    contentScale = ContentScale.Fit,
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .transformable(state = transformState, canPan = { scale > 1f })
-                                        .graphicsLayer(
-                                            scaleX = scale, scaleY = scale,
-                                            translationX = offset.x, translationY = offset.y,
-                                        ),
-                                )
+                                val motionFile = motionVideoFile
+                                if (isMotionPhoto && motionFile != null) {
+                                    // Inline motion-photo playback: the extracted embedded clip
+                                    // plays once over the still through the shared VideoPlayer,
+                                    // then onEnded drops us back to the image.
+                                    VideoPlayer(
+                                        uri = Uri.fromFile(motionFile),
+                                        autoPlay = true,
+                                        onEnded = { viewModel.stopMotionPhoto() },
+                                        modifier = Modifier.fillMaxSize(),
+                                    )
+                                } else if (isPanoramaMode) {
+                                    // Immersive panorama: the still fills viewport height and
+                                    // overflows horizontally (FillHeight crops width), and a
+                                    // horizontal drag scrolls along the strip. Kept on a dedicated
+                                    // offset + gesture so the normal pinch-zoom transform (with its
+                                    // edge-paging) is left untouched.
+                                    PanoramaPager(
+                                        model = s.model,
+                                        modifier = Modifier.fillMaxSize(),
+                                    )
+                                } else {
+                                    AsyncImage(
+                                        model = s.model,
+                                        contentDescription = null,
+                                        contentScale = ContentScale.Fit,
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .transformable(state = transformState, canPan = { scale > 1f })
+                                            .graphicsLayer(
+                                                scaleX = scale, scaleY = scale,
+                                                translationX = offset.x, translationY = offset.y,
+                                            ),
+                                    )
+                                }
                             }
                         is PhotoViewerViewModel.ViewerState.ShowVideo -> {
                             if (stateMatchesPage) {
@@ -722,7 +802,7 @@ fun PhotoViewerScreen(
                             if (thumbModel == null)
                                 CircularProgressIndicator(color = FgDim, strokeWidth = 2.dp)
                         is PhotoViewerViewModel.ViewerState.Error ->
-                            if (stateMatchesPage) Text(s.message ?: "Error loading photo", color = ErrorColor, fontSize = 14.sp)
+                            if (stateMatchesPage) Text(s.message ?: stringResource(R.string.viewer_error_loading_photo), color = ErrorColor, fontSize = 14.sp)
                     }
 
                     // Video-only download badge. Shown from "download starts" all the way
@@ -798,30 +878,52 @@ fun PhotoViewerScreen(
                             // otherwise it's the player decoding a local file, where the right
                             // word is "Loading". Otherwise the user sees a Downloading flash
                             // on every device-local video which is misleading.
+                            val statusText = when {
+                                pct != null -> stringResource(R.string.viewer_downloading_pct, pct)
+                                isDownloading -> stringResource(R.string.viewer_downloading)
+                                else -> stringResource(R.string.viewer_loading)
+                            }
                             Text(
-                                when {
-                                    pct != null -> "Downloading $pct%"
-                                    isDownloading -> "Downloading…"
-                                    else -> "Loading…"
-                                },
+                                statusText,
                                 color = FgPrimary, fontSize = 12.sp,
                             )
                         }
-                    } else if (fullResBlockedByMetered && stateMatchesPage) {
-                        // Hint the user when the viewer skipped auto-download because the
-                        // Wi-Fi-only-for-fullres preference is on and the device is metered.
-                        // Thumbnail stays in place; explicit actions (Save / Edit) still work.
-                        Row(
+                    }
+
+                    // Motion-photo "play" and panorama "view" affordances live in the bottom
+                    // control pills (next to the video pill) so the open still stays
+                    // unobstructed while browsing. Only the panorama exit chip stays
+                    // top-anchored here, so it is reachable while panning with the bottom
+                    // chrome hidden.
+                    if (isPanoramaMode && stateMatchesPage) {
+                        Box(
                             modifier = Modifier
-                                .background(PillBg, RoundedCornerShape(999.dp))
-                                .border(0.5.dp, PillBorder, RoundedCornerShape(999.dp))
-                                .padding(horizontal = 14.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
+                                .fillMaxSize()
+                                .statusBarsPadding()
+                                .padding(top = 64.dp),
+                            contentAlignment = Alignment.TopCenter,
                         ) {
-                            Text(
-                                stringResource(R.string.viewer_wifi_for_full_quality),
-                                color = FgPrimary, fontSize = 12.sp,
-                            )
+                            Row(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(999.dp))
+                                    .background(PillBg, RoundedCornerShape(999.dp))
+                                    .border(0.5.dp, PillBorder, RoundedCornerShape(999.dp))
+                                    .clickable { viewModel.exitPanorama() }
+                                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            ) {
+                                Icon(
+                                    Icons.Default.Close,
+                                    contentDescription = stringResource(R.string.cd_exit_panorama),
+                                    tint = FgPrimary,
+                                    modifier = Modifier.size(16.dp),
+                                )
+                                Text(
+                                    stringResource(R.string.viewer_exit_panorama),
+                                    color = FgPrimary, fontSize = 12.sp,
+                                )
+                            }
                         }
                     }
                 }
@@ -957,21 +1059,21 @@ fun PhotoViewerScreen(
                                     },
                                 )
                             }
-                            // Share via the system sheet. Unconditional across the three
-                            // subtypes — local items share their MediaStore URI directly, a
-                            // cloud-only item is decrypted to a temp file first. A shared-album
-                            // guest can use it too: it copies bytes out, it doesn't grant the
-                            // album.
+                            // Share → open the unified share drawer (Send to another app /
+                            // Share with people / Public link) instead of jumping straight to
+                            // the OS sheet. Available across all three subtypes; a shared-album
+                            // guest can still use "Send to another app" (copies bytes out, no
+                            // album grant). Opening the drawer kicks off the public-link lookup.
                             if (settledItem != null) {
                                 androidx.compose.material3.DropdownMenuItem(
                                     text = { Text(stringResource(R.string.share_action),
                                         color = FgPrimary) },
                                     leadingIcon = { Icon(Icons.Default.Share, null,
                                         tint = FgPrimary, modifier = Modifier.size(20.dp)) },
-                                    enabled = !isSharing,
                                     onClick = {
                                         menuExpanded = false
-                                        viewModel.shareItem(settledItem)
+                                        viewModel.loadPublicLink(settledItem)
+                                        showShareSheet = true
                                     },
                                 )
                             }
@@ -1111,6 +1213,33 @@ fun PhotoViewerScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
+            // Full-quality-paused hint — sits with the bottom controls and is dismissable, shown
+            // only while the Wi-Fi-only-for-fullres preference skipped the auto-download on a
+            // metered link. The VM flag already tracks the settled item.
+            if (fullResBlockedByMetered && !meteredHintDismissed) {
+                Row(
+                    modifier = Modifier
+                        .background(PillBg, RoundedCornerShape(999.dp))
+                        .border(0.5.dp, PillBorder, RoundedCornerShape(999.dp))
+                        .padding(start = 14.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        stringResource(R.string.viewer_wifi_for_full_quality),
+                        color = FgPrimary, fontSize = 12.sp,
+                    )
+                    Icon(
+                        Icons.Default.Close,
+                        contentDescription = stringResource(R.string.close),
+                        tint = FgPrimary.copy(alpha = 0.6f),
+                        modifier = Modifier
+                            .size(18.dp)
+                            .clickable { meteredHintDismissed = true },
+                    )
+                }
+            }
+
             // Video control pill — above filmstrip, visible as soon as item is a video
             val settledItem = items.getOrNull(pagerState.settledPage)
             val isVideoItem = when (settledItem) {
@@ -1125,6 +1254,79 @@ fun PhotoViewerScreen(
                     videoStarted = videoStarted,
                     onPlay       = { videoStarted = true },
                 )
+            }
+
+            // Motion-photo control pill — play or stop the embedded clip from the bottom
+            // chrome (mirrors the video pill) so the open still stays unobstructed while
+            // browsing. Fades with the chrome like every other bottom affordance.
+            if (isMotionPhoto && !isVideoItem &&
+                state is PhotoViewerViewModel.ViewerState.ShowImage) {
+                val motionKey = when (settledItem) {
+                    is GalleryItem.CloudOnly -> settledItem.cloud.linkId
+                    is GalleryItem.Synced    -> settledItem.cloud.linkId
+                    is GalleryItem.LocalOnly -> settledItem.local.displayName
+                    null -> ""
+                }
+                val motionPlaying = motionVideoFile != null
+                Row(
+                    modifier = Modifier
+                        .background(PillBg, infoPillShape)
+                        .border(0.5.dp, PillBorder, infoPillShape)
+                        .clickable(enabled = !isExtractingMotion) {
+                            if (motionPlaying) viewModel.stopMotionPhoto()
+                            else viewModel.playMotionPhoto(motionKey)
+                        }
+                        .padding(horizontal = 16.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    if (isExtractingMotion) {
+                        CircularProgressIndicator(
+                            color = FgPrimary,
+                            strokeWidth = 2.dp,
+                            modifier = Modifier.size(16.dp),
+                        )
+                    } else {
+                        Icon(
+                            Icons.Default.MotionPhotosOn,
+                            contentDescription = null,
+                            tint = if (motionPlaying) Accent else FgPrimary,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                    Text(
+                        stringResource(
+                            if (motionPlaying) R.string.cd_stop_motion_photo
+                            else R.string.cd_play_motion_photo,
+                        ),
+                        color = FgPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium,
+                    )
+                }
+            }
+
+            // Panorama control pill — enter the immersive pan view from the bottom chrome.
+            if (isPanorama && !isMotionPhoto && !isPanoramaMode && !isVideoItem &&
+                state is PhotoViewerViewModel.ViewerState.ShowImage) {
+                Row(
+                    modifier = Modifier
+                        .background(PillBg, infoPillShape)
+                        .border(0.5.dp, PillBorder, infoPillShape)
+                        .clickable { viewModel.enterPanorama() }
+                        .padding(horizontal = 16.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Icon(
+                        Icons.Default.Panorama,
+                        contentDescription = null,
+                        tint = FgPrimary,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Text(
+                        stringResource(R.string.viewer_view_panorama),
+                        color = FgPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium,
+                    )
+                }
             }
 
             // Filmstrip — always, unchanged
@@ -1221,6 +1423,8 @@ fun PhotoViewerScreen(
                 exif = metadata,
                 isStripping = isStrippingMetadata,
                 cloudSizeFallback = cloudFullResSize,
+                photoTags = photoTags,
+                onToggleTag = { tagId, add -> item?.let { viewModel.setPhotoTag(it, tagId, add) } },
                 onStripFields = { config ->
                     val uri = when (item) {
                         is GalleryItem.LocalOnly -> item.local.uri
@@ -1291,7 +1495,7 @@ fun PhotoViewerScreen(
         }
         AddToAlbumSheet(
             sheetState = addToAlbumSheetState,
-            cloudAlbums = if (hasCloud) albums else emptyList(),
+            cloudAlbums = albums,
             currentPhotoAlbumIds = currentPhotoAlbumIds,
             onDismiss = { showAddToAlbumSheet = false },
             onCloudAlbumPicked = { albumLinkId ->
@@ -1304,6 +1508,64 @@ fun PhotoViewerScreen(
                     }
                 }
                 showAddToAlbumSheet = false
+            },
+        )
+    }
+
+    // ── Share drawer ────────────────────────────────────────────────────────────
+    if (showShareSheet) {
+        val settledItem = items.getOrNull(pagerState.settledPage)
+        // Public link only exists for cloud-backed photos; a LocalOnly item shows the
+        // "back up first" note instead of opening the manage-link sheet.
+        val canCreateLink = settledItem is GalleryItem.Synced ||
+            settledItem is GalleryItem.CloudOnly
+        PhotoShareSheet(
+            sheetState = shareSheetState,
+            canCreateLink = canCreateLink,
+            localUploadEnabled = true,
+            onDismiss = { showShareSheet = false },
+            onSendToApp = {
+                showShareSheet = false
+                settledItem?.let { viewModel.shareItem(it) }
+            },
+            onShareWithPeople = {
+                // Proton shares photos with people by adding them to a shared album, so
+                // this hands off to the viewer's existing add-to-album sheet.
+                showShareSheet = false
+                showAddToAlbumSheet = true
+            },
+            onManagePublicLink = {
+                // Hand off to the dedicated manage-link sheet. The public-link lookup was
+                // already kicked off when the drawer opened (loadPublicLink), so the manage
+                // sheet renders the current state immediately.
+                showShareSheet = false
+                showManageLinkSheet = true
+            },
+        )
+    }
+
+    // ── Manage public link sheet ─────────────────────────────────────────────────
+    if (showManageLinkSheet) {
+        val settledItem = items.getOrNull(pagerState.settledPage)
+        ManagePublicLinkSheet(
+            sheetState = manageLinkSheetState,
+            publicLinkState = publicLinkState,
+            onDismiss = { showManageLinkSheet = false },
+            onCreateLink = { viewModel.createPublicLink() },
+            needsUpload = settledItem is GalleryItem.LocalOnly,
+            onUploadAndCreate = { settledItem?.let { viewModel.uploadAndCreateViewedLink(it) } },
+            onCopyLink = {
+                viewModel.currentPublicLinkUrl()?.let { url ->
+                    clipboard.setText(AnnotatedString(url))
+                    scope.launch { snackbarHostState.showSnackbar(linkCopiedMsg) }
+                }
+            },
+            onRemoveLink = { viewModel.revokePublicLink() },
+            onSetPassword = { password ->
+                viewModel.setLinkPassword(password)
+                // Confirm the change; a failure still surfaces in the sheet's Error state.
+                val msg = if (password.isNullOrBlank()) passwordRemovedMsg else passwordSetMsg
+                scope.launch { snackbarHostState.showSnackbar(msg) }
             },
         )
     }

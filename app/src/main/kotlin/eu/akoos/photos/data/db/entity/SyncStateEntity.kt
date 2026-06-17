@@ -23,11 +23,15 @@
 package eu.akoos.photos.data.db.entity
 
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 import eu.akoos.photos.domain.entity.SyncState
 import eu.akoos.photos.domain.entity.SyncStatus
 
-@Entity(tableName = "sync_state")
+@Entity(
+    tableName = "sync_state",
+    indices = [Index(value = ["userId"]), Index(value = ["status"])],
+)
 data class SyncStateEntity(
     @PrimaryKey val localUri: String,
     val userId: String,

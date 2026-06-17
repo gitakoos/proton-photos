@@ -26,26 +26,37 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.util.Log
+import androidx.lifecycle.Observer
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.work.WorkInfo
+import androidx.work.WorkManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import me.proton.core.accountmanager.domain.AccountManager
 import me.proton.core.user.domain.usecase.GetUser
 import eu.akoos.photos.R
+import eu.akoos.photos.presentation.viewer.PublicLinkState
 import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.ShareInvitation
 import eu.akoos.photos.domain.entity.ShareMember
@@ -57,12 +68,7 @@ import eu.akoos.photos.util.sanitizeErrorMessage
 import eu.akoos.photos.worker.AlbumDownloadWorker
 import javax.inject.Inject
 
-/**
- * Result of a bulk invite-by-email batch — used to feed a single snackbar summary
- * back to the UI after [AlbumDetailViewModel.inviteUsers] finishes. [failures] is the
- * raw error message per failed email so the snackbar can show e.g. "foo@bar.com:
- * outdated app". A clean run has [successCount] > 0 and an empty [failures].
- */
+/** Summary of a bulk invite-by-email batch. [failures] is the raw error message per failed email. */
 data class InviteBatchResult(
     val successCount: Int,
     val failures: List<Pair<String, String>>,
@@ -73,11 +79,7 @@ data class InviteBatchResult(
 sealed class AlbumDownloadState {
     data object Idle : AlbumDownloadState()
     data class Working(val done: Int, val total: Int) : AlbumDownloadState()
-    /**
-     * The download has been handed off to [AlbumDownloadWorker]; the actual per-file progress
-     * is now reflected by the system notification, not the in-app sheet. The UI uses this
-     * state to dismiss the "Downloading" overlay and show a one-shot confirmation snackbar.
-     */
+    /** Handed off to [AlbumDownloadWorker]; the UI consumes this once to dismiss the overlay + snackbar. */
     data object Enqueued : AlbumDownloadState()
 }
 
@@ -88,6 +90,10 @@ sealed class AlbumShareState {
     data class Working(val done: Int, val total: Int) : AlbumShareState()
 }
 
+/** Which foreground bulk action is in flight, so the blocking drawer can label it correctly —
+ *  delete and remove-from-album both raise [AlbumDetailUiState.isDeletingPhotos]. */
+enum class AlbumBusyOp { None, Deleting, Removing }
+
 data class AlbumDetailUiState(
     val albumName: String = "",
     val albumLinkId: String = "",
@@ -96,6 +102,8 @@ data class AlbumDetailUiState(
     val error: String? = null,
     val selectedPhotos: Set<String> = emptySet(),
     val isDeletingPhotos: Boolean = false,
+    /** The action behind [isDeletingPhotos]; drives the blocking drawer's label. */
+    val busyOp: AlbumBusyOp = AlbumBusyOp.None,
     /** System trash/delete consent intent to launch, set when a delete needs MediaStore permission. */
     val pendingDeleteIntent: android.app.PendingIntent? = null,
     val isSharing: Boolean = false,
@@ -124,31 +132,20 @@ data class AlbumDetailUiState(
     val isInvitingBatch: Boolean = false,
     /** Set after a [AlbumDetailViewModel.inviteUsers] batch completes; consumed once by the UI snackbar. */
     val inviteBatchResult: InviteBatchResult? = null,
-    /** Bumped when [AlbumDetailViewModel.setPhotoAsCover] or [setSelectedPhotoAsCover] succeed; the
-     *  UI consumes this via a LaunchedEffect to show a one-shot "Cover updated" snackbar. Using a
-     *  monotonically increasing tick (not a Boolean flag) means two consecutive sets in a row still
-     *  trigger two snackbars without a manual "clear" round-trip. */
+    /** Monotonic tick (not a Boolean) bumped on cover-set success so two sets in a row each snackbar. */
     val coverUpdatedTick: Int = 0,
     /** True while the shared-album "Save to my library" round-trip is in flight. */
     val isSavingToLibrary: Boolean = false,
-    /** Photos already copied + total to copy. Surfaces the per-photo progress as
-     *  a real "N of M" indicator on the action button. Both reset to 0 once
-     *  the singleton-backed flow returns to Idle. */
+    /** Per-photo "N of M" save progress; both reset to 0 when the singleton-backed flow returns to Idle. */
     val savingCopied: Int = 0,
     val savingTotal: Int = 0,
-    /** One-shot summary the UI consumes via LaunchedEffect to snackbar the outcome
-     *  of [saveSharedAlbumToOwnLibrary] — copied count, total requested, and the
-     *  new owned album's linkId so the toast can offer a "View library album" jump. */
+    /** One-shot save-to-library outcome the UI snackbars (carries the new album linkId for a "View" jump). */
     val saveToLibraryResult: SaveToLibraryResult? = null,
-    /** One-shot snapshot of a user-cancelled save-to-library job. Holds the
-     *  copied/total pair at the moment of cancellation so the snackbar can
-     *  surface "Save cancelled at N / M". Cleared by the UI once consumed. */
+    /** One-shot copied/total snapshot at cancellation, for the "Save cancelled at N / M" snackbar. */
     val saveCancelledAt: Pair<Int, Int>? = null,
     /** True while the "Leave album" action is in flight on a shared-with-me album. */
     val isLeavingAlbum: Boolean = false,
-    /** Bumped to `true` once the leave round-trip completes successfully so the screen
-     *  can pop back to the Shared tab. The UI consumes this via a LaunchedEffect; the
-     *  ViewModel does not navigate on its own. */
+    /** Set true on leave success so the screen pops back; the ViewModel never navigates on its own. */
     val leaveAlbumDone: Boolean = false,
 ) {
     val isSelectionMode: Boolean get() = selectedPhotos.isNotEmpty()
@@ -173,6 +170,7 @@ class AlbumDetailViewModel @Inject constructor(
     private val networkObserver: eu.akoos.photos.util.NetworkObserver,
     private val albumListEvents: eu.akoos.photos.util.AlbumListEventBus,
     private val deletePhotoUseCase: eu.akoos.photos.domain.usecase.DeletePhotoUseCase,
+    private val publicLink: eu.akoos.photos.presentation.common.PublicLinkController,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(AlbumDetailUiState())
@@ -185,26 +183,17 @@ class AlbumDetailViewModel @Inject constructor(
     /** Cached primary userId — same rationale as GalleryViewModel.primaryUserId. */
     @Volatile private var primaryUserId: me.proton.core.domain.entity.UserId? = null
 
-    // Canonical album photo order, kept in step with AlbumService.photoOrder: effective
-    // captureTime DESC (via TimestampSanity, matching the timeline key) with linkId as a
-    // stable tie-breaker so equal-captureTime bursts don't reshuffle between the observer's
-    // chunked emissions and the final server paint.
+    // captureTime DESC with linkId tie-breaker (matches AlbumService.photoOrder) so equal-captureTime
+    // bursts don't reshuffle between the observer's chunked emissions and the final server paint.
     private val photoOrder = compareByDescending<CloudPhoto> { it.captureTimeMs }.thenBy { it.linkId }
 
-    /**
-     * Enqueue an on-demand thumbnail decrypt for the album cell with [linkId]. The
-     * scheduler dedup's by linkId so it's safe to call repeatedly across recompositions.
-     * No-op until the first primaryUserId emission has landed (init flow below).
-     */
+    /** Enqueue an on-demand thumbnail decrypt; deduped by linkId, no-op until primaryUserId lands. */
     fun requestThumbnailDecrypt(linkId: String) {
         val userId = primaryUserId ?: return
         driveRepo.requestThumbnailDecrypt(userId, linkId)
     }
 
-    /**
-     * Cancel any in-flight decrypt for [linkId] — called from PhotoCell's DisposableEffect
-     * when the cell scrolls off-screen.
-     */
+    /** Cancel any in-flight decrypt for [linkId] when the cell scrolls off-screen. */
     fun cancelThumbnailDecrypt(linkId: String) {
         driveRepo.cancelThumbnailDecrypt(linkId)
     }
@@ -214,27 +203,20 @@ class AlbumDetailViewModel @Inject constructor(
         viewModelScope.launch {
             val userId = accountManager.getPrimaryUserId().first() ?: return@launch
             syncStateRepo.observeAll(userId).collect { states ->
-                // Only SYNCED rows mean "the file is on this device AND on Drive". CLOUD_ONLY
-                // rows can still carry a non-null localUri (a leftover reference from before
-                // the user freed up space) — using those would falsely mark cloud-only photos
-                // as "downloaded" in the album grid.
+                // Only SYNCED rows = on-device. CLOUD_ONLY rows can keep a stale localUri (freed-up space).
                 val map = states
                     .filter { it.status == SyncStatus.SYNCED && it.cloudFileId != null }
                     .associate { it.cloudFileId!! to it.localUri }
                 _uiState.update { it.copy(localUriByLinkId = map) }
             }
         }
-        // Resolve the owner email once per VM — the share-sheet renders it as the "owner"
-        // row, so it must be ready when the user opens the sheet. Failures are silent
-        // (the sheet falls back to "You" in copy if the email is empty).
+        // Resolve the owner email once for the share-sheet "owner" row; failures are silent.
         viewModelScope.launch {
             val userId = accountManager.getPrimaryUserId().first() ?: return@launch
             val email = runCatching { getUser(userId, refresh = false).email }.getOrNull().orEmpty()
             _uiState.update { it.copy(ownerEmail = email) }
         }
-        // Re-pull this album when photos are added/removed elsewhere (e.g. the gallery's
-        // "Add to album" sheet emits on the album-list bus). Without this the detail grid
-        // keeps the stale snapshot until the user re-opens the album.
+        // Re-pull when photos change elsewhere (e.g. gallery "Add to album"), else the grid stays stale.
         viewModelScope.launch {
             albumListEvents.changes.collect {
                 if (_uiState.value.albumLinkId.isNotBlank()) refresh()
@@ -252,51 +234,31 @@ class AlbumDetailViewModel @Inject constructor(
             shareId = shareId, sharedByEmail = sharedByEmail, volumeId = volumeId, error = null,
         ) }
         albumJob = viewModelScope.launch {
-            // Phase 1: instant cache read. Renders the grid without any network round trip,
-            // so re-opening an album feels free. Pre-migration rows (parentLinkId == null)
-            // return empty here and fall back to the network phase.
+            // Phase 1: instant cache read so re-opening feels free. Pre-migration rows (parentLinkId == null) miss here.
             val cached = runCatching { driveRepo.loadAlbumPhotosCached(albumLinkId) }.getOrNull().orEmpty()
             if (cached.isNotEmpty()) {
                 _uiState.update { it.copy(isLoading = false, photos = cached) }
             }
 
             if (!networkObserver.isOnline.value) {
-                // Offline: stick with the cached snapshot (already emitted above) and clear
-                // the skeleton spinner.
                 if (cached.isEmpty()) _uiState.update { it.copy(isLoading = false) }
                 return@launch
             }
             val userId = accountManager.getPrimaryUserId().first() ?: return@launch
-            // Phase 2: full network refresh. Picks up new additions, refreshed thumbnail
-            // URLs, etc.
-            //
-            // The onLinkIdsResolved callback runs after the cheap children-fetch step (a
-            // paginated call that only returns linkIds + capture times) but BEFORE the
-            // heavier chunked metadata/thumbnail-info work. We drop the skeleton at that
-            // point and start observing the DB by linkId — chunked upserts inside
-            // loadAlbumPhotos then trickle into the UI as they land, instead of the user
-            // staring at a shimmer until the WHOLE album finished processing.
+            // Phase 2: full network refresh. onLinkIdsResolved fires after the cheap children-fetch
+            // but before the heavy metadata work — drop the skeleton there and observe the DB by
+            // linkId so chunked upserts trickle in instead of one shimmer until the whole album lands.
             var observeJob: kotlinx.coroutines.Job? = null
             runCatching {
                 driveRepo.loadAlbumPhotos(
                     userId = userId,
                     albumLinkId = albumLinkId,
                     volumeId = volumeId,
-                    // Only a shared-WITH-me album needs the share bootstrap: the recipient
-                    // doesn't hold the owner's photos-root key, so the loader unlocks the album
-                    // through the accepted share and pins each photo's parentLinkId to the album.
-                    // An album the user OWNS — even one they shared BY themselves — still opens
-                    // with their own root key, so passing a shareId here would wrongly route it
-                    // down the recipient path and pin the owner's own photos to the album, which
-                    // drops them from the timeline, search and the backed-up count. Gate on
-                    // isSharedWithMe so own albums keep their photos parented to the photos root.
+                    // Pass shareId ONLY for shared-with-me albums (recipient lacks the owner's root key).
+                    // For owned albums it would pin photos to the album and drop them from timeline/search/count.
                     sharingShareId = if (_uiState.value.isSharedWithMe) _uiState.value.shareId else null,
                     onLinkIdsResolved = { linkIds ->
-                        // If the album is genuinely empty (rare) drop the skeleton
-                        // straight to the "No photos" empty state. Otherwise keep
-                        // `isLoading = true` until the first DB row lands so the
-                        // skeleton tiles transition straight to real cells instead
-                        // of flashing through the empty-album copy mid-load.
+                        // Keep isLoading until the first DB row lands so skeletons don't flash the empty-album copy.
                         if (linkIds.isEmpty()) {
                             _uiState.update { it.copy(isLoading = false) }
                             return@loadAlbumPhotos
@@ -304,32 +266,19 @@ class AlbumDetailViewModel @Inject constructor(
                         observeJob = viewModelScope.launch {
                             driveRepo.observePhotosByLinkIds(linkIds).collect { dbRows ->
                                 val byId = dbRows.associateBy { it.linkId }
-                                // Render captureTime DESC — matches Drive web UI and the
-                                // final loadAlbumPhotos result, so the observer's chunked
-                                // updates settle into the same order as the final paint.
                                 val ordered = linkIds.mapNotNull { byId[it] }
                                     .sortedWith(photoOrder)
                                 _uiState.update { state ->
                                     val existingById = state.photos.associateBy { it.linkId }
-                                    // An empty observation pass is NOT a green light to wipe
-                                    // the grid. It can mean the network refresh just walked
-                                    // the album membership table and the entities haven't
-                                    // landed in `photo_listing` under the new linkIds yet
-                                    // (shared-album rewrites do that), or that we're between
-                                    // chunked upserts. In both cases the cached snapshot
-                                    // we painted from `loadAlbumPhotosCached` is still the
-                                    // truthful view of what's in the album, so keep it.
+                                    // An empty pass doesn't mean empty album — could be between chunked upserts or a
+                                    // shared-album rewrite mid-flight. Keep the cached snapshot rather than wiping.
                                     if (ordered.isEmpty() && state.photos.isNotEmpty()) {
                                         return@update state
                                     }
                                     state.copy(
-                                        // First non-empty DB emission is what swaps the
-                                        // skeleton for the real grid.
                                         isLoading = state.isLoading && ordered.isEmpty(),
                                         photos = ordered.map { dbPhoto ->
-                                            // Adopt updates from DB; fall back to the existing
-                                            // state if a field would otherwise blank out (e.g.
-                                            // pre-decrypt display name).
+                                            // Fall back to existing state for fields that would blank out (e.g. pre-decrypt name).
                                             val existing = existingById[dbPhoto.linkId]
                                             if (existing == null) dbPhoto
                                             else dbPhoto.copy(
@@ -345,9 +294,7 @@ class AlbumDetailViewModel @Inject constructor(
                 )
             }.fold(
                     onSuccess = { photos ->
-                        // Definitive list — make sure ordering matches the server's final
-                        // response (the observer above used the eager linkId list which is
-                        // already in server order, so this is usually a no-op).
+                        // Definitive server list (usually a no-op since the observer already used server order).
                         _uiState.update { state ->
                             val existingById = state.photos.associateBy { it.linkId }
                             state.copy(
@@ -362,17 +309,9 @@ class AlbumDetailViewModel @Inject constructor(
                         }
                     },
                     onFailure = { e ->
-                        // Coroutine cancellation is not an error: it fires whenever the
-                        // user navigates back before the network refresh finishes (the
-                        // viewModelScope cancels its children on dispose). Surfacing
-                        // "StandaloneCoroutine was cancelled" as a snackbar makes every
-                        // back-press look like a failure even though everything worked.
+                        // Cancellation isn't an error — it fires on back-press before the refresh finishes.
                         if (e is kotlinx.coroutines.CancellationException) return@fold
-                        // Network failure: keep the cached snapshot (if any), drop the
-                        // skeleton, and let the offline banner / avatar dot tell the user
-                        // why the list didn't refresh. For non-network exceptions we still
-                        // route the message through sanitizeErrorMessage so a server-side
-                        // HTML page can't leak into the error banner.
+                        // Keep the cached snapshot on network failure; sanitize so server HTML can't leak into the banner.
                         val friendly = friendlyNetworkError(e, networkObserver.isOnline.value, context)
                         _uiState.update {
                             it.copy(
@@ -383,11 +322,8 @@ class AlbumDetailViewModel @Inject constructor(
                     },
                 )
         }
-        // Kick the members/invitations fetch off in parallel with the photo load for any
-        // owned album (not just ones whose share sheet is already open), so the avatar row
-        // is populated by the time the header renders instead of popping in late.
-        // loadInvitations() self-guards on shareId/shared-with-me and launches its own
-        // coroutine, so this never blocks the photo path.
+        // Fetch members/invitations in parallel so the avatar row is ready when the header renders.
+        // loadInvitations() self-guards on shareId/shared-with-me, so this never blocks the photo path.
         if (sharedByEmail == null) {
             loadInvitations()
         }
@@ -405,8 +341,7 @@ class AlbumDetailViewModel @Inject constructor(
         viewModelScope.launch {
             val userId = accountManager.getPrimaryUserId().first() ?: return@launch
             _uiState.update { it.copy(isLoadingInvitations = true) }
-            // Surface load failures via state.error so a network drop renders an
-            // error snackbar instead of an empty members list.
+            // Surface failures via state.error so a network drop snackbars instead of showing an empty list.
             val invitationsResult = runCatching { driveRepo.loadShareInvitations(userId, shareId) }
             val membersResult = runCatching { driveRepo.loadShareMembers(userId, shareId) }
             val firstError = invitationsResult.exceptionOrNull() ?: membersResult.exceptionOrNull()
@@ -426,8 +361,7 @@ class AlbumDetailViewModel @Inject constructor(
 
     fun revokeInvitation(invitationId: String) {
         val shareId = _uiState.value.shareId ?: return
-        // Optimistic placeholder rows carry a blank id until loadInvitations() replaces
-        // them with server truth — there's nothing to revoke on the backend yet.
+        // Optimistic placeholder rows carry a blank id (nothing to revoke on the backend yet).
         if (invitationId.isBlank()) return
         viewModelScope.launch {
             val userId = accountManager.getPrimaryUserId().first() ?: return@launch
@@ -472,6 +406,18 @@ class AlbumDetailViewModel @Inject constructor(
         }
     }
 
+    /** Toggle a whole date group from a month header's tri-state circle: if every photo in the
+     *  group is already selected, drop them all; otherwise add the missing ones. No-op when empty. */
+    fun toggleGroupSelection(linkIds: Collection<String>) {
+        if (linkIds.isEmpty()) return
+        _uiState.update { state ->
+            val all = linkIds.all { it in state.selectedPhotos }
+            val next = if (all) state.selectedPhotos - linkIds.toSet()
+                       else state.selectedPhotos + linkIds
+            state.copy(selectedPhotos = next)
+        }
+    }
+
     fun clearSelection() = _uiState.update { it.copy(selectedPhotos = emptySet()) }
 
     /** Deferred cloud-delete work + context, held while the system trash dialog is up. */
@@ -479,12 +425,7 @@ class AlbumDetailViewModel @Inject constructor(
     private var pendingDeleteLinkIds: List<String> = emptyList()
     private var pendingDeleteFromCloud: Boolean = false
 
-    /**
-     * Resolve the selected album photos to [GalleryItem]s for [DeletePhotoUseCase]: a photo with a
-     * known local twin ([AlbumDetailUiState.localUriByLinkId]) is [GalleryItem.Synced] (delete can
-     * offer device / cloud / both), otherwise [GalleryItem.CloudOnly]. The LocalMediaItem only needs
-     * a real `uri` for the delete; the rest mirrors the cloud photo's metadata.
-     */
+    /** Resolve selected photos to [GalleryItem]s for delete: [GalleryItem.Synced] if a local twin exists, else CloudOnly. */
     private fun selectedGalleryItems(): List<eu.akoos.photos.domain.entity.GalleryItem> {
         val state = _uiState.value
         val byId = state.photos.associateBy { it.linkId }
@@ -506,11 +447,8 @@ class AlbumDetailViewModel @Inject constructor(
     }
 
     /**
-     * Delete the selected photos, matching the gallery exactly: [freeUpSpace] removes the on-device
-     * copy, [deleteFromCloud] trashes the Drive copy (recoverable — NOT a permanent delete). On
-     * Android 11+ a local delete routes through the system trash dialog first. A device-only delete
-     * keeps the cloud photo, so the photo stays in the album (only its green cloud goes); deleting
-     * from the cloud drops it from the album.
+     * Delete selected photos (matches the gallery): [freeUpSpace] removes on-device, [deleteFromCloud] trashes
+     * the Drive copy (recoverable). A device-only delete keeps the photo in the album; a cloud delete drops it.
      */
     fun deleteSelectedPhotos(freeUpSpace: Boolean, deleteFromCloud: Boolean) {
         val linkIds = _uiState.value.selectedPhotos.toList()
@@ -518,7 +456,7 @@ class AlbumDetailViewModel @Inject constructor(
         if (linkIds.isEmpty() || items.isEmpty()) return
         viewModelScope.launch {
             val userId = accountManager.getPrimaryUserId().first() ?: return@launch
-            _uiState.update { it.copy(isDeletingPhotos = true) }
+            _uiState.update { it.copy(isDeletingPhotos = true, busyOp = AlbumBusyOp.Deleting) }
             val result = runCatching { deletePhotoUseCase(userId, items, freeUpSpace, deleteFromCloud) }
                 .getOrElse { e ->
                     Log.e("AlbumDetailVM", "deleteSelectedPhotos failed", e)
@@ -581,19 +519,14 @@ class AlbumDetailViewModel @Inject constructor(
         _uiState.update { it.copy(isDeletingPhotos = false, pendingDeleteIntent = null) }
     }
 
-    /**
-     * Removes the currently selected photos from this album (Drive `remove-multiple`).
-     * The photos themselves stay in Photos; only the album reference is dropped. Reuses
-     * the [isDeletingPhotos] flag so the UI shows a single "working" state regardless of
-     * whether the user picked Remove-from-album or full Delete.
-     */
+    /** Drop the selected photos' album reference (they stay in Photos). Reuses [isDeletingPhotos] for the working state. */
     fun removeSelectedPhotosFromAlbum() {
         val albumLinkId = _uiState.value.albumLinkId.ifBlank { return }
         val linkIds = _uiState.value.selectedPhotos.toList()
         if (linkIds.isEmpty()) return
         viewModelScope.launch {
             val userId = accountManager.getPrimaryUserId().first() ?: return@launch
-            _uiState.update { it.copy(isDeletingPhotos = true) }
+            _uiState.update { it.copy(isDeletingPhotos = true, busyOp = AlbumBusyOp.Removing) }
             runCatching { driveRepo.removePhotosFromAlbum(userId, albumLinkId, linkIds) }
                 .fold(
                     onSuccess = { removed ->
@@ -602,9 +535,7 @@ class AlbumDetailViewModel @Inject constructor(
                             state.copy(
                                 isDeletingPhotos = false,
                                 selectedPhotos = emptySet(),
-                                // Drop only the linkIds the server confirmed — leave any
-                                // chunk-failed photos in the grid so the user sees they
-                                // weren't actually removed.
+                                // Drop only server-confirmed linkIds; leave chunk-failed photos visible.
                                 photos = state.photos.filter { it.linkId !in removedSet },
                                 error = if (removed.size != linkIds.size)
                                     context.getString(R.string.album_remove_partial, removed.size, linkIds.size)
@@ -626,10 +557,6 @@ class AlbumDetailViewModel @Inject constructor(
         }
     }
 
-    /**
-     * Renames the current album. Empties [error] on success; surfaces a user-visible
-     * message on failure so the rename dialog can stay open if needed.
-     */
     fun renameAlbum(newName: String) {
         val albumLinkId = _uiState.value.albumLinkId.ifBlank { return }
         val trimmed = newName.trim()
@@ -650,14 +577,7 @@ class AlbumDetailViewModel @Inject constructor(
         }
     }
 
-    /**
-     * Sets the single selected photo as the album cover. No-op if more or fewer than one
-     * photo is selected — the UI only exposes this action in that exact state.
-     *
-     * On success: bumps [AlbumDetailUiState.coverUpdatedTick] so the screen pops a snackbar,
-     * and notifies [albumListEvents] so the AlbumsViewModel re-fetches and the gallery
-     * album-card thumbnail picks up the new cover without waiting for pull-to-refresh.
-     */
+    /** Set the single selected photo as the album cover. No-op unless exactly one is selected. */
     fun setSelectedPhotoAsCover() {
         val albumLinkId = _uiState.value.albumLinkId.ifBlank { return }
         val selected = _uiState.value.selectedPhotos
@@ -666,11 +586,7 @@ class AlbumDetailViewModel @Inject constructor(
         runSetCover(albumLinkId, coverLinkId, clearSelection = true)
     }
 
-    /**
-     * One-shot "set this specific photo as the cover" — bypasses the multi-select flow.
-     * Used by the per-cell long-press context menu in [AlbumDetailScreen] and (proxied
-     * through a separate VM method) the viewer's overflow "Set as album cover" action.
-     */
+    /** Set a specific photo as the cover, bypassing multi-select (per-cell menu + viewer overflow). */
     fun setPhotoAsCover(coverLinkId: String) {
         val albumLinkId = _uiState.value.albumLinkId.ifBlank { return }
         if (coverLinkId.isBlank()) return
@@ -690,8 +606,7 @@ class AlbumDetailViewModel @Inject constructor(
                                 coverUpdatedTick = it.coverUpdatedTick + 1,
                             )
                         }
-                        // Albums grid card needs to re-fetch so its thumbnail flips to the
-                        // newly chosen cover the moment the user pops back to the list.
+                        // Re-fetch the albums grid so its card flips to the new cover on pop-back.
                         albumListEvents.notifyChanged()
                     },
                     onFailure = { e ->
@@ -715,10 +630,7 @@ class AlbumDetailViewModel @Inject constructor(
             runCatching { driveRepo.createAlbumShareLink(userId, albumLinkId) }
                 .fold(
                     onSuccess = { url ->
-                        // Set BOTH `shareLink` (one-shot clipboard trigger) and `publicShareUrl`
-                        // (persistent state for the redesigned sheet). Existing callers that
-                        // observe `shareLink` keep working; the new sheet reads `publicShareUrl`
-                        // to decide whether the public-link toggle is on.
+                        // Set both: shareLink (one-shot clipboard trigger) and publicShareUrl (persistent sheet state).
                         _uiState.update {
                             it.copy(isSharing = false, shareLink = url, publicShareUrl = url)
                         }
@@ -737,11 +649,7 @@ class AlbumDetailViewModel @Inject constructor(
         }
     }
 
-    /**
-     * Toggles the public link ON — creates a public-link URL backed by the album share.
-     * Distinct from [createShareLink] in that the redesigned sheet wants a persistent
-     * URL displayed (and a separate "Copy" button), not a one-shot clipboard event.
-     */
+    /** Toggle the public link ON. Like [createShareLink] but yields a persistent URL, not a one-shot clipboard event. */
     fun createPublicLink() {
         val albumLinkId = _uiState.value.albumLinkId.ifBlank {
             Log.w("AlbumDetailVM", "createPublicLink: albumLinkId is blank, ignoring tap")
@@ -774,12 +682,7 @@ class AlbumDetailViewModel @Inject constructor(
         }
     }
 
-    /**
-     * Toggles the public link OFF. When the share has accepted members or pending
-     * invitations we now keep the share itself and just delete the public URL — so
-     * invited Proton accounts retain access. Otherwise we drop the whole share so the
-     * album reverts to "not shared" everywhere.
-     */
+    /** Toggle the public link OFF. Keep the share (delete only the URL) when members/invites exist; else drop it all. */
     fun disablePublicLink() {
         val shareId = _uiState.value.shareId ?: return
         val keepShare = _uiState.value.members.isNotEmpty() || _uiState.value.invitations.isNotEmpty()
@@ -796,14 +699,11 @@ class AlbumDetailViewModel @Inject constructor(
                         it.copy(
                             isTogglingPublicLink = false,
                             publicShareUrl = null,
-                            // When members stayed we keep `shareId` populated so the
-                            // member list keeps loading; only drop it when the share
-                            // itself is gone.
+                            // Keep shareId while members remain so the member list keeps loading.
                             shareId = if (keepShare) it.shareId else null,
                         )
                     }
-                    // Refresh the gallery album list so the shared-badge stays in sync
-                    // with the new state — present when members remain, gone otherwise.
+                    // Refresh the gallery so the shared-badge tracks the new state.
                     albumListEvents.notifyChanged()
                 },
                 onFailure = { e ->
@@ -820,12 +720,7 @@ class AlbumDetailViewModel @Inject constructor(
         }
     }
 
-    /**
-     * Upgrades or downgrades an accepted member's permission bitmap on the album share.
-     * `4` = viewer (read), `6` = editor (read + write). The local member list is updated
-     * optimistically and the server call follows; on failure we revert + surface a
-     * friendly error.
-     */
+    /** Change an accepted member's permission bitmap (4 = viewer, 6 = editor). Optimistic, reverts on failure. */
     fun changeMemberPermission(memberId: String, permissions: Int) {
         val shareId = _uiState.value.shareId ?: return
         val originalMembers = _uiState.value.members
@@ -841,7 +736,7 @@ class AlbumDetailViewModel @Inject constructor(
                         _uiState.update { it.copy(error = null) }
                     },
                     onFailure = { e ->
-                        // Revert to the prior member list so the row reflects reality.
+                        // Revert so the row reflects reality.
                         Log.e("AlbumDetailVM", "changeMemberPermission failed", e)
                         val friendly = friendlyNetworkError(e, networkObserver.isOnline.value, context)
                         _uiState.update {
@@ -855,15 +750,10 @@ class AlbumDetailViewModel @Inject constructor(
         }
     }
 
-    /**
-     * Same permission swap for a PENDING invitation — lets the owner downgrade a
-     * not-yet-accepted invite from the editor default to viewer (or back). Optimistic
-     * local update with revert-on-failure, mirroring [changeMemberPermission].
-     */
+    /** [changeMemberPermission] for a pending (not-yet-accepted) invitation. Optimistic, reverts on failure. */
     fun changeInvitationPermission(invitationId: String, permissions: Int) {
         val shareId = _uiState.value.shareId ?: return
-        // Optimistic placeholder rows carry a blank id until loadInvitations() replaces
-        // them with server truth — there's no invitation to update on the backend yet.
+        // Optimistic placeholder rows carry a blank id (no invitation to update on the backend yet).
         if (invitationId.isBlank()) return
         val originalInvitations = _uiState.value.invitations
         val updatedInvitations = originalInvitations.map { inv ->
@@ -910,28 +800,15 @@ class AlbumDetailViewModel @Inject constructor(
     }
 
     /**
-     * Bulk-invite the given emails to the current album. Mirrors the Drive web "Share"
-     * dialog flow: collect chips → tap Share → fire one [DrivePhotoRepository.inviteToAlbum]
-     * per email and summarize the result. The repo signature doesn't yet carry a message
-     * field — [message] is accepted for forward compatibility and is currently dropped at
-     * the data-layer boundary. [permissions] also has no backend setter yet (the value is
-     * baked into [AlbumSharingService.inviteToAlbum]) so it's a no-op today; we accept it
-     * so the UI semantics are correct the moment the backend lands.
-     *
-     * After the batch completes, [inviteBatchResult] is set to a non-null summary the UI
-     * can read once and clear via [clearInviteBatchResult]. We also refresh the invitation
-     * list so freshly-added pending rows show up under "Who has access".
+     * Bulk-invite emails: one [DrivePhotoRepository.inviteToAlbum] per email, then a summary in [inviteBatchResult].
+     * [message] and [permissions] have no backend setter yet — accepted for forward compat, dropped at the data layer.
      */
     fun inviteUsers(emails: List<String>, message: String, permissions: Int) {
         val albumLinkId = _uiState.value.albumLinkId.ifBlank { return }
         if (emails.isEmpty()) return
         viewModelScope.launch {
             val userId = accountManager.getPrimaryUserId().first() ?: return@launch
-            // Optimistically drop a pending row in "Who has access" for every brand-new
-            // invitee so the sheet reflects the action instantly instead of looking frozen
-            // until loadInvitations() lands. These carry a blank invitationId (revoke /
-            // permission-change are no-ops on them) and are replaced by server truth once
-            // the refresh below returns.
+            // Optimistic pending rows for new invitees (blank invitationId; replaced by server truth on refresh).
             _uiState.update { state ->
                 val known = (state.invitations.map { it.email } + state.members.map { it.email })
                     .map { it.lowercase() }
@@ -952,11 +829,8 @@ class AlbumDetailViewModel @Inject constructor(
                         onSuccess = { successes++ },
                         onFailure = { e ->
                             val friendly = friendlyNetworkError(e, networkObserver.isOnline.value, context)
-                            // IllegalArgumentException carries our hand-crafted "not a
-                            // Proton account / couldn't reach directory" strings that
-                            // already include the email — sanitising them would replace
-                            // the email with `<email>` and confuse the user. Trust those
-                            // verbatim; sanitise only opaque server-side messages.
+                            // Trust our IllegalArgumentException messages verbatim (they include the email);
+                            // sanitise would mask it as <email>. Only sanitise opaque server messages.
                             val raw = if (e is IllegalArgumentException) e.message.orEmpty()
                                 else sanitizeErrorMessage(e.message)
                             failures.add(email to (friendly ?: raw))
@@ -966,10 +840,7 @@ class AlbumDetailViewModel @Inject constructor(
             _uiState.update {
                 it.copy(
                     isInvitingBatch = false,
-                    // When nothing landed there's no refetch below to repaint the list, so
-                    // strip the optimistic placeholders here to avoid ghost pending rows.
-                    // On a (partial) success loadInvitations() replaces the whole list with
-                    // server truth, so the placeholders are left in place to avoid a flicker.
+                    // No success = no refetch, so strip placeholders to avoid ghost rows; on success loadInvitations() repaints.
                     invitations = if (successes > 0) it.invitations
                         else it.invitations.filter { inv -> inv.invitationId.isNotBlank() },
                     inviteBatchResult = InviteBatchResult(
@@ -978,8 +849,7 @@ class AlbumDetailViewModel @Inject constructor(
                     ),
                 )
             }
-            // The new invitations should appear in the "Who has access" list — refresh so
-            // the user sees them as pending without having to re-open the sheet.
+            // Refresh so the new pending rows appear in "Who has access" without re-opening the sheet.
             if (successes > 0) loadInvitations()
         }
     }
@@ -989,9 +859,7 @@ class AlbumDetailViewModel @Inject constructor(
     fun clearShareLink() = _uiState.update { it.copy(shareLink = null) }
 
     fun downloadSelectedPhotos() {
-        // Album-bound downloads land in Pictures/<AlbumName>/ so the device gallery shows
-        // them under a folder matching the cloud album. Empty album name (shared-with-me
-        // edge case where the name failed to decrypt) falls back to Pictures/ root.
+        // Downloads land in Pictures/<AlbumName>/; an empty (undecryptable) name falls back to Pictures/ root.
         val folderName = eu.akoos.photos.util.ProtonPhotosStorage.sanitize(_uiState.value.albumName)
         val selectedIds = _uiState.value.selectedPhotos
         val photos = _uiState.value.photos.filter { it.linkId in selectedIds }
@@ -1000,13 +868,8 @@ class AlbumDetailViewModel @Inject constructor(
     }
 
     /**
-     * Share the selected album photos to other apps. Album photos live on Drive, so a photo that
-     * also has a local copy ([AlbumDetailUiState.localUriByLinkId]) shares that content URI
-     * directly; a cloud-only one is decrypted to cacheDir/fullres/ via
-     * [DrivePhotoRepository.downloadFullResPhoto] (single-flighted, cheap on a cache hit) and
-     * exposed through the share FileProvider. [AlbumShareState.Working] advances per resolved
-     * photo so the share pill shows progress. The screen warns before calling this whenever the
-     * selection contains a photo that still needs downloading.
+     * Share selected photos to other apps: a local twin shares its URI directly; a cloud-only one
+     * decrypts to cacheDir via [DrivePhotoRepository.downloadFullResPhoto] and goes through the share FileProvider.
      */
     fun shareSelected() {
         val state = _uiState.value
@@ -1028,7 +891,7 @@ class AlbumDetailViewModel @Inject constructor(
                         androidx.core.content.FileProvider.getUriForFile(
                             context, "${context.packageName}.share.fileprovider", file,
                         ).also {
-                            // Report the real filename to the receiver instead of the linkId.
+                            // Report the real filename to the receiver, not the linkId.
                             eu.akoos.photos.util.ShareFileProvider.putDisplayName(it, photo.displayName)
                         }
                     }
@@ -1047,6 +910,25 @@ class AlbumDetailViewModel @Inject constructor(
         }
     }
 
+    // ── Public link for the single selected photo — delegated to the shared [PublicLinkController]
+    // so the album selection behaves identically to the timeline and viewer. Only share metadata is
+    // touched, never photo content. ────────────────────────────────────────────────────────────────
+    val publicLinkState: StateFlow<PublicLinkState> = publicLink.state
+
+    /** The single selected album photo's linkId, or null when 0 or >1 are selected. */
+    fun singleSelectedLinkId(): String? =
+        _uiState.value.selectedPhotos.takeIf { it.size == 1 }?.first()
+
+    fun loadPublicLink() = publicLink.load(viewModelScope, singleSelectedLinkId(), setLoading = true)
+
+    fun createSelectedPhotoLink() = publicLink.create(viewModelScope)
+
+    fun revokePublicLink() = publicLink.revoke(viewModelScope)
+
+    fun setLinkPassword(password: String?) = publicLink.setPassword(viewModelScope, password)
+
+    fun currentPublicLinkUrl(): String? = publicLink.currentUrl()
+
     fun downloadAllPhotos() {
         // See downloadSelectedPhotos above — same album-aware routing.
         val folderName = eu.akoos.photos.util.ProtonPhotosStorage.sanitize(_uiState.value.albumName)
@@ -1056,12 +938,8 @@ class AlbumDetailViewModel @Inject constructor(
     }
 
     /**
-     * Shared-with-me equivalent of "download": copies every photo from the shared
-     * album into a new owned album with the same name in the caller's own photos
-     * library. The backend duplicates the encrypted blobs server-side, so this is
-     * a metadata-only round-trip on the recipient client. Once it returns, the
-     * caller's regular Photos sync brings the new copies down + the green-cloud
-     * badge appears on each one naturally.
+     * Shared-with-me "download": copies the shared album into a new owned album of the same name.
+     * The backend duplicates the encrypted blobs server-side, so this is metadata-only on the client.
      */
     fun saveSharedAlbumToOwnLibrary() {
         val state = _uiState.value
@@ -1087,16 +965,12 @@ class AlbumDetailViewModel @Inject constructor(
         _uiState.update { it.copy(saveToLibraryResult = null) }
     }
 
-    /** Aborts an in-flight save-to-library copy. The repository tears the job
-     *  down + emits a Cancelled progress state which we surface as a neutral
-     *  snackbar. Safe to call when no copy is running. */
+    /** Abort an in-flight save-to-library copy. Safe to call when none is running. */
     fun cancelSaveToLibrary() {
         driveRepo.cancelSaveSharedAlbumToOwnLibrary()
     }
 
-    /** Recipient-side "Leave album". Resolves the user's membership for the share
-     *  and POSTs the delete. On success the album row is wiped from the local
-     *  cache and `leaveAlbumDone = true` signals the screen to pop back. */
+    /** Recipient-side "Leave album": resolve the user's membership + POST the delete, then signal a pop-back. */
     fun leaveSharedAlbum() {
         val st = _uiState.value
         val shareId = st.shareId
@@ -1112,8 +986,7 @@ class AlbumDetailViewModel @Inject constructor(
                 driveRepo.leaveSharedAlbum(userId, shareId, albumLinkId)
             }.onSuccess {
                 _uiState.update { it.copy(isLeavingAlbum = false, leaveAlbumDone = true) }
-                // Refresh the shared-with-me grid so the album disappears the moment the
-                // screen pops back, instead of lingering until the next manual reload.
+                // Refresh the shared-with-me grid so the album disappears on pop-back.
                 albumListEvents.notifyChanged()
             }.onFailure { e ->
                 if (e is kotlinx.coroutines.CancellationException) throw e
@@ -1131,10 +1004,7 @@ class AlbumDetailViewModel @Inject constructor(
         _uiState.update { it.copy(saveCancelledAt = null) }
     }
 
-    // Observe the singleton-backed save-to-library state so progress and outcome
-    // survive VM destruction. The viewModelScope subscription dies when the VM
-    // goes — the next AlbumDetailViewModel that opens the same album simply
-    // re-subscribes and inherits whatever the singleton currently holds.
+    // Singleton-backed so save progress survives VM destruction — the next VM re-subscribes and inherits it.
     init {
         viewModelScope.launch {
             driveRepo.saveSharedAlbumState.collect { progress ->
@@ -1201,15 +1071,70 @@ class AlbumDetailViewModel @Inject constructor(
         }
     }
 
-    /**
-     * Hands the download off to [AlbumDownloadWorker]. The worker survives view-exit and
-     * app-close, showing per-file progress + a Cancel action in a system notification —
-     * see `AlbumDownloadWorker.doWork()` for the worker side.
-     *
-     * The VM only emits the [AlbumDownloadState.Enqueued] state so the UI can dismiss its
-     * "Downloading" overlay; no in-app progress tracking is attempted, because the worker
-     * may outlive the screen.
-     */
+    // Mirror the background album download into downloadState; re-attaches to the unique-work entry on each VM open.
+    init {
+        viewModelScope.launch {
+            observeDownloadWorkInfo().collect { workInfo ->
+                val fallbackTotal = _uiState.value.photos.size
+                val next = when (workInfo?.state) {
+                    WorkInfo.State.RUNNING -> AlbumDownloadState.Working(
+                        workInfo.progress.getInt(AlbumDownloadWorker.KEY_PROGRESS_DONE, 0),
+                        workInfo.progress.getInt(AlbumDownloadWorker.KEY_PROGRESS_TOTAL, fallbackTotal),
+                    )
+                    // Queued — show the ring at zero so the button morphs the instant work is accepted.
+                    WorkInfo.State.ENQUEUED,
+                    WorkInfo.State.BLOCKED -> AlbumDownloadState.Working(0, fallbackTotal)
+                    // Terminal states (or no entry) collapse the in-app ring; the notification self-dismisses.
+                    WorkInfo.State.SUCCEEDED,
+                    WorkInfo.State.FAILED,
+                    WorkInfo.State.CANCELLED,
+                    null -> AlbumDownloadState.Idle
+                }
+                _uiState.update { state ->
+                    // Hold Enqueued through the window before WorkManager registers the entry (observer reports Idle then),
+                    // so the one-shot snackbar isn't pre-empted; a real Working tick still takes over.
+                    if (state.downloadState is AlbumDownloadState.Enqueued &&
+                        next is AlbumDownloadState.Idle
+                    ) {
+                        state
+                    } else {
+                        state.copy(downloadState = next)
+                    }
+                }
+            }
+        }
+    }
+
+    /** Tracks download work for the loaded album; albumLinkId arrives via [load], so flatMapLatest switches the subscription. */
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    private fun observeDownloadWorkInfo(): Flow<WorkInfo?> =
+        _uiState
+            .map { it.albumLinkId }
+            .distinctUntilChanged()
+            .flatMapLatest { albumLinkId ->
+                if (albumLinkId.isBlank()) emptyFlowOfWorkInfo()
+                else observeUniqueWork(AlbumDownloadWorker.uniqueName(albumLinkId))
+            }
+
+    /** Empty stand-in so [flatMapLatest] has a flow to switch to before an album is loaded. */
+    private fun emptyFlowOfWorkInfo(): Flow<WorkInfo?> = callbackFlow {
+        trySend(null)
+        awaitClose { }
+    }
+
+    /** Bridge WorkManager's LiveData to a Flow (2.9 has no Flow accessor); emits null with no entry so the collector idles. */
+    private fun observeUniqueWork(uniqueWorkName: String): Flow<WorkInfo?> = callbackFlow {
+        val liveData = WorkManager.getInstance(context)
+            .getWorkInfosForUniqueWorkLiveData(uniqueWorkName)
+        val observer = Observer<List<WorkInfo>> { infos ->
+            // REPLACE leaves the prior run as a terminal entry, so take the last (freshest).
+            trySend(infos.lastOrNull())
+        }
+        liveData.observeForever(observer)
+        awaitClose { liveData.removeObserver(observer) }
+    }.flowOn(Dispatchers.Main)
+
+    /** Hand the download off to [AlbumDownloadWorker] and set [AlbumDownloadState.Enqueued] once for the snackbar. */
     private fun enqueueAlbumDownload(
         folderName: String,
         photoLinkIds: List<String>,
@@ -1237,6 +1162,13 @@ class AlbumDetailViewModel @Inject constructor(
         }
     }
 
+    /** Cancel the in-flight album download; the observer flips the button back to Idle. */
+    fun cancelDownload() {
+        val albumLinkId = _uiState.value.albumLinkId.ifBlank { return }
+        WorkManager.getInstance(context)
+            .cancelUniqueWork(AlbumDownloadWorker.uniqueName(albumLinkId))
+    }
+
     fun resetDownloadState() = _uiState.update { it.copy(downloadState = AlbumDownloadState.Idle) }
 
     fun deleteShare() {
@@ -1257,9 +1189,7 @@ class AlbumDetailViewModel @Inject constructor(
                                 error = null,
                             )
                         }
-                        // Tell the gallery's AlbumsViewModel to re-fetch — otherwise its cached
-                        // album list still carries sharingShareId for this album and the badge
-                        // sticks until the next cold-start refresh.
+                        // Re-fetch the gallery album list, else the shared-badge sticks until cold start.
                         albumListEvents.notifyChanged()
                     },
                     onFailure = { e ->

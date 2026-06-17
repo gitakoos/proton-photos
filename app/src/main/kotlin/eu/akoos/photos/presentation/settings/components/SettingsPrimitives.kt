@@ -204,14 +204,14 @@ internal fun ExpandableHeaderRow(
 internal fun NavRow(label: String, description: String? = null, onClick: () -> Unit) {
     val colors = AppColors.current
     Row(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 12.dp),
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 15.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(modifier = Modifier.weight(1f)) {
-            Text(label, color = colors.fgPrimary, fontSize = 13.5.sp, fontWeight = FontWeight.Medium)
-            if (description != null) Text(description, color = colors.fgMute, fontSize = 11.5.sp)
+            Text(label, color = colors.fgPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+            if (description != null) Text(description, color = colors.fgMute, fontSize = 12.5.sp)
         }
-        Icon(Icons.AutoMirrored.Filled.ArrowForwardIos, null, tint = colors.fgMute, modifier = Modifier.size(13.dp))
+        Icon(Icons.AutoMirrored.Filled.ArrowForwardIos, null, tint = colors.fgMute, modifier = Modifier.size(14.dp))
     }
 }
 
@@ -233,14 +233,14 @@ internal fun IndentedNavRow(
     Row(
         modifier = Modifier.fillMaxWidth()
             .clickable(enabled = enabled, onClick = onClick)
-            .padding(start = 28.dp, end = 16.dp, top = 12.dp, bottom = 12.dp),
+            .padding(start = 28.dp, end = 16.dp, top = 15.dp, bottom = 15.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(modifier = Modifier.weight(1f)) {
-            Text(label, color = colors.fgPrimary.copy(alpha = alpha), fontSize = 13.5.sp, fontWeight = FontWeight.Medium)
-            if (description != null) Text(description, color = colors.fgMute.copy(alpha = alpha), fontSize = 11.5.sp)
+            Text(label, color = colors.fgPrimary.copy(alpha = alpha), fontSize = 15.sp, fontWeight = FontWeight.Medium)
+            if (description != null) Text(description, color = colors.fgMute.copy(alpha = alpha), fontSize = 12.5.sp)
         }
-        Icon(Icons.AutoMirrored.Filled.ArrowForwardIos, null, tint = colors.fgMute.copy(alpha = alpha), modifier = Modifier.size(13.dp))
+        Icon(Icons.AutoMirrored.Filled.ArrowForwardIos, null, tint = colors.fgMute.copy(alpha = alpha), modifier = Modifier.size(14.dp))
     }
 }
 
@@ -268,13 +268,13 @@ internal fun ToggleRow(
     Row(
         modifier = Modifier.fillMaxWidth().padding(
             start = if (indented) 32.dp else 16.dp,
-            end = 16.dp, top = 11.dp, bottom = 11.dp,
+            end = 16.dp, top = 13.dp, bottom = 13.dp,
         ),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(modifier = Modifier.weight(1f)) {
-            Text(label, color = colors.fgPrimary.copy(alpha = alpha), fontSize = 13.5.sp, fontWeight = FontWeight.Medium)
-            if (description != null) Text(description, color = colors.fgMute.copy(alpha = alpha), fontSize = 11.5.sp)
+            Text(label, color = colors.fgPrimary.copy(alpha = alpha), fontSize = 15.sp, fontWeight = FontWeight.Medium)
+            if (description != null) Text(description, color = colors.fgMute.copy(alpha = alpha), fontSize = 12.5.sp)
         }
         Spacer(Modifier.width(12.dp))
         Switch(

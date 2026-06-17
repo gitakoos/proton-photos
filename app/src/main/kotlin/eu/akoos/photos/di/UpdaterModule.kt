@@ -41,10 +41,8 @@ import javax.inject.Named
 import javax.inject.Singleton
 
 /**
- * Wires the self-updater's network stack. Intentionally separate from the Proton-auth
- * OkHttp client: GitHub's public REST API takes no Proton headers, no DoH, no certificate
- * pinning, and we don't want the updater traffic to share connection state with the
- * authenticated Drive session.
+ * The self-updater's network stack, kept separate from the Proton-auth client so GitHub traffic
+ * (no Proton headers, no DoH, no pinning) never shares connection state with the Drive session.
  */
 @Module
 @InstallIn(SingletonComponent::class)
@@ -52,9 +50,6 @@ object UpdaterModule {
 
     private const val GITHUB_BASE_URL = "https://api.github.com/"
 
-    /** Liberal timeouts — the updater is background work and a slow GitHub response
-     *  shouldn't matter, but we still want to give up before a stuck connection lingers
-     *  on a flaky mobile network. */
     private const val CONNECT_TIMEOUT_SECONDS = 15L
     private const val READ_TIMEOUT_SECONDS = 30L
 
@@ -65,10 +60,7 @@ object UpdaterModule {
         .connectTimeout(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
         .readTimeout(READ_TIMEOUT_SECONDS, TimeUnit.SECONDS)
         .addInterceptor { chain ->
-            // GitHub's documentation explicitly asks for a User-Agent on every call —
-            // anonymous requests without one get rate-limited harder than ones with.
-            // Tagging with the app version makes our traffic identifiable in case of
-            // server-side debugging.
+            // GitHub rate-limits anonymous requests without a User-Agent harder.
             val req = chain.request().newBuilder()
                 .header("User-Agent", "PhotosForProton/${BuildConfig.VERSION_NAME}")
                 .header("Accept", "application/vnd.github+json")
@@ -80,8 +72,6 @@ object UpdaterModule {
     @Provides
     @Singleton
     fun provideGitHubReleasesApi(@Named("GitHub") client: OkHttpClient): GitHubReleasesApi {
-        // Lenient JSON config — the GitHub Release payload has many more fields than the
-        // model declares, and we don't want a future server-side addition to break us.
         val json = Json {
             ignoreUnknownKeys = true
             isLenient = true
@@ -96,11 +86,6 @@ object UpdaterModule {
     }
 }
 
-/**
- * Bound separately so the interface ↔ impl wiring follows the same shape as the rest of
- * the repository layer (see [RepositoryModule]) instead of mixing @Binds into the
- * @Provides-style [UpdaterModule].
- */
 @Module
 @InstallIn(SingletonComponent::class)
 abstract class UpdaterRepositoryModule {

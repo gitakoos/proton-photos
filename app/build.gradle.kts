@@ -41,8 +41,8 @@ android {
         // versionCode bumped per release tag — keep monotonically increasing.
         // versionName mirrors the GitHub release tag (e.g. v2.0.0 → "2.0.0") so the About
         // screen and the published APK report the same version the user downloaded.
-        versionCode = 220
-        versionName = "2.2.0"
+        versionCode = 230
+        versionName = "2.3.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -53,12 +53,11 @@ android {
     // producing SIGABRT on the DefaultDispatch thread (verified on multiple Android 16
     // builds, both OEM and custom ROM — Android 15 devices don't crash).
     // Extracted .so files have their own pages managed by the linker, which sidesteps
-    // the userfaultfd contention. We tried removing this in commit 009a76e thinking
-    // it would unlock 16 KB-page Pixel devices, but the SIGABRT returned within
-    // 43-87 s of first sign-in — the original race is still live on Android 16
-    // userfaultfd kernels and our cryptoLock wrap only serialises OUR calls, not
-    // Go's internal scheduler. The 16 KB Pixel concern was never verified by an
-    // actual user report so it stays speculative.
+    // the userfaultfd contention. Removing it re-introduces the SIGABRT within
+    // ~45-90 s of first sign-in on Android 16 userfaultfd kernels — the cryptoLock
+    // wrap only serialises this app's own calls, not Go's internal scheduler.
+    // Dropping it to shrink 16 KB-page installs stays unjustified: that page-size
+    // concern was never confirmed by a real report.
     packaging {
         jniLibs {
             useLegacyPackaging = true
@@ -122,6 +121,9 @@ android {
     buildFeatures {
         compose = true
         buildConfig = true
+        // AIDL stub for ICryptoService — the cross-process binder that lets the
+        // :crypto process expose its thumbnail-decrypt methods to the main process.
+        aidl = true
     }
 
     testOptions {
@@ -236,6 +238,7 @@ dependencies {
     // Image loading + video frame extraction
     implementation(libs.coil.compose)
     implementation(libs.coil.video)
+    implementation(libs.coil.gif)
 
     // Video playback
     implementation(libs.media3.exoplayer)

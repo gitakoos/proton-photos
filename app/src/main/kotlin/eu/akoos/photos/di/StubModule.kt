@@ -89,7 +89,6 @@ object StubModule {
                 PostLoginAccountSetup.UserCheckResult.Success
         }
 
-    // Presentation
     @Provides @Singleton
     fun provideAppTheme(): AppTheme = AppTheme { content -> content() }
 
@@ -250,13 +249,7 @@ object StubModule {
     @Provides @Singleton
     fun provideGoogleServicesUtils(): Optional<GoogleServicesUtils> = Optional.empty()
 
-    // Telemetry + Observability — NOT overridden at the DI layer because the
-    // ProtonCore telemetry-dagger module hard-binds IsTelemetryEnabledImpl
-    // (which itself reads the user's server side Telemetry pref through
-    // GetUserSettings). Attempting an app side @Provides for IsTelemetryEnabled
-    // produces a Dagger DuplicateBindings build break. The remaining defenses
-    // (we never emit a telemetry event ourselves; the user can disable Telemetry
-    // in their Proton account settings to suppress library emits) are documented
-    // for the user in SettingsScreen. Future: ship a TestInstallIn style
-    // replacement module if ProtonCore opens up the binding.
+    // Telemetry/Observability are NOT overridden here: ProtonCore hard-binds IsTelemetryEnabledImpl,
+    // so an app-side @Provides would be a Dagger DuplicateBindings break. We never emit telemetry
+    // ourselves, and the user can disable it in their Proton account settings.
 }

@@ -31,10 +31,6 @@ import eu.akoos.photos.data.db.entity.DayMetaEntity
 @Dao
 interface DayMetaDao {
 
-    /**
-     * Stream all DayMeta rows for [userId]. The Calendar view uses this to overlay user-
-     * picked covers + place labels on top of the auto-computed month grid.
-     */
     @Query("SELECT * FROM day_meta WHERE userId = :userId")
     fun observeAll(userId: String): Flow<List<DayMetaEntity>>
 
@@ -45,15 +41,7 @@ interface DayMetaDao {
     @Query("SELECT * FROM day_meta WHERE userId = :userId AND date = :date LIMIT 1")
     suspend fun getByDate(userId: String, date: String): DayMetaEntity?
 
-    /**
-     * Returns days whose user-authored location or description text contains [needle]
-     * (case-insensitive). Backs the Calendar search bar's "location" + "description"
-     * matchers — date-string and month-name matching is done in-memory by the VM since
-     * those keys are derived from the ISO `date` column, not stored as free text.
-     *
-     * [needle] should already include the `%` wildcards (e.g. `"%budapest%"`) so the
-     * caller controls anchored vs contains-style matching.
-     */
+    /** Days whose location or description text matches [needle] (caller supplies the `%` wildcards). */
     @Query(
         """
         SELECT * FROM day_meta
@@ -71,4 +59,8 @@ interface DayMetaDao {
 
     @Query("DELETE FROM day_meta WHERE userId = :userId AND date = :date")
     suspend fun delete(userId: String, date: String)
+
+    /** Wipe a user's day-meta on sign-out so typed location/description text doesn't linger. */
+    @Query("DELETE FROM day_meta WHERE userId = :userId")
+    suspend fun deleteAll(userId: String)
 }

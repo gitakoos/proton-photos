@@ -59,15 +59,9 @@ import eu.akoos.photos.presentation.theme.Bg2
 import eu.akoos.photos.presentation.theme.PillBorder
 
 /**
- * Hero header used by the cloud [AlbumDetailScreen]. Renders a 4:3 cover image, a title
- * row holding only the album name + optional rename pencil, and a meta row where
- * [metaLeading] (share avatars) renders before the photo/video count with a dot
- * separator and [titleActions] (download, share, save-to-library, overflow) sit at the
- * far right. Keeping the actions on the meta row stops a long album name from shoving
- * them around — the title gets the whole top line to itself and ellipsizes.
- *
- * [coverModel] accepts anything Coil can load — typically a download URL string for the
- * album cover thumbnail.
+ * Hero header for [AlbumDetailScreen]: 4:3 cover, a title row (name + optional rename pencil), and a
+ * meta row with [metaLeading] (share avatars) + count on the left and [titleActions] at the far right.
+ * Actions live on the meta row so a long album name can't shove them around. [coverModel] is anything Coil loads.
  */
 @Composable
 internal fun AlbumHeroHeader(
@@ -80,7 +74,6 @@ internal fun AlbumHeroHeader(
     metaLeading: @Composable (RowScope.() -> Unit)? = null,
 ) {
     Column {
-        // Cover image — extends to top of screen (behind status bar)
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -132,10 +125,7 @@ internal fun AlbumHeroHeader(
                 }
             }
             Spacer(Modifier.height(8.dp))
-            // Meta row: share avatars + dot + count on the left, then the trailing
-            // [titleActions] pushed to the far right by a weight-1 spacer. Height is fixed
-            // to fit the 36.dp action buttons (and so a late member fetch doesn't shift the
-            // layout); children stay vertically centered.
+            // Fixed height fits the 36.dp action buttons so a late member fetch doesn't shift the layout.
             if (metaLeading != null || photoCountText.isNotEmpty() || titleActions != null) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,

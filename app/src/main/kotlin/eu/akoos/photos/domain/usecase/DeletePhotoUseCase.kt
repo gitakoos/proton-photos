@@ -26,6 +26,7 @@ import android.content.Context
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
+import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
 import me.proton.core.domain.entity.UserId
 import eu.akoos.photos.domain.entity.GalleryItem
@@ -33,6 +34,8 @@ import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.SyncStateRepository
 import javax.inject.Inject
+
+private const val TAG = "DeletePhotoUseCase"
 
 class DeletePhotoUseCase @Inject constructor(
     @ApplicationContext private val context: Context,
@@ -113,6 +116,8 @@ class DeletePhotoUseCase @Inject constructor(
             try {
                 cloudRepo.deleteFiles(userId, cloudLinkIds)
             } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                Log.w(TAG, "Cloud delete failed for ${cloudLinkIds.size} link(s)", e)
                 return Result.CloudDeleteFailed
             }
         }
@@ -142,6 +147,8 @@ class DeletePhotoUseCase @Inject constructor(
             try {
                 cloudRepo.deleteFiles(userId, cloudLinkIds)
             } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                Log.w(TAG, "Cloud delete failed for ${cloudLinkIds.size} link(s)", e)
                 return Result.CloudDeleteFailed
             }
         }

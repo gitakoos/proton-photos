@@ -56,9 +56,11 @@ import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Icon
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import eu.akoos.photos.R
 import eu.akoos.photos.presentation.common.IconBubble
+import eu.akoos.photos.presentation.common.SecureScreenEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -102,6 +104,8 @@ fun HiddenAlbumScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
+
+    SecureScreenEffect()
 
     // When the device has no screen lock at all, the vault opens ungated (there is nothing
     // to authenticate against). Surface that on the lock screen so the user understands the
@@ -262,11 +266,11 @@ fun HiddenAlbumScreen(
                     )
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            "Hidden Photos",
+                            stringResource(R.string.hidden_photos_title),
                             color = FgPrimary, fontSize = 20.sp, fontWeight = FontWeight.SemiBold,
                         )
                         Text(
-                            "${state.items.size} photo${if (state.items.size != 1) "s" else ""}",
+                            pluralStringResource(R.plurals.count_photos_plural, state.items.size, state.items.size),
                             color = FgMute, fontSize = 12.sp,
                         )
                     }
@@ -298,10 +302,10 @@ fun HiddenAlbumScreen(
                                 tint = FgMute, modifier = Modifier.size(40.dp),
                             )
                             Spacer(Modifier.height(16.dp))
-                            Text("No hidden photos", color = FgPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                            Text(stringResource(R.string.hidden_empty_title), color = FgPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
                             Spacer(Modifier.height(8.dp))
                             Text(
-                                "Long-press a photo in the gallery and choose \"Hide\"",
+                                stringResource(R.string.hidden_empty_subtitle),
                                 color = FgDim, fontSize = 14.sp,
                             )
                         }

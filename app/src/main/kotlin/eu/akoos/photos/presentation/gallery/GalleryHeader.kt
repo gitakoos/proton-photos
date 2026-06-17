@@ -39,19 +39,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.unit.dp
 import eu.akoos.photos.presentation.common.OfflineBanner
+import eu.akoos.photos.presentation.common.UpdateBanner
 import eu.akoos.photos.presentation.albums.AlbumsUiState
 
 /**
- * Top-of-screen rail surfaced in normal (non-selection) mode. Hosts the per-tab filter rail
- * (Photos / Albums / Shared) and the Avatar/Settings button. Hoisted out of [GalleryScreen] to
- * keep the entry composable's JIT footprint manageable.
+ * Top-of-screen rail for normal (non-selection) mode: the per-tab filter rail (Photos / Albums /
+ * Shared) and the Avatar/Settings button.
  *
- * The wrapping [androidx.compose.animation.AnimatedVisibility] that fades the header in and out
- * stays at the call site so the same alignment modifier and visibility predicate are visible
- * next to the other top-aligned overlays (selection header, scrim).
- *
- * @param onHeaderMeasured invoked with the header's pixel height every time it lays out, so the
- *   caller can offset the photo grid by the same amount.
+ * @param onHeaderMeasured invoked with the header's pixel height on each layout, so the caller can
+ *   offset the photo grid by the same amount.
  */
 @Composable
 internal fun GalleryHeader(
@@ -68,16 +64,20 @@ internal fun GalleryHeader(
     onHiddenAlbumClick: () -> Unit,
     /** Opens the Timeline filter screen from the Albums tab. */
     onShowAlbumsFilterSheet: () -> Unit,
+    /** Opens the create-album dialog from the Albums-tab "New album" pill. */
+    onNewAlbumClick: () -> Unit = {},
+    albumFilter: AlbumDisplayFilter = AlbumDisplayFilter.All,
+    onAlbumFilterSelected: (AlbumDisplayFilter) -> Unit = {},
     onSharedFilterSelected: (SharedFilter) -> Unit,
     onShowSharedEmailSheet: () -> Unit,
     onSettingsClick: () -> Unit,
     onHeaderMeasured: (Int) -> Unit,
+    updateBannerVersion: String? = null,
+    onUpdateBannerOpen: () -> Unit = {},
+    onUpdateBannerDismiss: () -> Unit = {},
 ) {
-    // Per-offline-session dismissal — reset to false the moment the network comes
-    // back so the next disconnect re-surfaces the banner. rememberSaveable so a
-    // config change (rotation, theme swap) doesn't re-pop the banner the user just
-    // hid. Kept here (not at the call site) so an unrelated refactor of GalleryScreen
-    // can't accidentally delete the wiring again.
+    // Per-offline-session dismissal: reset on reconnect so the next disconnect re-surfaces it.
+    // rememberSaveable so a config change doesn't re-pop the banner the user just hid.
     var offlineBannerDismissed by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(isOnlineNow) {
         if (isOnlineNow) offlineBannerDismissed = false
@@ -99,20 +99,21 @@ internal fun GalleryHeader(
             when (selectedTab) {
                 0 -> {
                     FilterRail(
-                        selectedFilter = galleryState.selectedFilter,
                         totalCount = galleryState.items.size,
-                        onFilterSelected = onFilterSelected,
                         contentFilter = galleryState.contentFilter,
                         onSearchClick = onSearchClick,
                         onCalendarClick = onCalendarClick,
                         onClearContentFilter = onClearContentFilter,
+                        onOpenTimelineFilter = onShowAlbumsFilterSheet,
                         modifier = Modifier.weight(1f),
                     )
                 }
                 1 -> {
                     AlbumsFilterRail(
                         onHiddenAlbumClick = onHiddenAlbumClick,
-                        onShowFilterSheet = onShowAlbumsFilterSheet,
+                        onNewAlbumClick = onNewAlbumClick,
+                        selectedFilter = albumFilter,
+                        onFilterSelected = onAlbumFilterSelected,
                         modifier = Modifier.weight(1f),
                     )
                 }
@@ -134,8 +135,24 @@ internal fun GalleryHeader(
                 onClick         = onSettingsClick,
             )
         }
+        // Category rail (Photos tab only). No expand/shrink animation so a tab swipe or entering
+        // selection mode doesn't run a janky vertical reveal.
+        if (selectedTab == 0) {
+            CategoryRail(
+                selectedFilter = galleryState.selectedFilter,
+                onFilterSelected = onFilterSelected,
+                modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
+            )
+        }
         if (!isOnlineNow && !offlineBannerDismissed) {
             OfflineBanner(onDismiss = { offlineBannerDismissed = true })
+        }
+        updateBannerVersion?.let { version ->
+            UpdateBanner(
+                versionName = version,
+                onOpen = onUpdateBannerOpen,
+                onDismiss = onUpdateBannerDismiss,
+            )
         }
     }
 }

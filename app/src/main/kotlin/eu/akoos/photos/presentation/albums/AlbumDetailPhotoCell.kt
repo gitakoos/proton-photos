@@ -26,7 +26,9 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -36,6 +38,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.foundation.layout.height
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Photo
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.PlayArrow
@@ -54,6 +58,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -68,8 +73,6 @@ import eu.akoos.photos.presentation.theme.Bg2
 import eu.akoos.photos.presentation.theme.ErrorColor
 import eu.akoos.photos.presentation.theme.FgDim
 import eu.akoos.photos.presentation.theme.StatusSynced
-
-// ── Hero header ────────────────────────────────────────────────────────────────
 
 @Composable
 internal fun AvatarCircle(letter: String, tint: Color, size: androidx.compose.ui.unit.Dp = 32.dp) {
@@ -89,8 +92,6 @@ internal fun AvatarCircle(letter: String, tint: Color, size: androidx.compose.ui
     }
 }
 
-// ── Photo cell ────────────────────────────────────────────────────────────────
-
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun PhotoCell(
@@ -98,9 +99,8 @@ internal fun PhotoCell(
     localUri: String? = null,
     isSelected: Boolean,
     isSelectionMode: Boolean,
-    /** When true, long-press pops the per-cell context menu (Set as cover / Remove from album).
-     *  When false, long-press falls through to [onLongPress] (multi-select toggle). The screen
-     *  flips this off for shared-with-me albums and while already in multi-select mode. */
+    /** True: long-press pops the per-cell menu. False: long-press toggles multi-select via [onLongPress].
+     *  Off for shared-with-me albums and while already in multi-select. */
     showLongPressMenu: Boolean = false,
     onTap: () -> Unit,
     onLongPress: () -> Unit,
@@ -115,11 +115,7 @@ internal fun PhotoCell(
         else -> null
     }
 
-    // Lazy-decrypt: a missing thumbnailUrl on a cloud photo means the sync pass populated
-    // the row in metadata-only mode. Enqueue an on-demand decrypt while the cell is
-    // visible; cancel when it scrolls away. If a local file URI is in hand we render
-    // from MediaStore instead, but we still queue the decrypt so the cloud-only view of
-    // the same album (e.g. on a sibling device) prefetches it for the user.
+    // Lazy-decrypt: a null thumbnailUrl means the row is metadata-only. Decrypt while visible, cancel on scroll-away.
     if (photo.thumbnailUrl == null && localUri == null) {
         androidx.compose.runtime.DisposableEffect(photo.linkId) {
             onRequestThumbnail(photo.linkId)
@@ -127,15 +123,13 @@ internal fun PhotoCell(
         }
     }
 
-    // Per-cell long-press menu state. The menu anchors to the cell because [DropdownMenu]
-    // positions relative to its parent — placing it inside the cell's Box means it pops
-    // right where the user pressed instead of in a fixed screen corner.
     var menuExpanded by remember { mutableStateOf(false) }
     val appColors = AppColors.current
 
     Box(
         modifier = Modifier
-            .aspectRatio(1f)
+            // Slightly taller than square so corner badges cover less of the photo.
+            .aspectRatio(0.85f)
             .clip(RoundedCornerShape(if (isSelected) 8.dp else 6.dp))
             .background(Bg2)
             .combinedClickable(
@@ -155,9 +149,7 @@ internal fun PhotoCell(
                 modifier = Modifier.fillMaxSize(),
             )
         } else {
-            // Placeholder while the on-demand decrypt is in progress. Bg2-filled Box from
-            // the parent already provides the dark tile; a low-opacity centered photo icon
-            // is the visual cue that this slot is loading.
+            // Loading placeholder while the on-demand decrypt runs (parent already fills the Bg2 tile).
             Icon(
                 Icons.Default.Photo,
                 contentDescription = null,
@@ -168,30 +160,58 @@ internal fun PhotoCell(
             )
         }
 
-        // Cloud / synced status — every photo in an album lives on Drive; tint indicates
-        // whether the device also has the file locally (green = synced, white = cloud-only).
-        // Matches the main gallery grid so the user reads the same icon language everywhere.
-        if (!isSelectionMode) {
-            Box(
+        // Cloud badge — green when the file is also on-device, white when cloud-only.
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(4.dp)
+                .size(18.dp)
+                .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(4.dp)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                Icons.Default.Cloud,
+                contentDescription = null,
+                tint = if (localUri != null) StatusSynced else Color.White,
+                modifier = Modifier.size(11.dp),
+            )
+        }
+
+        // Type + favorite badge pill from server category tags. 25dp end-padding clears the cloud badge (18dp + 4dp + 3dp).
+        val typeBadge: Pair<Int, Int?>? = when {
+            2 in photo.tags -> R.drawable.ic_video_camera to null
+            4 in photo.tags -> R.drawable.ic_live to R.string.cd_motion_photo
+            8 in photo.tags -> R.drawable.ic_panorama to R.string.cd_panorama
+            9 in photo.tags -> R.drawable.ic_raw to null
+            else -> null
+        }
+        val isFavorite = 0 in photo.tags
+        if (typeBadge != null || isFavorite) {
+            Row(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .padding(4.dp)
-                    .size(18.dp)
-                    .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(4.dp)),
-                contentAlignment = Alignment.Center,
+                    .padding(end = 25.dp, bottom = 4.dp)
+                    // Match the cloud badge's 18.dp box so both badges read as one size.
+                    .height(18.dp)
+                    .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(4.dp))
+                    .padding(horizontal = 3.5.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(3.dp),
             ) {
-                Icon(
-                    Icons.Default.Cloud,
-                    contentDescription = null,
-                    tint = if (localUri != null) StatusSynced else Color.White,
-                    modifier = Modifier.size(11.dp),
-                )
+                if (isFavorite) {
+                    Icon(Icons.Default.Favorite, contentDescription = null, tint = Color.White, modifier = Modifier.size(11.dp))
+                }
+                if (typeBadge != null) {
+                    Icon(
+                        painterResource(typeBadge.first),
+                        contentDescription = typeBadge.second?.let { stringResource(it) },
+                        tint = Color.White,
+                        modifier = Modifier.size(11.dp),
+                    )
+                }
             }
         }
 
-        // Video play indicator — mirrors the main gallery grid so video items in albums
-        // are visually distinct from photos. CloudPhoto carries the mimeType from the
-        // Drive listing, so this works for cloud-only and synced items alike.
         if (photo.mimeType.startsWith("video/") && !isSelectionMode) {
             Box(
                 modifier = Modifier
@@ -229,9 +249,7 @@ internal fun PhotoCell(
             }
         }
 
-        // Per-cell long-press context menu. Anchored to the cell Box so the popup appears
-        // over the photo the user pressed. Only mounted when the cell is in the
-        // long-press-menu mode — saves recompositions when the screen is in multi-select.
+        // Per-cell long-press menu, anchored to this Box so it pops over the pressed photo.
         if (showLongPressMenu) {
             DropdownMenu(
                 expanded = menuExpanded,
@@ -240,8 +258,6 @@ internal fun PhotoCell(
                 containerColor = appColors.cardBg,
                 border = androidx.compose.foundation.BorderStroke(0.5.dp, appColors.pillBorder),
             ) {
-                // Select is the first menu item so long-press has a discoverable path
-                // into multi-select.
                 DropdownMenuItem(
                     text = { Text(stringResource(R.string.gallery_action_select), color = appColors.fgPrimary) },
                     leadingIcon = {

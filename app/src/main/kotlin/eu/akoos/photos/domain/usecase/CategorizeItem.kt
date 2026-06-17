@@ -43,6 +43,14 @@ import eu.akoos.photos.domain.entity.GalleryItem
 //   9 Raw          — RAW mime types or extensions (dng, cr2, nef, arw, ...)
 object CategorizeItem {
     fun belongsTo(item: GalleryItem, tagId: Int): Boolean {
+        // A local-only item with cached tags is authoritative: the persisted detector result
+        // (including the XMP-derived Motion Photo / Panorama tags the cheap heuristics miss) wins
+        // over the fallback below. An empty set means "not scanned yet" — fall through to the
+        // heuristics so freshly-added items still filter immediately.
+        if (item is GalleryItem.LocalOnly && item.local.tags.isNotEmpty()) {
+            return tagId in item.local.tags
+        }
+
         // Server tag always wins.
         val cloudTags = when (item) {
             is GalleryItem.Synced    -> item.cloud.tags
@@ -68,9 +76,12 @@ object CategorizeItem {
             4 -> bucket.contains("motion photo") || name.startsWith("mvimg_")
             7 -> bucket.contains("burst") || name.startsWith("burst")
             8 -> {
-                if (w > 0 && h > 0) {
+                // Panorama as a heuristic fallback only (no cached GPano tag yet): require a
+                // ratio far past a phone screen's ~2.2:1 AND exclude screenshots, so a tall
+                // screenshot or a long receipt scan is never mistaken for a panorama.
+                if (w > 0 && h > 0 && !belongsTo(item, tagId = 1)) {
                     val ratio = maxOf(w, h).toFloat() / minOf(w, h).toFloat()
-                    ratio >= 2.0f
+                    ratio >= 2.8f
                 } else false
             }
             9 -> {
@@ -81,6 +92,52 @@ object CategorizeItem {
             else -> false   // 0 (Favorites), 5 (Selfies), 6 (Portraits) → server-only
         }
     }
+
+    /**
+     * Every type tag an item matches, computed in a SINGLE pass. Equivalent to calling [belongsTo]
+     * once per tag, but lowercases mime/name/bucket once rather than per tag. The grid cell checks
+     * several tags per tile, so at the densest zoom that repeated string work dominated the per-cell
+     * cost; this collapses it to one pass. Semantics match [belongsTo] tag-for-tag.
+     */
+    fun classify(item: GalleryItem): Set<Int> {
+        // A local-only item with cached tags is authoritative (same early-out as belongsTo).
+        if (item is GalleryItem.LocalOnly && item.local.tags.isNotEmpty()) {
+            return item.local.tags
+        }
+        val cloudTags = when (item) {
+            is GalleryItem.Synced    -> item.cloud.tags
+            is GalleryItem.CloudOnly -> item.cloud.tags
+            is GalleryItem.LocalOnly -> emptySet()
+        }
+        val mime = mimeTypeOf(item).lowercase()
+        val name = displayNameOf(item).lowercase()
+        val bucket = bucketOf(item)?.lowercase() ?: ""
+        val w = widthOf(item)
+        val h = heightOf(item)
+
+        val result = HashSet<Int>(cloudTags)   // server tags always win
+        if (mime.startsWith("video/")) result.add(2)
+        val isScreenshot = mime.startsWith("image/") && (
+            bucket.contains("screenshot") ||
+            name.startsWith("screenshot") ||
+            name.startsWith("screen_shot")
+        )
+        if (isScreenshot) result.add(1)
+        if (bucket.contains("live photo") || bucket == "live") result.add(3)
+        if (bucket.contains("motion photo") || name.startsWith("mvimg_")) result.add(4)
+        if (bucket.contains("burst") || name.startsWith("burst")) result.add(7)
+        // Panorama heuristic only when the tile isn't already a screenshot (by tag or heuristic).
+        if (w > 0 && h > 0 && 1 !in result) {
+            val ratio = maxOf(w, h).toFloat() / minOf(w, h).toFloat()
+            if (ratio >= 2.8f) result.add(8)
+        }
+        val ext = name.substringAfterLast('.', "")
+        if (ext in RAW_EXTS || mime in RAW_MIMES) result.add(9)
+        return result
+    }
+
+    private val RAW_EXTS = setOf("dng", "cr2", "cr3", "nef", "arw", "raf", "orf", "rw2", "pef", "srw")
+    private val RAW_MIMES = setOf("image/x-adobe-dng", "image/x-canon-cr2", "image/x-nikon-nef", "image/x-raw")
 
     private fun mimeTypeOf(item: GalleryItem): String = when (item) {
         is GalleryItem.LocalOnly -> item.local.mimeType

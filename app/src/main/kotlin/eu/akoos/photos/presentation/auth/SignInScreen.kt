@@ -45,6 +45,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import eu.akoos.photos.R
+import eu.akoos.photos.presentation.common.PrimaryButton
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.Bg0
 import eu.akoos.photos.presentation.theme.FgDim
@@ -98,23 +99,11 @@ fun SignInScreen(
 
         Spacer(Modifier.weight(1f))
 
-        Button(
+        PrimaryButton(
+            label = stringResource(R.string.sign_in_button),
             onClick = onSignInClick,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(52.dp),
-            shape = RoundedCornerShape(14.dp),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = Accent,
-                contentColor = Color.White,
-            ),
-        ) {
-            Text(
-                text = stringResource(R.string.sign_in_button),
-                fontSize = 16.sp,
-                fontWeight = FontWeight.SemiBold,
-            )
-        }
+            modifier = Modifier.fillMaxWidth(),
+        )
 
         Spacer(Modifier.height(16.dp))
 

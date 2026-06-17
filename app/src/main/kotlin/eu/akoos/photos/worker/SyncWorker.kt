@@ -79,15 +79,15 @@ class SyncWorker @AssistedInject constructor(
     @Volatile private var totalCount = 0
 
     override suspend fun doWork(): Result = coroutineScope {
-        // Promote to foreground IMMEDIATELY so the OS doesn't kill us partway through upload,
-        // and the user sees the work is happening. We can't return early without first
-        // showing the notification when the worker was enqueued as expedited / foreground.
-        // If the initial setForeground fails — happens on Android 14+ when the OS denies the
-        // foreground promotion in some contexts (e.g. immediately after BOOT_COMPLETED or
-        // during a low-priority background trigger) — explicitly cancel any partial channel
-        // notification so BackgroundSyncService's parallel notif doesn't stay paired with a
-        // ghost SyncWorker entry in the shade. Without this clean-up the user could see two
-        // overlapping "sync" notifications and think the upload stopped.
+        // Promote to foreground IMMEDIATELY so the run survives the app being swiped from Recents
+        // and the OS doesn't kill an upload partway through. The promotion MUST happen in
+        // WorkManager's start-of-work grant window: promoting later (only once an upload starts)
+        // is denied by the Android 12+ background-foreground-service rules on aggressive OEMs,
+        // leaving the worker as a killable background task whose notification vanishes the moment
+        // the app is closed. The notification shows "Checking…" until the batch size is known,
+        // then upload progress, and is cancelled in `finally` when the run ends — so an idle
+        // check only flashes it briefly. The always-on idle "watching" notification is separate
+        // (BackgroundSyncService) and stays independently toggleable.
         runCatching {
             setForeground(buildForegroundInfo(doneCount, totalCount))
         }.onFailure { e ->

@@ -30,20 +30,14 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -63,30 +57,53 @@ import eu.akoos.photos.presentation.settings.components.NavRow
 import eu.akoos.photos.presentation.settings.components.RowDivider
 import eu.akoos.photos.presentation.settings.components.SettingsCard
 import eu.akoos.photos.presentation.settings.components.SettingsSubPageScaffold
-import eu.akoos.photos.presentation.settings.components.rememberDebouncedAction
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.paletteAccent
 
 /**
- * Unified Appearance + Language screen. Theme picker = 3 horizontally-arrayed pills
- * (System / Light / Dark). Palette = a single pill row of colored swatches the user
- * taps directly — no per-row labels. Language = the original list, no restart-hint
- * footer (UI updates immediately so the warning was confusing).
- *
- * [LanguageSettingsScreen] is retained as a thin wrapper that just forwards to this
- * screen — kept so any legacy nav destination still resolves. The Settings list now
- * routes both menu entries here.
+ * Appearance hub — menu rows to the theme/palette and language sub-pages, plus the photo
+ * timeline filter. Kept thin so each concern lives on its own focused page instead of one
+ * long mixed scroll.
  */
 @Composable
 fun AppearanceSettingsScreen(
     onBack: () -> Unit,
+    onThemeClick: () -> Unit = {},
+    onLanguageClick: () -> Unit = {},
     onTimelineFilterClick: () -> Unit = {},
+) {
+    SettingsSubPageScaffold(title = stringResource(R.string.settings_appearance), onBack = onBack) {
+        SettingsCard {
+            NavRow(
+                label = stringResource(R.string.settings_theme_palette),
+                onClick = onThemeClick,
+            )
+            RowDivider()
+            NavRow(
+                label = stringResource(R.string.language_section),
+                onClick = onLanguageClick,
+            )
+            RowDivider()
+            // Photos timeline behaviour — what shows up on the Photos tab. A visualisation
+            // choice, so it sits with appearance rather than under Privacy.
+            NavRow(
+                label = stringResource(R.string.settings_timeline_filter),
+                onClick = onTimelineFilterClick,
+            )
+        }
+    }
+}
+
+/** Theme mode (System / Light / Dark) plus the colour palette. */
+@Composable
+fun ThemeSettingsScreen(
+    onBack: () -> Unit,
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val colors = AppColors.current
 
-    SettingsSubPageScaffold(title = stringResource(R.string.settings_appearance), onBack = onBack) {
+    SettingsSubPageScaffold(title = stringResource(R.string.settings_theme_palette), onBack = onBack) {
         // ── Theme mode row of pills ─────────────────────────────────────────
         CollapsibleSection(label = stringResource(R.string.theme_mode_section)) {
             Row(
@@ -107,11 +124,6 @@ fun AppearanceSettingsScreen(
         Spacer(Modifier.height(20.dp))
 
         // ── Palette dots ────────────────────────────────────────────────────
-        // Single pill, dots horizontally so every palette is one tap away. No
-        // labels because the swatch itself is the identity. Selected dot gets a
-        // 2dp accent ring so the active palette stays unambiguous against any
-        // background. Outer padding matches inter-swatch spacing for even visual
-        // weight from edge to edge.
         CollapsibleSection(label = stringResource(R.string.settings_palette_section)) {
             Row(
                 modifier = Modifier
@@ -139,68 +151,39 @@ fun AppearanceSettingsScreen(
                 }
             }
         }
+    }
+}
 
-        Spacer(Modifier.height(20.dp))
+/** Display language picker. */
+@Composable
+fun LanguageSettingsScreen(
+    onBack: () -> Unit,
+    viewModel: SettingsViewModel = hiltViewModel(),
+) {
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val colors = AppColors.current
 
-        // ── Language list ───────────────────────────────────────────────────
-        // Same row format as before, kept as a collapsible section so the page
-        // stays scannable when only one option matters to the user.
-        CollapsibleSection(label = stringResource(R.string.language_section)) {
-            val options = remember_languageOptions()
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(colors.cardBg, RoundedCornerShape(12.dp))
-                    .border(0.5.dp, colors.cardBorder, RoundedCornerShape(12.dp)),
-            ) {
-                options.forEachIndexed { index, option ->
-                    val selected = state.language == option.tag
-                    ChoiceRow(
-                        label = stringResource(option.labelRes),
-                        description = null,
-                        selected = selected,
-                        onClick = { viewModel.setLanguage(option.tag) },
-                    )
-                    if (index < options.lastIndex) RowDivider()
-                }
-            }
-        }
-
-        Spacer(Modifier.height(20.dp))
-
-        // ── Photos timeline behaviour ────────────────────────────────────────
-        // Display-level toggles that change WHAT shows up on the Photos tab,
-        // separate from the look (theme / palette) and the language. Lives here
-        // rather than under Privacy because it's a visualisation choice, not a
-        // security one.
-        CollapsibleSection(label = stringResource(R.string.settings_photos_timeline_section)) {
-            SettingsCard {
-                // Single entry point — the timeline filter screen holds both the
-                // "hide album photos" toggle and the per-folder device exclusions, so
-                // everything that controls what shows on the Photos tab lives in one place.
-                NavRow(
-                    label = stringResource(R.string.settings_timeline_filter),
-                    onClick = onTimelineFilterClick,
+    SettingsSubPageScaffold(title = stringResource(R.string.language_section), onBack = onBack) {
+        val options = remember_languageOptions()
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(colors.cardBg, RoundedCornerShape(12.dp))
+                .border(0.5.dp, colors.cardBorder, RoundedCornerShape(12.dp)),
+        ) {
+            options.forEachIndexed { index, option ->
+                val selected = state.language == option.tag
+                ChoiceRow(
+                    label = stringResource(option.labelRes),
+                    description = null,
+                    selected = selected,
+                    onClick = { viewModel.setLanguage(option.tag) },
                 )
+                if (index < options.lastIndex) RowDivider()
             }
         }
     }
 }
-
-/**
- * Legacy entry point — kept so navigation routes that still point at
- * `language_settings` resolve. Renders the same unified screen.
- */
-@Composable
-fun LanguageSettingsScreen(
-    onBack: () -> Unit,
-    onTimelineFilterClick: () -> Unit = {},
-    viewModel: SettingsViewModel = hiltViewModel(),
-) = AppearanceSettingsScreen(
-    onBack = onBack,
-    onTimelineFilterClick = onTimelineFilterClick,
-    viewModel = viewModel,
-)
 
 private data class LanguageOption(val tag: String, val labelRes: Int)
 
@@ -213,6 +196,7 @@ private fun remember_languageOptions(): List<LanguageOption> = listOf(
     LanguageOption("fr",     R.string.language_fr),
     LanguageOption("hu",     R.string.language_hu),
     LanguageOption("it",     R.string.language_it),
+    LanguageOption("nl",     R.string.language_nl),
 )
 
 @Composable
@@ -288,4 +272,3 @@ private fun ChoiceRow(
         }
     }
 }
-

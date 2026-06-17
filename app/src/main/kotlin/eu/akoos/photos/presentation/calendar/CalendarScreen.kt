@@ -312,11 +312,13 @@ private fun CalendarTopBar(
             .padding(horizontal = 8.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        // Back chevron — left-aligned, 40dp tap target, same as SearchScreen.
+        // Back button — the same floating pill the album / memories screens use.
         Box(
             modifier = Modifier
-                .size(40.dp)
+                .size(36.dp)
                 .clip(CircleShape)
+                .background(colors.pillBg, CircleShape)
+                .border(0.5.dp, colors.pillBorder, CircleShape)
                 .clickable(onClick = onBack),
             contentAlignment = Alignment.Center,
         ) {
@@ -324,6 +326,7 @@ private fun CalendarTopBar(
                 Icons.AutoMirrored.Filled.ArrowBack,
                 contentDescription = stringResource(R.string.onboarding_back),
                 tint = colors.fgPrimary,
+                modifier = Modifier.size(18.dp),
             )
         }
         Spacer(modifier = Modifier.width(4.dp))

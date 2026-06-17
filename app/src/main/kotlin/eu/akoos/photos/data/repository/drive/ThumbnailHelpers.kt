@@ -22,9 +22,12 @@
 
 package eu.akoos.photos.data.repository.drive
 
+import android.content.Context
 import android.util.Log
+import dagger.hilt.android.qualifiers.ApplicationContext
 import me.proton.core.crypto.common.pgp.SessionKey
-import eu.akoos.photos.data.crypto.DriveCryptoHelper
+import eu.akoos.photos.BuildConfig
+import eu.akoos.photos.crypto.CryptoServiceClient
 import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -41,8 +44,9 @@ private const val TAG = "ThumbnailHelpers"
  */
 @Singleton
 class ThumbnailHelpers @Inject constructor(
-    private val cryptoHelper: DriveCryptoHelper,
+    private val cryptoServiceClient: CryptoServiceClient,
     private val cdnBlockFetcher: CdnBlockFetcher,
+    @ApplicationContext private val context: Context,
 ) {
 
     /**
@@ -80,8 +84,17 @@ class ThumbnailHelpers @Inject constructor(
             val decFile = File(cacheDir, "thumb_$linkId.jpg")
             if (decFile.exists() && decFile.length() > 0) return "file://${decFile.absolutePath}"
 
+            // DEBUG-only large-library simulator: a `simlocal://<seedIndex>` source resolves to a
+            // seed's already-fetched ENCRYPTED blob on disk, so the real decrypt below runs with the
+            // cloned keys and ZERO CDN traffic. Unreachable in release (the scheme is never produced
+            // there) and double-gated on BuildConfig.DEBUG so the branch is stripped from release.
+            val simBytes: ByteArray? =
+                if (BuildConfig.DEBUG) LargeLibrarySim.seedIndexOf(info.bareUrl)?.let { seedIndex ->
+                    val blob = LargeLibrarySim.seedBlobFile(context, seedIndex)
+                    if (blob.exists() && blob.length() > 0) blob.readBytes() else ByteArray(0)
+                } else null
             // Thumbnail CDN uses pm-storage-token (same as block CDN), not Authorization: Bearer.
-            val encryptedBytes: ByteArray = try {
+            val encryptedBytes: ByteArray = simBytes ?: try {
                 cdnBlockFetcher.fetchBlock(url = info.bareUrl, token = info.token, maxAttempts = 3)
             } catch (e: Exception) {
                 // Thumbnails are best-effort — a non-2xx after retries means no thumbnail,
@@ -98,7 +111,7 @@ class ThumbnailHelpers @Inject constructor(
                 val encFile = File(cacheDir, "thumb_enc_$linkId")
                 val outFile = File(cacheDir, "thumb_dec_$linkId")
                 encFile.writeBytes(encryptedBytes)
-                val result = runCatching { cryptoHelper.decryptFileToDestination(sessionKey, encFile, outFile) }
+                val result = runCatching { cryptoServiceClient.decryptFileToDestination(sessionKey, encFile, outFile) }
                 encFile.delete()
                 if (result.isSuccess) {
                     val bytes = outFile.readBytes(); outFile.delete(); bytes
@@ -106,11 +119,11 @@ class ThumbnailHelpers @Inject constructor(
                     outFile.delete()
                     Log.w(TAG, "thumbnail sessionKey decrypt failed for $linkId: ${result.exceptionOrNull()?.message}")
                     // Fallback: try binary-PGP (legacy format)
-                    cryptoHelper.decryptBinaryPgpWithNodeKey(encryptedBytes, nodeKeyBytes)
+                    cryptoServiceClient.decryptBinaryPgpWithNodeKey(encryptedBytes, nodeKeyBytes)
                 }
             } else {
                 // No session key — try binary-PGP (legacy full PKESK+SEIPD format)
-                cryptoHelper.decryptBinaryPgpWithNodeKey(encryptedBytes, nodeKeyBytes)
+                cryptoServiceClient.decryptBinaryPgpWithNodeKey(encryptedBytes, nodeKeyBytes)
             }
 
             if (decrypted == null) {

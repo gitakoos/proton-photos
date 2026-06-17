@@ -45,11 +45,13 @@ internal fun BackupModeStep(selected: BackupMode, onSelect: (BackupMode) -> Unit
             subtitle = stringResource(R.string.onboarding_backup_subtitle),
         )
         Spacer(Modifier.height(20.dp))
+        // "Nothing for now" first AND selected by default, so accidentally tapping through
+        // onboarding never starts uploading the whole library unprompted.
         ChoiceCard(
-            label = stringResource(R.string.onboarding_backup_everything),
-            description = stringResource(R.string.onboarding_backup_everything_desc),
-            selected = selected == BackupMode.Everything,
-            onClick = { onSelect(BackupMode.Everything) },
+            label = stringResource(R.string.onboarding_backup_nothing),
+            description = stringResource(R.string.onboarding_backup_nothing_desc),
+            selected = selected == BackupMode.NothingForNow,
+            onClick = { onSelect(BackupMode.NothingForNow) },
         )
         Spacer(Modifier.height(10.dp))
         ChoiceCard(
@@ -60,10 +62,10 @@ internal fun BackupModeStep(selected: BackupMode, onSelect: (BackupMode) -> Unit
         )
         Spacer(Modifier.height(10.dp))
         ChoiceCard(
-            label = stringResource(R.string.onboarding_backup_nothing),
-            description = stringResource(R.string.onboarding_backup_nothing_desc),
-            selected = selected == BackupMode.NothingForNow,
-            onClick = { onSelect(BackupMode.NothingForNow) },
+            label = stringResource(R.string.onboarding_backup_everything),
+            description = stringResource(R.string.onboarding_backup_everything_desc),
+            selected = selected == BackupMode.Everything,
+            onClick = { onSelect(BackupMode.Everything) },
         )
     }
 }

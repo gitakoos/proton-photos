@@ -49,7 +49,10 @@ interface SyncStateDao {
     @Query("SELECT * FROM sync_state WHERE cloudFileId = :cloudFileId LIMIT 1")
     suspend fun getByCloudId(cloudFileId: String): SyncStateEntity?
 
-    @Query("SELECT * FROM sync_state WHERE status = 'SYNCED' AND (backedUpAtMs IS NULL OR backedUpAtMs < :timestampMs)")
+    // Only rows this app actually uploaded carry a backedUpAtMs, so requiring it non-null keeps
+    // Free-up-space from deleting a local file that was merely name/size-paired to a cloud photo
+    // (such rows have a null backedUpAtMs). A hard floor against removing an un-backed-up original.
+    @Query("SELECT * FROM sync_state WHERE status = 'SYNCED' AND backedUpAtMs IS NOT NULL AND backedUpAtMs < :timestampMs")
     suspend fun getSyncedBefore(timestampMs: Long): List<SyncStateEntity>
 
     @Transaction
@@ -61,4 +64,8 @@ interface SyncStateDao {
 
     @Query("DELETE FROM sync_state WHERE localUri IN (:localUris) AND status = 'LOCAL_ONLY'")
     suspend fun deleteLocalOnlyByUris(localUris: List<String>)
+
+    /** Wipe a user's sync-state on sign-out so a re-login starts from a clean local↔cloud pairing. */
+    @Query("DELETE FROM sync_state WHERE userId = :userId")
+    suspend fun deleteAll(userId: String)
 }

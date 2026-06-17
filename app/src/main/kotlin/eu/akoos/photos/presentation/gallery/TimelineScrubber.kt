@@ -82,6 +82,9 @@ fun BoxScope.TimelineScrubber(
     grouping: TimelineGrouping,
     topPadding: Dp,
     bottomPadding: Dp,
+    // Maps an item to the grid cell key the host screen used, so the drag tooltip can resolve the
+    // exact first-visible photo. Defaults to the main timeline's scheme; albums/search pass their own.
+    keyOf: (GalleryItem) -> String = ::defaultScrubberKey,
 ) {
     val colors = AppColors.current
     val density = LocalDensity.current
@@ -91,6 +94,13 @@ fun BoxScope.TimelineScrubber(
 
     val firstVisibleIndex by remember(gridState) {
         derivedStateOf { gridState.firstVisibleItemIndex }
+    }
+    // The grid interleaves date headers + the "On this day" row with photo cells, so its item count
+    // and indices run ahead of the photo list. Scrub in GRID space (this count) and map to a photo
+    // only for the tooltip — using the raw grid index against the photo list drifted the thumb,
+    // tooltip and seek further off the more headers accumulated down the timeline.
+    val totalGridItems by remember(gridState) {
+        derivedStateOf { gridState.layoutInfo.totalItemsCount }
     }
 
     var trackHeightPx by remember { mutableFloatStateOf(0f) }
@@ -125,31 +135,54 @@ fun BoxScope.TimelineScrubber(
 
     val dateFormat = remember(grouping) {
         when (grouping) {
-            // None level mirrors the Month format — when the user is on the flat
-            // ungrouped wall the tooltip still benefits from the broader month label.
+            // Flat (None) wall still uses the month label in the tooltip.
             TimelineGrouping.None  -> SimpleDateFormat("MMMM yyyy", Locale.getDefault())
             TimelineGrouping.Day   -> SimpleDateFormat("d MMMM yyyy", Locale.getDefault())
             TimelineGrouping.Month -> SimpleDateFormat("MMMM yyyy", Locale.getDefault())
             TimelineGrouping.Year  -> SimpleDateFormat("yyyy", Locale.getDefault())
         }
     }
+    // Grid cell key → item, mirroring PhotoGrid's keyOf. Built LAZILY (then cached) so steady
+    // scroll — including the large-library decrypt re-emissions — never pays for a full-list map;
+    // it materialises only when the user actually drags the scrubber and the exact date is wanted.
+    val keyToItemLazy = remember(items, keyOf) {
+        lazy { items.associateBy(keyOf) }
+    }
     val tooltipDate by remember(items, grouping) {
         derivedStateOf {
             if (!hasContent) ""
-            else {
-                val idx = firstVisibleIndex.coerceIn(0, totalItems - 1)
+            else if (isDragging) {
+                // Exact: the date of the first visible PHOTO cell (the grid's first item can be a
+                // date header, so skip to a photo via its key). Falls back to the fraction if the
+                // layout hasn't settled yet.
+                val map = keyToItemLazy.value
+                val key = gridState.layoutInfo.visibleItemsInfo
+                    .firstNotNullOfOrNull { info -> (info.key as? String)?.takeIf { it in map } }
+                val ms = key?.let { map[it]?.captureTimeMs } ?: run {
+                    val gridSpan = (totalGridItems - 1).coerceAtLeast(1)
+                    val idx = (firstVisibleIndex.toFloat() / gridSpan * (totalItems - 1))
+                        .roundToInt().coerceIn(0, totalItems - 1)
+                    items[idx].captureTimeMs
+                }
+                dateFormat.format(Date(ms))
+            } else {
+                // Tooltip is hidden when not dragging — a cheap grid-fraction approximation is fine.
+                val gridSpan = (totalGridItems - 1).coerceAtLeast(1)
+                val idx = (firstVisibleIndex.toFloat() / gridSpan * (totalItems - 1))
+                    .roundToInt().coerceIn(0, totalItems - 1)
                 dateFormat.format(Date(items[idx].captureTimeMs))
             }
         }
     }
 
+    // Returns a GRID index (the grid includes headers), so scrollToItem lands on the right row.
     fun fractionToIndex(fraction: Float): Int {
-        if (totalItems <= 0) return 0
-        return (fraction.coerceIn(0f, 1f) * (totalItems - 1)).roundToInt()
+        if (totalGridItems <= 0) return 0
+        return (fraction.coerceIn(0f, 1f) * (totalGridItems - 1)).roundToInt()
     }
 
-    val scrollFraction: Float = if (totalItems <= 1) 0f
-        else firstVisibleIndex.toFloat() / (totalItems - 1)
+    val scrollFraction: Float = if (totalGridItems <= 1) 0f
+        else firstVisibleIndex.toFloat() / (totalGridItems - 1)
 
     val maxTrackPx = (trackHeightPx - thumbHeightPx).coerceAtLeast(0f)
     val thumbTopPx = (scrollFraction * maxTrackPx).coerceIn(0f, maxTrackPx)
@@ -230,4 +263,11 @@ fun BoxScope.TimelineScrubber(
             )
         }
     }
+}
+
+/** Main-timeline grid key scheme — the default for [TimelineScrubber]'s `keyOf`. */
+private fun defaultScrubberKey(item: GalleryItem): String = when (item) {
+    is GalleryItem.LocalOnly -> "local_${item.local.uri}"
+    is GalleryItem.Synced    -> "synced_${item.local.uri}"
+    is GalleryItem.CloudOnly -> "cloud_${item.cloud.linkId}"
 }

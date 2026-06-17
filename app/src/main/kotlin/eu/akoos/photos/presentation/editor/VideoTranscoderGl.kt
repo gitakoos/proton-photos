@@ -38,30 +38,8 @@ import java.nio.ByteOrder
 import java.nio.FloatBuffer
 
 /**
- * GL plumbing for the video re-encode pipeline.
- *
- * Architecture mirrors the canonical AOSP CTS pattern (android.media.cts.OutputSurface
- * + InputSurface) — that pair has been the reference implementation for Android media
- * re-encode since API 18 and works on every device the engine targets.
- *
- *   decoder ──(MediaCodec output Surface)──> [OutputSurface] ──SurfaceTexture──>
- *                                                   │
- *                                                   ▼ GL draw (cropMatrix * rotMatrix)
- *                                                   │
- *   muxer  <──(MediaCodec input Surface)── [InputSurface] ◄──EGL eglMakeCurrent───┘
- *
- * - [InputSurface] owns the EGL display/context/surface tied to the encoder's input
- *   surface. Make it current to draw into the encoder.
- * - [OutputSurface] owns an external-OES texture wired through a [SurfaceTexture] to
- *   a [Surface]. Hand that Surface to the decoder as its output target. When a frame
- *   arrives we updateTexImage() and draw the texture onto the encoder's surface with
- *   a 4x4 transform combining (a) SurfaceTexture's intrinsic transform, (b) crop, and
- *   (c) user rotation.
- *
- * The CTS pattern punts the H.264 colour-format compatibility quagmire entirely — the
- * encoder receives raw RGBA via OpenGL, not a per-device YUV layout, so we sidestep
- * the "works on Pixel, breaks on Samsung" pitfall that every YUV-buffer re-encoder
- * eventually hits.
+ * GL plumbing for the video re-encode pipeline (AOSP CTS OutputSurface + InputSurface
+ * pattern). Encoder receives RGBA via OpenGL, sidestepping per-device YUV layout bugs.
  */
 internal class InputSurface(surface: Surface) {
 
@@ -84,9 +62,7 @@ internal class InputSurface(surface: Surface) {
             eglDisplay = EGL14.EGL_NO_DISPLAY
             throw RuntimeException("unable to initialize EGL14")
         }
-        // EGL_RECORDABLE_ANDROID hints the driver that the surface will feed a media
-        // encoder — critical on some Adreno drivers that otherwise pick a config that
-        // can't be read by the codec.
+        // EGL_RECORDABLE_ANDROID: required on some Adreno drivers, else the chosen config can't be read by the codec.
         val EGL_RECORDABLE_ANDROID = 0x3142
         val attribList = intArrayOf(
             EGL14.EGL_RED_SIZE, 8,
@@ -149,9 +125,8 @@ internal class InputSurface(surface: Surface) {
 }
 
 /**
- * Wraps an EXTERNAL_OES texture in a SurfaceTexture + Surface that the decoder can write
- * decoded frames into. [awaitNewImage] blocks the encoder thread until a frame is ready,
- * then [drawImage] composes it onto the current EGL surface via [TextureRenderer].
+ * Wraps an EXTERNAL_OES texture in a SurfaceTexture + Surface the decoder writes frames into.
+ * [awaitNewImage] blocks the encoder thread until a frame is ready, then [drawImage] composes it.
  */
 internal class OutputSurface : SurfaceTexture.OnFrameAvailableListener {
 
@@ -189,9 +164,7 @@ internal class OutputSurface : SurfaceTexture.OnFrameAvailableListener {
             }
             frameAvailable = false
         }
-        // SurfaceTexture.updateTexImage and the renderer's draw() must happen on the same
-        // EGL context that hosts the external-OES texture — caller arranges that via
-        // InputSurface.makeCurrent() before calling us.
+        // updateTexImage + draw must run on the EGL context hosting the OES texture (caller did makeCurrent).
         surfaceTexture!!.updateTexImage()
     }
 
@@ -205,18 +178,14 @@ internal class OutputSurface : SurfaceTexture.OnFrameAvailableListener {
         textureRenderer.drawFrame(surfaceTexture!!, transformMatrix)
     }
 
-    /** Pulls the SurfaceTexture's intrinsic transform (handles BT.601 vs BT.709, vertical
-     *  flips that the decoder may have baked in). Caller composes this with crop+rotate. */
+    /** SurfaceTexture's intrinsic transform (handles decoder-baked vertical flips). Caller composes with crop+rotate. */
     fun getSurfaceTextureTransform(out: FloatArray) {
         surfaceTexture!!.getTransformMatrix(out)
     }
 
     override fun onFrameAvailable(st: SurfaceTexture?) {
         synchronized(frameSyncObject) {
-            if (frameAvailable) {
-                // CTS code logs but doesn't throw — the decoder occasionally produces a
-                // duplicate frame at start; dropping the duplicate is the safe move.
-            }
+            // Decoder occasionally emits a duplicate frame at start; dropping it is safe.
             frameAvailable = true
             frameSyncObject.notifyAll()
         }
@@ -224,13 +193,8 @@ internal class OutputSurface : SurfaceTexture.OnFrameAvailableListener {
 }
 
 /**
- * Minimal external-OES texture quad shader. Multiplies texture coords through a 4x4
- * matrix combining SurfaceTexture's intrinsic transform with our crop+rotate transform.
- *
- * The shader is verbatim from the CTS TextureRender reference except for one addition:
- * we accept a user-supplied 4x4 in addition to SurfaceTexture's transform, then combine
- * them in the vertex shader. That keeps the cropping math in matrix space (cheap on the
- * GPU) instead of doing texture-coordinate arithmetic per-vertex.
+ * External-OES texture quad shader. Combines SurfaceTexture's intrinsic transform with our
+ * crop+rotate 4x4 in the vertex shader, keeping cropping math in matrix space.
  */
 private class TextureRenderer {
 
@@ -361,18 +325,8 @@ private class TextureRenderer {
 }
 
 /**
- * Builds the 4x4 transform applied to the SurfaceTexture's input quad so the cropped
- * subrect fills the encoder's output frame.
- *
- * - When [cropRect] is null we return identity (the full source frame fills the encoder).
- * - When [cropRect] is set we scale by (srcW / cropW, srcH / cropH) and translate by the
- *   crop offset, so only the cropped region maps onto the encoder's NDC quad.
- *
- * The rotation step is intentionally NOT applied here when the muxer's orientation hint
- * carries the rotation — see VideoReencoder for why we always burn rotation in pixels
- * during a re-encode (the muxer hint applies to the file, but a re-encoded output with
- * a cropped aspect ratio benefits from having the rotation already baked in so a player
- * doesn't double-apply it).
+ * Builds the 4x4 transform mapping the cropped subrect onto the encoder's NDC quad
+ * (scale by src/crop, translate by crop offset). Identity when there's no crop.
  */
 internal object CropMatrix {
 
@@ -398,23 +352,18 @@ internal object CropMatrix {
             return matrix
         }
 
-        // SurfaceTexture's texture coords range over the FULL source. To make only the
-        // cropped subrect fill the encoder's output quad we manipulate the vertex
-        // transform: NDC quad spans (-1..1)² but we want it to expose only the cropped
-        // texture region. Equivalent to a vertex-space scale + translate that maps
-        // (-1..1) NDC ↔ (crop/source) texture region.
+        // Vertex-space scale + translate mapping (-1..1) NDC to the crop/source texture region.
         val sx = sourceWidth.toFloat() / cropWidth.toFloat()
         val sy = sourceHeight.toFloat() / cropHeight.toFloat()
-        // Translate is in NDC units. The center of the crop should land at NDC (0, 0).
+        // Translate in NDC units; crop centre lands at (0, 0).
         val tx = 1f - 2f * (cropLeft + cropWidth / 2f) / sourceWidth
         val ty = -(1f - 2f * (cropTop + cropHeight / 2f) / sourceHeight)
 
-        // Order: scale first (around origin), then shift. Pre-multiply onto the rotation.
         val cropM = FloatArray(16)
         Matrix.setIdentityM(cropM, 0)
         Matrix.translateM(cropM, 0, tx * sx, ty * sy, 0f)
         Matrix.scaleM(cropM, 0, sx, sy, 1f)
-        // Apply crop, then rotate (so the rotation is around the cropped region's centre).
+        // Crop, then rotate around the cropped region's centre.
         val combined = FloatArray(16)
         Matrix.multiplyMM(combined, 0, matrix, 0, cropM, 0)
         return combined

@@ -49,6 +49,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import eu.akoos.photos.data.db.dao.LocalTagDao
+import eu.akoos.photos.data.db.entity.LocalTagEntity
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.entity.LocalMediaItem
@@ -60,6 +62,8 @@ import javax.inject.Singleton
 @Singleton
 class LocalMediaRepositoryImpl @Inject constructor(
     @ApplicationContext private val context: Context,
+    private val localTagDao: LocalTagDao,
+    private val localTagScanScheduler: LocalTagScanScheduler,
 ) : LocalMediaRepository {
 
     // Manual refresh trigger merged with the MediaStore ContentObserver. Permission grants do
@@ -245,10 +249,18 @@ class LocalMediaRepositoryImpl @Inject constructor(
 
         val result = mutableListOf<LocalMediaItem>()
 
+        // Load the category-tag cache once for this scan. Each item picks up its tags from the
+        // entry that still MATCHES on dateModified + sizeBytes; a stale or missing entry leaves
+        // tags empty (the categorizer falls back to its cheap heuristics, and the tag scheduler
+        // re-detects out of band). A read failure degrades to "no cache" — correctness intact.
+        val tagCache: Map<String, LocalTagEntity> =
+            runCatching { localTagDao.getAll().associateBy { it.uri } }.getOrDefault(emptyMap())
+
         val projection = arrayOf(
             MediaStore.MediaColumns._ID,
             MediaStore.MediaColumns.DATE_TAKEN,
             MediaStore.MediaColumns.DATE_ADDED,
+            MediaStore.MediaColumns.DATE_MODIFIED,
             MediaStore.MediaColumns.DISPLAY_NAME,
             MediaStore.MediaColumns.MIME_TYPE,
             MediaStore.MediaColumns.SIZE,
@@ -274,7 +286,7 @@ class LocalMediaRepositoryImpl @Inject constructor(
             try {
                 context.contentResolver.query(uri, projection, selection, null, sortOrder)?.use { cursor ->
                     while (cursor.moveToNext()) {
-                        result += cursor.toLocalMediaItem(baseUri = uri)
+                        result += cursor.toLocalMediaItem(baseUri = uri, tagCache = tagCache)
                     }
                 }
             } catch (e: Exception) {
@@ -318,7 +330,12 @@ class LocalMediaRepositoryImpl @Inject constructor(
                 }
             } catch (_: Exception) {}
         }
-        result.sortedByDescending { it.dateTaken }
+        val sorted = result.sortedByDescending { it.dateTaken }
+        // Fill/refresh the photo-category tag cache for any new or changed files in the
+        // background (cheap pre-filter; only large images get an XMP read), so the next scan
+        // surfaces accurate type badges and category search without re-reading on the hot path.
+        localTagScanScheduler.schedule(sorted)
+        sorted
     }
 
     private fun checkMediaPermission(): Boolean {
@@ -331,10 +348,14 @@ class LocalMediaRepositoryImpl @Inject constructor(
         }
     }
 
-    private fun android.database.Cursor.toLocalMediaItem(baseUri: Uri? = null): LocalMediaItem {
+    private fun android.database.Cursor.toLocalMediaItem(
+        baseUri: Uri? = null,
+        tagCache: Map<String, LocalTagEntity> = emptyMap(),
+    ): LocalMediaItem {
         val idCol        = getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
         val dateTakenCol = getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_TAKEN)
         val dateAddedCol = getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_ADDED)
+        val dateModCol   = getColumnIndex(MediaStore.MediaColumns.DATE_MODIFIED)
         val nameCol      = getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
         val mimeCol      = getColumnIndexOrThrow(MediaStore.MediaColumns.MIME_TYPE)
         val sizeCol      = getColumnIndexOrThrow(MediaStore.MediaColumns.SIZE)
@@ -347,8 +368,10 @@ class LocalMediaRepositoryImpl @Inject constructor(
         val rawDateTaken = getLong(dateTakenCol)
         val dateAdded    = getLong(dateAddedCol)
         val dateTaken    = if (rawDateTaken > 0) rawDateTaken else dateAdded * 1000L
+        val dateModified = if (dateModCol >= 0) getLong(dateModCol) else 0L
         val root         = baseUri ?: MediaStore.Images.Media.EXTERNAL_CONTENT_URI
         val contentUri   = Uri.withAppendedPath(root, id.toString())
+        val sizeBytes    = getLong(sizeCol)
 
         val displayName  = getString(nameCol) ?: ""
         val rawMimeType  = getString(mimeCol) ?: ""
@@ -368,16 +391,27 @@ class LocalMediaRepositoryImpl @Inject constructor(
             }
         }
 
+        val uriString = contentUri.toString()
+        // A cache entry counts only while the file is unchanged: same DATE_MODIFIED AND same
+        // size. Any drift means the file was replaced (edited, re-saved) so its old tags are
+        // discarded and re-detection happens out of band via the tag scheduler.
+        val cachedTags = tagCache[uriString]
+            ?.takeIf { it.dateModified == dateModified && it.sizeBytes == sizeBytes }
+            ?.tags()
+            ?: emptySet()
+
         return LocalMediaItem(
-            uri         = contentUri.toString(),
+            uri         = uriString,
             dateTaken   = dateTaken,
             displayName = displayName,
             mimeType    = mimeType,
-            sizeBytes   = getLong(sizeCol),
+            sizeBytes   = sizeBytes,
             bucketName  = if (bucketCol >= 0) getString(bucketCol) else null,
             width       = if (widthCol >= 0) getInt(widthCol) else 0,
             height      = if (heightCol >= 0) getInt(heightCol) else 0,
             duration    = if (durationCol >= 0) getLong(durationCol) else 0L,
+            dateModified = dateModified,
+            tags        = cachedTags,
         )
     }
 }

@@ -60,18 +60,9 @@ import java.nio.ByteBuffer
 import javax.inject.Inject
 
 /**
- * UI state for the video editor.
- *
- * The two supported operations — trim and rotate — both avoid per-frame decode/encode:
- *  - Trim happens via MediaExtractor + MediaMuxer stream-copy, sample-by-sample, so
- *    the codec bitstream is preserved exactly.
- *  - Rotate is metadata-only via [MediaMuxer.setOrientationHint] — the player applies
- *    the rotation at display time, no pixel work involved.
- *
- * [rotationDegrees] is ADDITIVE to whatever rotation tag the source already carries:
- * a portrait phone clip with a baked-in 90° rotation that the user rotates a further
- * 90° CW ends up at 180° in the output. We read the source's rotation via
- * MediaMetadataRetriever and add ours on save.
+ * UI state for the video editor. Trim is MediaExtractor + MediaMuxer stream-copy (bitstream preserved);
+ * rotate is metadata-only via [MediaMuxer.setOrientationHint]. [rotationDegrees] is ADDITIVE to the
+ * source's rotation tag (read via MediaMetadataRetriever, added on save).
  */
 data class VideoEditorUiState(
     val sourceUri: String? = null,
@@ -81,20 +72,12 @@ data class VideoEditorUiState(
     val trimStartMs: Long = 0L,
     val trimEndMs: Long = 0L,
     val rotationDegrees: Int = 0, // 0, 90, 180, 270 — additive to source rotation metadata
-    /**
-     * Crop rectangle in SOURCE-VIDEO pixel coordinates. Null = full frame.
-     *
-     * Setting this triggers the re-encode path on save — stream-copy can't satisfy a
-     * crop because the bitstream encodes the full source frame.
-     */
+    /** Crop in source-video pixels (null = full frame). Set → forces the re-encode save path. */
     val cropRect: Rect? = null,
     /** Source video dimensions in pixels (post-rotation), populated by loadLocal. */
     val sourceWidth: Int = 0,
     val sourceHeight: Int = 0,
-    /**
-     * Local audio file the user picked to replace the original audio track. Null =
-     * keep the source's audio. Setting this triggers the audio-swap path on save.
-     */
+    /** Picked overlay audio (null = keep source audio). Set → forces the audio-swap save path. */
     val audioOverlayUri: String? = null,
     val audioOverlayDisplayName: String? = null,
     val audioOverlayDurationMs: Long = 0L,
@@ -102,61 +85,27 @@ data class VideoEditorUiState(
      *  when [audioOverlayUri] is null. */
     val audioTrimStartMs: Long = 0L,
     val audioTrimEndMs: Long = 0L,
-    /**
-     * Source audio gain in [0..1]. 0 = silent (original track effectively dropped from
-     * output), 1 = original loudness, intermediate = attenuation. Replaces the old
-     * boolean mute toggle with a slider so the user can balance an overlay music track
-     * against the source audio instead of an all-or-nothing choice.
-     */
+    /** Source audio gain [0..1]: 0 drops the original, 1 keeps it, between attenuates. */
     val originalAudioGain: Float = 1.0f,
-    /**
-     * Overlay music gain in [0..1]. Same semantics as [originalAudioGain] but applied
-     * to the picked music file. Ignored when [audioOverlayUri] is null. When BOTH gains
-     * are > 0 the save pipeline mixes the two PCM streams sample-by-sample with the
-     * specified attenuations; when only one is > 0 the other is omitted.
-     */
+    /** Overlay music gain [0..1], ignored when [audioOverlayUri] is null. Both > 0 → the two PCM streams mix. */
     val musicAudioGain: Float = 1.0f,
     val isSaving: Boolean = false,
     val isLoading: Boolean = true,
     val saveResult: VideoSaveResult? = null,
     val errorMessage: String? = null,
-    /** 0..1 progress during a re-encode save; null when the save is a stream-copy
-     *  (which is fast enough that a spinner suffices). */
+    /** 0..1 progress during a re-encode save; null for stream-copy (fast enough for a spinner). */
     val saveProgress: Float? = null,
-    /** Phase the save is in so the sheet's label can distinguish the local re-encode
-     *  step (where saveProgress ticks 0→1) from the cloud upload step (no progress
-     *  available — best we can do is a spinner with a "Uploading…" caption so the user
-     *  doesn't think the screen has frozen between 100 % and dismissal). */
+    /** Save phase, so the sheet can label the local re-encode vs the progress-less cloud upload. */
     val saveStage: VideoSaveStage = VideoSaveStage.Idle,
-    /**
-     * On Android 11+ a foreign MediaStore URI cannot be opened for write without an
-     * explicit user-consent intent. When the first save attempt throws SecurityException
-     * we build one via [MediaStore.createWriteRequest] and surface its PendingIntent here
-     * so the screen can launch it; the user's choice flows back through
-     * [VideoEditorViewModel.onWritePermissionGranted] / [onWritePermissionDenied].
-     * Mirrors the PhotoEditor pattern so own-camera videos can actually be overwritten
-     * instead of silently falling through to a "Save as Copy".
-     */
+    /** R+ MediaStore write-consent intent ([MediaStore.createWriteRequest]) when an Overwrite hits
+     *  SecurityException on a foreign URI, so the screen can launch it instead of silently copying. */
     val pendingWriteIntent: android.app.PendingIntent? = null,
-    /**
-     * Surfaces the OS consent dialog produced by [MediaStore.createDeleteRequest] when a
-     * Synced video's Overwrite-mode save falls back to "save as copy" — without it the
-     * original device file orphans next to the edit. Mirrors [pendingWriteIntent]
-     * end-to-end (launcher in the screen, resolved by [onDeletePermissionResolved]).
-     */
+    /** OS delete-consent intent when a Synced Overwrite falls back to copy, to remove the orphaned
+     *  original. Mirrors [pendingWriteIntent]. */
     val pendingDeleteIntent: android.app.PendingIntent? = null,
-    /**
-     * Latched discriminator for how the editor was entered — drives the save flow's
-     * dispatch between in-place overwrite, cloud upload, and the always-copy External
-     * path. Null until [VideoEditorViewModel.loadLocal] / [loadCloud] / [loadExternal]
-     * publishes the source.
-     */
+    /** How the editor was entered — drives the save dispatch (overwrite / cloud upload / always-copy). */
     val source: VideoEditorSource? = null,
-    /**
-     * Set true when an [VideoEditorSource.External] save lands as a fresh MediaStore copy
-     * under the editor's default video output directory. The screen reads this to show
-     * the "Saved a copy" feedback so the user knows the foreign original was not mutated.
-     */
+    /** Latched after an [VideoEditorSource.External] save so the screen can show "Saved a copy". */
     val savedAsCopy: Boolean = false,
 )
 
@@ -168,27 +117,13 @@ sealed class VideoSaveResult {
 
 enum class VideoSaveMode { Overwrite, Copy }
 
-/**
- * High-level phase the save flow is in. Drives the bottom sheet's progress copy so the
- * user always knows what the editor is doing — the previous flow went silent between
- * "re-encode 100 %" and "screen pops back" while the cloud upload was running, leading
- * users to wonder whether the save had finished or stalled.
- */
+/** Save phase, driving the bottom sheet's progress copy. */
 enum class VideoSaveStage { Idle, Encoding, Encrypting, Uploading }
 
 /**
- * Discriminates how the editor was entered so the save flow knows whether the source
- * URI is safe to write back into.
- *
- *  - [Local] — picked from the in-app gallery; the URI points at a MediaStore item the
- *    user is free to overwrite (subject to R+ consent for foreign-owner rows).
- *  - [Cloud] — opened on a Drive-only video; the cached file is the edit input, the save
- *    flow uploads a new linkId.
- *  - [External] — arrived via Intent.ACTION_EDIT or ACTION_VIEW from outside the app
- *    (system "Open with" / "Edit with" chooser). The foreign URI may be read-only, owned
- *    by another app, or backed by a transient grant we lose at process death; save is
- *    forced to a fresh MediaStore copy in the editor's default video output directory so
- *    the foreign original is never mutated.
+ * How the editor was entered, so the save flow knows whether the source URI is writable.
+ * [Local] is overwritable (R+ consent for foreign-owner rows); [Cloud] uploads a new linkId;
+ * [External] (foreign ACTION_EDIT/VIEW) is forced to a fresh copy — the foreign URI may be read-only.
  */
 sealed class VideoEditorSource {
     data class Local(val uri: String, val displayName: String, val mimeType: String) : VideoEditorSource()
@@ -211,11 +146,8 @@ class VideoEditorViewModel @Inject constructor(
      *  time so we can write (sourceRotation + userRotation) % 360 into the muxer. */
     private var sourceRotationDegrees: Int = 0
 
-    /** Non-null when the editor was launched on a cloud-only video; we download it to
-     *  cache for editing and re-upload on save. Mirrors PhotoEditor's EditorSource.Cloud
-     *  but kept simple because the existing local save paths already operate on
-     *  file:// URIs — pointing them at the cache file lets the edit pipeline stay
-     *  unchanged. */
+    /** Non-null for a cloud-only video: downloaded to cache for editing, re-uploaded on save.
+     *  Local save paths run on the cache file:// URI unchanged. */
     private var sourceCloudPhoto: CloudPhoto? = null
     /** Optional album linkId the cloud video lives in. Used to re-attach the re-uploaded
      *  edit to the same album so it doesn't disappear from the album view. */
@@ -226,16 +158,10 @@ class VideoEditorViewModel @Inject constructor(
         if (linkId != null) sourceCloudAlbumLinkId = linkId
     }
 
-    /**
-     * The Drive twin of a Synced device video. When set, [save]'s local paths consult
-     * this on success to ALSO upload a paired copy / replacement to Drive — without
-     * that, an edit on a Synced item would only update the device file and the cloud
-     * counterpart stays stale.
-     */
+    /** Drive twin of a Synced device video; local saves consult it to also push the edit to Drive. */
     private var cloudCounterpart: CloudPhoto? = null
 
-    /** Mirrored into a StateFlow so the save sheet's subtitle can adjust when a Synced
-     *  edit will fan out to both device and cloud. */
+    /** Mirrors [cloudCounterpart] presence so the save sheet can show a "device + cloud" subtitle. */
     private val _hasCloudCounterpart = MutableStateFlow(false)
 
     fun setCloudCounterpart(photo: CloudPhoto?) {
@@ -243,8 +169,6 @@ class VideoEditorViewModel @Inject constructor(
         _hasCloudCounterpart.value = photo != null
     }
 
-    /** Exposed for VideoEditorScreen.SaveSheet so it can show a "both device + cloud"
-     *  subtitle for Synced videos. */
     val hasCloudCounterpart: StateFlow<Boolean> = _hasCloudCounterpart.asStateFlow()
 
     fun loadLocal(uri: String, displayName: String, mimeType: String) {
@@ -263,12 +187,10 @@ class VideoEditorViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             val parsed = runCatching { Uri.parse(uri) }.getOrNull()
             if (parsed == null) {
-                _state.update { it.copy(isLoading = false, errorMessage = "Invalid video URI") }
+                _state.update { it.copy(isLoading = false, errorMessage = context.getString(R.string.editor_invalid_video_uri)) }
                 return@launch
             }
-            // MediaMetadataRetriever needs setDataSource — accepts both file paths and
-            // content:// URIs. We pull duration (required) and rotation (so the additive
-            // rotate keeps the result upright).
+            // Pull duration + rotation (for the additive rotate) via MediaMetadataRetriever.
             val retriever = MediaMetadataRetriever()
             val result = runCatching {
                 retriever.setDataSource(context, parsed)
@@ -285,17 +207,13 @@ class VideoEditorViewModel @Inject constructor(
             runCatching { retriever.release() }
             val meta = result.getOrElse {
                 _state.update {
-                    it.copy(isLoading = false, errorMessage = "Couldn't read video metadata")
+                    it.copy(isLoading = false, errorMessage = context.getString(R.string.editor_video_metadata_failed))
                 }
                 return@launch
             }
             sourceRotationDegrees = ((meta.rotation % 360) + 360) % 360
-            // MediaMetadataRetriever reports the ENCODED dimensions, ignoring the
-            // VIDEO_ROTATION tag — so a portrait clip recorded by the camera (encoded
-            // landscape, rotation=90) reports 1920×1080 instead of 1080×1920. The
-            // crop overlay clamps against these dims, so without the swap the user
-            // can't drag the rect taller than the encoded height. Swap into effective
-            // (post-rotation) dimensions before publishing to state.
+            // MediaMetadataRetriever reports ENCODED dims (ignoring VIDEO_ROTATION), so swap into
+            // post-rotation effective dims, else the crop overlay clamps to the wrong orientation.
             val effW = if (sourceRotationDegrees % 180 != 0) meta.height else meta.width
             val effH = if (sourceRotationDegrees % 180 != 0) meta.width else meta.height
             _state.update {
@@ -433,7 +351,7 @@ class VideoEditorViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             val userId = accountManager.getPrimaryUserId().first()
             if (userId == null) {
-                _state.update { it.copy(isLoading = false, errorMessage = "Not signed in") }
+                _state.update { it.copy(isLoading = false, errorMessage = context.getString(R.string.viewer_not_signed_in)) }
                 return@launch
             }
             val downloaded = runCatching { cloudRepo.downloadFullResPhoto(userId, photo) }
@@ -443,7 +361,7 @@ class VideoEditorViewModel @Inject constructor(
                     it.copy(
                         isLoading = false,
                         errorMessage = downloaded.exceptionOrNull()?.message
-                            ?: "Cloud video download failed",
+                            ?: context.getString(R.string.editor_cloud_video_download_failed),
                     )
                 }
                 return@launch
@@ -463,7 +381,7 @@ class VideoEditorViewModel @Inject constructor(
                         ?.toIntOrNull() ?: 0,
                 )
             }.getOrElse {
-                _state.update { it.copy(isLoading = false, errorMessage = "Couldn't read video metadata") }
+                _state.update { it.copy(isLoading = false, errorMessage = context.getString(R.string.editor_video_metadata_failed)) }
                 return@launch
             }
             runCatching { retriever.release() }
@@ -835,7 +753,7 @@ class VideoEditorViewModel @Inject constructor(
                 result
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
-                VideoSaveResult.Failed(eu.akoos.photos.util.sanitizeErrorMessage(e.message ?: "Save failed"))
+                VideoSaveResult.Failed(eu.akoos.photos.util.sanitizeErrorMessage(e.message ?: context.getString(R.string.editor_save_failed)))
             } finally {
                 syncedTempFile?.delete()
             }
@@ -1041,7 +959,7 @@ class VideoEditorViewModel @Inject constructor(
             it.copy(
                 pendingWriteIntent = null,
                 isSaving = false,
-                saveResult = VideoSaveResult.Failed("Save cancelled"),
+                saveResult = VideoSaveResult.Failed(context.getString(R.string.editor_save_cancelled)),
                 saveProgress = null,
             )
         }
@@ -1558,7 +1476,7 @@ class VideoEditorViewModel @Inject constructor(
             muxer.setOrientationHint(orientationDegrees)
             muxer.start()
 
-            val buffer = ByteBuffer.allocate(maxBufferSize)
+            var buffer = ByteBuffer.allocate(maxBufferSize)
             val info = android.media.MediaCodec.BufferInfo()
 
             // Per-track loop: seek each track to its closest preceding sync sample to
@@ -1574,7 +1492,17 @@ class VideoEditorViewModel @Inject constructor(
                 val endUs = trimEndMs * 1000L
                 while (true) {
                     buffer.clear()
-                    val read = extractor.readSampleData(buffer, 0)
+                    val read = try {
+                        extractor.readSampleData(buffer, 0)
+                    } catch (e: IllegalArgumentException) {
+                        // Some 4K/HEVC keyframes exceed the reported KEY_MAX_INPUT_SIZE, so
+                        // readSampleData throws instead of truncating. Grow the buffer and retry
+                        // rather than failing the trim, the same way VideoMetadataStripper does.
+                        val grown = buffer.capacity() * 2
+                        if (grown > (100 shl 20)) throw e
+                        buffer = ByteBuffer.allocate(grown)
+                        continue
+                    }
                     if (read < 0) break
                     val pts = extractor.sampleTime
                     if (pts > endUs) break

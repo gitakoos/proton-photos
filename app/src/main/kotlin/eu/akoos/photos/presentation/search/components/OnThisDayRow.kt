@@ -49,6 +49,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -119,16 +120,15 @@ fun OnThisDayRow(
             contentPadding = PaddingValues(horizontal = 14.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            // One card per milestone; tapping opens that memory's photos rather than listing them all.
             yearGroups.forEach { (year, yearItems) ->
-                val yearsAgo = (now - year).coerceAtLeast(1)
-                yearItems.forEachIndexed { index, photo ->
-                    item(key = "otd_${year}_${keyOf(photo)}") {
-                        OnThisDayTile(
-                            item = photo,
-                            yearsAgo = yearsAgo,
-                            onClick = { onPhotoClick(yearItems, index) },
-                        )
-                    }
+                item(key = "otd_$year") {
+                    OnThisDayCard(
+                        coverItem = yearItems.first(),
+                        yearsAgo = (now - year).coerceAtLeast(1),
+                        count = yearItems.size,
+                        onClick = { onPhotoClick(yearItems, 0) },
+                    )
                 }
             }
         }
@@ -136,28 +136,30 @@ fun OnThisDayRow(
 }
 
 @Composable
-private fun OnThisDayTile(
-    item: GalleryItem,
+private fun OnThisDayCard(
+    coverItem: GalleryItem,
     yearsAgo: Int,
+    count: Int,
     onClick: () -> Unit,
 ) {
     val colors = AppColors.current
-    val imageModel: Any? = when (item) {
-        is GalleryItem.LocalOnly -> android.net.Uri.parse(item.local.uri)
-        is GalleryItem.Synced    -> android.net.Uri.parse(item.local.uri)
-        is GalleryItem.CloudOnly -> item.cloud.thumbnailUrl
+    val imageModel: Any? = when (coverItem) {
+        is GalleryItem.LocalOnly -> android.net.Uri.parse(coverItem.local.uri)
+        is GalleryItem.Synced    -> android.net.Uri.parse(coverItem.local.uri)
+        is GalleryItem.CloudOnly -> coverItem.cloud.thumbnailUrl
     }
-    val mimeType = when (item) {
-        is GalleryItem.LocalOnly -> item.local.mimeType
-        is GalleryItem.Synced    -> item.local.mimeType
-        is GalleryItem.CloudOnly -> item.cloud.mimeType
-    }
-    val isVideo = mimeType.startsWith("video/")
+    val isVideo = when (coverItem) {
+        is GalleryItem.LocalOnly -> coverItem.local.mimeType
+        is GalleryItem.Synced    -> coverItem.local.mimeType
+        is GalleryItem.CloudOnly -> coverItem.cloud.mimeType
+    }.startsWith("video/")
+    val yearsAgoLabel = pluralStringResource(R.plurals.count_years_ago_plural, yearsAgo, yearsAgo)
+    val countLabel = pluralStringResource(R.plurals.count_photos_plural, count, count)
 
     Box(
         modifier = Modifier
-            .size(96.dp)
-            .clip(RoundedCornerShape(12.dp))
+            .size(width = 124.dp, height = 156.dp)
+            .clip(RoundedCornerShape(14.dp))
             .background(colors.bg2)
             .clickable(onClick = onClick),
     ) {
@@ -170,44 +172,47 @@ private fun OnThisDayTile(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(34.dp)
+                .height(70.dp)
                 .align(Alignment.BottomCenter)
                 .background(
                     Brush.verticalGradient(
-                        listOf(Color.Transparent, Color.Black.copy(alpha = 0.55f)),
+                        listOf(Color.Transparent, Color.Black.copy(alpha = 0.66f)),
                     ),
                 ),
         )
-        Text(
-            text = "${yearsAgo}y",
-            color = Color.White,
-            fontSize = 11.sp,
-            fontWeight = FontWeight.Medium,
+        Column(
             modifier = Modifier
                 .align(Alignment.BottomStart)
-                .padding(horizontal = 6.dp, vertical = 5.dp),
-        )
+                .padding(horizontal = 10.dp, vertical = 9.dp),
+        ) {
+            Text(
+                text = yearsAgoLabel,
+                color = Color.White,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = countLabel,
+                color = Color.White.copy(alpha = 0.85f),
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Medium,
+            )
+        }
         if (isVideo) {
             Box(
                 modifier = Modifier
-                    .size(22.dp)
+                    .size(26.dp)
                     .align(Alignment.Center)
-                    .background(Color.Black.copy(alpha = 0.55f), CircleShape),
+                    .background(Color.Black.copy(alpha = 0.5f), CircleShape),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
                     Icons.Default.PlayArrow,
                     contentDescription = null,
                     tint = Color.White,
-                    modifier = Modifier.size(14.dp),
+                    modifier = Modifier.size(16.dp),
                 )
             }
         }
     }
-}
-
-private fun keyOf(item: GalleryItem): String = when (item) {
-    is GalleryItem.LocalOnly -> "L:" + item.local.uri
-    is GalleryItem.Synced    -> "S:" + item.local.uri
-    is GalleryItem.CloudOnly -> "C:" + item.cloud.linkId
 }

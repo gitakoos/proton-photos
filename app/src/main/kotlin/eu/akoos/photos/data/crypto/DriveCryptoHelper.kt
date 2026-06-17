@@ -43,14 +43,10 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Drive-specific signature contexts the server checks against. Mirror of the constants in
- * `me.proton.core.drive.cryptobase.domain.usecase.SignatureContexts` in the official
- * ProtonDriveApps/android-drive SDK. All are critical (server rejects when missing / mismatched).
- *
- * Note: the SDK exposes contexts ONLY for share-member operations. NodePassphrase, Manifest,
- * ContentKeyPacket, Name and Block signatures are produced without a context on both the
- * official Android client and ours — so we deliberately do NOT add notations to those sites.
- * Doing so could create signatures the server / web client refuse to verify.
+ * Drive signature contexts the server checks against (mirror of android-drive's SignatureContexts).
+ * All critical. The SDK exposes contexts ONLY for share-member ops — NodePassphrase, Manifest,
+ * ContentKeyPacket, Name and Block sign without one, so we deliberately don't add notations there
+ * (doing so produces signatures the server/web client refuse to verify).
  */
 internal object DriveSignatureContexts {
     val INVITER = SignatureContext(value = "drive.share-member.inviter", isCritical = true)
@@ -73,10 +69,9 @@ data class AddressSigningKey(
     /** Armored public key of the primary address. Used when we need to encrypt to ourselves. */
     val publicKeyArmored: String,
     /**
-     * Primary address-key ID — server-side identifier of the key whose private half is
-     * [unlockedKeyBytes]. Required by `POST /drive/photos/volumes` so the backend can
-     * tag the new Photos share with the exact key that signed/encrypted its passphrase.
-     * Mirrors the `AddressKeyID` field in `CreatePhotoVolumeRequest.Share` (official client).
+     * Server-side ID of the key whose private half is [unlockedKeyBytes]. Required by
+     * `POST /drive/photos/volumes` (the `AddressKeyID` field) to tag the new Photos share with the
+     * key that signed its passphrase.
      */
     val addressKeyId: String,
 )
@@ -92,59 +87,33 @@ data class VerifiedBytes(val data: ByteArray, val verified: Boolean) {
 class DriveCryptoHelper @Inject constructor(
     private val cryptoContext: CryptoContext,
     private val userAddressRepository: UserAddressRepository,
-    /** Lazy because PhotosShareService transitively depends on this DriveCryptoHelper —
-     *  Hilt would deadlock the graph on direct injection. We only need to read the
-     *  volume-owner addressId, which is a small synchronous (or one-time bootstrap)
-     *  lookup that doesn't trigger any further crypto. */
+    /** Lazy: PhotosShareService transitively depends on this helper, so direct injection would
+     *  deadlock the Hilt graph. Only used to read the volume-owner addressId. */
     private val photosShareServiceLazy: dagger.Lazy<eu.akoos.photos.data.repository.drive.PhotosShareService>,
 ) {
     private val photosShareService get() = photosShareServiceLazy.get()
     private val shareKeyCache = ConcurrentHashMap<String, ByteArray>()
 
-    // Serializes every libgojni-bound call. Android 16's CMC GC userfaultfd races against
-    // Go's signal handlers when multiple JNI threads call into the same Go runtime, surfacing
-    // as a SIGABRT after a few hundred parallel decrypts (observed on several Android 16 builds).
-    // The existing chunk-pacing inside PhotoStreamService is necessary but not sufficient
-    // because AlbumService + thumbnail fetchers add their own parallel pressure. A global
-    // lock yields ~2x slower throughput but eliminates the crash.
-    // Fair-FIFO so an in-flight upload's encrypt phase (which may hold the lock for
-    // several seconds while it churns through a video's blocks) can't starve viewer
-    // thumbnail / fullres decrypts. Without fairness, the next encrypt block can re-grab
-    // the lock before a queued decrypt gets a turn — and the gallery visibly freezes for
-    // the duration of the upload. Fair locks have a small throughput cost (a few percent
-    // of mutex acquisitions go through the queue) but eliminate the starvation pathology.
+    // Serializes every libgojni-bound call. Android 16's CMC GC userfaultfd races Go's signal
+    // handlers when multiple JNI threads enter the same Go runtime, SIGABRT-ing after a few hundred
+    // parallel decrypts; PhotoStreamService chunk-pacing alone can't cover AlbumService + thumbnail
+    // pressure. ~2x slower but crash-free. Fair-FIFO so a multi-second upload-encrypt run can't
+    // starve viewer decrypts (without fairness the gallery freezes for the upload's duration).
     private val cryptoLock = java.util.concurrent.locks.ReentrantLock(true)
 
     /**
-     * Wrap any direct pgpCrypto.* call site (anything not already routed through this helper)
-     * with this guard so the same ReentrantLock serializes the call into libgojni. Without it,
-     * services that decrypt names / unlock keys / generate keys in parallel can race the same
-     * Go signal handlers that the in-class methods are already protected against. Targets:
-     * PhotoEntityBuilder, AlbumService, PhotosShareService, PhotosVolumeBootstrap, and
-     * PhotoUploadService — call sites that decrypt or generate keys outside this helper and
-     * must be wrapped to serialize libgojni access.
+     * Wraps a direct pgpCrypto.* call (not already routed through this helper) so the same lock
+     * serializes it into libgojni. Used by PhotoEntityBuilder, AlbumService, PhotosShareService,
+     * PhotosVolumeBootstrap, and PhotoUploadService, which decrypt/generate keys outside this class.
      */
     fun <T> withCryptoLock(block: () -> T): T = cryptoLock.withLock(block)
 
     // ─── Decryption (download) ────────────────────────────────────────────────
 
     /**
-     * Returns the PUBLIC keys (armored) of EVERY enabled user address. Used as verification
-     * keys when we know the signer is the current user (anything WE uploaded). The previous
-     * version returned only the primary address's keys — which produced confusing
-     * "VERIFY_FAIL nodePassphrase / name" warnings AND empty display names whenever an
-     * upload had been signed by a non-primary address (aliases, multi-address accounts,
-     * users who later changed primary). decryptAndVerifyData falls back to an unverified
-     * decrypt on signature failure, but that fallback can itself fail in edge cases, leaving
-     * the gallery showing blank album / photo names until the user touched the album.
-     * Aggregating all addresses' public keys removes the false negative.
-     */
-    /**
-     * Returns every active email address on the user's account, in lowercase. Used to
-     * recognise own membership entries on a shared resource regardless of which alias
-     * the inviter used in the invitation. A multi-address account whose primary changes
-     * after accepting an invitation would otherwise fail to find itself in the member
-     * list by primary alone, blocking the "Leave album" action with "no permission".
+     * Every active email address on the account, lowercased. Lets us recognise own membership on a
+     * shared resource regardless of which alias the inviter used — matching by primary alone fails
+     * after a primary change and blocks "Leave album" with "no permission".
      */
     suspend fun getOwnEmailAddresses(userId: UserId): List<String> {
         return userAddressRepository.getAddresses(userId, false)
@@ -153,15 +122,19 @@ class DriveCryptoHelper @Inject constructor(
             .distinct()
     }
 
+    /**
+     * Armored PUBLIC keys of EVERY enabled address — verification keys for content WE uploaded.
+     * Aggregating all addresses (not just primary) avoids false "VERIFY_FAIL" + blank-name results
+     * when an upload was signed by a non-primary address (aliases, multi-address, changed primary).
+     */
     suspend fun getOwnPublicKeysArmored(userId: UserId): List<String> {
         val addresses = userAddressRepository.getAddresses(userId, false)
             .filter { it.enabled && it.keys.isNotEmpty() }
         if (addresses.isEmpty()) return emptyList()
         return addresses.flatMap { address ->
             address.keys.mapNotNull { addrKey ->
-                // getPublicKey enters libgojni; serialize it through cryptoLock so it can't run
-                // concurrently with a thumbnail/decrypt worker's Go call. Addresses were already
-                // fetched above (the suspend part), so the lock stays off the suspension path.
+                // getPublicKey enters libgojni; serialize it (addresses already fetched, so the lock
+                // stays off the suspension path).
                 cryptoLock.withLock {
                     runCatching { cryptoContext.pgpCrypto.getPublicKey(addrKey.privateKey.key) }.getOrNull()
                 }
@@ -189,13 +162,9 @@ class DriveCryptoHelper @Inject constructor(
     )
 
     /**
-     * Multi-key variant — gopenpgp walks every candidate against the message's PKESKs
-     * and picks the first one that opens. Used for shared-with-me content where the
-     * backend's PKESK substitution can land on a different key than the obvious parent
-     * (e.g. photo Name in a shared album is encrypted to the OWNER's root key, but the
-     * substituted PKESK targets the share's encryption subkey, so the recipient needs
-     * to offer both the album NodeKey AND the share private key bytes before any one
-     * of them lands a hit).
+     * Multi-key variant — gopenpgp tries each candidate against the message's PKESKs. Needed for
+     * shared-with-me content where the backend's PKESK substitution can target the share's
+     * encryption subkey rather than the obvious parent, so both keys must be offered.
      */
     fun decryptAndVerifyData(
         encryptedArmored: String,
@@ -209,10 +178,8 @@ class DriveCryptoHelper @Inject constructor(
         )
         VerifiedBytes(decrypted.data, decrypted.status == VerificationStatus.Success)
     } catch (e: Exception) {
-        // Verify-API rejects messages with no signature; fall back to encrypt-only
-        // decrypt. The plain decrypt only takes a single key, so we walk each candidate
-        // and stop at the first hit. Logging surfaces which key landed (or all of them
-        // failing) so production logs make the failure mode obvious.
+        // Verify-API rejects unsigned messages; fall back to encrypt-only decrypt. Plain decrypt
+        // takes one key, so walk each candidate and stop at the first hit.
         var fallbackResult: ByteArray? = null
         var lastFallbackErr: Throwable? = null
         for (candidate in decryptionKeyCandidates) {
@@ -257,24 +224,15 @@ class DriveCryptoHelper @Inject constructor(
             .sortedBy { it.order }
         if (addresses.isEmpty()) error("No active address for userId=${userId.id}")
 
-        // Try every active address in order. The share's passphrase is encrypted to ONE of
-        // the user's addresses (usually the one that owned the share at create time), and
-        // that isn't always the primary — accounts with aliases, multi-address users, or
-        // users who later changed their primary address all hit "Cannot decrypt message with
-        // provided Key list" if we only try the primary.
-        //
-        // CRITICAL: the WHOLE address attempt (decrypt + unlock) goes inside one runCatching.
-        // A non-matching address can return non-error bytes that fail at unlock() instead of
-        // at decryptData — wrapping only decryptData lets the unlock() throw escape the
-        // address loop, so we never fall through to the next address. The wrong "decrypted"
-        // passphrase never reaches the cache, but every refresh from cold start hits the same
-        // dead address first and fails before trying the right one.
+        // Try every active address: the share passphrase is encrypted to ONE of them, not always
+        // the primary (aliases, multi-address, changed primary all hit "Cannot decrypt with
+        // provided Key list" otherwise). The WHOLE attempt (decrypt + unlock) must be in one
+        // runCatching — a non-matching address can decrypt to bytes that only fail at unlock(), and
+        // wrapping just decryptData would let that throw escape the loop instead of trying the next.
         var lastError: Throwable? = null
         for (address in addresses) {
             val attempt = runCatching {
-                // address.useKeys delegates to ProtonCore's libgojni unlock + decryptData,
-                // and cryptoContext.pgpCrypto.unlock is the same Go runtime. Both go inside
-                // the lock so the post-login sync burst doesn't race other libgojni callers.
+                // useKeys + unlock both enter libgojni; lock so the post-login burst doesn't race.
                 cryptoLock.withLock {
                     val passphraseBytes = address.useKeys(cryptoContext) {
                         decryptData(sharePassphraseArmored)
@@ -300,11 +258,8 @@ class DriveCryptoHelper @Inject constructor(
         nodePassphraseArmored: String,
         parentKeyBytes: ByteArray,
     ): ByteArray = cryptoLock.withLock {
-        // Empty/blank PGP armor strings are NOT just garbage input — they make the underlying
-        // Go OpenPGP library panic with "runtime error: slice bounds out of range [:-1]"
-        // (it strips a trailing newline from a 0-length string). The panic aborts the whole
-        // process via SIGABRT and Kotlin's try/catch can't recover from it. Fail fast in
-        // Kotlin so a JobCancellationException replaces the SIGABRT.
+        // Blank PGP armor makes the Go library panic "slice bounds out of range [:-1]" and SIGABRT
+        // (uncatchable). Fail fast in Kotlin so an exception replaces the process abort.
         require(nodeKeyArmored.isNotBlank()) { "decryptNodeKey: nodeKeyArmored is blank" }
         require(nodePassphraseArmored.isNotBlank()) { "decryptNodeKey: nodePassphraseArmored is blank" }
         val nodePassphraseBytes = cryptoContext.pgpCrypto.decryptData(nodePassphraseArmored, parentKeyBytes)
@@ -317,8 +272,7 @@ class DriveCryptoHelper @Inject constructor(
     fun decryptLinkName(encryptedNameArmored: String, nodeKeyBytes: ByteArray): String? = cryptoLock.withLock {
         if (encryptedNameArmored.isBlank()) return@withLock null
         try {
-            // Names uploaded by the web/mobile client are encrypted+signed binary packets.
-            // decryptData works for both binary (encryptAndSignData) and text (encryptText) modes.
+            // decryptData handles both binary (encryptAndSignData) and text (encryptText) names.
             val bytes = cryptoContext.pgpCrypto.decryptData(encryptedNameArmored, nodeKeyBytes)
             String(bytes, Charsets.UTF_8)
         } catch (e: Exception) {
@@ -341,9 +295,7 @@ class DriveCryptoHelper @Inject constructor(
     }
 
     fun decryptFileToDestination(sessionKey: SessionKey, encryptedFile: File, destFile: File): File = cryptoLock.withLock {
-        // Same rationale as decryptNodeKey's require()s — empty/missing bytes make the Go
-        // OpenPGP library panic with "slice bounds out of range [:-1]" and abort the entire
-        // process via SIGABRT, bypassing Kotlin's try/catch. Validate in Kotlin first.
+        // Empty/missing bytes trigger the same [:-1] Go panic/SIGABRT — validate in Kotlin first.
         require(encryptedFile.exists() && encryptedFile.length() > 0) {
             "decryptFileToDestination: encryptedFile is empty or missing"
         }
@@ -352,31 +304,17 @@ class DriveCryptoHelper @Inject constructor(
     }
 
     /**
-     * Decrypts a binary OpenPGP block (PKESK + SEIPD packet) using the node's
-     * unlocked private key bytes.
-     *
-     * Proton Drive blocks are self-contained PGP messages: the key packet (PKESK)
-     * is embedded in every block alongside the data packet (SEIPD) — there is no
-     * separate ContentKeyPacket for block downloads.
-     *
-     * Approach:
-     *   1. Use getArmored() → proper ASCII-armor WITH CRC24 (manual armoring misses this)
-     *   2. getEncryptedPackets() splits into Key (PKESK) + Data (SEIPD) packets
-     *   3. decryptSessionKey(keyPacket, nodeKeyBytes) → SessionKey
-     *   4. decryptData(dataPacket, sessionKey) → plaintext bytes
+     * Decrypts a self-contained binary OpenPGP block (PKESK + SEIPD) with the node's unlocked key
+     * bytes. Drive block downloads have no separate ContentKeyPacket — the PKESK rides in the block.
      */
     fun decryptBinaryPgpWithNodeKey(data: ByteArray, nodeKeyBytes: ByteArray): ByteArray? = cryptoLock.withLock {
-        // Empty / too-short input is rejected here before reaching Go. A 0-byte buffer made
-        // the GoPGP library panic with "slice bounds out of range [:-1]" while parsing the
-        // armor header, killing the whole process with SIGABRT. Minimum length is the
-        // smallest PGP message we'd see in practice (a few dozen bytes).
+        // Reject too-short input before Go: a 0-byte buffer triggers the [:-1] panic/SIGABRT parsing
+        // the armor header. 16 is below the smallest real PGP message.
         if (data.size < 16) return@withLock null
         try {
-            // Use getArmored() for proper ASCII-armor including CRC24 checksum, then
-            // decrypt via the standard decryptData(armored, keyBytes) path — the same
-            // path used for node-passphrase decryption. The split+decryptData(packet,sk)
-            // path fails with "EncryptedFile cannot be extracted from EncryptedMessage"
-            // because that overload is for the attachment (literal-file) format only.
+            // getArmored() gives proper ASCII-armor + CRC24, then the standard decryptData(armored,
+            // keyBytes) path. The split + decryptData(packet, sk) path fails ("EncryptedFile cannot
+            // be extracted") — that overload is for the attachment/literal-file format only.
             val armored = cryptoContext.pgpCrypto.getArmored(data, PGPHeader.Message)
             cryptoContext.pgpCrypto.decryptData(armored, nodeKeyBytes)
         } catch (e: Exception) {
@@ -389,12 +327,10 @@ class DriveCryptoHelper @Inject constructor(
 
     suspend fun getAddressSigningKey(userId: UserId): AddressSigningKey {
         val addresses = userAddressRepository.getAddresses(userId, false)
-        // Volume owner address (set at registration and STICKY) — NOT today's mail-primary,
-        // because users that promote an alias to mail-primary later still have the original
-        // address as the Drive volume owner. Drive web + Drive Android sign every album /
-        // upload / share / invite with the volume owner; mixing in today's mail-primary
-        // produces signatures recipients can't verify against the volume owner's key. Fall
-        // back to mail-primary only when the share bootstrap hasn't run yet (cold start).
+        // Volume owner address (sticky from registration), NOT today's mail-primary: Drive signs
+        // every album/upload/share/invite with the volume owner, and an alias promoted to primary
+        // later would produce signatures recipients can't verify. Fall back to mail-primary only on
+        // cold start before the share bootstrap has run.
         val volumeOwnerAddressId = photosShareService.volumeOwnerAddressId(userId)
         val resolved = volumeOwnerAddressId
             ?.let { ownerId -> addresses.firstOrNull { it.addressId.id == ownerId && it.enabled && it.keys.isNotEmpty() } }
@@ -404,13 +340,9 @@ class DriveCryptoHelper @Inject constructor(
     }
 
     /**
-     * Loads the address with the specific [addressId] and returns it unlocked as an
-     * [AddressSigningKey]. Used when an existing Drive share lists a specific owner
-     * address that may NOT match the user's current primary (e.g., the share was
-     * created earlier from an alias, or the user later added a higher-priority
-     * address). Backend rejects invitations whose `InviterAddressID` doesn't match
-     * the share's owner with "The inviter address is not the one used in the
-     * context share".
+     * Unlocks the specific [addressId] as an [AddressSigningKey]. Used when a share lists an owner
+     * address that may differ from the current primary — the backend rejects invitations whose
+     * `InviterAddressID` doesn't match the share's owner.
      */
     suspend fun getAddressSigningKeyById(userId: UserId, addressId: String): AddressSigningKey {
         val addresses = userAddressRepository.getAddresses(userId, false)
@@ -422,18 +354,14 @@ class DriveCryptoHelper @Inject constructor(
     private fun unlockAddressAsSigningKey(
         address: me.proton.core.user.domain.entity.UserAddress,
     ): AddressSigningKey {
-        // Match Drive Android's KeyHolderCryptoKt.useKeysAs / PrivateKeyRing.getUnlockedPrimaryKey:
-        // pick the address key whose `isPrimary == true` (the one published in the user's SKL
-        // as the signing key), not just the first active key. Multi-key addresses (after a
-        // re-key / recovery / rollover) keep older keys active but only ONE is primary; signing
-        // with a secondary key makes Drive web's SKL-aware verifier flag every signature as
-        // SIGNED_NO_VERIFIER, which on the recipient cascades into "Failed to decrypt node".
+        // Pick the isPrimary key (the one published in the user's SKL as signer), not just the first
+        // active one. After a re-key/recovery, older keys stay active but signing with a secondary
+        // makes Drive web's SKL verifier flag SIGNED_NO_VERIFIER → recipient "Failed to decrypt node".
         val activeKeys = address.keys.filter { it.privateKey.isActive && it.privateKey.passphrase != null }
         val key = activeKeys.firstOrNull { it.privateKey.isPrimary }
             ?: activeKeys.firstOrNull()
             ?: error("No active address key with passphrase for ${address.email}")
-        // unlock + getPublicKey both enter libgojni; serialize through cryptoLock. Synchronous
-        // method (caller already did any suspend address fetch), so the lock never spans a suspension.
+        // unlock + getPublicKey enter libgojni; serialize. Synchronous, so the lock never suspends.
         val (keyBytes, publicKey) = cryptoLock.withLock {
             val plainPassphrase = cryptoContext.keyStoreCrypto.decrypt(key.privateKey.passphrase!!)
             val unlocked = cryptoContext.pgpCrypto.unlock(key.privateKey.key, plainPassphrase.array)
@@ -451,31 +379,19 @@ class DriveCryptoHelper @Inject constructor(
         )
     }
 
-    /**
-     * Generates an album NodeKey via gopenpgp's `generateNewPrivateKey` — the
-     * same path Drive Android's `CreateAlbum` → `CreateFolderInfo` →
-     * `GenerateNodeKey` → `GenerateNestedPrivateKey` takes for both folder and
-     * album keys (`tempandroid-drive/.../CreateAlbum.kt`).
-     */
+    /** Album NodeKey via the same gopenpgp path Drive Android's CreateAlbum uses. */
     fun generateAlbumNodeKey(): NodeKeyMaterial = generateNodeKey()
 
 
     fun generateNodeKey(): NodeKeyMaterial = cryptoLock.withLock {
         val rawBytes = cryptoContext.pgpCrypto.generateRandomBytes(32)
-        // NodePassphrase is decrypted by clients as a UTF-8 string (web: TextDecoder.decode).
-        // Raw random bytes break TextDecoder.  Base64-encoding the bytes produces valid UTF-8.
+        // Clients decrypt NodePassphrase as a UTF-8 string (web TextDecoder), which raw random
+        // bytes break — base64-encode to valid UTF-8.
         val passphraseStr   = Base64.encodeToString(rawBytes, Base64.NO_WRAP)
         val passphraseBytes = passphraseStr.toByteArray(Charsets.UTF_8)
-        // Drive Android's GenerateNestedPrivateKey hard-codes the User ID as
-        // `drive-key@proton.me` (`tempandroid-drive/.../GenerateNestedPrivateKey.kt:75-76`
-        // DEFAULT_USERNAME = "drive-key", DEFAULT_DOMAIN = "proton.me"). Every
-        // album NodeKey produced by the official client therefore carries the
-        // exact same User ID, and Drive web's openpgp.js validators have been
-        // tuned against that one canonical packet shape. Using a different
-        // User ID ("photos@proton.me") was the only wire-visible difference
-        // between our album NodeKey and one Drive web produces locally —
-        // matching the official client byte-for-byte removes that as the
-        // failure surface for the recipient's per-photo decrypt chain.
+        // User ID must be "drive-key@proton.me" — Drive Android hardcodes it, and Drive web's
+        // openpgp.js validators are tuned to that canonical packet shape. Any other User ID was the
+        // one wire difference that broke the recipient's per-photo decrypt chain.
         val armoredKey = cryptoContext.pgpCrypto.generateNewPrivateKey("drive-key", "proton.me", passphraseBytes)
         val publicKey  = cryptoContext.pgpCrypto.getPublicKey(armoredKey)
         val unlocked   = cryptoContext.pgpCrypto.unlock(armoredKey, passphraseBytes)
@@ -483,7 +399,7 @@ class DriveCryptoHelper @Inject constructor(
         unlocked.close()
         NodeKeyMaterial(
             armoredPrivateKey = armoredKey,
-            passphraseBytes   = passphraseBytes,   // UTF-8 bytes of the base64 string
+            passphraseBytes   = passphraseBytes,
             publicKeyArmored  = publicKey,
             unlockedKeyBytes  = keyBytes,
         )
@@ -493,13 +409,9 @@ class DriveCryptoHelper @Inject constructor(
         cryptoLock.withLock { cryptoContext.pgpCrypto.encryptData(data, recipientPublicKeyArmored) }
 
     /**
-     * Combined encrypt-and-sign in a single PGP MESSAGE blob — used for fields the
-     * Drive backend (and Drive web) verify against the signatureEmail chain, like
-     * the album's NodeHashKey. The official Drive Android `encryptAndSignHashKey`
-     * pattern signs the random hash-key bytes with the address signing key and
-     * encrypts to the node's own public key; without the signature, Drive web
-     * surfaces the "Missing signature for hash key" error on the recipient side
-     * and refuses to decrypt downstream children.
+     * Encrypt-and-sign into one PGP MESSAGE — for fields Drive verifies against the signatureEmail
+     * chain (e.g. the album NodeHashKey). Without the signature Drive web shows "Missing signature
+     * for hash key" and refuses to decrypt downstream children.
      */
     fun encryptAndSignDataToPgpMessage(
         data: ByteArray,
@@ -515,17 +427,10 @@ class DriveCryptoHelper @Inject constructor(
     }
 
     /**
-     * Re-wraps a NodePassphrase blob for a server-side copy: decrypts the source
-     * `sourceNodePassphraseArmored` using the old parent's key bytes, then re-
-     * encrypts the raw passphrase under the target parent's public key and
-     * detached-signs it with the caller's address key. The underlying NodeKey
-     * blob doesn't change (the backend re-uses the source encrypted private
-     * key as-is on the new copy), so the SAME passphrase still unlocks it.
-     *
-     * Used by the "Save shared album to my library" copy pipeline, where the
-     * source photo lives under the album NodeKey we accepted via the share and
-     * the target lives under a fresh owned album we just created in the user's
-     * own photos volume.
+     * Re-wraps a NodePassphrase for a server-side copy: extracts the session key from the source
+     * with the old parent key and writes a fresh PKESK to the target parent, plus a detached
+     * signature over the raw passphrase. The NodeKey blob is unchanged, so the same passphrase still
+     * unlocks it. Used by the "Save shared album to my library" copy pipeline.
      */
     fun reencryptNodePassphraseForCopy(
         sourceNodePassphraseArmored: String,
@@ -533,18 +438,10 @@ class DriveCryptoHelper @Inject constructor(
         targetParentPublicKeyArmored: String,
         signerKeyBytes: ByteArray,
     ): ReencryptedNodePassphrase = cryptoLock.withLock {
-        // PRESERVE the original SEIPD packet; only rewrap the PKESK to the new
-        // recipient. This matches Drive Android's `ChangeMessage`
-        // (drive/crypto-base/.../ChangeMessage.kt:37-62) which calls
-        // `getSessionKeyFromEncryptedMessage` and reuses the existing session
-        // key. Decrypt-then-encrypt loses information (literal-data type byte
-        // t/b, internal framing, signature inclusion) which produces a
-        // ciphertext that the photo NodeKey's S2K passphrase cannot reproduce
-        // on the recipient side, so the rewrap fails with "Message cannot be
-        // decrypted". Keeping the SEIPD bytes and only swapping the key-packet
-        // recipient means the bytes the recipient extracts after PKESK unwrap
-        // are byte-for-byte the bytes the photo NodeKey was originally encrypted
-        // against.
+        // PRESERVE the original SEIPD; only rewrap the PKESK (matches Drive Android's ChangeMessage,
+        // which reuses the existing session key). Decrypt-then-encrypt loses framing (literal type
+        // t/b, signature inclusion) and the recipient's S2K can't reproduce it → "Message cannot be
+        // decrypted". Keeping the SEIPD bytes means the recipient extracts byte-identical plaintext.
         val originalPackets = cryptoContext.pgpCrypto.getEncryptedPackets(sourceNodePassphraseArmored)
         val pkeskPackets = originalPackets.filter { it.type == PacketType.Key }.map { it.packet }
         val seipdPackets = originalPackets.filter { it.type == PacketType.Data }.map { it.packet }
@@ -553,44 +450,26 @@ class DriveCryptoHelper @Inject constructor(
         val sessionKey = pkeskPackets.firstNotNullOfOrNull { pk ->
             runCatching { cryptoContext.pgpCrypto.decryptSessionKey(pk, sourceParentKeyBytes) }.getOrNull()
         } ?: error("reencryptNodePassphraseForCopy: no PKESK decrypted with source key")
-        // Detached signature is computed over the RAW passphrase bytes — same
-        // as the original. We still need this because the wire DTO carries a
-        // separate `nodePassphraseSignature` field. The signed plaintext is
-        // the passphrase itself, NOT any wrapping.
+        // Detached signature over the RAW passphrase bytes for the separate wire
+        // `nodePassphraseSignature` field.
         val rawPassphrase = cryptoContext.pgpCrypto.decryptData(
             sourceNodePassphraseArmored,
             sourceParentKeyBytes,
         )
         val signature = cryptoContext.pgpCrypto.signData(rawPassphrase, signerKeyBytes, null)
-        // New PKESK to the album's encryption subkey, reusing the same
-        // session key — gopenpgp's `encryptSessionKey` writes the same
-        // sym-algo metadata so the existing SEIPD remains parseable.
+        // New PKESK to the target, reusing the session key so the existing SEIPD stays parseable.
         val newPkeskBytes = cryptoContext.pgpCrypto.encryptSessionKey(sessionKey, targetParentPublicKeyArmored)
-        // Concatenate: new PKESK + original SEIPD. Both are raw PGP packets.
-        // gopenpgp's `getArmored(bytes, Message)` adds the BEGIN/END headers
-        // and CRC24, matching what `encryptData` would have written.
+        // New PKESK + original SEIPD; getArmored adds headers + CRC24 like encryptData would.
         val combined = newPkeskBytes + seipdPackets[0]
         val newPassphraseArmored = cryptoContext.pgpCrypto.getArmored(combined, PGPHeader.Message)
         ReencryptedNodePassphrase(newPassphraseArmored, signature)
     }
 
     /**
-     * Re-targets a link Name to a new parent key the way Drive Android's
-     * `ChangeMessage` does (tempandroid-drive `drive/crypto-base/.../ChangeMessage.kt`):
-     * extract the session key from the OLD armored name using the old parent
-     * key, re-encrypt the plaintext under that SAME session key with an
-     * embedded signature by the caller's address key (core
-     * `encryptAndSignData(data, sessionKey, unlockedKey)` — the exact
-     * primitive the official `EncryptText(sessionKey, …)` overload calls),
-     * then write a fresh PKESK to the new parent and join key + data packets.
-     *
-     * Keeping the session-key lineage intact matters: Drive web's
-     * `decryptName` accepts ChangeMessage-shaped re-wraps (that is what every
-     * official client produces on add-to-album), while our previous
-     * fresh-session-key `encryptAndSignText` blobs were rejected on the
-     * recipient side even though the plaintext round-tripped locally — the
-     * same failure mode the NodePassphrase re-wrap had before
-     * [reencryptNodePassphraseForCopy] switched to session-key preservation.
+     * Re-targets a link Name to a new parent key the way Drive Android's ChangeMessage does: reuse
+     * the OLD name's session key, re-encrypt + embed-sign the plaintext under it, write a fresh
+     * PKESK to the new parent. Preserving the session-key lineage matters — Drive web's decryptName
+     * rejects fresh-session-key re-wraps (the same failure [reencryptNodePassphraseForCopy] fixed).
      */
     fun changeNameRecipient(
         oldNameArmored: String,
@@ -616,14 +495,9 @@ class DriveCryptoHelper @Inject constructor(
     }
 
     /**
-     * Re-wraps a Link Name blob for the same copy pipeline. Decrypts the source
-     * name with `sourceParentKeyBytes`, then encrypts + signs the recovered
-     * plaintext under `targetParentPublicKeyArmored` using the caller's address
-     * key. Mirrors Drive Android's `ChangeMessage` for our flat use case.
-     *
-     * Returns both the new armored ciphertext AND the plaintext bytes so the
-     * caller can also feed the plaintext into the HMAC-SHA256 step (`hash`
-     * field on CopyLinkRequest) without re-decrypting.
+     * Re-wraps a Link Name for the copy pipeline: decrypts with the source parent key, re-encrypts +
+     * signs under the target parent. Returns the new ciphertext AND plaintext bytes so the caller can
+     * feed the plaintext into the HMAC-SHA256 `hash` field without re-decrypting.
      */
     fun reencryptLinkNameForCopy(
         sourceNameArmored: String,
@@ -652,18 +526,15 @@ class DriveCryptoHelper @Inject constructor(
     )
 
     /**
-     * Plain detached armored PGP signature (-----BEGIN PGP SIGNATURE-----).
-     * Used for NodePassphraseSignature and ContentKeyPacketSignature — both the Proton web
-     * client and the Drive API expect a detached signature here, NOT an encrypted one.
+     * Plain detached armored signature. For NodePassphraseSignature / ContentKeyPacketSignature —
+     * the Drive API expects a detached signature here, NOT an encrypted one.
      */
     fun signData(data: ByteArray, signerKeyBytes: ByteArray): String =
         cryptoLock.withLock { cryptoContext.pgpCrypto.signData(data, signerKeyBytes, null) }
 
     /**
-     * Signs [data] with [signerKeyBytes] and encrypts the result to [recipientPublicKeyArmored].
-     * Returns a PGP MESSAGE (-----BEGIN PGP MESSAGE-----).
-     * Used for block EncSignature (EncSignature field) per Drive Android SDK convention.
-     * Do NOT use for NodePassphraseSignature — the API requires a plain detached signature there.
+     * Signs [data] and encrypts the result to [recipientPublicKeyArmored] (a PGP MESSAGE). For block
+     * EncSignature. Do NOT use for NodePassphraseSignature — the API needs a plain detached signature.
      */
     fun signDataEncrypted(
         data: ByteArray,
@@ -676,22 +547,17 @@ class DriveCryptoHelper @Inject constructor(
     }
 
     /**
-     * Encrypts the link name to [parentPublicKeyArmored] AND signs it with [signerKeyBytes].
-     * The web client always signs names; without a signature it shows "Missing signature for name".
+     * Encrypts the link name to [parentPublicKeyArmored] AND signs it. The web client always signs
+     * names; without a signature it shows "Missing signature for name".
      */
     fun encryptName(
         name: String,
         parentPublicKeyArmored: String,
         signerKeyBytes: ByteArray,
     ): String = cryptoLock.withLock {
-        // Drive Android's `EncryptAndSignText.kt:39-41` calls `pgpCrypto.encryptAndSignText`
-        // (text-mode literal data, type byte `t`), NOT `encryptAndSignData` (binary-mode,
-        // type byte `b`). Drive web's `decryptAndVerifyText` consumers refuse to verify
-        // signatures across the text/binary literal-type boundary even when the raw
-        // plaintext round-trips byte-for-byte. The recipient sees "Missing signature
-        // for name" or an "unknown signer" verification status, which cascades into
-        // "this album is rejected" on the recipient-side album-load path and breaks
-        // per-photo decrypt downstream.
+        // Must use encryptAndSignText (text-mode literal, type `t`), NOT encryptAndSignData (binary
+        // `b`): Drive web's decryptAndVerifyText refuses to verify across the text/binary boundary
+        // even when plaintext round-trips, cascading into a rejected album + broken per-photo decrypt.
         cryptoContext.pgpCrypto.encryptAndSignText(
             name,
             parentPublicKeyArmored,
@@ -706,8 +572,8 @@ class DriveCryptoHelper @Inject constructor(
     fun encryptSessionKeyToNode(sessionKey: SessionKey, nodePublicKeyArmored: String): ByteArray =
         cryptoLock.withLock { cryptoContext.pgpCrypto.encryptSessionKey(sessionKey, nodePublicKeyArmored) }
 
-    // Use Android NO_WRAP (no newlines) — the Proton server uses PHP's strict Base64::decode()
-    // which rejects whitespace including newlines that pgpCrypto.getBase64Encoded() may emit.
+    // NO_WRAP (no newlines): the Proton server's PHP Base64::decode() rejects the whitespace
+    // pgpCrypto.getBase64Encoded() may emit.
     fun base64Encode(bytes: ByteArray): String =
         Base64.encodeToString(bytes, Base64.NO_WRAP)
 
@@ -715,10 +581,7 @@ class DriveCryptoHelper @Inject constructor(
     fun encryptBlock(blockData: ByteArray, sessionKey: SessionKey): ByteArray =
         cryptoLock.withLock { cryptoContext.pgpCrypto.encryptData(blockData, sessionKey) }
 
-    /**
-     * Signs the plaintext block data (encrypted to the node key) so the server
-     * can store a verifiable signature while only the key holder can read it.
-     */
+    /** Signs the plaintext block, encrypted to the node key — server-verifiable yet key-holder-only. */
     fun signBlockEncrypted(
         blockPlaintext: ByteArray,
         signerKeyBytes: ByteArray,
@@ -732,13 +595,12 @@ class DriveCryptoHelper @Inject constructor(
     /** Returns the raw 32-byte SHA-256 digest of [data]. */
     fun sha256(data: ByteArray): ByteArray = MessageDigest.getInstance("SHA-256").digest(data)
 
-    /** Hex-encoded SHA-256 (kept for internal / legacy use). */
+    /** Hex-encoded SHA-256. */
     fun sha256Hex(data: ByteArray): String = sha256(data).joinToString("") { "%02x".format(it) }
 
     /**
-     * HMAC-SHA256 of the plaintext name using the raw NodeHashKey bytes.
-     * Used as the Hash field in album / link creation requests so the server can
-     * look up links by name without learning the plaintext name.
+     * HMAC-SHA256 of the plaintext name with the raw NodeHashKey bytes — the Hash field in album /
+     * link creation, letting the server look up links by name without learning the plaintext.
      */
     fun computeNameHash(plaintextName: String, nodeHashKeyBytes: ByteArray): String {
         val mac = javax.crypto.Mac.getInstance("HmacSHA256")
@@ -748,25 +610,19 @@ class DriveCryptoHelper @Inject constructor(
     }
 
     /**
-     * Signs the revision manifest.
-     *
-     * The manifest is the concatenation of raw SHA-256 bytes for every encrypted block
-     * (32 bytes × block count), in block-index order.  This matches the official SDK's
-     * `RevisionManifestSignatureManager` which folds `block.hashBytes` (raw SHA-256) together.
+     * Signs the revision manifest — the raw SHA-256 bytes of every block (32 × count) concatenated
+     * in block-index order, matching the SDK's RevisionManifestSignatureManager.
      */
     fun signManifest(blockHashBytes: List<ByteArray>, signerKeyBytes: ByteArray): String {
         val manifest = blockHashBytes.fold(ByteArray(0)) { acc, hash -> acc + hash }
-        // signData enters libgojni; serialize it. Manifest assembly above is pure CPU, kept
-        // outside the lock to minimize the held region.
+        // signData enters libgojni; serialize it. Assembly above is pure CPU, kept outside the lock.
         return cryptoLock.withLock { cryptoContext.pgpCrypto.signData(manifest, signerKeyBytes, null) }
     }
 
     /**
-     * Album / folder XAttr variant — Drive Android's `createXAttr()` no-arg overload
-     * (`CreateXAttr.kt:36-41`) emits ONLY a `Common.ModificationTime` field for
-     * non-file nodes. Drive web's verifier expects that exact shape on the album;
-     * adding `Size`, `BlockSizes`, or a `Media` block breaks the trust chain so
-     * every recipient downstream fails to decrypt every photo in the album.
+     * Album/folder XAttr — emits ONLY Common.ModificationTime, matching Drive Android's no-arg
+     * createXAttr(). Adding Size / BlockSizes / Media breaks the album trust chain so every recipient
+     * fails to decrypt every photo.
      */
     fun encryptAlbumXAttr(
         modificationTimeIso: String,
@@ -784,6 +640,15 @@ class DriveCryptoHelper @Inject constructor(
         }
     }
 
+    /**
+     * Photo/video xAttr. Mirrors Drive Android's `XAttrPhotoAdditionalMetadata` field-for-field:
+     * Common (ModificationTime/Size/BlockSizes/Digests), Media (Width/Height/Duration), optional
+     * Location (Latitude/Longitude) and Camera (CaptureTime/Device/Orientation/SubjectCoordinates).
+     *
+     * [width]/[height] must already be DISPLAY dimensions (caller swaps for rotated media).
+     * Camera/Location are gated by the caller against the strip config so xAttr never re-leaks a
+     * field the file itself had erased.
+     */
     fun encryptXAttr(
         modificationTimeIso: String,
         sizeBytes: Long,
@@ -794,47 +659,78 @@ class DriveCryptoHelper @Inject constructor(
         nodePublicKeyArmored: String,
         signerKeyBytes: ByteArray,
         sha1HexDigest: String? = null,
+        latitude: Double? = null,
+        longitude: Double? = null,
+        cameraOrientation: Int? = null,
+        cameraCaptureTimeIso: String? = null,
+        cameraDevice: String? = null,
+        subjectCoordinates: IntArray? = null,
     ): String {
         val blockSizesJson = blockSizes.joinToString(",", "[", "]")
-        // Drive web's `photosTransferPayloadBuilder` and Drive Android's `parseDigests`
-        // (tempweb-drive `extendedAttributes.ts:349`) read `Common.Digests.SHA1` from the
-        // encrypted xAttr and reject payloads that omit it with the misleading
-        // "Cannot build photo payload without a content hash". The SHA-1 hex is also
-        // the input to the HMAC-SHA256 that produces the wire ContentHash, so the two
-        // must come from the same digest pass.
+        // Common.Digests.SHA1 is required — Drive rejects payloads omitting it ("Cannot build photo
+        // payload without a content hash"), and it's the same digest the wire ContentHash HMAC uses.
         val digestsClause = if (!sha1HexDigest.isNullOrEmpty()) {
             ""","Digests":{"SHA1":"$sha1HexDigest"}"""
         } else ""
-        // Drive Android's CreateXAttr writes `duration = mediaDuration.inWholeSeconds.toDouble()`
-        // (tempandroid-drive .../file/base/.../CreateXAttr.kt:65) and Drive web reads
-        // `media.duration` directly out of an HTMLVideoElement whose value is in seconds.
-        // MediaStore.MediaColumns.DURATION on Android is milliseconds, so handing the raw
-        // value to the JSON payload makes every video render as a 1000× overlay (a 7-second
-        // clip lands as "2:03:45" on the Drive web grid). Convert here so the wire stays
-        // in the shared seconds-as-number convention.
+        // Drive's duration is seconds; MediaStore.DURATION is milliseconds. Convert, or every video
+        // renders 1000× (a 7 s clip shows as "2:03:45" on the Drive web grid).
         val durationSeconds = durationMillis / 1000.0
         val durationLiteral = if (durationMillis == 0L) "0" else "%.3f".format(java.util.Locale.US, durationSeconds).trimEnd('0').trimEnd('.')
+        // Location block — only when the caller supplied coords (i.e. GPS not stripped).
+        val locationClause = if (latitude != null && longitude != null) {
+            val lat = "%s".format(java.util.Locale.US, latitude)
+            val lon = "%s".format(java.util.Locale.US, longitude)
+            ""","Location":{"Latitude":$lat,"Longitude":$lon}"""
+        } else ""
+        // Camera block — Orientation is the raw EXIF orientation int (1..8), NOT degrees, matching
+        // XAttr.Camera. Device/CaptureTime/SubjectCoordinates are each optional.
+        val cameraClause = if (cameraOrientation != null || cameraCaptureTimeIso != null ||
+            cameraDevice != null || subjectCoordinates != null) {
+            buildString {
+                append(""","Camera":{""")
+                val parts = mutableListOf<String>()
+                cameraCaptureTimeIso?.let { parts.add(""""CaptureTime":"${jsonEscape(it)}"""") }
+                cameraDevice?.let { parts.add(""""Device":"${jsonEscape(it)}"""") }
+                cameraOrientation?.let { parts.add(""""Orientation":$it""") }
+                subjectCoordinates?.takeIf { it.size == 4 }?.let { rect ->
+                    parts.add(
+                        """"SubjectCoordinates":{"Top":${rect[0]},"Left":${rect[1]},"Bottom":${rect[2]},"Right":${rect[3]}}"""
+                    )
+                }
+                append(parts.joinToString(","))
+                append("}")
+            }
+        } else ""
         val json = buildString {
             append("""{"Common":{"ModificationTime":"$modificationTimeIso","Size":$sizeBytes,"BlockSizes":$blockSizesJson""")
             append(digestsClause)
-            append("""},"Media":{"Width":$width,"Height":$height,"Duration":$durationLiteral}}""")
+            append("""},"Media":{"Width":$width,"Height":$height,"Duration":$durationLiteral}""")
+            append(locationClause)
+            append(cameraClause)
+            append("}")
         }
-        // Drive Android's `EncryptAndSignXAttr.kt:39-43` calls
-        // `encryptAndSignTextWithCompression` (text-mode literal data + ZIP-deflate
-        // compression on the JSON), NOT `encryptAndSignData`. Drive web's xAttr
-        // decode path verifies via `decryptAndVerifyText`; when the wire blob is
-        // binary literal-data (type byte `b`) instead of text literal-data (type
-        // byte `t`), verification status drops to "unknown signer" even though the
-        // raw JSON round-trips. Cascading: a failed XAttr signature taints the
-        // album's trust chain and Drive web refuses to verify per-photo signatures
-        // anchored at the album, surfacing as "Failed to decrypt node" for every
-        // child photo.
+        // Must use encryptAndSignTextWithCompression (text-mode + ZIP-deflate), NOT
+        // encryptAndSignData: Drive web verifies xAttr via decryptAndVerifyText, and a binary `b`
+        // blob drops to "unknown signer", tainting the album trust chain → "Failed to decrypt node".
         return cryptoContext.pgpCrypto.encryptAndSignTextWithCompression(
             json,
             nodePublicKeyArmored,
             signerKeyBytes,
             null,
         )
+    }
+
+    /** Escapes a string for embedding in a manually-built JSON literal (Device names can carry
+     *  quotes/backslashes). Covers the control chars that would otherwise break xAttr parsing. */
+    private fun jsonEscape(s: String): String = buildString {
+        for (c in s) when (c) {
+            '\\' -> append("\\\\")
+            '"' -> append("\\\"")
+            '\n' -> append("\\n")
+            '\r' -> append("\\r")
+            '\t' -> append("\\t")
+            else -> if (c < ' ') append("\\u%04x".format(c.code)) else append(c)
+        }
     }
 
     /**
@@ -850,26 +746,20 @@ class DriveCryptoHelper @Inject constructor(
         inviteeEmail: String,
     ): String {
         val keyPacketBytes = Base64.decode(keyPacketBase64, Base64.DEFAULT)
-        // Look up the EXACT address the invitation was sent to. Brute-forcing over
-        // every active address is unsafe: gopenpgp's decryptSessionKey doesn't always
-        // throw on a key mismatch — sometimes it returns garbage bytes that still
-        // produce a valid-looking signature, and the server-side accept then proceeds
-        // with a session-key signature that doesn't match the actual share session key.
-        // The membership lands in a half-broken state where the recipient can never
-        // decrypt anything in the album. Resolving by email avoids the brute force.
+        // Resolve by the EXACT invitee email, not brute force: decryptSessionKey can return garbage
+        // bytes (not throw) on a key mismatch, producing a valid-looking but wrong signature that
+        // leaves the membership unable to decrypt anything in the album.
         val addresses = userAddressRepository.getAddresses(userId, false)
             .filter { it.enabled && it.keys.isNotEmpty() }
         val invitee = inviteeEmail.lowercase().trim()
         val address = addresses.firstOrNull { it.email.lowercase() == invitee }
             ?: error("No active address matching invitee email=$inviteeEmail for userId=${userId.id}")
         val signingKey = unlockAddressAsSigningKey(address)
-        // decryptSessionKey + signData + getUnarmored all enter libgojni; serialize the whole
-        // sequence. Address fetch (suspend) and unlockAddressAsSigningKey (self-locked) already
-        // ran above, so this lock never spans a suspension.
+        // decryptSessionKey + signData + getUnarmored enter libgojni; serialize. Suspend work
+        // (address fetch, unlock) already ran above, so the lock never suspends.
         val unarmored = cryptoLock.withLock {
             val sessionKey = cryptoContext.pgpCrypto.decryptSessionKey(keyPacketBytes, signingKey.unlockedKeyBytes)
-            // Sign WITH the "drive.share-member.member" context — without it the server rejects
-            // the accept with "Invalid Signature: wrong context".
+            // MEMBER context is required — without it the server rejects with "wrong context".
             val armoredSignature = cryptoContext.pgpCrypto.signData(
                 sessionKey.key,
                 signingKey.unlockedKeyBytes,
@@ -882,38 +772,26 @@ class DriveCryptoHelper @Inject constructor(
     }
 
     /**
-     * Re-encrypts [sessionKeyBytes] (the raw session key of a Drive share) to the recipient's
-     * public key and produces a detached signature signed by [signerKeyBytes] (the inviter
-     * address key). Returns (base64 keyPacket, base64 unarmored signature) — the exact pair
-     * the `/invitations` endpoint expects in `KeyPacket` + `KeyPacketSignature`.
-     *
-     * Critical detail (matches official Proton Drive Android client, see
-     * CreateShareInvitationRequest.createInternalRequest in ProtonDriveApps/android-drive):
-     * the inviter signs the **encrypted PKESK bytes** (the keyPacket itself), NOT the raw
-     * session key. Signing the session key causes the backend to reject the invitation
-     * with the misleading "outdated version of the app" error.
+     * Re-encrypts the share [sessionKey] to the invitee's public key and detached-signs it, returning
+     * the (base64 keyPacket, base64 signature) pair `/invitations` expects. Critical: the inviter
+     * signs the encrypted PKESK bytes, NOT the raw session key — signing the session key gets the
+     * invitation rejected as "outdated version of the app".
      */
     fun encryptAndSignSessionKeyForInvitee(
         sessionKey: SessionKey,
         inviteePublicKeyArmored: String,
         signerKeyBytes: ByteArray,
     ): Pair<String, String> = cryptoLock.withLock {
-        // encryptSessionKey + signData + getUnarmored all enter libgojni; serialize the whole
-        // sequence. Synchronous method — no suspension inside the lock.
+        // encryptSessionKey + signData + getUnarmored enter libgojni; serialize. Synchronous.
         val keyPacket = try {
             cryptoContext.pgpCrypto.encryptSessionKey(sessionKey, inviteePublicKeyArmored)
         } catch (t: Throwable) {
-            // gopenpgp's "SessionKey cannot be encrypted" surfaces here. Log the
-            // session-key size so the caller's failure path can correlate to the key
-            // selection (we expect 32 bytes for AES-256). A wildly different size
-            // means the wrong material was passed in.
+            // Log the session-key size (expect 32 for AES-256) so a wrong-material bug is diagnosable.
             Log.e(TAG, "encryptSessionKey to invitee failed: sessionKeyBytes=${sessionKey.key.size} cause=${t.message}", t)
             throw t
         }
         val keyPacketBase64 = Base64.encodeToString(keyPacket, Base64.NO_WRAP)
-        // Inviter-side context: matches DRIVE_SHARE_MEMBER_INVITER on the server.
-        // Sign the encrypted key packet bytes — official client signs `encryptedKeyPacket`,
-        // not the underlying session key.
+        // INVITER context; sign the encrypted key packet bytes (see KDoc).
         val armoredSig = cryptoContext.pgpCrypto.signData(
             keyPacket,
             signerKeyBytes,
@@ -924,10 +802,8 @@ class DriveCryptoHelper @Inject constructor(
     }
 
     /**
-     * Bundle of crypto material produced by [generateNewShareForLink]. The returned
-     * [rawPassphraseBytes] is the unlocked passphrase for the new share key — keep it
-     * in memory so we can build invitation key packets directly afterwards without an
-     * extra round-trip.
+     * Crypto material from [generateNewShareForLink]. [rawPassphraseBytes] is the unlocked share-key
+     * passphrase, kept in memory to build invitation key packets without a round-trip.
      */
     data class GeneratedShare(
         val shareKeyArmored: String,
@@ -938,44 +814,29 @@ class DriveCryptoHelper @Inject constructor(
         val nameKeyPacketBase64: String,
         val sharePublicKey: String,
         val rawPassphraseBytes: ByteArray,
-        /**
-         * In-memory copy of the session key used to encrypt [sharePassphraseArmored].
-         * Callers minting a public URL right after `createVolumeShare` should use this
-         * directly instead of round-tripping through [decryptSharePassphraseSessionKey],
-         * saving the unlock + decrypt round trip.
-         */
+        /** In-memory session key for [sharePassphraseArmored] — reuse when minting a URL right after
+         *  createVolumeShare instead of round-tripping [decryptSharePassphraseSessionKey]. */
         val passphraseSessionKey: SessionKey,
     )
 
     /**
-     * Builds every PGP artefact the `POST /drive/volumes/{volumeId}/shares` endpoint expects.
-     *
-     * The wire format mirrors ProtonDriveApps/android-drive [GenerateShareKey] +
-     * [GenerateSharePassphrase] + name encryption:
-     *
-     *   ShareKey                = armored locked private key, passphrase = base64(random 32B).
-     *   SharePassphrase         = armored PGP MESSAGE wrapping the passphrase bytes,
-     *                             encrypted to the inviter's address public key.
-     *   SharePassphraseSignature= detached armored signature over the raw passphrase bytes.
-     *   PassphraseKeyPacket     = base64 of the PKESK extracted from SharePassphrase.
-     *   Name                    = armored PGP MESSAGE wrapping the plaintext album name.
-     *   NameKeyPacket           = base64 of the PKESK extracted from Name.
+     * Builds the PGP artefacts `POST /drive/volumes/{volumeId}/shares` expects (ShareKey,
+     * SharePassphrase + signature, PassphraseKeyPacket, Name, NameKeyPacket), mirroring
+     * android-drive's GenerateShareKey + GenerateSharePassphrase + name encryption.
      */
     fun generateNewShareForLink(
         addressPublicKeyArmored: String,
         signerKeyBytes: ByteArray,
         plaintextName: String,
     ): GeneratedShare = cryptoLock.withLock {
-        // 1. New PGP key + passphrase (base64-encoded random bytes so the passphrase round-trips
-        //    cleanly as UTF-8 — same trick we use for node passphrases).
+        // 1. New key + base64 passphrase (round-trips as UTF-8, same as node passphrases).
         val rawPassphrase = cryptoContext.pgpCrypto.generateRandomBytes(32)
         val passphraseStr = Base64.encodeToString(rawPassphrase, Base64.NO_WRAP)
         val passphraseBytes = passphraseStr.toByteArray(Charsets.UTF_8)
         val shareKeyArmored = cryptoContext.pgpCrypto.generateNewPrivateKey("share", "proton.me", passphraseBytes)
         val sharePubKey = cryptoContext.pgpCrypto.getPublicKey(shareKeyArmored)
 
-        // 2. SharePassphrase = PKESK + SEIPD over the passphrase bytes. We split the
-        //    construction so we can also expose the PKESK by itself (PassphraseKeyPacket).
+        // 2. SharePassphrase = PKESK + SEIPD; split so the PKESK can also be exposed alone.
         val passphraseSessionKey = cryptoContext.pgpCrypto.generateNewSessionKey()
         val passphraseKeyPacketBytes =
             cryptoContext.pgpCrypto.encryptSessionKey(passphraseSessionKey, addressPublicKeyArmored)
@@ -987,8 +848,7 @@ class DriveCryptoHelper @Inject constructor(
         val sharePassphraseSignature =
             cryptoContext.pgpCrypto.signData(passphraseBytes, signerKeyBytes, null)
 
-        // 3. Name encryption — same shape as passphrase. The plaintext album name is wrapped
-        //    in PGP MESSAGE form and the matching PKESK is base64-encoded into NameKeyPacket.
+        // 3. Name encryption — same shape as the passphrase; matching PKESK → NameKeyPacket.
         val nameSessionKey = cryptoContext.pgpCrypto.generateNewSessionKey()
         val nameKeyPacketBytes =
             cryptoContext.pgpCrypto.encryptSessionKey(nameSessionKey, addressPublicKeyArmored)
@@ -1013,11 +873,9 @@ class DriveCryptoHelper @Inject constructor(
     }
 
     /**
-     * Material produced by [generateShareForAlbum] — the wire shape mirrors the official
-     * Drive Android `ShareInfo` after `CreateShareInfo` runs. The two key-packet fields
-     * carry the ALBUM's session keys re-encrypted under the new share key, NOT the share's
-     * own PKESKs (which is what our earlier `generateNewShareForLink` produced and which
-     * the backend rejected with "outdated version of the app" / code 2001).
+     * Material from [generateShareForAlbum], mirroring Drive Android's ShareInfo. The key-packet
+     * fields carry the ALBUM's session keys re-encrypted under the new share key, NOT the share's own
+     * PKESKs — the latter is what got [generateNewShareForLink] rejected (code 2001).
      */
     data class GeneratedAlbumShare(
         val shareKeyArmored: String,
@@ -1034,23 +892,11 @@ class DriveCryptoHelper @Inject constructor(
     )
 
     /**
-     * Builds every PGP artefact the album-share create endpoint expects, mirroring
-     * the canonical Drive Android `CreateShareInfo` + `ReencryptKeyPacket` pipeline.
-     *
-     * Differs from the earlier [generateNewShareForLink] in three critical ways:
-     *  - [GeneratedAlbumShare.sharePassphraseArmored] is multi-recipient — encrypted to
-     *    BOTH the album link's node public key AND the user's address public key, so
-     *    the owner can unlock the share via address, and downstream member operations
-     *    that go through the link can use the node side.
-     *  - `passphraseKeyPacket` and `nameKeyPacket` are NOT the share's own PKESK + name
-     *    PKESK; they are the ALBUM link's existing nodePassphrase / name session keys,
-     *    decrypted with [parentLinkKeyBytes] and re-encrypted under the new share key.
-     *    This is how the share key unlocks the album's existing material — without it
-     *    the backend rejects share-creation with code 2001 ("outdated version of the
-     *    app") because the request describes a share that's structurally disconnected
-     *    from the link it claims to share.
-     *  - The wire `Name` field stays a plaintext label (handled at the call site); the
-     *    actual album name is conveyed via [nameKeyPacketBase64].
+     * Builds the album-share-create artefacts, mirroring Drive Android's CreateShareInfo +
+     * ReencryptKeyPacket. Differs from [generateNewShareForLink]: the SharePassphrase is
+     * multi-recipient (album node + address), and the key packets are the ALBUM link's existing
+     * nodePassphrase/name session keys re-encrypted under the new share key — without that link the
+     * backend rejects share-creation (code 2001) as structurally disconnected.
      */
     suspend fun generateShareForAlbum(
         albumNodeKeyArmored: String,
@@ -1060,21 +906,19 @@ class DriveCryptoHelper @Inject constructor(
         addressPublicKeyArmored: String,
         signerKeyBytes: ByteArray,
     ): GeneratedAlbumShare = cryptoLock.withLock {
-        // 1. Album's public key — needed so the share passphrase is encrypted to BOTH
-        //    the album node (for member operations) and the user's address (for owner).
+        // 1. Album public key — the share passphrase is encrypted to both it (member ops) and the
+        //    user's address (owner).
         val albumPublicKeyArmored = cryptoContext.pgpCrypto.getPublicKey(albumNodeKeyArmored)
 
-        // 2. Generate share key + random passphrase. Base64 round-trip so the passphrase
-        //    serializes cleanly as UTF-8 — same convention as the existing node-key path.
+        // 2. Share key + base64 passphrase (round-trips as UTF-8, same as the node-key path).
         val rawPassphrase = cryptoContext.pgpCrypto.generateRandomBytes(32)
         val passphraseAscii = Base64.encodeToString(rawPassphrase, Base64.NO_WRAP)
         val passphraseBytes = passphraseAscii.toByteArray(Charsets.UTF_8)
         val shareKeyArmored = cryptoContext.pgpCrypto.generateNewPrivateKey("share", "proton.me", passphraseBytes)
         val sharePubKey = cryptoContext.pgpCrypto.getPublicKey(shareKeyArmored)
 
-        // 3. Multi-recipient SharePassphrase: PKESK(albumPub) + PKESK(addressPub) + SEIPD.
-        //    Any holder of the album node key OR the address key can decrypt to recover
-        //    the passphrase, which in turn unlocks the share's own private key.
+        // 3. Multi-recipient SharePassphrase: PKESK(albumPub) + PKESK(addressPub) + SEIPD, so either
+        //    the album node key or the address key recovers the passphrase.
         val sharePassphraseSessionKey = cryptoContext.pgpCrypto.generateNewSessionKey()
         val pkeskForAlbum =
             cryptoContext.pgpCrypto.encryptSessionKey(sharePassphraseSessionKey, albumPublicKeyArmored)
@@ -1087,26 +931,11 @@ class DriveCryptoHelper @Inject constructor(
             PGPHeader.Message,
         )
 
-        // 4. Detached signature over raw passphrase bytes, signed by the user's address
-        //    key with no context — same as the existing share-passphrase signature flow,
-        //    which we verified against the official client at the DTO layer.
+        // 4. Detached signature over the raw passphrase bytes, no context.
         val sharePassphraseSignature =
             cryptoContext.pgpCrypto.signData(passphraseBytes, signerKeyBytes, null)
 
-        // 5. Re-encrypt album.nodePassphrase session key from parent→share. The previous
-        //    implementation manually pulled the first PKESK out of the armored message,
-        //    decrypted its session key, then re-encrypted that session key to the share's
-        //    public key. That round-trip dropped the original PKESK's algorithm metadata
-        //    along the way, so the substituted PKESK gopenpgp produced was technically
-        //    targeted at the right subkey but encoded the session key under a different
-        //    symmetric algorithm than the SEIPD body it pointed at — leaving recipients
-        //    with a session key that decrypted PKESK successfully but failed on SEIPD.
-        //
-        //    `encryptMessageToAdditionalKey` performs the decrypt + re-encrypt as a single
-        //    internal step, preserves the original session key's algorithm bookkeeping,
-        //    and emits the new PKESK with metadata that matches the existing SEIPD. We
-        //    then extract just the new PKESK packet (the one whose target is the share
-        //    pub key) and ship it to the backend.
+        // 5. Re-encrypt album.nodePassphrase session key from parent→share.
         val passphraseKeyPacketBase64 = reencryptKeyPacketForAdditionalRecipient(
             originalMessageArmored = albumNodePassphraseArmored,
             unlockedSourceKeyBytes = parentLinkKeyBytes,
@@ -1134,14 +963,9 @@ class DriveCryptoHelper @Inject constructor(
         )
     }
 
-    /**
-     * Decodes the recipient KeyID written into a raw PKESK packet. Used to verify that
-     * gopenpgp picked the encryption subkey we expected when [encryptSessionKey] ran.
-     * Returns "?" if the bytes aren't a parsable v3 PKESK.
-     */
+    /** Diagnostic: decodes the recipient KeyID from a raw PKESK packet ("?" if not a v3 PKESK). */
     private fun pkeskKeyIdHex(packetBytes: ByteArray): String {
-        // New-format header: 0xC1, then a 1-byte (most cases here) length, then
-        // version (1 byte) + recipient KeyID (8 bytes) + algo + encrypted material.
+        // New-format header: 0xC1, 1-byte length, then version + KeyID(8) + algo + material.
         return runCatching {
             var idx = 0
             if (packetBytes[0].toInt() and 0xc0 != 0xc0) return@runCatching "?"
@@ -1156,16 +980,13 @@ class DriveCryptoHelper @Inject constructor(
     }
 
     /**
-     * Returns the hex KeyIDs of every primary/sub public key in an armored PGP public
-     * key block. The KeyID is the LSB 8 bytes of the SHA-1 fingerprint over the
-     * canonical public-key portion of each packet.
+     * Diagnostic: hex KeyIDs of every public key in an armored block (LSB 8 bytes of the SHA-1
+     * fingerprint over each packet's canonical public portion).
      */
     private fun publicKeyIdHexes(armoredPublicKey: String): String {
         return runCatching {
-            // Strip armor: drop the BEGIN/END lines, any header lines, then the CRC line.
-            // gopenpgp's getPublicKey output sometimes omits the `Version:` header line,
-            // so a regex tied to "double newline after headers" misses those cases. We
-            // walk the lines manually and join everything that's base64-only.
+            // Strip armor by walking lines and keeping base64-only ones — gopenpgp's output
+            // sometimes omits the Version header, so a "double-newline after headers" regex misses it.
             val lines = armoredPublicKey.lines()
             val bodyLines = mutableListOf<String>()
             var inBody = false
@@ -1244,25 +1065,9 @@ class DriveCryptoHelper @Inject constructor(
     }
 
     /**
-     * Adds a new PKESK to [originalMessageArmored] that lets the holder of
-     * [recipientPublicKeyArmored] open the existing SEIPD, and returns just
-     * that newly-minted PKESK packet as base64.
-     *
-     * Internally delegates to gopenpgp's `encryptMessageToAdditionalKey`,
-     * which decrypts the existing session key with [unlockedSourceKeyBytes]
-     * and re-encrypts it to [recipientPublicKeyArmored] in a single step —
-     * preserving the session key's algorithm metadata so the new PKESK
-     * stays bit-compatible with the unchanged SEIPD. Manually round-tripping
-     * `decryptSessionKey` + `encryptSessionKey` is lossy here: gopenpgp
-     * defaults the symmetric algorithm when re-encrypting, which leaves the
-     * recipient with a valid-looking PKESK that decrypts to a session key
-     * the SEIPD can't actually consume.
-     *
-     * Backend callers (CreateShareRequest's `passphraseKeyPacket` /
-     * `nameKeyPacket`) want just the new PKESK packet bytes, not the whole
-     * armored message — so we walk the resulting packet stream, isolate the
-     * single new Key packet by diffing against the original's packet list,
-     * and emit base64 over the lone fresh PKESK.
+     * Re-encrypts the session key of [originalMessageArmored] (recovered with [unlockedSourceKeyBytes])
+     * to [recipientPublicKeyArmored] and returns just the new PKESK packet as base64, for
+     * CreateShareRequest's passphraseKeyPacket / nameKeyPacket.
      */
     private fun reencryptKeyPacketForAdditionalRecipient(
         originalMessageArmored: String,
@@ -1270,22 +1075,16 @@ class DriveCryptoHelper @Inject constructor(
         recipientPublicKeyArmored: String,
         diagnosticLabel: String,
     ): String {
-        // Drive Android's ReencryptKeyPacketImpl path — get the session key out of the
-        // existing armored message with the source key, encrypt that same session key to
-        // the new recipient's public key, return just the resulting PKESK packet. The
-        // earlier algorithm-preserving variant (encryptMessageToAdditionalKey + diff)
-        // started failing backend verification with code 200501 (encryption verification
-        // failed) once the server tightened share-creation checks; matching the official
-        // client's primitive byte-for-byte clears that gate.
+        // Plain decryptSessionKey + encryptSessionKey, matching Drive Android's ReencryptKeyPacketImpl
+        // byte-for-byte. The earlier encryptMessageToAdditionalKey variant began failing backend
+        // verification (code 200501) once share-creation checks tightened.
         val originalPackets = cryptoContext.pgpCrypto.getEncryptedPackets(originalMessageArmored)
         val pkeskPackets = originalPackets.filter { it.type == PacketType.Key }.map { it.packet }
         require(pkeskPackets.isNotEmpty()) {
             "$diagnosticLabel: original armored message has no PKESK packets"
         }
 
-        // The source key may match any of the multi-recipient PKESKs (e.g. album-node
-        // PKESK first, address-node PKESK second). Try each in order; the first decrypt
-        // that succeeds gives us the session key.
+        // The source key may match any of the multi-recipient PKESKs; try each, first hit wins.
         val sessionKey = pkeskPackets.firstNotNullOfOrNull { packet ->
             runCatching { cryptoContext.pgpCrypto.decryptSessionKey(packet, unlockedSourceKeyBytes) }.getOrNull()
         } ?: error("$diagnosticLabel: none of ${pkeskPackets.size} PKESK packets decrypted with the source key")
@@ -1301,13 +1100,9 @@ class DriveCryptoHelper @Inject constructor(
     }
 
     /**
-     * Crypto bundle required by `POST drive/shares/{shareId}/urls`. The backend rejects
-     * the create-URL request unless every field below is present and internally consistent
-     * — they describe an SRP-authenticated public link that lets a recipient unlock the
-     * share session key from just the URL + a random password embedded in the URL itself.
-     *
-     * Permissions stays at 4 (read-only) and Flags at 2 (random URL password) — the values
-     * the official Drive Android client always sends for newly minted album/file URLs.
+     * Crypto bundle for `POST drive/shares/{shareId}/urls` — an SRP-authenticated public link that
+     * lets a recipient unlock the share session key from the URL + an embedded password. permissions=4
+     * (read-only), flags=2 (random URL password) match the official client's newly-minted URLs.
      */
     data class ShareUrlCryptoPackage(
         val permissions: Long = 4L,
@@ -1318,24 +1113,17 @@ class DriveCryptoHelper @Inject constructor(
         val srpModulusId: String,
         val sharePassphraseKeyPacketBase64: String,
         val encryptedUrlPassword: String,
+        /** Plaintext URL password (12 base64 chars) for the link's `#fragment`; only
+         *  [encryptedUrlPassword] is sent to the server. */
+        val urlPassword: String,
     )
 
     /**
-     * Mirrors the [CreateShareUrlInfo] pipeline in ProtonDriveApps/android-drive:
-     *
-     *  1. Mint a random URL password (9 raw bytes → 12 base64 ASCII chars, padding-free).
-     *  2. Compute an SRP verifier from that password using a [modulus] / [modulusId] pair
-     *     supplied by the caller (caller obtains them via `AuthRepository.randomModulus`).
-     *  3. Generate a fresh salt, derive a salted passphrase from the URL password, and
-     *     symmetrically encrypt [shareSessionKey] with it. The visitor regenerates the
-     *     same salted passphrase with the salt sent in `sharePasswordSalt` to recover
-     *     the session key client-side — no server roundtrip needed.
-     *  4. PGP-encrypt the URL password to the creator's own address public key so we can
-     *     echo it back to the creator (e.g. for a "show password" affordance) without
-     *     storing it on the server in plaintext.
-     *
-     * The returned package, plus [permissions]=4 and [flags]=2, fills every required
-     * field of [CreateShareUrlRequest].
+     * Mirrors android-drive's CreateShareUrlInfo: mint a random URL password, compute an SRP verifier
+     * from it (caller supplies [modulus]/[modulusId]), symmetrically encrypt [shareSessionKey] under a
+     * salted passphrase the visitor regenerates client-side, and PGP-encrypt the password to the
+     * creator's address for a "show password" echo. With [permissions]=4 / [flags]=2 this fills
+     * CreateShareUrlRequest.
      */
     suspend fun buildShareUrlCryptoPackage(
         addressPublicKeyArmored: String,
@@ -1343,12 +1131,9 @@ class DriveCryptoHelper @Inject constructor(
         modulus: String,
         modulusId: String,
     ): ShareUrlCryptoPackage {
-        // SRP verifier is suspend (it goes through Go via libgojni) so it must run
-        // outside the non-suspending cryptoLock. We serialize the actual gopenpgp
-        // calls below by acquiring the lock around the PGP-only portion only.
-        val urlPasswordRaw = cryptoLock.withLock { cryptoContext.pgpCrypto.generateRandomBytes(9) }
-        val urlPasswordAscii = Base64.encodeToString(urlPasswordRaw, Base64.NO_WRAP)
-        val urlPasswordBytes = urlPasswordAscii.toByteArray(Charsets.UTF_8)
+        // SRP verifier is suspend (Go via libgojni), so run it outside the non-suspending cryptoLock;
+        // only the PGP portion below is locked.
+        val urlPasswordBytes = generateRandomUrlPassword().toByteArray(Charsets.UTF_8)
         val auth = cryptoContext.srpCrypto.calculatePasswordVerifier(
             username = "",
             password = urlPasswordBytes,
@@ -1356,6 +1141,43 @@ class DriveCryptoHelper @Inject constructor(
             modulus = modulus,
         )
         return cryptoLock.withLock { buildPgpHalfOfShareUrlPackage(addressPublicKeyArmored, shareSessionKey, urlPasswordBytes, auth) }
+    }
+
+    /**
+     * Random URL password: 9 raw bytes → 12 padding-free Base64 chars (matches Drive's
+     * urlPassphraseSize = 9.bytes). For a new link or when clearing a custom password back to
+     * "anyone with the link". Rides in the `#fragment`; only an encrypted echo reaches the server.
+     */
+    suspend fun generateRandomUrlPassword(): String {
+        val raw = cryptoLock.withLock { cryptoContext.pgpCrypto.generateRandomBytes(9) }
+        return Base64.encodeToString(raw, Base64.NO_WRAP)
+    }
+
+    /**
+     * Like [buildShareUrlCryptoPackage] but from a CHOSEN password — the package a
+     * `PUT .../urls/{urlID}` needs to switch a link's password. [flags] records the type
+     * (1 = custom, recipient types it; 2 = random, carried in the fragment).
+     */
+    suspend fun buildShareUrlCryptoPackageFromPassword(
+        addressPublicKeyArmored: String,
+        shareSessionKey: SessionKey,
+        modulus: String,
+        modulusId: String,
+        password: String,
+        flags: Long,
+    ): ShareUrlCryptoPackage {
+        val urlPasswordBytes = password.toByteArray(Charsets.UTF_8)
+        // SRP verifier is suspend (Go via libgojni) so it runs outside the non-suspending
+        // cryptoLock; the PGP-only portion below is serialized under the lock.
+        val auth = cryptoContext.srpCrypto.calculatePasswordVerifier(
+            username = "",
+            password = urlPasswordBytes,
+            modulusId = modulusId,
+            modulus = modulus,
+        )
+        return cryptoLock.withLock {
+            buildPgpHalfOfShareUrlPackage(addressPublicKeyArmored, shareSessionKey, urlPasswordBytes, auth, flags)
+        }
     }
 
     /**
@@ -1367,6 +1189,7 @@ class DriveCryptoHelper @Inject constructor(
         shareSessionKey: SessionKey,
         urlPasswordBytes: ByteArray,
         auth: me.proton.core.crypto.common.srp.Auth,
+        flags: Long = 2L,
     ): ShareUrlCryptoPackage {
         val sharePasswordSalt = cryptoContext.pgpCrypto.generateNewKeySalt()
         val saltedPassword = cryptoContext.pgpCrypto.getPassphrase(urlPasswordBytes, sharePasswordSalt)
@@ -1377,12 +1200,17 @@ class DriveCryptoHelper @Inject constructor(
         val encryptedUrlPassword =
             cryptoContext.pgpCrypto.encryptData(urlPasswordBytes, addressPublicKeyArmored)
         return ShareUrlCryptoPackage(
+            flags = flags,
             urlPasswordSalt = auth.salt,
             sharePasswordSalt = sharePasswordSalt,
             srpVerifier = auth.verifier,
             srpModulusId = auth.modulusId,
             sharePassphraseKeyPacketBase64 = sharePassphraseKeyPacketB64,
             encryptedUrlPassword = encryptedUrlPassword,
+            // The exact bytes the SRP verifier above was built from — the recipient's URL
+            // fragment (random links) or typed password (custom links) must match it so
+            // their SRP auth succeeds.
+            urlPassword = String(urlPasswordBytes, Charsets.UTF_8),
         )
     }
 
@@ -1427,6 +1255,44 @@ class DriveCryptoHelper @Inject constructor(
             lastError = attempt.exceptionOrNull()
         }
         throw lastError ?: error("Could not decrypt share passphrase key packet with any address key")
+    }
+
+    /**
+     * Decrypts the random URL password of a public share-URL back to plaintext.
+     *
+     * The backend stores it as an armored PGP message encrypted to the creator's own
+     * address public key (the `Password` field of a `/urls` item). We decrypt it with the
+     * user's ADDRESS private key and return the plaintext, which the caller appends to the
+     * link as `#<password>` so an "anyone with the link" share opens without a prompt.
+     *
+     * Mirrors the official Drive `DecryptUrlPassword` use case (`decryptData(...)
+     * .toString(UTF_8)`). Uses the same address-key `decryptData` primitive as
+     * [decryptExternalShareKey] / [decryptSharePassphraseSessionKey]: tries every enabled
+     * address in primary-first order under [cryptoLock], since the message may be encrypted
+     * to any of the user's addresses. Our password is exactly 12 chars, so the whole
+     * decrypted string is the fragment (no fixed-size prefix to trim).
+     */
+    suspend fun decryptUrlPassword(
+        userId: UserId,
+        encryptedUrlPasswordArmored: String,
+    ): String {
+        // Fetch addresses BEFORE acquiring the non-suspending cryptoLock — getAddresses is a
+        // suspend Room call, and holding cryptoLock across a suspension starves libgojni.
+        val addresses = userAddressRepository.getAddresses(userId, false)
+            .filter { it.enabled && it.keys.isNotEmpty() }
+            .sortedBy { it.order }
+        if (addresses.isEmpty()) error("No active address for userId=${userId.id}")
+        var lastError: Throwable? = null
+        for (address in addresses) {
+            // useKeys enters libgojni; serialize each attempt. Lock taken per iteration so it's
+            // never held across loop control flow; addresses fetched above.
+            val attempt = runCatching {
+                cryptoLock.withLock { address.useKeys(cryptoContext) { decryptData(encryptedUrlPasswordArmored) } }
+            }
+            if (attempt.isSuccess) return String(attempt.getOrThrow(), Charsets.UTF_8)
+            lastError = attempt.exceptionOrNull()
+        }
+        throw lastError ?: error("Could not decrypt URL password with any address key")
     }
 
     /**

@@ -35,8 +35,10 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import me.proton.core.accountmanager.domain.AccountManager
+import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.entity.PendingInvitation
+import eu.akoos.photos.domain.entity.SharedPhoto
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.presentation.gallery.SharedFilter
 import eu.akoos.photos.util.friendlyNetworkError
@@ -48,6 +50,8 @@ data class SharedUiState(
     /** All albums from the user's volume (we filter by isShared for "shared by me"). */
     val allAlbums: List<Album> = emptyList(),
     val sharedWithMeAlbums: List<Album> = emptyList(),
+    /** Individual library photos the current user has shared via a public link. */
+    val sharedByMePhotos: List<SharedPhoto> = emptyList(),
     val pendingInvitations: List<PendingInvitation> = emptyList(),
     val filter: SharedFilter = SharedFilter.SharedWithMe,
     val error: String? = null,
@@ -105,7 +109,7 @@ class SharedViewModel @Inject constructor(
                 .onFailure { e ->
                     val friendly = friendlyNetworkError(e, networkObserver.isOnline.value, context)
                     _uiState.update {
-                        it.copy(error = friendly ?: "Failed to decline: ${sanitizeErrorMessage(e.message)}")
+                        it.copy(error = friendly ?: context.getString(R.string.shared_decline_failed, sanitizeErrorMessage(e.message)))
                     }
                 }
         }
@@ -150,7 +154,7 @@ class SharedViewModel @Inject constructor(
                         _uiState.update {
                             it.copy(
                                 error = friendly
-                                    ?: "Accept failed: ${sanitizeErrorMessage(e.message ?: e::class.simpleName)}",
+                                    ?: context.getString(R.string.shared_accept_failed, sanitizeErrorMessage(e.message ?: e::class.simpleName)),
                             )
                         }
                     },
@@ -176,11 +180,26 @@ class SharedViewModel @Inject constructor(
                     val sharedByMeDeferred = async { driveRepo.loadAlbums(userId) }
                     val sharedWithMeDeferred = async { driveRepo.loadSharedWithMeAlbums(userId) }
                     val pendingDeferred = async { runCatching { driveRepo.loadPendingInvitations(userId) }.getOrElse { emptyList() } }
-                    Triple(sharedByMeDeferred.await(), sharedWithMeDeferred.await(), pendingDeferred.await())
+                    // Shared-by-me photos tolerate their own failure: a hiccup on the shares
+                    // feed must not blank the albums section, so it resolves to an empty list.
+                    val sharedPhotosDeferred = async { runCatching { driveRepo.loadSharedByMePhotos(userId) }.getOrElse { emptyList() } }
+                    SharedLoad(
+                        albums = sharedByMeDeferred.await(),
+                        sharedWithMe = sharedWithMeDeferred.await(),
+                        pending = pendingDeferred.await(),
+                        sharedPhotos = sharedPhotosDeferred.await(),
+                    )
                 }
             }.fold(
-                onSuccess = { (albums, sharedWithMe, pending) ->
-                    _uiState.update { it.copy(isLoading = false, allAlbums = albums, sharedWithMeAlbums = sharedWithMe, pendingInvitations = pending) }
+                onSuccess = { load ->
+                    _uiState.update { it.copy(
+                        isLoading = false,
+                        allAlbums = load.albums,
+                        sharedWithMeAlbums = load.sharedWithMe,
+                        pendingInvitations = load.pending,
+                        sharedByMePhotos = load.sharedPhotos,
+                    ) }
+                    observeSharedPhotoThumbnails(load.sharedPhotos.map { it.linkId })
                 },
                 onFailure = { e ->
                     // Network drop → keep error null so the offline banner + the avatar
@@ -191,11 +210,181 @@ class SharedViewModel @Inject constructor(
                         it.copy(
                             isLoading = false,
                             error = if (friendly != null) null
-                                else "Failed to load shared albums: ${sanitizeErrorMessage(e.message)}",
+                                else context.getString(R.string.shared_load_failed, sanitizeErrorMessage(e.message)),
                         )
                     }
                 },
             )
         }
     }
+
+    /** Bundle for the parallel shared-tab load so the success branch reads one object. */
+    private data class SharedLoad(
+        val albums: List<Album>,
+        val sharedWithMe: List<Album>,
+        val pending: List<PendingInvitation>,
+        val sharedPhotos: List<SharedPhoto>,
+    )
+
+    // ── Shared-by-me photo thumbnails ───────────────────────────────────────────
+    //
+    // The shares feed hands back the snapshot thumbnailUrl from the listing DB. Cloud-only
+    // shared photos may not have a decrypted thumbnail yet; the grid cells request a decrypt
+    // on view, the DAO row updates, and this observation re-emits so the tile fills in without
+    // a manual refresh — the same lazy-thumbnail contract the gallery grid uses.
+
+    private var thumbObserveJob: kotlinx.coroutines.Job? = null
+
+    private fun observeSharedPhotoThumbnails(linkIds: List<String>) {
+        thumbObserveJob?.cancel()
+        if (linkIds.isEmpty()) return
+        thumbObserveJob = viewModelScope.launch {
+            driveRepo.observeSharedByMePhotos(linkIds).collect { photos ->
+                // Only the listing layer knows membership; if the feed has dropped a photo
+                // (un-shared elsewhere) the next refresh reconciles it. Here we just merge
+                // freshly-decrypted thumbnails onto the rows we already show.
+                if (photos.isEmpty()) return@collect
+                val byId = photos.associateBy { it.linkId }
+                _uiState.update { state ->
+                    state.copy(sharedByMePhotos = state.sharedByMePhotos.map { existing ->
+                        byId[existing.linkId]?.let { existing.copy(thumbnailUrl = it.thumbnailUrl) } ?: existing
+                    })
+                }
+            }
+        }
+    }
+
+    /** Cell entered the viewport — queue a lazy thumbnail decrypt for a cloud-only shared photo. */
+    fun requestThumbnail(linkId: String) {
+        viewModelScope.launch {
+            val userId = accountManager.getPrimaryUserId().first() ?: return@launch
+            driveRepo.requestThumbnailDecrypt(userId, linkId)
+        }
+    }
+
+    /** Cell left the viewport — cancel the in-flight decrypt so a fast scroll doesn't waste work. */
+    fun cancelThumbnail(linkId: String) {
+        driveRepo.cancelThumbnailDecrypt(linkId)
+    }
+
+    // ── Per-shared-photo public link management ─────────────────────────────────
+    //
+    // Tapping a shared photo opens the same [ManagePublicLinkSheet] the viewer/gallery use, so
+    // the link can be copied, password-protected, or removed straight from the Shared tab.
+    // Mirrors GalleryViewModel's link machine: identical [PublicLinkState], the same repo calls,
+    // and a captured [activeLinkPhotoId] guard so a second tap mid-request can't apply a result
+    // to the wrong photo. Only share metadata is ever touched — never photo content.
+
+    sealed class PublicLinkState {
+        data object None : PublicLinkState()
+        data object Loading : PublicLinkState()
+        data class Active(val url: String, val hasPassword: Boolean = false) : PublicLinkState()
+        data class Error(val message: String) : PublicLinkState()
+    }
+
+    private val _publicLinkState = MutableStateFlow<PublicLinkState>(PublicLinkState.None)
+    val publicLinkState: StateFlow<PublicLinkState> = _publicLinkState.asStateFlow()
+
+    /** The shared photo the manage-link sheet currently acts on; guards async results. */
+    private var activeLinkPhotoId: String? = null
+
+    /** Open the manage-link sheet for [linkId]: seed it with the existing public link. */
+    fun openLinkManager(linkId: String) {
+        activeLinkPhotoId = linkId
+        _publicLinkState.value = PublicLinkState.Loading
+        viewModelScope.launch {
+            val userId = accountManager.getPrimaryUserId().first() ?: run {
+                if (activeLinkPhotoId == linkId) _publicLinkState.value = PublicLinkState.None
+                return@launch
+            }
+            runCatching { driveRepo.getPhotoShareLink(userId, linkId) }
+                .onSuccess { url ->
+                    if (activeLinkPhotoId != linkId) return@onSuccess
+                    _publicLinkState.value = if (url != null) activeLinkState(url) else PublicLinkState.None
+                }
+                .onFailure {
+                    if (activeLinkPhotoId == linkId) _publicLinkState.value = PublicLinkState.None
+                }
+        }
+    }
+
+    fun closeLinkManager() {
+        activeLinkPhotoId = null
+        _publicLinkState.value = PublicLinkState.None
+    }
+
+    /** Re-mint a link if one was removed and the user taps Create again from the sheet. */
+    fun createLink() {
+        val linkId = activeLinkPhotoId ?: return
+        _publicLinkState.value = PublicLinkState.Loading
+        viewModelScope.launch {
+            val userId = accountManager.getPrimaryUserId().first() ?: run {
+                _publicLinkState.value = PublicLinkState.Error(context.getString(R.string.viewer_not_signed_in))
+                return@launch
+            }
+            runCatching { driveRepo.createPhotoShareLink(userId, linkId) }
+                .onSuccess { url ->
+                    if (activeLinkPhotoId != linkId) return@onSuccess
+                    _publicLinkState.value = activeLinkState(url)
+                }
+                .onFailure { e ->
+                    if (activeLinkPhotoId != linkId) return@onFailure
+                    val friendly = friendlyNetworkError(e, networkObserver.isOnline.value, context)
+                    _publicLinkState.value = PublicLinkState.Error(friendly ?: context.getString(R.string.share_link_failed))
+                }
+        }
+    }
+
+    fun removeLink() {
+        val linkId = activeLinkPhotoId ?: return
+        _publicLinkState.value = PublicLinkState.Loading
+        viewModelScope.launch {
+            val userId = accountManager.getPrimaryUserId().first() ?: run {
+                _publicLinkState.value = PublicLinkState.Error(context.getString(R.string.viewer_not_signed_in))
+                return@launch
+            }
+            runCatching { driveRepo.revokePhotoShareLink(userId, linkId) }
+                .onSuccess {
+                    if (activeLinkPhotoId != linkId) return@onSuccess
+                    // The photo is no longer shared — drop it from the section and close the sheet.
+                    _uiState.update { it.copy(sharedByMePhotos = it.sharedByMePhotos.filter { p -> p.linkId != linkId }) }
+                    _publicLinkState.value = PublicLinkState.None
+                    activeLinkPhotoId = null
+                }
+                .onFailure { e ->
+                    if (activeLinkPhotoId != linkId) return@onFailure
+                    val friendly = friendlyNetworkError(e, networkObserver.isOnline.value, context)
+                    _publicLinkState.value = PublicLinkState.Error(friendly ?: context.getString(R.string.share_link_failed))
+                }
+        }
+    }
+
+    fun setLinkPassword(password: String?) {
+        val linkId = activeLinkPhotoId ?: return
+        _publicLinkState.value = PublicLinkState.Loading
+        viewModelScope.launch {
+            val userId = accountManager.getPrimaryUserId().first() ?: run {
+                _publicLinkState.value = PublicLinkState.Error(context.getString(R.string.viewer_not_signed_in))
+                return@launch
+            }
+            runCatching { driveRepo.setPhotoLinkPassword(userId, linkId, password) }
+                .onSuccess { url ->
+                    if (activeLinkPhotoId != linkId) return@onSuccess
+                    _publicLinkState.value = activeLinkState(url)
+                }
+                .onFailure { e ->
+                    if (activeLinkPhotoId != linkId) return@onFailure
+                    val friendly = friendlyNetworkError(e, networkObserver.isOnline.value, context)
+                    _publicLinkState.value = PublicLinkState.Error(friendly ?: context.getString(R.string.share_password_failed))
+                }
+        }
+    }
+
+    /** The live public-link URL when one is active, for the sheet's copy-to-clipboard. */
+    fun currentPublicLinkUrl(): String? = (_publicLinkState.value as? PublicLinkState.Active)?.url
+
+    /** A random anyone-with-the-link URL carries its password in the `#fragment`; a custom-
+     *  password URL is bare, so the absence of a fragment means a password is required. */
+    private fun activeLinkState(url: String): PublicLinkState.Active =
+        PublicLinkState.Active(url = url, hasPassword = !url.contains('#'))
 }

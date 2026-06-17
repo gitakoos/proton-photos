@@ -61,6 +61,7 @@ import kotlinx.coroutines.withContext
 import androidx.datastore.preferences.core.edit
 import me.proton.core.accountmanager.domain.AccountManager
 import me.proton.core.user.domain.usecase.ObserveUser
+import eu.akoos.photos.R
 import eu.akoos.photos.data.hidden.HiddenStorageManager
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
@@ -83,7 +84,11 @@ import eu.akoos.photos.util.StripResult
 import eu.akoos.photos.util.MetadataStripConfig
 import eu.akoos.photos.util.looksLikeNetworkError
 import eu.akoos.photos.util.sanitizeErrorMessage
+import eu.akoos.photos.util.computeOnThisDay
 import eu.akoos.photos.worker.SyncWorker
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import javax.inject.Inject
 
 /** Internal bag for the flows the gallery `combine` chain produces. Lives at top
@@ -94,6 +99,17 @@ private data class GallerySources(
     val hiddenCloudLinkIds: Set<String>,
     val cloudInAlbum: Set<String>,
     val timelineExcludedBuckets: Set<String>,
+)
+
+/** Output of the off-main gallery computation: the hidden/bucket-filtered list (→ items), the
+ *  tab/content-filtered list (→ filteredItems), the local-only pending count, and the month +
+ *  "On this day" groupings now produced here instead of inside Compose composition. */
+private data class GalleryComputed(
+    val items: List<GalleryItem>,
+    val filtered: List<GalleryItem>,
+    val pending: Int,
+    val monthGroups: List<Pair<String, List<GalleryItem>>>,
+    val onThisDay: List<Pair<Int, List<GalleryItem>>>,
 )
 
 @HiltViewModel
@@ -115,6 +131,8 @@ class GalleryViewModel @Inject constructor(
     private val networkObserver: eu.akoos.photos.util.NetworkObserver,
     private val albumPhotoMembershipDao: eu.akoos.photos.data.db.dao.AlbumPhotoMembershipDao,
     private val albumListEvents: eu.akoos.photos.util.AlbumListEventBus,
+    private val updateOrchestrator: eu.akoos.photos.presentation.updater.UpdateOrchestrator,
+    private val publicLink: eu.akoos.photos.presentation.common.PublicLinkController,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(GalleryUiState())
@@ -132,6 +150,17 @@ class GalleryViewModel @Inject constructor(
     /** True when the device has a validated internet connection. Drives the avatar
      *  offline badge in [GalleryScreen] and gates every cloud-side refresh below. */
     val isOnline: StateFlow<Boolean> = networkObserver.isOnline
+
+    /** Version of an available update the user pushed aside with "Not now", surfaced as the
+     *  gallery update banner (null = no banner). Lives in the singleton [UpdateOrchestrator] so it
+     *  survives screen recreation; the dialog re-open / hard-dismiss route back through it. */
+    val updateBannerVersion: StateFlow<String?> = updateOrchestrator.banner
+
+    /** Banner tap → re-open the update dialog (the Activity's UpdaterHost renders it). */
+    fun openUpdateFromBanner() = updateOrchestrator.reopenFromBanner()
+
+    /** Banner X → dismiss this version so the silent check stops re-offering it. */
+    fun dismissUpdateBanner() = updateOrchestrator.hardDismissBanner(viewModelScope)
 
     /** Cloud linkIds that also have a SYNCED local copy on this device. A photo classified as
      *  [GalleryItem.CloudOnly] in the static item snapshot can become locally available after the
@@ -250,8 +279,12 @@ class GalleryViewModel @Inject constructor(
                     eu.akoos.photos.domain.usecase.UploadStatus.Failed -> false
                     eu.akoos.photos.domain.usecase.UploadStatus.Idle -> false
                 }
-                if (_uiState.value.isSyncing != syncing) {
-                    _uiState.update { it.copy(isSyncing = syncing) }
+                _uiState.update {
+                    it.copy(
+                        isSyncing = syncing,
+                        uploadDoneIdx = if (syncing) evt.doneIdx else 0,
+                        uploadTotalCount = if (syncing) evt.totalCount else 0,
+                    )
                 }
             }
         }
@@ -263,21 +296,19 @@ class GalleryViewModel @Inject constructor(
                 .map { it[SettingsKeys.FAVORITE_IDS] ?: emptySet() }
                 .distinctUntilChanged()
                 .collect { favIds ->
-                    _uiState.update { state ->
-                        state.copy(
-                            favoriteIds = favIds,
-                            // Must carry the live album-hide set, otherwise re-filtering here
-                            // (on any favourites change) would drop it and un-hide every album
-                            // photo until the next gallery emission re-applied it — a visible
-                            // flicker while "Hide photos in albums" is on.
-                            filteredItems = applyFilter(
-                                applyContentFilter(state.items, state.contentFilter),
-                                state.selectedFilter,
-                                favIds,
-                                state.albumHideCloudIds,
-                            ),
-                        )
-                    }
+                    val state = _uiState.value
+                    // Must carry the live album-hide set, otherwise re-filtering here (on any
+                    // favourites change) would drop it and un-hide every album photo until the next
+                    // gallery emission re-applied it — a visible flicker while "Hide photos in
+                    // albums" is on.
+                    val filtered = applyFilter(
+                        applyContentFilter(state.items, state.contentFilter),
+                        state.selectedFilter,
+                        favIds,
+                        state.albumHideCloudIds,
+                    )
+                    _uiState.update { it.copy(favoriteIds = favIds, filteredItems = filtered) }
+                    recomputeMonthGroups(filtered)
                 }
         }
     }
@@ -319,7 +350,8 @@ class GalleryViewModel @Inject constructor(
             val prefs = context.settingsDataStore.data.first()
             val groupingName = prefs[SettingsKeys.TIMELINE_GROUPING] ?: TimelineGrouping.Month.name
             val grouping = runCatching { TimelineGrouping.valueOf(groupingName) }.getOrDefault(TimelineGrouping.Month)
-            _uiState.update { it.copy(timelineGrouping = grouping) }
+            val denseWarningDismissed = prefs[SettingsKeys.DENSE_GRID_WARNING_DISMISSED] ?: false
+            _uiState.update { it.copy(timelineGrouping = grouping, denseGridWarningDismissed = denseWarningDismissed) }
         }
     }
 
@@ -377,12 +409,23 @@ class GalleryViewModel @Inject constructor(
             val hideInAlbumsFlow = context.settingsDataStore.data.map {
                 it[SettingsKeys.HIDE_PHOTOS_IN_ALBUMS] == true
             }
-            // Cloud linkIds in any album, gated by the toggle. When OFF (default),
-            // short-circuit to emptySet() so users who don't enable the feature pay
-            // zero cost from the cross-table query.
-            val cloudAlbumHideSetFlow = hideInAlbumsFlow.flatMapLatest { hide ->
-                if (hide) albumPhotoMembershipDao.observeAllAssociatedPhotoLinkIds().map { it.toSet() }
-                else flowOf(emptySet())
+            // Cloud album linkIds the user hid individually (per-album timeline toggle), separate
+            // from the master "hide all album photos" switch above.
+            val excludedAlbumIdsFlow = context.settingsDataStore.data.map {
+                it[SettingsKeys.TIMELINE_EXCLUDED_ALBUM_IDS] ?: emptySet()
+            }
+            // Cloud linkIds to drop from the timeline: the master toggle hides every photo in any
+            // album; otherwise only photos in the individually-hidden albums. Master OFF + no
+            // per-album hides short-circuits to emptySet() so non-users pay zero query cost.
+            val cloudAlbumHideSetFlow = combine(hideInAlbumsFlow, excludedAlbumIdsFlow) { hideAll, excludedIds ->
+                hideAll to excludedIds
+            }.flatMapLatest { (hideAll, excludedIds) ->
+                when {
+                    hideAll -> albumPhotoMembershipDao.observeAllAssociatedPhotoLinkIds().map { it.toSet() }
+                    excludedIds.isNotEmpty() ->
+                        albumPhotoMembershipDao.observeAssociatedPhotoLinkIdsForAlbums(excludedIds).map { it.toSet() }
+                    else -> flowOf(emptySet())
+                }
             }.catch {
                 // The membership cross-table is written in bursts when the Albums tab
                 // prefetches; a read landing mid-burst degrades to "hide nothing" rather
@@ -447,33 +490,60 @@ class GalleryViewModel @Inject constructor(
                     // [applyFilter] so non-All tabs (Favorites, Screenshots, Videos, …) can
                     // bypass it. When the user explicitly picks a tab they expect to see
                     // every item that matches, album membership notwithstanding.
-                    val items = sources.items.filter { item ->
-                        // Both the hidden-vault and the timeline-folder filters read off the
-                        // local twin; CloudOnly has neither a local URI nor a bucket so it's
-                        // never dropped by either. The folder filter is display-only — excluded
-                        // buckets still back up and stay browsable, they just don't show here.
-                        val local = when (item) {
-                            is GalleryItem.LocalOnly -> item.local
-                            is GalleryItem.Synced -> item.local
-                            is GalleryItem.CloudOnly -> null
+                    // The hidden/folder filter plus applyContentFilter + applyFilter (three passes
+                    // over the full library) run on Default, off the collector's Main thread; only
+                    // the finished lists reach the Main-thread state update. A thumbnail-decrypt
+                    // re-emission therefore can't stall the UI thread with filtering work.
+                    // contentFilter/selectedFilter/favoriteIds are snapshotted from the current
+                    // state — the dedicated filter-change handlers recompute filteredItems
+                    // themselves, so last-writer-wins here is unchanged from the inline version.
+                    val snapshot = _uiState.value
+                    val computed = withContext(Dispatchers.Default) {
+                        val items = sources.items.filter { item ->
+                            // Both the hidden-vault and the timeline-folder filters read off the
+                            // local twin; CloudOnly has neither a local URI nor a bucket so it's
+                            // never dropped by either. The folder filter is display-only — excluded
+                            // buckets still back up and stay browsable, they just don't show here.
+                            val local = when (item) {
+                                is GalleryItem.LocalOnly -> item.local
+                                is GalleryItem.Synced -> item.local
+                                is GalleryItem.CloudOnly -> null
+                            }
+                            val notHidden = local == null || local.uri !in sources.hiddenUris
+                            val bucket = local?.bucketName
+                            val notExcludedBucket = bucket == null || bucket !in sources.timelineExcludedBuckets
+                            notHidden && notExcludedBucket
                         }
-                        val notHidden = local == null || local.uri !in sources.hiddenUris
-                        val bucket = local?.bucketName
-                        val notExcludedBucket = bucket == null || bucket !in sources.timelineExcludedBuckets
-                        notHidden && notExcludedBucket
+                        val filtered = applyFilter(
+                            applyContentFilter(items, snapshot.contentFilter),
+                            snapshot.selectedFilter,
+                            snapshot.favoriteIds,
+                            sources.cloudInAlbum,
+                        )
+                        val pending = items.count { it is GalleryItem.LocalOnly }
+                        // Month-bucket the filtered list and compute "On this day" here, off the
+                        // Main thread. Both used to run inside Compose composition on every list
+                        // re-emission (a thumbnail-decrypt burst at 8500+ photos = a ~680 ms hitch).
+                        // The label format/locale, item field and encounter order match the grid's
+                        // former in-composition grouping exactly, so the rendered timeline is
+                        // unchanged. groupBy yields a LinkedHashMap, preserving first-seen month
+                        // order. "On this day" reads the unfiltered [items] to match the carousel's
+                        // filter-independent source (the grid binds allItems = state.items).
+                        val monthFormat = SimpleDateFormat("MMMM yyyy", Locale.getDefault())
+                        val monthGroups = filtered
+                            .groupBy { item -> monthFormat.format(Date(item.captureTimeMs)) }
+                            .entries.map { it.key to it.value }
+                        val onThisDay = computeOnThisDay(items)
+                        GalleryComputed(items, filtered, pending, monthGroups, onThisDay)
                     }
-                    val pending = items.count { it is GalleryItem.LocalOnly }
                     _uiState.update { state ->
                         state.copy(
                             isLoading = false,
-                            items = items,
-                            filteredItems = applyFilter(
-                                applyContentFilter(items, state.contentFilter),
-                                state.selectedFilter,
-                                state.favoriteIds,
-                                sources.cloudInAlbum,
-                            ),
-                            pendingUploadCount = pending,
+                            items = computed.items,
+                            filteredItems = computed.filtered,
+                            pendingUploadCount = computed.pending,
+                            monthGroups = computed.monthGroups,
+                            onThisDayGroups = computed.onThisDay,
                             hiddenCloudLinkIds = sources.hiddenCloudLinkIds,
                             albumHideCloudIds = sources.cloudInAlbum,
                         )
@@ -533,7 +603,9 @@ class GalleryViewModel @Inject constructor(
     private suspend fun doSync(userId: me.proton.core.domain.entity.UserId) {
         if (!networkObserver.isOnline.value) return
         if (!syncInFlight.compareAndSet(false, true)) return
-        _uiState.update { it.copy(isSyncing = true) }
+        // The avatar sync ring reflects real upload activity only (driven by
+        // observeBackgroundUploadProgress), not this passive cloud-listing + reconcile pass —
+        // otherwise it spun blue for the whole cold-listing walk while nothing was uploading.
         try {
             // Incremental cloud refresh before reconcile so deleted-cloud photos are removed
             // from the local DB before reconcile reads cloudItems.
@@ -559,7 +631,6 @@ class GalleryViewModel @Inject constructor(
             if (e is kotlinx.coroutines.CancellationException) throw e
         } finally {
             syncInFlight.set(false)
-            _uiState.update { it.copy(isSyncing = false) }
         }
     }
 
@@ -582,18 +653,38 @@ class GalleryViewModel @Inject constructor(
         }
     }
 
-    fun onFilterSelected(filter: GalleryFilter) {
-        _uiState.update { state ->
-            state.copy(
-                selectedFilter = filter,
-                filteredItems = applyFilter(
-                    applyContentFilter(state.items, state.contentFilter),
-                    filter,
-                    state.favoriteIds,
-                    state.albumHideCloudIds,
-                ),
-            )
+    /** The in-flight off-main month re-bucket from a filter toggle; cancelled when a newer toggle
+     *  supersedes it so the last filter always wins. */
+    private var monthGroupsJob: kotlinx.coroutines.Job? = null
+
+    /** Re-bucket the Month-grouped zoom levels off the main thread after a filter toggle updates
+     *  [GalleryUiState.filteredItems]. The streaming combine keeps month groups in lockstep with the
+     *  list as it loads; the explicit filter handlers update filteredItems synchronously for instant
+     *  feedback, so they re-bucket here too — without this the Month-grouped zoom levels keep
+     *  rendering the pre-toggle buckets while the flatter levels (which read filteredItems directly)
+     *  update correctly. */
+    private fun recomputeMonthGroups(filtered: List<GalleryItem>) {
+        monthGroupsJob?.cancel()
+        monthGroupsJob = viewModelScope.launch {
+            val groups = withContext(Dispatchers.Default) {
+                val fmt = SimpleDateFormat("MMMM yyyy", Locale.getDefault())
+                filtered.groupBy { item -> fmt.format(Date(item.captureTimeMs)) }
+                    .entries.map { it.key to it.value }
+            }
+            _uiState.update { it.copy(monthGroups = groups) }
         }
+    }
+
+    fun onFilterSelected(filter: GalleryFilter) {
+        val state = _uiState.value
+        val filtered = applyFilter(
+            applyContentFilter(state.items, state.contentFilter),
+            filter,
+            state.favoriteIds,
+            state.albumHideCloudIds,
+        )
+        _uiState.update { it.copy(selectedFilter = filter, filteredItems = filtered) }
+        recomputeMonthGroups(filtered)
     }
 
     fun setTimelineGrouping(grouping: TimelineGrouping) {
@@ -603,18 +694,23 @@ class GalleryViewModel @Inject constructor(
         }
     }
 
-    fun setContentFilter(filter: ContentFilter) {
-        _uiState.update { state ->
-            state.copy(
-                contentFilter = filter,
-                filteredItems = applyFilter(
-                    applyContentFilter(state.items, filter),
-                    state.selectedFilter,
-                    state.favoriteIds,
-                    state.albumHideCloudIds,
-                ),
-            )
+    fun dismissDenseGridWarning() {
+        viewModelScope.launch {
+            context.settingsDataStore.edit { it[SettingsKeys.DENSE_GRID_WARNING_DISMISSED] = true }
+            _uiState.update { it.copy(denseGridWarningDismissed = true) }
         }
+    }
+
+    fun setContentFilter(filter: ContentFilter) {
+        val state = _uiState.value
+        val filtered = applyFilter(
+            applyContentFilter(state.items, filter),
+            state.selectedFilter,
+            state.favoriteIds,
+            state.albumHideCloudIds,
+        )
+        _uiState.update { it.copy(contentFilter = filter, filteredItems = filtered) }
+        recomputeMonthGroups(filtered)
     }
 
     fun onPermissionResult(granted: Boolean, permanentlyDenied: Boolean) {
@@ -639,7 +735,7 @@ class GalleryViewModel @Inject constructor(
         }
     }
 
-    fun refresh() {
+    fun refresh(force: Boolean = true) {
         if (!networkObserver.isOnline.value) {
             // Offline: cached state from observeGallery() keeps the grid rendered. Pop the
             // spinner off immediately so pull-to-refresh doesn't hang.
@@ -648,9 +744,12 @@ class GalleryViewModel @Inject constructor(
         }
         viewModelScope.launch {
             val userId = accountManager.getPrimaryUserId().first() ?: return@launch
-            _uiState.update { it.copy(isRefreshing = true, isSyncing = true) }
+            // isRefreshing drives the pull-to-refresh spinner; isSyncing (avatar ring) is left
+            // to observeBackgroundUploadProgress so it only spins during real uploads, not the
+            // long full cloud listing this refresh kicks off.
+            _uiState.update { it.copy(isRefreshing = true) }
             runCatching {
-                cloudRepo.refreshCloudPhotos(userId)
+                cloudRepo.refreshCloudPhotos(userId, force = force)
                 // Whole listing is fresh — warm the rest of the library's thumbnails in the
                 // background (lowest priority) so a large account fills in without the user
                 // scrolling past every photo. Idempotent + idle-only, so it never blocks scroll.
@@ -668,12 +767,18 @@ class GalleryViewModel @Inject constructor(
                     _uiState.update { it.copy(error = sanitizeErrorMessage(e.message)) }
                 }
             }
-            _uiState.update { it.copy(isRefreshing = false, isSyncing = false) }
+            _uiState.update { it.copy(isRefreshing = false) }
         }
     }
 
     fun clearError() {
         _uiState.update { it.copy(error = null) }
+    }
+
+    /** Cancel the in-flight background back-up from the in-app progress pill — same effect as
+     *  the upload notification's cancel (cancels the unique SyncWorker). */
+    fun cancelUpload() {
+        SyncWorker.cancel(androidx.work.WorkManager.getInstance(context))
     }
 
     // ── Multi-select ──────────────────────────────────────────────────────────
@@ -733,7 +838,7 @@ class GalleryViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(multiDeleteState = MultiDeleteState.Working) }
             val userId = accountManager.getPrimaryUserId().first() ?: run {
-                _uiState.update { it.copy(multiDeleteState = MultiDeleteState.Failed("Not signed in")) }
+                _uiState.update { it.copy(multiDeleteState = MultiDeleteState.Failed(context.getString(R.string.viewer_not_signed_in))) }
                 return@launch
             }
             val result = deletePhotoUseCase(
@@ -750,7 +855,7 @@ class GalleryViewModel @Inject constructor(
                     ) }
                 }
                 is DeletePhotoUseCase.Result.CloudDeleteFailed ->
-                    _uiState.update { it.copy(multiDeleteState = MultiDeleteState.Failed("Could not delete from Drive")) }
+                    _uiState.update { it.copy(multiDeleteState = MultiDeleteState.Failed(context.getString(R.string.viewer_delete_drive_failed))) }
                 is DeletePhotoUseCase.Result.NeedsMediaWritePermission -> {
                     pendingPermissionResult = result
                     _uiState.update { it.copy(
@@ -793,7 +898,7 @@ class GalleryViewModel @Inject constructor(
             } else DeletePhotoUseCase.Result.Success
             if (cloudResult is DeletePhotoUseCase.Result.CloudDeleteFailed) {
                 _uiState.update { it.copy(
-                    multiDeleteState    = MultiDeleteState.Failed("Could not delete from Drive"),
+                    multiDeleteState    = MultiDeleteState.Failed(context.getString(R.string.viewer_delete_drive_failed)),
                     pendingDeleteIntent = null,
                 ) }
                 return@launch
@@ -834,7 +939,7 @@ class GalleryViewModel @Inject constructor(
             _uiState.update { it.copy(multiHideState = MultiDeleteState.Working) }
             val hideables = items.filter { it is GalleryItem.LocalOnly || it is GalleryItem.Synced }
             if (hideables.isEmpty()) {
-                _uiState.update { it.copy(multiHideState = MultiDeleteState.Failed("No local photos to hide")) }
+                _uiState.update { it.copy(multiHideState = MultiDeleteState.Failed(context.getString(R.string.gallery_no_local_to_hide))) }
                 return@launch
             }
             // Step 1: copy every local file into app-private hidden storage.
@@ -873,7 +978,7 @@ class GalleryViewModel @Inject constructor(
                 }
             }
             if (collected.isEmpty()) {
-                _uiState.update { it.copy(multiHideState = MultiDeleteState.Failed("Could not copy to Hidden")) }
+                _uiState.update { it.copy(multiHideState = MultiDeleteState.Failed(context.getString(R.string.gallery_copy_to_hidden_failed))) }
                 return@launch
             }
             pendingHidePrivateUris = collected
@@ -881,7 +986,7 @@ class GalleryViewModel @Inject constructor(
             // Step 2: delete the MediaStore originals (one system-trash dialog on Android 11+).
             val userId = accountManager.getPrimaryUserId().first() ?: run {
                 rollbackPendingHide()
-                _uiState.update { it.copy(multiHideState = MultiDeleteState.Failed("Not signed in")) }
+                _uiState.update { it.copy(multiHideState = MultiDeleteState.Failed(context.getString(R.string.viewer_not_signed_in))) }
                 return@launch
             }
             val result = deletePhotoUseCase(
@@ -912,7 +1017,7 @@ class GalleryViewModel @Inject constructor(
                 is DeletePhotoUseCase.Result.CloudDeleteFailed -> {
                     // Shouldn't happen with deleteFromCloud=false — undo the hide if it does.
                     rollbackPendingHide()
-                    _uiState.update { it.copy(multiHideState = MultiDeleteState.Failed("Could not move to Hidden")) }
+                    _uiState.update { it.copy(multiHideState = MultiDeleteState.Failed(context.getString(R.string.gallery_move_to_hidden_failed))) }
                 }
             }
         }
@@ -1026,6 +1131,62 @@ class GalleryViewModel @Inject constructor(
         }
     }
 
+    // ── Per-photo public link (selection of exactly one cloud photo) ────────────
+    //
+    // The unified share drawer offers a "Public link" row only when the selection is a single
+    // cloud-backed photo (see [showPublicLink] gating in GalleryScreen). The link machine itself
+    // lives in the shared [PublicLinkController] so the gallery and the viewer behave identically;
+    // the methods below resolve the selected linkId / local uri and delegate.
+
+    /** Single-photo public-link state surfaced in the manage-link sheet, owned by [publicLink]. */
+    val publicLinkState: StateFlow<eu.akoos.photos.presentation.viewer.PublicLinkState> = publicLink.state
+
+    /** The single cloud-backed (Synced/CloudOnly) linkId in the current selection, or null when
+     *  the selection is empty, larger than one, or contains a local-only item. Drives both the
+     *  share drawer's [showPublicLink] gating and which photo the manage-link sheet operates on. */
+    fun singleSelectedCloudLinkId(): String? {
+        val selected = _uiState.value.selectedItems
+        if (selected.size != 1) return null
+        return when (val only = selected.first()) {
+            is GalleryItem.Synced    -> only.cloud.linkId
+            is GalleryItem.CloudOnly -> only.cloud.linkId
+            is GalleryItem.LocalOnly -> null
+        }
+    }
+
+    /** Look up any existing public link for the single selected cloud photo and seed
+     *  [publicLinkState]. Called when the manage-link sheet opens. A failed lookup falls back to
+     *  None so the user can still create one instead of getting stuck on an error. */
+    fun loadPublicLink() = publicLink.load(viewModelScope, singleSelectedCloudLinkId(), setLoading = true)
+
+    /** Mint a public link for the photo the sheet is acting on. */
+    fun createPublicLink() = publicLink.create(viewModelScope)
+
+    /** Revoke the photo's public link. Re-fetches to confirm the delete stuck before reporting
+     *  None, so a silently-failed revoke keeps showing the live link rather than lying. */
+    fun revokePublicLink() = publicLink.revoke(viewModelScope)
+
+    /** Set ([password] non-blank) or clear ([password] null/blank) the custom password on the
+     *  photo's public link. No-op if no link exists yet. */
+    fun setLinkPassword(password: String?) = publicLink.setPassword(viewModelScope, password)
+
+    /** The live public-link URL if one is currently active, for the screen's copy-to-clipboard. */
+    fun currentPublicLinkUrl(): String? = publicLink.currentUrl()
+
+    /** The single selected LocalOnly photo's URI, or null when the selection isn't a single
+     *  not-yet-backed-up local photo. */
+    fun singleSelectedLocalUri(): String? {
+        val selected = _uiState.value.selectedItems
+        if (selected.size != 1) return null
+        return (selected.first() as? GalleryItem.LocalOnly)?.local?.uri
+    }
+
+    /** Upload the single selected local photo, wait for its cloud id, then mint a public link.
+     *  The manage-link sheet shows the shared Loading spinner throughout, then the live link. */
+    fun uploadAndCreateSelectedLink() {
+        singleSelectedLocalUri()?.let { publicLink.uploadAndCreate(viewModelScope, it) }
+    }
+
     // ── Add-to-album multi-action ──────────────────────────────────────────────
     //
     // Routes a multi-select to a cloud album. Synced and CloudOnly items carry a Drive linkId and
@@ -1063,7 +1224,7 @@ class GalleryViewModel @Inject constructor(
             val localUris = items.mapNotNull { (it as? GalleryItem.LocalOnly)?.local?.uri }
 
             if ((cloudLinkIds.isNotEmpty() || localUris.isNotEmpty()) && userId == null) {
-                _uiState.update { it.copy(addToAlbumState = AddToAlbumState.Failed("Not signed in")) }
+                _uiState.update { it.copy(addToAlbumState = AddToAlbumState.Failed(context.getString(R.string.viewer_not_signed_in))) }
                 return@launch
             }
 
@@ -1099,7 +1260,7 @@ class GalleryViewModel @Inject constructor(
         var cloudAdded = 0
         var cloudFailed = 0
         if (cloudLinkIds.isNotEmpty()) {
-            if (userId == null) return AddToAlbumState.Failed("Not signed in")
+            if (userId == null) return AddToAlbumState.Failed(context.getString(R.string.viewer_not_signed_in))
             try {
                 val r = cloudRepo.addPhotosToAlbum(userId, albumLinkId, cloudLinkIds)
                 cloudAdded = r.succeededLinkIds.size
@@ -1108,12 +1269,13 @@ class GalleryViewModel @Inject constructor(
                 // manual pull-to-refresh now that it gained photos.
                 if (cloudAdded > 0) albumListEvents.notifyChanged()
             } catch (e: Exception) {
-                return AddToAlbumState.Failed(e.message ?: "Could not add to cloud album")
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                return AddToAlbumState.Failed(e.message ?: context.getString(R.string.gallery_add_to_cloud_album_failed))
             }
         }
 
         if (cloudAdded == 0 && cloudFailed > 0 && localUris.isEmpty()) {
-            return AddToAlbumState.Failed("Could not add to album")
+            return AddToAlbumState.Failed(context.getString(R.string.gallery_add_to_album_failed))
         }
 
         val localQueued = if (userId != null && localUris.isNotEmpty()) {
@@ -1144,25 +1306,26 @@ class GalleryViewModel @Inject constructor(
     fun createAlbumThenAddSelected(name: String) {
         val trimmed = ProtonPhotosStorage.sanitize(name)
         if (trimmed.isEmpty()) {
-            _uiState.update { it.copy(addToAlbumState = AddToAlbumState.Failed("Album name cannot be empty")) }
+            _uiState.update { it.copy(addToAlbumState = AddToAlbumState.Failed(context.getString(R.string.albums_name_empty))) }
             return
         }
         val items = _uiState.value.selectedItems.toList()
         if (items.isEmpty()) {
-            _uiState.update { it.copy(addToAlbumState = AddToAlbumState.Failed("Select photos first")) }
+            _uiState.update { it.copy(addToAlbumState = AddToAlbumState.Failed(context.getString(R.string.gallery_select_photos_first))) }
             return
         }
         viewModelScope.launch {
             _uiState.update { it.copy(addToAlbumState = AddToAlbumState.Working) }
             val userId = accountManager.getPrimaryUserId().first() ?: run {
-                _uiState.update { it.copy(addToAlbumState = AddToAlbumState.Failed("Not signed in")) }
+                _uiState.update { it.copy(addToAlbumState = AddToAlbumState.Failed(context.getString(R.string.viewer_not_signed_in))) }
                 return@launch
             }
             val newAlbumLinkId = try {
                 cloudRepo.createDriveAlbum(userId, trimmed).linkId
             } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
                 _uiState.update { it.copy(addToAlbumState = AddToAlbumState.Failed(
-                    "Could not create album: ${e.message}",
+                    context.getString(R.string.gallery_create_album_failed, e.message ?: ""),
                 )) }
                 return@launch
             }
@@ -1181,8 +1344,9 @@ class GalleryViewModel @Inject constructor(
                 try {
                     cloudRepo.addPhotosToAlbum(userId, newAlbumLinkId, cloudLinkIds)
                 } catch (e: Exception) {
+                    if (e is kotlinx.coroutines.CancellationException) throw e
                     _uiState.update { it.copy(addToAlbumState = AddToAlbumState.Failed(
-                        e.message ?: "Could not add to album",
+                        e.message ?: context.getString(R.string.gallery_add_to_album_failed),
                     )) }
                     return@launch
                 }
@@ -1238,7 +1402,7 @@ class GalleryViewModel @Inject constructor(
             )
             if (config.isNoOp) {
                 _uiState.update { it.copy(multiStripState = MultiStripState.Failed(
-                    "Enable a metadata category in Settings → Privacy first",
+                    context.getString(R.string.gallery_enable_metadata_category),
                 )) }
                 return@launch
             }
@@ -1382,6 +1546,12 @@ class GalleryViewModel @Inject constructor(
             // All other tag filters: server-side tags win when set, but for freshly-uploaded photos
             // and local-only items we also try a client-side heuristic (mime type, filename pattern,
             // aspect ratio, bucket name) so Videos / Screenshots / Panoramas / RAW work immediately.
+            // Live Photos (iOS, tag 3) and Motion Photos (Android, tag 4) are the same concept on
+            // different platforms and share one "Live Photos" chip in the UI, so either one matches
+            // both tags.
+            GalleryFilter.LivePhotos, GalleryFilter.MotionPhotos -> baseItems.filter {
+                CategorizeItem.belongsTo(it, tagId = 3) || CategorizeItem.belongsTo(it, tagId = 4)
+            }
             else -> {
                 val tagId = filter.tagId ?: return baseItems
                 baseItems.filter { CategorizeItem.belongsTo(it, tagId) }
@@ -1421,12 +1591,13 @@ class GalleryViewModel @Inject constructor(
         }
 
         // Date
-        if (filter.year != null || filter.month != null) {
+        if (filter.year != null || filter.month != null || filter.day != null) {
             result = result.filter { item ->
                 val cal = java.util.Calendar.getInstance().apply { timeInMillis = item.captureTimeMs }
                 val yearMatch  = filter.year  == null || cal.get(java.util.Calendar.YEAR) == filter.year
                 val monthMatch = filter.month == null || (cal.get(java.util.Calendar.MONTH) + 1) == filter.month
-                yearMatch && monthMatch
+                val dayMatch   = filter.day   == null || cal.get(java.util.Calendar.DAY_OF_MONTH) == filter.day
+                yearMatch && monthMatch && dayMatch
             }
         }
 

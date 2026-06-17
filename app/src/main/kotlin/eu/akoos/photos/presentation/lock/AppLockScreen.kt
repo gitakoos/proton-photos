@@ -53,6 +53,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import eu.akoos.photos.R
+import eu.akoos.photos.presentation.common.SecureScreenEffect
 import eu.akoos.photos.presentation.util.findFragmentActivity
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.Bg0
@@ -65,8 +66,10 @@ import eu.akoos.photos.presentation.theme.PillBorder
 fun AppLockScreen(onUnlocked: () -> Unit) {
     val context = LocalContext.current
 
+    SecureScreenEffect()
+
     LaunchedEffect(Unit) {
-        showBiometricPrompt(context.findFragmentActivity()!!, onSuccess = onUnlocked)
+        context.findFragmentActivity()?.let { showBiometricPrompt(it, onSuccess = onUnlocked) }
     }
 
     Box(
@@ -112,7 +115,7 @@ fun AppLockScreen(onUnlocked: () -> Unit) {
                     .background(Accent.copy(alpha = 0.12f), RoundedCornerShape(14.dp))
                     .border(0.5.dp, Accent.copy(alpha = 0.3f), RoundedCornerShape(14.dp))
                     .clickable {
-                        showBiometricPrompt(context.findFragmentActivity()!!, onSuccess = onUnlocked)
+                        context.findFragmentActivity()?.let { showBiometricPrompt(it, onSuccess = onUnlocked) }
                     }
                     .padding(horizontal = 32.dp, vertical = 14.dp),
                 contentAlignment = Alignment.Center,

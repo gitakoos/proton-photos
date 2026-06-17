@@ -32,10 +32,7 @@ import eu.akoos.photos.data.db.entity.CloudAlbumEntity
 @Dao
 interface CloudAlbumDao {
 
-    /**
-     * One-shot read of every cached album, newest first by last-activity time.
-     * NULL `lastActivityTimeMs` rows sort to the end (SQLite default with DESC).
-     */
+    /** Every cached album, newest first; NULL lastActivityTimeMs sorts to the end. */
     @Query("SELECT * FROM cloud_albums ORDER BY lastActivityTimeMs DESC")
     suspend fun getAll(): List<CloudAlbumEntity>
 
@@ -54,11 +51,8 @@ interface CloudAlbumDao {
     @Query("DELETE FROM cloud_albums WHERE linkId NOT IN (:keepLinkIds)")
     suspend fun deleteWhereNotIn(keepLinkIds: List<String>)
 
-    /** Targeted single-album removal — used when the user leaves a shared-with-me
-     *  album, so the row disappears from the grid without waiting for a full
-     *  network refresh. The shared listing endpoint won't return the album after
-     *  the leave call, so `deleteWhereNotIn` would also clear it, but explicit
-     *  removal gives the UI an immediate confirmation. */
+    /** Targeted removal so a left shared-with-me album disappears from the grid immediately,
+     *  without waiting for the full refresh that would also drop it. */
     @Query("DELETE FROM cloud_albums WHERE linkId = :linkId")
     suspend fun deleteByLinkId(linkId: String)
 

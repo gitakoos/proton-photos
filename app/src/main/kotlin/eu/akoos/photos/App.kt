@@ -71,11 +71,9 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
     @Inject
     lateinit var photoListingDao: eu.akoos.photos.data.db.dao.PhotoListingDao
 
-    // Initialized in constructor so getWorkManagerConfiguration() never crashes even
-    // when called by startup initializers before Hilt injects workerFactory.
+    // Set up in constructor so getWorkManagerConfiguration() works before Hilt injects workerFactory.
     private val delegatingFactory = DelegatingWorkerFactory()
 
-    /** App-scoped scope for fire-and-forget tasks (theme mirror sync, etc.). */
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override val workManagerConfiguration: Configuration
@@ -85,27 +83,19 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
 
     override fun attachBaseContext(base: Context) {
         super.attachBaseContext(base)
-        // Disable Go's signal-based goroutine preemption (SIGURG) in the native crypto
-        // runtime before its shared library loads. The Go GC's preemption signals can
-        // collide with the platform's userfaultfd-based GC, aborting the process with a
-        // SIGABRT when two JNI threads call into the Go runtime concurrently. This env var
-        // is read by the Go runtime via libc getenv at init, so it must be set in the
-        // process environment here, the earliest app hook, before any crypto class loads.
-        // It only affects preemptibility of tight call-free loops, which the crypto code
-        // does not have, so throughput is unaffected. A JVM system property would not work
-        // (the runtime reads the OS environment, not JVM properties). setenv can throw
-        // ErrnoException, so guard it — failing to set it must never crash startup.
+        // Disable Go's SIGURG goroutine preemption before libgojni loads: its signals collide
+        // with the platform's userfaultfd GC and SIGABRT the process when two JNI threads enter
+        // the Go runtime at once. Must be an OS env var (Go reads getenv at init, not JVM props)
+        // set in the earliest app hook before any crypto class loads; guarded as setenv can throw.
         runCatching { android.system.Os.setenv("GODEBUG", "asyncpreemptoff=1", true) }
     }
 
     override fun onCreate() {
         super.onCreate() // Hilt injects workerFactory here
+        // The :crypto process shares this Application but must skip the main-process init below
+        // (WorkManager schedules, lifecycle observer, receivers, Coil) to avoid duplicate workers.
+        if (!isMainProcess()) return
         delegatingFactory.addFactory(workerFactory)
-        // StrictMode in debug only. detectCleartextNetwork() trips a violation the
-        // moment any plain HTTP socket opens - belt and suspenders to the manifest
-        // network security config which rejects cleartext at the TLS layer. Other
-        // VM detectors catch resource leaks during development. Release builds skip
-        // this entirely to avoid the perf hit.
         if (BuildConfig.DEBUG) {
             android.os.StrictMode.setVmPolicy(
                 android.os.StrictMode.VmPolicy.Builder()
@@ -116,36 +106,40 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
                     .build()
             )
         }
-        // Apply the user's theme to AppCompatDelegate so externally-launched Activities
-        // (ProtonCore login/payment screens with their own DayNight XML theme) honour it too.
+        // Apply theme/locale to AppCompatDelegate so externally-launched ProtonCore login/payment
+        // Activities (XML-based, outside our Compose tree) honour them too.
         applyStoredThemeMode()
-        // Apply the user's saved locale to AppCompatDelegate ONCE at process startup so
-        // ProtonCore login Activities (XML-based, outside our Compose tree) render in
-        // the chosen language. Runtime switches inside the app use LocaleOverride in
-        // the Compose tree and intentionally skip this call — calling it after process
-        // startup forces an Activity recreate which loses navigation state.
         applyStoredLanguage()
-        // Register notification channels eagerly so the first foreground-promoted Worker
-        // run doesn't race with channel creation (Android 8+). Idempotent — safe to call
-        // every cold start.
+        // Register channels eagerly so the first foreground-promoted Worker doesn't race channel
+        // creation (Android 8+). Idempotent.
         AlbumDownloadWorker.ensureChannel(this)
         registerUserPresentReceiver()
         scheduleFullResCachePrune()
-        // Background sweeper covering the "process killed for days, cache still on disk"
-        // gap that the one-shot prune in scheduleFullResCachePrune() (only runs on cold
-        // start) cannot reach. Idempotent — ExistingPeriodicWorkPolicy.UPDATE means safe
-        // to call on every launch.
+        // Periodic sweeper for the "process killed for days, cache still on disk" gap the cold-start
+        // prune above can't reach.
         CachePruneWorker.schedule(WorkManager.getInstance(this))
         seedAlbumOptInFromBucketMap()
         registerCacheCleanupOnBackground()
     }
 
+    /** True only in the main app process (the :crypto process runs as "$packageName:crypto"). */
+    private fun isMainProcess(): Boolean {
+        val procName = if (Build.VERSION.SDK_INT >= 28) {
+            getProcessName()
+        } else {
+            (getSystemService(ACTIVITY_SERVICE) as android.app.ActivityManager)
+                .runningAppProcesses
+                ?.firstOrNull { it.pid == android.os.Process.myPid() }
+                ?.processName
+        }
+        return procName == packageName
+    }
+
     /**
-     * One-shot seed for [SettingsKeys.ALBUM_OPT_IN_FOLDER_NAMES]. The first launch after
-     * this code ships, copies the bucket names already present in [SettingsKeys.ALBUM_BUCKET_MAP]
-     * into the opt-in set, so installs that were silently mirroring folders as Drive albums
-     * keep mirroring exactly those folders after the toggle becomes user-visible. Gated on
-     * [SettingsKeys.ALBUM_OPT_IN_MIGRATED] so subsequent launches skip the work entirely.
+     * One-shot seed for [SettingsKeys.ALBUM_OPT_IN_FOLDER_NAMES]: copies existing
+     * [SettingsKeys.ALBUM_BUCKET_MAP] bucket names into the opt-in set so installs already
+     * mirroring folders keep doing so once the toggle becomes user-visible. Gated on
+     * [SettingsKeys.ALBUM_OPT_IN_MIGRATED].
      */
     private fun seedAlbumOptInFromBucketMap() {
         appScope.launch {
@@ -166,9 +160,8 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
     }
 
     /**
-     * One-shot TTL prune for the full-res cache, deferred ~5 s so cold-start IO budget
-     * goes to the gallery first. The sweeper is a no-op when offline so cached photos
-     * stay viewable until the network returns.
+     * One-shot TTL prune for the full-res cache, deferred ~5 s so cold-start IO goes to the
+     * gallery first. No-op when offline so cached photos stay viewable until the network returns.
      */
     private fun scheduleFullResCachePrune() {
         appScope.launch {
@@ -183,15 +176,10 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
     }
 
     /**
-     * Process-lifetime receiver for [Intent.ACTION_USER_PRESENT] — fires when the user
-     * unlocks the device. Lock-screen photos (camera with quick-launch, screenshots taken
-     * while locked) flow into MediaStore but the per-Activity ContentObserver in
-     * LocalMediaRepositoryImpl is only registered while the gallery is open. Without this
-     * receiver the user has to open the app to kick a sync after unlock — the
-     * observable symptom is that captures taken on the lock screen sit on the device
-     * until the next manual app launch.
-     * Static manifest receivers can't observe ACTION_USER_PRESENT on Android 8+, so this
-     * has to be a runtime registration on the Application context.
+     * Process-lifetime [Intent.ACTION_USER_PRESENT] receiver — kicks a sync on unlock so
+     * lock-screen captures (which the gallery's per-Activity observer misses while closed) back
+     * up without reopening the app. Must be a runtime registration: manifest receivers can't
+     * observe ACTION_USER_PRESENT on Android 8+.
      */
     private fun registerUserPresentReceiver() {
         val receiver = object : BroadcastReceiver() {
@@ -208,10 +196,8 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
             }
         }
         val filter = IntentFilter(Intent.ACTION_USER_PRESENT)
-        // ACTION_USER_PRESENT is sent by com.android.systemui (a different UID), so the
-        // receiver MUST be exported. RECEIVER_NOT_EXPORTED silently drops the broadcast
-        // with an "Exported Denial" in the broadcast log — the receiver looks armed via
-        // dumpsys but never fires on unlock.
+        // Must be exported: ACTION_USER_PRESENT comes from systemui (a different UID), and
+        // RECEIVER_NOT_EXPORTED silently drops it so the receiver looks armed but never fires.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED)
         } else {
@@ -220,37 +206,24 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
     }
 
     /**
-     * Reads the cached theme key from a tiny SharedPreferences mirror (microseconds, no IO
-     * scheduler hop) and applies it to AppCompatDelegate. The canonical store is DataStore
-     * (`SettingsKeys.THEME_MODE`); the SharedPreferences side is kept in sync on every
-     * theme write in `SettingsViewModel` and refreshed in the background here in case the
-     * canonical version drifted (e.g. fresh install before the first theme write).
-     *
-     * Trade-off rationale: the previous implementation `runBlocking { DataStore.data.first() }`
-     * could block the main thread for tens of ms (cold-cache IO, DataStore migration), and on
-     * worst-case devices for hundreds. SharedPreferences-backed reads complete in < 1 ms.
+     * Reads the cached theme key from a SharedPreferences mirror (< 1 ms, no IO hop) and applies it
+     * to AppCompatDelegate, avoiding a main-thread `runBlocking { DataStore.data.first() }` that
+     * could stall for tens to hundreds of ms on cold cache. DataStore (`SettingsKeys.THEME_MODE`)
+     * is canonical; the mirror is written on every theme write and refreshed below for drift.
      */
     private fun applyStoredThemeMode() {
         val cached = ThemePrefsBoot.read(this)
-        // The AppCompatDelegate night-mode setting governs ProtonCore's Compose-based login
-        // screens (LoginTwoStepActivity etc.) because they read Configuration.uiMode via
-        // `isSystemInDarkTheme()`. We force NIGHT_YES for every value except an explicit
-        // "light" preference — the app's color palette is built for dark surfaces, and the
-        // previous "system" default made the login flow appear light on light-system phones
-        // (default theme on some OEM builds). The Compose-side ProtonPhotosTheme in MainActivity still
-        // respects the user's full system/dark/light choice for the in-app surfaces, so a
-        // user who explicitly picks "system" after first login still gets a system-following
-        // main app — the login flow just doesn't bounce between modes.
+        // AppCompatDelegate night mode governs ProtonCore's login screens (they read uiMode via
+        // isSystemInDarkTheme). Force NIGHT_YES except an explicit "light" pick — the palette is
+        // dark-built and a "system" default made login appear light on light-system OEM phones.
+        // The in-app Compose ProtonPhotosTheme still honours the full system/dark/light choice.
         AppCompatDelegate.setDefaultNightMode(
             when (cached) {
                 "light" -> AppCompatDelegate.MODE_NIGHT_NO
                 else    -> AppCompatDelegate.MODE_NIGHT_YES
             }
         )
-        // Refresh the mirror from DataStore in the background — handles two cases:
-        //  - First boot with no SharedPreferences entry yet (we just used "system"; DataStore
-        //    may already hold the migrated DARK_MODE value).
-        //  - DataStore was modified by a non-SettingsViewModel path (defensive sync).
+        // Background drift-sync of the mirror from DataStore (e.g. first boot before any theme write).
         appScope.launch {
             val fromDataStore = runCatching {
                 settingsDataStore.data.map { prefs ->
@@ -263,24 +236,16 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
             }.getOrNull() ?: return@launch
             if (fromDataStore != cached) {
                 ThemePrefsBoot.write(this@App, fromDataStore)
-                // Note: don't re-apply on the fly — would cause activity recreate flash. The
-                // current visible theme stays; the corrected value will apply on next cold start.
+                // Don't re-apply live (would flash an activity recreate); corrected value lands next cold start.
             }
         }
     }
 
     /**
-     * Reads the cached language tag from a tiny SharedPreferences mirror and applies it
-     * to AppCompatDelegate exactly once at process startup. The canonical store is
-     * DataStore (`SettingsKeys.LANGUAGE`); the SharedPreferences side is kept in sync on
-     * every language write in `SettingsViewModel` / `OnboardingViewModel` and refreshed
-     * in the background here in case the canonical version drifted.
-     *
-     * Why a one-shot at startup: `setApplicationLocales` triggers an Activity recreate
-     * when called after startup, which loses navigation state and plays a reload
-     * animation. Runtime locale switches inside the app go through `LocaleOverride` in
-     * the Compose tree — this call only covers the externally-launched ProtonCore login
-     * Activities (XML-based, outside the Compose tree).
+     * Applies the cached language tag (SharedPreferences mirror of DataStore `SettingsKeys.LANGUAGE`)
+     * to AppCompatDelegate once at startup. One-shot because `setApplicationLocales` after startup
+     * forces an Activity recreate that loses nav state; runtime switches go through `LocaleOverride`
+     * in Compose, so this only covers the XML-based ProtonCore login Activities.
      */
     private fun applyStoredLanguage() {
         val cached = LanguagePrefsBoot.read(this)
@@ -289,18 +254,13 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
         } else {
             LocaleListCompat.forLanguageTags(cached)
         }
-        // Dedup: setApplicationLocales triggers an Activity recreate (visible as a
-        // scale-from-center animation). If the framework already has the right locale
-        // from a previous session, skip the call. AppCompatDelegate persists
-        // setApplicationLocales across process death, so the no-op branch is the steady
-        // state once the user has picked a language.
+        // Skip the call if the framework already has the right locale — setApplicationLocales
+        // triggers an Activity recreate and persists across process death, so this is the steady state.
         val current = AppCompatDelegate.getApplicationLocales()
         if (current.toLanguageTags() != desired.toLanguageTags()) {
             AppCompatDelegate.setApplicationLocales(desired)
         }
-        // Defensive: same drift-sync as applyStoredThemeMode(). Handles a first boot
-        // where DataStore already holds the migrated tag but the SharedPreferences
-        // mirror has nothing.
+        // Background drift-sync of the mirror from DataStore (same as applyStoredThemeMode).
         appScope.launch {
             val fromDataStore = runCatching {
                 settingsDataStore.data.map { prefs ->
@@ -309,32 +269,16 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
             }.getOrNull() ?: return@launch
             if (fromDataStore != cached) {
                 LanguagePrefsBoot.write(this@App, fromDataStore)
-                // Don't re-apply on the fly — would force the Activity recreate this
-                // whole mechanism is built to avoid. The corrected value lands on the
-                // next cold start.
+                // Don't re-apply live — would force the Activity recreate this avoids; lands next cold start.
             }
         }
     }
 
     /**
-     * Privacy opt-in — when [SettingsKeys.CLEAR_CACHE_ON_APP_CLOSE] is on, wipe every
-     * disk cache the app maintains as soon as the whole process backgrounds. Users
-     * who flip this on are explicitly choosing zero on-disk traces over fast-restart
-     * UX; the cost is a fresh thumbnail + full-res pull on the next open. Lifecycle
-     * .Event.ON_STOP on the process-level lifecycle fires after the last Activity
-     * moves out of the started state (all activities backgrounded or destroyed), so
-     * this is the correct hook — single-Activity transitions (rotation, photo picker
-     * round-trips) do not trigger it.
-     *
-     * Wipe targets:
-     *  - `fullres/`, `fullres-session/` — full-res photo + video blob caches
-     *  - `thumbnails/` — decrypted photo thumbnails written by the gallery
-     *  - `coil_cache/` — Coil's bounded LRU disk cache (still leaks otherwise)
-     *
-     * Off-limits (would corrupt in-flight work or break next launch):
-     *  - `upload_<id>/` — in-flight encrypted upload block dirs
-     *  - `code_cache/` and other OS-managed subdirs
-     *  - the DataStore preferences themselves
+     * Privacy opt-in ([SettingsKeys.CLEAR_CACHE_ON_APP_CLOSE]): wipe disk caches when the whole
+     * process backgrounds. Process-level ON_STOP is the right hook — it fires only when all
+     * Activities leave the started state, not on rotation / picker round-trips. Wipes fullres,
+     * thumbnails, and coil_cache; deliberately leaves in-flight upload block dirs and DataStore alone.
      */
     private fun registerCacheCleanupOnBackground() {
         androidx.lifecycle.ProcessLifecycleOwner.get().lifecycle.addObserver(
@@ -351,9 +295,8 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
                             ).forEach { sub ->
                                 java.io.File(cacheDir, sub).deleteRecursively()
                             }
-                            // The decrypted thumbnail files are gone; null their DB paths so
-                            // the next launch re-requests a decrypt instead of pointing cells
-                            // at missing files (which the scheduler would skip as "done").
+                            // Null the DB thumbnail paths too, else the scheduler skips the now-missing
+                            // files as "done" instead of re-requesting a decrypt next launch.
                             photoListingDao.clearCachedThumbnailUrls()
                         }
                     }
@@ -362,14 +305,22 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
         )
     }
 
-    // Coil ImageLoader. VideoFrameDecoder for video posters. Memory cache capped at 12%
-    // (largeHeap default of 25% balloons past 400 MB and made scrolling laggy).
+    // Coil ImageLoader. VideoFrameDecoder for video posters; the animated decoder plays GIFs and
+    // widens HEIF/AVIF coverage (ImageDecoderDecoder on API 28+, GifDecoder below). Memory cache is
+    // capped well under the largeHeap 25% default, which balloons past 400 MB and made scrolling laggy.
     override fun newImageLoader(): ImageLoader = ImageLoader.Builder(this)
-        .components { add(VideoFrameDecoder.Factory()) }
+        .components {
+            add(VideoFrameDecoder.Factory())
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                add(coil.decode.ImageDecoderDecoder.Factory())
+            } else {
+                add(coil.decode.GifDecoder.Factory())
+            }
+        }
         .crossfade(true)
         .memoryCache {
             MemoryCache.Builder(this)
-                .maxSizePercent(0.12)
+                .maxSizePercent(0.18)
                 .build()
         }
         .diskCache {

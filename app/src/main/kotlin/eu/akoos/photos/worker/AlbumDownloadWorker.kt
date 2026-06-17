@@ -43,6 +43,8 @@ import kotlinx.coroutines.flow.first
 import java.io.File
 import me.proton.core.domain.entity.UserId
 import eu.akoos.photos.R
+import eu.akoos.photos.data.preferences.SettingsKeys
+import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.usecase.DownloadPhotosUseCase
 
@@ -73,6 +75,11 @@ class AlbumDownloadWorker @AssistedInject constructor(
     private val downloadPhotos: DownloadPhotosUseCase,
 ) : CoroutineWorker(context, params) {
 
+    // Per-run notification id so two concurrent album downloads no longer overwrite each other in
+    // the shade (the old fixed id meant only the last-started download stayed visible). Derived
+    // from this worker's UUID and kept well clear of the other fixed ids (4242-4245).
+    private val notificationId: Int = 5000 + (kotlin.math.abs(id.hashCode()) % 50_000)
+
     override suspend fun doWork(): Result {
         val albumName = inputData.getString(KEY_ALBUM_NAME).orEmpty()
         val userIdString = inputData.getString(KEY_USER_ID_STRING).orEmpty()
@@ -89,14 +96,21 @@ class AlbumDownloadWorker @AssistedInject constructor(
         }
         val userId = UserId(userIdString)
 
+        // Album-download notification opt-out, read once. When off the worker runs in the
+        // background (no foreground promotion, no notification); the in-app album screen still
+        // tracks progress via setProgress below.
+        val showNotification = context.settingsDataStore.data.first()[SettingsKeys.NOTIFY_ALBUM_DOWNLOAD] != false
+
         // Initial foreground info so the notification appears within the 5s window WorkManager
         // gives us before declaring an ANR-style timeout on the promote-to-foreground call.
         // Total starts at linkIds.size as a sane upper bound; the actual photo list is loaded
         // from the DB next (some linkIds may not be present yet — we still keep the same total
         // so the bar reaches 100% on completion).
-        runCatching {
-            setForeground(buildForegroundInfo(albumName, done = 0, total = linkIds.size))
-        }.onFailure { Log.w(TAG, "setForeground initial failed: ${it.message}") }
+        if (showNotification) {
+            runCatching {
+                setForeground(buildForegroundInfo(albumName, done = 0, total = linkIds.size))
+            }.onFailure { Log.w(TAG, "setForeground initial failed: ${it.message}") }
+        }
 
         return try {
             // Load CloudPhoto entities for the requested linkIds. `observePhotosByLinkIds`
@@ -109,11 +123,19 @@ class AlbumDownloadWorker @AssistedInject constructor(
             }
 
             val result = downloadPhotos.downloadCloudPhotos(userId, photos, albumName) { progress ->
-                // Best-effort progress refresh. setForeground throws if the worker was
+                // Publish progress to WorkManager so the in-app album screen can show a progress
+                // ring + cancel without depending on the notification (works even when the
+                // notification is opted out).
+                runCatching {
+                    setProgress(workDataOf(KEY_PROGRESS_DONE to progress.done, KEY_PROGRESS_TOTAL to progress.total))
+                }
+                // Best-effort notification refresh. setForeground throws if the worker was
                 // already cancelled (Android 14 + WorkManager 2.9); swallow that and let
                 // the CancellationException from the cooperative cancel bubble out instead.
-                runCatching {
-                    setForeground(buildForegroundInfo(albumName, progress.done, progress.total))
+                if (showNotification) {
+                    runCatching {
+                        setForeground(buildForegroundInfo(albumName, progress.done, progress.total))
+                    }
                 }
             }
 
@@ -163,6 +185,9 @@ class AlbumDownloadWorker @AssistedInject constructor(
             .setOnlyAlertOnce(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setCategory(NotificationCompat.CATEGORY_PROGRESS)
+            // Group concurrent album downloads so the shade clusters them; combined with the
+            // per-run [notificationId] both downloads stay visible instead of overwriting.
+            .setGroup(GROUP_KEY)
             // Cancel action — calling WorkManager.createCancelPendingIntent(id) yields an
             // intent that cooperatively cancels THIS worker by its UUID, so doWork's
             // CancellationException catch above is what handles teardown.
@@ -177,21 +202,28 @@ class AlbumDownloadWorker @AssistedInject constructor(
         // <service> entry. Without this, the worker silently fails to start on Q+ when
         // calling setForeground (or starts but is immediately killed on Android 14).
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            ForegroundInfo(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+            ForegroundInfo(notificationId, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
         } else {
-            ForegroundInfo(NOTIFICATION_ID, notification)
+            ForegroundInfo(notificationId, notification)
         }
     }
 
     companion object {
         const val TAG = "album_download_worker"
         const val CHANNEL_ID = "album_download"
+        // Legacy fixed id, retained for reference. Each run now posts under a per-instance
+        // [notificationId] instead, so concurrent downloads coexist in the shade.
         const val NOTIFICATION_ID = 4242
+        // Shared group key so multiple concurrent album-download notifications cluster together.
+        const val GROUP_KEY = "album_downloads"
 
         const val KEY_ALBUM_NAME = "albumName"
         const val KEY_PHOTO_LINK_IDS_FILE = "photoLinkIdsFile"
         const val KEY_PHOTO_COUNT = "photoCount"
         const val KEY_USER_ID_STRING = "userIdString"
+        // WorkManager progress data keys — read by AlbumDetailViewModel to drive the in-app ring.
+        const val KEY_PROGRESS_DONE = "progressDone"
+        const val KEY_PROGRESS_TOTAL = "progressTotal"
 
         /**
          * Lazily creates the album-download notification channel. Idempotent — calling on
@@ -263,6 +295,6 @@ class AlbumDownloadWorker @AssistedInject constructor(
             )
         }
 
-        private fun uniqueName(albumLinkId: String) = "album_download_$albumLinkId"
+        fun uniqueName(albumLinkId: String) = "album_download_$albumLinkId"
     }
 }

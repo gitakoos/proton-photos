@@ -158,6 +158,7 @@ internal fun AppearanceStep(
                 "fr" to R.string.language_fr,
                 "hu" to R.string.language_hu,
                 "it" to R.string.language_it,
+                "nl" to R.string.language_nl,
             )
             options.forEachIndexed { idx, (tag, labelRes) ->
                 val selected = language == tag

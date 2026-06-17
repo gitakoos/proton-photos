@@ -28,6 +28,13 @@ data class GalleryUiState(
     val isLoading: Boolean = true,
     val items: List<GalleryItem> = emptyList(),
     val filteredItems: List<GalleryItem> = emptyList(),
+    /** Month buckets of [filteredItems] ("MMMM yyyy" label → items, encounter order) precomputed
+     *  off the main thread in the ViewModel. The timeline grid iterates this directly instead of
+     *  running SimpleDateFormat per item inside composition on every list re-emission. */
+    val monthGroups: List<Pair<String, List<GalleryItem>>> = emptyList(),
+    /** "On this day" memories (year → items, most-recent-first) precomputed off the main thread
+     *  from the unfiltered [items], matching the carousel's filter-independent source. */
+    val onThisDayGroups: List<Pair<Int, List<GalleryItem>>> = emptyList(),
     val selectedFilter: GalleryFilter = GalleryFilter.All,
     val favoriteIds: Set<String> = emptySet(),
     val isRefreshing: Boolean = false,
@@ -40,38 +47,32 @@ data class GalleryUiState(
     val cloudMaxBytes: Long = 0L,
     val selectedItems: Set<GalleryItem> = emptySet(),
     val multiDeleteState: MultiDeleteState = MultiDeleteState.Idle,
-    /**
-     * Lifecycle of a multi-photo "move to hidden" run. Mirrors [multiDeleteState]'s
-     * sealed shape but is read separately by the selection bar so the Hide spinner
-     * surfaces on the More menu without also setting the Delete (trash) button to
-     * its in-flight state.
-     */
+    /** Separate from [multiDeleteState] so the Hide spinner shows on the More menu without
+     *  also putting the Delete (trash) button into its in-flight state. */
     val multiHideState: MultiDeleteState = MultiDeleteState.Idle,
-    /** True when the last hide batch included backed-up photos — the post-hide
-     *  snackbar then discloses that the Drive copies remain in the cloud. */
+    /** Last hide batch included backed-up photos — the snackbar then notes the Drive copies stay. */
     val hideCloudNoticePending: Boolean = false,
     val pendingDeleteIntent: android.app.PendingIntent? = null,
     val multiDownloadState: MultiDownloadState = MultiDownloadState.Idle,
     val multiShareState: MultiShareState = MultiShareState.Idle,
     val addToAlbumState: AddToAlbumState = AddToAlbumState.Idle,
     val multiStripState: MultiStripState = MultiStripState.Idle,
-    /** Android 10+ write-permission dialog for stripping metadata from foreign files in the
-     *  selection. Set when a batch strip hits files the OS won't write without consent; the
-     *  screen launches it and the granted retry strips the deferred URIs. */
+    /** Android 10+ write-permission dialog for stripping foreign files; the granted retry strips
+     *  the deferred URIs. */
     val pendingStripIntent: android.app.PendingIntent? = null,
     val isSyncing: Boolean = false,
+    // uploadTotalCount > 0 (with isSyncing) means a back-up is in flight.
+    val uploadDoneIdx: Int = 0,
+    val uploadTotalCount: Int = 0,
     val pendingUploadCount: Int = 0,
     val uploadedCount: Int = 0,
     val timelineGrouping: TimelineGrouping = TimelineGrouping.Month,
-    /** Cloud linkIds whose local twin lives in the Hidden vault. Used by [PhotoCell] to draw
-     *  a crossed-out eye overlay so the user can tell at a glance which cloud photos are
-     *  hidden on this device. Derived from SyncStateRepo rows with [SyncStatus.HIDDEN]. */
+    val denseGridWarningDismissed: Boolean = false,
+    /** Cloud linkIds whose local twin is in the Hidden vault; [PhotoCell] draws a crossed-out
+     *  eye overlay. Derived from SyncStateRepo rows with [SyncStatus.HIDDEN]. */
     val hiddenCloudLinkIds: Set<String> = emptySet(),
-    /** Cloud linkIds of photos that belong to at least one Drive album. Used by [applyFilter]
-     *  to exclude album items from the [GalleryFilter.All] view when the "Hide photos in albums"
-     *  toggle is on. Empty when the toggle is off. Non-All filters (Favorites, Screenshots,
-     *  Videos, …) ignore this — when the user explicitly picks a tab, they want to see every
-     *  matching item, album membership or not. */
+    /** Cloud linkIds in at least one Drive album. [applyFilter] excludes these from [GalleryFilter.All]
+     *  when "Hide photos in albums" is on (empty when off); non-All tabs ignore it. */
     val albumHideCloudIds: Set<String> = emptySet(),
 ) {
     val storageFraction: Float
@@ -96,31 +97,24 @@ sealed class MultiDownloadState {
     data class  Done(val succeeded: Int, val failed: Int) : MultiDownloadState()
 }
 
-/** Lifecycle of the multi-select "Share" action. [Working] tracks how many cloud-only items
- *  in the batch have finished decrypting so the share pill can show determinate progress; the
- *  terminal step is the chooser launch, surfaced through a one-shot intent rather than a state. */
+/** [Working] tracks how many cloud-only items have finished decrypting (determinate progress);
+ *  the terminal chooser launch is a one-shot intent, not a state. */
 sealed class MultiShareState {
     data object Idle : MultiShareState()
     data class  Working(val done: Int, val total: Int) : MultiShareState()
 }
 
-/** Lifecycle of the "Add selected to album" multi-action. Cloud-add and local-move legs run in
- *  the same operation, so the terminal state aggregates both numbers. */
 sealed class AddToAlbumState {
     data object Idle : AddToAlbumState()
     data object Working : AddToAlbumState()
-    /** [cloudAdded] = photos attached to a cloud album; [localMoved] = files moved to a bucket.
-     *  [skipped] = items the picked target couldn't accept (cloud-only items when target is a
-     *  local bucket; local-only items with no cloud counterpart when target is a Drive album).
-     *  Surfaced as a partial-success snackbar so a mixed selection no longer drops items
-     *  silently. */
+    /** [cloudAdded] attached to a cloud album; [localMoved] queued to back up then join; [skipped]
+     *  the target couldn't accept. Surfaced as a partial-success snackbar for mixed selections. */
     data class Done(val cloudAdded: Int, val localMoved: Int, val skipped: Int, val albumName: String) : AddToAlbumState()
     data class Failed(val message: String) : AddToAlbumState()
 }
 
-/** Lifecycle of the multi-select EXIF-strip action. Skipped count covers cloud-only items in
- *  the selection (we can't modify cloud bytes here) plus any local file the OS refused to write
- *  in-place (foreign owner under scoped storage). */
+/** Skipped count covers cloud-only items (no local bytes to modify) plus local files the OS
+ *  refused to write in-place (foreign owner under scoped storage). */
 sealed class MultiStripState {
     data object Idle : MultiStripState()
     data object Working : MultiStripState()
@@ -158,6 +152,7 @@ data class ContentFilter(
     val syncStatus: SyncStatusFilter = SyncStatusFilter.All,
     val year: Int? = null,
     val month: Int? = null,
+    val day: Int? = null,
 )
 
 enum class MediaType { All, PhotosOnly, VideosOnly }

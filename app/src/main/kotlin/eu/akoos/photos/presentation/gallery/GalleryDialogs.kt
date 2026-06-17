@@ -71,12 +71,6 @@ import eu.akoos.photos.presentation.theme.FgPrimary
 import eu.akoos.photos.presentation.theme.Line2
 import eu.akoos.photos.presentation.theme.PillBg
 
-// ── Content filter bottom sheet ───────────────────────────────────────────────
-//
-// Hosts the [ContentFilterSheet] inside a ModalBottomSheet. The mount gate
-// (`if (showFilterSheet)`) stays at the call-site so the open/dismiss flow
-// remains visible there.
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun GalleryContentFilterDialog(
@@ -103,11 +97,7 @@ internal fun GalleryContentFilterDialog(
     }
 }
 
-// ── Shared email filter bottom sheet ──────────────────────────────────────────
-//
-// Picker for the Shared tab's "Filter by person" affordance. The caller owns
-// the [activeEmailFilter] state — `onEmailSelected(null)` resets to "All".
-
+/** Shared-tab "Filter by person" picker. `onEmailSelected(null)` resets to "All". */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun GallerySharedEmailFilterDialog(
@@ -190,8 +180,6 @@ internal fun GallerySharedEmailFilterDialog(
     }
 }
 
-// ── Multi-select delete bottom sheet ──────────────────────────────────────────
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun GalleryMultiDeleteDialog(
@@ -212,11 +200,6 @@ internal fun GalleryMultiDeleteDialog(
     }
 }
 
-// ── Add-to-album picker bottom sheet ──────────────────────────────────────────
-//
-// Hosts [GalleryAddToAlbumPickerSheet] inside a ModalBottomSheet. The picker
-// itself stays in GalleryScreen.kt — this wrapper only owns the sheet chrome.
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun GalleryAddToAlbumDialog(
@@ -233,8 +216,7 @@ internal fun GalleryAddToAlbumDialog(
         containerColor = Bg2,
         scrimColor = Color.Black.copy(alpha = 0.5f),
     ) {
-        // Photos join an album as references on Drive; only cloud-backed items in the
-        // selection carry a linkId, so the picker offers cloud albums + a New album row.
+        // Only cloud-backed items carry a linkId, so the picker offers cloud albums + New album.
         val anyCloudBacked = selectedItems.any {
             it is GalleryItem.Synced || it is GalleryItem.CloudOnly
         }
@@ -247,11 +229,6 @@ internal fun GalleryAddToAlbumDialog(
         )
     }
 }
-
-// ── New-album inline create bottom sheet ──────────────────────────────────────
-//
-// Launched from the picker's "+ New album" row. Owns the text-field state
-// internally; calls back with the trimmed-but-not-empty name on commit.
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

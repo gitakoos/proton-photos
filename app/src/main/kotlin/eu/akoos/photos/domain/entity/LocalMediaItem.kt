@@ -32,4 +32,10 @@ data class LocalMediaItem(
     val width: Int = 0,
     val height: Int = 0,
     val duration: Long = 0,
+    /** MediaStore DATE_MODIFIED (epoch seconds). Half of the local-tag cache freshness key —
+     *  with [sizeBytes] it detects a file that was replaced in place. 0 when unavailable. */
+    val dateModified: Long = 0,
+    /** Category-tag ids (Drive PhotoTag enum) from the persisted local-tag cache. Empty when no
+     *  fresh cache entry exists yet; categorization then falls back to the cheap heuristics. */
+    val tags: Set<Int> = emptySet(),
 )

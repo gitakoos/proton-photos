@@ -22,24 +22,47 @@
 
 package eu.akoos.photos.presentation.viewer
 
+import android.content.Context
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import android.net.Uri
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentWidth
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.layout.ContentScale
+import coil.compose.AsyncImage
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
+import androidx.compose.material.icons.filled.ChevronLeft
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Icon
@@ -54,10 +77,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
@@ -72,6 +97,7 @@ import eu.akoos.photos.presentation.theme.FgPrimary
 import eu.akoos.photos.presentation.theme.PillBg
 import eu.akoos.photos.presentation.theme.PillBorder
 import eu.akoos.photos.presentation.util.formatVideoTime
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 
 // ── Video player ───────────────────────────────────────────────────────────────
@@ -86,82 +112,86 @@ internal fun VideoPlayer(
     uri: Uri,
     onPlayerReady: (ExoPlayer) -> Unit = {},
     modifier: Modifier = Modifier,
-    /** Optional bump value mixed into the player's `remember` key — caller passes the
-     *  editor's last-save timestamp so an Overwrite (same URI, fresh bytes) builds a new
-     *  ExoPlayer instead of reusing the one whose MediaSource still points at the
-     *  pre-edit state. */
+    /** Mixed into the player's `remember` key so an Overwrite-save (same URI, fresh bytes) builds
+     *  a new ExoPlayer instead of reusing one whose MediaSource points at the pre-edit state. */
     reloadKey: Any = Unit,
-    /** When false the player is built and prepared (first frame visible) but doesn't
-     *  start playback — the pill's play button flips this true via state at the call site.
-     *  This split lets the surface fade in immediately on cloud-video download and the
-     *  tap-to-play feel instantaneous instead of waiting on prepare(). */
+    /** When false the player prepares (first frame visible) but doesn't play; the pill flips this
+     *  true. Lets the surface fade in immediately and tap-to-play feel instant. */
     autoPlay: Boolean = true,
+    /** Non-null = play once and call this on natural end (inline motion-photo); null = loop. */
+    onEnded: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
+    val loop = onEnded == null
     val exoPlayer = remember(uri, reloadKey) {
         ExoPlayer.Builder(context).build().apply {
             setMediaItem(MediaItem.fromUri(uri))
             prepare()
             playWhenReady = autoPlay
-            repeatMode = ExoPlayer.REPEAT_MODE_ONE
+            repeatMode = if (loop) ExoPlayer.REPEAT_MODE_ONE else ExoPlayer.REPEAT_MODE_OFF
         }.also { onPlayerReady(it) }
     }
-    // Sync playback state when the caller flips autoPlay (user tapped the pill).
     LaunchedEffect(exoPlayer, autoPlay) {
         exoPlayer.playWhenReady = autoPlay
     }
+    // rememberUpdatedState keeps the STATE_ENDED listener pinned to the latest lambda without
+    // re-registering on every recomposition.
+    val currentOnEnded by androidx.compose.runtime.rememberUpdatedState(onEnded)
     DisposableEffect(exoPlayer) {
-        onDispose { exoPlayer.release() }
+        val listener = object : androidx.media3.common.Player.Listener {
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                if (playbackState == androidx.media3.common.Player.STATE_ENDED) {
+                    currentOnEnded?.invoke()
+                }
+            }
+        }
+        exoPlayer.addListener(listener)
+        onDispose {
+            exoPlayer.removeListener(listener)
+            exoPlayer.release()
+        }
+    }
+    // Pause when the app leaves the foreground so a video never keeps playing in the background.
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    DisposableEffect(exoPlayer, lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_PAUSE) exoPlayer.playWhenReady = false
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
     AndroidView(
         factory = { ctx ->
             PlayerView(ctx).apply {
-                // Disable the built-in controller BEFORE attaching the player. Setting
-                // `player = ...` first lets PlayerView observe the initial Player.STATE_*
-                // transition with the default controller still enabled — on some devices
-                // that paints a one-frame play/pause/seek bar overlay before our explicit
-                // useController=false takes effect. Setting it false first prevents that
-                // first-paint leak.
+                // Disable the controller BEFORE attaching the player: setting `player` first lets
+                // PlayerView paint a one-frame control bar on some devices before useController
+                // takes effect.
                 useController = false
                 controllerAutoShow = false
                 controllerHideOnTouch = false
                 controllerShowTimeoutMs = 0
-                // setShowBuffering NEVER also kills the spinner that ExoPlayer briefly
-                // shows when buffering — our own download/loading pill is the source of
-                // truth for "video is loading".
+                // Our own download/loading pill is the source of truth, so suppress ExoPlayer's
+                // buffering spinner.
                 setShowBuffering(PlayerView.SHOW_BUFFERING_NEVER)
                 hideController()
-                // The PlayerView's "shutter" view is a solid background that covers the
-                // surface until the first frame renders — and on some devices it stays
-                // up during pause / seek, looking like an unwanted overlay. Make it
-                // transparent so users only ever see the video itself.
+                // Transparent shutter so it doesn't look like an overlay during pause / seek.
                 setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
-                // The default artwork (a centered placeholder) shows when audio-only
-                // metadata is detected — irrelevant for our case but kill it explicitly.
                 useArtwork = false
                 setDefaultArtwork(null)
-                // Player attach AFTER the controller is fully suppressed.
                 player = exoPlayer
-                // Restored to true once single-flight download per linkId landed and
-                // eliminated the swipe-back-rebuilds-player path. The cached video now
-                // reuses the same ExoPlayer instance, so there's no "kept old frame"
-                // hazard — and keeping content on reset removes a flicker where the
-                // surface would briefly clear to transparent and the page background
-                // would bleed through.
+                // Keep the last frame on reset to avoid a transparent flicker; safe since the
+                // cached video reuses the same ExoPlayer instance (no stale-frame hazard).
                 setKeepContentOnPlayerReset(true)
             }
         },
         update = { view ->
             view.player = exoPlayer
-            // Defensive: if any code path flips useController back on (e.g. another
-            // PlayerView util we add later), keep the suppression invariant on update.
+            // Keep the controller suppressed in case anything flipped it back on.
             view.useController = false
         },
         modifier = modifier,
     )
 }
-
-// ── Video control pill — everything inline in one pill ────────────────────────
 
 @Composable
 internal fun VideoControlPill(
@@ -193,7 +223,6 @@ internal fun VideoControlPill(
         else -> 0f
     }
 
-    // Single pill: [▶/⏸] [seek bar ~90dp] [time] [🔊]
     Row(
         modifier = Modifier
             .background(PillBg, infoPillShape)
@@ -202,7 +231,6 @@ internal fun VideoControlPill(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        // Play / Pause
         Box(
             modifier = Modifier.size(28.dp).clip(CircleShape).clickable {
                 when {
@@ -215,8 +243,7 @@ internal fun VideoControlPill(
         ) {
             Icon(
                 if (videoStarted && isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                // Theme-reactive: the pill goes near-white in light mode where a fixed
-                // white glyph would vanish.
+                // FgPrimary (not white): the pill goes near-white in light mode.
                 null, tint = FgPrimary, modifier = Modifier.size(20.dp),
             )
         }
@@ -224,7 +251,6 @@ internal fun VideoControlPill(
         // Canvas draw lambdas are not composable scope — resolve the reactive color here.
         val seekColor = FgPrimary
 
-        // Compact seek bar inside pill
         Canvas(
             modifier = Modifier
                 .width(90.dp)
@@ -268,14 +294,12 @@ internal fun VideoControlPill(
             drawCircle(seekColor, radius = 5.dp.toPx(), center = Offset(px, cy))
         }
 
-        // Time
         Text(
             if (durationMs > 0) "${formatVideoTime(currentMs)} / ${formatVideoTime(durationMs)}"
             else "0:00",
             color = FgPrimary, fontSize = 12.sp, fontWeight = FontWeight.Medium,
         )
 
-        // Mute — always visible
         Box(
             modifier = Modifier.size(28.dp).clip(CircleShape).clickable {
                 isMuted = !isMuted
@@ -289,5 +313,134 @@ internal fun VideoControlPill(
                 modifier = Modifier.size(18.dp),
             )
         }
+    }
+}
+
+/** Phone rotation through this angle (~110°) sweeps the whole strip end to end, so the gyro pan
+ *  scales to the strip's width; a larger angle = gentler pan per unit of physical rotation. */
+private const val PANO_SWEEP_RAD = 1.9f
+
+/**
+ * Immersive horizontal-pan view for a panorama still. [ContentScale.FillHeight] +
+ * [wrapContentWidth(unbounded = true)] sizes the image from height alone, so a wide panorama
+ * overflows the width and the scroll container pans across it (gyro tilt drives the same scroll).
+ */
+@Composable
+internal fun PanoramaPager(
+    model: Any,
+    modifier: Modifier = Modifier,
+) {
+    val context = LocalContext.current
+    val scrollState = rememberScrollState()
+
+    // The sensor callback runs off the main thread, so it only posts the raw yaw delta onto a
+    // channel; the consumer maps it to pixels and drives the same scroll state as the drag.
+    val rotationDeltas = remember { Channel<Float>(Channel.UNLIMITED) }
+    DisposableEffect(Unit) {
+        val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as? SensorManager
+        val gyro = sensorManager?.getDefaultSensor(Sensor.TYPE_GYROSCOPE)
+        var lastTs = 0L
+        val listener = object : SensorEventListener {
+            override fun onSensorChanged(event: SensorEvent) {
+                if (lastTs != 0L) {
+                    val dt = (event.timestamp - lastTs) * 1e-9f
+                    // values[1] = rotation rate (rad/s) around the device's vertical axis (yaw).
+                    rotationDeltas.trySend(event.values[1] * dt)
+                }
+                lastTs = event.timestamp
+            }
+            override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+        }
+        if (gyro != null) {
+            sensorManager.registerListener(listener, gyro, SensorManager.SENSOR_DELAY_GAME)
+        }
+        onDispose { sensorManager?.unregisterListener(listener) }
+    }
+    LaunchedEffect(Unit) {
+        for (radians in rotationDeltas) {
+            // Yield to an active finger drag / fling so the two inputs never fight.
+            if (scrollState.isScrollInProgress) continue
+            val range = scrollState.maxValue
+            if (range <= 0) continue
+            // Turn left → reveal the left of the strip (scroll toward the start); turn right → right.
+            scrollState.scrollBy(-radians * (range / PANO_SWEEP_RAD))
+        }
+    }
+
+    // Side-arrow hint: a brief outward nudge on both edges telling the user to move the device
+    // (or drag) to look around. Fades out after a few seconds so it never lingers over the photo.
+    var showHint by remember { mutableStateOf(true) }
+    LaunchedEffect(Unit) { delay(4500); showHint = false }
+    val hintAlpha by animateFloatAsState(
+        targetValue = if (showHint) 1f else 0f,
+        animationSpec = tween(400),
+        label = "panoHintAlpha",
+    )
+    val hintTransition = rememberInfiniteTransition(label = "panoHint")
+    val nudge by hintTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(850, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        label = "panoHintNudge",
+    )
+
+    Box(modifier = modifier.fillMaxSize()) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .horizontalScroll(scrollState),
+            contentAlignment = Alignment.Center,
+        ) {
+            AsyncImage(
+                model = model,
+                contentDescription = null,
+                contentScale = ContentScale.FillHeight,
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .wrapContentWidth(unbounded = true),
+            )
+        }
+
+        if (hintAlpha > 0.01f) {
+            PanoramaHintArrow(
+                icon = Icons.Default.ChevronLeft,
+                modifier = Modifier
+                    .align(Alignment.CenterStart)
+                    .padding(start = 12.dp)
+                    .offset(x = (nudge * -5).dp)
+                    .alpha(hintAlpha),
+            )
+            PanoramaHintArrow(
+                icon = Icons.Default.ChevronRight,
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .padding(end = 12.dp)
+                    .offset(x = (nudge * 5).dp)
+                    .alpha(hintAlpha),
+            )
+        }
+    }
+}
+
+/** One edge arrow of the panorama "move to look around" hint — a chevron in a soft pill disc. */
+@Composable
+private fun PanoramaHintArrow(
+    icon: ImageVector,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier
+            .size(38.dp)
+            .clip(CircleShape)
+            .background(PillBg)
+            .border(0.5.dp, PillBorder, CircleShape),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            icon,
+            contentDescription = null,
+            tint = FgPrimary,
+            modifier = Modifier.size(24.dp),
+        )
     }
 }

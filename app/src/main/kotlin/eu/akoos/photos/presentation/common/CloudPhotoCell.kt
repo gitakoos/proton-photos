@@ -52,10 +52,12 @@ import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import eu.akoos.photos.R
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.Bg2
 import eu.akoos.photos.presentation.theme.FgDim
@@ -244,7 +246,7 @@ fun CloudPhotoCell(
                         contentAlignment = Alignment.Center,
                     ) {
                         Icon(
-                            Icons.Default.Check, "Selected",
+                            Icons.Default.Check, stringResource(R.string.cd_status_selected),
                             tint = Color.White, modifier = Modifier.size(14.dp),
                         )
                     }
@@ -274,7 +276,7 @@ private fun BoxScope.CloudBadge() {
     ) {
         Icon(
             Icons.Default.Cloud,
-            contentDescription = "Only in Drive",
+            contentDescription = stringResource(R.string.cd_status_cloud_only),
             tint = Color.White,
             modifier = Modifier.size(12.dp),
         )
@@ -294,7 +296,7 @@ private fun BoxScope.SyncedCloudBadge() {
     ) {
         Icon(
             Icons.Default.Cloud,
-            contentDescription = "Backed up, also on device",
+            contentDescription = stringResource(R.string.cd_status_backed_up_device),
             tint = Color(0xFF30D158),
             modifier = Modifier.size(12.dp),
         )
@@ -316,7 +318,7 @@ private fun BoxScope.HiddenEyeBadge() {
     ) {
         Icon(
             Icons.Default.VisibilityOff,
-            contentDescription = "Hidden on this device",
+            contentDescription = stringResource(R.string.viewer_hidden_label),
             tint = Color.White,
             modifier = Modifier.size(12.dp),
         )

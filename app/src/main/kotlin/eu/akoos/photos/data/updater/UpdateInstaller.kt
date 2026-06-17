@@ -24,12 +24,15 @@ package eu.akoos.photos.data.updater
 
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.content.pm.Signature
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import androidx.core.content.FileProvider
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
+import java.security.MessageDigest
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -88,4 +91,48 @@ class UpdateInstaller @Inject constructor(
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
     }
+
+    /**
+     * True only if [apkFile] is signed by the exact same certificate(s) as this installed app.
+     * Blocks installing a tampered/substituted APK (e.g. a MITM on the GitHub download) since
+     * the system installer would otherwise reject a mismatched signer with an opaque error
+     * mid-flow. Fail-closed: any parse/lookup error returns false (don't install).
+     */
+    fun verifyApkSignature(apkFile: File): Boolean {
+        return try {
+            val installed = signerSha256(installedSigners())
+            val candidate = signerSha256(apkSigners(apkFile.absolutePath))
+            installed.isNotEmpty() && installed == candidate
+        } catch (t: Throwable) {
+            false
+        }
+    }
+
+    private fun installedSigners(): Array<Signature> {
+        val pm = context.packageManager
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            pm.getPackageInfo(context.packageName, PackageManager.GET_SIGNING_CERTIFICATES)
+                .signingInfo?.apkContentsSigners ?: emptyArray()
+        } else {
+            @Suppress("DEPRECATION")
+            pm.getPackageInfo(context.packageName, PackageManager.GET_SIGNATURES).signatures ?: emptyArray()
+        }
+    }
+
+    private fun apkSigners(path: String): Array<Signature> {
+        val pm = context.packageManager
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            pm.getPackageArchiveInfo(path, PackageManager.GET_SIGNING_CERTIFICATES)
+                ?.signingInfo?.apkContentsSigners ?: emptyArray()
+        } else {
+            @Suppress("DEPRECATION")
+            pm.getPackageArchiveInfo(path, PackageManager.GET_SIGNATURES)?.signatures ?: emptyArray()
+        }
+    }
+
+    private fun signerSha256(signatures: Array<Signature>): Set<String> =
+        signatures.map { sig ->
+            MessageDigest.getInstance("SHA-256").digest(sig.toByteArray())
+                .joinToString("") { "%02x".format(it) }
+        }.toSet()
 }
