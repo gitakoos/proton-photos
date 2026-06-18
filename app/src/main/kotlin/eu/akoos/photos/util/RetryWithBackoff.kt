@@ -55,10 +55,7 @@ suspend fun <T> retryWithBackoff(
         } catch (e: Throwable) {
             lastError = e
             val msg = e.message ?: ""
-            val transient = e is IOException ||
-                msg.contains("429") || msg.contains("503") ||
-                msg.contains("502") || msg.contains("504") ||
-                shouldRetry(e)
+            val transient = isTransientApiError(e) || shouldRetry(e)
             if (!transient || attempt == maxAttempts - 1) throw e
             val backoff = minOf(baseMs shl attempt, maxBackoffMs)
             val jitter = Random.nextLong(0, baseMs)
@@ -67,6 +64,17 @@ suspend fun <T> retryWithBackoff(
         }
     }
     throw lastError ?: IllegalStateException("retryWithBackoff exhausted")
+}
+
+/**
+ * Whether [e] looks like a transient API failure worth retrying: a network [IOException], or a
+ * 429 / 502 / 503 / 504 surfaced in the message. Shared by [retryWithBackoff] and callers running
+ * their own slower outer backoff (e.g. resuming a rate-limited large-library listing).
+ */
+fun isTransientApiError(e: Throwable): Boolean {
+    val msg = e.message ?: ""
+    return e is IOException ||
+        msg.contains("429") || msg.contains("503") || msg.contains("502") || msg.contains("504")
 }
 
 /**

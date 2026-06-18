@@ -45,6 +45,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -52,11 +53,13 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import eu.akoos.photos.R
+import eu.akoos.photos.presentation.gallery.GridZoom
 import eu.akoos.photos.presentation.settings.components.CollapsibleSection
 import eu.akoos.photos.presentation.settings.components.NavRow
 import eu.akoos.photos.presentation.settings.components.RowDivider
 import eu.akoos.photos.presentation.settings.components.SettingsCard
 import eu.akoos.photos.presentation.settings.components.SettingsSubPageScaffold
+import eu.akoos.photos.presentation.settings.components.ToggleRow
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.paletteAccent
 
@@ -70,6 +73,7 @@ fun AppearanceSettingsScreen(
     onBack: () -> Unit,
     onThemeClick: () -> Unit = {},
     onLanguageClick: () -> Unit = {},
+    onGridLayoutClick: () -> Unit = {},
     onTimelineFilterClick: () -> Unit = {},
 ) {
     SettingsSubPageScaffold(title = stringResource(R.string.settings_appearance), onBack = onBack) {
@@ -82,6 +86,11 @@ fun AppearanceSettingsScreen(
             NavRow(
                 label = stringResource(R.string.language_section),
                 onClick = onLanguageClick,
+            )
+            RowDivider()
+            NavRow(
+                label = stringResource(R.string.settings_grid_layout),
+                onClick = onGridLayoutClick,
             )
             RowDivider()
             // Photos timeline behaviour — what shows up on the Photos tab. A visualisation
@@ -180,6 +189,47 @@ fun LanguageSettingsScreen(
                     onClick = { viewModel.setLanguage(option.tag) },
                 )
                 if (index < options.lastIndex) RowDivider()
+            }
+        }
+    }
+}
+
+/** Grid layout — the remember-last-zoom toggle plus the fixed default columns per row. */
+@Composable
+fun GridLayoutSettingsScreen(
+    onBack: () -> Unit,
+    viewModel: SettingsViewModel = hiltViewModel(),
+) {
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
+
+    SettingsSubPageScaffold(title = stringResource(R.string.settings_grid_layout), onBack = onBack) {
+        SettingsCard {
+            ToggleRow(
+                label = stringResource(R.string.grid_remember_last),
+                description = stringResource(R.string.grid_remember_last_desc),
+                checked = state.gridRememberLast,
+                onCheckedChange = viewModel::setGridRememberLast,
+            )
+        }
+
+        Spacer(Modifier.height(20.dp))
+
+        // Fixed default columns — greyed out while "remember last used" is on, since that
+        // overrides the default with whatever zoom the user last pinched to.
+        val defaultEnabled = !state.gridRememberLast
+        CollapsibleSection(label = stringResource(R.string.grid_default_columns_section)) {
+            Row(
+                modifier = Modifier.fillMaxWidth().alpha(if (defaultEnabled) 1f else 0.4f),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                GridZoom.COLUMN_OPTIONS.forEach { count ->
+                    ThemeModePill(
+                        label = count.toString(),
+                        selected = state.gridDefaultColumns == count,
+                        onClick = { if (defaultEnabled) viewModel.setGridDefaultColumns(count) },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
             }
         }
     }

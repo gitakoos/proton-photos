@@ -1042,4 +1042,10 @@
     <string name="err_show_more">Show more</string>
     <string name="err_show_less">Show less</string>
     <string name="err_copy">Copy</string>
+
+    <!-- Grid layout (Appearance) -->
+    <string name="settings_grid_layout">Grid layout</string>
+    <string name="grid_remember_last">Remember last used</string>
+    <string name="grid_remember_last_desc">Open your photos at the zoom level you last used</string>
+    <string name="grid_default_columns_section">Photos per row</string>
 </resources>

@@ -512,6 +512,8 @@ class SettingsViewModel @Inject constructor(
                     appLockTimeoutMinutes = migratedPrefs[SettingsKeys.APP_LOCK_TIMEOUT_MINUTES] ?: 0,
                     clearCacheOnAppClose = migratedPrefs[SettingsKeys.CLEAR_CACHE_ON_APP_CLOSE] ?: false,
                     hidePhotosInAlbums = migratedPrefs[SettingsKeys.HIDE_PHOTOS_IN_ALBUMS] ?: false,
+                    gridRememberLast = migratedPrefs[SettingsKeys.GRID_REMEMBER_LAST] ?: false,
+                    gridDefaultColumns = migratedPrefs[SettingsKeys.GRID_DEFAULT_COLUMNS] ?: 3,
                 )
             }
         }
@@ -730,6 +732,20 @@ class SettingsViewModel @Inject constructor(
                 it[SettingsKeys.THEME_PALETTE] = palette.storageKey
             }
             _uiState.update { it.copy(palette = palette) }
+        }
+    }
+
+    fun setGridRememberLast(enabled: Boolean) {
+        viewModelScope.launch {
+            context.settingsDataStore.edit { it[SettingsKeys.GRID_REMEMBER_LAST] = enabled }
+            _uiState.update { it.copy(gridRememberLast = enabled) }
+        }
+    }
+
+    fun setGridDefaultColumns(columns: Int) {
+        viewModelScope.launch {
+            context.settingsDataStore.edit { it[SettingsKeys.GRID_DEFAULT_COLUMNS] = columns }
+            _uiState.update { it.copy(gridDefaultColumns = columns) }
         }
     }
 

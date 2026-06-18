@@ -87,6 +87,15 @@ object SettingsKeys {
     val CATEGORY_RAIL_ORDER = stringPreferencesKey("category_rail_order")
 
     val LANGUAGE = stringPreferencesKey("language")
+
+    /** Photo grid: fixed default columns per row. Drives the album / device-folder / hidden grids,
+     *  and the timeline's opening zoom when [GRID_REMEMBER_LAST] is off. */
+    val GRID_DEFAULT_COLUMNS = intPreferencesKey("grid_default_columns")
+    /** When true, the timeline opens at the last pinched zoom level instead of [GRID_DEFAULT_COLUMNS]. */
+    val GRID_REMEMBER_LAST = booleanPreferencesKey("grid_remember_last")
+    /** Last pinched timeline zoom level index; restored on launch when [GRID_REMEMBER_LAST] is on. */
+    val GRID_LAST_LEVEL = intPreferencesKey("grid_last_level")
+
     /** Folders selected for backup. null (key absent) = back up nothing (first-run default). */
     val SYNC_FOLDER_NAMES = stringSetPreferencesKey("sync_folder_names")
 

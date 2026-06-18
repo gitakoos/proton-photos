@@ -134,6 +134,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
+import coil.compose.AsyncImagePainter
+import coil.request.ImageRequest
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import androidx.compose.material.icons.filled.Favorite
@@ -703,13 +705,19 @@ fun PhotoViewerScreen(
                     null -> null
                 }
                 val stateMatchesPage = state.itemKey == null || state.itemKey == currentItemKey
-                // Hide the thumb once the full-res image is loaded for this settled page so
+                // True once the settled full-res image has actually painted for this page.
+                // Re-armed per item so each new photo holds its thumb underneath until the
+                // full-res frame is up. Keeps the thumb drawn through the full-res decode +
+                // crossfade so the Bg0 background never shows through on a cold open.
+                var fullResPainted by remember(currentItemKey) { mutableStateOf(false) }
+                // Hide the thumb once the full-res image has painted for this settled page so
                 // it stops peeking through at the edges when the user pinch-zooms and pans —
                 // the full-res layer is graphicsLayer-translated, the thumb is not, and at
                 // any non-centered scale>1f the thumb would otherwise show through behind.
                 val suppressThumbForLoadedImage = isSettled &&
                     state is PhotoViewerViewModel.ViewerState.ShowImage &&
-                    stateMatchesPage
+                    stateMatchesPage &&
+                    fullResPainted
                 if (thumbModel != null && !suppressThumbForVideo && !suppressThumbForLoadedImage) {
                     AsyncImage(
                         model = thumbModel,
@@ -762,10 +770,24 @@ fun PhotoViewerScreen(
                                         modifier = Modifier.fillMaxSize(),
                                     )
                                 } else {
+                                    // Fade the full-res in over the thumb (which stays drawn
+                                    // until onState reports Success) so a cold open never shows
+                                    // the background through a one-frame gap. The transform stays
+                                    // on this element so pinch-zoom is unaffected.
+                                    val imageContext = LocalContext.current
+                                    val fullResRequest = remember(s.model) {
+                                        ImageRequest.Builder(imageContext)
+                                            .data(s.model)
+                                            .crossfade(true)
+                                            .build()
+                                    }
                                     AsyncImage(
-                                        model = s.model,
+                                        model = fullResRequest,
                                         contentDescription = null,
                                         contentScale = ContentScale.Fit,
+                                        onState = { st ->
+                                            if (st is AsyncImagePainter.State.Success) fullResPainted = true
+                                        },
                                         modifier = Modifier
                                             .fillMaxSize()
                                             .transformable(state = transformState, canPan = { scale > 1f })

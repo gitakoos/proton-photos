@@ -121,6 +121,7 @@ sealed class Screen(val route: String) {
     data object Onboarding : Screen("onboarding")
     data object AppearanceSettings : Screen("appearance_settings")
     data object ThemeSettings : Screen("theme_settings")
+    data object GridLayoutSettings : Screen("grid_layout_settings")
     data object LanguageSettings : Screen("language_settings")
     data object NotificationSettings : Screen("notification_settings")
     data object TimelineFilter : Screen("timeline_filter")
@@ -699,12 +700,19 @@ fun NavGraph(
                 onBack = { navController.popBackStack() },
                 onThemeClick = { navController.navigate(Screen.ThemeSettings.route) },
                 onLanguageClick = { navController.navigate(Screen.LanguageSettings.route) },
+                onGridLayoutClick = { navController.navigate(Screen.GridLayoutSettings.route) },
                 onTimelineFilterClick = { navController.navigate(Screen.TimelineFilter.route) },
             )
         }
 
         composable(Screen.ThemeSettings.route) {
             eu.akoos.photos.presentation.settings.ThemeSettingsScreen(
+                onBack = { navController.popBackStack() },
+            )
+        }
+
+        composable(Screen.GridLayoutSettings.route) {
+            eu.akoos.photos.presentation.settings.GridLayoutSettingsScreen(
                 onBack = { navController.popBackStack() },
             )
         }

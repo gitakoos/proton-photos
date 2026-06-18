@@ -11,10 +11,14 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/gitakoos/proton-photos/releases/latest"><img src="https://img.shields.io/badge/release-v2.3.0-blue" alt="Release" /></a>
+  <a href="https://github.com/gitakoos/proton-photos/releases/latest"><img src="https://img.shields.io/badge/release-v2.3.3-blue" alt="Release" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-green" alt="License" /></a>
   <img src="https://img.shields.io/badge/minSdk-26-orange" alt="Min SDK" />
   <a href="https://photos.akoos.eu"><img src="https://img.shields.io/badge/website-photos.akoos.eu-8B7CFF" alt="Website" /></a>
+</p>
+
+<p align="center">
+  <a href="https://www.buymeacoffee.com/akoos"><img src="https://img.buymeacoffee.com/button-api/?text=Buy me a coffee&emoji=☕&slug=akoos&button_colour=100f0f&font_colour=ffffff&font_family=Inter&outline_colour=ffffff&coffee_colour=FFDD00" alt="Buy me a coffee" /></a>
 </p>
 
 ## Features

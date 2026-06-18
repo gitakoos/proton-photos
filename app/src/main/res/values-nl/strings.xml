@@ -1043,4 +1043,14 @@
     <string name="dense_grid_warning_title">Compactste weergave</string>
     <string name="dense_grid_warning_message">Meer foto\'s per rij kan het scrollen minder soepel maken bij zeer grote bibliotheken.</string>
     <string name="dense_grid_warning_dismiss">Niet meer tonen</string>
+    <string name="backup_started">Bezig met uploaden naar Drive</string>
+    <string name="upload_confirm_title">Uploaden naar Drive?</string>
+    <string name="upload_confirm_message">%1$d geselecteerde uploaden naar je Proton Drive?</string>
+    <string name="upload_action_short">Uploaden</string>
+
+    <!-- Grid layout (Appearance) -->
+    <string name="settings_grid_layout">Rasterindeling</string>
+    <string name="grid_remember_last">Laatst gebruikte onthouden</string>
+    <string name="grid_remember_last_desc">Open je foto\'s op het laatst gebruikte zoomniveau</string>
+    <string name="grid_default_columns_section">Foto\'s per rij</string>
 </resources>

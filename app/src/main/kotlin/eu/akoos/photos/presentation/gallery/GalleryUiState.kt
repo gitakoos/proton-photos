@@ -67,6 +67,12 @@ data class GalleryUiState(
     val pendingUploadCount: Int = 0,
     val uploadedCount: Int = 0,
     val timelineGrouping: TimelineGrouping = TimelineGrouping.Month,
+    /** Resolved opening zoom level for the timeline grid (from the grid-layout preference). */
+    val initialZoomLevel: Int = GridZoom.DEFAULT_LEVEL,
+    /** When true, the timeline persists + restores the last pinched zoom; default columns ignored. */
+    val gridRememberLast: Boolean = false,
+    /** Fixed default columns per row when [gridRememberLast] is off; also drives album grids. */
+    val gridDefaultColumns: Int = GridZoom.DEFAULT_COLUMNS,
     val denseGridWarningDismissed: Boolean = false,
     /** Cloud linkIds whose local twin is in the Hidden vault; [PhotoCell] draws a crossed-out
      *  eye overlay. Derived from SyncStateRepo rows with [SyncStatus.HIDDEN]. */

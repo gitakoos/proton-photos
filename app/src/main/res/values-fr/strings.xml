@@ -1029,4 +1029,10 @@
     <string name="upload_confirm_title">Téléverser vers Drive ?</string>
     <string name="upload_confirm_message">Sauvegarder %1$d sélectionnés sur votre Proton Drive ?</string>
     <string name="upload_action_short">Téléverser</string>
+
+    <!-- Grid layout (Appearance) -->
+    <string name="settings_grid_layout">Disposition de la grille</string>
+    <string name="grid_remember_last">Mémoriser le dernier utilisé</string>
+    <string name="grid_remember_last_desc">Ouvrir vos photos au dernier niveau de zoom utilisé</string>
+    <string name="grid_default_columns_section">Photos par ligne</string>
 </resources>

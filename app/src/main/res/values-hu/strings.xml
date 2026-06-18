@@ -1028,4 +1028,10 @@
     <string name="upload_confirm_title">Feltöltöd a Drive-ra?</string>
     <string name="upload_confirm_message">%1$d kijelölt feltöltése a Proton Drive-ra?</string>
     <string name="upload_action_short">Feltöltés</string>
+
+    <!-- Grid layout (Appearance) -->
+    <string name="settings_grid_layout">Rácselrendezés</string>
+    <string name="grid_remember_last">Utolsó nézet megjegyzése</string>
+    <string name="grid_remember_last_desc">A fotók az utoljára használt nagyításon nyíljanak meg</string>
+    <string name="grid_default_columns_section">Kép / sor</string>
 </resources>

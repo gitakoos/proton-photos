@@ -31,6 +31,13 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.platform.LocalDensity
+import kotlinx.coroutines.isActive
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -62,6 +69,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -113,11 +121,13 @@ internal fun PhotoGrid(
     onPhotoClick: (items: List<GalleryItem>, index: Int) -> Unit,
     selectedItems: Set<GalleryItem> = emptySet(),
     isSelectionMode: Boolean = false,
-    onLongPress: (GalleryItem) -> Unit = {},
     onToggleSelect: (GalleryItem) -> Unit = {},
     onToggleGroup: (List<GalleryItem>) -> Unit = {},
-    grouping: TimelineGrouping = TimelineGrouping.Month,
-    onGroupingChanged: (TimelineGrouping) -> Unit = {},
+    onSelectionChange: (Set<GalleryItem>) -> Unit = {},
+    initialZoomLevel: Int = GridZoom.DEFAULT_LEVEL,
+    gridRememberLast: Boolean = false,
+    gridDefaultColumns: Int = GridZoom.DEFAULT_COLUMNS,
+    onZoomLevelChanged: (Int) -> Unit = {},
     hiddenCloudLinkIds: Set<String> = emptySet(),
     downloadedCloudLinkIds: Set<String> = emptySet(),
     favoriteIds: Set<String> = emptySet(),
@@ -200,40 +210,20 @@ internal fun PhotoGrid(
     }
 
     // ── Pinch-to-zoom levels ──────────────────────────────────────────────────
-    // Six discrete (cols, grouping) levels that pinch cycles through in one motion.
-    // Most-zoomed-out = 5 cols + year headers (the densest the timeline allows — a 6-col
-    // ungrouped wall was dropped because the per-row tile count made scrolling very large
-    // libraries janky). Most-zoomed-in = 1 col + day headers. The cross-over from year to
-    // month/day grouping matches the spot where tiles get big enough that a date header
+    // The ladder (columns + grouping per level) lives in GridZoom.LEVELS so the grid, the
+    // ViewModel and the grid-layout settings all agree on it. Pinch cycles through the levels; the
+    // cross-over from year to month/day grouping is where tiles get big enough that a date header
     // above them stops feeling like clutter.
-    val zoomLevels = remember {
-        // Mapping reflects how the user navigates: big tiles need fine-grained markers
-        // (day) because the user is browsing close-up; small tiles need broad markers
-        // (year) because the user is scrolling through history at speed.
-        listOf(
-            5 to TimelineGrouping.Year,    // L0 — 5 cols, year headers (densest allowed)
-            4 to TimelineGrouping.Month,   // L1 — 4 cols, month headers
-            3 to TimelineGrouping.Month,   // L2 — 3 cols, month headers (still wide)
-            2 to TimelineGrouping.Day,     // L3 — 2 cols, day headers, larger tiles
-            1 to TimelineGrouping.Day,     // L4 — 1 col, biggest tile + day headers
-        )
+    val zoomLevels = GridZoom.LEVELS
+    // Opening level comes from the grid-layout preference (resolved in the ViewModel): the last
+    // pinched level when "remember last used" is on, else the level for the default columns.
+    var levelIndex by rememberSaveable { mutableIntStateOf(initialZoomLevel.coerceIn(0, zoomLevels.lastIndex)) }
+    // Follow a settings change without a restart: re-derive the default level when the default
+    // columns change or "remember last used" is switched off. A pinch never touches these inputs,
+    // so it isn't overridden mid-session; while remembering, the level is left where the user left it.
+    LaunchedEffect(gridRememberLast, gridDefaultColumns) {
+        if (!gridRememberLast) levelIndex = GridZoom.levelForColumns(gridDefaultColumns)
     }
-    // Initial level is derived from the persisted grouping. Default for Month is L2
-    // (3 cols + month headers) — the "monthly browsing" baseline on first launch. None is no
-    // longer a zoom level, so a value persisted by an older build falls back to 4-col month.
-    // Year → densest (L0), Day → 2-col big tiles.
-    val initialLevel = remember(grouping) {
-        when (grouping) {
-            TimelineGrouping.Year  -> 0
-            TimelineGrouping.Month -> 2
-            TimelineGrouping.Day   -> 3
-            TimelineGrouping.None  -> 1   // retired level — fall back to 4-col month
-        }
-    }
-    var levelIndex by rememberSaveable { mutableIntStateOf(initialLevel) }
-    // A level persisted by a build with more zoom steps could be out of range now — clamp so the
-    // zoomLevels access is always valid and the pinch handler sees a normalised value.
-    LaunchedEffect(Unit) { if (levelIndex > zoomLevels.lastIndex) levelIndex = zoomLevels.lastIndex }
     val (columnCount, effectiveGrouping) = zoomLevels[levelIndex.coerceIn(0, zoomLevels.lastIndex)]
 
     // One-time heads-up the first time the timeline is zoomed out to the densest grid in a session
@@ -338,7 +328,7 @@ internal fun PhotoGrid(
                 when {
                     ratio >= 1.30f && levelIndex < zoomLevels.lastIndex -> {
                         levelIndex += 1
-                        onGroupingChanged(zoomLevels[levelIndex].second)
+                        onZoomLevelChanged(levelIndex)
                         haptics.performHapticFeedback(
                             androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove,
                         )
@@ -346,7 +336,7 @@ internal fun PhotoGrid(
                     }
                     ratio <= 1f / 1.30f && levelIndex > 0 -> {
                         levelIndex -= 1
-                        onGroupingChanged(zoomLevels[levelIndex].second)
+                        onZoomLevelChanged(levelIndex)
                         haptics.performHapticFeedback(
                             androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove,
                         )
@@ -355,6 +345,150 @@ internal fun PhotoGrid(
                 }
                 // Consume so the grid doesn't try to scroll while both fingers are down.
                 p1.consume(); p2.consume()
+            }
+        }
+    }
+
+    // ── Drag-to-select ────────────────────────────────────────────────────────
+    // Long-press a photo and, without lifting, drag across photos to select/deselect a contiguous
+    // range. detectDragGesturesAfterLongPress only fires AFTER the long-press time-out, so a plain
+    // single-finger drag still scrolls the grid and the two-finger pinch above is untouched. A
+    // long-press with no movement falls through to onDragEnd having only set the anchor cell, which
+    // matches the previous "long-press selects one" behaviour and enters selection mode.
+    val density = LocalDensity.current
+    val edgeScrollPx = remember(density) { with(density) { 80.dp.toPx() } }
+    // selectedItems is read through an updated-state holder because the pointerInput block below is
+    // keyed on `items` — without it the block snapshots a stale selection and a re-grab wipes whatever
+    // was selected after the last `items` change. With the live value, grabbing an unselected photo
+    // extends the selection and grabbing a selected one deselects, both preserving the rest.
+    val latestSelectedItems by rememberUpdatedState(selectedItems)
+    // Drag mode, decided once at the anchor: true = select the swept range, false = deselect it.
+    var dragSelect by remember { mutableStateOf(true) }
+    var dragAnchorIndex by remember { mutableStateOf(-1) }
+    var dragLastIndex by remember { mutableStateOf(-1) }
+    // Selection snapshot captured at the anchor, before any painting. Each paint sets the whole
+    // selection to this snapshot ± the currently swept range, so dragging back reverts the cells the
+    // range no longer covers to their pre-drag state instead of leaving them painted.
+    var dragInitial by remember { mutableStateOf(emptySet<GalleryItem>()) }
+    // Signed scroll speed (px/frame) while the finger sits in the top/bottom edge band; 0 stops it.
+    var edgeScrollVelocity by remember { mutableFloatStateOf(0f) }
+
+    // Apply a swept range [lo, hi] against the pre-drag snapshot: union when selecting, difference
+    // when deselecting. Replaces the whole selected set so the result is purely a function of the
+    // current range, never an accumulation of earlier paints.
+    val paintRange: (Int, Int) -> Unit = { lo, hi ->
+        val range = items.subList(lo, hi + 1).toSet()
+        onSelectionChange(if (dragSelect) dragInitial + range else dragInitial - range)
+    }
+
+    // Map a pointer offset (grid-node-local coordinates) to the flat [items] index under it. Scans
+    // only the currently visible cells, matches the one whose bounds contain the offset, and resolves
+    // its grid key via [indexByKey]. Returns null for header rows (non-photo keys) and empty gaps.
+    //
+    // LazyGridItemInfo.offset is measured from the viewport's start, which top content-padding pushes
+    // to a negative viewportStartOffset; the pointer offset is measured from the grid node's top-left
+    // (the content-padding band included). Shifting the cell bounds by viewportStartOffset puts both
+    // in the node-local space, so the cell directly under the finger is the one returned rather than
+    // the row one content-padding.top further down.
+    val itemIndexAt: (Offset) -> Int? = remember(items) {
+        fun(offset: Offset): Int? {
+            val startY = gridState.layoutInfo.viewportStartOffset
+            val info = gridState.layoutInfo.visibleItemsInfo.firstOrNull { cell ->
+                val top = cell.offset.y - startY
+                val left = cell.offset.x
+                offset.y >= top && offset.y < top + cell.size.height &&
+                    offset.x >= left && offset.x < left + cell.size.width
+            } ?: return null
+            val key = info.key as? String ?: return null
+            return indexByKey[key]
+        }
+    }
+
+    val dragSelectModifier = Modifier.pointerInput(items) {
+        detectDragGesturesAfterLongPress(
+            onDragStart = { offset ->
+                val idx = itemIndexAt(offset)
+                if (idx == null) {
+                    dragAnchorIndex = -1
+                    return@detectDragGesturesAfterLongPress
+                }
+                // Snapshot the live selection, then set the mode from the anchor: grabbing an
+                // unselected photo selects the swept range (extending the existing selection), grabbing
+                // a selected one deselects it. Dragging back reverts the cells the range no longer covers.
+                dragInitial = latestSelectedItems
+                dragSelect = items[idx] !in latestSelectedItems
+                dragAnchorIndex = idx
+                dragLastIndex = idx
+                paintRange(idx, idx)
+                haptics.performHapticFeedback(
+                    androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress,
+                )
+            },
+            onDrag = { change, _ ->
+                if (dragAnchorIndex < 0) return@detectDragGesturesAfterLongPress
+                change.consume()
+                val current = itemIndexAt(change.position)
+                if (current != null && current != dragLastIndex) {
+                    dragLastIndex = current
+                    val lo = kotlin.math.min(dragAnchorIndex, current)
+                    val hi = kotlin.math.max(dragAnchorIndex, current)
+                    // subList is inclusive of [hi]; header positions never land in [items] (the flat
+                    // photo list excludes them) so no extra filtering is needed.
+                    paintRange(lo, hi)
+                }
+                // Edge auto-scroll so the range can run past the visible screen. The pointer y is
+                // grid-local; near either edge we set a velocity the loop below applies each frame.
+                val viewportHeight = gridState.layoutInfo.viewportSize.height.toFloat()
+                val y = change.position.y
+                edgeScrollVelocity = when {
+                    y < edgeScrollPx -> -((edgeScrollPx - y) / edgeScrollPx) * 24f
+                    y > viewportHeight - edgeScrollPx ->
+                        ((y - (viewportHeight - edgeScrollPx)) / edgeScrollPx) * 24f
+                    else -> 0f
+                }
+            },
+            onDragEnd = {
+                // Fully disarm so the next long-press starts a fresh drag whose mode is re-decided
+                // from the new anchor.
+                dragAnchorIndex = -1
+                dragLastIndex = -1
+                dragInitial = emptySet()
+                edgeScrollVelocity = 0f
+            },
+            onDragCancel = {
+                dragAnchorIndex = -1
+                dragLastIndex = -1
+                dragInitial = emptySet()
+                edgeScrollVelocity = 0f
+            },
+        )
+    }
+
+    // Drives the edge auto-scroll: a single long-lived collector watches the velocity the drag
+    // handler sets. When it's non-zero (finger in an edge band) it scrolls the grid that direction
+    // every frame and extends the range up to the cell now under the finger, so holding at the edge
+    // keeps growing the selection past the visible screen. A zero velocity ends the inner loop.
+    LaunchedEffect(Unit) {
+        snapshotFlow { edgeScrollVelocity }.collect { velocity ->
+            if (velocity == 0f) return@collect
+            while (isActive && edgeScrollVelocity != 0f) {
+                gridState.scrollBy(edgeScrollVelocity)
+                if (dragAnchorIndex >= 0) {
+                    // Newly-scrolled-in cells extend the range to whichever edge the finger holds.
+                    val edgeCell = if (edgeScrollVelocity < 0f) {
+                        gridState.layoutInfo.visibleItemsInfo.firstOrNull { (it.key as? String) in indexByKey }
+                    } else {
+                        gridState.layoutInfo.visibleItemsInfo.lastOrNull { (it.key as? String) in indexByKey }
+                    }
+                    val edgeIndex = (edgeCell?.key as? String)?.let { indexByKey[it] }
+                    if (edgeIndex != null && edgeIndex != dragLastIndex) {
+                        dragLastIndex = edgeIndex
+                        val lo = kotlin.math.min(dragAnchorIndex, edgeIndex)
+                        val hi = kotlin.math.max(dragAnchorIndex, edgeIndex)
+                        paintRange(lo, hi)
+                    }
+                }
+                withFrameNanos {}
             }
         }
     }
@@ -373,6 +507,9 @@ internal fun PhotoGrid(
         verticalArrangement = Arrangement.spacedBy(6.dp),
         modifier = Modifier
             .fillMaxSize()
+            // Drag-select first (it only claims the gesture after a long-press time-out), then pinch
+            // (two-finger). Plain single-finger drags fall through to the grid's own scroll.
+            .then(dragSelectModifier)
             .then(pinchModifier),
     ) {
         if (permissionState == PermissionState.Denied ||
@@ -468,7 +605,6 @@ internal fun PhotoGrid(
                         if (isSelectionMode) onToggleSelect(item)
                         else onPhotoClick(items, indexByKey[keyOf(item)] ?: 0)
                     },
-                    onLongClick = { onLongPress(item) },
                 )
             }
         }

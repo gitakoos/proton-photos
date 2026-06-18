@@ -104,6 +104,13 @@ private const val REFRESH_BATCH = 100
  */
 private const val PHOTO_PAGE_MAX_ATTEMPTS = 3
 private const val PHOTO_PAGE_RETRY_BASE_MS: Long = 800L
+// When fetchPhotoPageWithRetry's short per-page backoff is exhausted mid-walk (a sustained
+// rate-limit), the listing pauses on this slower OUTER backoff and resumes from the saved cursor,
+// up to MAX_STREAM_RESUME_PAUSES times before giving up for this pass (the cursor is preserved
+// either way, so a later run continues). Bounds the extra in-pass patience to a few minutes.
+private const val MAX_STREAM_RESUME_PAUSES = 4
+private const val STREAM_RESUME_BASE_MS: Long = 30_000L
+private const val STREAM_RESUME_MAX_MS: Long = 180_000L
 
 /**
  * Cloud photo stream: paginated full refresh + event-based incremental refresh +
@@ -330,11 +337,14 @@ class PhotoStreamService @Inject constructor(
             val completeKey = SettingsKeys.photoListingCompleteKey(userId.id, activeVolumeId)
             val listingPrefs = context.settingsDataStore.data.first()
             val previouslyComplete = listingPrefs[completeKey] ?: false
-            // A forced refresh (pull-to-refresh) always walks fresh from the newest photo instead of
-            // resuming a saved cursor: a resumed walk only sees its tail, so it suppresses the
-            // stale-entry prune — which is exactly what the user wants when they pull to sync a
-            // deletion made elsewhere on Drive. Routine refreshes still resume to finish a big backfill.
-            val resumeCursor = if (previouslyComplete || force) null else listingPrefs[cursorKey]
+            // Once the library has been fully listed, a forced refresh (pull-to-refresh) walks fresh
+            // from the newest photo so the stale-entry prune sees the complete server set and a
+            // deletion made elsewhere on Drive disappears immediately. While a large library is still
+            // being backfilled, even a forced refresh RESUMES the saved cursor — otherwise
+            // pull-to-refresh would restart at the newest photo and re-hit the same rate-limit wall,
+            // never advancing the backfill (older photos would stay unfetched). A resumed walk only
+            // sees its tail, so it suppresses the prune, which is the right call mid-backfill.
+            val resumeCursor = if (previouslyComplete) null else listingPrefs[cursorKey]
             val startedFresh = resumeCursor == null
             // This walk is not complete until the loop below reaches the final short page; reset
             // up front so a crash/abort midway correctly leaves the listing marked incomplete.
@@ -352,11 +362,30 @@ class PhotoStreamService @Inject constructor(
                 if (resumeCursor != null) {
                     Log.d(TAG, "refreshCloudPhotos: resuming stream listing from saved cursor")
                 }
+                var resumePauses = 0
                 do {
-                    // Retry a transient page failure a few times before giving up, so a brief
-                    // network blip mid-walk doesn't truncate the listing and force a full resume
-                    // on the next launch. A persistent failure still falls through to the catch.
-                    val page = fetchPhotoPageWithRetry(manager, activeVolumeId, lastLinkId, pageLimit)
+                    // fetchPhotoPageWithRetry already absorbs brief blips with a short jittered
+                    // backoff. If it still throws on a transient error, it's a sustained rate-limit:
+                    // pause on a slower OUTER backoff and retry the SAME page from the saved cursor
+                    // rather than abandoning the walk (which would leave older photos unfetched until
+                    // a later launch), capped at MAX_STREAM_RESUME_PAUSES so a permanently-failing
+                    // page can't loop forever. A non-transient error rethrows immediately. Every wait
+                    // is a delay(), never a spin.
+                    var fetched: PhotoLinksResponse? = null
+                    while (fetched == null) {
+                        try {
+                            fetched = fetchPhotoPageWithRetry(manager, activeVolumeId, lastLinkId, pageLimit)
+                        } catch (e: Exception) {
+                            if (e is kotlinx.coroutines.CancellationException) throw e
+                            if (resumePauses >= MAX_STREAM_RESUME_PAUSES ||
+                                !eu.akoos.photos.util.isTransientApiError(e)) throw e
+                            resumePauses++
+                            val waitMs = minOf(STREAM_RESUME_BASE_MS shl (resumePauses - 1), STREAM_RESUME_MAX_MS)
+                            Log.w(TAG, "refreshCloudPhotos: rate-limited mid-walk, pausing ${waitMs}ms then resuming from cursor (pause $resumePauses/$MAX_STREAM_RESUME_PAUSES)")
+                            delay(waitMs)
+                        }
+                    }
+                    val page = checkNotNull(fetched)
                     streamLinks.addAll(page.links)
                     val nextCursor = if (page.links.size >= pageLimit) page.links.last().linkId else null
                     if (nextCursor != null) {
@@ -916,6 +945,11 @@ class PhotoStreamService @Inject constructor(
                 }
 
                 refreshCloudPhotos(userId)
+                // Re-arm the cooldown from when the walk FINISHED, not when it started: with the
+                // mid-walk resume-after-backoff a single pass can run for minutes, so arming only up
+                // front would let a partial backfill keep re-claiming the floor and stall. (The CAS
+                // above still atomically claims the window so two racing callers can't double-walk.)
+                lastFallbackFullRefreshMs.set(System.currentTimeMillis())
                 // Only arm the incremental event feed when the full refresh actually wrote the
                 // WHOLE library. The events endpoint delivers future deltas, never a backfill,
                 // so saving the "caught up to now" anchor on top of a partially-populated DB

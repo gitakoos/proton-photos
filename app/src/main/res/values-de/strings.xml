@@ -1029,4 +1029,10 @@
     <string name="upload_confirm_title">Auf Drive hochladen?</string>
     <string name="upload_confirm_message">%1$d ausgewählte auf deinem Proton Drive sichern?</string>
     <string name="upload_action_short">Hochladen</string>
+
+    <!-- Grid layout (Appearance) -->
+    <string name="settings_grid_layout">Rasterlayout</string>
+    <string name="grid_remember_last">Zuletzt verwendete merken</string>
+    <string name="grid_remember_last_desc">Deine Fotos mit der zuletzt verwendeten Zoomstufe öffnen</string>
+    <string name="grid_default_columns_section">Fotos pro Zeile</string>
 </resources>

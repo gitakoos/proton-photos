@@ -26,6 +26,7 @@ import android.os.Build
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -169,7 +170,7 @@ internal fun PhotoCell(
     typeBadgeCdRes: Int? = null,
     showTypeBadges: Boolean = true,
     onClick: () -> Unit,
-    onLongClick: () -> Unit = {},
+    onLongClick: (() -> Unit)? = null,
 ) {
     Box(
         modifier = Modifier
@@ -177,7 +178,14 @@ internal fun PhotoCell(
             .aspectRatio(0.85f)
             .clip(RoundedCornerShape(10.dp))
             .background(Bg2)
-            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+            // The timeline owns long-press at the grid level (drag-to-select), so it passes no
+            // [onLongClick] and the cell stays tap-only. Surfaces without a grid-level gesture
+            // (e.g. device folders) pass a handler and get long-press here.
+            .then(
+                if (onLongClick != null)
+                    Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick)
+                else Modifier.clickable(onClick = onClick)
+            )
             .then(
                 if (selected) Modifier.border(2.5.dp, Accent, RoundedCornerShape(10.dp))
                 else Modifier

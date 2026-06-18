@@ -280,9 +280,10 @@ fun HiddenAlbumScreen(
                     )
                 }
 
+                val cols = eu.akoos.photos.presentation.gallery.rememberDefaultGridColumns()
                 when {
                     state.isLoading -> LazyVerticalGrid(
-                        columns = GridCells.Fixed(3),
+                        columns = GridCells.Fixed(cols),
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(2.dp),
                         horizontalArrangement = Arrangement.spacedBy(2.dp),
@@ -311,7 +312,7 @@ fun HiddenAlbumScreen(
                         }
                     }
                     else -> LazyVerticalGrid(
-                        columns = GridCells.Fixed(3),
+                        columns = GridCells.Fixed(cols),
                         contentPadding = PaddingValues(8.dp, 4.dp, 8.dp, 100.dp),
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
                         verticalArrangement = Arrangement.spacedBy(4.dp),

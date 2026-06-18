@@ -61,6 +61,11 @@ data class SettingsUiState(
     val syncedVideoCount: Int = 0,
     val themeMode: ThemeMode = ThemeMode.System,
     val palette: ThemePalette = ThemePalette.Default,
+    /** Grid-layout settings (Appearance → Grid layout). [gridRememberLast] on = the timeline
+     *  remembers the last pinched zoom; off = it opens at [gridDefaultColumns], which also sets
+     *  the album / device-folder / hidden grids. 3 = the default columns-per-row baseline. */
+    val gridRememberLast: Boolean = false,
+    val gridDefaultColumns: Int = 3,
     val userDisplayName: String = "",
     val userEmail: String = "",
     val cloudUsedBytes: Long = 0L,

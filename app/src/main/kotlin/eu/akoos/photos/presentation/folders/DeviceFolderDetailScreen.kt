@@ -218,10 +218,11 @@ fun DeviceFolderDetailScreen(
             .fillMaxSize()
             .background(Bg0),
     ) {
+        val cols = eu.akoos.photos.presentation.gallery.rememberDefaultGridColumns()
         LazyVerticalGrid(
-            columns = GridCells.Fixed(3),
+            columns = GridCells.Fixed(cols),
             state = gridState,
-            // Match the main timeline grid (GalleryGrid) at 3 columns: same 20.dp side inset and
+            // Match the main timeline grid (GalleryGrid): same default columns, 20.dp side inset and
             // 6.dp gap, so device-folder photos render at the same size as the Photos page.
             contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 24.dp),
             horizontalArrangement = Arrangement.spacedBy(6.dp),

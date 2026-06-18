@@ -1038,4 +1038,10 @@
     <string name="upload_confirm_title">Caricare su Drive?</string>
     <string name="upload_confirm_message">Eseguire il backup di %1$d selezionati sul tuo Proton Drive?</string>
     <string name="upload_action_short">Carica</string>
+
+    <!-- Grid layout (Appearance) -->
+    <string name="settings_grid_layout">Layout griglia</string>
+    <string name="grid_remember_last">Ricorda l\'ultimo usato</string>
+    <string name="grid_remember_last_desc">Apri le tue foto all\'ultimo livello di zoom usato</string>
+    <string name="grid_default_columns_section">Foto per riga</string>
 </resources>

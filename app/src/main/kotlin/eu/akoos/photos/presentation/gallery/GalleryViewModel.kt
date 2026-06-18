@@ -190,7 +190,7 @@ class GalleryViewModel @Inject constructor(
         observeUserInitial()
         syncOnLaunch()
         observeFolderSettings()
-        loadTimelineGrouping()
+        observeGridPreferences()
         observeFavorites()
         observeBackgroundUploadProgress()
         observePrimaryUserId()
@@ -345,15 +345,40 @@ class GalleryViewModel @Inject constructor(
         is GalleryItem.CloudOnly -> item.cloud.linkId
     }
 
-    private fun loadTimelineGrouping() {
+    private fun observeGridPreferences() {
         viewModelScope.launch {
-            val prefs = context.settingsDataStore.data.first()
-            val groupingName = prefs[SettingsKeys.TIMELINE_GROUPING] ?: TimelineGrouping.Month.name
-            val grouping = runCatching { TimelineGrouping.valueOf(groupingName) }.getOrDefault(TimelineGrouping.Month)
-            val denseWarningDismissed = prefs[SettingsKeys.DENSE_GRID_WARNING_DISMISSED] ?: false
-            _uiState.update { it.copy(timelineGrouping = grouping, denseGridWarningDismissed = denseWarningDismissed) }
+            context.settingsDataStore.data
+                .map { prefs ->
+                    GridPrefs(
+                        rememberLast = prefs[SettingsKeys.GRID_REMEMBER_LAST] ?: false,
+                        defaultColumns = prefs[SettingsKeys.GRID_DEFAULT_COLUMNS] ?: GridZoom.DEFAULT_COLUMNS,
+                        lastLevel = (prefs[SettingsKeys.GRID_LAST_LEVEL] ?: GridZoom.DEFAULT_LEVEL)
+                            .coerceIn(0, GridZoom.LEVELS.lastIndex),
+                        denseWarningDismissed = prefs[SettingsKeys.DENSE_GRID_WARNING_DISMISSED] ?: false,
+                    )
+                }
+                .distinctUntilChanged()
+                .collect { p ->
+                    val initialLevel = if (p.rememberLast) p.lastLevel else GridZoom.levelForColumns(p.defaultColumns)
+                    _uiState.update {
+                        it.copy(
+                            timelineGrouping = GridZoom.groupingForLevel(initialLevel),
+                            initialZoomLevel = initialLevel,
+                            gridRememberLast = p.rememberLast,
+                            gridDefaultColumns = p.defaultColumns,
+                            denseGridWarningDismissed = p.denseWarningDismissed,
+                        )
+                    }
+                }
         }
     }
+
+    private data class GridPrefs(
+        val rememberLast: Boolean,
+        val defaultColumns: Int,
+        val lastLevel: Int,
+        val denseWarningDismissed: Boolean,
+    )
 
     private fun observeUserInitial() {
         viewModelScope.launch {
@@ -691,10 +716,18 @@ class GalleryViewModel @Inject constructor(
         recomputeMonthGroups(filtered)
     }
 
-    fun setTimelineGrouping(grouping: TimelineGrouping) {
-        viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.TIMELINE_GROUPING] = grouping.name }
-            _uiState.update { it.copy(timelineGrouping = grouping) }
+    /**
+     * Pinch changed the timeline zoom. The grouping follows immediately so the grid re-renders;
+     * the level is persisted only when "remember last used" is on, so otherwise the next launch
+     * still opens at the fixed default and an in-session pinch stays session-only.
+     */
+    fun setZoomLevel(level: Int) {
+        val clamped = level.coerceIn(0, GridZoom.LEVELS.lastIndex)
+        _uiState.update { it.copy(timelineGrouping = GridZoom.groupingForLevel(clamped)) }
+        if (_uiState.value.gridRememberLast) {
+            viewModelScope.launch {
+                context.settingsDataStore.edit { it[SettingsKeys.GRID_LAST_LEVEL] = clamped }
+            }
         }
     }
 
@@ -812,6 +845,14 @@ class GalleryViewModel @Inject constructor(
             else state.selectedItems + items
             state.copy(selectedItems = newSet)
         }
+    }
+
+    /** Replace the whole selected set in one update. Backs drag-to-select: the gesture recomputes
+     *  the full set (pre-drag snapshot ± the currently swept range) on every paint, so dragging back
+     *  reverts the un-covered cells to their pre-drag state. Entering / leaving selection mode
+     *  follows from [items] becoming non-empty / empty. */
+    fun setSelection(items: Set<GalleryItem>) {
+        _uiState.update { it.copy(selectedItems = items) }
     }
 
     /**
