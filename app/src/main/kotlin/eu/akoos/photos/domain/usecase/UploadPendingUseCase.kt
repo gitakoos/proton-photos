@@ -224,19 +224,31 @@ class UploadPendingUseCase @Inject constructor(
         // reconcile and upload (or a long-running batch the user wants to redirect) can
         // leave excluded rows here. Lookup needs bucketName, which lives on LocalMediaItem
         // not SyncState — one MediaStore query, mapped by URI.
-        if (backupEverything && excludedFolders.isNotEmpty()) {
+        // Re-apply the folder filter at upload time, not only at reconcile time. The user can
+        // deselect a folder (allow-list mode) or add an exclusion (backup-everything mode) AFTER
+        // reconcile created the LOCAL_ONLY rows, or mid-batch. Without this, photos already queued
+        // from a folder the user just turned off keep uploading until the queue drains, so the
+        // backup looks like it ignores the toggle. bucketName lives on LocalMediaItem, not
+        // SyncState, so one MediaStore query mapped by URI resolves each pending row's folder.
+        if (pending.isNotEmpty()) {
             val bucketByUri: Map<String, String?> = localRepo.observeLocalMedia().first()
                 .associate { it.uri to it.bucketName }
             val before = pending.size
             pending = pending.filter { state ->
-                // A photo the user explicitly added to an album always uploads, even from an
-                // excluded bucket — it has to back up to join the album.
+                // A photo explicitly queued for an album always uploads — it must back up to join it.
                 if (state.localUri in forcedUploadUris) return@filter true
                 val bucket = bucketByUri[state.localUri]
-                bucket == null || bucket !in excludedFolders
+                if (backupEverything) {
+                    // Everything except the buckets the user carved out.
+                    bucket == null || bucket !in excludedFolders
+                } else {
+                    // Allow-list: only the selected buckets. A null bucket matches reconcile, which
+                    // treats bucket-less media as backup-able while any folder is selected.
+                    !selectedFolders.isNullOrEmpty() && (bucket == null || bucket in selectedFolders)
+                }
             }
             if (pending.size != before) {
-                Log.d(UPLOAD_TAG, "Excluded-folder filter dropped ${before - pending.size}/${before} pending items")
+                Log.d(UPLOAD_TAG, "Folder filter dropped ${before - pending.size}/$before pending item(s)")
             }
         }
 

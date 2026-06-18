@@ -1033,4 +1033,9 @@
     <string name="dense_grid_warning_title">Vista más compacta</string>
     <string name="dense_grid_warning_message">Mostrar más fotos por fila puede hacer que el desplazamiento sea menos fluido en bibliotecas muy grandes.</string>
     <string name="dense_grid_warning_dismiss">No volver a mostrar</string>
+
+    <string name="backup_started">Subiendo a Drive</string>
+    <string name="upload_confirm_title">¿Subir a Drive?</string>
+    <string name="upload_confirm_message">¿Hacer copia de %1$d seleccionados en tu Proton Drive?</string>
+    <string name="upload_action_short">Subir</string>
 </resources>

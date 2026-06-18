@@ -54,6 +54,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import eu.akoos.photos.R
+import eu.akoos.photos.presentation.common.fullBleedHorizontal
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.Bg2
 import eu.akoos.photos.presentation.theme.PillBorder
@@ -73,7 +74,9 @@ internal fun AlbumHeroHeader(
     titleActions: @Composable (RowScope.() -> Unit)? = null,
     metaLeading: @Composable (RowScope.() -> Unit)? = null,
 ) {
-    Column {
+    // Full-bleed: cancel the parent grid's 20.dp side contentPadding so the cover banner and the
+    // title block span edge-to-edge, while the photo cells below stay inset by that padding.
+    Column(modifier = Modifier.fullBleedHorizontal(20.dp)) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()

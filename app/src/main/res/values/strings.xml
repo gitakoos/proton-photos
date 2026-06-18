@@ -852,6 +852,10 @@
     <string name="device_folder_upload_action">Upload to Drive</string>
     <string name="device_folder_uploading_fmt">Uploading %1$d to Drive</string>
     <string name="device_folder_already_backed_up">Already backed up to Drive</string>
+    <string name="backup_started">Backing up to Drive</string>
+    <string name="upload_confirm_title">Upload to Drive?</string>
+    <string name="upload_confirm_message">Back up %1$d selected to your Proton Drive?</string>
+    <string name="upload_action_short">Upload</string>
     <string name="device_folder_added_to_album">Added to album</string>
     <string name="device_folder_backing_up_fmt">Backing up %1$d / %2$d</string>
     <string name="device_folder_backup_all">Back up folder</string>

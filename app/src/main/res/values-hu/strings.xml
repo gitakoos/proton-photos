@@ -1023,4 +1023,9 @@
     <string name="dense_grid_warning_title">Legsűrűbb elrendezés</string>
     <string name="dense_grid_warning_message">Ha egy sorba több fotó kerül, nagyon nagy könyvtárnál akadozhat a görgetés.</string>
     <string name="dense_grid_warning_dismiss">Ne jelenjen meg többé</string>
+
+    <string name="backup_started">Feltöltés a Drive-ra</string>
+    <string name="upload_confirm_title">Feltöltöd a Drive-ra?</string>
+    <string name="upload_confirm_message">%1$d kijelölt feltöltése a Proton Drive-ra?</string>
+    <string name="upload_action_short">Feltöltés</string>
 </resources>

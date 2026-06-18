@@ -1024,4 +1024,9 @@
     <string name="dense_grid_warning_title">Affichage le plus dense</string>
     <string name="dense_grid_warning_message">Afficher plus de photos par ligne peut rendre le défilement moins fluide dans les très grandes bibliothèques.</string>
     <string name="dense_grid_warning_dismiss">Ne plus afficher</string>
+
+    <string name="backup_started">Téléversement vers Drive</string>
+    <string name="upload_confirm_title">Téléverser vers Drive ?</string>
+    <string name="upload_confirm_message">Sauvegarder %1$d sélectionnés sur votre Proton Drive ?</string>
+    <string name="upload_action_short">Téléverser</string>
 </resources>

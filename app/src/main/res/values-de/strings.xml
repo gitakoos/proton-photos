@@ -1024,4 +1024,9 @@
     <string name="dense_grid_warning_title">Kompakteste Ansicht</string>
     <string name="dense_grid_warning_message">Mehr Fotos pro Zeile können das Scrollen bei sehr großen Mediatheken weniger flüssig machen.</string>
     <string name="dense_grid_warning_dismiss">Nicht mehr anzeigen</string>
+
+    <string name="backup_started">Wird auf Drive hochgeladen</string>
+    <string name="upload_confirm_title">Auf Drive hochladen?</string>
+    <string name="upload_confirm_message">%1$d ausgewählte auf deinem Proton Drive sichern?</string>
+    <string name="upload_action_short">Hochladen</string>
 </resources>

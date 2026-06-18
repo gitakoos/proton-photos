@@ -1033,4 +1033,9 @@
     <string name="dense_grid_warning_title">Layout più compatto</string>
     <string name="dense_grid_warning_message">Mostrare più foto per riga può rendere lo scorrimento meno fluido nelle raccolte molto grandi.</string>
     <string name="dense_grid_warning_dismiss">Non mostrare più</string>
+
+    <string name="backup_started">Caricamento su Drive</string>
+    <string name="upload_confirm_title">Caricare su Drive?</string>
+    <string name="upload_confirm_message">Eseguire il backup di %1$d selezionati sul tuo Proton Drive?</string>
+    <string name="upload_action_short">Carica</string>
 </resources>

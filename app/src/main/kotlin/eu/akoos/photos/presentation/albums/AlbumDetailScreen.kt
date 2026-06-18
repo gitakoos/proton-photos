@@ -327,9 +327,11 @@ fun AlbumDetailScreen(
         LazyVerticalGrid(
             columns = GridCells.Fixed(3),
             state = gridState,
-            contentPadding = PaddingValues(bottom = 24.dp),
-            horizontalArrangement = Arrangement.spacedBy(2.dp),
-            verticalArrangement = Arrangement.spacedBy(2.dp),
+            // Match the main timeline grid (GalleryGrid) at 3 columns: same 20.dp side inset and
+            // 6.dp gap, so album photos render at the same size and spacing as the Photos page.
+            contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 24.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
             modifier = Modifier.fillMaxSize(),
         ) {
             item(span = { GridItemSpan(maxLineSpan) }) {

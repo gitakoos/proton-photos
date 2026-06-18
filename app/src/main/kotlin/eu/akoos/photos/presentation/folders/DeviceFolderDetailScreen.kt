@@ -91,6 +91,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.GalleryItem
+import eu.akoos.photos.presentation.common.ConfirmSheet
 import eu.akoos.photos.presentation.common.IconBubble
 import eu.akoos.photos.presentation.gallery.PhotoCell
 import eu.akoos.photos.presentation.viewer.ManagePublicLinkSheet
@@ -135,6 +136,7 @@ fun DeviceFolderDetailScreen(
     BackHandler(enabled = isSelectionMode) { viewModel.clearSelection() }
 
     var showBackupDialog by remember { mutableStateOf(false) }
+    var showUploadConfirm by remember { mutableStateOf(false) }
     val shareCtx = androidx.compose.ui.platform.LocalContext.current
     val shareChooserTitle = stringResource(R.string.share_chooser_title)
     // The VM builds the system-share intent off the UI thread; the screen launches the chooser.
@@ -219,11 +221,11 @@ fun DeviceFolderDetailScreen(
         LazyVerticalGrid(
             columns = GridCells.Fixed(3),
             state = gridState,
-            contentPadding = PaddingValues(
-                bottom = 24.dp,
-            ),
-            horizontalArrangement = Arrangement.spacedBy(2.dp),
-            verticalArrangement = Arrangement.spacedBy(2.dp),
+            // Match the main timeline grid (GalleryGrid) at 3 columns: same 20.dp side inset and
+            // 6.dp gap, so device-folder photos render at the same size as the Photos page.
+            contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 24.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
             modifier = Modifier.fillMaxSize(),
         ) {
             // Hero header — cover, folder name and count, like the cloud-album detail page.
@@ -477,18 +479,12 @@ fun DeviceFolderDetailScreen(
                         modifier = Modifier.size(20.dp),
                     )
                 }
-                // Back up selected to Drive. Already-synced selections are skipped; the progress
-                // pill covers a started back-up, so only speak up when there was nothing to do.
+                // Back up selected to Drive. Confirm with a snackbar either way (a back-up started,
+                // or the selection was already synced) since the progress pill alone is easy to miss.
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(999.dp))
-                        .clickable {
-                            viewModel.uploadSelected { outcome ->
-                                if (outcome.queued == 0) scope.launch {
-                                    snackbarHostState.showSnackbar(ctx.getString(R.string.device_folder_already_backed_up))
-                                }
-                            }
-                        }
+                        .clickable { showUploadConfirm = true }
                         .padding(horizontal = 14.dp, vertical = 10.dp),
                     contentAlignment = Alignment.Center,
                 ) {
@@ -586,6 +582,28 @@ fun DeviceFolderDetailScreen(
                     }
                 },
                 onDismiss = { showAddToAlbumSheet = false },
+            )
+        }
+
+        // Confirm before uploading the current selection (single or multiple) to Drive.
+        if (showUploadConfirm && selectedUris.isNotEmpty()) {
+            val ctx = androidx.compose.ui.platform.LocalContext.current
+            ConfirmSheet(
+                title = stringResource(R.string.upload_confirm_title),
+                message = stringResource(R.string.upload_confirm_message, selectedUris.size),
+                confirmLabel = stringResource(R.string.upload_action_short),
+                dismissLabel = stringResource(R.string.cancel),
+                onConfirm = {
+                    showUploadConfirm = false
+                    viewModel.uploadSelected { outcome ->
+                        scope.launch {
+                            val msg = if (outcome.queued > 0) R.string.backup_started
+                                else R.string.device_folder_already_backed_up
+                            snackbarHostState.showSnackbar(ctx.getString(msg))
+                        }
+                    }
+                },
+                onDismiss = { showUploadConfirm = false },
             )
         }
 

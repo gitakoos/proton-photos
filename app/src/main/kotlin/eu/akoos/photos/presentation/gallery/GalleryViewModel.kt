@@ -511,7 +511,11 @@ class GalleryViewModel @Inject constructor(
                             }
                             val notHidden = local == null || local.uri !in sources.hiddenUris
                             val bucket = local?.bucketName
-                            val notExcludedBucket = bucket == null || bucket !in sources.timelineExcludedBuckets
+                            // Backed-up photos (Synced) show through the folder filter even from a hidden
+                            // folder; only not-yet-uploaded locals are hidden. Otherwise seeing one photo
+                            // you uploaded from a hidden folder would force un-hiding the whole folder.
+                            val notExcludedBucket = item is GalleryItem.Synced ||
+                                bucket == null || bucket !in sources.timelineExcludedBuckets
                             notHidden && notExcludedBucket
                         }
                         val filtered = applyFilter(

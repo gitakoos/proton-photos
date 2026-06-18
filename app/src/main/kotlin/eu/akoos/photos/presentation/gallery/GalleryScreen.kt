@@ -186,6 +186,7 @@ import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.usecase.CategorizeItem
 import eu.akoos.photos.presentation.common.ConfirmDialog
+import eu.akoos.photos.presentation.common.ConfirmSheet
 import eu.akoos.photos.presentation.common.DenseGridWarningDialog
 import eu.akoos.photos.presentation.common.EmptyState
 import eu.akoos.photos.presentation.common.ErrorPopup
@@ -604,6 +605,7 @@ fun GalleryScreen(
     // A mixed selection that includes cloud-only photos has to download those originals before they
     // can leave the app, so we warn first. A pure-local selection shares straight away.
     var showShareCloudWarning by remember { mutableStateOf(false) }
+    var showBackUpConfirm by remember { mutableStateOf(false) }
     // Hand the VM-built ACTION_SEND_MULTIPLE intent to the system chooser. One-shot collect;
     // the share pill spinner is driven by multiShareState above, not by this flow.
     val shareChooserTitle = stringResource(R.string.share_chooser_title)
@@ -913,7 +915,7 @@ fun GalleryScreen(
                 addToAlbumState = addToAlbumState,
                 onDownload = viewModel::downloadSelected,
                 onRequestAddToAlbum = { showAddToAlbumSheet = true },
-                onBackUp = { viewModel.backUpSelected { } },
+                onBackUp = { showBackUpConfirm = true },
                 onStripMetadata = viewModel::stripMetadataSelected,
                 onHideSelected = viewModel::hideSelected,
             )
@@ -1043,6 +1045,25 @@ fun GalleryScreen(
                 viewModel.shareSelected()
             },
             onDismiss = { showShareCloudWarning = false },
+        )
+    }
+    if (showBackUpConfirm && state.selectedItems.isNotEmpty()) {
+        ConfirmSheet(
+            title = stringResource(R.string.upload_confirm_title),
+            message = stringResource(R.string.upload_confirm_message, state.selectedItems.size),
+            confirmLabel = stringResource(R.string.upload_action_short),
+            dismissLabel = stringResource(R.string.cancel),
+            onConfirm = {
+                showBackUpConfirm = false
+                viewModel.backUpSelected { queued ->
+                    tabScope.launch {
+                        val msg = if (queued > 0) R.string.backup_started
+                            else R.string.device_folder_already_backed_up
+                        snackbarHostState.showSnackbar(context.getString(msg))
+                    }
+                }
+            },
+            onDismiss = { showBackUpConfirm = false },
         )
     }
     if (showMultiDeleteSheet && state.selectedItems.isNotEmpty()) {
