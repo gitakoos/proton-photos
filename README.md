@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/gitakoos/proton-photos/releases/latest"><img src="https://img.shields.io/badge/release-v2.3.3-blue" alt="Release" /></a>
+  <a href="https://github.com/gitakoos/proton-photos/releases/latest"><img src="https://img.shields.io/badge/release-v2.3.4-blue" alt="Release" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-green" alt="License" /></a>
   <img src="https://img.shields.io/badge/minSdk-26-orange" alt="Min SDK" />
   <a href="https://photos.akoos.eu"><img src="https://img.shields.io/badge/website-photos.akoos.eu-8B7CFF" alt="Website" /></a>
@@ -41,7 +41,7 @@
 - Calendar view: every day on a calendar, with a hero photo per day, an editable place + description, and the full grid of that day's photos and videos.
 - Search: filename, media type, sync state, year and month filters, with accent-insensitive matching so an unaccented query still finds accented names; the empty-state shows recent photos, an "On this day" carousel and a jump-to-month grid.
 - Timeline scrubber on the photos grid for fast year-jump navigation.
-- Multi-select bulk actions: back up to Drive, download, add to album, delete, hide, strip metadata; adding a local photo to a cloud album uploads it first, back up also works on a single photo from the viewer, and uploads keep running in the background after you leave. Mixed device + cloud selection is guarded so nothing is silently dropped.
+- Multi-select: long-press a photo, or drag across the grid to sweep a range, in the timeline, albums and device folders. Bulk actions: back up to Drive, download, add to album, delete, hide, strip metadata; adding a local photo to a cloud album uploads it first, back up also works on a single photo from the viewer, and uploads keep running in the background after you leave. Mixed device + cloud selection is guarded so nothing is silently dropped.
 - Share to other apps: send photos and videos to any other app from the gallery, an album, or a device folder; cloud-only photos download first, then share.
 - Timeline filter: choose which device folders and album photos appear on the Photos timeline; display-only, so everything stays backed up and browsable.
 - Cloud trash, in-app: browse deleted cloud photos, restore them, or empty the trash for good without leaving the app.

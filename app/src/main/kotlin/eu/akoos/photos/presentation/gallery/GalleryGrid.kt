@@ -31,13 +31,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
-import androidx.compose.foundation.gestures.scrollBy
-import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.withFrameNanos
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.LocalDensity
-import kotlinx.coroutines.isActive
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -69,7 +63,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -350,148 +343,20 @@ internal fun PhotoGrid(
     }
 
     // ── Drag-to-select ────────────────────────────────────────────────────────
-    // Long-press a photo and, without lifting, drag across photos to select/deselect a contiguous
-    // range. detectDragGesturesAfterLongPress only fires AFTER the long-press time-out, so a plain
-    // single-finger drag still scrolls the grid and the two-finger pinch above is untouched. A
-    // long-press with no movement falls through to onDragEnd having only set the anchor cell, which
-    // matches the previous "long-press selects one" behaviour and enters selection mode.
+    // Long-press a photo then drag to select/deselect a contiguous range; a plain single-finger drag
+    // still scrolls and the two-finger pinch above is untouched. The gesture lives in the shared
+    // [rememberDragMultiSelectModifier].
     val density = LocalDensity.current
-    val edgeScrollPx = remember(density) { with(density) { 80.dp.toPx() } }
-    // selectedItems is read through an updated-state holder because the pointerInput block below is
-    // keyed on `items` — without it the block snapshots a stale selection and a re-grab wipes whatever
-    // was selected after the last `items` change. With the live value, grabbing an unselected photo
-    // extends the selection and grabbing a selected one deselects, both preserving the rest.
-    val latestSelectedItems by rememberUpdatedState(selectedItems)
-    // Drag mode, decided once at the anchor: true = select the swept range, false = deselect it.
-    var dragSelect by remember { mutableStateOf(true) }
-    var dragAnchorIndex by remember { mutableStateOf(-1) }
-    var dragLastIndex by remember { mutableStateOf(-1) }
-    // Selection snapshot captured at the anchor, before any painting. Each paint sets the whole
-    // selection to this snapshot ± the currently swept range, so dragging back reverts the cells the
-    // range no longer covers to their pre-drag state instead of leaving them painted.
-    var dragInitial by remember { mutableStateOf(emptySet<GalleryItem>()) }
-    // Signed scroll speed (px/frame) while the finger sits in the top/bottom edge band; 0 stops it.
-    var edgeScrollVelocity by remember { mutableFloatStateOf(0f) }
-
-    // Apply a swept range [lo, hi] against the pre-drag snapshot: union when selecting, difference
-    // when deselecting. Replaces the whole selected set so the result is purely a function of the
-    // current range, never an accumulation of earlier paints.
-    val paintRange: (Int, Int) -> Unit = { lo, hi ->
-        val range = items.subList(lo, hi + 1).toSet()
-        onSelectionChange(if (dragSelect) dragInitial + range else dragInitial - range)
-    }
-
-    // Map a pointer offset (grid-node-local coordinates) to the flat [items] index under it. Scans
-    // only the currently visible cells, matches the one whose bounds contain the offset, and resolves
-    // its grid key via [indexByKey]. Returns null for header rows (non-photo keys) and empty gaps.
-    //
-    // LazyGridItemInfo.offset is measured from the viewport's start, which top content-padding pushes
-    // to a negative viewportStartOffset; the pointer offset is measured from the grid node's top-left
-    // (the content-padding band included). Shifting the cell bounds by viewportStartOffset puts both
-    // in the node-local space, so the cell directly under the finger is the one returned rather than
-    // the row one content-padding.top further down.
-    val itemIndexAt: (Offset) -> Int? = remember(items) {
-        fun(offset: Offset): Int? {
-            val startY = gridState.layoutInfo.viewportStartOffset
-            val info = gridState.layoutInfo.visibleItemsInfo.firstOrNull { cell ->
-                val top = cell.offset.y - startY
-                val left = cell.offset.x
-                offset.y >= top && offset.y < top + cell.size.height &&
-                    offset.x >= left && offset.x < left + cell.size.width
-            } ?: return null
-            val key = info.key as? String ?: return null
-            return indexByKey[key]
-        }
-    }
-
-    val dragSelectModifier = Modifier.pointerInput(items) {
-        detectDragGesturesAfterLongPress(
-            onDragStart = { offset ->
-                val idx = itemIndexAt(offset)
-                if (idx == null) {
-                    dragAnchorIndex = -1
-                    return@detectDragGesturesAfterLongPress
-                }
-                // Snapshot the live selection, then set the mode from the anchor: grabbing an
-                // unselected photo selects the swept range (extending the existing selection), grabbing
-                // a selected one deselects it. Dragging back reverts the cells the range no longer covers.
-                dragInitial = latestSelectedItems
-                dragSelect = items[idx] !in latestSelectedItems
-                dragAnchorIndex = idx
-                dragLastIndex = idx
-                paintRange(idx, idx)
-                haptics.performHapticFeedback(
-                    androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress,
-                )
-            },
-            onDrag = { change, _ ->
-                if (dragAnchorIndex < 0) return@detectDragGesturesAfterLongPress
-                change.consume()
-                val current = itemIndexAt(change.position)
-                if (current != null && current != dragLastIndex) {
-                    dragLastIndex = current
-                    val lo = kotlin.math.min(dragAnchorIndex, current)
-                    val hi = kotlin.math.max(dragAnchorIndex, current)
-                    // subList is inclusive of [hi]; header positions never land in [items] (the flat
-                    // photo list excludes them) so no extra filtering is needed.
-                    paintRange(lo, hi)
-                }
-                // Edge auto-scroll so the range can run past the visible screen. The pointer y is
-                // grid-local; near either edge we set a velocity the loop below applies each frame.
-                val viewportHeight = gridState.layoutInfo.viewportSize.height.toFloat()
-                val y = change.position.y
-                edgeScrollVelocity = when {
-                    y < edgeScrollPx -> -((edgeScrollPx - y) / edgeScrollPx) * 24f
-                    y > viewportHeight - edgeScrollPx ->
-                        ((y - (viewportHeight - edgeScrollPx)) / edgeScrollPx) * 24f
-                    else -> 0f
-                }
-            },
-            onDragEnd = {
-                // Fully disarm so the next long-press starts a fresh drag whose mode is re-decided
-                // from the new anchor.
-                dragAnchorIndex = -1
-                dragLastIndex = -1
-                dragInitial = emptySet()
-                edgeScrollVelocity = 0f
-            },
-            onDragCancel = {
-                dragAnchorIndex = -1
-                dragLastIndex = -1
-                dragInitial = emptySet()
-                edgeScrollVelocity = 0f
-            },
-        )
-    }
-
-    // Drives the edge auto-scroll: a single long-lived collector watches the velocity the drag
-    // handler sets. When it's non-zero (finger in an edge band) it scrolls the grid that direction
-    // every frame and extends the range up to the cell now under the finger, so holding at the edge
-    // keeps growing the selection past the visible screen. A zero velocity ends the inner loop.
-    LaunchedEffect(Unit) {
-        snapshotFlow { edgeScrollVelocity }.collect { velocity ->
-            if (velocity == 0f) return@collect
-            while (isActive && edgeScrollVelocity != 0f) {
-                gridState.scrollBy(edgeScrollVelocity)
-                if (dragAnchorIndex >= 0) {
-                    // Newly-scrolled-in cells extend the range to whichever edge the finger holds.
-                    val edgeCell = if (edgeScrollVelocity < 0f) {
-                        gridState.layoutInfo.visibleItemsInfo.firstOrNull { (it.key as? String) in indexByKey }
-                    } else {
-                        gridState.layoutInfo.visibleItemsInfo.lastOrNull { (it.key as? String) in indexByKey }
-                    }
-                    val edgeIndex = (edgeCell?.key as? String)?.let { indexByKey[it] }
-                    if (edgeIndex != null && edgeIndex != dragLastIndex) {
-                        dragLastIndex = edgeIndex
-                        val lo = kotlin.math.min(dragAnchorIndex, edgeIndex)
-                        val hi = kotlin.math.max(dragAnchorIndex, edgeIndex)
-                        paintRange(lo, hi)
-                    }
-                }
-                withFrameNanos {}
-            }
-        }
-    }
+    val dragSelectModifier = rememberDragMultiSelectModifier(
+        gridState = gridState,
+        items = items,
+        indexByKey = indexByKey,
+        selected = selectedItems,
+        // Matches the grid's own contentPadding(top) below, so the hit-test maps the finger onto the
+        // right cell regardless of scroll position or device.
+        contentPaddingTopPx = with(density) { (topContentPadding + 8.dp).toPx() },
+        onSelectionChange = onSelectionChange,
+    )
 
     Box(modifier = Modifier.fillMaxSize()) {
     LazyVerticalGrid(

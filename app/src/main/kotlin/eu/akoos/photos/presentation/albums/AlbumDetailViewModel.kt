@@ -420,6 +420,9 @@ class AlbumDetailViewModel @Inject constructor(
 
     fun clearSelection() = _uiState.update { it.copy(selectedPhotos = emptySet()) }
 
+    /** Replace the whole selection — used by the drag-select sweep, which sets the swept range each frame. */
+    fun setSelectedPhotos(linkIds: Set<String>) = _uiState.update { it.copy(selectedPhotos = linkIds) }
+
     /** Deferred cloud-delete work + context, held while the system trash dialog is up. */
     private var pendingPermissionResult: eu.akoos.photos.domain.usecase.DeletePhotoUseCase.Result.NeedsMediaWritePermission? = null
     private var pendingDeleteLinkIds: List<String> = emptyList()

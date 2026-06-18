@@ -25,6 +25,7 @@ package eu.akoos.photos.presentation.albums
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -103,7 +104,7 @@ internal fun PhotoCell(
      *  Off for shared-with-me albums and while already in multi-select. */
     showLongPressMenu: Boolean = false,
     onTap: () -> Unit,
-    onLongPress: () -> Unit,
+    onLongPress: (() -> Unit)? = null,
     onSetAsCover: () -> Unit = {},
     onRemoveFromAlbum: () -> Unit = {},
     onRequestThumbnail: (linkId: String) -> Unit = {},
@@ -132,11 +133,15 @@ internal fun PhotoCell(
             .aspectRatio(0.85f)
             .clip(RoundedCornerShape(if (isSelected) 8.dp else 6.dp))
             .background(Bg2)
-            .combinedClickable(
-                onClick = onTap,
-                onLongClick = {
-                    if (showLongPressMenu) menuExpanded = true
-                    else onLongPress()
+            // Tap-only when the grid-level drag-select owns the long-press (onLongPress null) so the
+            // long-press falls through to the grid; combined (tap + menu/select) otherwise. A registered
+            // combinedClickable can otherwise claim the long-press and starve the grid gesture, so this
+            // mirrors the gallery PhotoCell's null-onLongClick handling.
+            .then(
+                when {
+                    showLongPressMenu -> Modifier.combinedClickable(onClick = onTap, onLongClick = { menuExpanded = true })
+                    onLongPress != null -> Modifier.combinedClickable(onClick = onTap, onLongClick = onLongPress)
+                    else -> Modifier.clickable(onClick = onTap)
                 },
             )
             .then(if (isSelected) Modifier.border(2.dp, Accent, RoundedCornerShape(8.dp)) else Modifier),
@@ -270,7 +275,7 @@ internal fun PhotoCell(
                     },
                     onClick = {
                         menuExpanded = false
-                        onLongPress()
+                        onLongPress?.invoke()
                     },
                 )
                 DropdownMenuItem(

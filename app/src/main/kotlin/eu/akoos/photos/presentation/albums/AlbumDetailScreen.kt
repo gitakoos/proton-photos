@@ -325,6 +325,18 @@ fun AlbumDetailScreen(
             modifier = Modifier.fillMaxSize(),
         ) {
         val cols = eu.akoos.photos.presentation.gallery.rememberDefaultGridColumns()
+        // Drag-to-select: long-press a photo then drag to sweep a range (shares the timeline gesture).
+        // Cells are keyed by linkId, so the swept indices map back to the selected linkIds.
+        val selectableLinkIds = remember(state.photos) { state.photos.map { it.linkId } }
+        val linkIdToIndex = remember(state.photos) { state.photos.mapIndexed { i, p -> p.linkId to i }.toMap() }
+        val dragSelectModifier = eu.akoos.photos.presentation.gallery.rememberDragMultiSelectModifier(
+            gridState = gridState,
+            items = selectableLinkIds,
+            indexByKey = linkIdToIndex,
+            selected = state.selectedPhotos,
+            contentPaddingTopPx = 0f,
+            onSelectionChange = viewModel::setSelectedPhotos,
+        )
         LazyVerticalGrid(
             columns = GridCells.Fixed(cols),
             state = gridState,
@@ -333,7 +345,7 @@ fun AlbumDetailScreen(
             contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 24.dp),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier.fillMaxSize().then(dragSelectModifier),
         ) {
             item(span = { GridItemSpan(maxLineSpan) }) {
                 val headerVideoCount = state.photos.count { it.mimeType.startsWith("video/") }
@@ -632,7 +644,9 @@ fun AlbumDetailScreen(
                                     onPhotoClick(viewerItems, index)
                                 }
                             },
-                            onLongPress = { viewModel.togglePhotoSelection(photo.linkId) },
+                            // Long-press + drag is handled by the grid-level drag-select; a plain
+                            // long-press there selects this single cell and enters selection mode.
+                            onLongPress = null,
                             onSetAsCover = { viewModel.setPhotoAsCover(photo.linkId) },
                             onRemoveFromAlbum = {
                                 // Reuse the bulk-remove path with a one-photo selection to share error/progress handling.

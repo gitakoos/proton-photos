@@ -30,7 +30,6 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -112,6 +111,9 @@ fun BoxScope.TimelineScrubber(
     val visible = hasContent && (isScrolling || isDragging)
 
     var dragTargetIndex by remember { mutableIntStateOf(-1) }
+    // Where the grabbed handle sits (px from the track top). Seeded at grab, moved by the drag
+    // delta, so the handle scrubs relative to where you grabbed it rather than to the raw touch Y.
+    var dragThumbPx by remember { mutableFloatStateOf(0f) }
 
     LaunchedEffect(gridState) {
         snapshotFlow { gridState.isScrollInProgress }
@@ -226,41 +228,48 @@ fun BoxScope.TimelineScrubber(
             .width(36.dp),
     ) {
         Box(modifier = Modifier.fillMaxHeight()) {
+            // Track — visual only; just measures its height. Deliberately NO tap/drag gesture: a tap
+            // or a scroll-touch near the right edge must not jump the timeline. Only the grab handle
+            // below scrubs (matches Ente / Google Photos, where you grab the handle to move).
             Box(
                 modifier = Modifier
                     .fillMaxHeight()
                     .width(36.dp)
                     .padding(end = 6.dp)
-                    .onSizeChanged { trackHeightPx = it.height.toFloat() }
-                    .pointerInput(totalItems) {
-                        detectTapGestures { offset ->
-                            val fraction = if (trackHeightPx <= 0f) 0f
-                                else offset.y / trackHeightPx
-                            dragTargetIndex = fractionToIndex(fraction)
-                        }
-                    }
-                    .pointerInput(totalItems) {
-                        detectDragGestures(
-                            onDragStart = { isDragging = true },
-                            onDragEnd = { isDragging = false },
-                            onDragCancel = { isDragging = false },
-                        ) { change, _ ->
-                            val y = change.position.y.coerceIn(0f, trackHeightPx)
-                            val fraction = if (trackHeightPx <= 0f) 0f else y / trackHeightPx
-                            dragTargetIndex = fractionToIndex(fraction)
-                        }
-                    },
+                    .onSizeChanged { trackHeightPx = it.height.toFloat() },
             )
 
+            // Grab handle — the ONLY scrub target. The 36dp-wide box is the touch area around the
+            // slim visual thumb; dragging it moves the timeline by the drag delta.
             Box(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
                     .offset { IntOffset(0, thumbTopPx.roundToInt()) }
-                    .padding(end = 4.dp)
-                    .size(width = 6.dp, height = thumbHeightDp)
-                    .clip(RoundedCornerShape(3.dp))
-                    .background(if (isDragging) colors.accent else colors.fgDim.copy(alpha = 0.7f)),
-            )
+                    .size(width = 36.dp, height = thumbHeightDp)
+                    .pointerInput(totalItems) {
+                        detectDragGestures(
+                            onDragStart = {
+                                isDragging = true
+                                dragThumbPx = thumbTopPx
+                            },
+                            onDragEnd = { isDragging = false },
+                            onDragCancel = { isDragging = false },
+                        ) { _, dragAmount ->
+                            dragThumbPx = (dragThumbPx + dragAmount.y).coerceIn(0f, maxTrackPx)
+                            val fraction = if (maxTrackPx <= 0f) 0f else dragThumbPx / maxTrackPx
+                            dragTargetIndex = fractionToIndex(fraction)
+                        }
+                    },
+                contentAlignment = Alignment.CenterEnd,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .padding(end = 4.dp)
+                        .size(width = 6.dp, height = thumbHeightDp)
+                        .clip(RoundedCornerShape(3.dp))
+                        .background(if (isDragging) colors.accent else colors.fgDim.copy(alpha = 0.7f)),
+                )
+            }
         }
     }
 }

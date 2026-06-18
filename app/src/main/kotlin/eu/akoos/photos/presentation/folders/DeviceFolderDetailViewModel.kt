@@ -155,6 +155,11 @@ class DeviceFolderDetailViewModel @Inject constructor(
         _selectedUris.value = emptySet()
     }
 
+    /** Replace the whole selection — used by the drag-select sweep, which sets the swept range each frame. */
+    fun setSelectedUris(uris: Set<String>) {
+        _selectedUris.value = uris
+    }
+
     /** Seed [albums] from the local album cache so the "Add to album" picker has options. */
     private fun loadAlbums() {
         viewModelScope.launch {

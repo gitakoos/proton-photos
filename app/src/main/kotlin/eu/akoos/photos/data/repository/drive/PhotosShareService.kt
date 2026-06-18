@@ -193,18 +193,22 @@ class PhotosShareService @Inject constructor(
             // If the Photos share didn't return a LinkID, get it from the standard share endpoint.
             var fallbackFailures = mutableListOf<String>()
             if (cachedPhotosRootLinkId == null) {
+                // The /v2/shares/{id} detail endpoint 404s for Photos shares on accounts whose
+                // storage comes from another account (organisation / custom-domain members). The
+                // standard share bootstrap (drive/shares/{id}) carries the root LinkID for those —
+                // the same endpoint the official client uses to resolve a share's root link.
                 try {
-                    val shareDetail = manager.invoke { getShareById(shareId) }.valueOrThrow.share
-                    if (shareDetail.linkId != null) {
-                        cachedPhotosRootLinkId = shareDetail.linkId
-                        Log.d(TAG, "getVolumeId: rootLinkId=${shareDetail.linkId} (from getShareById)")
+                    val bootstrap = manager.invoke { getShareBootstrap(shareId) }.valueOrThrow
+                    if (bootstrap.linkId != null) {
+                        cachedPhotosRootLinkId = bootstrap.linkId
+                        Log.d(TAG, "getVolumeId: rootLinkId=${bootstrap.linkId} (from getShareBootstrap)")
                     } else {
-                        fallbackFailures += "getShareById returned null linkId"
+                        fallbackFailures += "getShareBootstrap returned null linkId"
                     }
                 } catch (e: Exception) {
                     if (e is kotlinx.coroutines.CancellationException) throw e
-                    Log.w(TAG, "getVolumeId: getShareById fallback failed: ${e.message}")
-                    fallbackFailures += "getShareById: ${e.message ?: e.javaClass.simpleName}"
+                    Log.w(TAG, "getVolumeId: getShareBootstrap fallback failed: ${e.message}")
+                    fallbackFailures += "getShareBootstrap: ${e.message ?: e.javaClass.simpleName}"
                 }
             }
             // Last resort: derive root link ID from an album's parentLinkId.

@@ -219,6 +219,26 @@ fun DeviceFolderDetailScreen(
             .background(Bg0),
     ) {
         val cols = eu.akoos.photos.presentation.gallery.rememberDefaultGridColumns()
+        // Drag-to-select: long-press a photo then drag to sweep a range (shares the timeline gesture).
+        // Cells are keyed by local uri (cloud-only by linkId); the swept keys map to selected uris.
+        val selectableKeys = remember(items) {
+            items.map { item ->
+                when (item) {
+                    is GalleryItem.LocalOnly -> item.local.uri
+                    is GalleryItem.Synced -> item.local.uri
+                    is GalleryItem.CloudOnly -> item.cloud.linkId
+                }
+            }
+        }
+        val keyToIndex = remember(selectableKeys) { selectableKeys.mapIndexed { i, k -> k to i }.toMap() }
+        val dragSelectModifier = eu.akoos.photos.presentation.gallery.rememberDragMultiSelectModifier(
+            gridState = gridState,
+            items = selectableKeys,
+            indexByKey = keyToIndex,
+            selected = selectedUris,
+            contentPaddingTopPx = 0f,
+            onSelectionChange = viewModel::setSelectedUris,
+        )
         LazyVerticalGrid(
             columns = GridCells.Fixed(cols),
             state = gridState,
@@ -227,7 +247,7 @@ fun DeviceFolderDetailScreen(
             contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 24.dp),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier.fillMaxSize().then(dragSelectModifier),
         ) {
             // Hero header — cover, folder name and count, like the cloud-album detail page.
             item(span = { GridItemSpan(maxLineSpan) }) {
@@ -333,9 +353,9 @@ fun DeviceFolderDetailScreen(
                                 if (itemUri != null) viewModel.toggleSelection(itemUri)
                             } else onPhotoClick(items, index)
                         },
-                        onLongClick = {
-                            if (itemUri != null) viewModel.toggleSelection(itemUri)
-                        },
+                        // Long-press + drag is handled by the grid-level drag-select; a plain
+                        // long-press there selects this single cell and enters selection mode.
+                        onLongClick = null,
                     )
                 }
             }
