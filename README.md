@@ -18,7 +18,7 @@
 </p>
 
 <p align="center">
-  <a href="https://www.buymeacoffee.com/akoos"><img src="https://img.buymeacoffee.com/button-api/?text=Buy me a coffee&emoji=☕&slug=akoos&button_colour=100f0f&font_colour=ffffff&font_family=Inter&outline_colour=ffffff&coffee_colour=FFDD00" alt="Buy me a coffee" /></a>
+  <a href="https://www.buymeacoffee.com/akoos"><img src="https://img.shields.io/badge/Buy%20me%20a%20coffee-100f0f?logo=buymeacoffee&logoColor=FFDD00" alt="Buy me a coffee" /></a>
 </p>
 
 ## Features
