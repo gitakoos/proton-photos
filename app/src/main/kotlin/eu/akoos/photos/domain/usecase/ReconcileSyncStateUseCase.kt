@@ -187,7 +187,7 @@ class ReconcileSyncStateUseCase @Inject constructor(
             // captureTime in CloudPhoto is Unix seconds; LocalMediaItem.dateTaken is ms.
             val localCaptureTimeSec = local.dateTaken / 1000L
             val nameCandidate = cloudByNameAndDate[local.displayName to localCaptureTimeSec]
-                ?: cloudByNameSize[local.displayName to local.sizeBytes]
+                ?: cloudByNameSize[local.displayName to local.sizeBytes]?.takeIf { it.sizeBytes > 0 }
             // Trust a name+date / name+size match ONLY when a content hash can't settle it: the cloud
             // photo carries no ContentHash to check, or strip-on-upload changed the bytes so the same
             // photo can't hash-match its stripped cloud copy. When the cloud photo HAS a hash and

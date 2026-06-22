@@ -464,6 +464,31 @@ class PhotoStreamService @Inject constructor(
             val allPhotoLinks = streamLinks.sortedByDescending { it.captureTime }
             Log.d(TAG, "refreshCloudPhotos: ${allPhotoLinks.size} photos in stream")
 
+            // Persist a minimal stub per streamed link up front, so a photo is in the dedup index
+            // (keyed on its content hash) the moment pagination saw it — even if its detail batch
+            // below later fails. INSERT OR IGNORE never clobbers a fully-built row from a prior run;
+            // the per-chunk upsert in the detail loop then REPLACES each stub with the full row.
+            // Chunked so the gallery Flow isn't churned by one huge insert.
+            if (streamCallSucceeded && allPhotoLinks.isNotEmpty()) {
+                val stubRows = allPhotoLinks.map { link ->
+                    eu.akoos.photos.data.db.entity.PhotoListingEntity(
+                        linkId = link.linkId,
+                        shareId = effectiveShareId,
+                        volumeId = activeVolumeId,
+                        userId = userId.id,
+                        captureTime = link.captureTime,
+                        displayName = "",
+                        mimeType = "",
+                        sizeBytes = 0L,
+                        revisionId = "",
+                        thumbnailUrl = null,
+                        contentHash = link.contentHash,
+                        tagsCsv = link.tags.sorted().joinToString(","),
+                    )
+                }
+                stubRows.chunked(500).forEach { photoListingDao.insertStubsIgnore(it) }
+            }
+
             val rootLinkId = shareService.photosRootLinkId()
             val ownPublicKeys = cryptoHelper.getOwnPublicKeysArmored(userId)
 
@@ -503,6 +528,12 @@ class PhotoStreamService @Inject constructor(
             //    scoped to one batch and garbage-collected before the next one starts.
             for (batch in allPhotoLinks.chunked(REFRESH_BATCH)) {
                 try {
+                    // Retry the heavy per-batch work on a transient rate-limit/5xx (jittered
+                    // backoff) rather than letting one 429 fail the batch — a failed batch would
+                    // block the sticky "listed at least once" marker and stall the upload gate. The
+                    // stubs above already keep the photos in the dedup index, so this is purely to
+                    // complete the detail rows gently.
+                    eu.akoos.photos.util.retryWithBackoff(maxAttempts = 4, baseMs = 1_000L, maxBackoffMs = 30_000L) {
                     val batchLinkIds = batch.map { it.linkId }
                     val linkDetailMap = linkDetailHelpers.batchFetchLinkDetails(userId, activeVolumeId, batchLinkIds)
 
@@ -705,15 +736,32 @@ class PhotoStreamService @Inject constructor(
                             thumbnailDecryptScheduler.prefetch(userId, firstScreenRows)
                         }
                     }
+                    }
                 } catch (e: Exception) {
                     if (e is kotlinx.coroutines.CancellationException) throw e
-                    // One batch failing (network blip, a decode error, transient OOM on a
-                    // single oversized batch) must not abort the whole refresh: the chunks that
-                    // already upserted stay in the DB, and we press on to the next batch.
-                    // Recording the failure suppresses the stale-entry cleanup below.
-                    failedBatches++
+                    // One batch failing (a decode error, transient OOM on a single oversized batch)
+                    // must not abort the whole refresh: the chunks that already upserted stay in the
+                    // DB, and we press on to the next batch. A transient rate-limit/5xx that even the
+                    // retries above couldn't outlast does NOT count as a failed batch — the stubs
+                    // already hold the photos in the dedup index and the backfill pass below
+                    // completes their detail rows, so it must not block the ever-complete marker or
+                    // the stale-entry prune. Only a genuinely non-transient error suppresses those.
+                    if (!eu.akoos.photos.util.isTransientApiError(e)) failedBatches++
                     Log.w(TAG, "refreshCloudPhotos: batch failed (${e.javaClass.simpleName}: ${e.message}), continuing")
                 }
+            }
+
+            // Backfill any rows still left as stubs by a failed detail batch (rare, since the
+            // per-batch retry above absorbs ordinary rate limits). One bounded pass over just the
+            // gap — never a full re-walk — so a permanently-undecryptable photo can't loop.
+            try {
+                backfillIncompleteRows(
+                    userId, activeVolumeId, effectiveShareId, rootLinkId, rootLinkKeyBytes,
+                    ownPublicKeys, thumbnailCacheDir, accumulatedParentKeys, foundIds,
+                )
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                Log.w(TAG, "refreshCloudPhotos: incomplete-row backfill failed: ${e.message}")
             }
 
             // Seed the lazy scheduler with the parent keys decrypted across every batch.
@@ -750,11 +798,16 @@ class PhotoStreamService @Inject constructor(
             val libraryFullyListed = streamCallSucceeded
             if (libraryFullyListed) {
                 context.settingsDataStore.edit {
-                    it[completeKey] = failedBatches == 0
+                    // Pagination saw the whole library, and every streamed link already has a stub
+                    // row in the dedup index — so the listing is "complete enough" to open the
+                    // upload gate even if a detail batch failed (its row is filled by the backfill,
+                    // never re-uploaded). Tie both flags to pagination success, not failedBatches,
+                    // so a transient 429 mid-walk can't strand the upload on "Preparing backup".
+                    it[completeKey] = streamCallSucceeded
                     // Sticky "listed at least once" marker — never cleared at a later walk start, so
                     // the upload path can defer the post-reinstall bulk upload until the cloud library
-                    // is fully known. Only set on a clean walk; a failed batch leaves it untouched.
-                    if (failedBatches == 0) it[everCompleteKey] = true
+                    // is fully known.
+                    if (streamCallSucceeded) it[everCompleteKey] = true
                     it.remove(cursorKey)
                 }
             }
@@ -769,7 +822,11 @@ class PhotoStreamService @Inject constructor(
                 // protection window (see comment above) rather than the full TTL.
                 val recentUploads = recentUploadsTracker.snapshotWithinMs(UPLOAD_PROTECTION_WINDOW_MS)
                 val existingIds = photoListingDao.getAllLinkIds(userId.id).toSet()
-                val toDelete = (existingIds - foundIds - recentUploads).toList()
+                // Stub rows (detail not fetched yet) carry a valid contentHash but are absent from
+                // foundIds when their detail batch failed transiently. Exclude them so a rate-limit
+                // can't make the prune delete the very dedup rows the stub upsert just added.
+                val stubIds = photoListingDao.getIncompleteRows(userId.id).map { it.linkId }.toSet()
+                val toDelete = (existingIds - foundIds - recentUploads - stubIds).toList()
                     // The debug large-library simulator's synthetic rows aren't in the server
                     // listing, so a refresh must not prune them out from under an active test.
                     .let { ids ->
@@ -806,6 +863,113 @@ class PhotoStreamService @Inject constructor(
             // the entry reset, so the event anchor stays unsaved and the next launch retries a
             // full refresh. Swallow rather than rethrow: a degraded gallery beats a crash loop.
             Log.e(TAG, "refreshCloudPhotos aborted (${t.javaClass.simpleName}: ${t.message})", t)
+        }
+    }
+
+    /**
+     * Fills the detail (name, mime, size, revision, thumbnail material) on rows the full-walk left
+     * as bare stubs because their detail batch failed. ONE bounded pass over [getIncompleteRows]
+     * only — never a re-walk of the whole listing — and it just upserts the completed rows, so a
+     * photo that stays undecryptable is left as a stub (still dedup-safe via its content hash) and
+     * not retried in a loop. Mirrors the per-photo build in [doRefreshCloudPhotos]; every completed
+     * linkId is added to [foundIds] so the caller's stale-entry prune doesn't treat it as gone.
+     */
+    private suspend fun backfillIncompleteRows(
+        userId: UserId,
+        activeVolumeId: String,
+        effectiveShareId: String,
+        rootLinkId: String?,
+        rootLinkKeyBytes: ByteArray?,
+        ownPublicKeys: List<String>,
+        thumbnailCacheDir: File,
+        accumulatedParentKeys: MutableMap<String, ByteArray>,
+        foundIds: MutableSet<String>,
+    ) {
+        val incomplete = photoListingDao.getIncompleteRows(userId.id)
+        if (incomplete.isEmpty()) return
+        Log.d(TAG, "refreshCloudPhotos: backfilling ${incomplete.size} incomplete row(s)")
+
+        for (rows in incomplete.chunked(REFRESH_BATCH)) {
+            val linkIds = rows.map { it.linkId }
+            val linkDetailMap = linkDetailHelpers.batchFetchLinkDetails(userId, activeVolumeId, linkIds)
+
+            // Parent keys: reuse what the main loop already decrypted, plus any album parents that
+            // only appear among these rows. Same shape as the detail loop above.
+            val parentKeyCache = mutableMapOf<String?, ByteArray?>()
+            parentKeyCache[rootLinkId] = rootLinkKeyBytes
+            for ((k, v) in accumulatedParentKeys) parentKeyCache[k] = v
+            val albumParentIds = linkDetailMap.values
+                .mapNotNull { it.link.parentLinkId }
+                .filter { it != rootLinkId && parentKeyCache[it] == null }
+                .toSet()
+            if (albumParentIds.isNotEmpty() && rootLinkKeyBytes != null) {
+                val albumDetailMap = linkDetailHelpers.batchFetchLinkDetails(userId, activeVolumeId, albumParentIds.toList())
+                for ((albumId, albumDetail) in albumDetailMap) {
+                    val aLink = albumDetail.link
+                    if (aLink.nodeKey != null && aLink.nodePassphrase != null) {
+                        parentKeyCache[albumId] = try {
+                            cryptoHelper.decryptNodeKey(aLink.nodeKey, aLink.nodePassphrase, rootLinkKeyBytes)
+                        } catch (e: Exception) {
+                            if (e is kotlinx.coroutines.CancellationException) throw e
+                            Log.w(TAG, "refreshCloudPhotos: backfill albumKey failed for $albumId: ${e.message}")
+                            rootLinkKeyBytes
+                        }
+                    }
+                }
+            }
+            for ((k, v) in parentKeyCache) {
+                if (k != null && v != null) accumulatedParentKeys[k] = v
+            }
+
+            val thumbnailIdToLinkId = mutableMapOf<String, String>()
+            for ((linkId, detail) in linkDetailMap) {
+                val thumbnailList = detail.link.fileProperties?.activeRevision?.thumbnails
+                    ?: detail.photo?.activeRevision?.thumbnails
+                val tid = thumbnailList?.firstOrNull { it.type == 1 }?.thumbnailId
+                    ?: thumbnailList?.firstOrNull { it.type == 2 }?.thumbnailId
+                    ?: thumbnailList?.firstOrNull()?.thumbnailId
+                if (tid != null) thumbnailIdToLinkId[tid] = linkId
+            }
+            val thumbnailUrlMap: Map<String, ThumbnailUrlInfo> =
+                if (thumbnailIdToLinkId.isNotEmpty())
+                    linkDetailHelpers.batchFetchThumbnailUrls(userId, activeVolumeId, thumbnailIdToLinkId.keys.toList())
+                else emptyMap()
+            val thumbnailInfoByLinkId: Map<String, ThumbnailUrlInfo> =
+                thumbnailIdToLinkId.entries.mapNotNull { (tid, linkId) ->
+                    thumbnailUrlMap[tid]?.let { linkId to it }
+                }.toMap()
+
+            val ckpMap = linkDetailHelpers.batchFetchContentKeyPackets(userId, effectiveShareId, linkIds)
+
+            val toSave = mutableListOf<eu.akoos.photos.data.db.entity.PhotoListingEntity>()
+            for (row in rows) {
+                val detail = linkDetailMap[row.linkId] ?: continue
+                // Rebuild the stub the builder expects from the persisted row (it carries the wire
+                // fields the dedup keys on: capture time, content hash, tags).
+                val stub = PhotoLinkDto(
+                    linkId = row.linkId,
+                    captureTime = row.captureTime,
+                    contentHash = row.contentHash,
+                    tags = if (row.tagsCsv.isEmpty()) emptyList()
+                           else row.tagsCsv.split(',').mapNotNull { it.toIntOrNull() },
+                )
+                val parentId = detail.link.parentLinkId
+                val parentKeyBytes = parentKeyCache[parentId] ?: rootLinkKeyBytes
+                val thumbnailInfo = thumbnailInfoByLinkId[row.linkId]
+                if (!isRecentlyTrashed(row.linkId)) {
+                    toSave += photoEntityBuilder.build(
+                        stub, detail, userId, effectiveShareId, activeVolumeId, parentKeyBytes,
+                        thumbnailCacheDir, thumbnailInfo, ckpMap[row.linkId], ownPublicKeys,
+                        decryptThumbnail = false,
+                    )
+                    foundIds += row.linkId
+                }
+            }
+            if (toSave.isNotEmpty()) {
+                photoListingDao.upsertAll(toSave)
+                yield()
+                delay(100)
+            }
         }
     }
 
@@ -1124,8 +1288,15 @@ class PhotoStreamService @Inject constructor(
             Log.w(TAG, "refreshCloudPhotosIncremental: DriveNotFoundException: ${e.message}")
         } catch (e: Exception) {
             if (e is kotlinx.coroutines.CancellationException) throw e
-            Log.e(TAG, "refreshCloudPhotosIncremental failed, falling back to full refresh", e)
-            refreshCloudPhotos(userId)
+            if (eu.akoos.photos.util.isTransientApiError(e)) {
+                // A transient rate-limit on the event feed must not escalate to a full library
+                // re-walk. The anchor isn't advanced on this path, so the next incremental pass
+                // retries the same events instead of re-listing everything.
+                Log.w(TAG, "refreshCloudPhotosIncremental: transient error, retrying incrementally next pass: ${e.message}")
+            } else {
+                Log.e(TAG, "refreshCloudPhotosIncremental failed, falling back to full refresh", e)
+                refreshCloudPhotos(userId)
+            }
         }
     }
 }

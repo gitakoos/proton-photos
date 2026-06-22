@@ -35,6 +35,8 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -813,9 +815,14 @@ private fun CropPanel(state: VideoEditorUiState, vm: VideoEditorViewModel) {
 @Composable
 private fun RotatePanel(state: VideoEditorUiState, vm: VideoEditorViewModel) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        // Scrolls horizontally so long translations keep each pill's natural width
+        // instead of squishing the row to fit.
         Row(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             EditorPill(

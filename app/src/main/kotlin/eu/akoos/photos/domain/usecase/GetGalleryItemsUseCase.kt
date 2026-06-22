@@ -138,7 +138,7 @@ class GetGalleryItemsUseCase @Inject constructor(
             val cloudFromVideoSize = if (cloudFromSync == null && cloudFromHash == null &&
                     cloudFromContent == null && localItem.mimeType.startsWith("video/"))
                 cloudByNameSize[localItem.displayName.lowercase() to localItem.sizeBytes]
-                    ?.filter { it.linkId !in usedCloudIds }
+                    ?.filter { it.linkId !in usedCloudIds && it.sizeBytes > 0 }
                     ?.singleOrNull()
             else null
 

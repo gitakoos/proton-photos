@@ -51,6 +51,20 @@ interface PhotoListingDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(entities: List<PhotoListingEntity>)
 
+    /** Inserts listing stubs WITHOUT clobbering a row that already exists. The full-listing walk
+     *  upserts a minimal stub (linkId + capture time + content hash + tags) per streamed link so a
+     *  detail batch that later fails can't strand the row out of dedup; a prior fully-built row is
+     *  left intact (IGNORE), and the per-batch detail pass replaces a stub with the complete row. */
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertStubsIgnore(rows: List<PhotoListingEntity>)
+
+    /** Stub rows that carry no detail blob yet (a stub a failed detail batch never completed). Keyed
+     *  on an empty revisionId, which a fully-built row always resolves — so a RAW / odd-extension
+     *  photo whose mimeType is legitimately empty is NOT mistaken for a stub and re-fetched forever.
+     *  Used to backfill just the gap on a later pass instead of re-walking the whole library. */
+    @Query("SELECT * FROM photo_listing WHERE userId = :userId AND revisionId = ''")
+    suspend fun getIncompleteRows(userId: String): List<PhotoListingEntity>
+
     @Upsert
     suspend fun upsertAll(entities: List<PhotoListingEntity>)
 
@@ -106,7 +120,7 @@ interface PhotoListingDao {
      *  cached encXAttr is present (rows synced before the encXAttr column carry none and have their
      *  XAttr fetched on demand). Paged so a large library's crypto-bearing rows never all sit in
      *  memory at once. */
-    @Query("SELECT * FROM photo_listing WHERE userId = :userId AND gpsChecked = 0 ORDER BY captureTime DESC LIMIT :limit")
+    @Query("SELECT * FROM photo_listing WHERE userId = :userId AND gpsChecked = 0 AND revisionId != '' ORDER BY captureTime DESC LIMIT :limit")
     suspend fun getUngeocoded(userId: String, limit: Int): List<PhotoListingEntity>
 
     /** Marks rows as GPS-processed so the backfill never revisits them, whether or not a fix was found. */

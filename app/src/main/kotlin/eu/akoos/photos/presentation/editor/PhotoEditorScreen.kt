@@ -36,6 +36,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -1016,11 +1018,15 @@ private fun RedactPanel(state: EditorUiState, vm: PhotoEditorViewModel) {
 
 @Composable
 private fun RotatePanel(vm: PhotoEditorViewModel) {
-    // Center the three actions horizontally so the panel doesn't read as a left-
-    // anchored list against the wider editor frame.
+    // Scrolls horizontally so long translations keep each tile's natural width instead
+    // of squishing the row to fit.
     Row(
-        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
         ActionTile(stringResource(R.string.video_editor_rotate), Icons.AutoMirrored.Filled.RotateRight) { vm.rotate90Cw() }
         ActionTile(stringResource(R.string.editor_flip_h), Icons.Default.Flip) { vm.toggleFlipH() }
