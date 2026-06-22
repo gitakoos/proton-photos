@@ -90,8 +90,12 @@ private const val UPLOAD_PARALLELISM = 3
  *
  * `Idle` is a synthetic frame the use-case emits when it finishes (or finds nothing to upload)
  * so observers can clear any in-flight view without watching a separate signal.
+ *
+ * `WaitingForWifi` and `PreparingBackup` are synthetic frames emitted when the auto-sync drain is
+ * deferred (Wi-Fi-only on but off Wi-Fi / cloud listing not settled after a reinstall), so the
+ * queued-but-idle state reads as "waiting", not "broken". They carry no per-file payload.
  */
-enum class UploadStatus { Queued, Encrypting, Uploading, Done, Failed, Idle }
+enum class UploadStatus { Queued, Encrypting, Uploading, Done, Failed, Idle, WaitingForWifi, PreparingBackup }
 
 data class UploadProgress(
     val uri: String,
@@ -116,6 +120,7 @@ class UploadPendingUseCase @Inject constructor(
     private val localRepo: LocalMediaRepository,
     private val cloudRepo: DrivePhotoRepository,
     private val pendingDeleteNotif: PendingDeleteNotificationUseCase,
+    private val networkObserver: eu.akoos.photos.util.NetworkObserver,
     @ApplicationContext private val context: Context,
 ) {
     private val mutex = Mutex()
@@ -211,6 +216,18 @@ class UploadPendingUseCase @Inject constructor(
         // is not in the backup selection — bypass the folder guards below for these.
         val forcedUploadUris: Set<String> = pendingAdds.keys
 
+        // Wi-Fi-only enforcement for the auto-sync drain (absent key = ON, matching the rest of the
+        // app). ANY-Wi-Fi semantics: a metered Wi-Fi (hotspot, some routers) is still allowed, but
+        // mobile data is not. Centralised here so the inline callers (pull-to-refresh, Settings sync,
+        // editor) get the same guard the worker relies on. An explicit forced upload (a queued
+        // album-add / "back up now") bypasses it — the user asked for that one regardless of network.
+        val wifiOnly = prefs[SettingsKeys.SYNC_WIFI_ONLY] != false
+        if (wifiOnly && forcedUploadUris.isEmpty() && !networkObserver.currentlyOnWifi()) {
+            Log.d(UPLOAD_TAG, "Wi-Fi-only on and not on Wi-Fi — skipping auto-sync upload")
+            _progress.tryEmit(UploadProgress("", "", UploadStatus.WaitingForWifi, 0, 0))
+            return@withLock Result(attempted = 0, successCount = 0)
+        }
+
         // After a reinstall the cloud listing repopulates page by page; until it has been walked
         // end-to-end at least once, a LOCAL_ONLY row may just be a photo already on Drive whose
         // listing entry hasn't been re-fetched yet — uploading it now would duplicate it. Defer the
@@ -218,9 +235,16 @@ class UploadPendingUseCase @Inject constructor(
         val initialListingComplete = prefs.asMap().any { (k, v) ->
             k.name.startsWith("photo_listing_ever_complete_${userId.id}_") && v == true
         }
-        if (!initialListingComplete && forcedUploadUris.isEmpty()) {
-            Log.d(UPLOAD_TAG, "Initial cloud listing not complete yet — deferring bulk upload to avoid duplicates")
-            _progress.tryEmit(UploadProgress("", "", UploadStatus.Idle, 0, 0))
+        // Second half of the same guard: even once the listing is complete, a content-hash reconcile
+        // must have actually RUN against that complete listing before the LOCAL_ONLY rows are safe to
+        // drain. The moment the listing finishes, the ever-complete flag opens; if the upload drained
+        // here before the post-completion reconcile paired the rows, photos already on Drive would
+        // re-upload as duplicates. The sync worker runs reconcile (which sets this flag) before the
+        // upload, so it settles within the same pass — no infinite defer.
+        val pairingSettled = prefs[SettingsKeys.pairingSettledKey(userId.id)] ?: false
+        if ((!initialListingComplete || !pairingSettled) && forcedUploadUris.isEmpty()) {
+            Log.d(UPLOAD_TAG, "Cloud listing/pairing not settled yet — deferring bulk upload to avoid duplicates")
+            _progress.tryEmit(UploadProgress("", "", UploadStatus.PreparingBackup, 0, 0))
             return@withLock Result(attempted = 0, successCount = 0)
         }
 

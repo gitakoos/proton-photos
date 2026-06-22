@@ -246,7 +246,18 @@ class SettingsViewModel @Inject constructor(
                             // fresh batch.
                             batchStartMs = 0L
                             uploadedBytesByUri.clear()
-                            current.copy(uploadBytesPerSecond = null)
+                            current.copy(uploadBytesPerSecond = null, uploadDeferReason = null)
+                        }
+                        UploadStatus.WaitingForWifi, UploadStatus.PreparingBackup -> {
+                            // Deferral frame — no per-file payload. Surface the reason as a
+                            // one-line note in the Sync card without touching the events list
+                            // or byte counters.
+                            val reason = if (evt.status == UploadStatus.WaitingForWifi) {
+                                R.string.sync_deferred_waiting_wifi
+                            } else {
+                                R.string.sync_deferred_preparing
+                            }
+                            current.copy(uploadDeferReason = reason)
                         }
                         else -> {
                             val uiStatus = when (evt.status) {
@@ -255,7 +266,9 @@ class SettingsViewModel @Inject constructor(
                                 UploadStatus.Done -> UploadEventStatus.Done
                                 UploadStatus.Failed -> UploadEventStatus.Failed
                                 UploadStatus.Queued -> UploadEventStatus.Queued
-                                UploadStatus.Idle -> UploadEventStatus.Done // unreachable
+                                UploadStatus.Idle,
+                                UploadStatus.WaitingForWifi,
+                                UploadStatus.PreparingBackup -> UploadEventStatus.Done // unreachable
                             }
                             // New-batch detection: a fresh Uploading/Encrypting event that
                             // arrives when the previous batch fully completed (done == total > 0)
@@ -320,6 +333,7 @@ class SettingsViewModel @Inject constructor(
                                 uploadTotalCount = evt.totalCount,
                                 uploadEvents = nextEvents,
                                 uploadBytesPerSecond = bps,
+                                uploadDeferReason = null,
                             )
                         }
                     }
@@ -940,6 +954,7 @@ class SettingsViewModel @Inject constructor(
                             "photo_listing_cursor_${userId.id}_",
                             "photo_listing_complete_${userId.id}_",
                             "photo_listing_ever_complete_${userId.id}_",
+                            "pairing_settled_${userId.id}",
                         )
                         prefs.asMap().keys
                             .filter { key -> dynamicPrefixes.any { key.name.startsWith(it) } }

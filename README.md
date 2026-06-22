@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/gitakoos/proton-photos/releases/latest"><img src="https://img.shields.io/badge/release-v2.3.5-blue" alt="Release" /></a>
+  <a href="https://github.com/gitakoos/proton-photos/releases/latest"><img src="https://img.shields.io/badge/release-v2.3.6-blue" alt="Release" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-green" alt="License" /></a>
   <img src="https://img.shields.io/badge/minSdk-26-orange" alt="Min SDK" />
   <a href="https://photos.akoos.eu"><img src="https://img.shields.io/badge/website-photos.akoos.eu-8B7CFF" alt="Website" /></a>

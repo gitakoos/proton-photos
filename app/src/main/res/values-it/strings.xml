@@ -1063,6 +1063,8 @@
     <string name="upload_status_queued">In coda</string>
     <string name="upload_status_done">Fatto</string>
     <string name="upload_status_failed">Non riuscito</string>
+    <string name="sync_deferred_waiting_wifi">In attesa del Wi-Fi</string>
+    <string name="sync_deferred_preparing">Preparazione del backup…</string>
 
     <!-- Shared albums error snackbars -->
     <string name="shared_decline_failed">Rifiuto non riuscito: %1$s</string>

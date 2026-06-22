@@ -116,6 +116,10 @@ data class SettingsUiState(
      *  or the first file hasn't completed yet. Computed as cumulative-done-bytes /
      *  elapsed-since-batch-start so it's stable across parallel uploads. */
     val uploadBytesPerSecond: Long? = null,
+    /** String-res id explaining why the auto-sync drain is deferred (waiting for Wi-Fi /
+     *  preparing the first backup). Null when not deferred. Surfaced as a one-line note in
+     *  the Sync card so a queued-but-idle state reads as "waiting", not "broken". */
+    val uploadDeferReason: Int? = null,
 )
 
 /**

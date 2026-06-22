@@ -316,6 +316,17 @@ fun SettingsScreen(
                         Icon(Icons.AutoMirrored.Filled.ArrowForwardIos, null, tint = colors.fgMute, modifier = Modifier.size(13.dp))
                     }
                 }
+                // Deferral note — when the auto-sync drain is held back (waiting for Wi-Fi /
+                // preparing the first backup) the pending count sits above zero with no active
+                // upload. A one-line reason keeps "queued but idle" from reading as broken.
+                state.uploadDeferReason?.let { reasonRes ->
+                    Text(
+                        stringResource(reasonRes),
+                        color = colors.fgDim,
+                        fontSize = 11.5.sp,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp).padding(bottom = 8.dp),
+                    )
+                }
                 // ── Progress bar + expandable per-file list (while syncing OR pending) ──
                 // We render this *inside* the same Sync card (not as a separate card) so the
                 // header row's tap-target stays the gateway to Sync Settings — only the panel

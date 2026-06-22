@@ -222,6 +222,16 @@ object SettingsKeys {
     fun photoListingEverCompleteKey(userId: String, volumeId: String) =
         booleanPreferencesKey("photo_listing_ever_complete_${userId}_$volumeId")
 
+    /** Set true once a reconcile pass has run with the cloud listing already complete, so its
+     *  content-hash pairing had the full cloud set to match locals against. The bulk upload waits on
+     *  this in addition to [photoListingEverCompleteKey]: the moment the listing finishes the
+     *  ever-complete flag opens, but unpaired LOCAL_ONLY rows must not drain until a post-completion
+     *  reconcile has actually paired them, otherwise photos already on Drive re-upload as duplicates.
+     *  A stale value surviving sign-out is harmless: the listing-complete gate is cleared on sign-out,
+     *  so the next login still defers the upload until a fresh reconcile re-flips this. */
+    fun pairingSettledKey(userId: String) =
+        booleanPreferencesKey("pairing_settled_$userId")
+
     /** Notification opt-outs. Absent = true (shown). Producers read these before posting; the
      *  Notifications settings screen toggles them. NOTIFY_BACKUP_STATUS also controls whether the
      *  persistent background-sync service runs at all (it cannot be foreground without a notification). */

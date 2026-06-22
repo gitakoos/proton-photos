@@ -1051,6 +1051,8 @@
     <string name="upload_status_queued">En file d\'attente</string>
     <string name="upload_status_done">Terminé</string>
     <string name="upload_status_failed">Échec</string>
+    <string name="sync_deferred_waiting_wifi">En attente du Wi-Fi</string>
+    <string name="sync_deferred_preparing">Préparation de la sauvegarde…</string>
 
     <!-- Shared albums error snackbars -->
     <string name="shared_decline_failed">Échec du refus : %1$s</string>

@@ -278,6 +278,8 @@ class GalleryViewModel @Inject constructor(
                     eu.akoos.photos.domain.usecase.UploadStatus.Done -> false
                     eu.akoos.photos.domain.usecase.UploadStatus.Failed -> false
                     eu.akoos.photos.domain.usecase.UploadStatus.Idle -> false
+                    eu.akoos.photos.domain.usecase.UploadStatus.WaitingForWifi -> false
+                    eu.akoos.photos.domain.usecase.UploadStatus.PreparingBackup -> false
                 }
                 _uiState.update {
                     it.copy(
@@ -551,10 +553,10 @@ class GalleryViewModel @Inject constructor(
                         )
                         val pending = items.count { it is GalleryItem.LocalOnly }
                         // Month-bucket the filtered list and compute "On this day" here, off the
-                        // Main thread. Both used to run inside Compose composition on every list
-                        // re-emission (a thumbnail-decrypt burst at 8500+ photos = a ~680 ms hitch).
-                        // The label format/locale, item field and encounter order match the grid's
-                        // former in-composition grouping exactly, so the rendered timeline is
+                        // Main thread, rather than inside Compose composition on every list
+                        // re-emission (which costs a ~680 ms hitch from a thumbnail-decrypt burst at
+                        // 8500+ photos). The label format/locale, item field and encounter order are
+                        // kept identical to the grid's expected grouping, so the rendered timeline is
                         // unchanged. groupBy yields a LinkedHashMap, preserving first-seen month
                         // order. "On this day" reads the unfiltered [items] to match the carousel's
                         // filter-independent source (the grid binds allItems = state.items).

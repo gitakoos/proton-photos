@@ -25,6 +25,7 @@ package eu.akoos.photos.domain.usecase
 import android.content.Context
 import android.util.Log
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.edit
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -287,6 +288,16 @@ class ReconcileSyncStateUseCase @Inject constructor(
         if (staleLocalOnly.isNotEmpty()) {
             syncStateRepo.deleteLocalOnlyByUris(staleLocalOnly.map { it.localUri })
             Log.d(TAG, "reconcile: cleaned up ${staleLocalOnly.size} LOCAL_ONLY entries for excluded folders")
+        }
+
+        // This pass paired against a complete cloud listing, so any still-LOCAL_ONLY row is genuinely
+        // new and safe for the bulk upload to drain. Flip the gate UNCONDITIONALLY (even with zero
+        // cloud photos — a fresh account must still let its locals upload). The upload defers until
+        // this is set, so the post-completion reconcile always runs the content-hash pairing first.
+        if (initialListingComplete) {
+            context.settingsDataStore.edit { p ->
+                p[SettingsKeys.pairingSettledKey(userId.id)] = true
+            }
         }
 
         emit(SyncProgress(total, total, false))

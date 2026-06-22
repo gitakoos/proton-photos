@@ -1050,6 +1050,8 @@
     <string name="upload_status_queued">Sorban áll</string>
     <string name="upload_status_done">Kész</string>
     <string name="upload_status_failed">Sikertelen</string>
+    <string name="sync_deferred_waiting_wifi">Wi-Fi-re vár</string>
+    <string name="sync_deferred_preparing">Mentés előkészítése…</string>
 
     <!-- Shared albums error snackbars -->
     <string name="shared_decline_failed">Az elutasítás sikertelen: %1$s</string>

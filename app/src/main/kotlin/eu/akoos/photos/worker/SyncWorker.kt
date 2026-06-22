@@ -311,7 +311,10 @@ class SyncWorker @AssistedInject constructor(
         }
 
         fun schedule(workManager: WorkManager, wifiOnly: Boolean = true, intervalMinutes: Long = MIN_INTERVAL_MINUTES) {
-            val networkType = if (wifiOnly) NetworkType.UNMETERED else NetworkType.CONNECTED
+            // CONNECTED regardless of wifiOnly: WorkManager's UNMETERED constraint would block any
+            // metered Wi-Fi (hotspots, some routers). The Wi-Fi-vs-mobile decision is enforced in
+            // UploadPendingUseCase via NetworkObserver.currentlyOnWifi(), which allows metered Wi-Fi.
+            val networkType = NetworkType.CONNECTED
             val safeInterval = intervalMinutes.coerceAtLeast(MIN_INTERVAL_MINUTES)
             val request = PeriodicWorkRequestBuilder<SyncWorker>(safeInterval, TimeUnit.MINUTES)
                 // batteryNotLow gates the periodic sync away from running while the
@@ -346,7 +349,9 @@ class SyncWorker @AssistedInject constructor(
          * NEXT one.
          */
         fun scheduleContentObserver(context: Context, wifiOnly: Boolean = true) {
-            val networkType = if (wifiOnly) NetworkType.UNMETERED else NetworkType.CONNECTED
+            // CONNECTED for both modes; the metered-Wi-Fi-aware Wi-Fi-only gate lives in
+            // UploadPendingUseCase (see schedule()). wifiOnly stays in the signature for callers.
+            val networkType = NetworkType.CONNECTED
             val constraints = Constraints.Builder()
                 .setRequiredNetworkType(networkType)
                 .addContentUriTrigger(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, true)
@@ -393,7 +398,9 @@ class SyncWorker @AssistedInject constructor(
          */
         fun runNow(context: Context, wifiOnly: Boolean = true, allowLowBattery: Boolean = false) {
             ensureChannel(context)
-            val networkType = if (wifiOnly) NetworkType.UNMETERED else NetworkType.CONNECTED
+            // CONNECTED for both modes; the metered-Wi-Fi-aware Wi-Fi-only gate lives in
+            // UploadPendingUseCase (see schedule()). wifiOnly stays in the signature for callers.
+            val networkType = NetworkType.CONNECTED
             val constraints = Constraints.Builder()
                 .setRequiredNetworkType(networkType)
                 .apply { if (!allowLowBattery) setRequiresBatteryNotLow(true) }

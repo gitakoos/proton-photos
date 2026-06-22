@@ -1051,6 +1051,8 @@
     <string name="upload_status_queued">In Warteschlange</string>
     <string name="upload_status_done">Fertig</string>
     <string name="upload_status_failed">Fehlgeschlagen</string>
+    <string name="sync_deferred_waiting_wifi">Warten auf WLAN</string>
+    <string name="sync_deferred_preparing">Sicherung wird vorbereitet…</string>
 
     <!-- Shared albums error snackbars -->
     <string name="shared_decline_failed">Ablehnen fehlgeschlagen: %1$s</string>

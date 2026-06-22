@@ -935,6 +935,8 @@
     <string name="upload_status_queued">Queued</string>
     <string name="upload_status_done">Done</string>
     <string name="upload_status_failed">Failed</string>
+    <string name="sync_deferred_waiting_wifi">Waiting for Wi-Fi</string>
+    <string name="sync_deferred_preparing">Preparing backup…</string>
     <string name="rename_sheet_title">Rename file</string>
     <string name="rename_sheet_subtitle_cloud">Choose how to apply the new name to your cloud photo.</string>
     <string name="rename_sheet_subtitle_local">Choose how to apply the new name on this device.</string>

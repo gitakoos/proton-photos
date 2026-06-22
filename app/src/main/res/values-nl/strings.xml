@@ -1070,6 +1070,8 @@
     <string name="upload_status_queued">In wachtrij</string>
     <string name="upload_status_done">Klaar</string>
     <string name="upload_status_failed">Mislukt</string>
+    <string name="sync_deferred_waiting_wifi">Wachten op wifi</string>
+    <string name="sync_deferred_preparing">Back-up voorbereiden…</string>
 
     <!-- Shared albums error snackbars -->
     <string name="shared_decline_failed">Weigeren mislukt: %1$s</string>

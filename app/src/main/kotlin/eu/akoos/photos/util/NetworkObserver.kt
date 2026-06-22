@@ -131,5 +131,21 @@ class NetworkObserver @Inject constructor(
         }
     }
 
+    /**
+     * Whether an attached internet network rides the Wi-Fi transport, regardless of whether the
+     * system flags it metered. Wider than [currentlyUnmetered]: a phone hotspot or a router that
+     * advertises itself as metered still counts as Wi-Fi here, so the "sync only on Wi-Fi" setting
+     * allows those while still blocking cellular. Same allNetworks enumeration + null/exception
+     * safety as the other probes.
+     */
+    fun currentlyOnWifi(): Boolean {
+        val manager = cm ?: return false
+        return manager.allNetworks.any { network ->
+            val caps = manager.getNetworkCapabilities(network) ?: return@any false
+            caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
+        }
+    }
+
     companion object { private const val TAG = "NetworkObserver" }
 }
