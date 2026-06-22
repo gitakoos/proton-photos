@@ -61,9 +61,14 @@ data class HiddenAlbumUiState(
      *  backed up — without this the user couldn't tell which hidden items are safe to
      *  delete (cloud copy exists) vs which are device-only. */
     val backedUpUris: Set<String> = emptySet(),
+    /** URIs the user has selected. Selection mode is active whenever this is non-empty. */
+    val selectedUris: Set<String> = emptySet(),
     val isLoading: Boolean = false,
     val error: String? = null,
-)
+) {
+    val isSelectionMode: Boolean get() = selectedUris.isNotEmpty()
+    val selectedCount: Int get() = selectedUris.size
+}
 
 @HiltViewModel
 class HiddenAlbumViewModel @Inject constructor(
@@ -105,6 +110,7 @@ class HiddenAlbumViewModel @Inject constructor(
         _uiState.value = _uiState.value.copy(
             isAuthenticated = false,
             items = emptyList(),
+            selectedUris = emptySet(),
         )
     }
 
@@ -229,5 +235,34 @@ class HiddenAlbumViewModel @Inject constructor(
 
     fun clearError() {
         _uiState.value = _uiState.value.copy(error = null)
+    }
+
+    fun toggleSelection(uri: String) {
+        val current = _uiState.value.selectedUris
+        _uiState.value = _uiState.value.copy(
+            selectedUris = if (uri in current) current - uri else current + uri,
+        )
+    }
+
+    /** Replace the whole selection — used by the drag-select sweep, which sets the swept range each frame. */
+    fun setSelectedUris(uris: Set<String>) {
+        _uiState.value = _uiState.value.copy(selectedUris = uris)
+    }
+
+    fun clearSelection() {
+        _uiState.value = _uiState.value.copy(selectedUris = emptySet())
+    }
+
+    /**
+     * Unhide every selected photo, then drop the selection. Loops the per-photo [unhidePhoto]
+     * over a snapshot of the current selection — that path is idempotent on the hidden set, so
+     * a photo already removed mid-loop is a no-op. The observer re-resolves the grid from the
+     * persisted set as each removal lands.
+     */
+    fun unhideSelected() {
+        val snapshot = _uiState.value.selectedUris
+        if (snapshot.isEmpty()) return
+        snapshot.forEach { unhidePhoto(it) }
+        clearSelection()
     }
 }

@@ -434,20 +434,6 @@ internal fun FilterRail(
             }
         }
 
-        // ── Calendar button ───────────────────────────────────────────────────
-        item(key = "calendar_button") {
-            Box(
-                modifier = Modifier
-                    .size(38.dp)
-                    .background(PillBg, pillShape)
-                    .border(0.5.dp, PillBorder, pillShape)
-                    .clickable { onCalendarClick() },
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(Icons.Default.CalendarMonth, stringResource(R.string.calendar_title),
-                    tint = FgDim, modifier = Modifier.size(18.dp))
-            }
-        }
     }
 }
 

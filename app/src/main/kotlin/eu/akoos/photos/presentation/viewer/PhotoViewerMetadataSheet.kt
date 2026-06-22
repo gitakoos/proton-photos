@@ -50,6 +50,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -82,6 +83,12 @@ import java.util.Locale
 internal fun PhotoMetadataSheet(
     item: GalleryItem?,
     exif: PhotoMetadata?,
+    /** Geocoded place name for the Location row (device EXIF or a cloud photo's stored fix), or null
+     *  while it resolves / when the photo has no GPS — the row then keeps its dash placeholder. */
+    place: String? = null,
+    /** Resolution + length of a cloud-only video, read off its decrypted full-res (it has no EXIF or
+     *  on-device media row). Null for other items / until it downloads. */
+    cloudVideoMeta: CloudVideoMeta? = null,
     isStripping: Boolean,
     /** Resolved full-res byte count, used for the Size row when [CloudPhoto.sizeBytes] is 0 (the
      *  server batch API returns null size for some video uploads). Null until the download lands. */
@@ -143,38 +150,48 @@ internal fun PhotoMetadataSheet(
             val rowType = stringResource(R.string.viewer_meta_row_type)
             val rowAlbum = stringResource(R.string.viewer_meta_row_album)
             val rowSource = stringResource(R.string.viewer_meta_row_source)
+            val rowResolution = stringResource(R.string.viewer_meta_row_resolution)
+            val rowDuration = stringResource(R.string.viewer_meta_row_duration)
+            val rowPlace = stringResource(R.string.viewer_meta_row_place)
             MetadataSection(stringResource(R.string.viewer_meta_section_file_info)) {
-                when (item) {
-                    is GalleryItem.LocalOnly -> {
-                        MetaRow(rowFile, item.local.displayName, onEdit = effectiveRenameClick)
-                        MetaRow(rowDate, formatMs(item.local.dateTaken))
-                        MetaRow(rowSize, formatBytes(item.local.sizeBytes))
-                        MetaRow(rowType, item.local.mimeType)
-                        item.local.bucketName?.let { MetaRow(rowAlbum, it) }
-                        MetaRow(rowSource, stringResource(R.string.viewer_meta_source_device_only))
-                    }
-                    is GalleryItem.Synced -> {
-                        MetaRow(rowFile, item.local.displayName, onEdit = effectiveRenameClick)
-                        // Prefer the cloud captureTime: MediaStore's DATE_TAKEN can drift to the
-                        // download moment on some devices (Samsung One UI). Falls back to local.
-                        val displayDateMs = if (item.cloud.captureTime > 0L)
-                            item.cloud.captureTime * 1000L
-                        else item.local.dateTaken
-                        MetaRow(rowDate, formatMs(displayDateMs))
-                        MetaRow(rowSize, formatBytes(item.local.sizeBytes))
-                        MetaRow(rowType, item.local.mimeType)
-                        item.local.bucketName?.let { MetaRow(rowAlbum, it) }
-                        MetaRow(rowSource, stringResource(R.string.viewer_meta_source_backed_up))
-                    }
-                    is GalleryItem.CloudOnly -> {
-                        MetaRow(rowFile, item.cloud.displayName, onEdit = onRenameClick)
-                        MetaRow(rowDate, formatMs(item.cloud.captureTime * 1000L))
-                        val displaySize = item.cloud.sizeBytes.takeIf { it > 0 } ?: cloudSizeFallback ?: 0L
-                        MetaRow(rowSize, if (displaySize > 0) formatBytes(displaySize) else "—")
-                        MetaRow(rowType, item.cloud.mimeType)
-                        MetaRow(rowSource, stringResource(R.string.viewer_meta_source_cloud))
-                    }
+                // One unified row set across device / synced / cloud and photo / video — each value is
+                // sourced from whichever side carries it, in the same order every time. Location and
+                // Resolution reserve their slot (like Size) and fill in once resolved, rather than
+                // appearing only after they land.
+                val localMedia = (item as? GalleryItem.LocalOnly)?.local ?: (item as? GalleryItem.Synced)?.local
+                val cloud = (item as? GalleryItem.Synced)?.cloud ?: (item as? GalleryItem.CloudOnly)?.cloud
+                val mimeType = localMedia?.mimeType ?: cloud?.mimeType ?: ""
+                val dateMs = when (item) {
+                    is GalleryItem.LocalOnly -> item.local.dateTaken
+                    // Prefer the cloud captureTime: MediaStore's DATE_TAKEN can drift to the download
+                    // moment on some devices. Falls back to the local timestamp.
+                    is GalleryItem.Synced -> if (item.cloud.captureTime > 0L) item.cloud.captureTime * 1000L else item.local.dateTaken
+                    is GalleryItem.CloudOnly -> item.cloud.captureTime * 1000L
                 }
+                val sizeBytes = when (item) {
+                    is GalleryItem.CloudOnly -> item.cloud.sizeBytes.takeIf { it > 0 } ?: cloudSizeFallback ?: 0L
+                    else -> localMedia?.sizeBytes ?: 0L
+                }
+                val resW = localMedia?.width?.takeIf { it > 0 } ?: exif?.width?.takeIf { it > 0 } ?: cloudVideoMeta?.width?.takeIf { it > 0 }
+                val resH = localMedia?.height?.takeIf { it > 0 } ?: exif?.height?.takeIf { it > 0 } ?: cloudVideoMeta?.height?.takeIf { it > 0 }
+                val source = when (item) {
+                    is GalleryItem.LocalOnly -> stringResource(R.string.viewer_meta_source_device_only)
+                    is GalleryItem.Synced -> stringResource(R.string.viewer_meta_source_backed_up)
+                    is GalleryItem.CloudOnly -> stringResource(R.string.viewer_meta_source_cloud)
+                }
+
+                MetaRow(rowFile, localMedia?.displayName ?: cloud?.displayName ?: "", onEdit = effectiveRenameClick)
+                MetaRow(rowDate, formatMs(dateMs))
+                MetaRow(rowPlace, place ?: "—")
+                MetaRow(rowResolution, if (resW != null && resH != null) "$resW × $resH" else "—")
+                if (mimeType.startsWith("video/")) {
+                    val durMs = localMedia?.duration?.takeIf { it > 0 } ?: cloudVideoMeta?.durationMs?.takeIf { it > 0 }
+                    MetaRow(rowDuration, if (durMs != null) eu.akoos.photos.presentation.util.formatVideoTime(durMs) else "—")
+                }
+                MetaRow(rowSize, if (sizeBytes > 0) formatBytes(sizeBytes) else "—")
+                MetaRow(rowType, mimeType)
+                localMedia?.bucketName?.let { MetaRow(rowAlbum, it) }
+                MetaRow(rowSource, source)
             }
 
             if (item is GalleryItem.Synced || item is GalleryItem.CloudOnly) {
@@ -250,6 +267,8 @@ internal fun PhotoMetadataSheet(
                         showStripConfirm = true
                     },
                 ) {
+                    // The coarse place name now sits in the overview above; this section keeps the
+                    // raw coordinates behind Full metadata.
                     exif.gpsLatitude?.let {
                         MetaRow(stringResource(R.string.viewer_meta_row_latitude), "%.6f°".format(it))
                     }
@@ -272,8 +291,8 @@ internal fun PhotoMetadataSheet(
                         showStripConfirm = true
                     },
                 ) {
-                    exif.dateTimeOriginal?.let { MetaRow(stringResource(R.string.viewer_meta_row_taken), it) }
-                    exif.dateTime?.let { MetaRow(stringResource(R.string.viewer_meta_row_modified), it) }
+                    exif.dateTimeOriginal?.let { MetaRow(stringResource(R.string.viewer_meta_row_taken), formatExifDateTime(it)) }
+                    exif.dateTime?.let { MetaRow(stringResource(R.string.viewer_meta_row_modified), formatExifDateTime(it)) }
                 }
             }
 
@@ -519,6 +538,13 @@ internal fun formatItemDate(item: GalleryItem): String = formatMs(item.captureTi
 
 internal fun formatMs(ms: Long): String =
     SimpleDateFormat("MMM d, yyyy", Locale.getDefault()).format(Date(ms))
+
+/** EXIF stores timestamps as "yyyy:MM:dd HH:mm:ss" (the date uses colons too). Show the
+ *  conventional "yyyy-MM-dd HH:mm" instead; fall back to the raw value if it doesn't parse. */
+internal fun formatExifDateTime(raw: String): String = try {
+    val parsed = SimpleDateFormat("yyyy:MM:dd HH:mm:ss", Locale.US).parse(raw.trim())
+    if (parsed != null) SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(parsed) else raw
+} catch (_: Exception) { raw }
 
 internal fun formatBytes(bytes: Long): String = when {
     bytes >= 1_000_000 -> "%.1f MB".format(bytes / 1_000_000.0)

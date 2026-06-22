@@ -518,6 +518,8 @@ data class LinkFileActiveRevisionDto(
     @SerialName("State") val state: Int? = null,
     @SerialName("ManifestSignature") val manifestSignature: String? = null,
     @SerialName("Thumbnails") val thumbnails: List<ThumbnailEntryDto>? = null,
+    // Encrypted+signed XAttr blob — carries the photo's Location block (GPS) among other metadata.
+    @SerialName("XAttr") val xAttr: String? = null,
     // The share endpoint surfaces each photo's ContentHash here (the volume endpoint uses a
     // top-level `Photo` block); carried so Save-to-library reads it without a second round-trip.
     @SerialName("Photo") val photo: LinkPhotoDto? = null,
@@ -531,6 +533,7 @@ data class ActiveRevisionDto(
     @SerialName("ManifestSignature") val manifestSignature: String? = null,
     @SerialName("State") val state: Int? = null,
     @SerialName("Thumbnails") val thumbnails: List<ThumbnailEntryDto>? = null,
+    @SerialName("XAttr") val xAttr: String? = null,
 )
 
 @Serializable
@@ -840,6 +843,9 @@ data class RevisionWithBlocksDto(
     @SerialName("Blocks") val blocks: List<RevisionBlockDto> = emptyList(),
     @SerialName("State") val state: Int? = null,
     @SerialName("ContentKeyPacket") val contentKeyPacket: String? = null,
+    // Encrypted+signed XAttr (Location/Camera/Media). The link-metadata endpoints omit it; only the
+    // revision endpoint returns it, so the map's GPS backfill reads the photo's location from here.
+    @SerialName("XAttr") val xAttr: String? = null,
     @SerialName("ManifestSignature") val manifestSignature: String? = null,
     @SerialName("SignatureAddress") val signatureAddress: String? = null,
     // Thumbnails are signed INTO the manifest (prepended to content block hashes), so the

@@ -88,6 +88,7 @@ class TimelineFilterViewModel @Inject constructor(
     ) {
         val excludedCount: Int get() = folders.count { it.isExcluded }
         val allExcluded: Boolean get() = folders.isNotEmpty() && folders.all { it.isExcluded }
+        val allAlbumsExcluded: Boolean get() = albums.isNotEmpty() && albums.all { it.isExcluded }
     }
 
     private var excludedNames: Set<String> = emptySet()
@@ -118,6 +119,18 @@ class TimelineFilterViewModel @Inject constructor(
                     )
                 }
                 .sortedBy { it.name.lowercase() }
+
+            // Migrate the legacy "hide all album photos" master flag onto the per-album exclude set,
+            // so the album filter works like the device-folder one: excluding everything no longer
+            // hides the list, and individual albums can be re-included afterwards.
+            if (hideAlbumPhotos && albumRows.isNotEmpty()) {
+                excludedAlbumIds = albumRows.map { it.linkId }.toSet()
+                hideAlbumPhotos = false
+                context.settingsDataStore.edit {
+                    it[SettingsKeys.TIMELINE_EXCLUDED_ALBUM_IDS] = excludedAlbumIds
+                    it[SettingsKeys.HIDE_PHOTOS_IN_ALBUMS] = false
+                }
+            }
 
             localMediaRepo.observeLocalMedia().collectLatest { items ->
                 val populated = items
@@ -155,13 +168,26 @@ class TimelineFilterViewModel @Inject constructor(
         }
     }
 
-    /** Master toggle — persist HIDE_PHOTOS_IN_ALBUMS. The gallery observes the key directly
-     *  and re-filters on its next emission. */
-    fun setHideAlbumPhotos(enabled: Boolean) {
-        hideAlbumPhotos = enabled
-        _uiState.update { it.copy(hideAlbumPhotos = enabled) }
+    /** Master switch — exclude / include EVERY album at once. Drives the per-album exclude set
+     *  (not the legacy hide-all flag) so the list stays visible and individual albums can be
+     *  re-included afterwards, matching the device-folder filter. */
+    fun excludeAllAlbums() = setAlbumExcludes(_uiState.value.albums.map { it.linkId }.toSet())
+    fun includeAllAlbums() = setAlbumExcludes(emptySet())
+
+    private fun setAlbumExcludes(newSet: Set<String>) {
+        excludedAlbumIds = newSet
+        hideAlbumPhotos = false
+        _uiState.update { s ->
+            s.copy(
+                albums = s.albums.map { a -> a.copy(isExcluded = a.linkId in newSet) },
+                hideAlbumPhotos = false,
+            )
+        }
         viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.HIDE_PHOTOS_IN_ALBUMS] = enabled }
+            context.settingsDataStore.edit {
+                it[SettingsKeys.TIMELINE_EXCLUDED_ALBUM_IDS] = newSet
+                it[SettingsKeys.HIDE_PHOTOS_IN_ALBUMS] = false
+            }
         }
     }
 

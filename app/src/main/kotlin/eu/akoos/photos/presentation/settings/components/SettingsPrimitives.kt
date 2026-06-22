@@ -216,6 +216,37 @@ internal fun NavRow(label: String, description: String? = null, onClick: () -> U
 }
 
 /**
+ * Read-only row: a label + optional description with a static trailing value chip.
+ * No switch and no chevron, so it reads as informational rather than an interactive
+ * control. Used for settings whose state lives elsewhere (e.g. a server-side account
+ * preference) and is only mirrored here.
+ */
+@Composable
+internal fun InfoRow(label: String, description: String? = null, value: String) {
+    val colors = AppColors.current
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 15.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(label, color = colors.fgPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+            if (description != null) Text(description, color = colors.fgMute, fontSize = 12.5.sp)
+        }
+        Spacer(Modifier.width(12.dp))
+        Text(
+            value,
+            color = colors.fgDim,
+            fontSize = 12.5.sp,
+            modifier = Modifier
+                .clip(RoundedCornerShape(8.dp))
+                .background(colors.surfaceWeak)
+                .border(0.5.dp, colors.line2, RoundedCornerShape(8.dp))
+                .padding(horizontal = 10.dp, vertical = 5.dp),
+        )
+    }
+}
+
+/**
  * Drilldown row that sits underneath a parent toggle. Visually the same as [NavRow]
  * but indented (28.dp start) so the user reads it as a child of the toggle above.
  * Greys out when the parent is disabled — same alpha treatment as [ToggleRow] for

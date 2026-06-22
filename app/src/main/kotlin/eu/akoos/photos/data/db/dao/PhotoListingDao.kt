@@ -101,4 +101,15 @@ interface PhotoListingDao {
      *  material stays on the row, so a re-warm costs one decrypt, never a network round-trip. */
     @Query("UPDATE photo_listing SET thumbnailUrl = NULL WHERE linkId IN (:linkIds)")
     suspend fun clearThumbnailUrlsByLinkIds(linkIds: List<String>)
+
+    /** Page of rows the GPS backfill has not yet processed, newest first — regardless of whether a
+     *  cached encXAttr is present (rows synced before the encXAttr column carry none and have their
+     *  XAttr fetched on demand). Paged so a large library's crypto-bearing rows never all sit in
+     *  memory at once. */
+    @Query("SELECT * FROM photo_listing WHERE userId = :userId AND gpsChecked = 0 ORDER BY captureTime DESC LIMIT :limit")
+    suspend fun getUngeocoded(userId: String, limit: Int): List<PhotoListingEntity>
+
+    /** Marks rows as GPS-processed so the backfill never revisits them, whether or not a fix was found. */
+    @Query("UPDATE photo_listing SET gpsChecked = 1 WHERE linkId IN (:linkIds)")
+    suspend fun markGpsChecked(linkIds: List<String>)
 }

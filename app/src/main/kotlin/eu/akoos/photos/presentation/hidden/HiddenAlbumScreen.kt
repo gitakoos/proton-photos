@@ -23,6 +23,7 @@
 package eu.akoos.photos.presentation.hidden
 
 import android.app.KeyguardManager
+import androidx.activity.compose.BackHandler
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.compose.foundation.background
@@ -46,12 +47,16 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.itemsIndexed
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.LockOpen
+import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Icon
 import androidx.compose.material3.SnackbarHostState
@@ -74,6 +79,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -106,6 +112,10 @@ fun HiddenAlbumScreen(
     val snackbarHostState = remember { SnackbarHostState() }
 
     SecureScreenEffect()
+
+    // In selection mode the back button cancels the selection instead of leaving the screen —
+    // mirrors the gallery, album-detail and device-folder behaviour.
+    BackHandler(enabled = state.isSelectionMode) { viewModel.clearSelection() }
 
     // When the device has no screen lock at all, the vault opens ungated (there is nothing
     // to authenticate against). Surface that on the lock screen so the user understands the
@@ -245,39 +255,94 @@ fun HiddenAlbumScreen(
         } else {
             // Content — authenticated
             Column(modifier = Modifier.fillMaxSize()) {
-                // Header
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .statusBarsPadding()
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    IconBubble(
-                        icon = Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = stringResource(R.string.onboarding_back),
-                        onClick = onBack,
-                        diameter = 40.dp,
-                        iconSize = 20.dp,
-                        background = PillBg,
-                        borderColor = PillBorder,
-                        tint = FgPrimary,
-                    )
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            stringResource(R.string.hidden_photos_title),
-                            color = FgPrimary, fontSize = 20.sp, fontWeight = FontWeight.SemiBold,
+                if (state.isSelectionMode) {
+                    // Selection top-bar — cancel, a typed count and an Unhide action, matching the
+                    // gallery and album selection headers. The bulk action here is unhide only.
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .statusBarsPadding()
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        IconBubble(
+                            icon = Icons.Default.Close,
+                            contentDescription = stringResource(R.string.gallery_cancel_selection),
+                            onClick = { viewModel.clearSelection() },
+                            diameter = 40.dp,
+                            iconSize = 20.dp,
+                            background = PillBg,
+                            borderColor = PillBorder,
+                            tint = FgPrimary,
                         )
                         Text(
-                            pluralStringResource(R.plurals.count_photos_plural, state.items.size, state.items.size),
-                            color = FgMute, fontSize = 12.sp,
+                            pluralStringResource(R.plurals.count_photos_plural, state.selectedCount, state.selectedCount),
+                            color = FgPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.weight(1f),
+                        )
+                        // Unhide selected — restores every selected photo, then drops the selection.
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(999.dp))
+                                .background(PillBg)
+                                .border(0.5.dp, PillBorder, RoundedCornerShape(999.dp))
+                                .clickable { viewModel.unhideSelected() }
+                                .padding(horizontal = 14.dp, vertical = 8.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            ) {
+                                Icon(
+                                    Icons.Default.Visibility,
+                                    contentDescription = null,
+                                    tint = Accent,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                                Text(
+                                    stringResource(R.string.viewer_menu_unhide),
+                                    color = Accent, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    // Header
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .statusBarsPadding()
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        IconBubble(
+                            icon = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = stringResource(R.string.onboarding_back),
+                            onClick = onBack,
+                            diameter = 40.dp,
+                            iconSize = 20.dp,
+                            background = PillBg,
+                            borderColor = PillBorder,
+                            tint = FgPrimary,
+                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                stringResource(R.string.hidden_photos_title),
+                                color = FgPrimary, fontSize = 20.sp, fontWeight = FontWeight.SemiBold,
+                            )
+                            Text(
+                                pluralStringResource(R.plurals.count_photos_plural, state.items.size, state.items.size),
+                                color = FgMute, fontSize = 12.sp,
+                            )
+                        }
+                        Icon(
+                            Icons.Default.VisibilityOff, null,
+                            tint = FgDim, modifier = Modifier.size(20.dp),
                         )
                     }
-                    Icon(
-                        Icons.Default.VisibilityOff, null,
-                        tint = FgDim, modifier = Modifier.size(20.dp),
-                    )
                 }
 
                 val cols = eu.akoos.photos.presentation.gallery.rememberDefaultGridColumns()
@@ -311,20 +376,43 @@ fun HiddenAlbumScreen(
                             )
                         }
                     }
-                    else -> LazyVerticalGrid(
-                        columns = GridCells.Fixed(cols),
-                        contentPadding = PaddingValues(8.dp, 4.dp, 8.dp, 100.dp),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp),
-                        modifier = Modifier.fillMaxSize(),
-                    ) {
-                        itemsIndexed(state.items, key = { _, item -> item.uri }) { index, item ->
-                            HiddenPhotoCell(
-                                item = item,
-                                hasCloudCounterpart = item.uri in state.backedUpUris,
-                                onClick = { onPhotoClick(state.items, index) },
-                                onUnhide = { viewModel.unhidePhoto(item.uri) },
-                            )
+                    else -> {
+                        val gridState = rememberLazyGridState()
+                        // Drag-to-select: long-press a cell then sweep a range (shares the timeline
+                        // gesture). Cells are keyed by uri; the swept keys map straight to selected uris.
+                        // This is the only grid with a non-zero top content padding (4.dp), so the
+                        // drag hit-test is told that exact band or it would offset by a row.
+                        val selectableKeys = remember(state.items) { state.items.map { it.uri } }
+                        val keyToIndex = remember(selectableKeys) {
+                            selectableKeys.mapIndexed { i, k -> k to i }.toMap()
+                        }
+                        val dragMod = eu.akoos.photos.presentation.gallery.rememberDragMultiSelectModifier(
+                            gridState = gridState,
+                            items = selectableKeys,
+                            indexByKey = keyToIndex,
+                            selected = state.selectedUris,
+                            onSelectionChange = viewModel::setSelectedUris,
+                        )
+                        LazyVerticalGrid(
+                            columns = GridCells.Fixed(cols),
+                            state = gridState,
+                            contentPadding = PaddingValues(8.dp, 4.dp, 8.dp, 100.dp),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                            modifier = Modifier.fillMaxSize().then(dragMod),
+                        ) {
+                            itemsIndexed(state.items, key = { _, item -> item.uri }) { index, item ->
+                                HiddenPhotoCell(
+                                    item = item,
+                                    hasCloudCounterpart = item.uri in state.backedUpUris,
+                                    isSelectionMode = state.isSelectionMode,
+                                    isSelected = item.uri in state.selectedUris,
+                                    onClick = {
+                                        if (state.isSelectionMode) viewModel.toggleSelection(item.uri)
+                                        else onPhotoClick(state.items, index)
+                                    },
+                                )
+                            }
                         }
                     }
                 }
@@ -344,16 +432,22 @@ fun HiddenAlbumScreen(
 private fun HiddenPhotoCell(
     item: LocalMediaItem,
     hasCloudCounterpart: Boolean,
+    isSelectionMode: Boolean,
+    isSelected: Boolean,
     onClick: () -> Unit,
-    onUnhide: () -> Unit,
 ) {
-    var showOptions by remember { mutableStateOf(false) }
     Box(
         modifier = Modifier
             .aspectRatio(1f)
             .clip(RoundedCornerShape(8.dp))
             .background(Bg2)
-            .clickable { onClick() },
+            // The grid owns long-press at its level (drag-to-select), so the cell stays tap-only:
+            // in selection mode a tap toggles this cell, otherwise it opens the viewer.
+            .clickable { onClick() }
+            .then(
+                if (isSelected) Modifier.border(2.5.dp, Accent, RoundedCornerShape(8.dp))
+                else Modifier,
+            ),
     ) {
         AsyncImage(
             // Hidden previews must never persist in Coil's caches: a cached thumbnail
@@ -366,7 +460,8 @@ private fun HiddenPhotoCell(
                 .build(),
             contentDescription = null,
             contentScale = ContentScale.Crop,
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier.fillMaxSize()
+                .then(if (isSelected) Modifier.background(Accent.copy(alpha = 0.15f)) else Modifier),
         )
         // Green cloud badge in the bottom-end corner — matches the photos-grid styling
         // so the user can tell at a glance which hidden items are also backed up to
@@ -391,6 +486,39 @@ private fun HiddenPhotoCell(
                     tint = Color(0xFF30D158),
                     modifier = Modifier.size(12.dp),
                 )
+            }
+        }
+        // Selection circle — top-start, the same accent-filled check / dark-outlined idiom the
+        // timeline and album cells use, so selection reads identically across the app.
+        if (isSelectionMode) {
+            Box(
+                modifier = Modifier
+                    .padding(5.dp)
+                    .size(22.dp)
+                    .align(Alignment.TopStart),
+            ) {
+                if (isSelected) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Accent, CircleShape),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            Icons.Default.Check,
+                            contentDescription = stringResource(R.string.cd_status_selected),
+                            tint = Color.White,
+                            modifier = Modifier.size(14.dp),
+                        )
+                    }
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color.Black.copy(alpha = 0.3f), CircleShape)
+                            .border(1.5.dp, Color.White.copy(alpha = 0.8f), CircleShape),
+                    )
+                }
             }
         }
     }

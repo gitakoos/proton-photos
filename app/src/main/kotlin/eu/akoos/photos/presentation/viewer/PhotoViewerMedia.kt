@@ -93,6 +93,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
+import eu.akoos.photos.R
 import eu.akoos.photos.presentation.theme.FgPrimary
 import eu.akoos.photos.presentation.theme.PillBg
 import eu.akoos.photos.presentation.theme.PillBorder
@@ -143,6 +144,15 @@ internal fun VideoPlayer(
                 if (playbackState == androidx.media3.common.Player.STATE_ENDED) {
                     currentOnEnded?.invoke()
                 }
+            }
+            // A video that downloads and decrypts fine but whose codec/container ExoPlayer can't
+            // decode would otherwise sit on a silent black surface forever. Surface the failure.
+            override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                android.widget.Toast.makeText(
+                    context,
+                    context.getString(R.string.viewer_video_play_failed),
+                    android.widget.Toast.LENGTH_LONG,
+                ).show()
             }
         }
         exoPlayer.addListener(listener)

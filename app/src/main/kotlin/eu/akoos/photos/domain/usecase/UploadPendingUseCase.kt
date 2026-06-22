@@ -175,11 +175,12 @@ class UploadPendingUseCase @Inject constructor(
         // an auto-named album matching its source bucket (Camera, Screenshots, …).
         val albumOptInFolders: Set<String> = prefs[SettingsKeys.ALBUM_OPT_IN_FOLDER_NAMES] ?: emptySet()
 
-        val stripOnUpload = prefs[SettingsKeys.STRIP_ON_UPLOAD] ?: true
+        val stripOnUpload = prefs[SettingsKeys.STRIP_ON_UPLOAD] ?: false
+        val mirrorStripToLocal = prefs[SettingsKeys.MIRROR_STRIP_TO_LOCAL] ?: false
         val renameToCaptureDate = prefs[SettingsKeys.RENAME_TO_CAPTURE_DATE] ?: false
         val deleteLocalAfterBackup = prefs[SettingsKeys.DELETE_LOCAL_AFTER_BACKUP] ?: false
         val stripConfig = MetadataStripConfig(
-            stripGps = prefs[SettingsKeys.STRIP_GPS] ?: true,
+            stripGps = prefs[SettingsKeys.STRIP_GPS] ?: false,
             stripCameraInfo = prefs[SettingsKeys.STRIP_CAMERA_INFO] ?: false,
             stripTimestamp = prefs[SettingsKeys.STRIP_TIMESTAMP] ?: false,
             stripSoftwareInfo = prefs[SettingsKeys.STRIP_SOFTWARE_INFO] ?: false,
@@ -209,6 +210,19 @@ class UploadPendingUseCase @Inject constructor(
         // URIs that still have a queued album-add need their upload forced even when their folder
         // is not in the backup selection — bypass the folder guards below for these.
         val forcedUploadUris: Set<String> = pendingAdds.keys
+
+        // After a reinstall the cloud listing repopulates page by page; until it has been walked
+        // end-to-end at least once, a LOCAL_ONLY row may just be a photo already on Drive whose
+        // listing entry hasn't been re-fetched yet — uploading it now would duplicate it. Defer the
+        // bulk upload until the listing is known-complete; explicit forced uploads still go through.
+        val initialListingComplete = prefs.asMap().any { (k, v) ->
+            k.name.startsWith("photo_listing_ever_complete_${userId.id}_") && v == true
+        }
+        if (!initialListingComplete && forcedUploadUris.isEmpty()) {
+            Log.d(UPLOAD_TAG, "Initial cloud listing not complete yet — deferring bulk upload to avoid duplicates")
+            _progress.tryEmit(UploadProgress("", "", UploadStatus.Idle, 0, 0))
+            return@withLock Result(attempted = 0, successCount = 0)
+        }
 
         if (!backupEverything && (selectedFolders == null || selectedFolders.isEmpty()) && forcedUploadUris.isEmpty()) {
             Log.d(UPLOAD_TAG, "No backup folders configured — skipping upload")
@@ -335,11 +349,10 @@ class UploadPendingUseCase @Inject constructor(
                                 userId = userId,
                                 state = state,
                                 totalCount = totalCount,
-                                backupEverything = backupEverything,
-                                selectedFolders = selectedFolders,
                                 forcedUploadUris = forcedUploadUris,
                                 albumOptInFolders = albumOptInFolders,
                                 stripOnUpload = stripOnUpload,
+                                mirrorStripToLocal = mirrorStripToLocal,
                                 renameToCaptureDate = renameToCaptureDate,
                                 deleteLocalAfterBackup = deleteLocalAfterBackup,
                                 stripConfig = stripConfig,
@@ -391,11 +404,10 @@ class UploadPendingUseCase @Inject constructor(
         userId: UserId,
         state: SyncState,
         totalCount: Int,
-        backupEverything: Boolean,
-        selectedFolders: Set<String>?,
         forcedUploadUris: Set<String>,
         albumOptInFolders: Set<String>,
         stripOnUpload: Boolean,
+        mirrorStripToLocal: Boolean,
         renameToCaptureDate: Boolean,
         deleteLocalAfterBackup: Boolean,
         stripConfig: MetadataStripConfig,
@@ -413,29 +425,39 @@ class UploadPendingUseCase @Inject constructor(
                 Log.w(UPLOAD_TAG, "Local item not found for URI: ${state.localUri}")
                 return
             }
-            // Guard: skip items from folders that are no longer selected.
-            // ReconcileSyncStateUseCase normally cleans these up, but this is a safety net
-            // in case a stale LOCAL_ONLY entry survives (e.g. after import / app restart).
-            // backupEverything skips this defense-in-depth folder check too —
-            // there's no folder filter to compare against. A photo the user explicitly added to
-            // an album (forcedUploadUris) also bypasses the check: it must upload so it can join
-            // the album even when its source folder isn't in the backup set.
-            if (!backupEverything && state.localUri !in forcedUploadUris &&
-                rawLocalItem.bucketName != null && selectedFolders != null && rawLocalItem.bucketName !in selectedFolders) {
-                Log.d(UPLOAD_TAG, "Skipping ${rawLocalItem.displayName}: folder '${rawLocalItem.bucketName}' not selected for backup")
-                return
+            // Skip items whose folder is no longer in the backup selection. Read the selection LIVE
+            // (not the snapshot captured when the batch began) so unchecking a folder mid-sync stops
+            // its not-yet-started uploads, not just the next batch. Items already past this point
+            // finish; an album-forced upload (forcedUploadUris) always proceeds so it can join its album.
+            if (state.localUri !in forcedUploadUris) {
+                val livePrefs = context.settingsDataStore.data.first()
+                val liveBackupEverything = livePrefs[SettingsKeys.BACKUP_EVERYTHING] ?: false
+                val liveSelected = livePrefs[SettingsKeys.SYNC_FOLDER_NAMES]
+                val liveExcluded = livePrefs[SettingsKeys.EXCLUDED_FOLDER_NAMES] ?: emptySet()
+                val bucket = rawLocalItem.bucketName
+                val stillEligible = if (liveBackupEverything) {
+                    bucket == null || bucket !in liveExcluded
+                } else {
+                    !liveSelected.isNullOrEmpty() && (bucket == null || bucket in liveSelected)
+                }
+                if (!stillEligible) {
+                    Log.d(UPLOAD_TAG, "Skipping ${rawLocalItem.displayName}: folder '${rawLocalItem.bucketName}' no longer in the backup selection")
+                    return
+                }
             }
             // Optional rename: derive cloud displayName from the source's capture timestamp
-            // (MediaStore DATE_TAKEN). The on-device file is NOT touched — only the name we
-            // send to Drive changes. Strip-on-upload runs against the bytes of the original
-            // (or stripped temp) file independently, so a stripped + renamed photo still gets
-            // its EXIF erased before the cloud name lands.
+            // (MediaStore DATE_TAKEN). The on-device file keeps its own name unless "mirror to
+            // local" is on, which renames it to match — deferred until AFTER the upload succeeds
+            // (below) so a failed upload never renames a file that has no Drive copy. Strip-on-upload
+            // runs against the bytes independently, so a stripped + renamed photo still gets erased.
+            var mirrorRenameTarget: String? = null
             val renamedItem = if (renameToCaptureDate) {
                 val ext = rawLocalItem.displayName.substringAfterLast('.', "")
                 val captureMs = rawLocalItem.dateTaken.takeIf { it > 0L } ?: System.currentTimeMillis()
                 val newBase = SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", Locale.US).format(Date(captureMs))
                 val newName = if (ext.isNotEmpty()) "$newBase.$ext" else newBase
                 Log.d(UPLOAD_TAG, "Rename-on-upload: '${rawLocalItem.displayName}' → '$newName'")
+                if (mirrorStripToLocal) mirrorRenameTarget = newName
                 rawLocalItem.copy(displayName = newName)
             } else {
                 rawLocalItem
@@ -471,20 +493,37 @@ class UploadPendingUseCase @Inject constructor(
             // fall back to the original URI when the temp couldn't be produced — a strip
             // failure must never block the backup of the file itself.
             val uploadUri: String = if (stripOnUpload && localItem.mimeType.startsWith("image/")) {
-                // Motion Photos carry an MP4 appended after the primary still. A plain
-                // ExifInterface rewrite-strip drops that trailer (and the motion is lost), so
-                // detect first and, for a motion photo, strip only the primary's EXIF while
-                // re-attaching the original trailer byte-for-byte.
+                // Motion Photos carry an MP4 appended after the primary still. A plain ExifInterface
+                // rewrite-strip drops that trailer (and the motion is lost), so detect first and, for
+                // a motion photo, strip only the primary's EXIF into a temp while re-attaching the
+                // original trailer byte-for-byte. This runs FIRST and authoritatively (MotionPhotoUtil
+                // .detect) so a motion photo can never reach the in-place mirror wipe below.
                 val motionTemp = stripImagePreservingMotion(state.localUri, stripConfig)
                 if (motionTemp != null) {
                     strippedFile = motionTemp
                     Log.d(UPLOAD_TAG, "Motion Photo primary stripped, trailer preserved for ${localItem.displayName}")
+                    // Mirror: a motion photo can't be wiped in place (an EXIF rewrite drops its
+                    // trailer), so overwrite the on-device original with the whole motion-preserving
+                    // stripped file instead — the local loses its metadata too and byte-matches the
+                    // cloud. Silent with all-files; a refused write leaves the original intact.
+                    if (mirrorStripToLocal && overwriteLocalInPlace(state.localUri, motionTemp)) {
+                        Log.d(UPLOAD_TAG, "Mirror strip: on-device motion photo wiped for ${localItem.displayName}")
+                    }
                     android.net.Uri.fromFile(motionTemp).toString()
+                } else if (mirrorStripToLocal &&
+                    ExifHelper.stripFieldsInPlace(context, state.localUri, stripConfig)
+                        is eu.akoos.photos.util.StripResult.Stripped
+                ) {
+                    // Confirmed NOT a motion photo (the helper above returned null) → safe to wipe the
+                    // on-device original in place and upload it as-is, so the local and the backed-up
+                    // copy stay byte-identical and pair by content hash. The wipe is the last step
+                    // before the upload and is idempotent, so a failed upload simply retries it.
+                    Log.d(UPLOAD_TAG, "Mirror strip: on-device original wiped for ${localItem.displayName}")
+                    state.localUri
                 } else {
-                    // Not a motion photo — take the ordinary EXIF tag wipe. (A confirmed motion
-                    // photo never reaches here: the helper returns a byte-exact temp instead of
-                    // null when its split can't complete.) stripToTempFile returning null then
-                    // means nothing to strip or a strip error, so the original URI uploads untouched.
+                    // Mirror off, or the OS refused the in-place write (no MANAGE_MEDIA) → ordinary
+                    // temp-copy EXIF wipe, which leaves the original untouched. stripToTempFile
+                    // returning null means nothing to strip or a strip error → the original uploads.
                     strippedFile = ExifHelper.stripToTempFile(context, state.localUri, stripConfig)
                     if (strippedFile != null) {
                         Log.d(UPLOAD_TAG, "Metadata stripped for ${localItem.displayName}")
@@ -499,6 +538,12 @@ class UploadPendingUseCase @Inject constructor(
                         .remuxWithoutLocation(context, state.localUri, tmp)) {
                     strippedFile = tmp
                     Log.d(UPLOAD_TAG, "Video location atom stripped for ${localItem.displayName}")
+                    // Mirror: overwrite the on-device video with the location-stripped remux so the
+                    // local loses its GPS too and matches the cloud. Silent with all-files; a refused
+                    // write leaves the original intact.
+                    if (mirrorStripToLocal && overwriteLocalInPlace(state.localUri, tmp)) {
+                        Log.d(UPLOAD_TAG, "Mirror strip: on-device video wiped for ${localItem.displayName}")
+                    }
                     android.net.Uri.fromFile(tmp).toString()
                 } else {
                     // Re-mux failed — the temp is already cleaned up by the stripper; upload
@@ -582,6 +627,14 @@ class UploadPendingUseCase @Inject constructor(
                 ),
                 userId,
             )
+
+            // Mirror the cloud rename onto the on-device file now that the upload is committed (and
+            // never before — a failed upload must not rename a file with no Drive copy). Silent with
+            // MANAGE_MEDIA; the URI is stable across a DISPLAY_NAME change, so the SYNCED row above
+            // still tracks it, and renaming never touches bytes, so localHash stays valid. Two
+            // same-second burst shots resolve to one name — MediaStore refuses the second rename and
+            // renameLocalInPlace skips it (the content hash still pairs that copy by its bytes).
+            mirrorRenameTarget?.let { renameLocalInPlace(state.localUri, it) }
 
             // Delete-after-backup: only the ORIGINAL MediaStore URI, never the strip
             // temp. Runs AFTER the SYNCED upsert so a crash here cannot leave the
@@ -752,6 +805,70 @@ class UploadPendingUseCase @Inject constructor(
             else entry.substring(0, idx) to entry.substring(idx + 1)
         }.toMap()
 
+    /** Renames the on-device MediaStore file in place (silent with MANAGE_MEDIA), so a mirrored
+     *  upload's local copy shares the cloud name. A write the OS refuses is logged and skipped. */
+    private fun renameLocalInPlace(uri: String, newName: String): Boolean = try {
+        val values = android.content.ContentValues().apply {
+            put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, newName)
+        }
+        val rows = context.contentResolver.update(Uri.parse(uri), values, null, null)
+        if (rows > 0) Log.d(UPLOAD_TAG, "Mirror rename: on-device file renamed to '$newName'")
+        rows > 0
+    } catch (e: Exception) {
+        if (e is kotlinx.coroutines.CancellationException) throw e
+        Log.w(UPLOAD_TAG, "Mirror rename skipped for $uri: ${e.message}")
+        false
+    }
+
+    /** Overwrites the on-device MediaStore file with [src]'s bytes (silent with MANAGE_MEDIA /
+     *  all-files). Used to mirror a strip onto the original — a motion photo's in-place EXIF rewrite
+     *  would drop the trailer, and a video can't be EXIF-edited at all, so the whole stripped file is
+     *  written instead. "wt" truncates the file up front, so the current bytes are staged to a backup
+     *  and rolled back if the copy fails or is cancelled — the original is never left partial. A write
+     *  the OS refuses is logged and skipped (the original stays intact). */
+    private fun overwriteLocalInPlace(uri: String, src: File): Boolean {
+        val parsed = Uri.parse(uri)
+        // Stage the current bytes so a copy that throws partway (I/O error, eject, kill) can be rolled
+        // back — the same restore-on-failure guard ExifInterface.saveAttributes uses internally.
+        val backup: File = try {
+            val bak = File.createTempFile("mirror_bak_", ".tmp", context.cacheDir)
+            val copied = context.contentResolver.openInputStream(parsed)?.use { input ->
+                bak.outputStream().use { input.copyTo(it) }
+                true
+            } ?: false
+            if (!copied) { bak.delete(); return false }
+            bak
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            Log.w(UPLOAD_TAG, "Mirror overwrite skipped (backup failed) for $uri: ${e.message}")
+            return false
+        }
+        return try {
+            val out = context.contentResolver.openOutputStream(parsed, "wt")
+                ?: run { backup.delete(); return false }
+            out.use { o -> src.inputStream().use { it.copyTo(o) } }
+            backup.delete()
+            true
+        } catch (e: Exception) {
+            // Restore the original from the backup before propagating, so a failed OR cancelled
+            // overwrite leaves the file exactly as it was. copyTo is blocking, so the restore still
+            // runs under cancellation; rethrow afterwards. Keep the backup only if the restore fails.
+            val restored = runCatching {
+                context.contentResolver.openOutputStream(parsed, "wt")?.use { o ->
+                    backup.inputStream().use { it.copyTo(o) }
+                } != null
+            }.getOrDefault(false)
+            if (restored) {
+                backup.delete()
+                Log.w(UPLOAD_TAG, "Mirror overwrite failed for $uri; original restored: ${e.message}")
+            } else {
+                Log.e(UPLOAD_TAG, "Mirror overwrite + restore failed for $uri; backup kept at ${backup.absolutePath}")
+            }
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            false
+        }
+    }
+
     /** Removes a single "localUri=albumLinkId" entry from PENDING_ALBUM_ADDS after its add lands. */
     private suspend fun removePendingAlbumAdd(localUri: String, albumLinkId: String) {
         pendingAddMutex.withLock {
@@ -863,6 +980,20 @@ class UploadPendingUseCase @Inject constructor(
      *  - Location: only when GPS is NOT stripped.
      *  - displayWidth/Height: W/H swapped when EXIF orientation / video rotation is 90/270.
      */
+    /** RAW formats whose embedded preview (what the thumbnail decodes from) is already display-
+     *  oriented, so their xAttr must report a NORMAL camera orientation — see [buildXAttrMetadata]. */
+    private val rawImageMimeTypes = setOf(
+        "image/x-adobe-dng", "image/dng", "image/x-canon-cr2", "image/x-canon-cr3", "image/x-canon-crw",
+        "image/x-nikon-nef", "image/x-nikon-nrw", "image/x-sony-arw", "image/x-sony-sr2", "image/x-sony-srf",
+        "image/x-fuji-raf", "image/x-panasonic-rw2", "image/x-olympus-orf", "image/x-pentax-pef",
+        "image/x-samsung-srw", "image/x-minolta-mrw", "image/x-kodak-dcr", "image/x-sigma-x3f",
+        "image/x-epson-erf", "image/x-hasselblad-3fr", "image/x-raw",
+    )
+    private val rawImageExtensions = setOf(
+        "dng", "cr2", "cr3", "crw", "nef", "nrw", "arw", "sr2", "srf", "raf", "rw2", "orf", "pef",
+        "srw", "mrw", "dcr", "x3f", "erf", "3fr", "raw",
+    )
+
     private fun buildXAttrMetadata(
         sourceUri: String,
         item: eu.akoos.photos.domain.entity.LocalMediaItem,
@@ -877,24 +1008,30 @@ class UploadPendingUseCase @Inject constructor(
         }
         return when {
             item.mimeType.startsWith("video/") -> {
-                var rotation = 0
+                var rawW = 0
+                var rawH = 0
                 runCatching {
                     android.media.MediaMetadataRetriever().use { r ->
                         r.setDataSource(context, Uri.parse(sourceUri))
-                        rotation = r.extractMetadata(
-                            android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION
+                        rawW = r.extractMetadata(
+                            android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH
+                        )?.toIntOrNull() ?: 0
+                        rawH = r.extractMetadata(
+                            android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT
                         )?.toIntOrNull() ?: 0
                     }
                 }
-                val swap = rotation == 90 || rotation == 270
+                // Send the RAW encoded stream dimensions UNSWAPPED and NO Camera block at all — what
+                // the official client sends for a video. Drive web reads the display rotation from the
+                // MP4 container itself, so swapping the dimensions or adding an orientation makes web
+                // double-count the rotation and show the video sideways. The capture date still reaches
+                // Drive through the separate photo.captureTime field (PhotoMetaDto), so the video keeps
+                // its timeline position without an xAttr Camera block.
+                val baseW = rawW.takeIf { it > 0 } ?: item.width
+                val baseH = rawH.takeIf { it > 0 } ?: item.height
                 eu.akoos.photos.data.repository.drive.UploadXAttrMetadata(
-                    // Video carries no EXIF GPS/camera tags here; the container location atom is
-                    // stripped separately. Map rotation→EXIF orientation so Camera.Orientation
-                    // still describes the displayed frame.
-                    cameraOrientation = rotationToExifOrientation(rotation),
-                    cameraCaptureTimeIso = captureTimeIso,
-                    displayWidth = if (swap) item.height.takeIf { it > 0 } else item.width.takeIf { it > 0 },
-                    displayHeight = if (swap) item.width.takeIf { it > 0 } else item.height.takeIf { it > 0 },
+                    displayWidth = baseW.takeIf { it > 0 },
+                    displayHeight = baseH.takeIf { it > 0 },
                 )
             }
             item.mimeType.startsWith("image/") -> {
@@ -905,10 +1042,18 @@ class UploadPendingUseCase @Inject constructor(
                     orientation == androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_270 ||
                     orientation == androidx.exifinterface.media.ExifInterface.ORIENTATION_TRANSPOSE ||
                     orientation == androidx.exifinterface.media.ExifInterface.ORIENTATION_TRANSVERSE
+                // RAW: the embedded preview the thumbnail decodes from is already display-oriented, so
+                // report a NORMAL camera orientation. Sending the source's sensor orientation makes
+                // Drive web rotate the already-upright RAW thumbnail and show it sideways (our own grid
+                // draws the thumbnail as-is, so it looks right there — the mismatch only shows on the
+                // web). Dimensions still use the upright (swapped) values so the aspect ratio matches.
+                val ext = item.displayName.substringAfterLast('.', "").lowercase()
+                val isRaw = item.mimeType in rawImageMimeTypes || ext in rawImageExtensions
                 eu.akoos.photos.data.repository.drive.UploadXAttrMetadata(
                     latitude = if (!stripGps) meta.gpsLatitude else null,
                     longitude = if (!stripGps) meta.gpsLongitude else null,
-                    cameraOrientation = orientation,
+                    cameraOrientation = if (isRaw)
+                        androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL else orientation,
                     cameraCaptureTimeIso = captureTimeIso,
                     cameraDevice = if (!stripCamera) meta.model else null,
                     subjectCoordinates = if (!stripCamera) readSubjectCoordinates(sourceUri) else null,
@@ -918,15 +1063,6 @@ class UploadPendingUseCase @Inject constructor(
             }
             else -> eu.akoos.photos.data.repository.drive.UploadXAttrMetadata()
         }
-    }
-
-    /** Maps a video container rotation (degrees) to the equivalent EXIF orientation tag so the
-     *  xAttr Camera.Orientation field uses the same 1..8 vocabulary as photos. */
-    private fun rotationToExifOrientation(degrees: Int): Int = when (((degrees % 360) + 360) % 360) {
-        90 -> androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_90
-        180 -> androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_180
-        270 -> androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_270
-        else -> androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL
     }
 
     /** Reads EXIF SubjectArea (3 or 4 comma-separated ints) and converts it to the

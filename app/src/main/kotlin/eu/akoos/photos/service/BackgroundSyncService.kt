@@ -138,14 +138,37 @@ class BackgroundSyncService : Service() {
         // we don't, and on Android 12+ a delayed startForeground() throws ForegroundServiceStartNotAllowedException.
         ensureChannel(this)
         val notification = buildNotification()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(
-                NOTIFICATION_ID,
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
-            )
-        } else {
-            startForeground(NOTIFICATION_ID, notification)
+        val foregrounded = try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(
+                    NOTIFICATION_ID,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+            true
+        } catch (e: Exception) {
+            // Android 12+ throws ForegroundServiceStartNotAllowedException when the service is
+            // (re)started from the background — e.g. the START_STICKY restart after an OEM / memory
+            // kill while the app isn't in the foreground. We can't promote to foreground here, so
+            // rather than crash (and loop on the sticky restart), kick a one-shot background sync —
+            // WorkManager is allowed from the background — and stop. The persistent observer
+            // re-registers the next time the service starts from an allowed context (app launch).
+            Log.w(TAG, "startForeground denied (background start); one-shot sync fallback: ${e.message}")
+            false
+        }
+
+        if (!foregrounded) {
+            scope.launch {
+                val wifiOnly = runCatching {
+                    applicationContext.settingsDataStore.data.first()[SettingsKeys.SYNC_WIFI_ONLY] != false
+                }.getOrDefault(true)
+                runCatching { SyncWorker.runNow(applicationContext, wifiOnly) }
+                stopSelf()
+            }
+            return
         }
 
         registerObserver()
@@ -237,6 +260,7 @@ class BackgroundSyncService : Service() {
                 val wifiOnly = applicationContext.settingsDataStore.data.first()[SettingsKeys.SYNC_WIFI_ONLY] != false
                 SyncWorker.runNow(applicationContext, wifiOnly)
             } catch (t: Throwable) {
+                if (t is kotlinx.coroutines.CancellationException) throw t
                 Log.w(TAG, "fireSync failed: ${t.message}")
             }
         }

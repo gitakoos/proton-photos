@@ -468,4 +468,12 @@ interface DrivePhotoRepository {
      * decrypted, cached, queued, or running, so it never delays a visible cell.
      */
     fun backfillThumbnails(userId: UserId)
+
+    /**
+     * Walk the cloud photos whose encrypted XAttr hasn't been geocoded yet, decrypt each to recover
+     * its GPS Location block, and persist the coordinates so the map plots synced photos. Resumable
+     * and idempotent — a re-run only touches rows not yet checked. Needs no runtime permission
+     * (cloud GPS comes from the photo's own encrypted metadata, not the device MediaStore).
+     */
+    suspend fun backfillCloudGps(userId: UserId)
 }

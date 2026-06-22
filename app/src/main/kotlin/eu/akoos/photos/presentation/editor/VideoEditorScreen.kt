@@ -1380,18 +1380,18 @@ private fun VideoSaveSheet(
         )
         Spacer(Modifier.height(18.dp))
 
-        // Both Encoding and Uploading phases get a progress bar now — the upload leg has
-        // per-block byte progress wired through from PhotoUploadService so the sheet shows
-        // a live count instead of a silent 100 % sit during the (sometimes long) cloud
-        // upload. Two sequential 0→100 % runs is clearer than mystery latency.
-        if (isSaving && progress != null && stage != VideoSaveStage.Idle) {
+        // The encode/encrypt phases report deterministic byte progress, so they get a
+        // determinate bar. The CDN-upload phase's byte progress is too coarse to track
+        // smoothly (it sits near 100 % then races), so it falls through to the
+        // indeterminate spinner below — a moving spinner reads as "still working" rather
+        // than a frozen bar.
+        if (isSaving && progress != null && stage != VideoSaveStage.Idle &&
+            stage != VideoSaveStage.Uploading) {
             Text(
                 LocalContext.current.getString(
                     when (stage) {
-                        VideoSaveStage.Encoding -> R.string.video_editor_reencoding
                         VideoSaveStage.Encrypting -> R.string.video_editor_encrypting
-                        VideoSaveStage.Uploading -> R.string.video_editor_uploading
-                        VideoSaveStage.Idle -> R.string.video_editor_reencoding // never reached
+                        else -> R.string.video_editor_reencoding
                     }
                 ),
                 color = FgPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium,
@@ -1410,8 +1410,8 @@ private fun VideoSaveSheet(
             )
         } else if (isSaving) {
             // Either pure stream-copy save (no progress reported) or the cloud upload
-            // leg after a re-encode completed. Show a spinner with a context-aware
-            // label so the user always sees what's currently happening.
+            // leg. Show an indeterminate spinner with a context-aware label so the user
+            // always sees motion while the phase runs.
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),

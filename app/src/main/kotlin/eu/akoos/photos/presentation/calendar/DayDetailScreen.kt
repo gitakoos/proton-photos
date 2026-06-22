@@ -22,11 +22,8 @@
 
 package eu.akoos.photos.presentation.calendar
 
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -44,14 +41,11 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Notes
-import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.foundation.layout.width
-import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -76,7 +70,11 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import eu.akoos.photos.R
 import eu.akoos.photos.presentation.common.IconBubble
+import eu.akoos.photos.presentation.common.fullBleedHorizontal
 import eu.akoos.photos.domain.entity.GalleryItem
+import eu.akoos.photos.presentation.gallery.PhotoCell
+import eu.akoos.photos.presentation.gallery.photoCellInputsFor
+import eu.akoos.photos.presentation.gallery.rememberDefaultGridColumns
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.Bg2
 import eu.akoos.photos.presentation.theme.PillBg
@@ -86,13 +84,12 @@ import java.util.Locale
 import java.util.TimeZone
 
 /**
- * Day Detail screen — hero photo at the top, editable location/description below, then
- * a grid of every photo + video captured on that calendar date.
+ * Day Detail screen — hero photo at the top, editable description below, then a grid of
+ * every photo + video captured on that calendar date.
  *
  * The hero image comes from the user-picked cover when set, otherwise the first photo
  * of the day. Long-pressing any thumbnail in the grid promotes it to the new cover.
  */
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun DayDetailScreen(
     date: String,
@@ -107,12 +104,9 @@ fun DayDetailScreen(
     // Local input state that mirrors meta but lets the user type without each keystroke
     // hitting Room. The mirror resets when a new meta row comes in (e.g. on first load
     // or when a different date is opened).
-    var locationInput by remember(state.meta?.date) { mutableStateOf(state.meta?.locationText ?: "") }
     var descriptionInput by remember(state.meta?.date) { mutableStateOf(state.meta?.description ?: "") }
 
-    // Which of the two metadata fields (if any) the user is currently editing. The
-    // active one drives an EditFieldSheet modal that's mounted below.
-    var editingLocation by remember { mutableStateOf(false) }
+    // Whether the description editor sheet is open.
     var editingDescription by remember { mutableStateOf(false) }
 
     val heroItem: GalleryItem? = remember(state.items, state.meta?.coverPhotoUri) {
@@ -140,14 +134,17 @@ fun DayDetailScreen(
                 CircularProgressIndicator(color = colors.accent)
             }
         } else {
+            val cols = rememberDefaultGridColumns()
             LazyVerticalGrid(
-                columns = GridCells.Fixed(3),
+                columns = GridCells.Fixed(cols),
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 48.dp),
+                // Match the main timeline grid (GalleryGrid): same default columns, 20.dp side inset
+                // and 6.dp gap, so the day's photos render at the same size as the Photos page.
+                contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 48.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                // Hero + metadata header span all three columns.
+                // Hero + metadata header span the full row.
                 item(span = { GridItemSpan(maxLineSpan) }, key = "header_hero") {
                     HeroHeader(
                         heroItem = heroItem,
@@ -162,16 +159,9 @@ fun DayDetailScreen(
                         .padding(horizontal = 12.dp, vertical = 8.dp),
                     ) {
                         // Lightweight row pattern: icon + current value (or hint) on a single
-                        // row. Tapping anywhere on the row opens an EditFieldSheet for that
-                        // field — heavier inline OutlinedTextFields would dominate the page
-                        // and make the photos below feel secondary.
-                        EditableMetaRow(
-                            icon = Icons.Default.LocationOn,
-                            hint = stringResource(R.string.day_detail_location_hint),
-                            value = locationInput,
-                            onClick = { editingLocation = true },
-                        )
-                        Spacer(Modifier.height(6.dp))
+                        // row. Tapping anywhere on the row opens an EditFieldSheet — a heavier
+                        // inline OutlinedTextField would dominate the page and make the photos
+                        // below feel secondary.
                         EditableMetaRow(
                             icon = Icons.AutoMirrored.Filled.Notes,
                             hint = stringResource(R.string.day_detail_description_hint),
@@ -187,10 +177,20 @@ fun DayDetailScreen(
                     items = state.items,
                     key = { _, item -> itemKey(item) },
                 ) { index, item ->
-                    DayThumbnail(
-                        item = item,
+                    val inputs = remember(item) { photoCellInputsFor(item) }
+                    PhotoCell(
+                        imageData = inputs.imageData,
+                        stableKey = inputs.stableKey,
+                        isVideo = inputs.isVideo,
+                        isPlaceholder = inputs.isPlaceholder,
+                        showCloudBadge = inputs.showCloudBadge,
+                        showSyncedBadge = inputs.showSyncedBadge,
+                        isFavorite = inputs.isFavorite,
+                        typeBadgeRes = inputs.typeBadgeRes,
+                        typeBadgeCdRes = inputs.typeBadgeCdRes,
                         onClick = { onPhotoClick(state.items, index) },
-                        onLongPress = { viewModel.setCover(item) },
+                        // Long-press promotes this thumbnail to the day's cover.
+                        onLongClick = { viewModel.setCover(item) },
                     )
                 }
             }
@@ -217,23 +217,8 @@ fun DayDetailScreen(
         }
     }
 
-    // Edit-field bottom sheets — at most one is open at a time. Save commits to Room
-    // via the existing VM setters (same path the VM setters use); cancel just dismisses
-    // without persisting.
-    if (editingLocation) {
-        eu.akoos.photos.presentation.calendar.components.EditFieldSheet(
-            title = stringResource(R.string.day_detail_edit_location_title),
-            initialValue = locationInput,
-            hint = stringResource(R.string.day_detail_location_hint),
-            singleLine = true,
-            onDismiss = { editingLocation = false },
-            onSave = { v ->
-                locationInput = v
-                viewModel.updateLocation(v)
-                editingLocation = false
-            },
-        )
-    }
+    // Description edit sheet. Save commits to Room via the existing VM setter; cancel just
+    // dismisses without persisting.
     if (editingDescription) {
         eu.akoos.photos.presentation.calendar.components.EditFieldSheet(
             title = stringResource(R.string.day_detail_edit_description_title),
@@ -302,6 +287,9 @@ private fun HeroHeader(
     val colors = AppColors.current
     Box(
         modifier = Modifier
+            // Cancel the parent grid's 20.dp side contentPadding so the cover spans edge-to-edge,
+            // exactly like the album detail hero, while the photo cells below stay inset.
+            .fullBleedHorizontal(20.dp)
             .fillMaxWidth()
             .aspectRatio(16f / 10f)
             .background(Bg2),
@@ -352,62 +340,6 @@ private fun HeroHeader(
                     color = Color.White.copy(alpha = 0.85f),
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Medium,
-                )
-            }
-        }
-    }
-}
-
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-private fun DayThumbnail(
-    item: GalleryItem,
-    onClick: () -> Unit,
-    onLongPress: () -> Unit,
-) {
-    val colors = AppColors.current
-    val model: Any? = when (item) {
-        is GalleryItem.LocalOnly -> android.net.Uri.parse(item.local.uri)
-        is GalleryItem.Synced    -> android.net.Uri.parse(item.local.uri)
-        is GalleryItem.CloudOnly -> item.cloud.thumbnailUrl
-    }
-    val mimeType = when (item) {
-        is GalleryItem.LocalOnly -> item.local.mimeType
-        is GalleryItem.Synced    -> item.local.mimeType
-        is GalleryItem.CloudOnly -> item.cloud.mimeType
-    }
-    val isVideo = mimeType.startsWith("video/")
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .aspectRatio(1f)
-            .clip(RoundedCornerShape(8.dp))
-            .background(Bg2)
-            .combinedClickable(
-                onClick = onClick,
-                onLongClick = onLongPress,
-            ),
-    ) {
-        AsyncImage(
-            model = model,
-            contentDescription = null,
-            contentScale = ContentScale.Crop,
-            modifier = Modifier.fillMaxSize(),
-        )
-        if (isVideo) {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(6.dp)
-                    .size(20.dp)
-                    .background(Color.Black.copy(alpha = 0.55f), CircleShape),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    Icons.Default.PlayArrow,
-                    contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier.size(14.dp),
                 )
             }
         }

@@ -158,7 +158,13 @@ class MainActivity : AppCompatActivity() {
             .onSessionForceLogout {
                 lifecycleScope.launch { accountManager.disableAccount(it.userId) }
             }
-            .onAccountDisabled { /* NavGraph already routes to login when isLoggedIn = false */ }
+            .onAccountDisabled {
+                // Every sign-out path converges here (explicit sign-out, force-logout, 2FA /
+                // key-check failures). Wipe this account's cached rows, plaintext key material and
+                // decrypted thumbnails so a revoked or re-authed session leaves nothing resident.
+                // NavGraph already routes to login once isLoggedIn = false.
+                lifecycleScope.launch { runCatching { driveRepo.clearCacheForSignOut(it.userId) } }
+            }
             .onUserKeyCheckFailed { /* corrupt user key — best to just disable and re-login */ }
             .onUserAddressKeyCheckFailed { /* same */ }
 
@@ -180,9 +186,10 @@ class MainActivity : AppCompatActivity() {
                 // with the periodic run.
                 SyncWorker.runNow(this@MainActivity, wifiOnly)
                 SyncWorker.scheduleContentObserver(this@MainActivity, wifiOnly)
-                // The foreground service needs its notification shown — skip it when the backup-status
-                // notification is opted out; the worker + content trigger still keep backups flowing.
-                val backupNotif = prefs[SettingsKeys.NOTIFY_BACKUP_STATUS] != false
+                // The persistent keep-alive foreground service is opt-in and OFF by default — the
+                // content trigger + periodic worker keep backups flowing without it (and without a
+                // standing notification). Only start it when the user has explicitly opted in.
+                val backupNotif = prefs[SettingsKeys.NOTIFY_BACKUP_STATUS] == true
                 if (backupNotif) eu.akoos.photos.service.BackgroundSyncService.start(this@MainActivity)
             }
         }
@@ -535,6 +542,12 @@ class MainActivity : AppCompatActivity() {
             } catch (_: Exception) {
                 // Silent — onResume must never crash; the next refresh or SyncWorker tick retries.
             }
+        }
+        // Silent in-app update check. The repository caches the result for 24h, so this is a no-op
+        // on most resumes; when a newer GitHub release exists it surfaces the update dialog (and,
+        // after "Not now", the dismissable gallery banner) through UpdateOrchestrator.
+        lifecycleScope.launch {
+            runCatching { updateOrchestrator.runSilentCheck() }
         }
     }
 

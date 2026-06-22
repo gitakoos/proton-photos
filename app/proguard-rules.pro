@@ -76,6 +76,10 @@
 # ── Coil image loading ───────────────────────────────────────────────────
 -dontwarn coil.**
 
+# ── osmdroid (OpenStreetMap tiles for the photo map) ─────────────────────
+-keep class org.osmdroid.** { *; }
+-dontwarn org.osmdroid.**
+
 # ── App-side: Workers (HiltWorker reflection) + Application class ────────
 -keep class eu.akoos.photos.App { *; }
 -keep class * extends androidx.work.ListenableWorker { <init>(...); }

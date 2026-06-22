@@ -59,7 +59,6 @@ import kotlin.math.min
  * @param items the flat selectable list, in grid order
  * @param indexByKey grid cell key -> index into [items]; cells whose key is absent aren't selectable
  * @param selected the live selection, read so a re-grab extends from / deselects within the current set
- * @param contentPaddingTopPx the grid's own top content padding in px (0 if the grid has none)
  * @param onSelectionChange called with the new selection on every range change
  */
 @Composable
@@ -68,7 +67,6 @@ fun <T> rememberDragMultiSelectModifier(
     items: List<T>,
     indexByKey: Map<String, Int>,
     selected: Set<T>,
-    contentPaddingTopPx: Float,
     onSelectionChange: (Set<T>) -> Unit,
 ): Modifier {
     val density = LocalDensity.current
@@ -100,14 +98,16 @@ fun <T> rememberDragMultiSelectModifier(
         }
     }
 
-    // LazyGridItemInfo.offset is measured from the content start (after the top padding); the pointer
-    // offset is grid-node-local (the padding band included). Adding the known top padding puts both in
-    // node-local space, so the cell under the finger is returned. Deterministic across devices, where
-    // viewportStartOffset can read inconsistently and drift the hit-test by a content-padding band.
-    val itemIndexAt: (Offset) -> Int? = remember(items, contentPaddingTopPx) {
+    // LazyGridItemInfo.offset is relative to the content start (after the top contentPadding); the
+    // pointer offset is node-local (0 = node top). viewportStartOffset is exactly -(top contentPadding),
+    // so subtracting it converts each cell into the pointer's space — read from layoutInfo it is exact
+    // and scroll-invariant. (A hand-passed padding was off by a band; dropping it entirely then drifted
+    // the hit a full row on the timeline, whose top padding is large under the floating header.)
+    val itemIndexAt: (Offset) -> Int? = remember(items) {
         fun(offset: Offset): Int? {
+            val startOffset = gridState.layoutInfo.viewportStartOffset
             val info = gridState.layoutInfo.visibleItemsInfo.firstOrNull { cell ->
-                val top = cell.offset.y + contentPaddingTopPx
+                val top = cell.offset.y - startOffset
                 val left = cell.offset.x
                 offset.y >= top && offset.y < top + cell.size.height &&
                     offset.x >= left && offset.x < left + cell.size.width

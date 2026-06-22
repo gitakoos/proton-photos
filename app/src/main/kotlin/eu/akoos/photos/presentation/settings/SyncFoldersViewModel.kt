@@ -138,11 +138,14 @@ class SyncFoldersViewModel @Inject constructor(
      * Lets the user pre-declare a folder name that doesn't yet exist as a populated MediaStore
      * bucket. The folder shows up immediately with "0 items"; once a matching bucket appears
      * (a photo is saved there), it's automatically merged into the populated list.
+     *
+     * Returns false when the name is rejected (blank or already added) so the dialog can keep
+     * itself open and surface an error; true once the folder is added.
      */
-    fun addManualFolder(rawName: String) {
+    fun addManualFolder(rawName: String): Boolean {
         val name = rawName.trim()
-        if (name.isEmpty()) return
-        if (manualNames.contains(name)) return
+        if (name.isEmpty()) return false
+        if (manualNames.contains(name)) return false
         val updated = manualNames + name
         manualNames = updated
         viewModelScope.launch {
@@ -153,6 +156,7 @@ class SyncFoldersViewModel @Inject constructor(
             if (s.folders.any { it.name == name }) s
             else s.copy(folders = s.folders + SyncFolder(name, null, 0, isSelected = false))
         }
+        return true
     }
 
     fun toggle(folderName: String) {

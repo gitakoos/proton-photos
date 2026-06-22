@@ -54,8 +54,16 @@ data class SharedUiState(
     val sharedByMePhotos: List<SharedPhoto> = emptyList(),
     val pendingInvitations: List<PendingInvitation> = emptyList(),
     val filter: SharedFilter = SharedFilter.SharedWithMe,
+    /** linkIds of shared-by-me photos the user has multi-selected for a bulk action. */
+    val selectedPhotoIds: Set<String> = emptySet(),
+    /** True while a bulk stop-sharing pass is running, to gate the action button. */
+    val isRevoking: Boolean = false,
     val error: String? = null,
 ) {
+    /** Long-press on a shared-by-me photo turns the grid into a selection grid. */
+    val isSelectionMode: Boolean get() = selectedPhotoIds.isNotEmpty()
+    val selectedCount: Int get() = selectedPhotoIds.size
+
     /** Albums the current user has shared with others. */
     val sharedByMe: List<Album> get() = allAlbums.filter { it.isShared }
 
@@ -96,10 +104,63 @@ class SharedViewModel @Inject constructor(
     fun refresh() = loadSharedAlbums()
 
     fun setFilter(filter: SharedFilter) {
-        _uiState.update { it.copy(filter = filter) }
+        // Switching tabs leaves selection mode — the shared-by-me photos that drive it
+        // only exist on the "Shared by me" tab.
+        _uiState.update {
+            if (it.filter == filter) it
+            else it.copy(filter = filter, selectedPhotoIds = emptySet())
+        }
     }
 
     fun clearError() = _uiState.update { it.copy(error = null) }
+
+    // ── Bulk selection of shared-by-me photos ───────────────────────────────────
+
+    /** Long-press / tap toggles a shared-by-me photo in the selection set. */
+    fun toggleSelection(photoId: String) {
+        _uiState.update { state ->
+            val next = state.selectedPhotoIds.toMutableSet()
+            if (!next.add(photoId)) next.remove(photoId)
+            state.copy(selectedPhotoIds = next)
+        }
+    }
+
+    fun clearSelection() = _uiState.update { it.copy(selectedPhotoIds = emptySet()) }
+
+    /**
+     * Stop sharing every selected photo: revoke each public link over a snapshot of the
+     * selection, drop the successfully-revoked rows from the section, then leave selection
+     * mode. Touches only share metadata — never photo content. Mirrors [removeLink]'s repo
+     * call without its single-photo [activeLinkPhotoId] guard.
+     */
+    fun revokeSelected() {
+        val targets = _uiState.value.selectedPhotoIds.toList()
+        if (targets.isEmpty()) return
+        viewModelScope.launch {
+            val userId = accountManager.getPrimaryUserId().first() ?: return@launch
+            _uiState.update { it.copy(isRevoking = true) }
+            val revoked = mutableSetOf<String>()
+            var lastError: Throwable? = null
+            for (linkId in targets) {
+                runCatching { driveRepo.revokePhotoShareLink(userId, linkId) }
+                    .onSuccess { revoked += linkId }
+                    .onFailure { lastError = it }
+            }
+            _uiState.update { state ->
+                val friendly = lastError?.let { friendlyNetworkError(it, networkObserver.isOnline.value, context) }
+                state.copy(
+                    sharedByMePhotos = state.sharedByMePhotos.filter { it.linkId !in revoked },
+                    selectedPhotoIds = state.selectedPhotoIds - revoked,
+                    isRevoking = false,
+                    error = when {
+                        lastError == null -> state.error
+                        friendly != null -> friendly
+                        else -> context.getString(R.string.share_stop_failed)
+                    },
+                )
+            }
+        }
+    }
 
     fun declineInvitation(invitationId: String) {
         viewModelScope.launch {

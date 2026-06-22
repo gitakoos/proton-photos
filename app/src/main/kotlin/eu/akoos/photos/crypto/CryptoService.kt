@@ -136,6 +136,20 @@ class CryptoService : Service() {
             }
         }
 
+        override fun decryptXAttr(
+            xAttrArmored: String?,
+            nodeKeyBytes: ByteArray?,
+        ): String? = cryptoLock.withLock {
+            // Blank armor triggers the same [:-1] panic/SIGABRT — keep it out of the Go runtime.
+            if (xAttrArmored.isNullOrBlank() || nodeKeyBytes == null) return@withLock null
+            try {
+                cryptoContext.pgpCrypto.decryptText(xAttrArmored, nodeKeyBytes)
+            } catch (e: Exception) {
+                Log.w(TAG, "decryptXAttr failed: ${e.message}")
+                null
+            }
+        }
+
         override fun decryptBinaryToFile(
             encPath: String?,
             destPath: String?,

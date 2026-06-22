@@ -89,6 +89,7 @@ import eu.akoos.photos.presentation.settings.ExcludedFoldersScreen
 import eu.akoos.photos.presentation.settings.SyncFoldersScreen
 import eu.akoos.photos.presentation.settings.TimelineFilterScreen
 import eu.akoos.photos.presentation.settings.SyncSettingsScreen
+import eu.akoos.photos.presentation.map.MapScreen
 import eu.akoos.photos.presentation.search.SearchScreen
 import eu.akoos.photos.presentation.settings.TrashScreen
 import eu.akoos.photos.presentation.viewer.PhotoViewerScreen
@@ -129,6 +130,7 @@ sealed class Screen(val route: String) {
     data object TimelineAlbumsFilter : Screen("timeline_albums_filter")
     data object TimelineDeviceFolders : Screen("timeline_device_folders")
     data object Search : Screen("search")
+    data object Map : Screen("map")
     data object Calendar : Screen("calendar")
     data object Memories : Screen("memories")
     data object MemoryCategory : Screen("memory_category/{type}") {
@@ -375,6 +377,18 @@ fun NavGraph(
                 onDayClick = { date ->
                     selectedDayDate = date
                     navController.navigate(Screen.DayDetail.route)
+                },
+                onOpenMap = {
+                    navController.navigate(Screen.Map.route) {
+                        popUpTo(Screen.Calendar.route) { inclusive = true }
+                        launchSingleTop = true
+                    }
+                },
+                onOpenSearch = {
+                    navController.navigate(Screen.Search.route) {
+                        popUpTo(Screen.Calendar.route) { inclusive = true }
+                        launchSingleTop = true
+                    }
                 },
             )
         }
@@ -885,6 +899,38 @@ fun NavGraph(
                     selectedViewerHiddenLinkIds = emptySet()
                     viewerFromAlbum = false
                     navController.navigate(Screen.Viewer.route)
+                },
+                onOpenMap = { navController.navigate(Screen.Map.route) },
+                onOpenCalendar = {
+                    navController.navigate(Screen.Calendar.route) {
+                        popUpTo(Screen.Search.route) { inclusive = true }
+                        launchSingleTop = true
+                    }
+                },
+            )
+        }
+
+        composable(Screen.Map.route) {
+            MapScreen(
+                onBack = { navController.popBackStack() },
+                onPhotoClick = { items, i ->
+                    selectedViewerItems = items
+                    selectedViewerIndex = i
+                    selectedViewerHiddenLinkIds = emptySet()
+                    viewerFromAlbum = false
+                    navController.navigate(Screen.Viewer.route)
+                },
+                onOpenCalendar = {
+                    navController.navigate(Screen.Calendar.route) {
+                        popUpTo(Screen.Map.route) { inclusive = true }
+                        launchSingleTop = true
+                    }
+                },
+                onOpenSearch = {
+                    navController.navigate(Screen.Search.route) {
+                        popUpTo(Screen.Map.route) { inclusive = true }
+                        launchSingleTop = true
+                    }
                 },
             )
         }

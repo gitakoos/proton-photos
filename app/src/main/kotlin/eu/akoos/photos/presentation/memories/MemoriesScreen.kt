@@ -240,7 +240,7 @@ internal fun FloatingMemoriesHeader(
     ) {
         Box(
             modifier = Modifier
-                .size(36.dp)
+                .size(40.dp)
                 .background(PillBg, CircleShape)
                 .border(0.5.dp, PillBorder, CircleShape)
                 .clickable(onClick = onBack),

@@ -128,12 +128,12 @@ internal fun AlbumHeroHeader(
                 }
             }
             Spacer(Modifier.height(8.dp))
-            // Fixed height fits the 36.dp action buttons so a late member fetch doesn't shift the layout.
+            // Fixed height fits the 40.dp action buttons so a late member fetch doesn't shift the layout.
             if (metaLeading != null || photoCountText.isNotEmpty() || titleActions != null) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    modifier = Modifier.height(36.dp),
+                    modifier = Modifier.height(40.dp),
                 ) {
                     if (metaLeading != null) {
                         metaLeading()

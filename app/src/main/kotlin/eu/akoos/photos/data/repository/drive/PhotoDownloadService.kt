@@ -755,9 +755,10 @@ class PhotoDownloadService @Inject constructor(
             cacheDir.listFiles()?.forEach { f ->
                 if (!f.isFile) return@forEach
                 val name = f.name
-                // Skip in-flight scratch files; only sweep finalized blobs (and their
-                // hash sidecars). `.hashes.tmp` is also covered by the .tmp guard below.
-                if (name.startsWith("dec_") || name.startsWith("enc_") || name.endsWith(".tmp")) return@forEach
+                // Keep dec_* (resume state) and .tmp (in-flight publish); enc_* is transient
+                // per-block scratch deleted inline after decrypt, so an old enc_* is an orphan
+                // from a crash mid-block — let the TTL cutoff sweep it like a finalized blob.
+                if (name.startsWith("dec_") || name.endsWith(".tmp")) return@forEach
                 if (f.lastModified() in 1..cutoff) {
                     if (f.delete()) deleted++
                     // Wipe the linkId.hashes sidecar alongside any swept blob so we don't

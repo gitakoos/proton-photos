@@ -116,8 +116,6 @@ internal fun ShareAlbumSheet(
 ) {
     var inviteEmail by remember { mutableStateOf("") }
     val pendingEmails = remember { mutableStateListOf<String>() }
-    // Typed for Drive-web parity but dropped at the data-layer boundary — repo signature has no message field yet.
-    var inviteMessage by remember { mutableStateOf("") }
     // 6 (editor) matches the inviteToAlbum() default in the data layer.
     var newInvitePermissions by remember { mutableStateOf(6) }
 
@@ -132,7 +130,6 @@ internal fun ShareAlbumSheet(
     val resetInputs = {
         inviteEmail = ""
         pendingEmails.clear()
-        inviteMessage = ""
     }
 
     val appColors = AppColors.current
@@ -454,34 +451,8 @@ internal fun ShareAlbumSheet(
                 )
             }
 
-            // Message field — revealed only once a chip exists, keeping the common single-email case small.
+            // Revealed only once a chip exists, keeping the common single-email case small.
             if (hasPendingInvites) {
-                Spacer(Modifier.height(12.dp))
-                OutlinedTextField(
-                    value = inviteMessage,
-                    onValueChange = { inviteMessage = it },
-                    placeholder = {
-                        Text(
-                            stringResource(R.string.share_invite_message_hint),
-                            color = FgMute, fontSize = 13.sp,
-                        )
-                    },
-                    enabled = !isInvitingBatch,
-                    minLines = 2,
-                    maxLines = 4,
-                    shape = RoundedCornerShape(12.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = PillBorder,
-                        unfocusedBorderColor = PillBorder,
-                        focusedContainerColor = PillBg,
-                        unfocusedContainerColor = PillBg,
-                        focusedTextColor = FgPrimary,
-                        unfocusedTextColor = FgPrimary,
-                        cursorColor = Accent,
-                    ),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-
                 Spacer(Modifier.height(12.dp))
                 // Share + Cancel footer for the invite batch — distinct from the sheet-level "Stop sharing" footer.
                 Row(
@@ -493,7 +464,6 @@ internal fun ShareAlbumSheet(
                         onClick = {
                             inviteEmail = ""
                             pendingEmails.clear()
-                            inviteMessage = ""
                         },
                         enabled = !isInvitingBatch,
                     ) {
@@ -511,12 +481,10 @@ internal fun ShareAlbumSheet(
                             )
                             .clickable(enabled = !isInvitingBatch && pendingEmails.isNotEmpty()) {
                                 val snapshot = pendingEmails.toList()
-                                val msg = inviteMessage.trim()
-                                onInviteUsers(snapshot, msg, newInvitePermissions)
+                                onInviteUsers(snapshot, "", newInvitePermissions)
                                 // Optimistically clear; the VM holds the result for the screen's snackbar.
                                 pendingEmails.clear()
                                 inviteEmail = ""
-                                inviteMessage = ""
                             }
                             .padding(horizontal = 18.dp, vertical = 10.dp),
                         contentAlignment = Alignment.Center,

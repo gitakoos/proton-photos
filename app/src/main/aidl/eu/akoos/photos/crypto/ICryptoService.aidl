@@ -15,4 +15,7 @@ interface ICryptoService {
     // blocks (a few MB) that would exceed the binder limit as a byte[]. Reads encPath,
     // writes the plaintext to destPath; returns false on failure.
     boolean decryptBinaryToFile(String encPath, String destPath, in byte[] nodeKeyBytes);
+    // Decrypts a cloud photo's armored XAttr blob to plaintext JSON with the node key.
+    // Returns null on failure; the client falls back to the in-process path.
+    String decryptXAttr(String xAttrArmored, in byte[] nodeKeyBytes);
 }

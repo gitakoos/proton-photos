@@ -71,13 +71,11 @@ import java.util.Locale
  * starts on the system's first day of week so French/American/etc. installs feel native.
  *
  * [expanded] controls how the grid sizes its rows:
- *  - `false` (default — used by the stacked LazyColumn layout): rows take their natural
- *    height driven by a 1:1 [aspectRatio] on each cell. The whole grid lays out top-down
- *    inside the parent scroll container.
- *  - `true` (used by the per-month [MonthPager]): the grid is asked to fill the parent's
- *    available height, with each of the (up to) six week rows sharing the vertical space
- *    via [weight], so a single-month page feels like a full-screen calendar rather than
- *    a small block of cells with empty space underneath.
+ *  - `false`: rows take their natural height driven by a 1:1 [aspectRatio] on each cell, laying
+ *    out top-down inside the parent scroll container.
+ *  - `true` (used by the one-month-per-page calendar): the grid fills the parent's available
+ *    height, with each of the (up to) six week rows sharing the vertical space via [weight], so a
+ *    single-month page feels like a full-screen calendar rather than a small block of cells.
  */
 @Composable
 fun MonthGrid(

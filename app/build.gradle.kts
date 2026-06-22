@@ -41,8 +41,8 @@ android {
         // versionCode bumped per release tag — keep monotonically increasing.
         // versionName mirrors the GitHub release tag (e.g. v2.0.0 → "2.0.0") so the About
         // screen and the published APK report the same version the user downloaded.
-        versionCode = 234
-        versionName = "2.3.4"
+        versionCode = 235
+        versionName = "2.3.5"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -268,6 +268,9 @@ dependencies {
 
     // DataStore
     implementation(libs.datastore.preferences)
+
+    // Map view — OpenStreetMap tiles, no Google Play Services
+    implementation(libs.osmdroid.android)
 
     // Coroutines
     implementation(libs.coroutines.android)

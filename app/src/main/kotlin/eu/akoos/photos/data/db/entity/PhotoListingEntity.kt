@@ -67,6 +67,11 @@ data class PhotoListingEntity(
     val encNodePassphrase: String? = null,
     /** linkId of this photo's parent (root or album). Needed to look up the parent's decrypted nodeKey at thumbnail-decrypt time. */
     val parentLinkId: String? = null,
+    /** Armored encrypted XAttr blob for this photo's active revision. Decrypted later (off the read
+     *  path) to recover the GPS Location block for the map; null for rows captured before this column. */
+    val encXAttr: String? = null,
+    /** Set once the GPS backfill has processed this row, so it is never reprocessed. */
+    val gpsChecked: Boolean = false,
 ) {
     fun toDomain() = CloudPhoto(
         linkId = linkId,

@@ -106,7 +106,7 @@ fun SyncFoldersScreen(
                 icon = Icons.AutoMirrored.Filled.ArrowBack,
                 contentDescription = stringResource(R.string.onboarding_back),
                 onClick = onBack,
-                diameter = 36.dp,
+                diameter = 40.dp,
                 iconSize = 18.dp,
                 background = colors.surfaceWeak,
                 borderColor = PillBorder,
@@ -266,6 +266,7 @@ fun SyncFoldersScreen(
                     }
                     if (showAddDialog) {
                         var input by remember { mutableStateOf("") }
+                        var nameError by remember { mutableStateOf(false) }
                         AlertDialog(
                             onDismissRequest = { showAddDialog = false },
                             title = { Text(stringResource(R.string.sync_folders_add_dialog_title), color = FgPrimary) },
@@ -278,17 +279,28 @@ fun SyncFoldersScreen(
                                     Spacer(Modifier.height(12.dp))
                                     OutlinedTextField(
                                         value = input,
-                                        onValueChange = { input = it },
+                                        onValueChange = {
+                                            input = it
+                                            nameError = false
+                                        },
                                         singleLine = true,
                                         placeholder = { Text(stringResource(R.string.sync_folders_add_dialog_name_hint)) },
+                                        isError = nameError,
                                     )
+                                    if (nameError) {
+                                        Spacer(Modifier.height(6.dp))
+                                        Text(
+                                            stringResource(R.string.sync_folders_add_dialog_name_invalid),
+                                            color = FgMute, fontSize = 11.5.sp,
+                                        )
+                                    }
                                 }
                             },
                             confirmButton = {
                                 TextButton(
                                     onClick = {
-                                        viewModel.addManualFolder(input)
-                                        showAddDialog = false
+                                        if (viewModel.addManualFolder(input)) showAddDialog = false
+                                        else nameError = true
                                     },
                                 ) { Text(stringResource(R.string.share_invite_add), color = Accent) }
                             },

@@ -98,14 +98,14 @@ fun AppLockScreen(onUnlocked: () -> Unit) {
             }
             Spacer(Modifier.height(28.dp))
             Text(
-                "Photos for Proton",
+                stringResource(R.string.app_name),
                 color = FgPrimary,
                 fontSize = 22.sp,
                 fontWeight = FontWeight.SemiBold,
             )
             Spacer(Modifier.height(8.dp))
             Text(
-                "Authenticate to continue",
+                stringResource(R.string.app_lock_authenticate_prompt),
                 color = FgDim,
                 fontSize = 14.sp,
             )
@@ -156,8 +156,8 @@ internal fun showBiometricPrompt(
     )
     prompt.authenticate(
         BiometricPrompt.PromptInfo.Builder()
-            .setTitle("Photos for Proton")
-            .setDescription("Authenticate to continue")
+            .setTitle(activity.getString(R.string.app_name))
+            .setDescription(activity.getString(R.string.app_lock_authenticate_prompt))
             .setAllowedAuthenticators(
                 BiometricManager.Authenticators.BIOMETRIC_STRONG or
                     BiometricManager.Authenticators.DEVICE_CREDENTIAL,

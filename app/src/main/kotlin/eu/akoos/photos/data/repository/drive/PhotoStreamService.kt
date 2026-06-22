@@ -335,6 +335,7 @@ class PhotoStreamService @Inject constructor(
             // so the stale-entry cleanup below gets a complete picture.
             val cursorKey = SettingsKeys.photoListingCursorKey(userId.id, activeVolumeId)
             val completeKey = SettingsKeys.photoListingCompleteKey(userId.id, activeVolumeId)
+            val everCompleteKey = SettingsKeys.photoListingEverCompleteKey(userId.id, activeVolumeId)
             val listingPrefs = context.settingsDataStore.data.first()
             val previouslyComplete = listingPrefs[completeKey] ?: false
             // Once the library has been fully listed, a forced refresh (pull-to-refresh) walks fresh
@@ -346,6 +347,18 @@ class PhotoStreamService @Inject constructor(
             // sees its tail, so it suppresses the prune, which is the right call mid-backfill.
             val resumeCursor = if (previouslyComplete) null else listingPrefs[cursorKey]
             val startedFresh = resumeCursor == null
+            // A forced refresh mid-backfill resumes the saved cursor, so it only re-walks the older
+            // tail and would miss photos added at the TOP of the library since (e.g. uploaded from
+            // Drive web) until the backfill finally completes. Pull the newest page first — insert-
+            // only, one cheap page — so new uploads appear right away without abandoning the backfill.
+            if (force && !startedFresh) {
+                try {
+                    refreshNewestPage(userId)
+                } catch (e: Exception) {
+                    if (e is kotlinx.coroutines.CancellationException) throw e
+                    Log.w(TAG, "refreshCloudPhotos: newest-page pre-fetch failed: ${e.message}")
+                }
+            }
             // This walk is not complete until the loop below reaches the final short page; reset
             // up front so a crash/abort midway correctly leaves the listing marked incomplete.
             context.settingsDataStore.edit { it[completeKey] = false }
@@ -423,7 +436,8 @@ class PhotoStreamService @Inject constructor(
                             ids.filterNot { it.startsWith(LargeLibrarySim.LINK_ID_PREFIX) } else ids
                     }
                 if (toDelete.isNotEmpty()) {
-                    photoListingDao.deleteByLinkIds(toDelete)
+                    // Chunk to stay under SQLite's bound-variable limit on a big server-side deletion.
+                    toDelete.chunked(500).forEach { photoListingDao.deleteByLinkIds(it) }
                     recentUploadsTracker.forget(toDelete)
                     Log.d(TAG, "refreshCloudPhotos: removed ${toDelete.size} stale entries (early, post-listing)")
                 }
@@ -737,6 +751,10 @@ class PhotoStreamService @Inject constructor(
             if (libraryFullyListed) {
                 context.settingsDataStore.edit {
                     it[completeKey] = failedBatches == 0
+                    // Sticky "listed at least once" marker — never cleared at a later walk start, so
+                    // the upload path can defer the post-reinstall bulk upload until the cloud library
+                    // is fully known. Only set on a clean walk; a failed batch leaves it untouched.
+                    if (failedBatches == 0) it[everCompleteKey] = true
                     it.remove(cursorKey)
                 }
             }
@@ -759,7 +777,8 @@ class PhotoStreamService @Inject constructor(
                             ids.filterNot { it.startsWith(LargeLibrarySim.LINK_ID_PREFIX) } else ids
                     }
                 if (toDelete.isNotEmpty()) {
-                    photoListingDao.deleteByLinkIds(toDelete)
+                    // Chunk to stay under SQLite's bound-variable limit on a big server-side deletion.
+                    toDelete.chunked(500).forEach { photoListingDao.deleteByLinkIds(it) }
                     // Forget them in the tracker too — they're confirmed gone from server, so
                     // they should never be "protected" again on a subsequent refresh.
                     recentUploadsTracker.forget(toDelete)
@@ -968,6 +987,7 @@ class PhotoStreamService @Inject constructor(
                     context.settingsDataStore.edit { it[anchorKey] = latestAnchor.eventId }
                     Log.d(TAG, "incremental: initial anchor saved ${latestAnchor.eventId}")
                 } catch (e: Exception) {
+                    if (e is kotlinx.coroutines.CancellationException) throw e
                     Log.w(TAG, "incremental: could not get event anchor (${e.message}), will retry after cooldown")
                 }
                 return
@@ -1103,6 +1123,7 @@ class PhotoStreamService @Inject constructor(
         } catch (e: DriveNotFoundException) {
             Log.w(TAG, "refreshCloudPhotosIncremental: DriveNotFoundException: ${e.message}")
         } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
             Log.e(TAG, "refreshCloudPhotosIncremental failed, falling back to full refresh", e)
             refreshCloudPhotos(userId)
         }

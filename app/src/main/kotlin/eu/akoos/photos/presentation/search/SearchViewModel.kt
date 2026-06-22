@@ -40,12 +40,15 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.stateIn
 import java.text.Normalizer
 import me.proton.core.accountmanager.domain.AccountManager
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.R
+import eu.akoos.photos.data.db.dao.PhotoLocationDao
+import eu.akoos.photos.data.db.entity.PhotoLocationEntity
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.usecase.CategorizeItem
 import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
@@ -53,6 +56,8 @@ import eu.akoos.photos.presentation.gallery.ContentFilter
 import eu.akoos.photos.presentation.gallery.GalleryFilter
 import eu.akoos.photos.presentation.gallery.MediaType
 import eu.akoos.photos.presentation.gallery.SyncStatusFilter
+import eu.akoos.photos.presentation.map.MapPin
+import eu.akoos.photos.util.OfflineGeocoder
 import java.util.Calendar
 import javax.inject.Inject
 
@@ -61,6 +66,7 @@ import javax.inject.Inject
 class SearchViewModel @Inject constructor(
     private val getGalleryItems: GetGalleryItemsUseCase,
     private val accountManager: AccountManager,
+    private val photoLocationDao: PhotoLocationDao,
     @ApplicationContext private val context: Context,
 ) : ViewModel() {
 
@@ -108,6 +114,57 @@ class SearchViewModel @Inject constructor(
         }
         .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** Geotagged photos for the account — the Map entry card renders these as a live mini-map
+     *  preview. Reads the persisted location table directly so it reflects the GPS backfill as
+     *  rows land. */
+    val geotaggedLocations: StateFlow<List<PhotoLocationEntity>> = accountManager.getPrimaryUserId()
+        .flatMapLatest { userId ->
+            if (userId == null) flowOf(emptyList())
+            else photoLocationDao.observeForUser(userId.id)
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** The geotagged fixes enriched with the [GalleryItem] each id resolves to in the merged library,
+     *  so the Map card's mini-pins have a thumbnail source (local uri or cloud thumbnail, both loaded
+     *  through the gallery's Coil path). An id with no library match yet yields a null item, leaving
+     *  that pin on the placeholder until the merge catches up. */
+    val geotaggedPins: StateFlow<List<MapPin>> = accountManager.getPrimaryUserId()
+        .flatMapLatest { userId ->
+            if (userId == null) flowOf(emptyList())
+            else combine(geotaggedLocations, getGalleryItems.invoke(userId)) { locs, library ->
+                val itemByKey = HashMap<String, GalleryItem>(library.size * 2)
+                for (item in library) {
+                    when (item) {
+                        is GalleryItem.LocalOnly -> itemByKey[item.local.uri] = item
+                        is GalleryItem.Synced -> {
+                            itemByKey[item.local.uri] = item
+                            itemByKey[item.cloud.linkId] = item
+                        }
+                        is GalleryItem.CloudOnly -> itemByKey[item.cloud.linkId] = item
+                    }
+                }
+                locs.map { MapPin(it.id, it.latitude, it.longitude, itemByKey[it.id]) }
+            }
+        }
+        .flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** Number of distinct cities the account's geotagged photos were taken in — the Map card's
+     *  subtitle. Each fix is reverse-geocoded to a "City, Country" label off the main thread (the
+     *  offline geocoder caches its dataset after the first lookup) and the distinct labels counted.
+     *  Recomputes whenever [geotaggedLocations] changes; emits 0 until the first pass completes. */
+    val distinctCityCount: StateFlow<Int> = geotaggedLocations
+        .mapLatest { locations ->
+            val labels = HashSet<String>()
+            for (loc in locations) {
+                OfflineGeocoder.reverseGeocode(context, loc.latitude, loc.longitude)
+                    ?.let { labels.add(it) }
+            }
+            labels.size
+        }
+        .flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
 
     /** The text field updates [_query] on every keystroke for instant echo, but the heavy
      *  per-item filter only needs to run once typing settles. Debouncing the query feed into
@@ -173,9 +230,14 @@ class SearchViewModel @Inject constructor(
             }
         }
         out = applyContentFilter(out, filter)
-        val tagId = category.tagId
-        if (category != GalleryFilter.All && tagId != null) {
-            out = out.filter { CategorizeItem.belongsTo(it, tagId) }
+        if (category != GalleryFilter.All) {
+            out = when (category) {
+                // Live Photos (tag 3) and Motion Photos (tag 4) are the same concept on iOS/Android
+                // and share one chip, so either tag matches both — mirror the gallery filter.
+                GalleryFilter.LivePhotos, GalleryFilter.MotionPhotos ->
+                    out.filter { CategorizeItem.belongsTo(it, 3) || CategorizeItem.belongsTo(it, 4) }
+                else -> category.tagId?.let { id -> out.filter { CategorizeItem.belongsTo(it, id) } } ?: out
+            }
         }
         return out
     }
@@ -241,6 +303,7 @@ class SearchViewModel @Inject constructor(
             1 to R.string.gallery_filter_screenshots,
             2 to R.string.filter_type_videos,
             3 to R.string.gallery_filter_live_photos,
+            4 to R.string.gallery_filter_motion_photos,
             5 to R.string.gallery_filter_selfies,
             6 to R.string.gallery_filter_portraits,
             7 to R.string.gallery_filter_bursts,

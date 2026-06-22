@@ -110,11 +110,12 @@ class MemoriesViewModel @Inject constructor(
     }
 
     /**
-     * Buckets every item by its meteorological season-year. December rolls into the NEXT year's
-     * Winter; Jan/Feb stay in the current year's Winter. The merged feed is already
-     * capture-time-descending, so each bucket's first item is its newest = the cover. Buckets are
-     * ordered most-recent-first (by season-year, then Winter > Autumn > Summer > Spring within a
-     * year). One [Calendar] instance is reused across the whole library to avoid per-item churn.
+     * Buckets every item by its meteorological season-year. A winter is named by the December it
+     * starts in, so Jan/Feb roll BACK into the prior year's Winter (Dec 2022 + Jan/Feb 2023 = one
+     * "Winter 2022"). The merged feed is already capture-time-descending, so each bucket's first
+     * item is its newest = the cover. Buckets are ordered most-recent-first (by season-year, then
+     * Winter > Autumn > Summer > Spring within a year). One [Calendar] instance is reused across
+     * the whole library to avoid per-item churn.
      */
     private fun buckets(all: List<GalleryItem>): List<SeasonBucket> {
         if (all.isEmpty()) return emptyList()
@@ -122,6 +123,7 @@ class MemoriesViewModel @Inject constructor(
         // Preserve the input (capture-time-descending) order inside each bucket.
         val grouped = LinkedHashMap<SeasonKey, MutableList<GalleryItem>>()
         for (item in all) {
+            if (item.captureTimeMs <= 0L) continue // skip unknown/sentinel capture times (no "Winter 1971" card)
             cal.timeInMillis = item.captureTimeMs
             val month = cal.get(Calendar.MONTH) + 1
             val year = cal.get(Calendar.YEAR)
@@ -132,7 +134,9 @@ class MemoriesViewModel @Inject constructor(
                 6, 7, 8 -> Season.SUMMER
                 else -> Season.AUTUMN
             }
-            val seasonYear = if (month == 12) year + 1 else year
+            // Name the winter by the December it starts in: Jan/Feb roll back a year, every other
+            // month keeps its own (Dec 2022 + Jan/Feb 2023 → "Winter 2022", the oldest expected card).
+            val seasonYear = if (month == 1 || month == 2) year - 1 else year
             grouped.getOrPut(SeasonKey(seasonYear, season)) { ArrayList() }.add(item)
         }
         return grouped.entries

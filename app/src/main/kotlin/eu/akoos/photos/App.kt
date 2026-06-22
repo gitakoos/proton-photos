@@ -106,6 +106,16 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
                     .build()
             )
         }
+        // osmdroid requires a unique user-agent for the OSM tile-server fair-use policy; the
+        // default "osmdroid" string is rate-limited. Set once here before any MapView mounts.
+        org.osmdroid.config.Configuration.getInstance().apply {
+            userAgentValue = BuildConfig.APPLICATION_ID
+            // Cap the on-disk tile cache (default ~600MB) and keep cached tiles valid for 30 days so
+            // pre-cached photo regions stay usable offline rather than expiring after the default day.
+            tileFileSystemCacheMaxBytes = 200L * 1024 * 1024
+            tileFileSystemCacheTrimBytes = 180L * 1024 * 1024
+            expirationOverrideDuration = 1000L * 60 * 60 * 24 * 30
+        }
         // Apply theme/locale to AppCompatDelegate so externally-launched ProtonCore login/payment
         // Activities (XML-based, outside our Compose tree) honour them too.
         applyStoredThemeMode()
@@ -291,7 +301,7 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
                         if (!enabled) return@launch
                         runCatching {
                             listOf(
-                                "fullres", "fullres-session", "thumbnails", "coil_cache",
+                                "fullres", "thumbnails", "coil_cache",
                             ).forEach { sub ->
                                 java.io.File(cacheDir, sub).deleteRecursively()
                             }

@@ -115,12 +115,14 @@ import eu.akoos.photos.data.db.dao.CloudAlbumDao
 import eu.akoos.photos.data.db.dao.DayMetaDao
 import eu.akoos.photos.data.db.dao.LocalTagDao
 import eu.akoos.photos.data.db.dao.PhotoListingDao
+import eu.akoos.photos.data.db.dao.PhotoLocationDao
 import eu.akoos.photos.data.db.dao.SyncStateDao
 import eu.akoos.photos.data.db.entity.AlbumPhotoMembershipEntity
 import eu.akoos.photos.data.db.entity.CloudAlbumEntity
 import eu.akoos.photos.data.db.entity.DayMetaEntity
 import eu.akoos.photos.data.db.entity.LocalTagEntity
 import eu.akoos.photos.data.db.entity.PhotoListingEntity
+import eu.akoos.photos.data.db.entity.PhotoLocationEntity
 import eu.akoos.photos.data.db.entity.SyncStateEntity
 
 @TypeConverters(
@@ -143,6 +145,7 @@ import eu.akoos.photos.data.db.entity.SyncStateEntity
         CloudAlbumEntity::class,
         AlbumPhotoMembershipEntity::class,
         LocalTagEntity::class,
+        PhotoLocationEntity::class,
         // Account
         AccountEntity::class,
         AccountMetadataEntity::class,
@@ -182,7 +185,7 @@ import eu.akoos.photos.data.db.entity.SyncStateEntity
         // Telemetry
         TelemetryEventEntity::class,
     ],
-    version = 11,
+    version = 13,
     exportSchema = true,
 )
 abstract class AppDatabase : BaseDatabase(),
@@ -208,6 +211,7 @@ abstract class AppDatabase : BaseDatabase(),
     abstract fun cloudAlbumDao(): CloudAlbumDao
     abstract fun albumPhotoMembershipDao(): AlbumPhotoMembershipDao
     abstract fun localTagDao(): LocalTagDao
+    abstract fun photoLocationDao(): PhotoLocationDao
 
     abstract override fun accountDao(): AccountDao
     abstract override fun sessionDao(): SessionDao

@@ -528,6 +528,26 @@ internal fun AddToAlbumSheet(
                         modifier = Modifier.padding(horizontal = 20.dp))
                 }
             }
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 8.dp)
+                    .background(
+                        CardBg,
+                        androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
+                    )
+                    .border(
+                        0.5.dp,
+                        CardBorder,
+                        androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
+                    )
+                    .clickable(onClick = onDismiss)
+                    .padding(vertical = 14.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(stringResource(R.string.cancel), color = FgPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+            }
         }
     }
 }

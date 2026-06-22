@@ -41,15 +41,12 @@ interface DayMetaDao {
     @Query("SELECT * FROM day_meta WHERE userId = :userId AND date = :date LIMIT 1")
     suspend fun getByDate(userId: String, date: String): DayMetaEntity?
 
-    /** Days whose location or description text matches [needle] (caller supplies the `%` wildcards). */
+    /** Days whose description text matches [needle] (caller supplies the `%` wildcards). */
     @Query(
         """
         SELECT * FROM day_meta
         WHERE userId = :userId
-          AND (
-            LOWER(IFNULL(locationText, '')) LIKE :needle
-            OR LOWER(IFNULL(description, '')) LIKE :needle
-          )
+          AND LOWER(IFNULL(description, '')) LIKE :needle
         """
     )
     suspend fun searchByText(userId: String, needle: String): List<DayMetaEntity>

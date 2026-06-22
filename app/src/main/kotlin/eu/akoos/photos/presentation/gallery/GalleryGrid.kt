@@ -31,7 +31,6 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -346,15 +345,11 @@ internal fun PhotoGrid(
     // Long-press a photo then drag to select/deselect a contiguous range; a plain single-finger drag
     // still scrolls and the two-finger pinch above is untouched. The gesture lives in the shared
     // [rememberDragMultiSelectModifier].
-    val density = LocalDensity.current
     val dragSelectModifier = rememberDragMultiSelectModifier(
         gridState = gridState,
         items = items,
         indexByKey = indexByKey,
         selected = selectedItems,
-        // Matches the grid's own contentPadding(top) below, so the hit-test maps the finger onto the
-        // right cell regardless of scroll position or device.
-        contentPaddingTopPx = with(density) { (topContentPadding + 8.dp).toPx() },
         onSelectionChange = onSelectionChange,
     )
 

@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.presentation.shared
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -36,6 +37,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -43,6 +45,7 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.MailOutline
 import androidx.compose.material.icons.filled.People
@@ -67,6 +70,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -82,6 +86,7 @@ import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.entity.PendingInvitation
 import eu.akoos.photos.domain.entity.SharedPhoto
 import eu.akoos.photos.presentation.common.CloudPhotoCell
+import eu.akoos.photos.presentation.common.ConfirmDialog
 import eu.akoos.photos.presentation.common.EmptyState
 import eu.akoos.photos.presentation.gallery.SharedFilter
 import eu.akoos.photos.presentation.viewer.ManagePublicLinkSheet
@@ -144,6 +149,7 @@ fun SharedScreen(
     val sheetScope = rememberCoroutineScope()
     val manageSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var showManageSheet by remember { mutableStateOf(false) }
+    var showRevokeConfirm by remember { mutableStateOf(false) }
     val linkCopiedMsg = stringResource(R.string.share_link_copied)
     val passwordSetMsg = stringResource(R.string.share_password_set)
     val passwordRemovedMsg = stringResource(R.string.share_password_removed)
@@ -250,10 +256,17 @@ fun SharedScreen(
                             ) { photo ->
                                 SharedPhotoCell(
                                     photo = photo,
+                                    isSelectionMode = state.isSelectionMode,
+                                    isSelected = photo.linkId in state.selectedPhotoIds,
                                     onClick = {
-                                        viewModel.openLinkManager(photo.linkId)
-                                        showManageSheet = true
+                                        if (state.isSelectionMode) {
+                                            viewModel.toggleSelection(photo.linkId)
+                                        } else {
+                                            viewModel.openLinkManager(photo.linkId)
+                                            showManageSheet = true
+                                        }
                                     },
+                                    onLongClick = { viewModel.toggleSelection(photo.linkId) },
                                     onRequestThumbnail = { id -> viewModel.requestThumbnail(id) },
                                     onCancelThumbnail = { id -> viewModel.cancelThumbnail(id) },
                                 )
@@ -262,6 +275,38 @@ fun SharedScreen(
                     }
             }
         }
+
+        // Selection top bar — overlays the grid when one or more shared-by-me photos are
+        // selected. Close cancels the selection; the trailing action confirms a bulk revoke.
+        if (state.isSelectionMode) {
+            SharedSelectionBar(
+                selectedCount = state.selectedCount,
+                isRevoking = state.isRevoking,
+                onCancel = { viewModel.clearSelection() },
+                onStopSharing = { showRevokeConfirm = true },
+                modifier = Modifier.align(Alignment.TopCenter),
+            )
+        }
+    }
+
+    BackHandler(enabled = state.isSelectionMode) { viewModel.clearSelection() }
+
+    if (showRevokeConfirm) {
+        ConfirmDialog(
+            title = pluralStringResource(
+                R.plurals.shared_stop_sharing_confirm_title,
+                state.selectedCount, state.selectedCount,
+            ),
+            message = stringResource(R.string.shared_stop_sharing_confirm_body),
+            confirmLabel = stringResource(R.string.share_stop_sharing),
+            dismissLabel = stringResource(R.string.share_invite_cancel),
+            destructive = true,
+            onConfirm = {
+                showRevokeConfirm = false
+                viewModel.revokeSelected()
+            },
+            onDismiss = { showRevokeConfirm = false },
+        )
     }
 
     if (showManageSheet) {
@@ -303,6 +348,72 @@ fun SharedScreen(
 // ── Shared-photo grid cell + section header ─────────────────────────────────────
 
 @Composable
+private fun SharedSelectionBar(
+    selectedCount: Int,
+    isRevoking: Boolean,
+    onCancel: () -> Unit,
+    onStopSharing: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .statusBarsPadding()
+            .padding(horizontal = 12.dp)
+            .padding(top = 8.dp, bottom = 10.dp)
+            .clip(RoundedCornerShape(28.dp))
+            .background(Bg0.copy(alpha = 0.95f))
+            .border(0.5.dp, PillBorder, RoundedCornerShape(28.dp))
+            .padding(horizontal = 8.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        eu.akoos.photos.presentation.common.IconBubble(
+            icon = Icons.AutoMirrored.Filled.ArrowBack,
+            contentDescription = stringResource(R.string.gallery_cancel_selection),
+            onClick = onCancel,
+            diameter = 40.dp,
+            iconSize = 20.dp,
+            tint = FgPrimary,
+        )
+        Text(
+            pluralStringResource(R.plurals.count_photos_plural, selectedCount, selectedCount),
+            color = FgPrimary,
+            fontSize = 16.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f, fill = false).padding(horizontal = 12.dp),
+        )
+        Box(
+            modifier = Modifier
+                .height(40.dp)
+                .clip(RoundedCornerShape(20.dp))
+                .background(PillBg)
+                .border(0.5.dp, PillBorder, RoundedCornerShape(20.dp))
+                .clickable(enabled = !isRevoking) { onStopSharing() }
+                .padding(horizontal = 16.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (isRevoking) {
+                androidx.compose.material3.CircularProgressIndicator(
+                    color = ErrorColor,
+                    strokeWidth = 2.dp,
+                    modifier = Modifier.size(16.dp),
+                )
+            } else {
+                Text(
+                    stringResource(R.string.share_stop_sharing),
+                    color = ErrorColor,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun SectionHeader(text: String, topPadding: Dp = 0.dp) {
     Text(
         text,
@@ -318,7 +429,10 @@ private fun SectionHeader(text: String, topPadding: Dp = 0.dp) {
 @Composable
 private fun SharedPhotoCell(
     photo: SharedPhoto,
+    isSelectionMode: Boolean,
+    isSelected: Boolean,
     onClick: () -> Unit,
+    onLongClick: () -> Unit,
     onRequestThumbnail: (String) -> Unit,
     onCancelThumbnail: (String) -> Unit,
 ) {
@@ -329,11 +443,11 @@ private fun SharedPhotoCell(
         cloudThumbnailUrl = photo.thumbnailUrl,
         cloudLinkId = photo.linkId,
         isVideo = photo.isVideo,
-        isSelectionMode = false,
-        isSelected = false,
+        isSelectionMode = isSelectionMode,
+        isSelected = isSelected,
         showCloudBadge = true,
         onClick = onClick,
-        onLongClick = onClick,
+        onLongClick = onLongClick,
         onRequestThumbnail = onRequestThumbnail,
         onCancelThumbnail = onCancelThumbnail,
     )

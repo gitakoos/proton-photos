@@ -199,6 +199,11 @@ class PhotoEntityBuilder @Inject constructor(
             ?: detail?.photo?.contentKeyPacket
             ?: detail?.link?.fileProperties?.contentKeyPacket
 
+        // Encrypted XAttr for the active revision — canonical for file links is FileProperties.ActiveRevision,
+        // with the legacy Link.ActiveRevision as fallback. Stored verbatim; decrypted off the read path.
+        val resolvedEncXAttr = link?.fileProperties?.activeRevision?.xAttr
+            ?: link?.activeRevision?.xAttr
+
         return PhotoListingEntity(
             linkId = stub.linkId,
             shareId = shareId,
@@ -218,6 +223,7 @@ class PhotoEntityBuilder @Inject constructor(
             encNodeKey = link?.nodeKey,
             encNodePassphrase = link?.nodePassphrase,
             parentLinkId = link?.parentLinkId,
+            encXAttr = resolvedEncXAttr,
         )
     }
 }

@@ -207,7 +207,7 @@ fun MemoryCategoryScreen(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .padding(bottom = 28.dp)
-                    .size(44.dp)
+                    .size(40.dp)
                     .clip(CircleShape)
                     .background(PillBg, CircleShape)
                     .border(0.5.dp, PillBorder, CircleShape)

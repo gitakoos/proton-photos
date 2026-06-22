@@ -172,6 +172,45 @@ import java.util.Locale
 internal val bubbleShape = CircleShape
 internal val infoPillShape = RoundedCornerShape(999.dp)
 
+/** Local-side URI of an item that carries one (LocalOnly / Synced), else null. Used to re-pair a
+ *  snapshot LocalOnly with the Synced twin it became once its upload landed. */
+private fun GalleryItem.localUriOrNull(): String? = when (this) {
+    is GalleryItem.LocalOnly -> local.uri
+    is GalleryItem.Synced    -> local.uri
+    is GalleryItem.CloudOnly -> null
+}
+
+/**
+ * Reconcile the static [snapshot] handed to the viewer against the [live] timeline so the open
+ * viewer reflects a photo finishing upload (LocalOnly → Synced) and any metadata refresh, without
+ * losing the user's place.
+ *
+ * Each snapshot item is re-resolved against [live] by its stable id, or — for a snapshot
+ * `LocalOnly` whose upload landed and turned it into a `Synced` (new stable id) — by a local-uri
+ * match. The resolved live version is swapped in; an item absent from [live] is kept as-is. The
+ * list shape and order are preserved (same size, same positions), so this is safe for every
+ * surface the viewer opens from: the caller already hands a filtered list (the gallery strips
+ * hidden / timeline-excluded items, albums hand their own membership), and reconciliation never
+ * injects an item that wasn't in that list. Returns [snapshot] unchanged until [live] first emits.
+ */
+internal fun reconcileViewerItems(
+    snapshot: List<GalleryItem>,
+    live: List<GalleryItem>,
+): List<GalleryItem> {
+    if (live.isEmpty() || snapshot.isEmpty()) return snapshot
+    val byStableId = live.associateBy { it.stableId }
+    val byLocalUri = live.asSequence()
+        .mapNotNull { item -> item.localUriOrNull()?.let { it to item } }
+        .toMap()
+
+    fun resolve(item: GalleryItem): GalleryItem =
+        byStableId[item.stableId]
+            ?: item.localUriOrNull()?.let { byLocalUri[it] }
+            ?: item
+
+    return snapshot.map(::resolve)
+}
+
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun PhotoViewerScreen(
@@ -199,8 +238,32 @@ fun PhotoViewerScreen(
 
     if (secure) SecureScreenEffect()
 
+    // Live reconciliation: the caller hands a static snapshot captured at click time, so a photo
+    // finishing upload (LocalOnly → Synced) or any metadata refresh would never reflect here. Swap
+    // each snapshot item for its live version in place (same order + size), keeping items not in
+    // the live merge as-is. See [reconcileViewerItems].
+    val liveItems by viewModel.liveItems.collectAsStateWithLifecycle()
+    val reconciled = remember(items, liveItems) { reconcileViewerItems(items, liveItems) }
+    // Render off the reconciled list; every per-page lookup below reads from `items` so alias it.
+    @Suppress("NAME_SHADOWING") val items = reconciled
+
     val clampedInitial = initialIndex.coerceIn(0, items.lastIndex)
     val pagerState = rememberPagerState(initialPage = clampedInitial) { items.size }
+    // Identity of the page the user is settled on, remembered so that — should a future live
+    // change ever alter the list length — we can re-find the photo by key and keep the user on it.
+    // With the in-place swap the index is stable, so the scroll-back below is normally inert; the
+    // pager `key` (further down) is what makes a LocalOnly → Synced swap rebind cleanly.
+    var anchorKey by remember { mutableStateOf(items.getOrNull(clampedInitial)?.stableId) }
+    LaunchedEffect(pagerState.settledPage) {
+        items.getOrNull(pagerState.settledPage)?.stableId?.let { anchorKey = it }
+    }
+    LaunchedEffect(items) {
+        val key = anchorKey ?: return@LaunchedEffect
+        val newIndex = items.indexOfFirst { it.stableId == key }
+        if (newIndex >= 0 && newIndex != pagerState.currentPage) {
+            pagerState.scrollToPage(newIndex)
+        }
+    }
     val state by viewModel.state.collectAsStateWithLifecycle()
     val isDownloading by viewModel.isDownloading.collectAsStateWithLifecycle()
     val downloadProgress by viewModel.downloadProgress.collectAsStateWithLifecycle()
@@ -209,6 +272,8 @@ fun PhotoViewerScreen(
     // while the user keeps browsing on the same metered link.
     var meteredHintDismissed by remember { mutableStateOf(false) }
     val metadata by viewModel.metadata.collectAsStateWithLifecycle()
+    val detailsPlace by viewModel.detailsPlace.collectAsStateWithLifecycle()
+    val cloudVideoMeta by viewModel.cloudVideoMeta.collectAsStateWithLifecycle()
     val cloudFullResSize by viewModel.cloudFullResSize.collectAsStateWithLifecycle()
     val isStrippingMetadata by viewModel.isStrippingMetadata.collectAsStateWithLifecycle()
     val photoTags by viewModel.currentPhotoTags.collectAsStateWithLifecycle()
@@ -395,6 +460,21 @@ fun PhotoViewerScreen(
     var videoStarted  by remember { mutableStateOf(false) }
     var currentPlayer by remember { mutableStateOf<ExoPlayer?>(null) }
     var isVideoPlaying by remember { mutableStateOf(false) }
+    // Flipped true the instant a back is initiated, BEFORE the pop animation runs, so the live
+    // PlayerView surface is torn out of the composition immediately and the already-drawn
+    // thumbnail/background fades instead of a lingering video frame. The route's popExitTransition
+    // would otherwise keep the surface alive through its 180ms fade.
+    var exiting by remember { mutableStateOf(false) }
+    // Pause the current player and drop the video surface a frame before the back navigation, so
+    // the fade animates over a still rather than a playing surface.
+    val startExit = {
+        currentPlayer?.let { runCatching { it.playWhenReady = false } }
+        exiting = true
+        onBack()
+    }
+    // Route the system/gesture back through the same teardown so a hardware back doesn't leave the
+    // playing surface to linger through the pop fade either.
+    androidx.activity.compose.BackHandler(enabled = !exiting) { startExit() }
     // Latches true the first time ExoPlayer reports it's actually playing on this page,
     // so the loading badge keeps showing through download + prepare + first-paint and
     // then disappears for good (ordinary pause/resume after that doesn't bring it back).
@@ -601,6 +681,12 @@ fun PhotoViewerScreen(
         HorizontalPager(
             state = pagerState,
             modifier = Modifier.fillMaxSize(),
+            // Key each page slot to its item's stable identity so a live reconcile rebinds per-page
+            // state (video flags, painted-thumb gate) to the photo rather than the position. When a
+            // LocalOnly is swapped for the Synced it became, its stable id changes (uri → linkId)
+            // and that one page rebuilds cleanly against the now-backed-up item while the user stays
+            // on it.
+            key = { page -> items.getOrNull(page)?.stableId ?: page },
             // Page-swipe is suppressed while zoomed (scale > 1f) and while panorama mode
             // is active, so the panorama's own horizontal drag doesn't fight the pager.
             userScrollEnabled = scale == 1f && !isPanoramaMode,
@@ -665,9 +751,19 @@ fun PhotoViewerScreen(
                     },
                 contentAlignment = Alignment.Center,
             ) {
+                // Videos: Coil's VideoFrameDecoder grabs a frame via MediaMetadataRetriever, which
+                // ignores the MP4 rotation atom → a sideways full-screen poster flash before the
+                // player paints. Use the correctly-oriented cloud thumbnail when there is one
+                // (Synced/CloudOnly); for a not-yet-uploaded local video draw no poster at all (the
+                // themed background covers the brief pre-first-frame gap) rather than flash the
+                // rotation-broken frame. Photos keep their local-URI poster (Coil honours EXIF).
                 val thumbModel: Any? = when (item) {
-                    is GalleryItem.LocalOnly -> Uri.parse(item.local.uri)
-                    is GalleryItem.Synced    -> Uri.parse(item.local.uri)
+                    is GalleryItem.LocalOnly ->
+                        if (item.local.mimeType.startsWith("video/")) null
+                        else Uri.parse(item.local.uri)
+                    is GalleryItem.Synced ->
+                        if (item.local.mimeType.startsWith("video/")) item.cloud.thumbnailUrl
+                        else Uri.parse(item.local.uri)
                     is GalleryItem.CloudOnly -> item.cloud.thumbnailUrl
                     null -> null
                 }
@@ -685,15 +781,14 @@ fun PhotoViewerScreen(
                     is GalleryItem.CloudOnly -> item.cloud.mimeType.startsWith("video/")
                     null -> false
                 }
-                // Suppress the thumbnail not just on play-tap but as soon as the full-res
-                // video URI lands — once VideoPlayer is in composition the surface paints
-                // the first frame on prepare() and the thumbnail just sits on top, producing
-                // a "downloaded but won't start" appearance where the video looks broken
-                // because the poster never updates after download.
-                val showingVideoState = isSettled &&
-                    state is PhotoViewerViewModel.ViewerState.ShowVideo
-                val suppressThumbForVideo = isSettled && isVideoItemThumb &&
-                    (videoStarted || showingVideoState)
+                // Keep the thumbnail drawn UNDER the player until the first decoded frame
+                // actually paints (videoEverPlayed latches on the first reported isPlaying).
+                // The default SurfaceView is opaque black and punches a hole through the Compose
+                // layer, so on a light theme — and on any cold open — there's a black flash
+                // through download → prepare → first-paint; the poster covers it. Suppressing the
+                // moment ShowVideo lands (the old behaviour) re-opened that gap, so gate on the
+                // painted-a-frame signal instead.
+                val suppressThumbForVideo = isSettled && isVideoItemThumb && videoEverPlayed
                 // Identity of the item currently bound to this page (same expression the
                 // settled-block uses below for stateMatchesPage). Lifted here so the thumb
                 // gate can check whether the full-res image is actually rendering for *this*
@@ -799,7 +894,11 @@ fun PhotoViewerScreen(
                                 }
                             }
                         is PhotoViewerViewModel.ViewerState.ShowVideo -> {
-                            if (stateMatchesPage) {
+                            // Drop the player the frame a back starts (`exiting`) so the live
+                            // surface swaps out for the already-drawn thumbnail/background before
+                            // the route's pop fade runs — otherwise the playing surface lingers
+                            // through the 180ms animation.
+                            if (stateMatchesPage && !exiting) {
                                 // Render the player as soon as a full-res video URI is
                                 // available — gating on `videoStarted` meant the ExoPlayer
                                 // wasn't built until the user tapped the pill, but because
@@ -974,7 +1073,7 @@ fun PhotoViewerScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                ViewerBubble(onClick = onBack) {
+                ViewerBubble(onClick = startExit) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.onboarding_back),
                         tint = FgPrimary, modifier = Modifier.size(20.dp))
                 }
@@ -1441,6 +1540,9 @@ fun PhotoViewerScreen(
     // ── Metadata sheet ─────────────────────────────────────────────────────────
     if (showMetadata) {
         val item = items.getOrNull(pagerState.settledPage)
+        LaunchedEffect(item) {
+            if (item != null) viewModel.loadDetailsPlace(item)
+        }
         ModalBottomSheet(
             onDismissRequest = { showMetadata = false },
             sheetState = metadataSheetState,
@@ -1450,6 +1552,8 @@ fun PhotoViewerScreen(
             PhotoMetadataSheet(
                 item = item,
                 exif = metadata,
+                place = detailsPlace,
+                cloudVideoMeta = cloudVideoMeta,
                 isStripping = isStrippingMetadata,
                 cloudSizeFallback = cloudFullResSize,
                 photoTags = photoTags,

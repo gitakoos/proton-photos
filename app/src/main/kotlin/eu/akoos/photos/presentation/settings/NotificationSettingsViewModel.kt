@@ -59,8 +59,9 @@ class NotificationSettingsViewModel @Inject constructor(
 ) : ViewModel() {
 
     data class UiState(
-        /** Persistent "Photo backup" foreground-service notification. */
-        val backupStatus: Boolean = true,
+        /** Persistent keep-alive "Photo backup" foreground-service notification. Opt-in, off by
+         *  default — backups run on the content trigger + periodic worker without it. */
+        val backupStatus: Boolean = false,
         /** Album download progress + completion notifications. */
         val albumDownload: Boolean = true,
         /** "Photos ready to remove" reminder after a delete-after-backup run. */
@@ -74,7 +75,7 @@ class NotificationSettingsViewModel @Inject constructor(
         viewModelScope.launch {
             val prefs = context.settingsDataStore.data.first()
             _uiState.value = UiState(
-                backupStatus = prefs[SettingsKeys.NOTIFY_BACKUP_STATUS] != false,
+                backupStatus = prefs[SettingsKeys.NOTIFY_BACKUP_STATUS] == true,
                 albumDownload = prefs[SettingsKeys.NOTIFY_ALBUM_DOWNLOAD] != false,
                 deleteReminder = prefs[SettingsKeys.NOTIFY_DELETE_REMINDER] != false,
             )

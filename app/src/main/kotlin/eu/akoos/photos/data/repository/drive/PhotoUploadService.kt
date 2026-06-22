@@ -139,6 +139,10 @@ private const val THUMBNAIL_DEFAULT_MAX_PX = 512
 private const val THUMBNAIL_PHOTO_MAX_PX = 1920
 private const val THUMBNAIL_DEFAULT_INDEX = -5
 private const val THUMBNAIL_PHOTO_INDEX = -4
+// Thumbnail size budget, matching the official client: the DEFAULT (grid) thumbnail caps at 64 KiB,
+// the PHOTO (viewer) thumbnail at 1 MiB. We step JPEG quality down until the encoded bytes fit.
+private const val THUMBNAIL_DEFAULT_MAX_BYTES = 64 * 1024
+private const val THUMBNAIL_PHOTO_MAX_BYTES = 1024 * 1024
 
 /**
  * Per-call retry for upload-side metadata endpoints. 5 attempts × 1500 ms base / 15 s cap
@@ -251,11 +255,13 @@ class PhotoUploadService @Inject constructor(
             val cdnUploadSlots = Semaphore(2)
             val encryptSlots = Semaphore(ENCRYPT_PARALLELISM)
 
-            // Stable tempDir name keyed on source URI + size, so a retry-eligible failure leaves
-            // the encrypted blocks here for the next uploadFile() call to resume from.
+            // Stable tempDir name keyed on the ORIGINAL media URI + size, so a retry-eligible
+            // failure leaves the encrypted blocks here for the next uploadFile() call to resume
+            // from. Keyed on item.uri (the source content:// URI), NOT uploadUri — with
+            // strip-on-upload the latter is a fresh temp file each run, which would defeat resume.
             val tempDir = File(
                 context.cacheDir,
-                UploadResumeManifest.stableTempDirName(uploadUri, item.sizeBytes),
+                UploadResumeManifest.stableTempDirName(item.uri, item.sizeBytes),
             ).also { it.mkdirs() }
 
             // Proton photo category tags (Motion Photo, Panorama, Video, Raw, Screenshot) sent
@@ -264,6 +270,10 @@ class PhotoUploadService @Inject constructor(
 
             // The finally block inspects the failure category (wipe vs preserve-for-resume), so
             // catch, categorise, then rethrow.
+            // Tracks the created (uncommitted) node so a non-retryable failure can best-effort delete
+            // it instead of leaving an orphan link on Drive.
+            var orphanFileId: String? = null
+            var orphanShareId: String? = null
             try {
             val volumeId = shareService.getVolumeId(userId)
             val shareId = shareService.getShareId(userId, volumeId)
@@ -437,6 +447,11 @@ class PhotoUploadService @Inject constructor(
                 }.verificationCode
                 verificationCodeBytes = Base64.decode(verificationCodeBase64, Base64.DEFAULT)
             }
+
+            // The node now exists on Drive (created this run, or carried over from a resume manifest);
+            // record it so a non-retryable failure below can best-effort delete the orphan.
+            orphanFileId = fileId
+            orphanShareId = shareId
 
             data class BlockSpill(
                 val file: File,
@@ -630,9 +645,12 @@ class PhotoUploadService @Inject constructor(
             // the same session key. The PHOTO thumbnail is image-only and skipped when the source is
             // already at or below 1920px (mirrors Drive Android's isBiggerThenPhotoThumbnail gate),
             // so a small image doesn't ship a redundant second copy.
-            val supportedThumbnailMime = item.mimeType in setOf(
-                "image/jpeg", "image/jpg", "image/png", "image/heic", "image/heif", "image/webp",
-            ) || item.mimeType.startsWith("video/")
+            // Any image (incl. RAW/DNG — decodeFileDescriptor reaches their embedded preview) or
+            // video. A format the decoder can't handle just yields no thumbnail (the generator is
+            // null-safe), so being inclusive here costs nothing and matches the official client's
+            // "any Image category" gate — without it a RAW upload ships with no preview at all.
+            val supportedThumbnailMime = item.mimeType.startsWith("image/") ||
+                item.mimeType.startsWith("video/")
             val isImagePhoto = item.mimeType.startsWith("image/")
             val wantPhotoThumbnail = isImagePhoto &&
                 (item.width > THUMBNAIL_PHOTO_MAX_PX || item.height > THUMBNAIL_PHOTO_MAX_PX ||
@@ -659,7 +677,7 @@ class PhotoUploadService @Inject constructor(
                     }
                 // PHOTO (1920px), image-only.
                 if (wantPhotoThumbnail) {
-                    runCatching { generateImageThumbnailBytes(uploadUri, THUMBNAIL_PHOTO_MAX_PX) }
+                    runCatching { generateImageThumbnailBytes(uploadUri, item.mimeType, THUMBNAIL_PHOTO_MAX_PX, THUMBNAIL_PHOTO_MAX_BYTES) }
                         .getOrNull()?.let { plain ->
                             runCatching { cryptoHelper.encryptBlock(plain, sessionKey) }.getOrNull()?.let { enc ->
                                 runCatching { cryptoHelper.sha256(enc) }.getOrNull()?.let { h ->
@@ -966,6 +984,17 @@ class PhotoUploadService @Inject constructor(
                     Log.d(TAG, "uploadFile: non-retryable failure (${e.javaClass.simpleName}: ${e.message}) — wiping tempDir ${tempDir.name}")
                     runCatching { tempDir.deleteRecursively() }
                         .onFailure { Log.w(TAG, "uploadFile: failure cleanup of ${tempDir.absolutePath} failed: ${it.message}") }
+                    // Best-effort: drop the uncommitted node so a non-retryable failure doesn't leave
+                    // an orphan link on Drive (repeated failures would otherwise accumulate them).
+                    val orphan = orphanFileId
+                    val orphanShare = orphanShareId
+                    if (orphan != null && orphanShare != null) {
+                        runCatching {
+                            apiProvider.get<DriveApiService>(userId).invoke {
+                                deleteLinks(orphanShare, eu.akoos.photos.data.api.dto.DeleteLinksRequest(listOf(orphan)))
+                            }.valueOrThrow
+                        }.onFailure { Log.w(TAG, "uploadFile: orphan node cleanup (deleteLinks $orphan) failed: ${it.message}") }
+                    }
                 }
                 throw e
             }
@@ -978,14 +1007,29 @@ class PhotoUploadService @Inject constructor(
      * the stream, or when decoding fails.
      */
     private fun generateThumbnailBytes(uri: String, mimeType: String, maxPx: Int = 512): ByteArray? {
+        val maxBytes = if (maxPx <= THUMBNAIL_DEFAULT_MAX_PX) THUMBNAIL_DEFAULT_MAX_BYTES else THUMBNAIL_PHOTO_MAX_BYTES
         return when {
-            mimeType.startsWith("video/") -> generateVideoThumbnailBytes(uri, maxPx)
-            mimeType.startsWith("image/") -> generateImageThumbnailBytes(uri, maxPx)
+            mimeType.startsWith("video/") -> generateVideoThumbnailBytes(uri, maxPx, maxBytes)
+            mimeType.startsWith("image/") -> generateImageThumbnailBytes(uri, mimeType, maxPx, maxBytes)
             else -> null
         }
     }
 
-    private fun generateVideoThumbnailBytes(uri: String, maxPx: Int): ByteArray? = runCatching {
+    /** Compresses [bitmap] to JPEG, stepping quality down a ladder until the result fits [maxBytes]
+     *  (or the floor quality is hit). Mirrors the official client's thumbnail size budget instead of
+     *  a fixed quality, so grid thumbnails don't bloat the encrypted block and its later download. */
+    private fun compressJpegToBudget(bitmap: Bitmap, maxBytes: Int): ByteArray {
+        var bytes = ByteArray(0)
+        for (q in intArrayOf(90, 80, 70, 60, 50, 40, 30, 20, 10)) {
+            bytes = ByteArrayOutputStream().use { out ->
+                bitmap.compress(Bitmap.CompressFormat.JPEG, q, out); out.toByteArray()
+            }
+            if (bytes.size <= maxBytes) break
+        }
+        return bytes
+    }
+
+    private fun generateVideoThumbnailBytes(uri: String, maxPx: Int, maxBytes: Int): ByteArray? = runCatching {
         val retriever = MediaMetadataRetriever()
         try {
             val androidUri = Uri.parse(uri)
@@ -994,16 +1038,24 @@ class PhotoUploadService @Inject constructor(
             } else {
                 retriever.setDataSource(context, androidUri)
             }
-            // Grab the first decodable frame near t=0. Some devices return null at exactly 0.
+            // Grab the first decodable frame. Try a sync frame near 1s, then frame 0, then ANY frame
+            // (OPTION_CLOSEST, not just a keyframe) at 0 and near the middle — a clip with no early
+            // keyframe, an unusual codec, or a very short duration still yields a thumbnail instead
+            // of silently producing none.
+            val durationMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
             val rawFrame = retriever.getFrameAtTime(1_000_000 /* 1s */, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
                 ?: retriever.getFrameAtTime(0)
-                ?: return@runCatching null
-            // The decoded frame is in storage orientation; rotate it by the container's
-            // rotation tag so a portrait clip yields an upright thumbnail (mirrors the photo
-            // path's EXIF rebake — the JPEG below carries no rotation metadata of its own).
-            val rotationDeg = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)
-                ?.toIntOrNull() ?: 0
-            val frame = applyRotationToBitmap(rawFrame, rotationDeg)
+                ?: retriever.getFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST)
+                ?: (if (durationMs > 0) retriever.getFrameAtTime(durationMs * 500L, MediaMetadataRetriever.OPTION_CLOSEST) else null)
+            if (rawFrame == null) {
+                Log.w(TAG, "generateVideoThumbnailBytes: no decodable frame for $uri (durationMs=$durationMs)")
+                return@runCatching null
+            }
+            // Upload the RAW frame in storage orientation — do NOT rotate it. Drive web rotates the
+            // thumbnail by the container's rotation tag at display time (the same way it rotates the
+            // video itself), so pre-rotating here double-rotates it and shows it sideways on the web.
+            // Matches the official client (ThumbnailUtils.createVideoThumbnail keeps the raw frame).
+            val frame = rawFrame
             val scaled = if (frame.width > maxPx || frame.height > maxPx) {
                 val scale = maxPx.toFloat() / maxOf(frame.width, frame.height)
                 val sw = (frame.width * scale).toInt().coerceAtLeast(1)
@@ -1012,11 +1064,7 @@ class PhotoUploadService @Inject constructor(
                     if (it !== frame) frame.recycle()
                 }
             } else frame
-            ByteArrayOutputStream().use { out ->
-                scaled.compress(Bitmap.CompressFormat.JPEG, 80, out)
-                scaled.recycle()
-                out.toByteArray()
-            }
+            compressJpegToBudget(scaled, maxBytes).also { scaled.recycle() }
         } finally {
             runCatching { retriever.release() }
         }
@@ -1025,55 +1073,56 @@ class PhotoUploadService @Inject constructor(
         null
     }
 
-    private fun generateImageThumbnailBytes(uri: String, maxPx: Int): ByteArray? {
+    private fun generateImageThumbnailBytes(uri: String, mimeType: String, maxPx: Int, maxBytes: Int): ByteArray? {
         return runCatching {
             val androidUri = Uri.parse(uri)
-            val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            context.contentResolver.openInputStream(androidUri)?.use { BitmapFactory.decodeStream(it, null, opts) }
-            val w = opts.outWidth.coerceAtLeast(1)
-            val h = opts.outHeight.coerceAtLeast(1)
-            var sample = 1
-            var tw = w; var th = h
-            while (tw / 2 >= maxPx || th / 2 >= maxPx) { sample *= 2; tw = w / sample; th = h / sample }
+            // Decode through a SEEKABLE file descriptor, not an InputStream. RAW/DNG decoding needs
+            // random access to reach the embedded preview, so decodeStream returns null for them while
+            // decodeFileDescriptor succeeds — this is what lets a RAW image get a thumbnail at all (the
+            // official client decodes the same way). The fd path is a strict superset for JPEG/PNG/HEIC.
+            context.contentResolver.openFileDescriptor(androidUri, "r")?.use { pfd ->
+                val fd = pfd.fileDescriptor
+                val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                BitmapFactory.decodeFileDescriptor(fd, null, opts)
+                if (opts.outMimeType == null) return null
+                val w = opts.outWidth.coerceAtLeast(1)
+                val h = opts.outHeight.coerceAtLeast(1)
+                var sample = 1
+                var tw = w; var th = h
+                while (tw / 2 >= maxPx || th / 2 >= maxPx) { sample *= 2; tw = w / sample; th = h / sample }
 
-            val decodeOpts = BitmapFactory.Options().apply { inSampleSize = sample }
-            val sampled = context.contentResolver.openInputStream(androidUri)?.use {
-                BitmapFactory.decodeStream(it, null, decodeOpts)
-            } ?: return null
+                val decodeOpts = BitmapFactory.Options().apply { inSampleSize = sample }
+                val sampled = BitmapFactory.decodeFileDescriptor(fd, null, decodeOpts) ?: return null
 
-            val scaledBitmap = if (sampled.width > maxPx || sampled.height > maxPx) {
-                val scale = maxPx.toFloat() / maxOf(sampled.width, sampled.height)
-                val scaled = Bitmap.createScaledBitmap(
-                    sampled,
-                    (sampled.width * scale).toInt().coerceAtLeast(1),
-                    (sampled.height * scale).toInt().coerceAtLeast(1),
-                    true,
-                )
-                if (scaled !== sampled) sampled.recycle()
-                scaled
-            } else sampled
-
-            // EXIF orientation rebake. BitmapFactory.decodeStream returns RAW byte pixels
-            // (pre-rotation). The compressed thumbnail JPEG below carries no EXIF tag so
-            // viewers can't recover the orientation later — the saved blob would render
-            // as landscape on Drive Web / Coil / any consumer for a portrait phone photo
-            // whose source had EXIF 90°. Apply the rotation directly to the pixels so
-            // the saved bytes are already in display orientation.
-            val orientation = runCatching {
-                context.contentResolver.openInputStream(androidUri)?.use {
-                    androidx.exifinterface.media.ExifInterface(it).getAttributeInt(
-                        androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION,
-                        androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL,
+                val scaledBitmap = if (sampled.width > maxPx || sampled.height > maxPx) {
+                    val scale = maxPx.toFloat() / maxOf(sampled.width, sampled.height)
+                    val scaled = Bitmap.createScaledBitmap(
+                        sampled,
+                        (sampled.width * scale).toInt().coerceAtLeast(1),
+                        (sampled.height * scale).toInt().coerceAtLeast(1),
+                        true,
                     )
-                } ?: androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL
-            }.getOrDefault(androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL)
+                    if (scaled !== sampled) sampled.recycle()
+                    scaled
+                } else sampled
 
-            val bitmap = applyExifRotationToBitmap(scaledBitmap, orientation)
+                // EXIF orientation rebake — BitmapFactory.decodeFileDescriptor returns raw sensor
+                // pixels and never auto-rotates, so bake the orientation into EVERY image (incl. RAW,
+                // whose embedded preview is also in sensor orientation). The saved thumbnail JPEG
+                // carries no EXIF tag, so without this a portrait phone photo with EXIF 90° renders
+                // sideways on Drive Web (which shows the thumbnail pixels as-is). ExifInterface reads
+                // the orientation tag for JPEG / HEIC / RAW alike.
+                val orientation = runCatching {
+                    context.contentResolver.openInputStream(androidUri)?.use {
+                        androidx.exifinterface.media.ExifInterface(it).getAttributeInt(
+                            androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION,
+                            androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL,
+                        )
+                    } ?: androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL
+                }.getOrDefault(androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL)
 
-            ByteArrayOutputStream().use { out ->
-                bitmap.compress(Bitmap.CompressFormat.JPEG, 80, out)
-                bitmap.recycle()
-                out.toByteArray()
+                val bitmap = applyExifRotationToBitmap(scaledBitmap, orientation)
+                compressJpegToBudget(bitmap, maxBytes).also { bitmap.recycle() }
             }
         }.getOrElse { e ->
             Log.w(TAG, "generateThumbnailBytes: failed for $uri — ${e.message}")
@@ -1105,15 +1154,4 @@ class PhotoUploadService @Inject constructor(
         return rotated
     }
 
-    /** Rotates [bitmap] clockwise by [degrees] (0/90/180/270). Recycles the input when a new
-     *  bitmap is allocated. Used for video frames, whose orientation lives in the container
-     *  rotation tag rather than in EXIF. */
-    private fun applyRotationToBitmap(bitmap: Bitmap, degrees: Int): Bitmap {
-        val normalized = ((degrees % 360) + 360) % 360
-        if (normalized == 0) return bitmap
-        val matrix = android.graphics.Matrix().apply { postRotate(normalized.toFloat()) }
-        val rotated = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
-        if (rotated !== bitmap) bitmap.recycle()
-        return rotated
-    }
 }

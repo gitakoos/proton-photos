@@ -64,10 +64,9 @@ import javax.inject.Inject
  * share the underlying [DayMetaDao] so an edit in Day Detail is immediately visible
  * when the user returns to the Calendar.
  *
- * It also drives three transient UI affordances that don't persist past app restart:
- *  - [viewMode] toggle between the stacked-list and one-month-per-page pager,
- *  - [searchQuery] + [searchResults] for free-text day-meta search (location/description/
- *    date string),
+ * It also drives two transient UI affordances that don't persist past app restart:
+ *  - [searchQuery] + [searchResults] for free-text day-meta search (description +
+ *    date string), surfaced from the search panel alongside the month-jump grid,
  *  - last-known [primaryUserId] so the search query can hit the DAO directly off the UI
  *    thread without re-resolving the account on every keystroke.
  */
@@ -98,34 +97,41 @@ class CalendarViewModel @Inject constructor(
 
     private fun observe() {
         viewModelScope.launch {
-            accountManager.getPrimaryUserId()
-                .flatMapLatest { userId ->
-                    primaryUserId = userId?.id
-                    if (userId == null) {
-                        flowOf(Triple(emptyList<GalleryItem>(), emptyList<DayMetaEntity>(), emptySet<String>()))
-                    } else {
-                        combine(
-                            getGalleryItems.invoke(userId),
-                            dayMetaDao.observeAll(userId.id),
-                            hiddenUrisFlow,
-                        ) { items, metas, hidden -> Triple(items, metas, hidden) }
-                    }
-                }
-                .collect { (items, metas, hiddenUris) ->
-                    val visible = items.filter { item ->
-                        val uri = when (item) {
-                            is GalleryItem.LocalOnly -> item.local.uri
-                            is GalleryItem.Synced -> item.local.uri
-                            is GalleryItem.CloudOnly -> null
+            try {
+                accountManager.getPrimaryUserId()
+                    .flatMapLatest { userId ->
+                        primaryUserId = userId?.id
+                        if (userId == null) {
+                            flowOf(Triple(emptyList<GalleryItem>(), emptyList<DayMetaEntity>(), emptySet<String>()))
+                        } else {
+                            combine(
+                                getGalleryItems.invoke(userId),
+                                dayMetaDao.observeAll(userId.id),
+                                hiddenUrisFlow,
+                            ) { items, metas, hidden -> Triple(items, metas, hidden) }
                         }
-                        uri == null || uri !in hiddenUris
                     }
-                    val months = buildMonths(visible, metas)
-                    _uiState.update { it.copy(
-                        isLoading = false,
-                        months = months,
-                    ) }
-                }
+                    .collect { (items, metas, hiddenUris) ->
+                        val visible = items.filter { item ->
+                            val uri = when (item) {
+                                is GalleryItem.LocalOnly -> item.local.uri
+                                is GalleryItem.Synced -> item.local.uri
+                                is GalleryItem.CloudOnly -> null
+                            }
+                            uri == null || uri !in hiddenUris
+                        }
+                        val months = buildMonths(visible, metas)
+                        _uiState.update { it.copy(
+                            isLoading = false,
+                            months = months,
+                        ) }
+                    }
+            } catch (e: Throwable) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                // A transient throw in the merge must end the spinner rather than leave the grid
+                // shimmering forever; drop to the empty grid the screen renders for no months.
+                _uiState.update { it.copy(isLoading = false) }
+            }
         }
     }
 
@@ -157,25 +163,10 @@ class CalendarViewModel @Inject constructor(
         }
     }
 
-    fun setViewMode(mode: CalendarViewMode) {
-        _uiState.update { it.copy(viewMode = mode) }
-    }
-
-    fun toggleViewMode() {
-        _uiState.update {
-            val next = if (it.viewMode == CalendarViewMode.Stacked) {
-                CalendarViewMode.PerMonth
-            } else {
-                CalendarViewMode.Stacked
-            }
-            it.copy(viewMode = next)
-        }
-    }
-
     fun setSearchActive(active: Boolean) {
         _uiState.update {
             if (active) it.copy(isSearchActive = true)
-            // Closing the bar clears the query so the user lands back on the full month grid.
+            // Closing the panel clears the query so the user lands back on the full month grid.
             else it.copy(isSearchActive = false, searchQuery = "", searchResults = emptyList())
         }
     }
@@ -184,14 +175,8 @@ class CalendarViewModel @Inject constructor(
         _uiState.update { it.copy(searchQuery = query) }
     }
 
-    /** Jump-to-month picker visibility — toggled from the in-bar header chip. */
-    fun setJumpPickerVisible(visible: Boolean) {
-        _uiState.update { it.copy(isJumpPickerVisible = visible) }
-    }
-
     /**
      * Computes the flat list of [DayBucket]s matching [query] across:
-     *  - day-meta location text (case-insensitive contains),
      *  - day-meta description text (case-insensitive contains),
      *  - the day's ISO date (e.g. "2024-05" or "2024-05-03"),
      *  - the day's localized month + year string (e.g. "may 2024", "march 5").
@@ -207,7 +192,7 @@ class CalendarViewModel @Inject constructor(
         val terms = needle.split(Regex("\\s+")).filter { it.isNotBlank() }
         if (terms.isEmpty()) return emptyList()
 
-        // Pull all DayMeta rows for cross-checking the location/description against the
+        // Pull all DayMeta rows for cross-checking the description against the
         // user-authored fields stored in the DB. We bias the DAO call against the FIRST
         // term — Room narrows the row set cheaply by ISO LIKE, then we intersect the
         // remaining terms in-memory across the day-bucket-derived strings.
@@ -242,8 +227,6 @@ class CalendarViewModel @Inject constructor(
                     append(dayLabel)
                     append(' ')
                     append(month.year.toString())
-                    meta?.locationText?.let { append(' '); append(it.lowercase(Locale.getDefault())) }
-                    dayBucket.locationText?.let { append(' '); append(it.lowercase(Locale.getDefault())) }
                     meta?.description?.let { append(' '); append(it.lowercase(Locale.getDefault())) }
                 }
                 if (terms.all { haystack.contains(it) }) {
@@ -382,19 +365,10 @@ class CalendarViewModel @Inject constructor(
     }
 }
 
-/**
- * Calendar's two layout strategies. [Stacked] is the legacy LazyColumn of months;
- * [PerMonth] is a HorizontalPager where each page is one month full-width. State is
- * intentionally NOT persisted to DataStore — it resets per app launch by design.
- */
-enum class CalendarViewMode { Stacked, PerMonth }
-
 data class CalendarUiState(
     val isLoading: Boolean = true,
     val months: List<MonthBucket> = emptyList(),
-    /** Current view-mode toggle. Stacked by default — matches what users had before. */
-    val viewMode: CalendarViewMode = CalendarViewMode.Stacked,
-    /** Whether the in-bar search input is visible. */
+    /** Whether the search panel (text field + month-jump grid + results) is open. */
     val isSearchActive: Boolean = false,
     /** Live raw query — debounced before being matched against [months]. */
     val searchQuery: String = "",
@@ -402,8 +376,6 @@ data class CalendarUiState(
     val searchResults: List<DayBucket> = emptyList(),
     /** True while we're recomputing [searchResults] for a freshly changed query. */
     val isSearchLoading: Boolean = false,
-    /** Whether the jump-to-month picker dropdown is currently shown. */
-    val isJumpPickerVisible: Boolean = false,
 )
 
 data class MonthBucket(

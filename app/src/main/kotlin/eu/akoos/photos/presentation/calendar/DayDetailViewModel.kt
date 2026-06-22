@@ -54,7 +54,7 @@ import javax.inject.Inject
 
 /**
  * Backs DayDetailScreen — owns the live photos-of-day stream, the per-day metadata row
- * and the editing surface (location, description, cover photo).
+ * and the editing surface (description, cover photo).
  *
  * The [date] selector flips when the screen is opened for a different day; the inner
  * flows are flatMapLatest'd over it so the previous day's collection is cancelled and
@@ -133,15 +133,6 @@ class DayDetailViewModel @Inject constructor(
         if (_selectedDate.value == date) return
         _selectedDate.value = date
         _uiState.update { it.copy(isLoading = true, date = date) }
-    }
-
-    fun updateLocation(text: String) {
-        upsertWith { existing ->
-            (existing ?: blank()).copy(
-                locationText = text.ifBlank { null },
-                updatedAt = System.currentTimeMillis(),
-            )
-        }
     }
 
     fun updateDescription(text: String) {

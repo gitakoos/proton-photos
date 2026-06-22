@@ -214,6 +214,14 @@ object SettingsKeys {
     fun photoListingCompleteKey(userId: String, volumeId: String) =
         booleanPreferencesKey("photo_listing_complete_${userId}_$volumeId")
 
+    /** Sticky companion to [photoListingCompleteKey]. Set true the first time the full listing walk
+     *  finishes cleanly and NOT reset at the start of later walks (only cleared on sign-out), so the
+     *  upload path can tell "the whole cloud library has been listed at least once" from "a refresh
+     *  is mid-walk". The bulk upload waits on this after a reinstall so photos already on Drive —
+     *  whose listing rows haven't been re-fetched yet — aren't re-uploaded as duplicates. */
+    fun photoListingEverCompleteKey(userId: String, volumeId: String) =
+        booleanPreferencesKey("photo_listing_ever_complete_${userId}_$volumeId")
+
     /** Notification opt-outs. Absent = true (shown). Producers read these before posting; the
      *  Notifications settings screen toggles them. NOTIFY_BACKUP_STATUS also controls whether the
      *  persistent background-sync service runs at all (it cannot be foreground without a notification). */
@@ -227,6 +235,9 @@ object SettingsKeys {
     val STRIP_TIMESTAMP = booleanPreferencesKey("strip_timestamp")
     val STRIP_SOFTWARE_INFO = booleanPreferencesKey("strip_software_info")
     val STRIP_ON_UPLOAD = booleanPreferencesKey("strip_on_upload")
+    /** When true, "strip on upload" also wipes the on-device original (with MANAGE_MEDIA), so the
+     *  backed-up copy and the local file stay byte-identical and pair by content hash. */
+    val MIRROR_STRIP_TO_LOCAL = booleanPreferencesKey("mirror_strip_to_local")
     /** When true, the upload pipeline derives a new filename from the source's capture
      *  timestamp before sending bytes to Drive — e.g. `IMG_2841.jpg` → `2026-05-29_14-32-08.jpg`.
      *  Cloud-side `displayName` reflects the new name; the on-device file is untouched.

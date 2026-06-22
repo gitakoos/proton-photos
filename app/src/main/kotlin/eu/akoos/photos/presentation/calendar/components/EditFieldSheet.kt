@@ -24,11 +24,15 @@
 
 package eu.akoos.photos.presentation.calendar.components
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.ModalBottomSheet
@@ -43,7 +47,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -55,12 +61,12 @@ import eu.akoos.photos.presentation.theme.AppColors
 import kotlinx.coroutines.launch
 
 /**
- * Bottom sheet for editing a single text field (location or description) on Day Detail.
+ * Bottom sheet for editing a single text field (the day's description) on Day Detail.
  *
  * Lives alongside [MonthGrid]/[MonthPager] in the calendar `components` package so the
- * DayDetailScreen stays focused on layout. Mirrors the create-album bottom sheet recipe
- * from AlbumsScreen — same containerColor, scrim alpha, padding shape — so the surface
- * feels native to the app.
+ * DayDetailScreen stays focused on layout. Uses the app's shared sheet recipe — an edge-to-edge
+ * [AppColors.bg0] container with the default drag handle suppressed in favour of a slim custom
+ * handle — so the surface matches the location detail and other drawers.
  *
  * The caller owns the initial text (`initialValue`); we keep a local mirror so each
  * keystroke doesn't round-trip through Room. On save we publish the trimmed-or-blank
@@ -104,14 +110,25 @@ fun EditFieldSheet(
     ModalBottomSheet(
         sheetState = sheetState,
         onDismissRequest = onDismiss,
-        containerColor = colors.cardBg,
+        containerColor = colors.bg0,
         scrimColor = Color.Black.copy(alpha = 0.5f),
+        // Suppress the default grey drag-handle band; a slim handle sits over the edge-to-edge
+        // container instead, matching the location detail and the app's other drawers.
+        dragHandle = {
+            Box(
+                modifier = Modifier
+                    .padding(top = 10.dp, bottom = 2.dp)
+                    .size(width = 32.dp, height = 4.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(colors.fgMute.copy(alpha = 0.5f)),
+            )
+        },
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 24.dp)
-                .padding(bottom = 36.dp),
+                .padding(top = 8.dp, bottom = 36.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Text(

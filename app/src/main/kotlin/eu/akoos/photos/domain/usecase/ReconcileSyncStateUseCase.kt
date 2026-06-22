@@ -70,6 +70,18 @@ class ReconcileSyncStateUseCase @Inject constructor(
         // an explicit allow-list; we don't second-guess it with a parallel deny-list).
         val excludedFolders: Set<String> = prefs[SettingsKeys.EXCLUDED_FOLDER_NAMES] ?: emptySet()
 
+        // Has the cloud library been listed end-to-end at least once? The content-hash recompute
+        // below only runs when it has — a missing hash match against a half-walked listing would be
+        // a wasted file read (the twin may simply be unlisted so far). Mirrors the upload-time gate.
+        val initialListingComplete = prefs.asMap().any { (k, v) ->
+            k.name.startsWith("photo_listing_ever_complete_${userId.id}_") && v == true
+        }
+        // Strip-on-upload rewrites a photo's bytes, so its cloud copy can't content-hash-match the
+        // local original. When it's on, the name/date match stays the fallback for those; when off,
+        // the bytes are identical and a content-hash match is REQUIRED before pairing — so a
+        // different file that merely shares a name (Drive allows that) can't be taken for a backup.
+        val stripOnUpload = prefs[SettingsKeys.STRIP_ON_UPLOAD] ?: false
+
         val allLocalItems = localRepo.observeLocalMedia().first()
 
         val localItems = if (backupEverything) {
@@ -157,21 +169,35 @@ class ReconcileSyncStateUseCase @Inject constructor(
                 continue
             }
             val byId = existingSync?.cloudFileId?.let { cloudByLinkId[it] }
-            // localHash is the bare SHA-1; the cloud ContentHash is HMAC-SHA256(rootNodeHashKey,
-            // sha1Hex), so convert before the lookup. Content-exact, so it pairs a photo to its cloud
-            // copy even when rename-on-upload gave the cloud a different displayName than the local file.
-            val byHash = existingSync?.localHash?.takeIf { it.isNotEmpty() }
-                ?.let { cloudRepo.cloudContentHash(it) }?.let { cloudByHash[it] }
+
+            // Content hash is the AUTHORITATIVE matcher: it compares the actual file bytes (the local
+            // bare SHA-1 converted to Drive's HMAC ContentHash), so it pairs the same photo whatever
+            // its name and — unlike name+size — can't be fooled into pairing two DIFFERENT files that
+            // share a name (Drive allows duplicate names). Use the stored hash; if a reinstall wiped
+            // it, recompute from the file once (persisted below) when the cloud library is fully
+            // listed so there's a complete set to match against. This also pairs a renamed cloud copy.
+            val storedHash = existingSync?.localHash?.takeIf { it.isNotEmpty() }
+            var recomputedHash: String? = null
+            val localHashHex: String? = storedHash
+                ?: if (initialListingComplete && cloudByHash.isNotEmpty())
+                    localRepo.sha1(local.uri).also { recomputedHash = it } else null
+            val byContentHash = localHashHex?.let { cloudRepo.cloudContentHash(it) }?.let { cloudByHash[it] }
+
             // captureTime in CloudPhoto is Unix seconds; LocalMediaItem.dateTaken is ms.
             val localCaptureTimeSec = local.dateTaken / 1000L
-            val byNameAndDate = cloudByNameAndDate[local.displayName to localCaptureTimeSec]
-            val byName = cloudByNameSize[local.displayName to local.sizeBytes]
-            // No filename-only fallback: matching on name alone (no hash, size or capture time) can
-            // pair a unique local photo to an unrelated cloud one sharing a recurring camera name
-            // (IMG_0001.jpg), marking it SYNCED so Free-up-space could delete a file that was
-            // never backed up. Anything matching none of id / hash / name+date / name+size stays
-            // LOCAL_ONLY and re-uploads instead; a duplicate is recoverable, a deleted original isn't.
-            val matchedCloud = byId ?: byHash ?: byNameAndDate ?: byName
+            val nameCandidate = cloudByNameAndDate[local.displayName to localCaptureTimeSec]
+                ?: cloudByNameSize[local.displayName to local.sizeBytes]
+            // Trust a name+date / name+size match ONLY when a content hash can't settle it: the cloud
+            // photo carries no ContentHash to check, or strip-on-upload changed the bytes so the same
+            // photo can't hash-match its stripped cloud copy. When the cloud photo HAS a hash and
+            // nothing was stripped, byContentHash above is the only thing that may pair it — trusting
+            // the name alone could mark a different same-named file as backed up, and Free-up-space
+            // could then delete a local that was never really uploaded. (No name-only fallback either:
+            // a recurring camera name like IMG_0001.jpg must never pair on its own.)
+            val byNameUnverifiable = nameCandidate?.takeIf {
+                it.contentHash.isNullOrEmpty() || stripOnUpload
+            }
+            val matchedCloud = byId ?: byContentHash ?: byNameUnverifiable
             if (matchedCloud == null) {
                 Log.d(TAG, "LOCAL_ONLY: ${local.displayName} (size=${local.sizeBytes}, " +
                     "captureSec=$localCaptureTimeSec, existingCloudId=${existingSync?.cloudFileId})")
@@ -181,7 +207,7 @@ class ReconcileSyncStateUseCase @Inject constructor(
             newStates += SyncState(
                 localUri = local.uri,
                 cloudFileId = matchedCloud?.linkId,
-                localHash = existingSync?.localHash.orEmpty(),
+                localHash = recomputedHash ?: existingSync?.localHash.orEmpty(),
                 cloudHash = matchedCloud?.contentHash,
                 status = status,
                 lastSyncAttemptMs = System.currentTimeMillis(),

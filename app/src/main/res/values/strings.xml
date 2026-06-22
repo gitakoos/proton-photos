@@ -159,6 +159,7 @@
     <string name="hidden_photos_title">Hidden Photos</string>
     <string name="hidden_photos_auth_prompt">Authenticate to view your hidden photos</string>
     <string name="hidden_photos_unlock">Unlock</string>
+    <string name="app_lock_authenticate_prompt">Authenticate to continue</string>
     <string name="hidden_no_device_lock_notice">No device lock set — the vault is not protected.</string>
     <string name="hidden_auth_title">Hidden Photos</string>
     <string name="hidden_auth_description">Authenticate to view your hidden photos</string>
@@ -421,6 +422,13 @@
     <string name="settings_security_desc">App lock, hidden photos</string>
     <string name="settings_strip_metadata_upload">Strip metadata on upload</string>
     <string name="settings_strip_metadata_upload_desc">Remove GPS location before upload. Add camera, timestamp and software fields under Customize.</string>
+    <string name="settings_mirror_strip_local">Mirror changes to local files</string>
+    <string name="settings_mirror_strip_local_desc">Apply the same metadata and filename changes to the on-device original, so the backed-up copy and the local file stay identical. This changes your original files.</string>
+    <string name="onboarding_mirror_title">Match your local copies</string>
+    <string name="onboarding_mirror_subtitle">Apply the same changes to the originals on your device</string>
+    <string name="onboarding_mirror_toggle">Mirror changes to local files</string>
+    <string name="onboarding_mirror_toggle_desc">When backing up, apply the same metadata and filename changes to the on-device original, so the local file and the backed-up copy stay identical. This changes your original files.</string>
+    <string name="onboarding_mirror_grant">Allow all-files access</string>
     <string name="settings_rename_on_upload">Rename to capture date on upload</string>
     <string name="settings_rename_on_upload_desc">Use the photo or video\'s metadata to set the filename to its capture date and time before upload. Original device file is untouched.</string>
     <string name="settings_delete_after_backup">Delete device file after backup</string>
@@ -538,6 +546,9 @@
     <string name="about_lib_coil">Image loading library</string>
     <string name="about_lib_room">Local database</string>
     <string name="about_lib_gopenpgp">OpenPGP implementation</string>
+    <string name="about_lib_geonames">City name dataset, licensed under CC BY 4.0</string>
+    <string name="about_lib_osmdroid">Map view, licensed under Apache 2.0</string>
+    <string name="about_lib_osm">Map data © OpenStreetMap contributors, ODbL</string>
 
     <!-- Albums -->
     <string name="albums_new_album">New Album</string>
@@ -580,6 +591,7 @@
     <string name="share_role_can_edit">can edit</string>
     <string name="share_role_pending">pending</string>
     <string name="share_stop_sharing">Stop sharing</string>
+    <string name="shared_stop_sharing_confirm_body">The public links will stop working and the photos will no longer be shared.</string>
     <string name="share_close">Close</string>
     <!-- Drive-web-style invite popup (multi-chip flow) -->
     <string name="share_invite_email_hint">Email address</string>
@@ -653,6 +665,21 @@
     <string name="search_section_jump_to_month">Jump to month</string>
     <string name="search_section_recent">Recent</string>
 
+    <!-- Map -->
+    <string name="map_title">Map</string>
+    <string name="map_card_title">Map</string>
+    <string name="map_card_subtitle_empty">No located photos yet</string>
+    <string name="map_card_calendar_subtitle">A calendar view of your photos</string>
+    <string name="map_search_places">Search places</string>
+    <string name="map_search_no_places">No places yet</string>
+    <string name="map_osm_attribution" translatable="false">© OpenStreetMap contributors</string>
+
+    <!-- Location detail -->
+    <string name="location_save_as_album">Save as album</string>
+    <string name="location_save_as_album_confirm_title">Save as album</string>
+    <string name="location_save_as_album_confirm_body_fmt">Create an album from %1$s?</string>
+    <string name="location_saved_as_album_fmt">Album \"%1$s\" created</string>
+
     <!-- Photo viewer slideshow controls -->
     <string name="viewer_play_slideshow">Play slideshow</string>
     <string name="viewer_pause_slideshow">Pause slideshow</string>
@@ -699,6 +726,14 @@
         <item quantity="one">1 photo</item>
         <item quantity="other">%d photos</item>
     </plurals>
+    <plurals name="map_card_subtitle_count">
+        <item quantity="one">%1$d photo on the map</item>
+        <item quantity="other">%1$d photos on the map</item>
+    </plurals>
+    <plurals name="map_card_cities_count">
+        <item quantity="one">%d city</item>
+        <item quantity="other">%d cities</item>
+    </plurals>
     <plurals name="count_videos_plural">
         <item quantity="one">1 video</item>
         <item quantity="other">%d videos</item>
@@ -706,6 +741,10 @@
     <plurals name="share_invite_sent">
         <item quantity="one">Invitation sent</item>
         <item quantity="other">%1$d invitations sent</item>
+    </plurals>
+    <plurals name="shared_stop_sharing_confirm_title">
+        <item quantity="one">Stop sharing this photo?</item>
+        <item quantity="other">Stop sharing %d photos?</item>
     </plurals>
 
     <!-- "On this day" memories card on the Photos tab. Shown above the grid when the user
@@ -745,6 +784,7 @@
     <string name="viewer_view_panorama">View panorama</string>
     <string name="viewer_exit_panorama">Exit</string>
     <string name="motion_photo_play_failed">Could not play this motion photo.</string>
+    <string name="viewer_video_play_failed">This video can\'t be played</string>
 
     <!-- Video editor -->
     <string name="video_editor_trim">Trim</string>
@@ -769,15 +809,13 @@
     <!-- Calendar view -->
     <string name="calendar_title">Calendar</string>
     <string name="calendar_no_photos">No photos this month</string>
-    <string name="calendar_search_placeholder">Search by date, place or note</string>
+    <string name="calendar_search_placeholder">Search by month, year, or description</string>
     <string name="calendar_search_no_results">No matching days</string>
     <string name="calendar_view_toggle_cd">Switch view mode</string>
     <string name="calendar_search_cd">Search calendar</string>
     <string name="calendar_jump_cd">Jump to month</string>
     <string name="calendar_jump_title">Jump to month</string>
-    <string name="day_detail_location_hint">Add a place</string>
     <string name="day_detail_description_hint">Add a note about this day</string>
-    <string name="day_detail_edit_location_title">Edit location</string>
     <string name="day_detail_edit_description_title">Edit description</string>
     <string name="day_detail_save">Save</string>
     <string name="day_detail_photos_count">%1$d photos</string>
@@ -875,6 +913,7 @@
     <string name="sync_folders_add_action">Add folder</string>
     <string name="sync_folders_add_row_subtitle">Pre-declare a folder so future photos in it back up automatically</string>
     <string name="sync_folders_add_dialog_body">Enter the exact folder name (e.g. \"Trip 2026\"). Once a photo lands in a matching folder it will back up automatically.</string>
+    <string name="sync_folders_add_dialog_name_invalid">Enter a new folder name that isn\'t already added</string>
     <string name="sync_folders_selected_cd">Selected</string>
     <!-- Mirror device folders as albums screen -->
     <string name="mirror_opted_in_cd">Opted in</string>
@@ -885,6 +924,8 @@
     <string name="mirror_name_already_added">Folder already added</string>
     <!-- Settings — sync error popup + free-up snackbars -->
     <string name="settings_sync_failed">Sync failed</string>
+    <string name="settings_sync_failed_reconcile">Couldn\'t check what needs backing up</string>
+    <string name="settings_sync_failed_upload">Couldn\'t upload photos</string>
     <string name="settings_freed_photos">Freed %1$d photo(s) from device</string>
     <string name="settings_free_up_none">No locally cached backed-up photos to remove</string>
     <string name="settings_free_up_error">Could not free up space: %1$s</string>
@@ -953,6 +994,8 @@
     <string name="viewer_meta_row_date">Date</string>
     <string name="viewer_meta_row_size">Size</string>
     <string name="viewer_meta_row_type">Type</string>
+    <string name="viewer_meta_row_resolution">Resolution</string>
+    <string name="viewer_meta_row_duration">Duration</string>
     <string name="viewer_meta_row_album">Album</string>
     <string name="viewer_meta_row_source">Source</string>
     <string name="viewer_meta_row_make">Make</string>
@@ -965,6 +1008,7 @@
     <string name="viewer_meta_row_flash">Flash</string>
     <string name="viewer_meta_row_white_balance">White balance</string>
     <string name="viewer_meta_row_latitude">Latitude</string>
+    <string name="viewer_meta_row_place">Place</string>
     <string name="viewer_meta_row_longitude">Longitude</string>
     <string name="viewer_meta_row_altitude">Altitude</string>
     <string name="viewer_meta_row_taken">Taken</string>

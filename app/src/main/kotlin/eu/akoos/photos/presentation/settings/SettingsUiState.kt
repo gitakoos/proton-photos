@@ -73,6 +73,7 @@ data class SettingsUiState(
     val language: String = "system",
     // Metadata stripping
     val stripOnUpload: Boolean = true,
+    val mirrorStripToLocal: Boolean = false,
     val renameToCaptureDate: Boolean = false,
     /** When true, the upload pipeline removes the local MediaStore copy once Drive has
      *  the upload. Off by default — opting in delegates "long-term storage" to Proton Drive. */

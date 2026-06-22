@@ -170,7 +170,7 @@ fun TrashScreen(
                 icon = Icons.AutoMirrored.Filled.ArrowBack,
                 contentDescription = stringResource(R.string.onboarding_back),
                 onClick = onBack,
-                diameter = 36.dp,
+                diameter = 40.dp,
                 iconSize = 18.dp,
                 background = colors.surfaceWeak,
                 borderColor = PillBorder,

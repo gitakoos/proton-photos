@@ -59,6 +59,7 @@ import androidx.compose.material.icons.outlined.Collections
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ModalBottomSheet
 import eu.akoos.photos.presentation.common.ConfirmDialog
+import eu.akoos.photos.presentation.common.ScrollScrubber
 import eu.akoos.photos.presentation.theme.ErrorColor
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -271,6 +272,16 @@ fun AlbumsScreen(
                     }
             }
         }
+
+        // Fast-scroll handle for long album / device-folder grids. Two-column grid, so it only
+        // earns its keep past several rows — gate on a screenful's worth of cells. No date axis
+        // here, so it's a plain scroll-position thumb (no label).
+        ScrollScrubber(
+            gridState = gridState,
+            topPadding = topPadding + 12.dp,
+            bottomPadding = 24.dp,
+            minItemsToShow = 12,
+        )
 
         eu.akoos.photos.presentation.common.ThemedSnackbarHost(snackbarHostState, modifier = Modifier.align(Alignment.BottomCenter))
     }

@@ -283,6 +283,13 @@
     <string name="settings_security_desc">Alkalmazás zárolása, rejtett fotók</string>
     <string name="settings_strip_metadata_upload">Metaadatok eltávolítása feltöltéskor</string>
     <string name="settings_strip_metadata_upload_desc">A GPS-helyadat eltávolítása feltöltés előtt. Kamera-, dátum- és szoftvermezők hozzáadása a Testreszabás alatt.</string>
+    <string name="settings_mirror_strip_local">Módosítások tükrözése a helyi fájlokra</string>
+    <string name="settings_mirror_strip_local_desc">Ugyanazokat a metaadat- és fájlnév-módosításokat a helyi eredetin is elvégzi, így a felhő- és a helyi másolat megegyezik. Ez módosítja az eredeti fájljaidat.</string>
+    <string name="onboarding_mirror_title">Helyi másolatok egyeztetése</string>
+    <string name="onboarding_mirror_subtitle">Ugyanazok a módosítások az eszközön lévő eredetiken is</string>
+    <string name="onboarding_mirror_toggle">Módosítások tükrözése a helyi fájlokra</string>
+    <string name="onboarding_mirror_toggle_desc">Feltöltéskor ugyanazokat a metaadat- és fájlnév-módosításokat a helyi eredetin is elvégzi, így a helyi fájl és a felhő-másolat megegyezik. Ez módosítja az eredeti fájljaidat.</string>
+    <string name="onboarding_mirror_grant">Összes fájl elérése</string>
     <string name="settings_rename_on_upload">Átnevezés készítés dátumára feltöltéskor</string>
     <string name="settings_rename_on_upload_desc">A fotó vagy videó metaadata alapján a fájlnév a készítés dátumára és idejére áll be feltöltéskor. Az eszközön lévő eredeti fájl változatlan marad.</string>
     <string name="settings_delete_after_backup">Eszközről törlés mentés után</string>
@@ -363,6 +370,7 @@
     <string name="hidden_photos_title">Rejtett fotók</string>
     <string name="hidden_photos_auth_prompt">Azonosítsd magad a rejtett fotók megtekintéséhez</string>
     <string name="hidden_photos_unlock">Feloldás</string>
+    <string name="app_lock_authenticate_prompt">Hitelesítés a folytatáshoz</string>
     <string name="hidden_no_device_lock_notice">Nincs képernyőzár beállítva — a rejtett mappa nincs védve.</string>
     <string name="hidden_auth_title">Rejtett fotók</string>
     <string name="hidden_auth_description">Azonosítsd magad a rejtett fotók megtekintéséhez</string>
@@ -429,6 +437,9 @@
     <string name="about_lib_coil">Képbetöltő könyvtár</string>
     <string name="about_lib_room">Helyi adatbázis</string>
     <string name="about_lib_gopenpgp">OpenPGP implementáció</string>
+    <string name="about_lib_geonames">Városnév-adatbázis, CC BY 4.0 licenc alatt</string>
+    <string name="about_lib_osmdroid">Térképnézet, Apache 2.0 licenc alatt</string>
+    <string name="about_lib_osm">Térképadatok © OpenStreetMap contributors, ODbL</string>
 
     <!-- Albums -->
     <string name="albums_new_album">Új album</string>
@@ -475,6 +486,7 @@
     <string name="share_role_can_edit">szerkesztheti</string>
     <string name="share_role_pending">függőben</string>
     <string name="share_stop_sharing">Megosztás leállítása</string>
+    <string name="shared_stop_sharing_confirm_body">A nyilvános hivatkozások megszűnnek, és a fotók többé nem lesznek megosztva.</string>
     <string name="share_close">Bezárás</string>
     <!-- Drive-web-style invite popup (multi-chip flow) -->
     <string name="share_invite_email_hint">E-mail cím</string>
@@ -585,6 +597,14 @@
         <item quantity="one">1 kép</item>
         <item quantity="other">%d kép</item>
     </plurals>
+    <plurals name="map_card_subtitle_count">
+        <item quantity="one">%1$d fénykép a térképen</item>
+        <item quantity="other">%1$d fénykép a térképen</item>
+    </plurals>
+    <plurals name="map_card_cities_count">
+        <item quantity="one">%d város</item>
+        <item quantity="other">%d város</item>
+    </plurals>
     <plurals name="count_videos_plural">
         <item quantity="one">1 videó</item>
         <item quantity="other">%d videó</item>
@@ -592,6 +612,10 @@
     <plurals name="share_invite_sent">
         <item quantity="one">Meghívó elküldve</item>
         <item quantity="other">%1$d meghívó elküldve</item>
+    </plurals>
+    <plurals name="shared_stop_sharing_confirm_title">
+        <item quantity="one">Leállítod a fotó megosztását?</item>
+        <item quantity="other">Leállítod %d fotó megosztását?</item>
     </plurals>
 
     <string name="gallery_on_this_day">Ezen a napon</string>
@@ -629,6 +653,7 @@
     <string name="viewer_view_panorama">Panoráma megtekintése</string>
     <string name="viewer_exit_panorama">Kilépés</string>
     <string name="motion_photo_play_failed">Ezt a mozgó fényképet nem sikerült lejátszani.</string>
+    <string name="viewer_video_play_failed">Ez a videó nem játszható le</string>
 
     <!-- Videó szerkesztő -->
     <string name="video_editor_trim">Vágás</string>
@@ -699,17 +724,27 @@
     <string name="search_section_on_this_day_years_plural">%1$d éve</string>
     <string name="search_section_jump_to_month">Ugrás hónaphoz</string>
     <string name="search_section_recent">Legutóbbi</string>
+    <string name="map_title">Térkép</string>
+    <string name="map_card_title">Térkép</string>
+    <string name="map_card_subtitle_empty">Még nincs helyhez kötött fénykép</string>
+    <string name="map_card_calendar_subtitle">A képeid naptár nézetben</string>
+    <string name="map_search_places">Helyek keresése</string>
+    <string name="map_search_no_places">Még nincsenek helyek</string>
+
+    <!-- Location detail -->
+    <string name="location_save_as_album">Mentés albumként</string>
+    <string name="location_save_as_album_confirm_title">Mentés albumként</string>
+    <string name="location_save_as_album_confirm_body_fmt">Létrehozol egy albumot ebből: %1$s?</string>
+    <string name="location_saved_as_album_fmt">„%1$s” album létrehozva</string>
     <string name="calendar_title">Naptár</string>
     <string name="calendar_no_photos">Nincs fotó ebben a hónapban</string>
-    <string name="calendar_search_placeholder">Keresés dátum, hely vagy jegyzet szerint</string>
+    <string name="calendar_search_placeholder">Keresés hónap, év vagy leírás szerint</string>
     <string name="calendar_search_no_results">Nincs találat</string>
     <string name="calendar_view_toggle_cd">Nézet váltása</string>
     <string name="calendar_search_cd">Keresés a naptárban</string>
     <string name="calendar_jump_cd">Ugrás hónaphoz</string>
     <string name="calendar_jump_title">Ugrás hónaphoz</string>
-    <string name="day_detail_location_hint">Adj hozzá egy helyet</string>
     <string name="day_detail_description_hint">Írj egy jegyzetet ehhez a naphoz</string>
-    <string name="day_detail_edit_location_title">Hely szerkesztése</string>
     <string name="day_detail_edit_description_title">Leírás szerkesztése</string>
     <string name="day_detail_save">Mentés</string>
     <string name="day_detail_photos_count">%1$d fotó</string>
@@ -849,6 +884,8 @@
     <string name="viewer_meta_row_date">Dátum</string>
     <string name="viewer_meta_row_size">Méret</string>
     <string name="viewer_meta_row_type">Típus</string>
+    <string name="viewer_meta_row_resolution">Felbontás</string>
+    <string name="viewer_meta_row_duration">Hossz</string>
     <string name="viewer_meta_row_album">Album</string>
     <string name="viewer_meta_row_source">Forrás</string>
     <string name="viewer_meta_row_make">Gyártó</string>
@@ -861,6 +898,7 @@
     <string name="viewer_meta_row_flash">Vaku</string>
     <string name="viewer_meta_row_white_balance">Fehéregyensúly</string>
     <string name="viewer_meta_row_latitude">Szélesség</string>
+    <string name="viewer_meta_row_place">Hely</string>
     <string name="viewer_meta_row_longitude">Hosszúság</string>
     <string name="viewer_meta_row_altitude">Tengerszint feletti magasság</string>
     <string name="viewer_meta_row_taken">Készült</string>
@@ -987,6 +1025,7 @@
     <string name="sync_folders_add_action">Mappa hozzáadása</string>
     <string name="sync_folders_add_row_subtitle">Adj meg előre egy mappát, hogy a benne készülő fotók automatikusan mentésre kerüljenek</string>
     <string name="sync_folders_add_dialog_body">Add meg a mappa pontos nevét (pl. „Nyaralás 2026”). Amint egy fotó egyező nevű mappába kerül, automatikusan mentésre kerül.</string>
+    <string name="sync_folders_add_dialog_name_invalid">Adj meg egy új, még nem hozzáadott mappanevet</string>
     <string name="sync_folders_selected_cd">Kijelölve</string>
 
     <!-- Mirror device folders as albums screen -->
@@ -999,6 +1038,8 @@
 
     <!-- Settings — sync error popup + free-up snackbars -->
     <string name="settings_sync_failed">A szinkronizálás sikertelen</string>
+    <string name="settings_sync_failed_reconcile">Nem sikerült ellenőrizni, mit kell menteni</string>
+    <string name="settings_sync_failed_upload">Nem sikerült feltölteni a fotókat</string>
     <string name="settings_freed_photos">%1$d fotó felszabadítva az eszközről</string>
     <string name="settings_free_up_none">Nincs helyben tárolt, mentett fotó, amit el lehetne távolítani</string>
     <string name="settings_free_up_error">Nem sikerült helyet felszabadítani: %1$s</string>

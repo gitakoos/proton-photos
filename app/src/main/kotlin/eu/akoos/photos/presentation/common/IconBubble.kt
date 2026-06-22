@@ -50,7 +50,7 @@ import eu.akoos.photos.presentation.theme.PillBorder
  * header (40.dp pill on [PillBg] with a 0.5.dp [PillBorder] outline and an 18.dp
  * icon tinted [FgPrimary]). Callers tune the four common knobs:
  *
- *  - **diameter** — 36.dp on settings-style back buttons, 28-32.dp in smaller
+ *  - **diameter** — 40.dp on header / back buttons, 28-32.dp in smaller
  *    overlays.
  *  - **iconSize** — 16-20.dp depending on the icon's visual weight.
  *  - **background** — pass `SurfaceWeak` for settings rows, `Color(0x99000000)`

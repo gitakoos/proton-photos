@@ -90,6 +90,10 @@ class GetGalleryItemsUseCase @Inject constructor(
         // the loop REFUSE to guess when two cloud photos share the key, rather than merge a wrong pair.
         val cloudByNameAndDate: Map<Pair<String, Long>, List<CloudPhoto>> =
             cloud.groupBy { it.displayName.lowercase() to it.captureTime }
+        // Name + exact byte size, videos only (see [cloudFromVideoSize] below). Grouped, not
+        // associateBy, so an ambiguous (name,size) refuses to guess just like name+date.
+        val cloudByNameSize: Map<Pair<String, Long>, List<CloudPhoto>> =
+            cloud.groupBy { it.displayName.lowercase() to it.sizeBytes }
 
         val result = mutableListOf<GalleryItem>()
         val usedCloudIds = mutableSetOf<String>()
@@ -125,8 +129,20 @@ class GetGalleryItemsUseCase @Inject constructor(
                     ?.filter { it.linkId !in usedCloudIds }
                     ?.singleOrNull()
             else null
+            // Videos can't reliably name+capture-time pair: a video's capture time isn't a stable
+            // cross-client key the way a photo's EXIF date is, so after a fresh reinstall (no
+            // SyncState/stored hash yet) a video stays LocalOnly until the next full sync recomputes
+            // hashes — while photos pair immediately. Fall back to name + EXACT byte size for videos
+            // only: a video's length is highly distinctive and singleOrNull refuses any ambiguous
+            // match, so this pairs the same file early without the capture-time mismatch.
+            val cloudFromVideoSize = if (cloudFromSync == null && cloudFromHash == null &&
+                    cloudFromContent == null && localItem.mimeType.startsWith("video/"))
+                cloudByNameSize[localItem.displayName.lowercase() to localItem.sizeBytes]
+                    ?.filter { it.linkId !in usedCloudIds }
+                    ?.singleOrNull()
+            else null
 
-            val cloudPhoto = cloudFromSync ?: cloudFromHash ?: cloudFromContent
+            val cloudPhoto = cloudFromSync ?: cloudFromHash ?: cloudFromContent ?: cloudFromVideoSize
 
             if (cloudPhoto != null) {
                 usedCloudIds += cloudPhoto.linkId

@@ -98,6 +98,7 @@ import eu.akoos.photos.presentation.settings.components.AppLockTimeoutRow
 import eu.akoos.photos.presentation.settings.components.CollapsibleSection
 import eu.akoos.photos.presentation.settings.components.ExpandableHeaderRow
 import eu.akoos.photos.presentation.settings.components.IndentedNavRow
+import eu.akoos.photos.presentation.settings.components.InfoRow
 import eu.akoos.photos.presentation.settings.components.NavRow
 import eu.akoos.photos.presentation.settings.components.RowDivider
 import eu.akoos.photos.presentation.settings.components.SectionLabel
@@ -205,7 +206,7 @@ fun SettingsScreen(
                     icon = Icons.Default.Close,
                     contentDescription = null,
                     onClick = debouncedBack,
-                    diameter = 36.dp,
+                    diameter = 40.dp,
                     iconSize = 16.dp,
                     background = colors.surfaceWeak,
                     borderColor = colors.pillBorder,
@@ -711,6 +712,7 @@ fun PrivacySettingsScreen(
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val context = LocalContext.current
     SettingsSubPageScaffold(title = stringResource(R.string.settings_privacy_metadata), onBack = onBack) {
         // ── Metadata card ───────────────────────────────────────────────────
         // Strip sub-toggles collapse under the main strip-on-upload switch — they
@@ -739,6 +741,37 @@ fun PrivacySettingsScreen(
             // overrides; defaults match what the upload pipeline actually does when
             // none of them are explicitly set.
             if (state.stripOnUpload) {
+                RowDivider()
+                ToggleRow(
+                    label = stringResource(R.string.settings_mirror_strip_local),
+                    description = stringResource(R.string.settings_mirror_strip_local_desc),
+                    checked = state.mirrorStripToLocal,
+                    onCheckedChange = { enabled ->
+                        viewModel.setMirrorStripToLocal(enabled)
+                        // Writing the on-device original in place needs all-files access on devices
+                        // that refuse a silent MediaStore write even with MANAGE_MEDIA. Send the user
+                        // to that grant screen when they opt in without it; until it's granted the
+                        // mirror falls back to a temp-copy strip and the original stays untouched.
+                        if (enabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
+                            !android.os.Environment.isExternalStorageManager()
+                        ) {
+                            runCatching {
+                                context.startActivity(
+                                    Intent(
+                                        android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                                        android.net.Uri.parse("package:${context.packageName}"),
+                                    )
+                                )
+                            }.onFailure {
+                                runCatching {
+                                    context.startActivity(
+                                        Intent(android.provider.Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
+                                    )
+                                }
+                            }
+                        }
+                    },
+                )
                 RowDivider()
                 var showStripDetails by remember { mutableStateOf(false) }
                 ExpandableHeaderRow(
@@ -804,20 +837,15 @@ fun PrivacySettingsScreen(
                 onClick = onHiddenAlbumClick,
             )
             RowDivider()
-            // Telemetry visibility row. Telemetry events fired by the embedded
-            // ProtonCore stack are gated by IsTelemetryEnabledImpl, which reads
-            // the user's server side `Telemetry` preference. We surface this here
-            // as a read only row so the user knows the control exists and where
-            // it lives — overriding the binding locally would conflict with
-            // ProtonCore's own @Binds and ripple into the auth flow. A future
-            // iteration can move this to a dedicated Diagnostics section once
-            // we add more such "follow your Proton account" rows.
-            ToggleRow(
+            // Telemetry events fired by the embedded ProtonCore stack are gated by
+            // IsTelemetryEnabledImpl, which reads the server side `Telemetry`
+            // preference. This is surfaced as a read-only mirror so the control's
+            // location is discoverable; the actual switch lives in the Proton
+            // account settings.
+            InfoRow(
                 label = stringResource(R.string.settings_telemetry),
                 description = stringResource(R.string.settings_telemetry_desc),
-                checked = false,
-                onCheckedChange = {},
-                enabled = false,
+                value = stringResource(R.string.sync_none),
             )
         }
         }

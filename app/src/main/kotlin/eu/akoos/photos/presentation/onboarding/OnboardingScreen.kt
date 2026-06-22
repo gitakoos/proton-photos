@@ -94,6 +94,7 @@ import eu.akoos.photos.presentation.onboarding.steps.BackupModeStep
 import eu.akoos.photos.presentation.onboarding.steps.DoneStep
 import eu.akoos.photos.presentation.onboarding.steps.FolderPickerStep
 import eu.akoos.photos.presentation.onboarding.steps.ManageMediaStep
+import eu.akoos.photos.presentation.onboarding.steps.MirrorOptInStep
 import eu.akoos.photos.presentation.onboarding.steps.NotificationsStep
 import eu.akoos.photos.presentation.onboarding.steps.PhotosAccessStep
 import eu.akoos.photos.presentation.onboarding.steps.PrivacyStep
@@ -242,6 +243,7 @@ class OnboardingViewModel @Inject constructor(
         stripTimestamp: Boolean,
         stripSoftware: Boolean,
         renameOnUpload: Boolean,
+        mirrorToLocal: Boolean,
         deleteAfterBackup: Boolean,
         themeMode: ThemeMode,
         palette: ThemePalette,
@@ -279,6 +281,7 @@ class OnboardingViewModel @Inject constructor(
                 p[SettingsKeys.STRIP_TIMESTAMP] = stripTimestamp
                 p[SettingsKeys.STRIP_SOFTWARE_INFO] = stripSoftware
                 p[SettingsKeys.RENAME_TO_CAPTURE_DATE] = renameOnUpload
+                p[SettingsKeys.MIRROR_STRIP_TO_LOCAL] = mirrorToLocal
                 p[SettingsKeys.DELETE_LOCAL_AFTER_BACKUP] = deleteAfterBackup
                 p[SettingsKeys.THEME_MODE] = themeMode.storageKey
                 p[SettingsKeys.THEME_PALETTE] = palette.storageKey
@@ -327,8 +330,8 @@ fun OnboardingScreen(
     var excludedFolders by rememberSaveable { mutableStateOf<Set<String>>(emptySet()) }
     var albumMirrorSelection by rememberSaveable { mutableStateOf<Set<String>>(emptySet()) }
     var albumMirrorCustom by rememberSaveable { mutableStateOf<Set<String>>(emptySet()) }
-    var stripMetadata by rememberSaveable { mutableStateOf(true) }
-    var stripGps by rememberSaveable { mutableStateOf(true) }
+    var stripMetadata by rememberSaveable { mutableStateOf(false) }
+    var stripGps by rememberSaveable { mutableStateOf(false) }
     var stripCamera by rememberSaveable { mutableStateOf(false) }
     var stripTimestamp by rememberSaveable { mutableStateOf(false) }
     var stripSoftware by rememberSaveable { mutableStateOf(false) }
@@ -351,6 +354,13 @@ fun OnboardingScreen(
     var manageMediaGranted by rememberSaveable {
         mutableStateOf(
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && MediaStore.canManageMedia(context)
+        )
+    }
+    var mirrorToLocal by rememberSaveable { mutableStateOf(false) }
+    var allFilesGranted by rememberSaveable {
+        mutableStateOf(
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
+                android.os.Environment.isExternalStorageManager()
         )
     }
 
@@ -381,6 +391,10 @@ fun OnboardingScreen(
             add(OnboardingStep.AlbumMirrorOptIn)
         }
         add(OnboardingStep.Privacy)
+        // Mirror needs all-files access (API 30+) and only matters when something backs up.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && backupMode != BackupMode.NothingForNow) {
+            add(OnboardingStep.MirrorOptIn)
+        }
         add(OnboardingStep.AppLock)
         if (showNotifications) add(OnboardingStep.Notifications)
         if (showManageMedia) add(OnboardingStep.ManageMedia)
@@ -415,6 +429,12 @@ fun OnboardingScreen(
         manageMediaGranted = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
             MediaStore.canManageMedia(context)
         scope.launch { pagerState.animateScrollToPage(pagerState.currentPage + 1) }
+    }
+    val allFilesLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult(),
+    ) {
+        allFilesGranted = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
+            android.os.Environment.isExternalStorageManager()
     }
 
     Box(modifier = Modifier.fillMaxSize().background(colors.pageBg)) {
@@ -513,6 +533,19 @@ fun OnboardingScreen(
                             onRenameChange = { renameOnUpload = it },
                             onDeleteChange = { deleteAfterBackup = it },
                         )
+                        OnboardingStep.MirrorOptIn -> MirrorOptInStep(
+                            enabled = mirrorToLocal,
+                            granted = allFilesGranted,
+                            onEnabledChange = { mirrorToLocal = it },
+                            onGrant = {
+                                allFilesLauncher.launch(
+                                    Intent(
+                                        Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                                        android.net.Uri.fromParts("package", context.packageName, null),
+                                    )
+                                )
+                            },
+                        )
                         OnboardingStep.AppLock -> AppLockStep(
                             enabled = appLockEnabled,
                             timeoutMinutes = appLockTimeoutMinutes,
@@ -582,6 +615,7 @@ fun OnboardingScreen(
                                 stripTimestamp = stripTimestamp,
                                 stripSoftware = stripSoftware,
                                 renameOnUpload = renameOnUpload,
+                                mirrorToLocal = mirrorToLocal,
                                 deleteAfterBackup = deleteAfterBackup,
                                 themeMode = themeMode,
                                 palette = palette,
@@ -622,7 +656,7 @@ fun OnboardingScreen(
 
 private enum class OnboardingStep {
     About, Welcome, Appearance, PhotosAccess, BackupMode, FolderPicker,
-    AlbumMirrorOptIn, Privacy, AppLock, Notifications, ManageMedia, Done,
+    AlbumMirrorOptIn, Privacy, MirrorOptIn, AppLock, Notifications, ManageMedia, Done,
 }
 
 private fun hasMediaPermission(context: Context): Boolean {

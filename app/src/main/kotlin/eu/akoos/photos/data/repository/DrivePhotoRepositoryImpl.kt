@@ -25,7 +25,6 @@ package eu.akoos.photos.data.repository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.map
@@ -79,6 +78,7 @@ class DrivePhotoRepositoryImpl @Inject constructor(
     private val cloudTrashService: CloudTrashService,
     private val albumSharingService: AlbumSharingService,
     private val thumbnailScheduler: ThumbnailDecryptScheduler,
+    private val cloudGpsBackfillScheduler: CloudGpsBackfillScheduler,
     private val photoListingDao: PhotoListingDao,
     private val syncStateDao: SyncStateDao,
     private val dayMetaDao: DayMetaDao,
@@ -440,5 +440,9 @@ class DrivePhotoRepositoryImpl @Inject constructor(
 
     override fun backfillThumbnails(userId: UserId) {
         thumbnailScheduler.backfillAll(userId)
+    }
+
+    override suspend fun backfillCloudGps(userId: UserId) {
+        cloudGpsBackfillScheduler.backfillAll(userId)
     }
 }

@@ -114,6 +114,7 @@
     <string name="hidden_photos_title">Verborgen foto\'s</string>
     <string name="hidden_photos_auth_prompt">Verifieer je identiteit om je verborgen foto\'s te bekijken</string>
     <string name="hidden_photos_unlock">Ontgrendelen</string>
+    <string name="app_lock_authenticate_prompt">Verifieer om door te gaan</string>
     <string name="hidden_no_device_lock_notice">Geen schermvergrendeling ingesteld — de kluis is niet beschermd.</string>
     <string name="hidden_auth_title">Verborgen foto\'s</string>
     <string name="hidden_auth_description">Verifieer je identiteit om je verborgen foto\'s te bekijken</string>
@@ -341,6 +342,13 @@
     <string name="settings_security_desc">App-vergrendeling, verborgen foto\'s</string>
     <string name="settings_strip_metadata_upload">Metadata verwijderen bij uploaden</string>
     <string name="settings_strip_metadata_upload_desc">Verwijder de GPS-locatie vóór het uploaden. Voeg camera-, tijdstempel- en softwarevelden toe onder Aanpassen.</string>
+    <string name="settings_mirror_strip_local">Wijzigingen spiegelen naar lokale bestanden</string>
+    <string name="settings_mirror_strip_local_desc">Pas dezelfde metadata- en bestandsnaamwijzigingen toe op het origineel op het apparaat, zodat de geüploade en lokale kopie identiek blijven. Dit wijzigt je originele bestanden.</string>
+    <string name="onboarding_mirror_title">Lokale kopieën gelijktrekken</string>
+    <string name="onboarding_mirror_subtitle">Pas dezelfde wijzigingen toe op de originelen op je apparaat</string>
+    <string name="onboarding_mirror_toggle">Wijzigingen spiegelen naar lokale bestanden</string>
+    <string name="onboarding_mirror_toggle_desc">Pas bij het uploaden dezelfde metadata- en bestandsnaamwijzigingen toe op het origineel op het apparaat, zodat het lokale bestand en de geüploade kopie identiek blijven. Dit wijzigt je originele bestanden.</string>
+    <string name="onboarding_mirror_grant">Toegang tot alle bestanden toestaan</string>
     <string name="settings_rename_on_upload">Hernoemen naar opnamedatum bij uploaden</string>
     <string name="settings_rename_on_upload_desc">Gebruik de metadata van de foto of video om de bestandsnaam vóór het uploaden in te stellen op de opnamedatum en -tijd. Het originele bestand op het apparaat blijft onaangeroerd.</string>
     <string name="settings_delete_after_backup">Apparaatbestand verwijderen na back-up</string>
@@ -458,6 +466,9 @@
     <string name="about_lib_coil">Bibliotheek voor afbeeldingen laden</string>
     <string name="about_lib_room">Lokale database</string>
     <string name="about_lib_gopenpgp">OpenPGP-implementatie</string>
+    <string name="about_lib_geonames">Dataset met plaatsnamen, gelicentieerd onder CC BY 4.0</string>
+    <string name="about_lib_osmdroid">Kaartweergave, gelicentieerd onder Apache 2.0</string>
+    <string name="about_lib_osm">Kaartgegevens © OpenStreetMap contributors, ODbL</string>
 
     <!-- Albums -->
     <string name="albums_new_album">Nieuw album</string>
@@ -493,6 +504,7 @@
     <string name="share_role_can_edit">kan bewerken</string>
     <string name="share_role_pending">in afwachting</string>
     <string name="share_stop_sharing">Stoppen met delen</string>
+    <string name="shared_stop_sharing_confirm_body">De openbare links werken niet meer en de foto\'s worden niet langer gedeeld.</string>
     <string name="share_close">Sluiten</string>
     <!-- Drive-web-style invite popup (multi-chip flow) -->
     <string name="share_invite_email_hint">E-mailadres</string>
@@ -562,6 +574,18 @@
     <string name="search_section_on_this_day_years_plural">%1$d jaar geleden</string>
     <string name="search_section_jump_to_month">Naar maand springen</string>
     <string name="search_section_recent">Recent</string>
+    <string name="map_title">Kaart</string>
+    <string name="map_card_title">Kaart</string>
+    <string name="map_card_subtitle_empty">Nog geen gelokaliseerde foto\'s</string>
+    <string name="map_card_calendar_subtitle">Je afbeeldingen in kalenderweergave</string>
+    <string name="map_search_places">Plaatsen zoeken</string>
+    <string name="map_search_no_places">Nog geen plaatsen</string>
+
+    <!-- Location detail -->
+    <string name="location_save_as_album">Opslaan als album</string>
+    <string name="location_save_as_album_confirm_title">Opslaan als album</string>
+    <string name="location_save_as_album_confirm_body_fmt">Een album maken van %1$s?</string>
+    <string name="location_saved_as_album_fmt">Album \"%1$s\" aangemaakt</string>
 
     <!-- Photo viewer slideshow controls -->
     <string name="viewer_play_slideshow">Diavoorstelling afspelen</string>
@@ -609,6 +633,14 @@
         <item quantity="one">1 foto</item>
         <item quantity="other">%d foto\'s</item>
     </plurals>
+    <plurals name="map_card_subtitle_count">
+        <item quantity="one">%1$d foto op de kaart</item>
+        <item quantity="other">%1$d foto\'s op de kaart</item>
+    </plurals>
+    <plurals name="map_card_cities_count">
+        <item quantity="one">%d stad</item>
+        <item quantity="other">%d steden</item>
+    </plurals>
     <plurals name="count_videos_plural">
         <item quantity="one">1 video</item>
         <item quantity="other">%d video\'s</item>
@@ -616,6 +648,10 @@
     <plurals name="share_invite_sent">
         <item quantity="one">Uitnodiging verzonden</item>
         <item quantity="other">%1$d uitnodigingen verzonden</item>
+    </plurals>
+    <plurals name="shared_stop_sharing_confirm_title">
+        <item quantity="one">Stoppen met het delen van deze foto?</item>
+        <item quantity="other">Stoppen met het delen van %d foto\'s?</item>
     </plurals>
 
     <!-- "On this day" memories card on the Photos tab. Shown above the grid when the user
@@ -655,6 +691,7 @@
     <string name="viewer_view_panorama">Panorama bekijken</string>
     <string name="viewer_exit_panorama">Sluiten</string>
     <string name="motion_photo_play_failed">Kon deze bewegingsfoto niet afspelen.</string>
+    <string name="viewer_video_play_failed">Deze video kan niet worden afgespeeld</string>
 
     <!-- Video editor -->
     <string name="video_editor_trim">Inkorten</string>
@@ -717,15 +754,13 @@
     <!-- Calendar view -->
     <string name="calendar_title">Kalender</string>
     <string name="calendar_no_photos">Geen foto\'s deze maand</string>
-    <string name="calendar_search_placeholder">Zoeken op datum, plaats of notitie</string>
+    <string name="calendar_search_placeholder">Zoeken op maand, jaar of beschrijving</string>
     <string name="calendar_search_no_results">Geen overeenkomende dagen</string>
     <string name="calendar_view_toggle_cd">Weergavemodus wisselen</string>
     <string name="calendar_search_cd">Kalender doorzoeken</string>
     <string name="calendar_jump_cd">Naar maand springen</string>
     <string name="calendar_jump_title">Naar maand springen</string>
-    <string name="day_detail_location_hint">Een plaats toevoegen</string>
     <string name="day_detail_description_hint">Een notitie over deze dag toevoegen</string>
-    <string name="day_detail_edit_location_title">Locatie bewerken</string>
     <string name="day_detail_edit_description_title">Beschrijving bewerken</string>
     <string name="day_detail_save">Opslaan</string>
     <string name="day_detail_photos_count">%1$d foto\'s</string>
@@ -869,6 +904,8 @@
     <string name="viewer_meta_row_date">Datum</string>
     <string name="viewer_meta_row_size">Grootte</string>
     <string name="viewer_meta_row_type">Type</string>
+    <string name="viewer_meta_row_resolution">Resolutie</string>
+    <string name="viewer_meta_row_duration">Duur</string>
     <string name="viewer_meta_row_album">Album</string>
     <string name="viewer_meta_row_source">Bron</string>
     <string name="viewer_meta_row_make">Merk</string>
@@ -881,6 +918,7 @@
     <string name="viewer_meta_row_flash">Flits</string>
     <string name="viewer_meta_row_white_balance">Witbalans</string>
     <string name="viewer_meta_row_latitude">Breedtegraad</string>
+    <string name="viewer_meta_row_place">Plaats</string>
     <string name="viewer_meta_row_longitude">Lengtegraad</string>
     <string name="viewer_meta_row_altitude">Hoogte</string>
     <string name="viewer_meta_row_taken">Gemaakt</string>
@@ -1007,6 +1045,7 @@
     <string name="sync_folders_add_action">Map toevoegen</string>
     <string name="sync_folders_add_row_subtitle">Geef vooraf een map op zodat toekomstige foto\'s erin automatisch worden geback-upt</string>
     <string name="sync_folders_add_dialog_body">Voer de exacte mapnaam in (bijv. \"Reis 2026\"). Zodra een foto in een overeenkomende map terechtkomt, wordt deze automatisch geback-upt.</string>
+    <string name="sync_folders_add_dialog_name_invalid">Voer een nieuwe mapnaam in die nog niet is toegevoegd</string>
     <string name="sync_folders_selected_cd">Geselecteerd</string>
 
     <!-- Mirror device folders as albums screen -->
@@ -1019,6 +1058,8 @@
 
     <!-- Settings — sync error popup + free-up snackbars -->
     <string name="settings_sync_failed">Synchronisatie mislukt</string>
+    <string name="settings_sync_failed_reconcile">Kon niet controleren wat een back-up nodig heeft</string>
+    <string name="settings_sync_failed_upload">Kon foto\'s niet uploaden</string>
     <string name="settings_freed_photos">%1$d foto(\'s) vrijgemaakt van apparaat</string>
     <string name="settings_free_up_none">Geen lokaal gecachte geback-upte foto\'s om te verwijderen</string>
     <string name="settings_free_up_error">Kon geen ruimte vrijmaken: %1$s</string>

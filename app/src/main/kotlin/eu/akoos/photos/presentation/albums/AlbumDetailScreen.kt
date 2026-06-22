@@ -334,7 +334,6 @@ fun AlbumDetailScreen(
             items = selectableLinkIds,
             indexByKey = linkIdToIndex,
             selected = state.selectedPhotos,
-            contentPaddingTopPx = 0f,
             onSelectionChange = viewModel::setSelectedPhotos,
         )
         LazyVerticalGrid(
@@ -406,7 +405,7 @@ fun AlbumDetailScreen(
                             val isInFlight = if (state.isSharedWithMe) state.isSavingToLibrary else isDownloading
                             Box(
                                 modifier = Modifier
-                                    .size(36.dp)
+                                    .size(40.dp)
                                     .background(PillBg, CircleShape)
                                     .border(0.5.dp, PillBorder, CircleShape)
                                     .clickable(enabled = !isInFlight, onClick = onAction),
@@ -455,7 +454,7 @@ fun AlbumDetailScreen(
                             if (state.isSavingToLibrary) {
                                 Box(
                                     modifier = Modifier
-                                        .size(36.dp)
+                                        .size(40.dp)
                                         .background(PillBg, CircleShape)
                                         .border(0.5.dp, PillBorder, CircleShape)
                                         .clickable(onClick = { viewModel.cancelSaveToLibrary() }),
@@ -474,7 +473,7 @@ fun AlbumDetailScreen(
                             if (isDownloading) {
                                 Box(
                                     modifier = Modifier
-                                        .size(36.dp)
+                                        .size(40.dp)
                                         .background(PillBg, CircleShape)
                                         .border(0.5.dp, PillBorder, CircleShape)
                                         .clickable(onClick = { viewModel.cancelDownload() }),
@@ -492,7 +491,7 @@ fun AlbumDetailScreen(
                             // Share (owner) / Info (shared-with-me) — both open via showShareSheet.
                             Box(
                                 modifier = Modifier
-                                    .size(36.dp)
+                                    .size(40.dp)
                                     .background(PillBg, CircleShape)
                                     .border(0.5.dp, PillBorder, CircleShape)
                                     .clickable(onClick = { showShareSheet = true }),
@@ -511,7 +510,7 @@ fun AlbumDetailScreen(
                                 Box {
                                     Box(
                                         modifier = Modifier
-                                            .size(36.dp)
+                                            .size(40.dp)
                                             .background(PillBg, CircleShape)
                                             .border(0.5.dp, PillBorder, CircleShape)
                                             .clickable(onClick = { showSharedAlbumOverflow = true }),
@@ -684,7 +683,7 @@ fun AlbumDetailScreen(
                 .align(Alignment.TopStart)
                 .statusBarsPadding()
                 .padding(start = 16.dp, top = 10.dp),
-            diameter = 36.dp,
+            diameter = 40.dp,
             iconSize = 18.dp,
             background = Color(0x99000000),
             borderColor = PillBorder,
@@ -710,7 +709,7 @@ fun AlbumDetailScreen(
                     icon = Icons.AutoMirrored.Filled.ArrowBack,
                     contentDescription = stringResource(R.string.gallery_cancel_selection),
                     onClick = { viewModel.clearSelection() },
-                    diameter = 36.dp,
+                    diameter = 40.dp,
                     iconSize = 18.dp,
                     background = PillBg,
                     borderColor = PillBorder,
@@ -748,7 +747,7 @@ fun AlbumDetailScreen(
                 val isSharingPhotos = state.shareState is AlbumShareState.Working
                 Box(
                     modifier = Modifier
-                        .size(36.dp)
+                        .size(40.dp)
                         .background(PillBg, CircleShape)
                         .border(0.5.dp, PillBorder, CircleShape)
                         .clickable(enabled = !isSharingPhotos) { showPhotoShareSheet = true },
@@ -774,7 +773,7 @@ fun AlbumDetailScreen(
                 if (!state.isSharedWithMe) {
                     Box(
                         modifier = Modifier
-                            .size(36.dp)
+                            .size(40.dp)
                             .background(PillBg, CircleShape)
                             .border(0.5.dp, PillBorder, CircleShape)
                             .clickable(enabled = !state.isDeletingPhotos) { showDeleteConfirm = true },
@@ -806,7 +805,7 @@ fun AlbumDetailScreen(
                 icon = Icons.Default.KeyboardArrowUp,
                 contentDescription = stringResource(R.string.cd_scroll_to_top),
                 onClick = { scope.launch { gridState.animateScrollToItem(0) } },
-                diameter = 44.dp,
+                diameter = 40.dp,
                 iconSize = 24.dp,
                 background = PillBgOpaque,
                 borderColor = PillBorder,

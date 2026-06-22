@@ -29,13 +29,12 @@ import androidx.glance.appwidget.GlanceAppWidgetReceiver
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 
 class PhotoWidgetReceiver : GlanceAppWidgetReceiver() {
 
     override val glanceAppWidget: GlanceAppWidget = PhotoWidget()
-
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
     override fun onUpdate(
         context: Context,
@@ -52,9 +51,18 @@ class PhotoWidgetReceiver : GlanceAppWidgetReceiver() {
 
     override fun onDeleted(context: Context, appWidgetIds: IntArray) {
         super.onDeleted(context, appWidgetIds)
-        appWidgetIds.forEach { id ->
-            PhotoWidgetUpdateWorker.cancel(context, id)
-            scope.launch { PhotoWidgetUpdater.cleanup(context, id) }
+        appWidgetIds.forEach { id -> PhotoWidgetUpdateWorker.cancel(context, id) }
+        // goAsync keeps the receiver alive for the off-main cleanup; the scope is
+        // created and cancelled within this broadcast so it never outlives it.
+        val pending = goAsync()
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        scope.launch {
+            try {
+                appWidgetIds.forEach { id -> PhotoWidgetUpdater.cleanup(context, id) }
+            } finally {
+                pending.finish()
+                scope.cancel()
+            }
         }
     }
 }

@@ -8,7 +8,13 @@
     <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
+    <!-- Lets the map view read un-redacted EXIF GPS from on-device photos (Android 10+). -->
+    <uses-permission android:name="android.permission.ACCESS_MEDIA_LOCATION" />
     <uses-permission android:name="android.permission.MANAGE_MEDIA" />
+    <!-- Optional, opt-in: lets "mirror to local files" wipe metadata / rename the on-device
+         original in place where the OS refuses a silent MediaStore write even with MANAGE_MEDIA
+         granted. Requested only when the user turns that toggle on. -->
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
     <!--
         FOREGROUND_SERVICE + FOREGROUND_SERVICE_DATA_SYNC are required by AlbumDownloadWorker
         so the album-download Worker can call setForeground() and keep running once the

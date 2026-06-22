@@ -95,7 +95,7 @@ fun AboutScreen(
                     icon = Icons.AutoMirrored.Filled.ArrowBack,
                     contentDescription = stringResource(R.string.onboarding_back),
                     onClick = onBack,
-                    diameter = 36.dp,
+                    diameter = 40.dp,
                     iconSize = 16.dp,
                     background = colors.surfaceWeak,
                     borderColor = colors.pillBorder,
@@ -239,6 +239,27 @@ fun AboutScreen(
                     title = "GoOpenPGP",
                     subtitle = stringResource(R.string.about_lib_gopenpgp),
                     onClick = { openUrl("https://github.com/ProtonMail/gopenpgp") },
+                )
+                RowDivider()
+                LinkRow(
+                    colors = colors,
+                    title = "GeoNames",
+                    subtitle = stringResource(R.string.about_lib_geonames),
+                    onClick = { openUrl("https://www.geonames.org/") },
+                )
+                RowDivider()
+                LinkRow(
+                    colors = colors,
+                    title = "osmdroid",
+                    subtitle = stringResource(R.string.about_lib_osmdroid),
+                    onClick = { openUrl("https://github.com/osmdroid/osmdroid") },
+                )
+                RowDivider()
+                LinkRow(
+                    colors = colors,
+                    title = "OpenStreetMap",
+                    subtitle = stringResource(R.string.about_lib_osm),
+                    onClick = { openUrl("https://www.openstreetmap.org/copyright") },
                 )
             }
 

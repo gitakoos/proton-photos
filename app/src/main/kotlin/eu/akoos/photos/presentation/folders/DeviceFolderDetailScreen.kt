@@ -236,7 +236,6 @@ fun DeviceFolderDetailScreen(
             items = selectableKeys,
             indexByKey = keyToIndex,
             selected = selectedUris,
-            contentPaddingTopPx = 0f,
             onSelectionChange = viewModel::setSelectedUris,
         )
         LazyVerticalGrid(
@@ -264,8 +263,10 @@ fun DeviceFolderDetailScreen(
                             val bp = backupProgress
                             Box(
                                 modifier = Modifier
-                                    .size(36.dp)
+                                    .size(40.dp)
                                     .clip(CircleShape)
+                                    .background(PillBg, CircleShape)
+                                    .border(0.5.dp, PillBorder, CircleShape)
                                     .clickable(enabled = bp == null) { showBackupDialog = true },
                                 contentAlignment = Alignment.Center,
                             ) {
@@ -288,8 +289,10 @@ fun DeviceFolderDetailScreen(
                                 Spacer(Modifier.width(8.dp))
                                 Box(
                                     modifier = Modifier
-                                        .size(36.dp)
+                                        .size(40.dp)
                                         .clip(CircleShape)
+                                        .background(PillBg, CircleShape)
+                                        .border(0.5.dp, PillBorder, CircleShape)
                                         .clickable { viewModel.cancelBackup() },
                                     contentAlignment = Alignment.Center,
                                 ) {
@@ -335,7 +338,7 @@ fun DeviceFolderDetailScreen(
                     // The old per-cell Select / Share / Back-up menu is gone; in selection mode the
                     // toolbar carries Share + Back up, so a long-press + the toolbar covers the same
                     // actions without the extra "Select" tap.
-                    val inputs = photoCellInputsFor(item)
+                    val inputs = remember(item) { photoCellInputsFor(item) }
                     PhotoCell(
                         imageData = inputs.imageData,
                         stableKey = inputs.stableKey,
@@ -371,7 +374,7 @@ fun DeviceFolderDetailScreen(
                 .align(Alignment.TopStart)
                 .statusBarsPadding()
                 .padding(start = 16.dp, top = 10.dp),
-            diameter = 36.dp,
+            diameter = 40.dp,
             iconSize = 18.dp,
             background = Color(0x99000000),
             borderColor = PillBorder,
@@ -424,7 +427,7 @@ fun DeviceFolderDetailScreen(
                     icon = Icons.AutoMirrored.Filled.ArrowBack,
                     contentDescription = stringResource(R.string.gallery_cancel_selection),
                     onClick = { viewModel.clearSelection() },
-                    diameter = 36.dp,
+                    diameter = 40.dp,
                     iconSize = 18.dp,
                     background = PillBg,
                     borderColor = PillBorder,
@@ -438,7 +441,7 @@ fun DeviceFolderDetailScreen(
                 // Share selected to other apps — device files share their URI directly, no download.
                 Box(
                     modifier = Modifier
-                        .size(36.dp)
+                        .size(40.dp)
                         .background(PillBg, CircleShape)
                         .border(0.5.dp, PillBorder, CircleShape)
                         .clickable { showPhotoShareSheet = true },
@@ -456,7 +459,7 @@ fun DeviceFolderDetailScreen(
                 // option to also remove the Drive copy of any backed-up photos.
                 Box(
                     modifier = Modifier
-                        .size(36.dp)
+                        .size(40.dp)
                         .background(PillBg, CircleShape)
                         .border(0.5.dp, PillBorder, CircleShape)
                         .clickable { showDeleteSheet = true },
@@ -698,7 +701,7 @@ fun DeviceFolderDetailScreen(
                 icon = Icons.Default.KeyboardArrowUp,
                 contentDescription = stringResource(R.string.cd_scroll_to_top),
                 onClick = { scope.launch { gridState.animateScrollToItem(0) } },
-                diameter = 44.dp,
+                diameter = 40.dp,
                 iconSize = 24.dp,
                 background = PillBgOpaque,
                 borderColor = PillBorder,

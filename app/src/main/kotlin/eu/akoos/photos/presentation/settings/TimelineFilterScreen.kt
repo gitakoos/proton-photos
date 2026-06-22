@@ -178,13 +178,13 @@ fun TimelineAlbumsFilterScreen(
             ToggleRow(
                 label = stringResource(R.string.settings_hide_album_photos),
                 description = stringResource(R.string.settings_hide_album_photos_desc),
-                checked = state.hideAlbumPhotos,
-                onCheckedChange = viewModel::setHideAlbumPhotos,
+                checked = state.allAlbumsExcluded,
+                onCheckedChange = { if (it) viewModel.excludeAllAlbums() else viewModel.includeAllAlbums() },
             )
         }
-        // Per-album show/hide — only shown while the master "hide all" switch is off, since
-        // that switch already hides every album photo regardless of the individual ones.
-        if (!state.hideAlbumPhotos && state.albums.isNotEmpty()) {
+        // Per-album show/hide — always visible so that after excluding every album with the master
+        // switch you can still re-include individual ones (the master just sets/clears the whole set).
+        if (state.albums.isNotEmpty()) {
             Spacer(Modifier.height(8.dp))
             Text(
                 stringResource(R.string.timeline_filter_per_album_hint),
@@ -228,8 +228,10 @@ fun TimelineDeviceFoldersScreen(
                 onCheckedChange = { if (it) viewModel.excludeAll() else viewModel.includeAll() },
             )
         }
-        // Per-folder pickers hide entirely while "hide all" is on, like the album visibility screen.
-        if (!state.allExcluded) {
+        // The per-folder list stays visible even with "hide all" on, so you can exclude everything
+        // and then re-include a single folder without toggling all the others back by hand. (`run`
+        // is inline, so the @Composable calls inside keep their composition context.)
+        run {
             Spacer(Modifier.height(12.dp))
             Row(
                 modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),

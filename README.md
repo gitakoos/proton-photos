@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/gitakoos/proton-photos/releases/latest"><img src="https://img.shields.io/badge/release-v2.3.4-blue" alt="Release" /></a>
+  <a href="https://github.com/gitakoos/proton-photos/releases/latest"><img src="https://img.shields.io/badge/release-v2.3.5-blue" alt="Release" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-green" alt="License" /></a>
   <img src="https://img.shields.io/badge/minSdk-26-orange" alt="Min SDK" />
   <a href="https://photos.akoos.eu"><img src="https://img.shields.io/badge/website-photos.akoos.eu-8B7CFF" alt="Website" /></a>
@@ -38,7 +38,11 @@
 - Open-with support: hand a photo or video to the app from any file manager or gallery to view it full-screen, or to jump straight into the editor.
 - Photo viewer: slideshow with video support (waits for clips to finish), pinch-zoom, "On this day" memories card.
 - Pinch-to-zoom on the photos grid groups by day, month or year as you zoom in / out.
-- Calendar view: every day on a calendar, with a hero photo per day, an editable place + description, and the full grid of that day's photos and videos.
+- Type badges on the timeline: device photos are tagged at a glance as video, motion / live photo, panorama or RAW.
+- RAW support: DNG and other RAW photos get a thumbnail and preview at upload, so they show correctly across the app and on the web.
+- Calendar view: a single continuous calendar that snaps one month per page, with a hero photo per day, an editable place + description, and the full grid of that day's photos and videos. A type-to-jump search overlay finds any month or year instantly.
+- Photo map: open the map from Search to see your located photos plotted on a world map, on-device and cloud alike, with thumbnail pins. Tap a place to open a drawer of every photo taken there and save it as an album; search any city to jump to it. Dark map tiles in dark theme, and place names are resolved fully offline.
+- Places: every location opens its own page: a hero, the photo + video count, and the full grid of everything taken there, with the same multi-select and save-as-album actions as the rest of the app.
 - Search: filename, media type, sync state, year and month filters, with accent-insensitive matching so an unaccented query still finds accented names; the empty-state shows recent photos, an "On this day" carousel and a jump-to-month grid.
 - Timeline scrubber on the photos grid for fast year-jump navigation.
 - Multi-select: long-press a photo, or drag across the grid to sweep a range, in the timeline, albums and device folders. Bulk actions: back up to Drive, download, add to album, delete, hide, strip metadata; adding a local photo to a cloud album uploads it first, back up also works on a single photo from the viewer, and uploads keep running in the background after you leave. Mixed device + cloud selection is guarded so nothing is silently dropped.
@@ -47,6 +51,7 @@
 - Cloud trash, in-app: browse deleted cloud photos, restore them, or empty the trash for good without leaving the app.
 - Hidden vault behind biometric / PIN. Heavy blur overlay on cells and viewer.
 - Per-field metadata stripping (GPS, camera, timestamps, software) on upload or in bulk.
+- Mirror to local (opt-in): apply the same upload-time metadata strip and rename to the on-device original, so your local and cloud copies stay byte-for-byte identical and pair by content hash. Off by default, with its own onboarding step.
 - Offline browsing: cached photos and videos work without a network connection.
 - Background thumbnail cache: gallery populates instantly with visible cells resolved first, and a size-bounded background warm-up decrypts the rest of the library ahead of time so scrolling stays smooth.
 - One-tap bulk free-up of already-backed-up device copies.
@@ -78,11 +83,13 @@ Hilt binds the Data implementations to the Domain interfaces; every Proton Drive
 app/src/main/kotlin/eu/akoos/photos/
 ├── presentation/     UI: Composables + ViewModels
 │   ├── auth/         Sign-in
-│   ├── onboarding/   First-launch wizard (about, backup mode, folder pick, privacy, lock, appearance, permissions)
+│   ├── onboarding/   First-launch wizard (about, backup mode, folder pick, privacy, metadata mirror, lock, appearance, permissions)
 │   ├── gallery/      Photos tab + multi-select
 │   ├── albums/       Albums tab + detail + sharing
 │   ├── shared/       Shared-with-me albums tab
 │   ├── calendar/     Calendar view + per-day metadata editor
+│   ├── map/          Photo map (osmdroid thumbnail pins, place drawer, city search)
+│   ├── location/     Per-place detail page
 │   ├── viewer/       Full-screen photo / video viewer
 │   ├── editor/       Photo + video editor
 │   ├── search/       Search with filename + content filters
@@ -101,7 +108,8 @@ app/src/main/kotlin/eu/akoos/photos/
 │   ├── api/          Retrofit Drive API + DTOs
 │   ├── crypto/       DriveCryptoHelper (ProtonCore wrapper)
 │   ├── db/           Room DAOs / entities / migrations
-│   ├── repository/
+│   ├── repository/   incl. GpsBackfillScheduler + CloudGpsBackfillScheduler
+│   │   │             (geotag extraction for on-device + cloud photos)
 │   │   └── drive/    Drive backend split per concern (Upload, Download,
 │   │                 Stream, Album, AlbumSharing, AlbumCryptoChain,
 │   │                 CloudTrash, ThumbnailDecryptScheduler, …)
@@ -111,7 +119,8 @@ app/src/main/kotlin/eu/akoos/photos/
 ├── di/               Hilt modules (Core, Network, Database, Repository,
 │                     WorkManager, Updater, Stub)
 ├── navigation/       Single NavGraph
-├── util/             Cross-cutting helpers (Exif, NetworkObserver, ErrorMessageSanitizer)
+├── util/             Cross-cutting helpers (Exif, NetworkObserver, ErrorMessageSanitizer,
+│                     OfflineGeocoder — offline reverse-geocoding from a bundled GeoNames dataset)
 ├── worker/           WorkManager workers
 ├── service/          Foreground service + boot receiver for continuous backup
 ├── widget/           Home-screen widget (4 modes incl. Cloud Photos from encrypted cache)
@@ -121,7 +130,8 @@ app/src/main/kotlin/eu/akoos/photos/
 ## Tech stack
 
 - Kotlin · Jetpack Compose · Material 3
-- Hilt (DI) · Room (DB) · Coil (images) · OkHttp + Retrofit (network) · Media3/ExoPlayer (video)
+- Hilt (DI) · Room (DB) · Coil (images) · OkHttp + Retrofit (network) · Media3/ExoPlayer (video) · [osmdroid](https://github.com/osmdroid/osmdroid) (map tiles)
+- Offline place names from the [GeoNames](https://www.geonames.org/) cities15000 dataset (CC BY 4.0), bundled under `app/src/main/assets`
 - [ProtonCore Android](https://github.com/ProtonMail/protoncore_android) (GPL-3.0) + [GoOpenPGP](https://github.com/ProtonMail/gopenpgp) for auth, keys, crypto
 - Drive API reference: [ProtonDriveApps/android-drive](https://github.com/ProtonDriveApps/android-drive)
 - Min SDK 26 (Android 8) · Target SDK 35

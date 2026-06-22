@@ -31,6 +31,11 @@ interface LocalMediaRepository {
     fun hasMediaPermission(): Flow<Boolean>
     suspend fun queryByUri(uri: String): LocalMediaItem?
 
+    /** Lowercase SHA-1 hex of the file's plaintext bytes, or null if it can't be read. Lets
+     *  reconcile pair a local file with its cloud copy by content after a reinstall wiped the
+     *  stored hash — name-independent, so a rename-on-upload cloud copy still matches. */
+    suspend fun sha1(uri: String): String?
+
     /**
      * Forces a re-query of MediaStore. Use after the user grants the media permission:
      * the MediaStore [android.database.ContentObserver] does not fire on a permission

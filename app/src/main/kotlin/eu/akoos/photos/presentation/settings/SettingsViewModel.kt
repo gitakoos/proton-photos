@@ -501,10 +501,11 @@ class SettingsViewModel @Inject constructor(
                     palette = ThemePalette.fromKey(migratedPrefs[SettingsKeys.THEME_PALETTE]),
                     lastSyncMs = migratedPrefs[SettingsKeys.LAST_SYNC_MS],
                     language = migratedPrefs[SettingsKeys.LANGUAGE] ?: "system",
-                    stripOnUpload = migratedPrefs[SettingsKeys.STRIP_ON_UPLOAD] ?: true,
+                    stripOnUpload = migratedPrefs[SettingsKeys.STRIP_ON_UPLOAD] ?: false,
+                    mirrorStripToLocal = migratedPrefs[SettingsKeys.MIRROR_STRIP_TO_LOCAL] ?: false,
                     renameToCaptureDate = migratedPrefs[SettingsKeys.RENAME_TO_CAPTURE_DATE] ?: false,
                     deleteLocalAfterBackup = migratedPrefs[SettingsKeys.DELETE_LOCAL_AFTER_BACKUP] ?: false,
-                    stripGps = migratedPrefs[SettingsKeys.STRIP_GPS] ?: true,
+                    stripGps = migratedPrefs[SettingsKeys.STRIP_GPS] ?: false,
                     stripCameraInfo = migratedPrefs[SettingsKeys.STRIP_CAMERA_INFO] ?: false,
                     stripTimestamp = migratedPrefs[SettingsKeys.STRIP_TIMESTAMP] ?: false,
                     stripSoftwareInfo = migratedPrefs[SettingsKeys.STRIP_SOFTWARE_INFO] ?: false,
@@ -527,12 +528,13 @@ class SettingsViewModel @Inject constructor(
                 // Hardcoded 15-min floor — the OS content URI trigger covers fresh photos
                 // within seconds; periodic is just the Doze/OEM-throttle safety net.
                 SyncWorker.schedule(workManager, _uiState.value.syncWifiOnly, SyncWorker.MIN_INTERVAL_MINUTES)
-                // Bring BackgroundSyncService back so the in-process MediaStore observer
-                // resumes catching fresh photos within seconds of capture. Without this,
-                // re-enabling Continuous backup would only restart the 15-min periodic
-                // worker — the user-perceived "instant upload" only returns at next
-                // app-foreground.
-                eu.akoos.photos.service.BackgroundSyncService.start(context)
+                // The persistent keep-alive service (the in-process MediaStore observer that catches
+                // fresh photos within seconds) is opt-in and off by default — the content trigger +
+                // periodic worker keep backups flowing without a standing notification. Only bring it
+                // back when the user has explicitly turned its notification on.
+                if (context.settingsDataStore.data.first()[SettingsKeys.NOTIFY_BACKUP_STATUS] == true) {
+                    eu.akoos.photos.service.BackgroundSyncService.start(context)
+                }
             } else {
                 SyncWorker.cancel(workManager)
                 // Stop the persistent foreground service so the LOW "Watching for new
@@ -582,6 +584,9 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             val userId = accountManager.getPrimaryUserId().first() ?: return@launch
             _uiState.update { it.copy(isSyncing = true, syncError = null) }
+            // Names which step is running so a thrown failure reports the phase that broke
+            // ("Couldn't reconcile" vs "Couldn't upload") instead of one generic "Sync failed".
+            var failedPhaseRes = R.string.settings_sync_failed
             try {
                 // 0. Fresh cloud photo listing — pulls the current Photos stream and DELETES
                 //    `photo_listing` rows for items no longer on Drive. Without this step the
@@ -597,9 +602,11 @@ class SettingsViewModel @Inject constructor(
                 }
                 // 1. Reconcile: refresh cloud DB + mark unsynced local photos as LOCAL_ONLY,
                 //    demote SYNCED → CLOUD_ONLY for cloud-deleted items.
+                failedPhaseRes = R.string.settings_sync_failed_reconcile
                 reconcile(userId).collect {}
                 // 2. Upload: send LOCAL_ONLY photos to Proton Drive
                 //    (uploadFile() now immediately saves each photo to the local DB)
+                failedPhaseRes = R.string.settings_sync_failed_upload
                 upload(userId)
                 val now = System.currentTimeMillis()
                 context.settingsDataStore.edit { it[SettingsKeys.LAST_SYNC_MS] = now }
@@ -613,8 +620,10 @@ class SettingsViewModel @Inject constructor(
                 } catch (e: Exception) {
                     android.util.Log.w("SettingsViewModel", "syncNow: post-sync getUser failed", e)
                 }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: Exception) {
-                _uiState.update { it.copy(syncError = e.message ?: context.getString(R.string.settings_sync_failed)) }
+                _uiState.update { it.copy(syncError = context.getString(failedPhaseRes)) }
             } finally {
                 _uiState.update { it.copy(isSyncing = false) }
             }
@@ -773,6 +782,13 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    fun setMirrorStripToLocal(enabled: Boolean) {
+        viewModelScope.launch {
+            context.settingsDataStore.edit { it[SettingsKeys.MIRROR_STRIP_TO_LOCAL] = enabled }
+            _uiState.update { it.copy(mirrorStripToLocal = enabled) }
+        }
+    }
+
     fun setRenameToCaptureDate(enabled: Boolean) {
         viewModelScope.launch {
             context.settingsDataStore.edit { it[SettingsKeys.RENAME_TO_CAPTURE_DATE] = enabled }
@@ -923,6 +939,7 @@ class SettingsViewModel @Inject constructor(
                             "event_anchor_${userId.id}_",
                             "photo_listing_cursor_${userId.id}_",
                             "photo_listing_complete_${userId.id}_",
+                            "photo_listing_ever_complete_${userId.id}_",
                         )
                         prefs.asMap().keys
                             .filter { key -> dynamicPrefixes.any { key.name.startsWith(it) } }

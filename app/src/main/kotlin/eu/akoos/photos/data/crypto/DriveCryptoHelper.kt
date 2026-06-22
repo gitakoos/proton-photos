@@ -35,6 +35,7 @@ import me.proton.core.key.domain.decryptData
 import me.proton.core.key.domain.decryptSessionKey
 import me.proton.core.key.domain.useKeys
 import me.proton.core.user.domain.repository.UserAddressRepository
+import org.json.JSONObject
 import java.io.File
 import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
@@ -54,6 +55,19 @@ internal object DriveSignatureContexts {
 }
 
 private const val TAG = "DriveCrypto"
+
+/**
+ * Extracts (latitude, longitude) from a plaintext XAttr JSON blob produced by [DriveCryptoHelper].
+ * The Location block is optional (absent when the photo had no GPS), so a missing/malformed block
+ * returns null. Coordinates outside the valid WGS84 ranges are rejected. Pure and main-process safe.
+ */
+fun parsePhotoLocation(xAttrJson: String): Pair<Double, Double>? = runCatching {
+    val location = JSONObject(xAttrJson).optJSONObject("Location") ?: return@runCatching null
+    if (!location.has("Latitude") || !location.has("Longitude")) return@runCatching null
+    val lat = location.getDouble("Latitude")
+    val lon = location.getDouble("Longitude")
+    if (lat in -90.0..90.0 && lon in -180.0..180.0) lat to lon else null
+}.getOrNull()
 
 data class NodeKeyMaterial(
     val armoredPrivateKey: String,
@@ -279,6 +293,21 @@ class DriveCryptoHelper @Inject constructor(
             // Fallback: legacy text-mode messages
             try { cryptoContext.pgpCrypto.decryptText(encryptedNameArmored, nodeKeyBytes) }
             catch (e2: Exception) { Log.w(TAG, "decryptLinkName failed: ${e2.message}"); null }
+        }
+    }
+
+    /**
+     * Decrypts a cloud photo's armored XAttr blob to its plaintext JSON with the node key.
+     * Like [decryptLinkName], it runs under [cryptoLock] without signature verification.
+     * Returns null on any failure (the Go runtime guards apply: blank armor is rejected first).
+     */
+    fun decryptXAttr(xAttrArmored: String, nodeKeyBytes: ByteArray): String? = cryptoLock.withLock {
+        if (xAttrArmored.isBlank()) return@withLock null
+        runCatching {
+            cryptoContext.pgpCrypto.decryptText(xAttrArmored, nodeKeyBytes)
+        }.getOrElse {
+            Log.w(TAG, "decryptXAttr failed: ${it.message}")
+            null
         }
     }
 
@@ -1328,7 +1357,7 @@ class DriveCryptoHelper @Inject constructor(
                     unlockedKey.close()
                     bytes
                 }
-                Log.d(TAG, "decryptExternalShareKey: address=${address.email} passphraseBytes=${passphraseBytes.size} keyBytes=${keyBytes.size}")
+                Log.d(TAG, "decryptExternalShareKey: succeeded (passphraseBytes=${passphraseBytes.size} keyBytes=${keyBytes.size})")
                 return keyBytes
             }
             lastError = attempt.exceptionOrNull()

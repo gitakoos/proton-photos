@@ -77,6 +77,7 @@ class LinkDetailHelpers @Inject constructor(
                     }
                 }
             } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
                 Log.e(TAG, "batchFetchLinkDetails chunk failed: ${e.message}")
             }
         }
@@ -109,6 +110,7 @@ class LinkDetailHelpers @Inject constructor(
                     }
                 }
             } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
                 Log.w(TAG, "batchFetchContentKeyPackets failed: ${e.message}")
             }
         }
@@ -148,11 +150,60 @@ class LinkDetailHelpers @Inject constructor(
                     }
                 }
             } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
                 Log.w(TAG, "batchFetchLinkDetailsViaShare failed: ${e.message}")
             }
         }
         Log.d(TAG, "batchFetchLinkDetailsViaShare: got ${result.size}/${linkIds.size} link details")
         return result
+    }
+
+    /**
+     * Fetches one photo's encrypted XAttr from its active revision. The link-metadata endpoints
+     * (volume + share) omit the revision XAttr; only the revision endpoint returns it. Tries the
+     * volume revision endpoint first, then the share-based one, mirroring PhotoDownloadService.
+     */
+    suspend fun fetchRevisionXAttr(
+        userId: UserId,
+        volumeId: String,
+        shareId: String,
+        linkId: String,
+        revisionId: String,
+    ): String? {
+        val manager = apiProvider.get<DriveApiService>(userId)
+        return shareService.networkSemaphore.withPermit {
+            runCatching {
+                manager.invoke { getRevisionByVolume(volumeId, linkId, revisionId) }.valueOrThrow.revision.xAttr
+            }.getOrNull()
+                ?: runCatching {
+                    manager.invoke { getRevision(shareId, linkId, revisionId) }.valueOrThrow.revision.xAttr
+                }.getOrNull()
+        }
+    }
+
+    /**
+     * Like [fetchRevisionXAttr], but distinguishes a successful fetch with no XAttr (returns null)
+     * from a fetch that FAILED (rethrows the underlying error after the volume + share fallbacks are
+     * both exhausted). The swallow-and-return-null shape of [fetchRevisionXAttr] can't tell those
+     * apart; the GPS backfill needs to, so it only marks a row checked once its revision was actually
+     * read and retries the ones whose fetch threw. Rides the same [PhotosShareService.networkSemaphore]
+     * permit pool.
+     */
+    suspend fun fetchRevisionXAttrOrThrow(
+        userId: UserId,
+        volumeId: String,
+        shareId: String,
+        linkId: String,
+        revisionId: String,
+    ): String? {
+        val manager = apiProvider.get<DriveApiService>(userId)
+        return shareService.networkSemaphore.withPermit {
+            runCatching {
+                manager.invoke { getRevisionByVolume(volumeId, linkId, revisionId) }.valueOrThrow.revision.xAttr
+            }.getOrElse {
+                manager.invoke { getRevision(shareId, linkId, revisionId) }.valueOrThrow.revision.xAttr
+            }
+        }
     }
 
     /**
@@ -185,6 +236,7 @@ class LinkDetailHelpers @Inject constructor(
                     }
                 }
             } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
                 Log.w(TAG, "batchFetchThumbnailUrls chunk failed: ${e.message}")
             }
         }

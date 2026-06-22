@@ -193,6 +193,14 @@ class CryptoServiceClient @Inject constructor(
             local = { fallback.get().decryptBinaryPgpWithNodeKey(data, nodeKeyBytes) },
         )
 
+    /** Decrypts a cloud photo's armored XAttr blob to plaintext JSON in `:crypto`. Null = the
+     *  guarded decrypt failed there (not retried in-process). Falls back on a transport failure. */
+    suspend fun decryptXAttr(xAttrArmored: String, nodeKeyBytes: ByteArray): String? =
+        withService(
+            remote = { svc -> svc.decryptXAttr(xAttrArmored, nodeKeyBytes) },
+            local = { fallback.get().decryptXAttr(xAttrArmored, nodeKeyBytes) },
+        )
+
     /** File-based binary-PGP decrypt for large download blocks. Returns true on success
      *  (plaintext written to [destFile]). Falls back to the in-process byte[] helper. */
     suspend fun decryptBinaryToFile(encryptedFile: File, destFile: File, nodeKeyBytes: ByteArray): Boolean =

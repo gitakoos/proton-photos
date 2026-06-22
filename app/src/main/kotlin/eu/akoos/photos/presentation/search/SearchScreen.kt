@@ -43,7 +43,6 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -53,7 +52,6 @@ import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.FilterList
@@ -91,7 +89,10 @@ import eu.akoos.photos.presentation.gallery.FilterChip
 import eu.akoos.photos.presentation.gallery.GalleryFilter
 import eu.akoos.photos.presentation.gallery.MediaType
 import eu.akoos.photos.presentation.gallery.SyncStatusFilter
+import eu.akoos.photos.presentation.memories.FloatingMemoriesHeader
+import eu.akoos.photos.presentation.search.components.CalendarPreviewCard
 import eu.akoos.photos.presentation.search.components.JumpToMonthGridSection
+import eu.akoos.photos.presentation.search.components.MapPreviewCard
 import eu.akoos.photos.presentation.search.components.OnThisDayRow
 import eu.akoos.photos.presentation.search.components.RecentRow
 import eu.akoos.photos.presentation.search.components.MonthBucket
@@ -116,6 +117,8 @@ private val chipShape = RoundedCornerShape(10.dp)
 fun SearchScreen(
     onBack: () -> Unit,
     onPhotoClick: (List<GalleryItem>, Int) -> Unit,
+    onOpenMap: () -> Unit = {},
+    onOpenCalendar: () -> Unit = {},
     vm: SearchViewModel = hiltViewModel(),
 ) {
     val colors = AppColors.current
@@ -124,6 +127,8 @@ fun SearchScreen(
     val filter by vm.contentFilter.collectAsStateWithLifecycle()
     val selectedCategory by vm.selectedCategory.collectAsStateWithLifecycle()
     val allItems by vm.allItems.collectAsStateWithLifecycle()
+    val geotaggedPins by vm.geotaggedPins.collectAsStateWithLifecycle()
+    val distinctCityCount by vm.distinctCityCount.collectAsStateWithLifecycle()
 
     var showFilterSheet by remember { mutableStateOf(false) }
     val filterSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -132,44 +137,20 @@ fun SearchScreen(
     // vertical space; they slide back at the top. The search field + title stay put.
     val filterRowsVisible by remember { derivedStateOf { resultsGridState.firstVisibleItemIndex == 0 } }
 
-    Column(
+    Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(colors.bg0)
-            .statusBarsPadding(),
+            .background(colors.bg0),
     ) {
-        // Top bar: back arrow + screen title.
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(36.dp)
-                    .clip(CircleShape)
-                    .background(colors.pillBg, CircleShape)
-                    .border(0.5.dp, colors.pillBorder, CircleShape)
-                    .clickable(onClick = onBack),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = stringResource(R.string.onboarding_back),
-                    tint = colors.fgPrimary,
-                    modifier = Modifier.size(18.dp),
-                )
-            }
-            Spacer(modifier = Modifier.width(4.dp))
-            Text(
-                text = stringResource(R.string.search_title),
-                color = colors.fgPrimary,
-                fontSize = 19.sp,
-                fontWeight = FontWeight.SemiBold,
-            )
-        }
-
+      // Search content fills the screen; the floating header overlays it (added after this
+      // Column in the Box so it draws on top). The status-bar inset plus a top pad clears
+      // the collapsed header row so the search field never slips under the title pill.
+      Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .statusBarsPadding()
+            .padding(top = 52.dp),
+      ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -295,6 +276,16 @@ fun SearchScreen(
                     .navigationBarsPadding(),
                 contentPadding = PaddingValues(bottom = 24.dp),
             ) {
+                item(key = "map_preview_section") {
+                    MapPreviewCard(
+                        pins = geotaggedPins,
+                        cityCount = distinctCityCount,
+                        onOpenMap = onOpenMap,
+                    )
+                }
+                item(key = "calendar_preview_section") {
+                    CalendarPreviewCard(onClick = onOpenCalendar)
+                }
                 if (recent.isNotEmpty()) {
                     item(key = "recent_section") {
                         RecentRow(
@@ -369,7 +360,7 @@ fun SearchScreen(
                         .navigationBarsPadding(),
                 ) {
                     itemsIndexed(results, key = { _, it -> keyOf(it) }) { idx, item ->
-                        val inputs = photoCellInputsFor(item)
+                        val inputs = remember(item) { photoCellInputsFor(item) }
                         PhotoCell(
                             imageData = inputs.imageData,
                             stableKey = inputs.stableKey,
@@ -396,6 +387,14 @@ fun SearchScreen(
                 )
             }
         }
+      }
+
+        // Floating title pill — drops down to switch to the Map or Calendar view, like the
+        // Collection. It carries its own statusBarsPadding and floats over the search content.
+        FloatingMemoriesHeader(
+            title = stringResource(R.string.search_title),
+            onBack = onBack,
+        )
     }
 
     if (showFilterSheet) {

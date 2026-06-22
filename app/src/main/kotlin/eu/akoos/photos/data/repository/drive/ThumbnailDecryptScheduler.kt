@@ -520,7 +520,7 @@ class ThumbnailDecryptScheduler @Inject constructor(
                 }
             }
             if (evicted.isNotEmpty()) {
-                runCatching { photoListingDao.clearThumbnailUrlsByLinkIds(evicted) }
+                runCatching { evicted.chunked(500).forEach { photoListingDao.clearThumbnailUrlsByLinkIds(it) } }
                     .onFailure { Log.w(TAG, "trim: clearing ${evicted.size} rows failed: ${it.message}") }
                 Log.d(TAG, "thumb cache trim: evicted ${evicted.size}, now ${total / (1024 * 1024)}MB")
             }

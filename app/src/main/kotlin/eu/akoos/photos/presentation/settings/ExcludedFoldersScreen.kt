@@ -54,6 +54,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -109,7 +110,7 @@ fun ExcludedFoldersScreen(
                 icon = Icons.AutoMirrored.Filled.ArrowBack,
                 contentDescription = stringResource(R.string.onboarding_back),
                 onClick = onBack,
-                diameter = 36.dp,
+                diameter = 40.dp,
                 iconSize = 18.dp,
                 background = colors.surfaceWeak,
                 borderColor = PillBorder,
@@ -304,7 +305,7 @@ private fun ExcludeRow(
                 fontWeight = FontWeight.Medium,
             )
             Text(
-                "${folder.itemCount} photos",
+                pluralStringResource(R.plurals.count_photos_plural, folder.itemCount, folder.itemCount),
                 color    = FgMute,
                 fontSize = 12.sp,
             )

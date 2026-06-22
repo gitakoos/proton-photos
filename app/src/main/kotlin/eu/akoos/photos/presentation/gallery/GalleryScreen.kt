@@ -515,7 +515,12 @@ fun GalleryScreen(
     val showOverlays by remember(selectedTab) {
         derivedStateOf {
             when (selectedTab) {
-                0 -> !isPhotosScrollingDown || gridState.firstVisibleItemIndex == 0
+                // When the grid is replaced by an EmptyState (filtered to nothing, or the whole
+                // library deleted) there's no content to scroll back to index 0 — so always keep the
+                // header + nav dock visible. Otherwise a scrolled-down delete-all leaves the overlays
+                // hidden with no way to bring them back short of restarting the app.
+                0 -> state.filteredItems.isEmpty() ||
+                    !isPhotosScrollingDown || gridState.firstVisibleItemIndex == 0
                 1 -> !isAlbumsScrollingDown || albumsGridState.firstVisibleItemIndex == 0
                 else -> true // Shared tab has no scroll hiding yet
             }
@@ -895,7 +900,11 @@ fun GalleryScreen(
                     showShareSheet = true
                 },
                 onRequestDelete = { showMultiDeleteSheet = true },
-                onHeaderHeightChanged = { headerHeightPx = it },
+                // Keep the grid's top inset at the FULL browse-header height while selecting, so it
+                // doesn't jump up when the shorter selection header (no category rail) replaces the
+                // taller browse header. The browse header's last measurement stays in headerHeightPx —
+                // AnimatedVisibility stops re-measuring it while it's hidden — so the content holds.
+                onHeaderHeightChanged = { },
             )
         }
 

@@ -286,6 +286,13 @@
     <string name="settings_security_desc">Bloqueo de app, fotos ocultas</string>
     <string name="settings_strip_metadata_upload">Quitar metadatos al subir</string>
     <string name="settings_strip_metadata_upload_desc">Quitar la ubicación GPS antes de subir. Añade campos de cámara, fecha y software en Personalizar.</string>
+    <string name="settings_mirror_strip_local">Reflejar los cambios en los archivos locales</string>
+    <string name="settings_mirror_strip_local_desc">Aplica los mismos cambios de metadatos y nombre al original en el dispositivo, para que la copia subida y la local sean idénticas. Esto modifica tus archivos originales.</string>
+    <string name="onboarding_mirror_title">Igualar las copias locales</string>
+    <string name="onboarding_mirror_subtitle">Aplica los mismos cambios a los originales de tu dispositivo</string>
+    <string name="onboarding_mirror_toggle">Reflejar los cambios en los archivos locales</string>
+    <string name="onboarding_mirror_toggle_desc">Al subir, aplica los mismos cambios de metadatos y nombre al original en el dispositivo, para que el archivo local y la copia subida sean idénticos. Esto modifica tus archivos originales.</string>
+    <string name="onboarding_mirror_grant">Permitir acceso a todos los archivos</string>
     <string name="settings_rename_on_upload">Renombrar a la fecha de captura al subir</string>
     <string name="settings_rename_on_upload_desc">Usa los metadatos de la foto o el vídeo para establecer el nombre del archivo con la fecha y hora de captura antes de subirlo. El archivo original en el dispositivo no se modifica.</string>
     <string name="settings_strip_gps">Quitar ubicación GPS</string>
@@ -364,6 +371,7 @@
     <string name="hidden_photos_title">Fotos ocultas</string>
     <string name="hidden_photos_auth_prompt">Autentícate para ver tus fotos ocultas</string>
     <string name="hidden_photos_unlock">Desbloquear</string>
+    <string name="app_lock_authenticate_prompt">Autentícate para continuar</string>
     <string name="hidden_no_device_lock_notice">Sin bloqueo de pantalla — la carpeta oculta no está protegida.</string>
     <string name="hidden_auth_title">Fotos ocultas</string>
     <string name="hidden_auth_description">Autentícate para ver tus fotos ocultas</string>
@@ -430,6 +438,9 @@
     <string name="about_lib_coil">Biblioteca de carga de imágenes</string>
     <string name="about_lib_room">Base de datos local</string>
     <string name="about_lib_gopenpgp">Implementación de OpenPGP</string>
+    <string name="about_lib_geonames">Conjunto de datos de nombres de ciudades, con licencia CC BY 4.0</string>
+    <string name="about_lib_osmdroid">Vista de mapa, con licencia Apache 2.0</string>
+    <string name="about_lib_osm">Datos de mapa © OpenStreetMap contributors, ODbL</string>
 
     <!-- Albums -->
     <string name="albums_new_album">Nuevo álbum</string>
@@ -476,6 +487,7 @@
     <string name="share_role_can_edit">puede editar</string>
     <string name="share_role_pending">pendiente</string>
     <string name="share_stop_sharing">Dejar de compartir</string>
+    <string name="shared_stop_sharing_confirm_body">Los enlaces públicos dejarán de funcionar y las fotos ya no se compartirán.</string>
     <string name="share_close">Cerrar</string>
     <!-- Drive-web-style invite popup (multi-chip flow) -->
     <string name="share_invite_email_hint">Dirección de correo</string>
@@ -589,6 +601,16 @@
         <item quantity="many">%d fotos</item>
         <item quantity="other">%d fotos</item>
     </plurals>
+    <plurals name="map_card_subtitle_count">
+        <item quantity="one">%1$d foto en el mapa</item>
+        <item quantity="many">%1$d fotos en el mapa</item>
+        <item quantity="other">%1$d fotos en el mapa</item>
+    </plurals>
+    <plurals name="map_card_cities_count">
+        <item quantity="one">%d ciudad</item>
+        <item quantity="many">%d ciudades</item>
+        <item quantity="other">%d ciudades</item>
+    </plurals>
     <plurals name="count_videos_plural">
         <item quantity="one">1 vídeo</item>
         <item quantity="many">%d vídeos</item>
@@ -598,6 +620,11 @@
         <item quantity="one">Invitación enviada</item>
         <item quantity="many">%1$d invitaciones enviadas</item>
         <item quantity="other">%1$d invitaciones enviadas</item>
+    </plurals>
+    <plurals name="shared_stop_sharing_confirm_title">
+        <item quantity="one">¿Dejar de compartir esta foto?</item>
+        <item quantity="many">¿Dejar de compartir %d fotos?</item>
+        <item quantity="other">¿Dejar de compartir %d fotos?</item>
     </plurals>
 
     <string name="gallery_on_this_day">En este día</string>
@@ -636,6 +663,7 @@
     <string name="viewer_view_panorama">Ver panorámica</string>
     <string name="viewer_exit_panorama">Salir</string>
     <string name="motion_photo_play_failed">No se pudo reproducir esta foto en movimiento.</string>
+    <string name="viewer_video_play_failed">No se puede reproducir este vídeo</string>
 
     <!-- Editor de vídeo -->
     <string name="video_editor_trim">Recortar</string>
@@ -706,17 +734,27 @@
     <string name="search_section_on_this_day_years_plural">Hace %1$d años</string>
     <string name="search_section_jump_to_month">Saltar al mes</string>
     <string name="search_section_recent">Recientes</string>
+    <string name="map_title">Mapa</string>
+    <string name="map_card_title">Mapa</string>
+    <string name="map_card_subtitle_empty">Aún no hay fotos ubicadas</string>
+    <string name="map_card_calendar_subtitle">Tus fotos en vista de calendario</string>
+    <string name="map_search_places">Buscar lugares</string>
+    <string name="map_search_no_places">Aún no hay lugares</string>
+
+    <!-- Location detail -->
+    <string name="location_save_as_album">Guardar como álbum</string>
+    <string name="location_save_as_album_confirm_title">Guardar como álbum</string>
+    <string name="location_save_as_album_confirm_body_fmt">¿Crear un álbum a partir de %1$s?</string>
+    <string name="location_saved_as_album_fmt">Álbum \"%1$s\" creado</string>
     <string name="calendar_title">Calendario</string>
     <string name="calendar_no_photos">No hay fotos este mes</string>
-    <string name="calendar_search_placeholder">Buscar por fecha, lugar o nota</string>
+    <string name="calendar_search_placeholder">Buscar por mes, año o descripción</string>
     <string name="calendar_search_no_results">Sin días coincidentes</string>
     <string name="calendar_view_toggle_cd">Cambiar modo de vista</string>
     <string name="calendar_search_cd">Buscar en el calendario</string>
     <string name="calendar_jump_cd">Saltar al mes</string>
     <string name="calendar_jump_title">Saltar al mes</string>
-    <string name="day_detail_location_hint">Añade un lugar</string>
     <string name="day_detail_description_hint">Añade una nota sobre este día</string>
-    <string name="day_detail_edit_location_title">Editar ubicación</string>
     <string name="day_detail_edit_description_title">Editar descripción</string>
     <string name="day_detail_save">Guardar</string>
     <string name="day_detail_photos_count">%1$d fotos</string>
@@ -856,6 +894,8 @@
     <string name="viewer_meta_row_date">Fecha</string>
     <string name="viewer_meta_row_size">Tamaño</string>
     <string name="viewer_meta_row_type">Tipo</string>
+    <string name="viewer_meta_row_resolution">Resolución</string>
+    <string name="viewer_meta_row_duration">Duración</string>
     <string name="viewer_meta_row_album">Álbum</string>
     <string name="viewer_meta_row_source">Origen</string>
     <string name="viewer_meta_row_make">Fabricante</string>
@@ -868,6 +908,7 @@
     <string name="viewer_meta_row_flash">Flash</string>
     <string name="viewer_meta_row_white_balance">Balance de blancos</string>
     <string name="viewer_meta_row_latitude">Latitud</string>
+    <string name="viewer_meta_row_place">Lugar</string>
     <string name="viewer_meta_row_longitude">Longitud</string>
     <string name="viewer_meta_row_altitude">Altitud</string>
     <string name="viewer_meta_row_taken">Tomada</string>
@@ -997,6 +1038,7 @@
     <string name="sync_folders_add_action">Añadir carpeta</string>
     <string name="sync_folders_add_row_subtitle">Declara una carpeta por adelantado para que las fotos futuras se respalden automáticamente</string>
     <string name="sync_folders_add_dialog_body">Introduce el nombre exacto de la carpeta (p. ej. \"Viaje 2026\"). En cuanto una foto llegue a una carpeta coincidente, se respaldará automáticamente.</string>
+    <string name="sync_folders_add_dialog_name_invalid">Introduce un nombre de carpeta nuevo que no esté ya añadido</string>
     <string name="sync_folders_selected_cd">Seleccionada</string>
 
     <!-- Mirror device folders as albums screen -->
@@ -1009,6 +1051,8 @@
 
     <!-- Settings — sync error popup + free-up snackbars -->
     <string name="settings_sync_failed">Error de sincronización</string>
+    <string name="settings_sync_failed_reconcile">No se pudo comprobar qué falta por respaldar</string>
+    <string name="settings_sync_failed_upload">No se pudieron subir las fotos</string>
     <string name="settings_freed_photos">%1$d foto(s) liberadas del dispositivo</string>
     <string name="settings_free_up_none">No hay fotos respaldadas en caché local para eliminar</string>
     <string name="settings_free_up_error">No se pudo liberar espacio: %1$s</string>

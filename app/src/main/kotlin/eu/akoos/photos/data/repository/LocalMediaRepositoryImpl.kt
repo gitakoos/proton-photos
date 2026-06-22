@@ -179,6 +179,23 @@ class LocalMediaRepositoryImpl @Inject constructor(
 
     override fun hasMediaPermission(): Flow<Boolean> = flowOf(checkMediaPermission())
 
+    override suspend fun sha1(uri: String): String? = withContext(Dispatchers.IO) {
+        val digest = java.security.MessageDigest.getInstance("SHA-1")
+        try {
+            context.contentResolver.openInputStream(Uri.parse(uri))?.use { stream ->
+                val buffer = ByteArray(8192)
+                var read: Int
+                while (stream.read(buffer).also { read = it } != -1) {
+                    digest.update(buffer, 0, read)
+                }
+            } ?: return@withContext null
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            return@withContext null
+        }
+        digest.digest().joinToString("") { "%02x".format(it) }
+    }
+
     override suspend fun queryByUri(uri: String): LocalMediaItem? = withContext(Dispatchers.IO) {
         val parsedUri = Uri.parse(uri)
         // App-private hidden file (file://...) — synthesize the LocalMediaItem from the file.
@@ -240,6 +257,7 @@ class LocalMediaRepositoryImpl @Inject constructor(
                 if (cursor.moveToFirst()) cursor.toLocalMediaItem(baseUri = collectionUri) else null
             }
         } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
             null
         }
     }
@@ -294,7 +312,13 @@ class LocalMediaRepositoryImpl @Inject constructor(
             }
         }
 
-        result.sortedByDescending { it.dateTaken }
+        val sorted = result.sortedByDescending { it.dateTaken }
+        // Fill/refresh the photo-category tag cache for new or changed files in the background
+        // (cheap pre-filter; only large images get an XMP read), keyed on the real DATE_MODIFIED
+        // this query reads — so the next scan surfaces accurate type badges instead of caching a
+        // dateModified of 0 that never matches the gallery's freshness check.
+        localTagScanScheduler.schedule(sorted)
+        sorted
     }
 
     private suspend fun queryTrashedMedia(): List<LocalMediaItem> = withContext(Dispatchers.IO) {
@@ -330,12 +354,7 @@ class LocalMediaRepositoryImpl @Inject constructor(
                 }
             } catch (_: Exception) {}
         }
-        val sorted = result.sortedByDescending { it.dateTaken }
-        // Fill/refresh the photo-category tag cache for any new or changed files in the
-        // background (cheap pre-filter; only large images get an XMP read), so the next scan
-        // surfaces accurate type badges and category search without re-reading on the hot path.
-        localTagScanScheduler.schedule(sorted)
-        sorted
+        result.sortedByDescending { it.dateTaken }
     }
 
     private fun checkMediaPermission(): Boolean {

@@ -84,7 +84,7 @@ internal fun SettingsSubPageScaffold(
                     icon = Icons.AutoMirrored.Filled.ArrowBack,
                     contentDescription = stringResource(R.string.onboarding_back),
                     onClick = debouncedBack,
-                    diameter = 36.dp,
+                    diameter = 40.dp,
                     iconSize = 16.dp,
                     background = colors.surfaceWeak,
                     borderColor = colors.pillBorder,

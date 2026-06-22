@@ -57,9 +57,12 @@ import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.usecase.DeletePhotoUseCase
+import eu.akoos.photos.data.db.dao.PhotoLocationDao
 import eu.akoos.photos.data.hidden.HiddenStorageManager
 import eu.akoos.photos.domain.usecase.DownloadPhotosUseCase
+import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
 import eu.akoos.photos.util.ExifHelper
+import eu.akoos.photos.util.OfflineGeocoder
 import eu.akoos.photos.util.StripResult
 import eu.akoos.photos.util.MetadataStripConfig
 import eu.akoos.photos.util.MotionPhotoUtil
@@ -67,6 +70,10 @@ import eu.akoos.photos.util.PhotoMetadata
 import eu.akoos.photos.util.friendlyNetworkError
 import java.io.File
 import javax.inject.Inject
+
+/** Raw stream dimensions + length of a cloud video, read off its decrypted full-res for the
+ *  details sheet (a cloud-only video carries no on-device media row and no EXIF). */
+data class CloudVideoMeta(val width: Int, val height: Int, val durationMs: Long)
 
 @HiltViewModel
 class PhotoViewerViewModel @Inject constructor(
@@ -81,6 +88,8 @@ class PhotoViewerViewModel @Inject constructor(
     private val albumListEvents: eu.akoos.photos.util.AlbumListEventBus,
     private val forceUploadLocalUris: eu.akoos.photos.domain.usecase.ForceUploadLocalUrisUseCase,
     private val publicLink: eu.akoos.photos.presentation.common.PublicLinkController,
+    private val photoLocationDao: PhotoLocationDao,
+    private val getGalleryItems: GetGalleryItemsUseCase,
 ) : ViewModel() {
 
     private companion object {
@@ -184,10 +193,21 @@ class PhotoViewerViewModel @Inject constructor(
     private val _metadata = MutableStateFlow<PhotoMetadata?>(null)
     val metadata: StateFlow<PhotoMetadata?> = _metadata.asStateFlow()
 
+    /** Geocoded place name for the details overview's Location row, or null while it resolves / when
+     *  the photo carries no GPS. Loaded per item by [loadDetailsPlace] so the row reserves its slot
+     *  and fills in like the Size row instead of only appearing once a location is found. */
+    private val _detailsPlace = MutableStateFlow<String?>(null)
+    val detailsPlace: StateFlow<String?> = _detailsPlace.asStateFlow()
+
     /** Resolved on-disk size of the loaded cloud full-res, used as the Size-row fallback when
      *  [CloudPhoto.sizeBytes] is 0 (server returns null size for some videos). Reset per page. */
     private val _cloudFullResSize = MutableStateFlow<Long?>(null)
     val cloudFullResSize: StateFlow<Long?> = _cloudFullResSize.asStateFlow()
+
+    /** Resolution + length of a cloud VIDEO, read off its decrypted full-res once it downloads, so a
+     *  cloud-only video's details fill in like a local one's. Null for images / until the blob lands. */
+    private val _cloudVideoMeta = MutableStateFlow<CloudVideoMeta?>(null)
+    val cloudVideoMeta: StateFlow<CloudVideoMeta?> = _cloudVideoMeta.asStateFlow()
 
     /** True when auto full-res was skipped (Wi-Fi-only setting + metered network); the screen then
      *  shows a "Connect to Wi-Fi for full quality" hint. */
@@ -321,6 +341,16 @@ class PhotoViewerViewModel @Inject constructor(
         val sourceAlbumLinkId: String?,
     )
 
+    /** Live gallery list backing the viewer's reconciliation. The screen re-resolves each item in
+     *  its passed-in static `items` snapshot against this by identity so a photo finishing upload
+     *  (LocalOnly → Synced) or any metadata refresh reflects in the open viewer instead of staying
+     *  frozen at click time. Empty until the merge first emits. */
+    val liveItems: StateFlow<List<GalleryItem>> = flow {
+        val userId = accountManager.getPrimaryUserId().first()
+        if (userId == null) { emit(emptyList()); return@flow }
+        emitAll(getGalleryItems.invoke(userId))
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
     /** Cloud linkId → local URI for photos also on device. Lets the screen upgrade a CloudOnly
      *  badge to "Synced" after a download, since the static `items` snapshot can't reflect it. */
     val localUriByLinkId: StateFlow<Map<String, String>> = flow {
@@ -427,6 +457,77 @@ class PhotoViewerViewModel @Inject constructor(
 
     fun clearMetadata() {
         _metadata.value = null
+        _detailsPlace.value = null
+    }
+
+    /**
+     * Resolve the current item's place name for the details overview's Location row — from local EXIF
+     * GPS, or for a cloud photo from the stored fix the map backfill records ([PhotoLocationEntity]).
+     * Reset to null first so the row shows its placeholder immediately, then filled once resolved. A
+     * photo with no GPS simply leaves it null (the row keeps the dash).
+     */
+    fun loadDetailsPlace(item: GalleryItem) {
+        _detailsPlace.value = null
+        viewModelScope.launch(Dispatchers.IO) {
+            val latLng = when (item) {
+                is GalleryItem.LocalOnly -> localGps(item.local.uri)
+                is GalleryItem.Synced -> localGps(item.local.uri) ?: cloudGps(item.cloud.linkId)
+                is GalleryItem.CloudOnly -> cloudGps(item.cloud.linkId)
+            }
+            if (latLng != null) {
+                _detailsPlace.value = OfflineGeocoder.reverseGeocode(context, latLng.first, latLng.second)
+            }
+        }
+    }
+
+    private fun localGps(uri: String): Pair<Double, Double>? {
+        // Images keep GPS in EXIF.
+        val meta = runCatching { ExifHelper.readMetadata(context, uri) }.getOrNull()
+        val lat = meta?.gpsLatitude
+        val lng = meta?.gpsLongitude
+        if (lat != null && lng != null) return lat to lng
+        // Videos keep it in the container (ISO 6709), which ExifInterface doesn't read.
+        return videoGps(uri)
+    }
+
+    private fun videoGps(uri: String): Pair<Double, Double>? {
+        val retriever = android.media.MediaMetadataRetriever()
+        return try {
+            retriever.setDataSource(context, Uri.parse(uri))
+            val loc = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_LOCATION) ?: return null
+            // ISO 6709, e.g. "+37.7749-122.4194/" — take the first two signed numbers (lat, lng).
+            val m = Regex("""([+-]\d+(?:\.\d+)?)([+-]\d+(?:\.\d+)?)""").find(loc) ?: return null
+            val lat = m.groupValues[1].toDoubleOrNull() ?: return null
+            val lng = m.groupValues[2].toDoubleOrNull() ?: return null
+            lat to lng
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            null
+        } finally {
+            runCatching { retriever.release() }
+        }
+    }
+
+    private suspend fun cloudGps(linkId: String): Pair<Double, Double>? {
+        val userId = accountManager.getPrimaryUserId().first() ?: return null
+        val row = runCatching { photoLocationDao.getById(userId.id, linkId) }.getOrNull() ?: return null
+        return row.latitude to row.longitude
+    }
+
+    private fun readVideoMeta(file: File): CloudVideoMeta? {
+        val retriever = android.media.MediaMetadataRetriever()
+        return try {
+            retriever.setDataSource(file.absolutePath)
+            val w = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 0
+            val h = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0
+            val d = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+            if (w > 0 && h > 0) CloudVideoMeta(w, h, d) else null
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            null
+        } finally {
+            runCatching { retriever.release() }
+        }
     }
 
     /**
@@ -1234,6 +1335,7 @@ class PhotoViewerViewModel @Inject constructor(
         // Reset the resolved-size fallback so the details sheet doesn't show last item's
         // size while the new page is still downloading.
         _cloudFullResSize.value = null
+        _cloudVideoMeta.value = null
         _fullResBlockedByMetered.value = false
         // Clear the previous photo's EXIF; the cloud photo's own metadata is read from its
         // decrypted full-res once the download lands (see onSuccess below).
@@ -1293,6 +1395,9 @@ class PhotoViewerViewModel @Inject constructor(
                     // Read EXIF from the decrypted full-res so the details sheet matches a local
                     // photo's. Videos have none; stripped-on-upload simply shows nothing.
                     if (!isVideo) loadMetadata(fileUri.toString())
+                    // A video's resolution + length live in the container, not EXIF — read them off
+                    // the decrypted blob so a cloud-only video's details fill in like a local one's.
+                    else _cloudVideoMeta.value = readVideoMeta(file)
                 },
                 onFailure = { e ->
                     if (photo.thumbnailUrl == null && _state.value.itemKey == itemKey) {
