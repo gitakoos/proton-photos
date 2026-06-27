@@ -35,18 +35,14 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
-import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -75,14 +71,19 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.lazy.staggeredgrid.LazyStaggeredGridState
+import androidx.compose.foundation.lazy.staggeredgrid.rememberLazyStaggeredGridState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -186,6 +187,7 @@ import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.usecase.CategorizeItem
 import eu.akoos.photos.presentation.common.ConfirmDialog
+import eu.akoos.photos.presentation.common.anyLocalOnly
 import eu.akoos.photos.presentation.common.ConfirmSheet
 import eu.akoos.photos.presentation.common.DenseGridWarningDialog
 import eu.akoos.photos.presentation.common.EmptyState
@@ -297,8 +299,49 @@ fun GalleryScreen(
     val appColors = AppColors.current
     var selectedTab by rememberSaveable { mutableIntStateOf(0) }
     val gridState = rememberLazyGridState()
+    // Mosaic uses a staggered grid; its scroll state is hoisted here so the screen-level behaviours
+    // keyed on scroll position (re-tap scroll-to-top, overlay auto-hide, look-ahead prefetch) follow
+    // whichever grid is actually showing. The fixed grid keeps using [gridState] unchanged.
+    val staggeredState = rememberLazyStaggeredGridState()
+    val mosaicGrid by remember {
+        context.settingsDataStore.data.map { it[SettingsKeys.MOSAIC_GRID] ?: false }
+    }.collectAsState(initial = false)
+    // The scroll state the visible Photos grid is driven by; everything below observes this so the
+    // mosaic path is no longer inert.
+    val activeFirstVisibleItemIndex: () -> Int = {
+        if (mosaicGrid) staggeredState.firstVisibleItemIndex else gridState.firstVisibleItemIndex
+    }
+    val activeFirstVisibleItemScrollOffset: () -> Int = {
+        if (mosaicGrid) staggeredState.firstVisibleItemScrollOffset else gridState.firstVisibleItemScrollOffset
+    }
     val albumsGridState = rememberLazyGridState()
     val tabScope = rememberCoroutineScope()
+    // Three top-level tabs (Photos / Albums / Shared), hosted in a pager so they can be swiped
+    // between as well as tapped. Seeded from the saved tab so a config change restores the page.
+    val pagerState = rememberPagerState(initialPage = selectedTab) { 3 }
+    // Two-way sync between the pager and [selectedTab] (which drives the header rail + dock highlight).
+    // Settling on a page — by swipe or by the dock's animateScrollToPage — adopts it as the active tab;
+    // a tap path updates selectedTab and animates the pager below.
+    LaunchedEffect(pagerState.settledPage) {
+        if (pagerState.settledPage != selectedTab) selectedTab = pagerState.settledPage
+    }
+    // ── Landing tab (app open) ────────────────────────────────────────────────
+    // Seed the opening tab from the saved preference ONCE per process. The guard is a
+    // rememberSaveable flag so it survives config changes: on a rotation [selectedTab] is
+    // restored from its own saved value and this effect does not re-run, leaving the user's
+    // manual swipes intact. Default 0 (Photos) reproduces the historical behaviour.
+    var landingTabApplied by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        if (landingTabApplied) return@LaunchedEffect
+        landingTabApplied = true
+        val landing = context.settingsDataStore.data
+            .map { (it[SettingsKeys.LANDING_TAB] ?: 0).coerceIn(0, 2) }
+            .first()
+        if (landing != selectedTab) {
+            selectedTab = landing
+            pagerState.scrollToPage(landing)
+        }
+    }
     var sharedFilter by remember { mutableStateOf(SharedFilter.SharedWithMe) }
     var albumFilter by remember { mutableStateOf(AlbumDisplayFilter.All) }
     var activeEmailFilter by remember { mutableStateOf<String?>(null) }
@@ -324,7 +367,7 @@ fun GalleryScreen(
                 is GalleryItem.LocalOnly -> null
             }
         }
-        LaunchedEffect(gridState, state.filteredItems) {
+        LaunchedEffect(gridState, staggeredState, mosaicGrid, state.filteredItems) {
             val rendered = state.filteredItems
             if (rendered.isEmpty()) return@LaunchedEffect
             // Stable-key → filteredItems index, for the two cell key shapes the grid emits.
@@ -332,7 +375,12 @@ fun GalleryScreen(
             rendered.forEachIndexed { idx, gi -> cloudLinkIdOf(gi)?.let { indexByLinkId[it] = idx } }
             var lastAnchor = -1
             snapshotFlow {
-                val last = gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.key as? String
+                // Anchor on the last visible cell of whichever grid is showing so prefetch warms the
+                // rows just past the viewport in mosaic mode too, not only the fixed grid.
+                val last = if (mosaicGrid)
+                    staggeredState.layoutInfo.visibleItemsInfo.lastOrNull()?.key as? String
+                else
+                    gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.key as? String
                 last?.removePrefix("cloud_")?.removePrefix("synced_")
             }.collect { anchorLinkId ->
                 val anchorIdx = anchorLinkId?.let { indexByLinkId[it] } ?: return@collect
@@ -489,10 +537,13 @@ fun GalleryScreen(
     // ── Scroll direction detection ────────────────────────────────────────────
     var previousIndex by remember { mutableIntStateOf(0) }
     var previousOffset by remember { mutableIntStateOf(0) }
-    val isPhotosScrollingDown by remember {
+    // Reads the ACTIVE grid's first-visible position (staggered when mosaic is on) so overlay
+    // auto-hide-on-scroll works in both layouts. derivedStateOf keeps the live read off the
+    // composable body so it only recomposes when the direction flips, not on every scrolled pixel.
+    val isPhotosScrollingDown by remember(mosaicGrid) {
         derivedStateOf {
-            val currentIndex = gridState.firstVisibleItemIndex
-            val currentOffset = gridState.firstVisibleItemScrollOffset
+            val currentIndex = activeFirstVisibleItemIndex()
+            val currentOffset = activeFirstVisibleItemScrollOffset()
             (currentIndex > previousIndex || (currentIndex == previousIndex && currentOffset > previousOffset))
                 .also { previousIndex = currentIndex; previousOffset = currentOffset }
         }
@@ -509,22 +560,33 @@ fun GalleryScreen(
         }
     }
 
-    // derivedStateOf so reading the live scroll index here doesn't recompose the whole screen on
-    // every scrolled pixel — only when the overlay-visibility boolean actually flips. Reading
-    // firstVisibleItemIndex directly in composition was the dominant scroll-jank source.
-    val showOverlays by remember(selectedTab) {
+    // The single shared header above the pager auto-hides on the active tab's scroll. It follows the
+    // pager's currentPage (which crosses the midpoint mid-swipe), so the header tracks the tab being
+    // swiped to rather than waiting for the swipe to settle. derivedStateOf keeps the live scroll read
+    // off the composable body so it only recomposes when the boolean flips, not on every scrolled pixel.
+    val showOverlays by remember(mosaicGrid) {
         derivedStateOf {
-            when (selectedTab) {
+            when (pagerState.currentPage) {
                 // When the grid is replaced by an EmptyState (filtered to nothing, or the whole
                 // library deleted) there's no content to scroll back to index 0 — so always keep the
                 // header + nav dock visible. Otherwise a scrolled-down delete-all leaves the overlays
                 // hidden with no way to bring them back short of restarting the app.
                 0 -> state.filteredItems.isEmpty() ||
-                    !isPhotosScrollingDown || gridState.firstVisibleItemIndex == 0
+                    !isPhotosScrollingDown || activeFirstVisibleItemIndex() == 0
                 1 -> !isAlbumsScrollingDown || albumsGridState.firstVisibleItemIndex == 0
                 else -> true // Shared tab has no scroll hiding yet
             }
         }
+    }
+    // A tab change (swipe or dock tap) must never land on a page whose header is still in its
+    // scrolled-down hidden state. Re-baselining the scroll trackers to the landed grid's current
+    // position resets "scrolling down" to false, so the header is shown on arrival; the user re-hides
+    // it only by scrolling that page down again.
+    LaunchedEffect(pagerState.currentPage) {
+        previousIndex = activeFirstVisibleItemIndex()
+        previousOffset = activeFirstVisibleItemScrollOffset()
+        previousAlbumsIndex = albumsGridState.firstVisibleItemIndex
+        previousAlbumsOffset = albumsGridState.firstVisibleItemScrollOffset
     }
 
     // ── Filter bottom sheet state ─────────────────────────────────────────────
@@ -588,6 +650,30 @@ fun GalleryScreen(
         if (multiHideState is MultiDeleteState.Failed) {
             snackbarHostState.showSnackbar(multiHideState.message)
             viewModel.resetMultiHideState()
+        }
+    }
+
+    // Undo for the reversible destructive actions (hide → vault, delete → cloud trash). Keyed on
+    // the captured target so it fires once per action, independent of which terminal channel set
+    // it. Not tapping leaves the action exactly as performed; Undo restores precisely those items.
+    val undoAction = state.undoAction
+    LaunchedEffect(undoAction) {
+        if (undoAction == null) return@LaunchedEffect
+        val message = when (undoAction) {
+            is UndoAction.Hide       -> context.resources.getQuantityString(
+                R.plurals.gallery_hidden_snackbar, undoAction.count, undoAction.count)
+            is UndoAction.CloudTrash -> context.resources.getQuantityString(
+                R.plurals.gallery_moved_to_trash_snackbar, undoAction.count, undoAction.count)
+        }
+        val result = snackbarHostState.showSnackbar(
+            message     = message,
+            actionLabel = context.getString(R.string.gallery_undo),
+            duration    = androidx.compose.material3.SnackbarDuration.Long,
+        )
+        if (result == androidx.compose.material3.SnackbarResult.ActionPerformed) {
+            viewModel.undoLastAction()
+        } else {
+            viewModel.clearUndoAction()
         }
     }
 
@@ -724,29 +810,27 @@ fun GalleryScreen(
         }
     }
 
+    val isOnlineNow by viewModel.isOnline.collectAsStateWithLifecycle()
+    val updateBannerVersion by viewModel.updateBannerVersion.collectAsStateWithLifecycle()
+
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(appColors.bg0)
     ) {
         // ── CONTENT ──────────────────────────────────────────────────────────
-        // Adjacent-tab slide: the whole content area eases horizontally on tab change
-        // (forward = enter from the right, back = from the left). The floating header and
-        // bottom dock are siblings, so they stay put while the content slides beneath them.
-        AnimatedContent(
-            targetState = selectedTab,
-            transitionSpec = {
-                val forward = targetState > initialState
-                if (forward) {
-                    (slideInHorizontally { it } + fadeIn()) togetherWith (slideOutHorizontally { -it } + fadeOut())
-                } else {
-                    (slideInHorizontally { -it } + fadeIn()) togetherWith (slideOutHorizontally { it } + fadeOut())
-                }
-            },
-            label = "tabContent",
+        // Only the tab content lives in the pager, so a swipe slides the grid / albums / shared list
+        // beneath the fixed header and dock. The pager's natural snap supplies the slide transition and
+        // the deliberate-swipe threshold (a small nudge settles back, so accidental flicks don't change
+        // tabs). Horizontal swipe is disabled in selection mode so the Photos grid's drag-multi-select
+        // keeps the horizontal/diagonal drag. Content is inset by the shared header's height so it lays
+        // out beneath it, exactly as the floating header expects.
+        HorizontalPager(
+            state = pagerState,
+            userScrollEnabled = !state.isSelectionMode,
             modifier = Modifier.fillMaxSize(),
-        ) { tab ->
-        when (tab) {
+        ) { page ->
+        when (page) {
             0 -> {
                 val pullState = rememberPullToRefreshState()
                 PullToRefreshBox(
@@ -800,6 +884,7 @@ fun GalleryScreen(
                                 monthGroups        = state.monthGroups,
                                 onThisDayGroups    = state.onThisDayGroups,
                                 gridState          = gridState,
+                                staggeredState     = staggeredState,
                                 topContentPadding  = headerHeightDp,
                                 permissionState    = state.permissionState,
                                 onPermissionGrant  = { permissionLauncher.launch(mediaPermissions) },
@@ -843,42 +928,51 @@ fun GalleryScreen(
         }
 
         // ── FLOATING HEADER (normal mode) ─────────────────────────────────────
-        val isOnlineNow by viewModel.isOnline.collectAsStateWithLifecycle()
-        val updateBannerVersion by viewModel.updateBannerVersion.collectAsStateWithLifecycle()
+        // One shared header sits above the pager — the pager swipes only the content beneath it. It is
+        // driven by pagerState.currentPage (which flips at the swipe midpoint), so the per-tab rails
+        // transition DURING the swipe rather than after it settles. Crossfade swaps the per-tab content
+        // and animateContentSize animates the height between the taller Photos header (2 rows + category
+        // rail) and the shorter Albums/Shared ones, so the shrink/grow is smooth instead of a snap.
         AnimatedVisibility(
             visible = showOverlays && !state.isSelectionMode,
             enter = fadeIn(),
             exit = fadeOut(),
             modifier = Modifier.align(Alignment.TopCenter),
         ) {
-            GalleryHeader(
-                selectedTab = selectedTab,
-                galleryState = state,
-                albumsState = albumsState,
-                sharedFilter = sharedFilter,
-                activeEmailFilter = activeEmailFilter,
-                isOnlineNow = isOnlineNow,
-                onFilterSelected = viewModel::onFilterSelected,
-                onSearchClick = onSearchClick,
-                onCalendarClick = onCalendarClick,
-                onClearContentFilter = { viewModel.setContentFilter(ContentFilter()) },
-                onHiddenAlbumClick = onHiddenAlbumClick,
-                // The Albums-tab filter button opens the Timeline filter screen.
-                onShowAlbumsFilterSheet = onOpenTimelineFilter,
-                onNewAlbumClick = { albumCreateSignal++ },
-                albumFilter = albumFilter,
-                onAlbumFilterSelected = { albumFilter = it },
-                onSharedFilterSelected = { filter ->
-                    sharedFilter = filter
-                    activeEmailFilter = null
-                },
-                onShowSharedEmailSheet = { showEmailFilterSheet = true },
-                onSettingsClick = onSettingsClick,
-                onHeaderMeasured = { headerHeightPx = it },
-                updateBannerVersion = updateBannerVersion,
-                onUpdateBannerOpen = viewModel::openUpdateFromBanner,
-                onUpdateBannerDismiss = viewModel::dismissUpdateBanner,
-            )
+            Box(modifier = Modifier.animateContentSize()) {
+                Crossfade(targetState = pagerState.currentPage, label = "headerTab") { page ->
+                    GalleryHeader(
+                        selectedTab = page,
+                        galleryState = state,
+                        albumsState = albumsState,
+                        sharedFilter = sharedFilter,
+                        activeEmailFilter = activeEmailFilter,
+                        isOnlineNow = isOnlineNow,
+                        onFilterSelected = viewModel::onFilterSelected,
+                        onSearchClick = onSearchClick,
+                        onCalendarClick = onCalendarClick,
+                        onClearContentFilter = { viewModel.setContentFilter(ContentFilter()) },
+                        onHiddenAlbumClick = onHiddenAlbumClick,
+                        // The Albums-tab filter button opens the Timeline filter screen.
+                        onShowAlbumsFilterSheet = onOpenTimelineFilter,
+                        onNewAlbumClick = { albumCreateSignal++ },
+                        albumFilter = albumFilter,
+                        onAlbumFilterSelected = { albumFilter = it },
+                        onSharedFilterSelected = { filter ->
+                            sharedFilter = filter
+                            activeEmailFilter = null
+                        },
+                        onShowSharedEmailSheet = { showEmailFilterSheet = true },
+                        onSettingsClick = onSettingsClick,
+                        // Only the page actually in front reports its height, so the content inset and
+                        // the selection-mode grid offset track the visible header, not a fading one.
+                        onHeaderMeasured = { if (page == pagerState.currentPage) headerHeightPx = it },
+                        updateBannerVersion = updateBannerVersion,
+                        onUpdateBannerOpen = viewModel::openUpdateFromBanner,
+                        onUpdateBannerDismiss = viewModel::dismissUpdateBanner,
+                    )
+                }
+            }
         }
 
         // ── SELECTION HEADER (top: cancel + count + share + delete) ───────────
@@ -924,6 +1018,7 @@ fun GalleryScreen(
                 multiHideState = state.multiHideState,
                 multiStripState = multiStripState,
                 addToAlbumState = addToAlbumState,
+                anyLocalOnly = anyLocalOnly(state.selectedItems),
                 onDownload = viewModel::downloadSelected,
                 onRequestAddToAlbum = { showAddToAlbumSheet = true },
                 onBackUp = { showBackUpConfirm = true },
@@ -1001,15 +1096,24 @@ fun GalleryScreen(
                 .padding(bottom = 24.dp),
         ) {
             BottomDock(
-                selectedTab = selectedTab,
+                selectedTab = pagerState.currentPage,
                 onTabSelected = { tab ->
-                    // Always land at the top: re-tapping the active tab or switching to another both
-                    // reset that tab's scroll, so a page never reopens half-scrolled where you left it.
+                    // Always land at the visual top (item 0): re-tapping the active tab or switching
+                    // to another both reset that tab's scroll, so a page never reopens half-scrolled
+                    // where you left it. The Photos tab targets whichever grid is showing (staggered
+                    // when mosaic is on), and item 0 is the top in every order — including reversed,
+                    // where the top is the oldest photo by design.
                     when (tab) {
-                        0 -> tabScope.launch { gridState.scrollToItem(0) }
+                        0 -> tabScope.launch {
+                            if (mosaicGrid) staggeredState.scrollToItem(0) else gridState.scrollToItem(0)
+                        }
                         1 -> tabScope.launch { albumsGridState.scrollToItem(0) }
                     }
+                    // Drive the pager so a tap slides to the page; the rail and dock highlight both
+                    // follow pagerState.currentPage, which flips as the slide crosses the midpoint —
+                    // the same point a swipe flips them, so tap and swipe stay in sync.
                     selectedTab = tab
+                    tabScope.launch { pagerState.animateScrollToPage(tab) }
                 },
             )
         }
@@ -1240,14 +1344,14 @@ internal fun GalleryAddToAlbumPickerSheet(
                     modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp))
             }
             // Scroll the album rows within a bounded height so a large album collection stays
-            // fully reachable (the sheet itself doesn't grow past the screen, so an un-scrolled
-            // list cut everything past ~7 albums off the bottom).
-            Column(
+            // fully reachable. A LazyColumn participates in the bottom sheet's nested scroll,
+            // so the inner list scrolls instead of the sheet swallowing the drag.
+            LazyColumn(
                 modifier = Modifier
-                    .heightIn(max = 360.dp)
-                    .verticalScroll(rememberScrollState()),
+                    .fillMaxWidth()
+                    .heightIn(max = 360.dp),
             ) {
-                cloudAlbums.forEach { album ->
+                items(cloudAlbums) { album ->
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()

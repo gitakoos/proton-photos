@@ -24,6 +24,8 @@ package eu.akoos.photos.util
 
 import android.util.Log
 import kotlinx.coroutines.delay
+import me.proton.core.network.domain.ApiException
+import me.proton.core.network.domain.ApiResult
 import okhttp3.Response
 import java.io.IOException
 import kotlin.random.Random
@@ -34,12 +36,13 @@ private const val TAG = "RetryBackoff"
  * Runs [block] up to [maxAttempts] times with jittered exponential backoff between attempts.
  *
  * Retries are triggered by:
- *   • [IOException] (network failure, socket reset, DNS error)
- *   • Any exception whose message contains "429", "503", "502", "504"
+ *   • [isTransientApiError] (network [IOException], a 429 / 5xx [me.proton.core.network.domain.ApiException], a connectivity error)
  *   • A custom [shouldRetry] predicate evaluated on the thrown exception
  *
- * Backoff: `min(baseMs * 2^attempt, maxBackoffMs)` + random 0..baseMs jitter.
- * The final attempt's failure is propagated.
+ * Backoff: `min(baseMs * 2^attempt, maxBackoffMs)` + random 0..baseMs jitter, but when the failure
+ * is a 429 that carries a `Retry-After`, that server-specified wait (clamped to [maxBackoffMs]) is
+ * honoured instead, so a rate-limited caller backs off exactly as long as the server asked rather
+ * than hammering it sooner. The final attempt's failure is propagated.
  */
 suspend fun <T> retryWithBackoff(
     maxAttempts: Int = 5,
@@ -57,24 +60,60 @@ suspend fun <T> retryWithBackoff(
             val msg = e.message ?: ""
             val transient = isTransientApiError(e) || shouldRetry(e)
             if (!transient || attempt == maxAttempts - 1) throw e
-            val backoff = minOf(baseMs shl attempt, maxBackoffMs)
+            val expBackoff = minOf(baseMs shl attempt, maxBackoffMs)
             val jitter = Random.nextLong(0, baseMs)
-            Log.w(TAG, "attempt ${attempt + 1}/$maxAttempts failed (${e.javaClass.simpleName}: $msg), retrying in ${backoff + jitter}ms")
-            delay(backoff + jitter)
+            val serverWait = e.retryAfterMsOrNull()?.coerceAtMost(maxBackoffMs)
+            val wait = serverWait ?: (expBackoff + jitter)
+            Log.w(TAG, "attempt ${attempt + 1}/$maxAttempts failed (${e.javaClass.simpleName}: $msg), retrying in ${wait}ms")
+            delay(wait)
         }
     }
     throw lastError ?: IllegalStateException("retryWithBackoff exhausted")
 }
 
 /**
- * Whether [e] looks like a transient API failure worth retrying: a network [IOException], or a
- * 429 / 502 / 503 / 504 surfaced in the message. Shared by [retryWithBackoff] and callers running
- * their own slower outer backoff (e.g. resuming a rate-limited large-library listing).
+ * The `Retry-After` a ProtonCore 429 [ApiException] carries (in [ApiResult.Error.Http.retryAfter],
+ * a [kotlin.time.Duration]), in milliseconds, or null when absent / not an HTTP error. Lets the
+ * backoff respect a server-specified wait instead of guessing.
+ */
+private fun Throwable.retryAfterMsOrNull(): Long? {
+    val http = (this as? ApiException)?.error as? ApiResult.Error.Http ?: return null
+    val ms = http.retryAfter?.inWholeMilliseconds ?: return null
+    return if (ms > 0L) ms else null
+}
+
+/**
+ * Whether [e] is a transient API failure worth retrying. Shared by [retryWithBackoff] and callers
+ * running their own slower outer backoff (e.g. resuming a rate-limited large-library listing).
+ *
+ * Classified by TYPE, not by message text: ProtonCore surfaces an HTTP failure as an
+ * [ApiException] whose [ApiException.error] is [ApiResult.Error.Http] carrying the status in the
+ * separate [ApiResult.Error.Http.httpCode] field — the status never appears in `message`, so the
+ * old substring check missed every server-issued 429 / 5xx. Treated as transient:
+ *   • [ApiResult.Error.Http] with httpCode 429 (rate limit) or any 5xx (server-side, retryable)
+ *   • the connectivity [ApiResult.Error] variants (Connection / Timeout / NoInternet)
+ *   • a network [IOException] (raw, or wrapped as the ApiException error's cause)
+ * Non-transient 4xx (e.g. 400 / 403 / 404 / 422) are NOT retried — a retry can't fix them.
+ *
+ * The message-substring fallback is kept last so any wrapper shape we don't recognise by type
+ * still behaves as it did before.
  */
 fun isTransientApiError(e: Throwable): Boolean {
+    if (e is IOException) return true
+    val apiError = (e as? ApiException)?.error
+    if (apiError != null) {
+        when (apiError) {
+            is ApiResult.Error.Http ->
+                if (apiError.httpCode == 429 || apiError.httpCode in 500..599) return true
+            is ApiResult.Error.Connection,
+            is ApiResult.Error.Timeout,
+            is ApiResult.Error.NoInternet -> return true
+            else -> Unit
+        }
+        if (apiError.cause is IOException) return true
+    }
     val msg = e.message ?: ""
-    return e is IOException ||
-        msg.contains("429") || msg.contains("503") || msg.contains("502") || msg.contains("504")
+    return msg.contains("429") || msg.contains("503") || msg.contains("502") || msg.contains("504")
 }
 
 /**

@@ -148,8 +148,15 @@ class ReconcileSyncStateUseCase @Inject constructor(
 
         val newStates = mutableListOf<SyncState>()
 
+        // One snapshot of every SyncState row, indexed by local URI, instead of a per-item
+        // getByUri() DAO round-trip inside the loop below (an N+1 that, at tens of thousands of
+        // local items, issued tens of thousands of point queries). The same snapshot also feeds
+        // the SYNCED-demotion pass further down — that loop reads rows reconcile hasn't written
+        // yet, so the pre-loop view is exactly what it needs.
+        val existingByUri = syncStateRepo.observeAll(userId).first().associateBy { it.localUri }
+
         for (local in localItems) {
-            val existingSync = syncStateRepo.getByUri(local.uri)
+            val existingSync = existingByUri[local.uri]
             // HIDDEN rows belong to a photo the user moved into the Hidden vault — the local
             // MediaStore copy is gone (or about to be), so reconcile must NOT generate a new
             // SyncState entry that would overwrite the HIDDEN status with LOCAL_ONLY/SYNCED.
@@ -205,6 +212,12 @@ class ReconcileSyncStateUseCase @Inject constructor(
             }
 
             val status = if (matchedCloud != null) SyncStatus.SYNCED else SyncStatus.LOCAL_ONLY
+            // Free-up-space only deletes the local copy of a row that carries a backedUpAtMs stamp.
+            // The upload path sets it; a reconcile pairing must set it too so a photo that's provably
+            // on Drive (e.g. paired after a reinstall) becomes reclaimable — but ONLY for a
+            // content-certain match (direct cloud id or content-hash). A name/date-only match is not
+            // proof the bytes are on Drive, so its stamp stays null and free-up-space leaves it alone.
+            val contentCertain = byId != null || byContentHash != null
             newStates += SyncState(
                 localUri = local.uri,
                 cloudFileId = matchedCloud?.linkId,
@@ -213,7 +226,7 @@ class ReconcileSyncStateUseCase @Inject constructor(
                 status = status,
                 lastSyncAttemptMs = System.currentTimeMillis(),
                 lastSyncSuccessMs = if (status == SyncStatus.SYNCED) System.currentTimeMillis() else null,
-                backedUpAtMs = existingSync?.backedUpAtMs,
+                backedUpAtMs = existingSync?.backedUpAtMs ?: (if (contentCertain) System.currentTimeMillis() else null),
                 sizeBytes = local.sizeBytes,
             )
             done++
@@ -237,7 +250,9 @@ class ReconcileSyncStateUseCase @Inject constructor(
         // unlike the main gallery, which also has a contentHash fallback).
         val localUriSet = allLocalItems.map { it.uri }.toSet()
         val nowMs = System.currentTimeMillis()
-        val syncedStates = syncStateRepo.observeAll(userId).first()
+        // Reuse the pre-loop snapshot: this pass only demotes rows that were SYNCED BEFORE
+        // reconcile ran, and the new states aren't persisted until the upsertAll below.
+        val syncedStates = existingByUri.values
             .filter { it.status == SyncStatus.SYNCED && it.cloudFileId != null }
         for (state in syncedStates) {
             when {
@@ -276,7 +291,10 @@ class ReconcileSyncStateUseCase @Inject constructor(
         // out of the normal scope by design; deleting its LOCAL_ONLY row here would make the very
         // next upload pass skip it, so the forced upload would silently never run.
         val forcedUris = (prefs[SettingsKeys.PENDING_ALBUM_ADDS] ?: emptySet())
-            .map { it.substringBeforeLast('=') }
+            // Split at the FIRST '=': the localUri (content:// URI) has none, but the albumLinkId is
+            // base64 and ends in '=' padding, so substringBeforeLast would yield a wrong key and fail
+            // to spare the forced row from the cleanup below.
+            .map { it.substringBefore('=') }
             .toSet()
         val inScopeUris = newStates.map { it.localUri }.toSet()
         val staleLocalOnly = syncStateRepo.observeAll(userId).first()

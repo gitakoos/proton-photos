@@ -50,7 +50,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.itemsIndexed
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -65,6 +65,7 @@ import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.PhotoAlbum
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.TextButton
@@ -231,12 +232,22 @@ fun DeviceFolderDetailScreen(
             }
         }
         val keyToIndex = remember(selectableKeys) { selectableKeys.mapIndexed { i, k -> k to i }.toMap() }
+        // Armed at the long-press anchor so the cell's release-tap skips toggling the just-selected
+        // cell back off (otherwise a stationary long-press would select then immediately deselect).
+        val tapGuard = remember { mutableStateOf(false) }
+        // Group by month like the cloud album. withIndex() keeps each item's original position so
+        // onPhotoClick still opens the right one and the drag-select keys stay aligned.
+        val photoGroups = remember(items) {
+            val fmt = java.text.SimpleDateFormat("MMMM yyyy", java.util.Locale.getDefault())
+            items.withIndex().groupBy { fmt.format(java.util.Date(it.value.captureTimeMs)) }
+        }
         val dragSelectModifier = eu.akoos.photos.presentation.gallery.rememberDragMultiSelectModifier(
             gridState = gridState,
             items = selectableKeys,
             indexByKey = keyToIndex,
             selected = selectedUris,
             onSelectionChange = viewModel::setSelectedUris,
+            tapGuard = tapGuard,
         )
         LazyVerticalGrid(
             columns = GridCells.Fixed(cols),
@@ -318,48 +329,72 @@ fun DeviceFolderDetailScreen(
                     }
                 }
             } else {
-                itemsIndexed(
-                    items = items,
-                    key = { _, item ->
-                        when (item) {
+                photoGroups.forEach { (label, entries) ->
+                    // Month section header — same styling as the cloud-album detail grid.
+                    item(span = { GridItemSpan(maxLineSpan) }, key = "hdr_$label") {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp, top = 24.dp, bottom = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                label,
+                                color = FgPrimary,
+                                fontSize = 22.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                letterSpacing = (-0.44).sp,
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
+                    }
+                    items(
+                        entries,
+                        key = { entry ->
+                            when (val item = entry.value) {
+                                is GalleryItem.LocalOnly -> item.local.uri
+                                is GalleryItem.Synced -> item.local.uri
+                                is GalleryItem.CloudOnly -> item.cloud.linkId
+                            }
+                        },
+                    ) { entry ->
+                        val index = entry.index
+                        val item = entry.value
+                        val itemUri = when (item) {
                             is GalleryItem.LocalOnly -> item.local.uri
                             is GalleryItem.Synced -> item.local.uri
-                            is GalleryItem.CloudOnly -> item.cloud.linkId
+                            is GalleryItem.CloudOnly -> null
                         }
-                    },
-                ) { index, item ->
-                    val itemUri = when (item) {
-                        is GalleryItem.LocalOnly -> item.local.uri
-                        is GalleryItem.Synced -> item.local.uri
-                        is GalleryItem.CloudOnly -> null
+                        val isSelected = itemUri != null && itemUri in selectedUris
+                        // Long-press enters selection directly, matching the timeline and album grids.
+                        // The old per-cell Select / Share / Back-up menu is gone; in selection mode the
+                        // toolbar carries Share + Back up, so a long-press + the toolbar covers the same
+                        // actions without the extra "Select" tap.
+                        val inputs = remember(item) { photoCellInputsFor(item) }
+                        PhotoCell(
+                            imageData = inputs.imageData,
+                            stableKey = inputs.stableKey,
+                            isVideo = inputs.isVideo,
+                            isPlaceholder = inputs.isPlaceholder,
+                            selected = isSelected,
+                            isSelectionMode = isSelectionMode,
+                            showCloudBadge = inputs.showCloudBadge,
+                            showSyncedBadge = inputs.showSyncedBadge,
+                            isFavorite = inputs.isFavorite,
+                            typeBadgeRes = inputs.typeBadgeRes,
+                            typeBadgeCdRes = inputs.typeBadgeCdRes,
+                            onClick = {
+                                // Skip the release-tap that follows a long-press select; it would
+                                // otherwise toggle the just-anchored cell back off.
+                                if (tapGuard.value) {
+                                    tapGuard.value = false
+                                } else if (isSelectionMode) {
+                                    if (itemUri != null) viewModel.toggleSelection(itemUri)
+                                } else onPhotoClick(items, index)
+                            },
+                            // Long-press + drag is handled by the grid-level drag-select; a plain
+                            // long-press there selects this single cell and enters selection mode.
+                            onLongClick = null,
+                        )
                     }
-                    val isSelected = itemUri != null && itemUri in selectedUris
-                    // Long-press enters selection directly, matching the timeline and album grids.
-                    // The old per-cell Select / Share / Back-up menu is gone; in selection mode the
-                    // toolbar carries Share + Back up, so a long-press + the toolbar covers the same
-                    // actions without the extra "Select" tap.
-                    val inputs = remember(item) { photoCellInputsFor(item) }
-                    PhotoCell(
-                        imageData = inputs.imageData,
-                        stableKey = inputs.stableKey,
-                        isVideo = inputs.isVideo,
-                        isPlaceholder = inputs.isPlaceholder,
-                        selected = isSelected,
-                        isSelectionMode = isSelectionMode,
-                        showCloudBadge = inputs.showCloudBadge,
-                        showSyncedBadge = inputs.showSyncedBadge,
-                        isFavorite = inputs.isFavorite,
-                        typeBadgeRes = inputs.typeBadgeRes,
-                        typeBadgeCdRes = inputs.typeBadgeCdRes,
-                        onClick = {
-                            if (isSelectionMode) {
-                                if (itemUri != null) viewModel.toggleSelection(itemUri)
-                            } else onPhotoClick(items, index)
-                        },
-                        // Long-press + drag is handled by the grid-level drag-select; a plain
-                        // long-press there selects this single cell and enters selection mode.
-                        onLongClick = null,
-                    )
                 }
             }
         }
@@ -455,6 +490,28 @@ fun DeviceFolderDetailScreen(
                     )
                 }
                 Spacer(Modifier.size(4.dp))
+                // Hide selected — move on-device-only photos into the app's Hidden vault. Offered only
+                // when something in the selection is LocalOnly (not yet backed up); a Synced photo keeps
+                // its Drive copy so it is never hideable. Mirrors the timeline's hide action.
+                val anyLocalOnlySelected = selectedItems.any { it is GalleryItem.LocalOnly }
+                if (anyLocalOnlySelected) {
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .background(PillBg, CircleShape)
+                            .border(0.5.dp, PillBorder, CircleShape)
+                            .clickable(enabled = !isDeleting) { viewModel.hideSelected() },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            Icons.Default.VisibilityOff,
+                            contentDescription = stringResource(R.string.gallery_hide_selected),
+                            tint = Accent,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                    Spacer(Modifier.size(4.dp))
+                }
                 // Delete selected — same sheet + system trash dialog as the gallery, with the
                 // option to also remove the Drive copy of any backed-up photos.
                 Box(

@@ -233,6 +233,15 @@
     <!-- Gallery snackbar / error fallbacks (raw exception text stays in the log) -->
     <string name="gallery_error_title">Error</string>
     <string name="gallery_no_local_to_hide">No local photos to hide</string>
+    <string name="gallery_undo">Undo</string>
+    <plurals name="gallery_hidden_snackbar">
+        <item quantity="one">1 hidden</item>
+        <item quantity="other">%d hidden</item>
+    </plurals>
+    <plurals name="gallery_moved_to_trash_snackbar">
+        <item quantity="one">1 moved to trash</item>
+        <item quantity="other">%d moved to trash</item>
+    </plurals>
     <string name="gallery_copy_to_hidden_failed">Could not copy to Hidden</string>
     <string name="gallery_move_to_hidden_failed">Could not move to Hidden</string>
     <string name="gallery_add_to_cloud_album_failed">Could not add to cloud album</string>
@@ -241,6 +250,12 @@
     <string name="gallery_create_album_failed">Could not create album: %1$s</string>
     <string name="gallery_enable_metadata_category">Enable a metadata category in Settings → Privacy first</string>
     <string name="gallery_album_picker_count_drive">%1$s · Drive</string>
+    <!-- Add photos to an album from inside the album -->
+    <string name="album_add_photos">Add photos</string>
+    <string name="album_picker_title">Add to album</string>
+    <string name="album_picker_selected">%1$d selected</string>
+    <string name="album_add_count">Add (%1$d)</string>
+    <string name="album_picker_empty">No photos to add.</string>
 
     <!-- Permission -->
     <string name="permission_grant_button">Grant access</string>
@@ -460,6 +475,16 @@
     <string name="settings_hide_all_folders_desc">Photos in hidden device folders won\'t appear in your main Photos timeline. They stay on your device.</string>
     <string name="settings_hide_album_photos_desc">Photos added to a Drive (cloud) album won\'t appear in your main Photos timeline. They still show in the Albums and Shared tabs.</string>
     <string name="settings_timeline_filter">Timeline filter</string>
+    <string name="settings_timeline">Timeline</string>
+    <string name="settings_timeline_section_layout">Layout</string>
+    <string name="settings_timeline_section_shows">What shows</string>
+    <string name="settings_timeline_section_display">Display</string>
+    <string name="settings_show_scroll_date">Show date while scrolling</string>
+    <string name="settings_show_scroll_date_desc">A floating month and year label appears over the timeline while you scroll, so you always have a time reference.</string>
+    <string name="settings_reverse_timeline">Reverse timeline order</string>
+    <string name="settings_reverse_timeline_desc">Show the oldest photos at the top and the newest at the bottom. The timeline opens on your newest photos.</string>
+    <string name="settings_mosaic_grid">Mosaic grid</string>
+    <string name="settings_mosaic_grid_desc">Lay the timeline out as a staggered mosaic where each photo keeps its own shape, so portrait photos stand taller.</string>
     <string name="timeline_filter_title">Timeline filter</string>
     <string name="timeline_filter_subtitle">Choose what to hide from your main Photos timeline. Hidden photos stay on your device and keep backing up.</string>
     <string name="timeline_filter_categories_header">Category bar</string>
@@ -478,8 +503,13 @@
     <string name="settings_media_management_grant_action">Grant</string>
     <string name="settings_appearance">Appearance &amp; Language</string>
     <string name="settings_appearance_desc">Theme, palette, app language</string>
+    <string name="settings_landing_tab">Landing tab</string>
+    <string name="settings_landing_tab_desc">Which tab opens when you start the app</string>
     <string name="settings_strip_customize">Customize what gets stripped</string>
     <string name="settings_about_desc">Version, credits and licenses</string>
+    <string name="settings_copy_diagnostics">Copy diagnostics log</string>
+    <string name="settings_copy_diagnostics_desc">For sync troubleshooting. No account data is included.</string>
+    <string name="settings_diagnostics_copied">Diagnostics log copied</string>
 
     <string name="albums_empty_title">No albums yet</string>
     <string name="albums_empty_subtitle">Albums created in Drive will appear here</string>
@@ -522,6 +552,10 @@
     <string name="language_hu">Hungarian, Magyar</string>
     <string name="language_it">Italian, Italiano</string>
     <string name="language_nl">Dutch, Nederlands</string>
+    <string name="language_pl">Polish, Polski</string>
+    <string name="language_sk">Slovak, Slovenčina</string>
+    <string name="language_sl">Slovenian, Slovenščina</string>
+    <string name="language_cs">Czech, Čeština</string>
     <string name="language_section">Display language</string>
 
     <!-- About -->
@@ -549,6 +583,21 @@
     <string name="about_lib_geonames">City name dataset, licensed under CC BY 4.0</string>
     <string name="about_lib_osmdroid">Map view, licensed under Apache 2.0</string>
     <string name="about_lib_osm">Map data © OpenStreetMap contributors, ODbL</string>
+
+    <!-- FAQ -->
+    <string name="faq_title">Frequently asked questions</string>
+    <string name="faq_settings_entry">FAQ</string>
+    <string name="faq_onboarding_intro">A few quick answers to get you started. You can find these later in Settings.</string>
+    <string name="faq_q_cloud_icons">What do the cloud icons mean?</string>
+    <string name="faq_a_cloud_icons">A green cloud means the photo is backed up to Proton Drive and still on this device. A white cloud means it is only in Proton Drive, not on this device. No icon means it is only on this device and not backed up yet.</string>
+    <string name="faq_q_backup">How does backup work?</string>
+    <string name="faq_a_backup">New photos and videos back up automatically once backup is on. You can keep backups to Wi-Fi only in Settings, so they pause on mobile data.</string>
+    <string name="faq_q_albums">What are albums, and what does folder mirroring do?</string>
+    <string name="faq_a_albums">Albums group photos on Proton Drive. \"Mirror device folders as Drive albums\" makes your phone folders, like Camera or Screenshots, appear as matching albums on Drive as they back up.</string>
+    <string name="faq_q_mirror_local">What does \"Mirror changes to local files\" do?</string>
+    <string name="faq_a_mirror_local">When the app strips metadata or renames a photo as it backs it up, it applies those same changes to the original on your phone too, so the local file and the backed-up copy stay identical. It applies only to photos this app backs up, going forward, and does not pull edits you make on Proton Drive web back to your phone.</string>
+    <string name="faq_q_existing">Does the app change my existing photos?</string>
+    <string name="faq_a_existing">No. Metadata changes happen only when the app backs up a photo, and only if you turn on metadata stripping or local mirroring. Photos already on your phone are left as they are unless you choose a per-photo action.</string>
 
     <!-- Albums -->
     <string name="albums_new_album">New Album</string>
@@ -838,8 +887,8 @@
     <string name="offline_banner_dismiss_cd">Dismiss offline notice</string>
     <string name="network_error_offline">You\'re offline. Try again when you reconnect.</string>
     <string name="network_error_transient">Connection failed. Try again later.</string>
-    <string name="cd_status_backed_up_device">Backed up to Drive and on device</string>
-    <string name="cd_status_cloud_only">Only in Proton Drive</string>
+    <string name="cd_status_backed_up_device">Proton Drive and device</string>
+    <string name="cd_status_cloud_only">Proton Drive only</string>
     <string name="cd_status_hidden_local">Hidden on this device</string>
     <string name="cd_status_device_only">Only on device</string>
     <string name="cd_status_backed_up">Backed up</string>
@@ -1028,9 +1077,9 @@
     <string name="viewer_meta_orientation_180">Rotated 180°</string>
     <string name="viewer_meta_orientation_90_cw">Rotated 90° CW</string>
     <string name="viewer_meta_orientation_90_ccw">Rotated 90° CCW</string>
-    <string name="viewer_meta_source_device_only">On device only</string>
-    <string name="viewer_meta_source_backed_up">Backed up to Proton Drive</string>
-    <string name="viewer_meta_source_cloud">Proton Drive</string>
+    <string name="viewer_meta_source_device_only">On this device only</string>
+    <string name="viewer_meta_source_backed_up">Proton Drive and device</string>
+    <string name="viewer_meta_source_cloud">Proton Drive only</string>
     <string name="viewer_meta_strip">Strip</string>
     <string name="viewer_meta_strip_all">Strip all private metadata</string>
     <string name="viewer_meta_strip_all_desc">Removes GPS, camera info and software fields from this file</string>

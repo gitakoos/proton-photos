@@ -53,11 +53,16 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import androidx.datastore.preferences.core.edit
 import me.proton.core.accountmanager.domain.AccountManager
 import me.proton.core.user.domain.usecase.GetUser
 import eu.akoos.photos.R
+import eu.akoos.photos.data.hidden.HiddenStorageManager
+import eu.akoos.photos.data.preferences.SettingsKeys
+import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.presentation.viewer.PublicLinkState
 import eu.akoos.photos.domain.entity.CloudPhoto
+import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.entity.ShareInvitation
 import eu.akoos.photos.domain.entity.ShareMember
 import eu.akoos.photos.domain.entity.SyncStatus
@@ -91,7 +96,7 @@ sealed class AlbumShareState {
 }
 
 /** Which foreground bulk action is in flight, so the blocking drawer can label it correctly —
- *  delete and remove-from-album both raise [AlbumDetailUiState.isDeletingPhotos]. */
+ *  delete, remove-from-album and hide all raise [AlbumDetailUiState.isDeletingPhotos]. */
 enum class AlbumBusyOp { None, Deleting, Removing }
 
 data class AlbumDetailUiState(
@@ -106,6 +111,9 @@ data class AlbumDetailUiState(
     val busyOp: AlbumBusyOp = AlbumBusyOp.None,
     /** System trash/delete consent intent to launch, set when a delete needs MediaStore permission. */
     val pendingDeleteIntent: android.app.PendingIntent? = null,
+    /** Set after a hide moves at least one backed-up photo to the vault; the UI snackbars the
+     *  "your Drive copies are untouched" notice once, then clears it via [clearHideCloudNotice]. */
+    val hideCloudNoticePending: Boolean = false,
     val isSharing: Boolean = false,
     val shareLink: String? = null,
     /** Persistent public-link URL when the album has an active public share. Distinct from
@@ -170,6 +178,7 @@ class AlbumDetailViewModel @Inject constructor(
     private val networkObserver: eu.akoos.photos.util.NetworkObserver,
     private val albumListEvents: eu.akoos.photos.util.AlbumListEventBus,
     private val deletePhotoUseCase: eu.akoos.photos.domain.usecase.DeletePhotoUseCase,
+    private val hiddenStorage: HiddenStorageManager,
     private val publicLink: eu.akoos.photos.presentation.common.PublicLinkController,
 ) : ViewModel() {
 
@@ -217,8 +226,13 @@ class AlbumDetailViewModel @Inject constructor(
             _uiState.update { it.copy(ownerEmail = email) }
         }
         // Re-pull when photos change elsewhere (e.g. gallery "Add to album"), else the grid stays stale.
+        // Skip while a local remove is in flight: that path re-binds the observe to the surviving ids
+        // itself, so a concurrent full refresh would only re-capture the pre-remove linkIds and re-paint
+        // the removed photos, flickering the grid. A legitimate external change after the remove settles
+        // still refreshes normally.
         viewModelScope.launch {
             albumListEvents.changes.collect {
+                if (suppressSelfRefresh) return@collect
                 if (_uiState.value.albumLinkId.isNotBlank()) refresh()
             }
         }
@@ -227,8 +241,22 @@ class AlbumDetailViewModel @Inject constructor(
     // Cancelled on each new load() call so stale DB observers don't linger.
     private var albumJob: Job? = null
 
+    // The DB-observe job from load() and the linkIds it is collecting. Promoted to fields so a
+    // remove can re-bind the observe to the surviving ids — observePhotosByLinkIds keeps returning a
+    // removed photo (only its album membership row is deleted; the photo_listing row remains), which
+    // would otherwise fight the optimistic filter and make the removed tiles flicker.
+    private var observeJob: Job? = null
+    private var observedLinkIds: List<String> = emptyList()
+
+    // True only for the duration of a local remove so the albumListEvents collector skips a racing
+    // full reload while we re-bind the observe to the surviving ids. Cleared in a finally so a later
+    // external change (gallery "Add to album", a cover-set) still refreshes this album.
+    private var suppressSelfRefresh = false
+
     fun load(albumLinkId: String, albumName: String, shareId: String?, sharedByEmail: String? = null, volumeId: String? = null) {
         albumJob?.cancel()
+        observeJob?.cancel()
+        observedLinkIds = emptyList()
         _uiState.update { it.copy(
             isLoading = true, albumName = albumName, albumLinkId = albumLinkId,
             shareId = shareId, sharedByEmail = sharedByEmail, volumeId = volumeId, error = null,
@@ -248,7 +276,6 @@ class AlbumDetailViewModel @Inject constructor(
             // Phase 2: full network refresh. onLinkIdsResolved fires after the cheap children-fetch
             // but before the heavy metadata work — drop the skeleton there and observe the DB by
             // linkId so chunked upserts trickle in instead of one shimmer until the whole album lands.
-            var observeJob: kotlinx.coroutines.Job? = null
             runCatching {
                 driveRepo.loadAlbumPhotos(
                     userId = userId,
@@ -263,33 +290,7 @@ class AlbumDetailViewModel @Inject constructor(
                             _uiState.update { it.copy(isLoading = false) }
                             return@loadAlbumPhotos
                         }
-                        observeJob = viewModelScope.launch {
-                            driveRepo.observePhotosByLinkIds(linkIds).collect { dbRows ->
-                                val byId = dbRows.associateBy { it.linkId }
-                                val ordered = linkIds.mapNotNull { byId[it] }
-                                    .sortedWith(photoOrder)
-                                _uiState.update { state ->
-                                    val existingById = state.photos.associateBy { it.linkId }
-                                    // An empty pass doesn't mean empty album — could be between chunked upserts or a
-                                    // shared-album rewrite mid-flight. Keep the cached snapshot rather than wiping.
-                                    if (ordered.isEmpty() && state.photos.isNotEmpty()) {
-                                        return@update state
-                                    }
-                                    state.copy(
-                                        isLoading = state.isLoading && ordered.isEmpty(),
-                                        photos = ordered.map { dbPhoto ->
-                                            // Fall back to existing state for fields that would blank out (e.g. pre-decrypt name).
-                                            val existing = existingById[dbPhoto.linkId]
-                                            if (existing == null) dbPhoto
-                                            else dbPhoto.copy(
-                                                thumbnailUrl = dbPhoto.thumbnailUrl ?: existing.thumbnailUrl,
-                                                displayName  = dbPhoto.displayName.ifBlank { existing.displayName },
-                                            )
-                                        },
-                                    )
-                                }
-                            }
-                        }
+                        startPhotoObserve(linkIds)
                     },
                 )
             }.fold(
@@ -326,6 +327,43 @@ class AlbumDetailViewModel @Inject constructor(
         // loadInvitations() self-guards on shareId/shared-with-me, so this never blocks the photo path.
         if (sharedByEmail == null) {
             loadInvitations()
+        }
+    }
+
+    /**
+     * (Re)subscribe the DB observe to [linkIds], collecting chunked upserts into [AlbumDetailUiState.photos].
+     * Cancels any prior observe first so the job never leaks, and records [observedLinkIds] so a remove
+     * can re-bind to the surviving set instead of letting the old observe re-emit removed photos.
+     */
+    private fun startPhotoObserve(linkIds: List<String>) {
+        observeJob?.cancel()
+        observedLinkIds = linkIds
+        observeJob = viewModelScope.launch {
+            driveRepo.observePhotosByLinkIds(linkIds).collect { dbRows ->
+                val byId = dbRows.associateBy { it.linkId }
+                val ordered = linkIds.mapNotNull { byId[it] }
+                    .sortedWith(photoOrder)
+                _uiState.update { state ->
+                    val existingById = state.photos.associateBy { it.linkId }
+                    // An empty pass doesn't mean empty album — could be between chunked upserts or a
+                    // shared-album rewrite mid-flight. Keep the cached snapshot rather than wiping.
+                    if (ordered.isEmpty() && state.photos.isNotEmpty()) {
+                        return@update state
+                    }
+                    state.copy(
+                        isLoading = state.isLoading && ordered.isEmpty(),
+                        photos = ordered.map { dbPhoto ->
+                            // Fall back to existing state for fields that would blank out (e.g. pre-decrypt name).
+                            val existing = existingById[dbPhoto.linkId]
+                            if (existing == null) dbPhoto
+                            else dbPhoto.copy(
+                                thumbnailUrl = dbPhoto.thumbnailUrl ?: existing.thumbnailUrl,
+                                displayName  = dbPhoto.displayName.ifBlank { existing.displayName },
+                            )
+                        },
+                    )
+                }
+            }
         }
     }
 
@@ -427,6 +465,14 @@ class AlbumDetailViewModel @Inject constructor(
     private var pendingPermissionResult: eu.akoos.photos.domain.usecase.DeletePhotoUseCase.Result.NeedsMediaWritePermission? = null
     private var pendingDeleteLinkIds: List<String> = emptyList()
     private var pendingDeleteFromCloud: Boolean = false
+    /** Private-vault URIs collected during a hide, committed once the system delete dialog OK's
+     *  (rolled back on cancel so a photo never ends up in both the vault and MediaStore). */
+    private var pendingHidePrivateUris: List<String> = emptyList()
+    /** linkIds the in-flight hide will drop from the album list once its delete confirms. */
+    private var pendingHideLinkIds: List<String> = emptyList()
+    /** True when the deferred system-dialog work belongs to a hide, so [onDeletePermissionGranted]
+     *  commits the vault URIs instead of running the delete-only finish. */
+    private var pendingHideInFlight: Boolean = false
 
     /** Resolve selected photos to [GalleryItem]s for delete: [GalleryItem.Synced] if a local twin exists, else CloudOnly. */
     private fun selectedGalleryItems(): List<eu.akoos.photos.domain.entity.GalleryItem> {
@@ -494,12 +540,52 @@ class AlbumDetailViewModel @Inject constructor(
         }
     }
 
-    /** Run the deferred cloud delete once the system trash dialog is confirmed, then update the view. */
+    /** Drop the hidden photos from the album list and surface the "Drive copies untouched" notice. */
+    private fun finishHide(linkIds: List<String>) {
+        pendingHideLinkIds = emptyList()
+        _uiState.update { state ->
+            state.copy(
+                isDeletingPhotos = false,
+                busyOp = AlbumBusyOp.None,
+                selectedPhotos = emptySet(),
+                photos = state.photos.filter { it.linkId !in linkIds },
+                hideCloudNoticePending = true,
+            )
+        }
+    }
+
+    /** Persist the staged vault URIs into HIDDEN_PHOTO_URIS and clear the pending list. */
+    private fun commitPendingHide() {
+        val uris = pendingHidePrivateUris
+        pendingHidePrivateUris = emptyList()
+        if (uris.isEmpty()) return
+        viewModelScope.launch {
+            context.settingsDataStore.edit { prefs ->
+                val current = prefs[SettingsKeys.HIDDEN_PHOTO_URIS] ?: emptySet()
+                prefs[SettingsKeys.HIDDEN_PHOTO_URIS] = current + uris
+            }
+        }
+    }
+
+    /** Roll back vault copies that were created but never committed (cancel / error path). */
+    private fun rollbackPendingHide() {
+        val uris = pendingHidePrivateUris
+        pendingHidePrivateUris = emptyList()
+        for (u in uris) hiddenStorage.delete(u)
+    }
+
+    fun clearHideCloudNotice() = _uiState.update { it.copy(hideCloudNoticePending = false) }
+
+    /** Run the deferred cloud delete (or commit a deferred hide) once the system dialog is confirmed,
+     *  then update the view. The same [pendingDeleteIntent] carries both flows; [pending.hide] picks. */
     fun onDeletePermissionGranted() {
         val pending = pendingPermissionResult ?: return
         val linkIds = pendingDeleteLinkIds
         val fromCloud = pendingDeleteFromCloud
+        val hideLinkIds = pendingHideLinkIds
+        val wasHide = pendingHideInFlight
         pendingPermissionResult = null
+        pendingHideInFlight = false
         _uiState.update { it.copy(pendingDeleteIntent = null) }
         viewModelScope.launch {
             val userId = accountManager.getPrimaryUserId().first()
@@ -512,13 +598,19 @@ class AlbumDetailViewModel @Inject constructor(
                     hide = pending.hide,
                 )
             }
-            finishDelete(linkIds, fromCloud)
+            if (wasHide) finishHide(hideLinkIds) else finishDelete(linkIds, fromCloud)
         }
     }
 
-    /** User cancelled the system trash dialog — drop the deferred cloud work. */
+    /** User cancelled the system trash dialog — drop the deferred cloud work, and for a hide also
+     *  roll back the orphaned vault copies so the photo isn't left in both places. */
     fun clearPendingDeleteIntent() {
         pendingPermissionResult = null
+        if (pendingHideInFlight) {
+            pendingHideInFlight = false
+            rollbackPendingHide()
+            pendingHideLinkIds = emptyList()
+        }
         _uiState.update { it.copy(isDeletingPhotos = false, pendingDeleteIntent = null) }
     }
 
@@ -530,33 +622,46 @@ class AlbumDetailViewModel @Inject constructor(
         viewModelScope.launch {
             val userId = accountManager.getPrimaryUserId().first() ?: return@launch
             _uiState.update { it.copy(isDeletingPhotos = true, busyOp = AlbumBusyOp.Removing) }
-            runCatching { driveRepo.removePhotosFromAlbum(userId, albumLinkId, linkIds) }
-                .fold(
-                    onSuccess = { removed ->
-                        val removedSet = removed.toSet()
-                        _uiState.update { state ->
-                            state.copy(
-                                isDeletingPhotos = false,
-                                selectedPhotos = emptySet(),
-                                // Drop only server-confirmed linkIds; leave chunk-failed photos visible.
-                                photos = state.photos.filter { it.linkId !in removedSet },
-                                error = if (removed.size != linkIds.size)
-                                    context.getString(R.string.album_remove_partial, removed.size, linkIds.size)
-                                else null,
-                            )
-                        }
-                    },
-                    onFailure = { e ->
-                        Log.e("AlbumDetailVM", "removeSelectedPhotosFromAlbum failed", e)
-                        val friendly = friendlyNetworkError(e, networkObserver.isOnline.value, context)
-                        _uiState.update {
-                            it.copy(
-                                isDeletingPhotos = false,
-                                error = friendly ?: context.getString(R.string.album_remove_photos_failed),
-                            )
-                        }
-                    },
-                )
+            suppressSelfRefresh = true
+            try {
+                runCatching { driveRepo.removePhotosFromAlbum(userId, albumLinkId, linkIds) }
+                    .fold(
+                        onSuccess = { removed ->
+                            val removedSet = removed.toSet()
+                            _uiState.update { state ->
+                                state.copy(
+                                    isDeletingPhotos = false,
+                                    selectedPhotos = emptySet(),
+                                    // Drop only server-confirmed linkIds; leave chunk-failed photos visible.
+                                    photos = state.photos.filter { it.linkId !in removedSet },
+                                    error = if (removed.size != linkIds.size)
+                                        context.getString(R.string.album_remove_partial, removed.size, linkIds.size)
+                                    else null,
+                                )
+                            }
+                            // Re-bind the DB observe to the surviving ids. Remove only deletes the album
+                            // membership row, not the photo_listing row, so the old observe would keep
+                            // re-emitting the removed photos and fight the optimistic filter above —
+                            // the source of the post-remove grid flicker.
+                            if (removedSet.isNotEmpty()) {
+                                val surviving = observedLinkIds.filter { it !in removedSet }
+                                startPhotoObserve(surviving)
+                            }
+                        },
+                        onFailure = { e ->
+                            Log.e("AlbumDetailVM", "removeSelectedPhotosFromAlbum failed", e)
+                            val friendly = friendlyNetworkError(e, networkObserver.isOnline.value, context)
+                            _uiState.update {
+                                it.copy(
+                                    isDeletingPhotos = false,
+                                    error = friendly ?: context.getString(R.string.album_remove_photos_failed),
+                                )
+                            }
+                        },
+                    )
+            } finally {
+                suppressSelfRefresh = false
+            }
         }
     }
 

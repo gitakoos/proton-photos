@@ -133,10 +133,11 @@ internal fun PhotoCell(
             .aspectRatio(0.85f)
             .clip(RoundedCornerShape(if (isSelected) 8.dp else 6.dp))
             .background(Bg2)
-            // Tap-only when the grid-level drag-select owns the long-press (onLongPress null) so the
-            // long-press falls through to the grid; combined (tap + menu/select) otherwise. A registered
-            // combinedClickable can otherwise claim the long-press and starve the grid gesture, so this
-            // mirrors the gallery PhotoCell's null-onLongClick handling.
+            // Tap-only by default: with no long-press handler the cell is a plain clickable, and the
+            // grid-level drag-select owns the stationary long-press (single-select + range sweep)
+            // while the call-site tap-guard skips the release-tap. combinedClickable is used only to
+            // carry a long-press: the menu variant pops the per-cell menu, and an explicit onLongPress
+            // (unused by album detail, which leaves it null) routes there instead.
             .then(
                 when {
                     showLongPressMenu -> Modifier.combinedClickable(onClick = onTap, onLongClick = { menuExpanded = true })

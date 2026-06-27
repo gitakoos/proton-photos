@@ -208,7 +208,14 @@ internal fun reconcileViewerItems(
             ?: item.localUriOrNull()?.let { byLocalUri[it] }
             ?: item
 
-    return snapshot.map(::resolve)
+    val resolved = snapshot.map(::resolve)
+    // Keep a STABLE list identity across no-op re-emits. The timeline feed backing the
+    // gallery viewer re-emits many times a second during the cold listing / thumbnail
+    // decrypt burst, yet those ticks rarely change any item the viewer is currently showing.
+    // Returning a fresh list every time would retrigger the page-resync effect in
+    // PhotoViewerScreen and can yank an in-flight swipe back to the previous photo. Hand back
+    // the original instance when reconciliation changed nothing.
+    return if (resolved == snapshot) snapshot else resolved
 }
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
@@ -258,6 +265,11 @@ fun PhotoViewerScreen(
         items.getOrNull(pagerState.settledPage)?.stableId?.let { anchorKey = it }
     }
     LaunchedEffect(items) {
+        // Never re-sync mid-gesture: a live re-emit that lands during a swipe must not cancel
+        // the in-flight fling (that is the "snaps back to the previous photo" timeline bug). The
+        // settle handler above updates anchorKey once the gesture finishes, so a genuine list
+        // change still re-anchors on the next settled frame.
+        if (pagerState.isScrollInProgress) return@LaunchedEffect
         val key = anchorKey ?: return@LaunchedEffect
         val newIndex = items.indexOfFirst { it.stableId == key }
         if (newIndex >= 0 && newIndex != pagerState.currentPage) {
@@ -921,7 +933,17 @@ fun PhotoViewerScreen(
                                     // fresh prepare() against the freshly-written bytes.
                                     reloadKey = editedAt,
                                     onPlayerReady = { currentPlayer = it },
-                                    modifier = Modifier.fillMaxSize(),
+                                    // Same pinch-zoom transform the still uses: the shared per-page
+                                    // scale/offset (reset on settledPage change) with edge-paging,
+                                    // panning only once zoomed in. The TextureView surface scales
+                                    // with graphicsLayer.
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .transformable(state = transformState, canPan = { scale > 1f })
+                                        .graphicsLayer(
+                                            scaleX = scale, scaleY = scale,
+                                            translationX = offset.x, translationY = offset.y,
+                                        ),
                                 )
                             }
                             // No play overlay — play button is in the VideoControlPill below filmstrip
@@ -1255,11 +1277,10 @@ fun PhotoViewerScreen(
                                     },
                                 )
                             }
-                            // Hide is only offered for LocalOnly items — Synced photos
-                            // already have a Drive copy that hiding the local file alone
-                            // wouldn't protect, and CloudOnly has no local file to move.
-                            // Unhide stays available for any already-hidden item so the
-                            // user can recover regardless of how it was hidden originally.
+                            // Hide is offered only for on-device-only (LocalOnly) photos: a Synced
+                            // copy keeps its Drive entry so it can't truly be vaulted, and CloudOnly
+                            // has no local file to move. Unhide stays available for any already-hidden
+                            // item so the user can recover it regardless of origin.
                             val canShowHideToggle = (!isHidden && settledItem is GalleryItem.LocalOnly) ||
                                 (isHidden && isLocalItem)
                             if (canShowHideToggle) {

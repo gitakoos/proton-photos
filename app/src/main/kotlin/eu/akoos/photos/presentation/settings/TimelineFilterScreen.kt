@@ -58,6 +58,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.pluralStringResource
@@ -70,8 +71,11 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import eu.akoos.photos.R
 import eu.akoos.photos.presentation.gallery.CategoryReorderList
+import eu.akoos.photos.presentation.gallery.GridZoom
+import eu.akoos.photos.presentation.settings.components.CollapsibleSection
 import eu.akoos.photos.presentation.settings.components.NavRow
 import eu.akoos.photos.presentation.settings.components.RowDivider
+import eu.akoos.photos.presentation.settings.components.SectionLabel
 import eu.akoos.photos.presentation.settings.components.SettingsCard
 import eu.akoos.photos.presentation.settings.components.SettingsSubPageScaffold
 import eu.akoos.photos.presentation.settings.components.ToggleRow
@@ -83,34 +87,103 @@ import eu.akoos.photos.presentation.theme.FgPrimary
 import eu.akoos.photos.presentation.theme.StatusError
 
 /**
- * Hub for the main Photos timeline filters. Each concern (category bar order, album
- * visibility, device folders) opens its own sub-page so the page reads like the other
- * Settings hubs. Every filter here is display-only: hidden folders/albums keep their
- * photos on the device and on Drive, they are just dropped from the timeline tabs.
+ * The Photos timeline settings hub — a menu of focused sub-pages so each concern lives on its
+ * own short screen instead of one long mixed scroll: Layout (grid + display), Categories,
+ * Albums, and Device folders. Every filter under here is display-only — hidden albums/folders
+ * keep their photos on the device and on Drive, they are just dropped from the timeline tabs.
  */
 @Composable
 fun TimelineFilterScreen(
     onBack: () -> Unit,
-    onCategoryOrderClick: () -> Unit = {},
-    onAlbumsClick: () -> Unit = {},
-    onDeviceFoldersClick: () -> Unit = {},
+    onOpenLayout: () -> Unit = {},
+    onOpenCategories: () -> Unit = {},
+    onOpenAlbums: () -> Unit = {},
+    onOpenDeviceFolders: () -> Unit = {},
+) {
+    SettingsSubPageScaffold(title = stringResource(R.string.settings_timeline), onBack = onBack) {
+        SettingsCard {
+            NavRow(label = stringResource(R.string.settings_timeline_section_layout), onClick = onOpenLayout)
+            RowDivider()
+            NavRow(label = stringResource(R.string.timeline_filter_categories_header), onClick = onOpenCategories)
+            RowDivider()
+            NavRow(label = stringResource(R.string.timeline_filter_albums_header), onClick = onOpenAlbums)
+            RowDivider()
+            NavRow(label = stringResource(R.string.device_folders_section), onClick = onOpenDeviceFolders)
+        }
+    }
+}
+
+/** Layout + display: grid columns, remember-last-zoom, scroll-date label, and "On this day". */
+@Composable
+fun TimelineLayoutScreen(
+    onBack: () -> Unit,
+    settingsViewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
+    val settings by settingsViewModel.uiState.collectAsStateWithLifecycle()
     val showOnThisDay by remember {
         ctx.settingsDataStore.data.map { it[SettingsKeys.SHOW_ON_THIS_DAY] ?: true }
     }.collectAsState(initial = true)
+
     SettingsSubPageScaffold(
-        title = stringResource(R.string.timeline_filter_title),
+        title = stringResource(R.string.settings_timeline_section_layout),
         onBack = onBack,
     ) {
-        Text(
-            stringResource(R.string.timeline_filter_subtitle),
-            color = FgMute, fontSize = 13.sp, lineHeight = 18.sp,
-            modifier = Modifier.padding(bottom = 16.dp),
-        )
-        // Simple display toggles live in their own card, kept apart from the drill-down menu rows.
         SettingsCard {
+            ToggleRow(
+                label = stringResource(R.string.grid_remember_last),
+                description = stringResource(R.string.grid_remember_last_desc),
+                checked = settings.gridRememberLast,
+                onCheckedChange = settingsViewModel::setGridRememberLast,
+            )
+        }
+        Spacer(Modifier.height(16.dp))
+        // Fixed default columns — greyed out while "remember last used" is on, since that
+        // overrides the default with whatever zoom the user last pinched to.
+        val defaultEnabled = !settings.gridRememberLast
+        CollapsibleSection(label = stringResource(R.string.grid_default_columns_section)) {
+            Row(
+                modifier = Modifier.fillMaxWidth().alpha(if (defaultEnabled) 1f else 0.4f),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                GridZoom.COLUMN_OPTIONS.forEach { count ->
+                    TimelinePill(
+                        label = count.toString(),
+                        selected = settings.gridDefaultColumns == count,
+                        onClick = { if (defaultEnabled) settingsViewModel.setGridDefaultColumns(count) },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+        }
+
+        Spacer(Modifier.height(24.dp))
+
+        SectionLabel(stringResource(R.string.settings_timeline_section_display))
+        Spacer(Modifier.height(8.dp))
+        SettingsCard {
+            ToggleRow(
+                label = stringResource(R.string.settings_show_scroll_date),
+                description = stringResource(R.string.settings_show_scroll_date_desc),
+                checked = settings.showScrollDate,
+                onCheckedChange = settingsViewModel::setShowScrollDate,
+            )
+            RowDivider()
+            ToggleRow(
+                label = stringResource(R.string.settings_reverse_timeline),
+                description = stringResource(R.string.settings_reverse_timeline_desc),
+                checked = settings.reverseTimelineOrder,
+                onCheckedChange = settingsViewModel::setReverseTimelineOrder,
+            )
+            RowDivider()
+            ToggleRow(
+                label = stringResource(R.string.settings_mosaic_grid),
+                description = stringResource(R.string.settings_mosaic_grid_desc),
+                checked = settings.mosaicGrid,
+                onCheckedChange = settingsViewModel::setMosaicGrid,
+            )
+            RowDivider()
             // "On this day" memories carousel on the Photos tab — display toggle, default on.
             ToggleRow(
                 label = stringResource(R.string.gallery_on_this_day),
@@ -120,30 +193,13 @@ fun TimelineFilterScreen(
                 },
             )
         }
-        Spacer(Modifier.height(16.dp))
-        SettingsCard {
-            NavRow(
-                label = stringResource(R.string.timeline_filter_categories_header),
-                onClick = onCategoryOrderClick,
-            )
-            RowDivider()
-            NavRow(
-                label = stringResource(R.string.timeline_filter_albums_header),
-                onClick = onAlbumsClick,
-            )
-            RowDivider()
-            NavRow(
-                label = stringResource(R.string.device_folders_section),
-                onClick = onDeviceFoldersClick,
-            )
-        }
+        Spacer(Modifier.height(24.dp))
     }
 }
 
-// ── Category bar order sub-page ───────────────────────────────────────────────
-
+/** Category bar order on the Photos tab. */
 @Composable
-fun TimelineCategoryOrderScreen(onBack: () -> Unit) {
+fun TimelineCategoriesScreen(onBack: () -> Unit) {
     SettingsSubPageScaffold(
         title = stringResource(R.string.timeline_filter_categories_header),
         onBack = onBack,
@@ -161,30 +217,33 @@ fun TimelineCategoryOrderScreen(onBack: () -> Unit) {
     }
 }
 
-// ── Album visibility sub-page ─────────────────────────────────────────────────
-
+/** Album visibility on the timeline (display-only: hidden albums keep their photos). */
 @Composable
-fun TimelineAlbumsFilterScreen(
+fun TimelineAlbumsScreen(
     onBack: () -> Unit,
-    viewModel: TimelineFilterViewModel = hiltViewModel(),
+    filterViewModel: TimelineFilterViewModel = hiltViewModel(),
 ) {
-    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val filterState by filterViewModel.uiState.collectAsStateWithLifecycle()
     val colors = AppColors.current
+
     SettingsSubPageScaffold(
         title = stringResource(R.string.timeline_filter_albums_header),
         onBack = onBack,
     ) {
+        Text(
+            stringResource(R.string.timeline_filter_subtitle),
+            color = FgMute, fontSize = 13.sp, lineHeight = 18.sp,
+            modifier = Modifier.padding(bottom = 12.dp),
+        )
         SettingsCard {
             ToggleRow(
                 label = stringResource(R.string.settings_hide_album_photos),
                 description = stringResource(R.string.settings_hide_album_photos_desc),
-                checked = state.allAlbumsExcluded,
-                onCheckedChange = { if (it) viewModel.excludeAllAlbums() else viewModel.includeAllAlbums() },
+                checked = filterState.allAlbumsExcluded,
+                onCheckedChange = { if (it) filterViewModel.excludeAllAlbums() else filterViewModel.includeAllAlbums() },
             )
         }
-        // Per-album show/hide — always visible so that after excluding every album with the master
-        // switch you can still re-include individual ones (the master just sets/clears the whole set).
-        if (state.albums.isNotEmpty()) {
+        if (filterState.albums.isNotEmpty()) {
             Spacer(Modifier.height(8.dp))
             Text(
                 stringResource(R.string.timeline_filter_per_album_hint),
@@ -192,9 +251,9 @@ fun TimelineAlbumsFilterScreen(
                 modifier = Modifier.padding(bottom = 8.dp),
             )
             SettingsCard {
-                state.albums.forEachIndexed { i, album ->
-                    AlbumFilterRow(album = album, onToggle = { viewModel.toggleAlbum(album.linkId) })
-                    if (i < state.albums.lastIndex) {
+                filterState.albums.forEachIndexed { i, album ->
+                    AlbumFilterRow(album = album, onToggle = { filterViewModel.toggleAlbum(album.linkId) })
+                    if (i < filterState.albums.lastIndex) {
                         HorizontalDivider(
                             modifier = Modifier.padding(start = 86.dp),
                             thickness = 0.5.dp, color = colors.cardBorder,
@@ -206,76 +265,102 @@ fun TimelineAlbumsFilterScreen(
     }
 }
 
-// ── Device folders sub-page ───────────────────────────────────────────────────
-
+/** Device-folder visibility on the timeline (display-only: hidden folders keep their photos). */
 @Composable
 fun TimelineDeviceFoldersScreen(
     onBack: () -> Unit,
-    viewModel: TimelineFilterViewModel = hiltViewModel(),
+    filterViewModel: TimelineFilterViewModel = hiltViewModel(),
 ) {
-    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val filterState by filterViewModel.uiState.collectAsStateWithLifecycle()
     val colors = AppColors.current
+
     SettingsSubPageScaffold(
         title = stringResource(R.string.device_folders_section),
         onBack = onBack,
     ) {
-        // Master switch — hide (exclude) or show every folder at once, like the album screen.
         SettingsCard {
             ToggleRow(
                 label = stringResource(R.string.settings_hide_all_folders),
                 description = stringResource(R.string.settings_hide_all_folders_desc),
-                checked = state.allExcluded,
-                onCheckedChange = { if (it) viewModel.excludeAll() else viewModel.includeAll() },
+                checked = filterState.allExcluded,
+                onCheckedChange = { if (it) filterViewModel.excludeAll() else filterViewModel.includeAll() },
             )
         }
-        // The per-folder list stays visible even with "hide all" on, so you can exclude everything
-        // and then re-include a single folder without toggling all the others back by hand. (`run`
-        // is inline, so the @Composable calls inside keep their composition context.)
-        run {
-            Spacer(Modifier.height(12.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                Text(
-                    stringResource(
-                        R.string.settings_excluded_folders_count_label,
-                        state.excludedCount, state.folders.size,
-                    ),
-                    color = FgDim, fontSize = 12.sp,
-                )
-                Text(
-                    stringResource(R.string.settings_excluded_folders_select_all),
-                    color = Accent, fontSize = 12.sp, fontWeight = FontWeight.Medium,
-                    modifier = Modifier.clickable { viewModel.excludeAll() },
-                )
-            }
-            SettingsCard {
-                if (state.folders.isEmpty()) {
-                    Box(
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 32.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            stringResource(R.string.settings_excluded_folders_empty),
-                            color = FgMute, fontSize = 13.sp,
+        Spacer(Modifier.height(12.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text(
+                stringResource(
+                    R.string.settings_excluded_folders_count_label,
+                    filterState.excludedCount, filterState.folders.size,
+                ),
+                color = FgDim, fontSize = 12.sp,
+            )
+            Text(
+                stringResource(R.string.settings_excluded_folders_select_all),
+                color = Accent, fontSize = 12.sp, fontWeight = FontWeight.Medium,
+                modifier = Modifier.clickable { filterViewModel.excludeAll() },
+            )
+        }
+        SettingsCard {
+            if (filterState.folders.isEmpty()) {
+                Box(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 32.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        stringResource(R.string.settings_excluded_folders_empty),
+                        color = FgMute, fontSize = 13.sp,
+                    )
+                }
+            } else {
+                filterState.folders.forEachIndexed { i, folder ->
+                    TimelineFolderRow(folder = folder, onToggle = { filterViewModel.toggle(folder.name) })
+                    if (i < filterState.folders.lastIndex) {
+                        HorizontalDivider(
+                            modifier = Modifier.padding(start = 86.dp),
+                            thickness = 0.5.dp, color = colors.cardBorder,
                         )
-                    }
-                } else {
-                    state.folders.forEachIndexed { i, folder ->
-                        TimelineFolderRow(folder = folder, onToggle = { viewModel.toggle(folder.name) })
-                        if (i < state.folders.lastIndex) {
-                            HorizontalDivider(
-                                modifier = Modifier.padding(start = 86.dp),
-                                thickness = 0.5.dp, color = colors.cardBorder,
-                            )
-                        }
                     }
                 }
             }
         }
-        Spacer(Modifier.height(24.dp))
+    }
+}
+
+/** Selectable pill used by the default-columns row, matching the Appearance theme pills. */
+@Composable
+private fun TimelinePill(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = AppColors.current
+    Box(
+        modifier = modifier
+            .height(44.dp)
+            .background(
+                color = if (selected) colors.accent.copy(alpha = 0.22f) else colors.cardBg,
+                shape = RoundedCornerShape(999.dp),
+            )
+            .border(
+                width = if (selected) 1.dp else 0.5.dp,
+                color = if (selected) colors.accent else colors.cardBorder,
+                shape = RoundedCornerShape(999.dp),
+            )
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = label,
+            color = if (selected) colors.accent else colors.fgPrimary,
+            fontSize = 13.sp,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+        )
     }
 }
 

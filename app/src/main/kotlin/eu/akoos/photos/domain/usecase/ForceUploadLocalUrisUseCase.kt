@@ -71,25 +71,29 @@ class ForceUploadLocalUrisUseCase @Inject constructor(
         }
         for (uri in uris) {
             val existingRow = syncStateRepo.getByUri(uri)
-            // Don't disturb a row that's already uploaded/uploading/hidden — only force one when
-            // there's nothing that will upload this URI on its own.
-            if (existingRow != null && existingRow.status != SyncStatus.LOCAL_ONLY) continue
-            if (existingRow == null) {
-                syncStateRepo.upsert(
-                    SyncState(
-                        localUri = uri,
-                        cloudFileId = null,
-                        localHash = "",
-                        cloudHash = null,
-                        status = SyncStatus.LOCAL_ONLY,
-                        lastSyncAttemptMs = System.currentTimeMillis(),
-                        lastSyncSuccessMs = null,
-                        backedUpAtMs = null,
-                        sizeBytes = 0L,
-                    ),
-                    userId,
-                )
-            }
+            // Skip seeding only when the URI is genuinely on Drive (the album-add drain joins it
+            // once it sees the cloudFileId) or is owned by another flow we must not disturb.
+            // A reinstall/re-index can leave a stale SYNCED/CLOUD_ONLY row with a null cloudFileId
+            // (never actually uploaded); that case falls through to be reseeded as LOCAL_ONLY so it
+            // uploads and then joins, instead of getting stuck.
+            if (existingRow?.cloudFileId != null) continue
+            if (existingRow?.status == SyncStatus.UPLOADING ||
+                existingRow?.status == SyncStatus.HIDDEN
+            ) continue
+            syncStateRepo.upsert(
+                SyncState(
+                    localUri = uri,
+                    cloudFileId = null,
+                    localHash = existingRow?.localHash ?: "",
+                    cloudHash = null,
+                    status = SyncStatus.LOCAL_ONLY,
+                    lastSyncAttemptMs = System.currentTimeMillis(),
+                    lastSyncSuccessMs = null,
+                    backedUpAtMs = null,
+                    sizeBytes = existingRow?.sizeBytes ?: 0L,
+                ),
+                userId,
+            )
         }
         // Kick the DURABLE background worker rather than uploading inline in the caller's scope:
         // an inline pass dies the moment the user leaves the screen, and never surfaces in the

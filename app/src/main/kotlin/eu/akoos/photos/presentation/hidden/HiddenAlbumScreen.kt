@@ -386,12 +386,17 @@ fun HiddenAlbumScreen(
                         val keyToIndex = remember(selectableKeys) {
                             selectableKeys.mapIndexed { i, k -> k to i }.toMap()
                         }
+                        // Armed at the long-press anchor so the cell's release-tap skips toggling the
+                        // just-selected cell back off (otherwise a stationary long-press would select
+                        // then immediately deselect).
+                        val tapGuard = remember { mutableStateOf(false) }
                         val dragMod = eu.akoos.photos.presentation.gallery.rememberDragMultiSelectModifier(
                             gridState = gridState,
                             items = selectableKeys,
                             indexByKey = keyToIndex,
                             selected = state.selectedUris,
                             onSelectionChange = viewModel::setSelectedUris,
+                            tapGuard = tapGuard,
                         )
                         LazyVerticalGrid(
                             columns = GridCells.Fixed(cols),
@@ -408,7 +413,10 @@ fun HiddenAlbumScreen(
                                     isSelectionMode = state.isSelectionMode,
                                     isSelected = item.uri in state.selectedUris,
                                     onClick = {
-                                        if (state.isSelectionMode) viewModel.toggleSelection(item.uri)
+                                        // Skip the release-tap that follows a long-press select; it
+                                        // would otherwise toggle the just-anchored cell back off.
+                                        if (tapGuard.value) tapGuard.value = false
+                                        else if (state.isSelectionMode) viewModel.toggleSelection(item.uri)
                                         else onPhotoClick(state.items, index)
                                     },
                                 )

@@ -60,6 +60,10 @@ import javax.inject.Singleton
 
 private const val TAG = "AlbumSvc"
 
+// The add-multiple / remove-multiple album endpoints reject any request with more than 10 links
+// ("This collection should contain 10 elements or less"), so both paths chunk to this size.
+private const val ALBUM_LINK_BATCH_MAX = 10
+
 
 /**
  * Album CRUD + album-photo loading + add-to-album. Reads cached photo entities through
@@ -1224,7 +1228,7 @@ class AlbumService @Inject constructor(
         //    Move every photo the backend rejected from `succeeded` into `failed` so
         //    the UI snackbar and downstream cache writes match reality.
         val rejectedByLink = mutableMapOf<String, String>() // linkId → error
-        albumDataEntries.chunked(50).forEach { chunk ->
+        albumDataEntries.chunked(ALBUM_LINK_BATCH_MAX).forEach { chunk ->
             val resp = semaphore.withPermit {
                 manager.invoke {
                     addPhotosToAlbum(volumeId, albumLinkId, AddAlbumMultipleRequest(chunk))
@@ -1305,16 +1309,36 @@ class AlbumService @Inject constructor(
         val volumeId = shareService.getVolumeId(userId)
         val manager = apiProvider.get<DriveApiService>(userId)
         val removed = mutableListOf<String>()
-        for (chunk in photoLinkIds.chunked(50)) {
+        // The add/remove-multiple endpoints reject any request carrying more than 10 links
+        // ("This collection should contain 10 elements or less"), so a larger chunk fails wholesale.
+        for (chunk in photoLinkIds.chunked(ALBUM_LINK_BATCH_MAX)) {
             try {
-                semaphore.withPermit {
+                val resp = semaphore.withPermit {
                     manager.invoke {
                         removePhotosFromAlbum(volumeId, albumLinkId, RemoveFromAlbumRequest(chunk))
                     }.valueOrThrow
                 }
-                removed += chunk
+                // remove-multiple returns a per-photo response array, exactly like add-multiple: the
+                // top-level Code only means the batch was processed, so each entry's own code is the
+                // truth for what actually left the album. Treating the chunk as all-or-nothing hid
+                // real per-photo rejections; only the photos the server confirms leave the membership.
+                val rejected = resp.responses.filter { it.response.code != 1000 }
+                removed += chunk.filter { id -> rejected.none { it.linkId == id } }
+                for (entry in rejected) {
+                    val detail = entry.response.error ?: "code=${entry.response.code}"
+                    eu.akoos.photos.util.SyncDiagnostics.log(
+                        "album-remove: server rejected ${entry.linkId.take(8)} ($detail)"
+                    )
+                    Log.w(TAG, "removePhotosFromAlbum: server rejected ${entry.linkId}: $detail")
+                }
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
+                // Surface the real whole-batch rejection — the cause of the silent "0/N removed".
+                // Routed through SyncDiagnostics so it survives the release build's log stripping and
+                // shows up in the in-app "Copy log".
+                eu.akoos.photos.util.SyncDiagnostics.log(
+                    "album-remove: chunk of ${chunk.size} failed (${e.message})"
+                )
                 Log.w(TAG, "removePhotosFromAlbum: chunk failed (${chunk.size} ids): ${e.message}")
             }
         }

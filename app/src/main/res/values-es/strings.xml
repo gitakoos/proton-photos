@@ -322,6 +322,16 @@
     <string name="settings_hide_all_folders_desc">Las fotos en carpetas del dispositivo ocultas no aparecerán en tu línea de tiempo principal de Fotos. Permanecen en tu dispositivo.</string>
     <string name="settings_hide_album_photos_desc">Las fotos añadidas a un álbum de Drive (nube) no aparecerán en tu línea de tiempo principal de Fotos. Siguen visibles en las pestañas Álbumes y Compartidos.</string>
     <string name="settings_timeline_filter">Filtro de la línea de tiempo</string>
+    <string name="settings_timeline">Línea de tiempo</string>
+    <string name="settings_timeline_section_layout">Diseño</string>
+    <string name="settings_timeline_section_shows">Qué se muestra</string>
+    <string name="settings_timeline_section_display">Visualización</string>
+    <string name="settings_show_scroll_date">Mostrar la fecha al desplazarse</string>
+    <string name="settings_show_scroll_date_desc">Al desplazarte aparece una etiqueta flotante con el mes y el año sobre la línea de tiempo, para que siempre tengas una referencia temporal.</string>
+    <string name="settings_reverse_timeline">Invertir el orden de la línea de tiempo</string>
+    <string name="settings_reverse_timeline_desc">Muestra las fotos más antiguas arriba y las más recientes abajo. La línea de tiempo se abre en tus fotos más recientes.</string>
+    <string name="settings_mosaic_grid">Cuadrícula en mosaico</string>
+    <string name="settings_mosaic_grid_desc">Organiza la línea de tiempo como un mosaico escalonado en el que cada foto conserva su propia forma, de modo que las fotos verticales se ven más altas.</string>
     <string name="timeline_filter_title">Filtro de la línea de tiempo</string>
     <string name="timeline_filter_subtitle">Elige qué ocultar de tu línea de tiempo principal de Fotos. Las fotos ocultas permanecen en el dispositivo y se siguen respaldando.</string>
     <string name="timeline_filter_categories_header">Barra de categorías</string>
@@ -340,6 +350,8 @@
     <string name="settings_media_management_grant_action">Conceder</string>
     <string name="settings_appearance">Apariencia e idioma</string>
     <string name="settings_appearance_desc">Tema, paleta, idioma de la app</string>
+    <string name="settings_landing_tab">Pestaña inicial</string>
+    <string name="settings_landing_tab_desc">Qué pestaña se abre al iniciar la app</string>
     <string name="settings_strip_customize">Qué metadatos eliminar</string>
     <string name="settings_about_desc">Versión, créditos y licencias</string>
 
@@ -414,6 +426,10 @@
     <string name="language_hu">Húngaro, Magyar</string>
     <string name="language_it">Italiano</string>
     <string name="language_nl">Neerlandés, Nederlands</string>
+    <string name="language_pl">Polaco, Polski</string>
+    <string name="language_sk">Eslovaco, Slovenčina</string>
+    <string name="language_sl">Esloveno, Slovenščina</string>
+    <string name="language_cs">Checo, Čeština</string>
     <string name="language_section">Idioma de visualización</string>
 
     <!-- About -->
@@ -777,8 +793,8 @@
     <string name="offline_banner_dismiss_cd">Cerrar aviso</string>
     <string name="network_error_offline">Estás sin conexión. Inténtalo de nuevo cuando vuelvas a conectarte.</string>
     <string name="network_error_transient">Falló la conexión. Inténtalo más tarde.</string>
-    <string name="cd_status_backed_up_device">Copia de seguridad en Drive y en el dispositivo</string>
-    <string name="cd_status_cloud_only">Solo en Proton Drive</string>
+    <string name="cd_status_backed_up_device">Proton Drive y dispositivo</string>
+    <string name="cd_status_cloud_only">Solo Proton Drive</string>
     <string name="cd_status_hidden_local">Oculta en este dispositivo</string>
     <string name="cd_status_device_only">Solo en este dispositivo</string>
     <string name="cd_status_backed_up">Copia de seguridad realizada</string>
@@ -926,9 +942,9 @@
     <string name="viewer_meta_orientation_180">Girada 180°</string>
     <string name="viewer_meta_orientation_90_cw">Girada 90° a la derecha</string>
     <string name="viewer_meta_orientation_90_ccw">Girada 90° a la izquierda</string>
-    <string name="viewer_meta_source_device_only">Solo en el dispositivo</string>
-    <string name="viewer_meta_source_backed_up">Respaldada en Proton Drive</string>
-    <string name="viewer_meta_source_cloud">Proton Drive</string>
+    <string name="viewer_meta_source_device_only">Solo en este dispositivo</string>
+    <string name="viewer_meta_source_backed_up">Proton Drive y dispositivo</string>
+    <string name="viewer_meta_source_cloud">Solo Proton Drive</string>
     <string name="viewer_meta_strip">Quitar</string>
     <string name="viewer_meta_strip_all">Quitar todos los metadatos privados</string>
     <string name="viewer_meta_strip_all_desc">Elimina el GPS, la información de la cámara y los campos de software de este archivo</string>
@@ -986,6 +1002,15 @@
     <!-- Gallery snackbar / error fallbacks -->
     <string name="gallery_error_title">Error</string>
     <string name="gallery_no_local_to_hide">No hay fotos locales para ocultar</string>
+    <string name="gallery_undo">Deshacer</string>
+    <plurals name="gallery_hidden_snackbar">
+        <item quantity="one">1 oculta</item>
+        <item quantity="other">%d ocultas</item>
+    </plurals>
+    <plurals name="gallery_moved_to_trash_snackbar">
+        <item quantity="one">1 movida a la papelera</item>
+        <item quantity="other">%d movidas a la papelera</item>
+    </plurals>
     <string name="gallery_copy_to_hidden_failed">No se pudo copiar a Ocultos</string>
     <string name="gallery_move_to_hidden_failed">No se pudo mover a Ocultos</string>
     <string name="gallery_add_to_cloud_album_failed">No se pudo añadir al álbum en la nube</string>
@@ -994,6 +1019,11 @@
     <string name="gallery_create_album_failed">No se pudo crear el álbum: %1$s</string>
     <string name="gallery_enable_metadata_category">Activa primero una categoría de metadatos en Ajustes → Privacidad</string>
     <string name="gallery_album_picker_count_drive">%1$s · Drive</string>
+    <string name="album_add_photos">Añadir fotos</string>
+    <string name="album_picker_title">Añadir al álbum</string>
+    <string name="album_picker_selected">%1$d seleccionadas</string>
+    <string name="album_add_count">Añadir (%1$d)</string>
+    <string name="album_picker_empty">No hay fotos para añadir.</string>
 
     <!-- Album create/rename/delete snackbar fallbacks -->
     <string name="albums_name_empty">El nombre del álbum no puede estar vacío</string>
@@ -1090,4 +1120,21 @@
     <string name="grid_remember_last">Recordar el último usado</string>
     <string name="grid_remember_last_desc">Abrir tus fotos con el último nivel de zoom usado</string>
     <string name="grid_default_columns_section">Fotos por fila</string>
+    <!-- FAQ -->
+    <string name="faq_title">Preguntas frecuentes</string>
+    <string name="faq_settings_entry">Preguntas frecuentes</string>
+    <string name="faq_onboarding_intro">Unas respuestas rápidas para empezar. Las encontrarás más tarde en Ajustes.</string>
+    <string name="faq_q_cloud_icons">¿Qué significan los iconos de nube?</string>
+    <string name="faq_a_cloud_icons">Una nube verde significa que la foto está respaldada en Proton Drive y sigue en este dispositivo. Una nube blanca significa que solo está en Proton Drive, no en este dispositivo. Sin icono significa que solo está en este dispositivo y aún no se ha respaldado.</string>
+    <string name="faq_q_backup">¿Cómo funciona el respaldo?</string>
+    <string name="faq_a_backup">Las fotos y vídeos nuevos se respaldan automáticamente una vez activado el respaldo. En Ajustes puedes limitar el respaldo solo a Wi-Fi, de modo que se pause con los datos móviles.</string>
+    <string name="faq_q_albums">¿Qué son los álbumes y qué hace la duplicación de carpetas?</string>
+    <string name="faq_a_albums">Los álbumes agrupan fotos en Proton Drive. \"Duplicar carpetas del dispositivo como álbumes de Drive\" hace que tus carpetas del teléfono, como Camera o Screenshots, aparezcan como álbumes equivalentes en Drive a medida que se respaldan.</string>
+    <string name="faq_q_mirror_local">¿Qué hace \"Reflejar los cambios en los archivos locales\"?</string>
+    <string name="faq_a_mirror_local">Cuando la app elimina metadatos o cambia el nombre de una foto al respaldarla, aplica esos mismos cambios también al original en tu teléfono, para que el archivo local y la copia respaldada sigan siendo idénticos. Solo se aplica a las fotos que esta app respalda, a partir de ahora, y no trae a tu teléfono las ediciones que hagas en la web de Proton Drive.</string>
+    <string name="faq_q_existing">¿La app modifica mis fotos existentes?</string>
+    <string name="faq_a_existing">No. Los cambios de metadatos solo ocurren cuando la app respalda una foto, y solo si activas la eliminación de metadatos o la duplicación local. Las fotos que ya están en tu teléfono se dejan tal cual, salvo que elijas una acción para una foto concreta.</string>
+    <string name="settings_copy_diagnostics">Copiar registro de diagnóstico</string>
+    <string name="settings_copy_diagnostics_desc">Para solucionar problemas de sincronización. No se incluye ningún dato de la cuenta.</string>
+    <string name="settings_diagnostics_copied">Registro de diagnóstico copiado</string>
 </resources>

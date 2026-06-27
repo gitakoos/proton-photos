@@ -22,6 +22,7 @@ import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.LocalMediaRepository
 import eu.akoos.photos.domain.repository.SyncStateRepository
+import eu.akoos.photos.util.NetworkObserver
 import org.junit.Assert.assertEquals
 import org.junit.Before
 import org.junit.Test
@@ -31,6 +32,7 @@ class UploadPendingUseCaseTest {
     private lateinit var syncStateRepo: SyncStateRepository
     private lateinit var localRepo: LocalMediaRepository
     private lateinit var cloudRepo: DrivePhotoRepository
+    private lateinit var networkObserver: NetworkObserver
     private lateinit var context: Context
     private lateinit var useCase: UploadPendingUseCase
     private val userId = UserId("test-user")
@@ -40,7 +42,13 @@ class UploadPendingUseCaseTest {
         syncStateRepo = mockk(relaxed = true)
         localRepo = mockk()
         cloudRepo = mockk(relaxed = true)
+        networkObserver = mockk(relaxed = true)
         context = mockk()
+
+        // Upload-time folder filter maps pending URIs to bucket names via this flow. An empty
+        // listing leaves every pending URI with a null bucket, which the allow-list filter treats
+        // as backup-able while any folder is selected — so all LOCAL_ONLY items still upload.
+        every { localRepo.observeLocalMedia() } returns flowOf(emptyList())
 
         val contentResolver = mockk<ContentResolver>()
         every { context.contentResolver } returns contentResolver
@@ -68,8 +76,19 @@ class UploadPendingUseCaseTest {
         every { mockPrefs[SettingsKeys.STRIP_TIMESTAMP] } returns false
         every { mockPrefs[SettingsKeys.STRIP_SOFTWARE_INFO] } returns false
         every { mockPrefs[SettingsKeys.ALBUM_BUCKET_MAP] } returns emptySet()
+        every { mockPrefs[SettingsKeys.MIRROR_STRIP_TO_LOCAL] } returns false
+        every { mockPrefs[SettingsKeys.PENDING_ALBUM_ADDS] } returns emptySet()
+        every { mockPrefs[SettingsKeys.PENDING_DELETE_URIS] } returns emptySet()
+        // Wi-Fi-only off so the network guard never short-circuits the upload loop.
+        every { mockPrefs[SettingsKeys.SYNC_WIFI_ONLY] } returns false
+        // Cloud listing settled: one ever-complete flag present + pairing settled, so the
+        // post-reinstall duplicate-avoidance guard lets the bulk upload proceed.
+        every { mockPrefs.asMap() } returns mapOf<Preferences.Key<*>, Any>(
+            Pair(SettingsKeys.photoListingEverCompleteKey(userId.id, "vol1"), true),
+        )
+        every { mockPrefs[SettingsKeys.pairingSettledKey(userId.id)] } returns true
 
-        useCase = UploadPendingUseCase(syncStateRepo, localRepo, cloudRepo, mockk(relaxed = true), context)
+        useCase = UploadPendingUseCase(syncStateRepo, localRepo, cloudRepo, mockk(relaxed = true), networkObserver, context)
     }
 
     private fun syncState(uri: String, status: SyncStatus) = SyncState(

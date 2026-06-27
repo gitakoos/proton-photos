@@ -173,8 +173,11 @@ class DrivePhotoRepositoryImpl @Inject constructor(
     override suspend fun downloadFullResPhoto(
         userId: UserId,
         photo: CloudPhoto,
+        preResolvedLinkDetail: eu.akoos.photos.data.api.dto.BatchLinkDto?,
         onProgress: ((doneBytes: Long, totalBytes: Long) -> Unit)?,
-    ): File = downloadService.downloadFullResPhoto(userId, photo, onProgress)
+    ): File = downloadService.downloadFullResPhoto(
+        userId, photo, preResolvedLinkDetail, onProgress,
+    )
 
     override suspend fun uploadFile(
         userId: UserId,

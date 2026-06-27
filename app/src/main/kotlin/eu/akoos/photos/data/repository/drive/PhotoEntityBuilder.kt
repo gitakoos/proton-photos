@@ -187,7 +187,7 @@ class PhotoEntityBuilder @Inject constructor(
 
         // Tags: server-side PhotoTag ids (0 = Favorite). Read from the photo-stream stub primarily;
         // the batch-link response sometimes echoes the same list back via detail.photo.tags.
-        val tags = (stub.tags + (detail?.photo?.tags ?: emptyList())).toSet()
+        val tags = ((stub.tags ?: emptyList()) + (detail?.photo?.tags ?: emptyList())).toSet()
         val tagsCsv = tags.joinToString(",")
 
         // Lazy-path metadata: persist whatever the scheduler will need later.
@@ -209,7 +209,7 @@ class PhotoEntityBuilder @Inject constructor(
             shareId = shareId,
             volumeId = volumeId,
             userId = userId.id,
-            captureTime = stub.captureTime,
+            captureTime = stub.captureTime ?: 0L,
             displayName = displayName,
             mimeType = mimeType,
             sizeBytes = link?.size ?: 0L,

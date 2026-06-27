@@ -66,6 +66,7 @@ class DeviceFolderDetailViewModel @Inject constructor(
     private val accountManager: AccountManager,
     private val forceUploadLocalUris: ForceUploadLocalUrisUseCase,
     private val deletePhotoUseCase: DeletePhotoUseCase,
+    private val hiddenStorage: eu.akoos.photos.data.hidden.HiddenStorageManager,
     private val driveRepo: DrivePhotoRepository,
     private val publicLink: eu.akoos.photos.presentation.common.PublicLinkController,
 ) : ViewModel() {
@@ -323,6 +324,10 @@ class DeviceFolderDetailViewModel @Inject constructor(
     /** Deferred cloud-delete work, held while the system trash dialog is up. */
     private var pendingPermissionResult: DeletePhotoUseCase.Result.NeedsMediaWritePermission? = null
 
+    /** Private vault URIs created by a hide that is waiting on the system delete dialog. Committed to
+     *  HIDDEN_PHOTO_URIS once the delete confirms, rolled back if it is cancelled. */
+    private var pendingHidePrivateUris: List<String> = emptyList()
+
     private fun selectedGalleryItems(): List<GalleryItem> {
         val sel = _selectedUris.value
         return _items.value.filter { localUriOf(it) in sel }
@@ -353,7 +358,74 @@ class DeviceFolderDetailViewModel @Inject constructor(
         }
     }
 
-    /** Run the deferred cloud delete once the system trash dialog is confirmed, then clear. */
+    /**
+     * Move the selected on-device-only photos into the app's Hidden vault — the same flow the timeline
+     * uses ([GalleryViewModel.hideSelected]): copy each LocalOnly file into app-private storage, then
+     * route through [DeletePhotoUseCase] with `freeUpSpace=true, deleteFromCloud=false, hide=true` so the
+     * MediaStore original is removed (one system-delete dialog on Android 11+). Only LocalOnly photos
+     * qualify: a Synced photo keeps its Drive copy so it can't be vaulted, so it is skipped.
+     */
+    fun hideSelected() {
+        val hideables = selectedGalleryItems().filterIsInstance<GalleryItem.LocalOnly>()
+        if (hideables.isEmpty()) return
+        viewModelScope.launch {
+            _isDeleting.value = true
+            try {
+                // Step 1: copy each on-device file into app-private hidden storage.
+                val collected = mutableListOf<String>()
+                for (item in hideables) {
+                    val local = item.local
+                    val privateUri = hiddenStorage.store(
+                        local.uri, local.displayName, local.mimeType, captureTimeMs = local.dateTaken,
+                    )
+                    if (privateUri != null) collected += privateUri
+                }
+                if (collected.isEmpty()) return@launch
+                pendingHidePrivateUris = collected
+
+                // Step 2: delete the MediaStore originals (one system-delete dialog on Android 11+).
+                val userId = accountManager.getPrimaryUserId().first() ?: run {
+                    rollbackPendingHide()
+                    return@launch
+                }
+                when (val result = deletePhotoUseCase(userId, hideables, freeUpSpace = true, deleteFromCloud = false, hide = true)) {
+                    is DeletePhotoUseCase.Result.Success -> {
+                        commitPendingHide()
+                        _selectedUris.value = emptySet()
+                    }
+                    is DeletePhotoUseCase.Result.NeedsMediaWritePermission -> {
+                        pendingPermissionResult = result
+                        _pendingDeleteIntent.value = result.pendingIntent
+                    }
+                    is DeletePhotoUseCase.Result.CloudDeleteFailed -> rollbackPendingHide()
+                }
+            } finally {
+                _isDeleting.value = false
+            }
+        }
+    }
+
+    /** Persist the pending hide URIs into HIDDEN_PHOTO_URIS so they survive a restart and the load()
+     *  filter keeps them out of the folder. */
+    private suspend fun commitPendingHide() {
+        val uris = pendingHidePrivateUris
+        pendingHidePrivateUris = emptyList()
+        if (uris.isEmpty()) return
+        context.settingsDataStore.edit { prefs ->
+            val current = prefs[SettingsKeys.HIDDEN_PHOTO_URIS] ?: emptySet()
+            prefs[SettingsKeys.HIDDEN_PHOTO_URIS] = current + uris
+        }
+    }
+
+    /** Discard private copies that were created but never committed (error or cancelled delete). */
+    private fun rollbackPendingHide() {
+        val uris = pendingHidePrivateUris
+        pendingHidePrivateUris = emptyList()
+        for (u in uris) hiddenStorage.delete(u)
+    }
+
+    /** Run the deferred cloud delete once the system trash dialog is confirmed, then clear. A hide
+     *  flow commits its vault copies here once the local delete is confirmed. */
     fun onDeletePermissionGranted() {
         val pending = pendingPermissionResult
         pendingPermissionResult = null
@@ -369,15 +441,17 @@ class DeviceFolderDetailViewModel @Inject constructor(
                         freeUpSpace = pending.freeUpSpace,
                         hide = pending.hide,
                     )
+                    if (pending.hide) commitPendingHide()
                 }
             }
             _selectedUris.value = emptySet()
         }
     }
 
-    /** User cancelled the system trash dialog — drop the deferred cloud work. */
+    /** User cancelled the system trash dialog — drop the deferred cloud work and any pending vault copies. */
     fun clearPendingDeleteIntent() {
         pendingPermissionResult = null
         _pendingDeleteIntent.value = null
+        rollbackPendingHide()
     }
 }

@@ -115,6 +115,7 @@ interface DrivePhotoRepository {
     suspend fun downloadFullResPhoto(
         userId: UserId,
         photo: CloudPhoto,
+        preResolvedLinkDetail: eu.akoos.photos.data.api.dto.BatchLinkDto? = null,
         onProgress: ((doneBytes: Long, totalBytes: Long) -> Unit)? = null,
     ): File
     /**

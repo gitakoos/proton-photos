@@ -198,7 +198,17 @@ class HiddenStorageManager @Inject constructor(
                     put(MediaStore.MediaColumns.DATE_MODIFIED, captureTimeMs / 1000L)
                 }
             }
-            val target = context.contentResolver.insert(collection, values) ?: return@withContext null
+            // Some MediaProvider builds reject an uncommon video mime (notably video/x-matroska for
+            // .mkv) by THROWING IllegalArgumentException instead of returning null. Retry under the
+            // generic video/* (or image/*) mime so the file still lands, and skip gracefully rather
+            // than crashing the unhide if even that is refused.
+            val target = try {
+                context.contentResolver.insert(collection, values)
+            } catch (e: IllegalArgumentException) {
+                Log.w(TAG, "restore: insert rejected mime '$mime', retrying generic: ${e.message}")
+                values.put(MediaStore.MediaColumns.MIME_TYPE, if (isVideo) "video/*" else "image/*")
+                runCatching { context.contentResolver.insert(collection, values) }.getOrNull()
+            } ?: return@withContext null
             try {
                 context.contentResolver.openOutputStream(target)?.use { out ->
                     srcFile.inputStream().use { it.copyTo(out) }

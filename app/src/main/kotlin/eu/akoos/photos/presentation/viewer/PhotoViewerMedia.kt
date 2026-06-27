@@ -170,34 +170,19 @@ internal fun VideoPlayer(
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
+    // Inflate PlayerView from XML where surface_type="texture_view" is set. The TextureView surface
+    // lets Compose graphicsLayer scale the frames for pinch-zoom (a SurfaceView lives on its own
+    // compositor layer that ignores parent transforms), while resize_mode="fit" wraps it in an
+    // AspectRatioFrameLayout that letterboxes the video so its aspect ratio is preserved instead of
+    // stretched. The controller stays off; our own pill and the ExoPlayer listeners drive playback.
     AndroidView(
         factory = { ctx ->
-            PlayerView(ctx).apply {
-                // Disable the controller BEFORE attaching the player: setting `player` first lets
-                // PlayerView paint a one-frame control bar on some devices before useController
-                // takes effect.
-                useController = false
-                controllerAutoShow = false
-                controllerHideOnTouch = false
-                controllerShowTimeoutMs = 0
-                // Our own download/loading pill is the source of truth, so suppress ExoPlayer's
-                // buffering spinner.
-                setShowBuffering(PlayerView.SHOW_BUFFERING_NEVER)
-                hideController()
-                // Transparent shutter so it doesn't look like an overlay during pause / seek.
-                setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
-                useArtwork = false
-                setDefaultArtwork(null)
-                player = exoPlayer
-                // Keep the last frame on reset to avoid a transparent flicker; safe since the
-                // cached video reuses the same ExoPlayer instance (no stale-frame hazard).
-                setKeepContentOnPlayerReset(true)
-            }
+            (android.view.LayoutInflater.from(ctx)
+                .inflate(R.layout.view_video_player_texture, null) as PlayerView)
+                .apply { player = exoPlayer }
         },
         update = { view ->
             view.player = exoPlayer
-            // Keep the controller suppressed in case anything flipped it back on.
-            view.useController = false
         },
         modifier = modifier,
     )

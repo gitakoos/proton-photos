@@ -380,6 +380,16 @@
     <string name="settings_hide_all_folders_desc">Foto\'s in verborgen apparaatmappen verschijnen niet in je hoofdtijdlijn met foto\'s. Ze blijven op je apparaat.</string>
     <string name="settings_hide_album_photos_desc">Foto\'s die aan een Drive-album (cloud) zijn toegevoegd, verschijnen niet in je hoofdtijdlijn met foto\'s. Ze blijven wel zichtbaar in de tabbladen Albums en Gedeeld.</string>
     <string name="settings_timeline_filter">Tijdlijnfilter</string>
+    <string name="settings_timeline">Tijdlijn</string>
+    <string name="settings_timeline_section_layout">Indeling</string>
+    <string name="settings_timeline_section_shows">Wat wordt getoond</string>
+    <string name="settings_timeline_section_display">Weergave</string>
+    <string name="settings_show_scroll_date">Datum tonen tijdens scrollen</string>
+    <string name="settings_show_scroll_date_desc">Tijdens het scrollen verschijnt een zwevend label met maand en jaar boven de tijdlijn, zodat je altijd een tijdsaanduiding hebt.</string>
+    <string name="settings_reverse_timeline">Tijdlijnvolgorde omkeren</string>
+    <string name="settings_reverse_timeline_desc">Toon de oudste foto\'s bovenaan en de nieuwste onderaan. De tijdlijn opent bij je nieuwste foto\'s.</string>
+    <string name="settings_mosaic_grid">Mozaïekraster</string>
+    <string name="settings_mosaic_grid_desc">Plaats de tijdlijn als een verspringend mozaïek waarbij elke foto zijn eigen vorm behoudt, zodat staande foto\'s hoger lijken.</string>
     <string name="timeline_filter_title">Tijdlijnfilter</string>
     <string name="timeline_filter_subtitle">Kies wat je wilt verbergen uit je hoofdtijdlijn met foto\'s. Verborgen foto\'s blijven op je apparaat en worden verder geback-upt.</string>
     <string name="timeline_filter_categories_header">Categoriebalk</string>
@@ -398,6 +408,8 @@
     <string name="settings_media_management_grant_action">Verlenen</string>
     <string name="settings_appearance">Weergave &amp; taal</string>
     <string name="settings_appearance_desc">Thema, palet, app-taal</string>
+    <string name="settings_landing_tab">Starttabblad</string>
+    <string name="settings_landing_tab_desc">Welk tabblad opent bij het starten van de app</string>
     <string name="settings_strip_customize">Aanpassen wat wordt verwijderd</string>
     <string name="settings_about_desc">Versie, credits en licenties</string>
 
@@ -442,6 +454,10 @@
     <string name="language_hu">Hongaars, Magyar</string>
     <string name="language_it">Italiaans, Italiano</string>
     <string name="language_nl">Nederlands</string>
+    <string name="language_pl">Pools, Polski</string>
+    <string name="language_sk">Slowaaks, Slovenčina</string>
+    <string name="language_sl">Sloveens, Slovenščina</string>
+    <string name="language_cs">Tsjechisch, Čeština</string>
     <string name="language_section">Weergavetaal</string>
 
     <!-- About -->
@@ -783,8 +799,8 @@
     <string name="offline_banner_dismiss_cd">Offlinemelding sluiten</string>
     <string name="network_error_offline">Je bent offline. Probeer het opnieuw zodra je weer verbinding hebt.</string>
     <string name="network_error_transient">Verbinding mislukt. Probeer het later opnieuw.</string>
-    <string name="cd_status_backed_up_device">Geback-upt naar Drive en op apparaat</string>
-    <string name="cd_status_cloud_only">Alleen in Proton Drive</string>
+    <string name="cd_status_backed_up_device">Proton Drive en apparaat</string>
+    <string name="cd_status_cloud_only">Alleen Proton Drive</string>
     <string name="cd_status_hidden_local">Verborgen op dit apparaat</string>
     <string name="cd_status_device_only">Alleen op apparaat</string>
     <string name="cd_status_backed_up">Geback-upt</string>
@@ -936,9 +952,9 @@
     <string name="viewer_meta_orientation_180">180° gedraaid</string>
     <string name="viewer_meta_orientation_90_cw">90° met de klok mee gedraaid</string>
     <string name="viewer_meta_orientation_90_ccw">90° tegen de klok in gedraaid</string>
-    <string name="viewer_meta_source_device_only">Alleen op apparaat</string>
-    <string name="viewer_meta_source_backed_up">Geback-upt naar Proton Drive</string>
-    <string name="viewer_meta_source_cloud">Proton Drive</string>
+    <string name="viewer_meta_source_device_only">Alleen op dit apparaat</string>
+    <string name="viewer_meta_source_backed_up">Proton Drive en apparaat</string>
+    <string name="viewer_meta_source_cloud">Alleen Proton Drive</string>
     <string name="viewer_meta_strip">Verwijderen</string>
     <string name="viewer_meta_strip_all">Alle privémetadata verwijderen</string>
     <string name="viewer_meta_strip_all_desc">Verwijdert GPS, camera-informatie en softwarevelden uit dit bestand</string>
@@ -995,6 +1011,15 @@
     <!-- Gallery snackbar / error fallbacks -->
     <string name="gallery_error_title">Fout</string>
     <string name="gallery_no_local_to_hide">Geen lokale foto\'s om te verbergen</string>
+    <string name="gallery_undo">Ongedaan maken</string>
+    <plurals name="gallery_hidden_snackbar">
+        <item quantity="one">1 verborgen</item>
+        <item quantity="other">%d verborgen</item>
+    </plurals>
+    <plurals name="gallery_moved_to_trash_snackbar">
+        <item quantity="one">1 naar prullenbak verplaatst</item>
+        <item quantity="other">%d naar prullenbak verplaatst</item>
+    </plurals>
     <string name="gallery_copy_to_hidden_failed">Kopiëren naar Verborgen mislukt</string>
     <string name="gallery_move_to_hidden_failed">Verplaatsen naar Verborgen mislukt</string>
     <string name="gallery_add_to_cloud_album_failed">Toevoegen aan cloudalbum mislukt</string>
@@ -1003,6 +1028,11 @@
     <string name="gallery_create_album_failed">Kan album niet aanmaken: %1$s</string>
     <string name="gallery_enable_metadata_category">Schakel eerst een metadatacategorie in onder Instellingen → Privacy</string>
     <string name="gallery_album_picker_count_drive">%1$s · Drive</string>
+    <string name="album_add_photos">Foto\'s toevoegen</string>
+    <string name="album_picker_title">Aan album toevoegen</string>
+    <string name="album_picker_selected">%1$d geselecteerd</string>
+    <string name="album_add_count">Toevoegen (%1$d)</string>
+    <string name="album_picker_empty">Geen foto\'s om toe te voegen.</string>
 
     <!-- Album create/rename/delete snackbar fallbacks -->
     <string name="albums_name_empty">De albumnaam mag niet leeg zijn</string>
@@ -1096,4 +1126,21 @@
     <string name="grid_remember_last">Laatst gebruikte onthouden</string>
     <string name="grid_remember_last_desc">Open je foto\'s op het laatst gebruikte zoomniveau</string>
     <string name="grid_default_columns_section">Foto\'s per rij</string>
+    <!-- FAQ -->
+    <string name="faq_title">Veelgestelde vragen</string>
+    <string name="faq_settings_entry">Veelgestelde vragen</string>
+    <string name="faq_onboarding_intro">Een paar korte antwoorden om te beginnen. Je vindt ze later terug in Instellingen.</string>
+    <string name="faq_q_cloud_icons">Wat betekenen de wolkpictogrammen?</string>
+    <string name="faq_a_cloud_icons">Een groene wolk betekent dat de foto is geback-upt naar Proton Drive en nog op dit apparaat staat. Een witte wolk betekent dat hij alleen in Proton Drive staat, niet op dit apparaat. Geen pictogram betekent dat hij alleen op dit apparaat staat en nog niet is geback-upt.</string>
+    <string name="faq_q_backup">Hoe werkt de back-up?</string>
+    <string name="faq_a_backup">Nieuwe foto\'s en video\'s worden automatisch geback-upt zodra back-up aanstaat. In Instellingen kun je back-ups beperken tot Wi-Fi, zodat ze pauzeren op mobiele data.</string>
+    <string name="faq_q_albums">Wat zijn albums, en wat doet mapspiegeling?</string>
+    <string name="faq_a_albums">Albums groeperen foto\'s op Proton Drive. \"Apparaatmappen spiegelen als Drive-albums\" laat je telefoonmappen, zoals Camera of Screenshots, als bijbehorende albums op Drive verschijnen terwijl ze worden geback-upt.</string>
+    <string name="faq_q_mirror_local">Wat doet \"Wijzigingen spiegelen naar lokale bestanden\"?</string>
+    <string name="faq_a_mirror_local">Wanneer de app metadata verwijdert of een foto hernoemt tijdens de back-up, past hij diezelfde wijzigingen ook toe op het origineel op je telefoon, zodat het lokale bestand en de geback-upte kopie identiek blijven. Dit geldt alleen voor foto\'s die deze app back-upt, vanaf nu, en het haalt wijzigingen die je op het Proton Drive-web maakt niet terug naar je telefoon.</string>
+    <string name="faq_q_existing">Wijzigt de app mijn bestaande foto\'s?</string>
+    <string name="faq_a_existing">Nee. Metadatawijzigingen gebeuren alleen wanneer de app een foto back-upt, en alleen als je het verwijderen van metadata of lokale spiegeling inschakelt. Foto\'s die al op je telefoon staan, blijven ongewijzigd, tenzij je een actie per foto kiest.</string>
+    <string name="settings_copy_diagnostics">Diagnostieklogboek kopiëren</string>
+    <string name="settings_copy_diagnostics_desc">Voor het oplossen van synchronisatieproblemen. Er worden geen accountgegevens opgenomen.</string>
+    <string name="settings_diagnostics_copied">Diagnostieklogboek gekopieerd</string>
 </resources>

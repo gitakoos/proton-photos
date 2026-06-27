@@ -64,6 +64,7 @@ import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.entity.LocalMediaItem
 import androidx.compose.runtime.mutableIntStateOf
 import eu.akoos.photos.presentation.albums.AlbumDetailScreen
+import eu.akoos.photos.presentation.albums.AlbumPhotoPickerScreen
 import eu.akoos.photos.presentation.auth.SignInScreen
 import eu.akoos.photos.presentation.calendar.CalendarScreen
 import eu.akoos.photos.presentation.calendar.DayDetailScreen
@@ -78,7 +79,9 @@ import eu.akoos.photos.presentation.memories.MemoryCategoryScreen
 import eu.akoos.photos.presentation.onboarding.OnboardingScreen
 import eu.akoos.photos.presentation.settings.AboutScreen
 import eu.akoos.photos.presentation.settings.AccountScreen
+import eu.akoos.photos.presentation.settings.FaqScreen
 import eu.akoos.photos.presentation.settings.AppearanceSettingsScreen
+import eu.akoos.photos.presentation.settings.LandingTabScreen
 import eu.akoos.photos.presentation.settings.LanguageSettingsScreen
 import eu.akoos.photos.presentation.settings.NotificationSettingsScreen
 import eu.akoos.photos.presentation.settings.PendingDeleteHandler
@@ -88,6 +91,10 @@ import eu.akoos.photos.presentation.settings.SettingsScreen
 import eu.akoos.photos.presentation.settings.ExcludedFoldersScreen
 import eu.akoos.photos.presentation.settings.SyncFoldersScreen
 import eu.akoos.photos.presentation.settings.TimelineFilterScreen
+import eu.akoos.photos.presentation.settings.TimelineLayoutScreen
+import eu.akoos.photos.presentation.settings.TimelineCategoriesScreen
+import eu.akoos.photos.presentation.settings.TimelineAlbumsScreen
+import eu.akoos.photos.presentation.settings.TimelineDeviceFoldersScreen
 import eu.akoos.photos.presentation.settings.SyncSettingsScreen
 import eu.akoos.photos.presentation.map.MapScreen
 import eu.akoos.photos.presentation.search.SearchScreen
@@ -108,6 +115,7 @@ sealed class Screen(val route: String) {
     data object PrivacySecuritySettings : Screen("privacy_security_settings")
     data object Viewer : Screen("viewer")
     data object AlbumDetail : Screen("album_detail")
+    data object AlbumPhotoPicker : Screen("album_photo_picker")
     data object SyncFolders : Screen("sync_folders")
     data object DeviceFolderDetail : Screen("device_folder_detail")
     data object ExcludedFolders : Screen("excluded_folders")
@@ -118,16 +126,18 @@ sealed class Screen(val route: String) {
     data object Loading : Screen("loading")
     data object Login : Screen("login")
     data object About : Screen("about")
+    data object Faq : Screen("faq")
     data object Account : Screen("account_settings")
     data object Onboarding : Screen("onboarding")
     data object AppearanceSettings : Screen("appearance_settings")
+    data object LandingTab : Screen("landing_tab")
     data object ThemeSettings : Screen("theme_settings")
-    data object GridLayoutSettings : Screen("grid_layout_settings")
     data object LanguageSettings : Screen("language_settings")
     data object NotificationSettings : Screen("notification_settings")
     data object TimelineFilter : Screen("timeline_filter")
-    data object TimelineCategoryOrder : Screen("timeline_category_order")
-    data object TimelineAlbumsFilter : Screen("timeline_albums_filter")
+    data object TimelineLayout : Screen("timeline_layout")
+    data object TimelineCategories : Screen("timeline_categories")
+    data object TimelineAlbums : Screen("timeline_albums")
     data object TimelineDeviceFolders : Screen("timeline_device_folders")
     data object Search : Screen("search")
     data object Map : Screen("map")
@@ -202,6 +212,9 @@ fun NavGraph(
     // FLAG_SECURE and full-res hidden photos stay out of screenshots and the recent-apps preview.
     var viewerSecure by remember { mutableStateOf(false) }
     var selectedAlbum by remember { mutableStateOf<Album?>(null) }
+    // Cloud linkIds already in the album being added to — handed from AlbumDetail at picker-open
+    // time so the picker pre-filters them out (no re-adding duplicates).
+    var pickerExcludeLinkIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     // True when the viewer was opened from an album detail (not from the main gallery).
     // Suppresses the per-photo "Save to device" button — the album has its own "Download all".
     var viewerFromAlbum by remember { mutableStateOf(false) }
@@ -244,7 +257,13 @@ fun NavGraph(
                 }
                 StartupRoute.Ready -> {
                     navController.navigate(Screen.Gallery.route) {
-                        popUpTo(Screen.Loading.route) { inclusive = true }
+                        // Pop the ENTIRE graph, not just Loading: on a fresh sign-in the
+                        // NotLoggedIn step already consumed Loading and left Login on the stack,
+                        // so a Loading-only pop leaves Login under Gallery and back lands on it.
+                        // Popping the graph root clears Loading / Login / Onboarding uniformly, so
+                        // back from Gallery exits the app.
+                        popUpTo(navController.graph.id) { inclusive = true }
+                        launchSingleTop = true
                     }
                 }
             }
@@ -684,7 +703,28 @@ fun NavGraph(
                         viewerFromAlbum = true
                         navController.navigate(Screen.Viewer.route)
                     },
+                    onAddPhotosClick = { currentLinkIds ->
+                        // Capture the album's current members so the picker hides them.
+                        pickerExcludeLinkIds = currentLinkIds
+                        navController.navigate(Screen.AlbumPhotoPicker.route)
+                    },
                     onBack = { navController.popBackStack() },
+                )
+            }
+        }
+
+        composable(Screen.AlbumPhotoPicker.route) {
+            val album = selectedAlbum
+            if (album == null) {
+                navController.popBackStack()
+            } else {
+                AlbumPhotoPickerScreen(
+                    albumLinkId = album.linkId,
+                    albumName = album.name,
+                    excludeLinkIds = pickerExcludeLinkIds,
+                    onBack = { navController.popBackStack() },
+                    // The album observes the add via AlbumListEventBus and refreshes itself.
+                    onAdded = { navController.popBackStack() },
                 )
             }
         }
@@ -700,6 +740,7 @@ fun NavGraph(
                 onAppearanceClick         = { navController.navigate(Screen.AppearanceSettings.route) },
                 onLanguageClick           = { navController.navigate(Screen.LanguageSettings.route) },
                 onAboutClick              = { navController.navigate(Screen.About.route) },
+                onFaqClick                = { navController.navigate(Screen.Faq.route) },
                 onAccountClick            = { navController.navigate(Screen.Account.route) },
                 onCheckForUpdatesClick    = onCheckForUpdates,
             )
@@ -709,24 +750,26 @@ fun NavGraph(
             AboutScreen(onBack = { navController.popBackStack() })
         }
 
+        composable(Screen.Faq.route) {
+            FaqScreen(onBack = { navController.popBackStack() })
+        }
+
         composable(Screen.AppearanceSettings.route) {
             AppearanceSettingsScreen(
                 onBack = { navController.popBackStack() },
                 onThemeClick = { navController.navigate(Screen.ThemeSettings.route) },
                 onLanguageClick = { navController.navigate(Screen.LanguageSettings.route) },
-                onGridLayoutClick = { navController.navigate(Screen.GridLayoutSettings.route) },
                 onTimelineFilterClick = { navController.navigate(Screen.TimelineFilter.route) },
+                onLandingTabClick = { navController.navigate(Screen.LandingTab.route) },
             )
+        }
+
+        composable(Screen.LandingTab.route) {
+            LandingTabScreen(onBack = { navController.popBackStack() })
         }
 
         composable(Screen.ThemeSettings.route) {
             eu.akoos.photos.presentation.settings.ThemeSettingsScreen(
-                onBack = { navController.popBackStack() },
-            )
-        }
-
-        composable(Screen.GridLayoutSettings.route) {
-            eu.akoos.photos.presentation.settings.GridLayoutSettingsScreen(
                 onBack = { navController.popBackStack() },
             )
         }
@@ -857,29 +900,28 @@ fun NavGraph(
 
         composable(Screen.TimelineFilter.route) {
             TimelineFilterScreen(
-                onBack               = { navController.popBackStack() },
-                onCategoryOrderClick = { navController.navigate(Screen.TimelineCategoryOrder.route) },
-                onAlbumsClick        = { navController.navigate(Screen.TimelineAlbumsFilter.route) },
-                onDeviceFoldersClick = { navController.navigate(Screen.TimelineDeviceFolders.route) },
+                onBack = { navController.popBackStack() },
+                onOpenLayout = { navController.navigate(Screen.TimelineLayout.route) },
+                onOpenCategories = { navController.navigate(Screen.TimelineCategories.route) },
+                onOpenAlbums = { navController.navigate(Screen.TimelineAlbums.route) },
+                onOpenDeviceFolders = { navController.navigate(Screen.TimelineDeviceFolders.route) },
             )
         }
 
-        composable(Screen.TimelineCategoryOrder.route) {
-            eu.akoos.photos.presentation.settings.TimelineCategoryOrderScreen(
-                onBack = { navController.popBackStack() },
-            )
+        composable(Screen.TimelineLayout.route) {
+            TimelineLayoutScreen(onBack = { navController.popBackStack() })
         }
 
-        composable(Screen.TimelineAlbumsFilter.route) {
-            eu.akoos.photos.presentation.settings.TimelineAlbumsFilterScreen(
-                onBack = { navController.popBackStack() },
-            )
+        composable(Screen.TimelineCategories.route) {
+            TimelineCategoriesScreen(onBack = { navController.popBackStack() })
+        }
+
+        composable(Screen.TimelineAlbums.route) {
+            TimelineAlbumsScreen(onBack = { navController.popBackStack() })
         }
 
         composable(Screen.TimelineDeviceFolders.route) {
-            eu.akoos.photos.presentation.settings.TimelineDeviceFoldersScreen(
-                onBack = { navController.popBackStack() },
-            )
+            TimelineDeviceFoldersScreen(onBack = { navController.popBackStack() })
         }
 
         composable(Screen.NotificationSettings.route) {

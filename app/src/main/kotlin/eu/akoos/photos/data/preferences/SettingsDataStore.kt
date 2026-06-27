@@ -41,6 +41,20 @@ object SettingsKeys {
     /** When false, the gallery hides the "On this day" memories carousel. Default true. */
     val SHOW_ON_THIS_DAY = booleanPreferencesKey("show_on_this_day")
 
+    /** When true, a floating month/year label fades in over the Photos timeline while it is
+     *  actively scrolling, giving a time reference for the topmost visible photo. Off by default. */
+    val SHOW_SCROLL_DATE = booleanPreferencesKey("show_scroll_date")
+
+    /** When true, the Photos timeline is flipped so the oldest photos sit at the top and the
+     *  newest at the bottom (scroll up for older). Off by default — the timeline stays newest-first.
+     *  Display-only: the shared item sort that also feeds Search and Calendar is untouched. */
+    val REVERSE_TIMELINE_ORDER = booleanPreferencesKey("reverse_timeline_order")
+
+    /** When true, the Photos timeline uses a staggered (masonry) grid where each tile keeps its
+     *  photo's aspect ratio — portrait photos appear taller. Off by default: the timeline stays on
+     *  the fixed square grid. Display-only and limited to the Photos tab. */
+    val MOSAIC_GRID = booleanPreferencesKey("mosaic_grid")
+
     /** When true (default), the viewer + editor will NOT auto-download cloud full-res
      *  blobs on metered networks. Wifi-only is the data-conscious default; users on
      *  unlimited mobile plans can flip it off in Settings → Sync. Does not affect the
@@ -87,6 +101,11 @@ object SettingsKeys {
     val CATEGORY_RAIL_ORDER = stringPreferencesKey("category_rail_order")
 
     val LANGUAGE = stringPreferencesKey("language")
+
+    /** Which top-level gallery tab opens on app start: 0 = Photos, 1 = Albums, 2 = Shared.
+     *  Default 0 keeps the historical Photos-first behaviour. Applied once per cold start;
+     *  manual tab swipes within a session are not written back here. */
+    val LANDING_TAB = intPreferencesKey("landing_tab")
 
     /** Photo grid: fixed default columns per row. Drives the album / device-folder / hidden grids,
      *  and the timeline's opening zoom when [GRID_REMEMBER_LAST] is off. */

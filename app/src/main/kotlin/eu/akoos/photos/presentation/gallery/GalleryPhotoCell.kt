@@ -61,6 +61,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import coil.compose.AsyncImagePainter
 import coil.request.ImageRequest
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.GalleryItem
@@ -169,13 +170,19 @@ internal fun PhotoCell(
     typeBadgeRes: Int? = null,
     typeBadgeCdRes: Int? = null,
     showTypeBadges: Boolean = true,
+    // Per-cell aspect ratio (width / height) for the staggered mosaic grid. Null keeps the fixed
+    // square-grid tile shape; the fixed grid never passes this so its tiles are unchanged.
+    aspectRatioOverride: Float? = null,
+    // Mosaic-only: reports the loaded thumbnail's intrinsic width / height so a cell with no stored
+    // dimensions (a cloud photo) can size its tile from the decoded image. Null on the fixed grid.
+    onIntrinsicAspect: ((Float) -> Unit)? = null,
     onClick: () -> Unit,
     onLongClick: (() -> Unit)? = null,
 ) {
     Box(
         modifier = Modifier
             // Slightly taller than a square so the corner badges cover less of the photo.
-            .aspectRatio(0.85f)
+            .aspectRatio(aspectRatioOverride ?: 0.85f)
             .clip(RoundedCornerShape(10.dp))
             .background(Bg2)
             // The timeline owns long-press at the grid level (drag-to-select), so it passes no
@@ -222,6 +229,19 @@ internal fun PhotoCell(
                 model              = request,
                 contentDescription = null,
                 contentScale       = ContentScale.Crop,
+                // Mosaic cells with no stored dimensions read the decoded thumbnail's intrinsic size
+                // here to size their tile. onState is attached only when a reporter is supplied, so
+                // the fixed grid (null) keeps its original request with no extra callback.
+                onState = onIntrinsicAspect?.let { report ->
+                    { st ->
+                        if (st is AsyncImagePainter.State.Success) {
+                            val size = st.painter.intrinsicSize
+                            if (size.width > 0f && size.height > 0f) {
+                                report(size.width / size.height)
+                            }
+                        }
+                    }
+                },
                 modifier           = Modifier.fillMaxSize()
                     .then(if (selected) Modifier.background(Accent.copy(alpha = 0.15f)) else Modifier),
             )

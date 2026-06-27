@@ -22,10 +22,17 @@
 
 package eu.akoos.photos.presentation.gallery
 
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -33,6 +40,7 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -41,12 +49,18 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.staggeredgrid.LazyStaggeredGridState
+import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
+import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
+import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridItemSpan
+import androidx.compose.foundation.lazy.staggeredgrid.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -57,6 +71,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -107,6 +122,7 @@ internal fun PhotoGrid(
     monthGroups: List<Pair<String, List<GalleryItem>>>,
     onThisDayGroups: List<Pair<Int, List<GalleryItem>>>,
     gridState: LazyGridState,
+    staggeredState: LazyStaggeredGridState,
     topContentPadding: Dp,
     permissionState: PermissionState,
     onPermissionGrant: () -> Unit,
@@ -139,6 +155,41 @@ internal fun PhotoGrid(
     val showOnThisDay by remember {
         context.settingsDataStore.data.map { it[SettingsKeys.SHOW_ON_THIS_DAY] ?: true }
     }.collectAsState(initial = true)
+    // Opt-in floating month/year label while scrolling; default off.
+    val showScrollDate by remember {
+        context.settingsDataStore.data.map { it[SettingsKeys.SHOW_SCROLL_DATE] ?: false }
+    }.collectAsState(initial = false)
+    // Opt-in reversed chronology: oldest at the top, newest at the bottom; default off.
+    val reverseOrder by remember {
+        context.settingsDataStore.data.map { it[SettingsKeys.REVERSE_TIMELINE_ORDER] ?: false }
+    }.collectAsState(initial = false)
+    // Opt-in staggered (masonry) layout; default off. When off, the fixed square grid below is
+    // rendered exactly as before.
+    val mosaicGrid by remember {
+        context.settingsDataStore.data.map { it[SettingsKeys.MOSAIC_GRID] ?: false }
+    }.collectAsState(initial = false)
+
+    // Reversed views used only when the toggle is on. Reversing the flat list flips the within-group
+    // item order AND, because groupBy preserves encounter order, the group order for the inline
+    // None/Day/Year levels below. The Month groups arrive pre-bucketed from the ViewModel, so they
+    // are reversed here too — group order and each group's items. When off, both pass straight
+    // through, so behaviour is byte-identical to newest-first. The scrubber + scroll-date label
+    // receive [orderedItems], so their position→date mapping needs no separate reversal flag.
+    val orderedItems = remember(items, reverseOrder) {
+        if (reverseOrder) items.asReversed() else items
+    }
+    val orderedMonthGroups = remember(monthGroups, reverseOrder) {
+        if (reverseOrder) monthGroups.asReversed().map { (label, groupItems) -> label to groupItems.asReversed() }
+        else monthGroups
+    }
+
+    // The staggered scroll state for the mosaic layout is hoisted to GalleryScreen and passed in, so
+    // the screen-level scroll behaviours (re-tap scroll-to-top, overlay auto-hide, look-ahead
+    // prefetch) follow it when mosaic is on. The fixed grid's [gridState] is untouched on the OFF path.
+
+    // Both orders open at the grid's natural index-0 (the top of the page): newest in normal mode,
+    // oldest when reversed. The re-tap-tab scroll-to-top also targets index 0, so the opening
+    // position and the button agree in every mode.
 
     // Stable grid key for an item — must match the keys passed to the `items(...)` blocks below.
     val keyOf: (GalleryItem) -> String = { item ->
@@ -157,10 +208,11 @@ internal fun PhotoGrid(
     }
 
     // key → index, so a cell's onClick resolves the tapped photo's position in O(1) instead of
-    // a List.indexOf scan per click (an N-cost call repeated across every visible cell).
-    val indexByKey = remember(items) {
-        HashMap<String, Int>(items.size).apply {
-            items.forEachIndexed { idx, gi -> put(keyOf(gi), idx) }
+    // a List.indexOf scan per click (an N-cost call repeated across every visible cell). Built over
+    // [orderedItems] so the index matches the list the grid renders and hands to onPhotoClick.
+    val indexByKey = remember(orderedItems) {
+        HashMap<String, Int>(orderedItems.size).apply {
+            orderedItems.forEachIndexed { idx, gi -> put(keyOf(gi), idx) }
         }
     }
     // Pending-decrypt linkId for a cloud row whose thumbnail isn't cached yet (matches the old
@@ -180,24 +232,29 @@ internal fun PhotoGrid(
     // per-cell 120 ms-debounced LaunchedEffect, whose fire order followed compose/dispose timing
     // rather than scroll position, so thumbnails popped in out of order. Centralising both the
     // request and the cancel here also lets PhotoCell stay a pure (skippable) presentation cell.
-    LaunchedEffect(gridState, items) {
-        var requested = emptySet<String>()
-        snapshotFlow {
-            gridState.layoutInfo.visibleItemsInfo.mapNotNull { it.key as? String }
-        }.distinctUntilChanged().collect { visibleKeys ->
-            val firstIdx = visibleKeys.firstNotNullOfOrNull { indexByKey[it] }
-            val lastIdx = visibleKeys.asReversed().firstNotNullOfOrNull { indexByKey[it] }
-            val nowRequested = LinkedHashSet<String>()
-            if (firstIdx != null && lastIdx != null) {
-                val to = (lastIdx + 1 + 12).coerceAtMost(items.size)
-                for (i in firstIdx until to) pendingCloudLinkIdOf(items[i])?.let {
-                    if (nowRequested.add(it)) onRequestThumbnail(it)
-                }
-            }
-            // Cancel rows that left the request window so the scheduler stops decrypting flung-past
-            // cells — the same back-pressure the old per-cell onDispose provided.
-            requested.forEach { if (it !in nowRequested) onCancelThumbnail(it) }
-            requested = nowRequested
+    // The visible-key source is the only thing that differs between the fixed and staggered grids,
+    // so it is supplied as a snapshot lambda and the range walk is shared (see [visibleRangeDecrypt]).
+    if (mosaicGrid) {
+        LaunchedEffect(staggeredState, orderedItems) {
+            visibleRangeDecrypt(
+                orderedItems = orderedItems,
+                indexByKey = indexByKey,
+                pendingCloudLinkIdOf = pendingCloudLinkIdOf,
+                onRequestThumbnail = onRequestThumbnail,
+                onCancelThumbnail = onCancelThumbnail,
+                visibleKeys = { staggeredState.layoutInfo.visibleItemsInfo.mapNotNull { it.key as? String } },
+            )
+        }
+    } else {
+        LaunchedEffect(gridState, orderedItems) {
+            visibleRangeDecrypt(
+                orderedItems = orderedItems,
+                indexByKey = indexByKey,
+                pendingCloudLinkIdOf = pendingCloudLinkIdOf,
+                onRequestThumbnail = onRequestThumbnail,
+                onCancelThumbnail = onCancelThumbnail,
+                visibleKeys = { gridState.layoutInfo.visibleItemsInfo.mapNotNull { it.key as? String } },
+            )
         }
     }
 
@@ -242,7 +299,7 @@ internal fun PhotoGrid(
     // levels (None flat / Day / Year) are off-default and grouped inline here as before; their
     // label format and encounter order are unchanged.
     val grouped: List<Pair<String, List<GalleryItem>>> = if (effectiveGrouping == TimelineGrouping.Month) {
-        monthGroups
+        orderedMonthGroups
     } else {
         val dateFormat = remember(effectiveGrouping) {
             val pattern = when (effectiveGrouping) {
@@ -253,13 +310,15 @@ internal fun PhotoGrid(
             }
             SimpleDateFormat(pattern, Locale.getDefault())
         }
-        remember(items, effectiveGrouping) {
+        // [orderedItems] is already reversed when the toggle is on, so grouping it yields reversed
+        // group order and reversed within-group items with no extra handling here.
+        remember(orderedItems, effectiveGrouping) {
             if (effectiveGrouping == TimelineGrouping.None) {
                 // Single flat bucket — no header row is emitted for it (the header loop below
                 // skips MonthHeader entirely in None mode).
-                listOf("" to items)
+                listOf("" to orderedItems)
             } else {
-                items.groupBy { item -> dateFormat.format(Date(item.captureTimeMs)) }
+                orderedItems.groupBy { item -> dateFormat.format(Date(item.captureTimeMs)) }
                     .entries.map { it.key to it.value }
             }
         }
@@ -344,14 +403,56 @@ internal fun PhotoGrid(
     // ── Drag-to-select ────────────────────────────────────────────────────────
     // Long-press a photo then drag to select/deselect a contiguous range; a plain single-finger drag
     // still scrolls and the two-finger pinch above is untouched. The gesture lives in the shared
-    // [rememberDragMultiSelectModifier].
+    // [rememberDragMultiSelectModifier] (fixed grid) / [rememberStaggeredDragMultiSelectModifier].
+    // Armed at the long-press anchor so the cell's release-tap (below) skips toggling the just-selected
+    // cell back off; shared across both grid layouts since only one is mounted at a time.
+    val tapGuard = remember { mutableStateOf(false) }
     val dragSelectModifier = rememberDragMultiSelectModifier(
         gridState = gridState,
-        items = items,
+        items = orderedItems,
         indexByKey = indexByKey,
         selected = selectedItems,
         onSelectionChange = onSelectionChange,
+        tapGuard = tapGuard,
     )
+    val staggeredDragSelectModifier = rememberStaggeredDragMultiSelectModifier(
+        gridState = staggeredState,
+        items = orderedItems,
+        indexByKey = indexByKey,
+        selected = selectedItems,
+        onSelectionChange = onSelectionChange,
+        tapGuard = tapGuard,
+    )
+
+    if (mosaicGrid) {
+        MosaicPhotoGrid(
+            staggeredState = staggeredState,
+            grouped = grouped,
+            orderedItems = orderedItems,
+            onThisDayByYear = onThisDayByYear,
+            showOnThisDay = showOnThisDay,
+            showScrollDate = showScrollDate,
+            columnCount = columnCount,
+            effectiveGrouping = effectiveGrouping,
+            topContentPadding = topContentPadding,
+            permissionState = permissionState,
+            onPermissionGrant = onPermissionGrant,
+            onPhotoClick = onPhotoClick,
+            selectedItems = selectedItems,
+            isSelectionMode = isSelectionMode,
+            onToggleSelect = onToggleSelect,
+            onToggleGroup = onToggleGroup,
+            hiddenCloudLinkIds = hiddenCloudLinkIds,
+            downloadedCloudLinkIds = downloadedCloudLinkIds,
+            favoriteIds = favoriteIds,
+            keyOf = keyOf,
+            indexByKey = indexByKey,
+            dragSelectModifier = staggeredDragSelectModifier,
+            pinchModifier = pinchModifier,
+            tapGuard = tapGuard,
+        )
+        return
+    }
 
     Box(modifier = Modifier.fillMaxSize()) {
     LazyVerticalGrid(
@@ -462,24 +563,425 @@ internal fun PhotoGrid(
                     typeBadgeCdRes    = inputs.typeBadgeCdRes,
                     showTypeBadges    = columnCount < 5,
                     onClick           = {
-                        if (isSelectionMode) onToggleSelect(item)
-                        else onPhotoClick(items, indexByKey[keyOf(item)] ?: 0)
+                        // Skip the release-tap that follows a long-press select; it would otherwise
+                        // toggle the just-anchored cell back off.
+                        if (tapGuard.value) {
+                            tapGuard.value = false
+                        } else if (isSelectionMode) onToggleSelect(item)
+                        else onPhotoClick(orderedItems, indexByKey[keyOf(item)] ?: 0)
                     },
                 )
             }
         }
     }
 
+        // Tracks the scrubber's drag so the floating scroll-date label can yield while the user is
+        // scrubbing — both sit near the top and must never show at once.
+        var scrubberDragging by remember { mutableStateOf(false) }
+
         // Timeline scrubber sidebar — fades in while scrolling, draggable to seek.
         // Reads the effective (pinch-controlled) grouping so its tooltip format matches
         // the headers the user is currently seeing.
+        // [orderedItems] matches the grid's render order, so the scrubber maps grid position → date
+        // correctly under the reversed order without a separate flag (top = oldest when reversed).
         TimelineScrubber(
             gridState = gridState,
-            items = items,
+            items = orderedItems,
             grouping = effectiveGrouping,
             topPadding = topContentPadding + 8.dp,
             bottomPadding = 120.dp,
+            onDraggingChange = { scrubberDragging = it },
         )
+
+        // Opt-in floating month/year label — top-centre, visible only while the grid is actively
+        // scrolling and the scrubber isn't being dragged. Shares the scrubber's date mapping so the
+        // two surfaces always agree.
+        if (showScrollDate) {
+            ScrollDateLabel(
+                gridState = gridState,
+                items = orderedItems,
+                grouping = effectiveGrouping,
+                topPadding = topContentPadding + 12.dp,
+                suppressed = scrubberDragging,
+                modifier = Modifier.align(Alignment.TopCenter),
+            )
+        }
+    }
+}
+
+/**
+ * Shared visible-range decrypt loop for both grid layouts. The fixed and staggered grids expose
+ * the visible cell keys through different layout-info types, so the caller passes a snapshot
+ * [visibleKeys] lambda; everything downstream (the leading-margin range walk + cancel of cells that
+ * left the window) is identical. Suspends for the lifetime of the owning LaunchedEffect.
+ */
+private suspend fun visibleRangeDecrypt(
+    orderedItems: List<GalleryItem>,
+    indexByKey: Map<String, Int>,
+    pendingCloudLinkIdOf: (GalleryItem) -> String?,
+    onRequestThumbnail: (String) -> Unit,
+    onCancelThumbnail: (String) -> Unit,
+    visibleKeys: () -> List<String>,
+) {
+    var requested = emptySet<String>()
+    snapshotFlow { visibleKeys() }.distinctUntilChanged().collect { keys ->
+        val firstIdx = keys.firstNotNullOfOrNull { indexByKey[it] }
+        val lastIdx = keys.asReversed().firstNotNullOfOrNull { indexByKey[it] }
+        val nowRequested = LinkedHashSet<String>()
+        if (firstIdx != null && lastIdx != null) {
+            val to = (lastIdx + 1 + 12).coerceAtMost(orderedItems.size)
+            for (i in firstIdx until to) pendingCloudLinkIdOf(orderedItems[i])?.let {
+                if (nowRequested.add(it)) onRequestThumbnail(it)
+            }
+        }
+        requested.forEach { if (it !in nowRequested) onCancelThumbnail(it) }
+        requested = nowRequested
+    }
+}
+
+/** Clamp band for a mosaic tile's aspect ratio so a panorama or a sliver-thin source can't produce
+ *  an absurdly short or tall cell that breaks the staggered flow. */
+private const val MOSAIC_ASPECT_MIN = 0.5f
+private const val MOSAIC_ASPECT_MAX = 2.0f
+
+/**
+ * Width / height aspect ratio for a mosaic tile from STORED dimensions, or null when none are
+ * known. Local-backed items carry MediaStore dimensions; a cloud-only item has none, so it returns
+ * null and the cell sizes itself from the decoded thumbnail instead (see the mosaic items block).
+ * The ratio is clamped to a sane band.
+ */
+private fun storedMosaicAspect(item: GalleryItem): Float? {
+    val (w, h) = when (item) {
+        is GalleryItem.LocalOnly -> item.local.width to item.local.height
+        is GalleryItem.Synced    -> item.local.width to item.local.height
+        is GalleryItem.CloudOnly -> 0 to 0
+    }
+    if (w <= 0 || h <= 0) return null
+    return (w.toFloat() / h.toFloat()).coerceIn(MOSAIC_ASPECT_MIN, MOSAIC_ASPECT_MAX)
+}
+
+/**
+ * Opt-in staggered (masonry) timeline. A separate composable so the fixed-grid path in [PhotoGrid]
+ * stays exactly as it was — this is only reached when the Mosaic toggle is on. Reads the SAME
+ * ordered + grouped views the fixed grid does, so reversed-order and pinch-grouping behave
+ * identically; only the layout (variable tile heights via per-item aspect ratio) differs. Date
+ * headers and the On-This-Day row span the full row via [StaggeredGridItemSpan.FullLine].
+ */
+@Composable
+private fun MosaicPhotoGrid(
+    staggeredState: LazyStaggeredGridState,
+    grouped: List<Pair<String, List<GalleryItem>>>,
+    orderedItems: List<GalleryItem>,
+    onThisDayByYear: List<Pair<Int, List<GalleryItem>>>,
+    showOnThisDay: Boolean,
+    showScrollDate: Boolean,
+    columnCount: Int,
+    effectiveGrouping: TimelineGrouping,
+    topContentPadding: Dp,
+    permissionState: PermissionState,
+    onPermissionGrant: () -> Unit,
+    onPhotoClick: (items: List<GalleryItem>, index: Int) -> Unit,
+    selectedItems: Set<GalleryItem>,
+    isSelectionMode: Boolean,
+    onToggleSelect: (GalleryItem) -> Unit,
+    onToggleGroup: (List<GalleryItem>) -> Unit,
+    hiddenCloudLinkIds: Set<String>,
+    downloadedCloudLinkIds: Set<String>,
+    favoriteIds: Set<String>,
+    keyOf: (GalleryItem) -> String,
+    indexByKey: Map<String, Int>,
+    dragSelectModifier: Modifier,
+    pinchModifier: Modifier,
+    tapGuard: MutableState<Boolean>,
+) {
+    val context = LocalContext.current
+    Box(modifier = Modifier.fillMaxSize()) {
+        LazyVerticalStaggeredGrid(
+            columns = StaggeredGridCells.Fixed(columnCount),
+            state = staggeredState,
+            contentPadding = PaddingValues(
+                top = topContentPadding + 8.dp,
+                bottom = 120.dp,
+                start = 20.dp,
+                end = 20.dp,
+            ),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalItemSpacing = 6.dp,
+            modifier = Modifier
+                .fillMaxSize()
+                .then(dragSelectModifier)
+                .then(pinchModifier),
+        ) {
+            if (permissionState == PermissionState.Denied ||
+                permissionState == PermissionState.PermanentlyDenied
+            ) {
+                item(span = StaggeredGridItemSpan.FullLine, contentType = "header") {
+                    PermissionBanner(
+                        permanent = permissionState == PermissionState.PermanentlyDenied,
+                        onAction = {
+                            if (permissionState == PermissionState.PermanentlyDenied) {
+                                val intent = android.content.Intent(
+                                    android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS
+                                ).apply {
+                                    data = android.net.Uri.fromParts("package", context.packageName, null)
+                                }
+                                context.startActivity(intent)
+                            } else {
+                                onPermissionGrant()
+                            }
+                        },
+                    )
+                }
+            }
+
+            if (showOnThisDay && onThisDayByYear.isNotEmpty()) {
+                item(span = StaggeredGridItemSpan.FullLine, key = "on_this_day", contentType = "header") {
+                    OnThisDayCarousel(
+                        yearGroups = onThisDayByYear,
+                        onPhotoClick = onPhotoClick,
+                    )
+                }
+            }
+
+            for ((month, monthItems) in grouped) {
+                val monthVideos = monthItems.count { item ->
+                    val mt = when (item) {
+                        is GalleryItem.LocalOnly -> item.local.mimeType
+                        is GalleryItem.Synced    -> item.local.mimeType
+                        is GalleryItem.CloudOnly -> item.cloud.mimeType
+                    }
+                    mt.startsWith("video/")
+                }
+                val monthPhotos = monthItems.size - monthVideos
+                if (effectiveGrouping != TimelineGrouping.None) {
+                    val selectedInGroup = monthItems.count { it in selectedItems }
+                    item(span = StaggeredGridItemSpan.FullLine, contentType = "header") {
+                        MonthHeader(
+                            month = month,
+                            photoCount = monthPhotos,
+                            videoCount = monthVideos,
+                            isSelectionMode = isSelectionMode,
+                            selectedInGroup = selectedInGroup,
+                            groupSize = monthItems.size,
+                            onToggleGroup = { onToggleGroup(monthItems) },
+                        )
+                    }
+                }
+                items(
+                    monthItems,
+                    key = { item -> keyOf(item) },
+                    contentType = { "photo" },
+                ) { item ->
+                    val cloudId = cloudLinkIdOfMosaic(item)
+                    val inputs = remember(item, favoriteIds, downloadedCloudLinkIds) {
+                        photoCellInputsFor(item, favoriteIds, downloadedCloudLinkIds)
+                    }
+                    // Prefer the stored MediaStore aspect (local-backed items) so they lay out with
+                    // no relayout. A cloud-only cell has none, so it starts square and adopts the
+                    // decoded thumbnail's aspect once it loads — one relayout per such cell.
+                    val storedAspect = remember(item) { storedMosaicAspect(item) }
+                    var thumbAspect by remember(inputs.stableKey) { mutableStateOf(1f) }
+                    PhotoCell(
+                        imageData         = inputs.imageData,
+                        stableKey         = inputs.stableKey,
+                        isVideo           = inputs.isVideo,
+                        isPlaceholder     = inputs.isPlaceholder,
+                        selected          = item in selectedItems,
+                        isSelectionMode   = isSelectionMode,
+                        isHiddenOnDevice  = cloudId != null && cloudId in hiddenCloudLinkIds,
+                        showCloudBadge    = inputs.showCloudBadge,
+                        showSyncedBadge   = inputs.showSyncedBadge,
+                        isFavorite        = inputs.isFavorite,
+                        typeBadgeRes      = inputs.typeBadgeRes,
+                        typeBadgeCdRes    = inputs.typeBadgeCdRes,
+                        showTypeBadges    = columnCount < 5,
+                        aspectRatioOverride = storedAspect ?: thumbAspect,
+                        onIntrinsicAspect = if (storedAspect == null) {
+                            { aspect -> thumbAspect = aspect.coerceIn(MOSAIC_ASPECT_MIN, MOSAIC_ASPECT_MAX) }
+                        } else null,
+                        onClick           = {
+                            // Skip the release-tap that follows a long-press select; it would otherwise
+                            // toggle the just-anchored cell back off.
+                            if (tapGuard.value) {
+                                tapGuard.value = false
+                            } else if (isSelectionMode) onToggleSelect(item)
+                            else onPhotoClick(orderedItems, indexByKey[keyOf(item)] ?: 0)
+                        },
+                    )
+                }
+            }
+        }
+
+        var scrubberDragging by remember { mutableStateOf(false) }
+
+        TimelineScrubberStaggered(
+            gridState = staggeredState,
+            items = orderedItems,
+            grouping = effectiveGrouping,
+            topPadding = topContentPadding + 8.dp,
+            bottomPadding = 120.dp,
+            onDraggingChange = { scrubberDragging = it },
+        )
+
+        if (showScrollDate) {
+            ScrollDateLabelStaggered(
+                gridState = staggeredState,
+                items = orderedItems,
+                grouping = effectiveGrouping,
+                topPadding = topContentPadding + 12.dp,
+                suppressed = scrubberDragging,
+                modifier = Modifier.align(Alignment.TopCenter),
+            )
+        }
+    }
+}
+
+/** Cloud link id for the mosaic cell's hidden-overlay gate; mirrors [PhotoGrid]'s cloudLinkIdOf. */
+private fun cloudLinkIdOfMosaic(item: GalleryItem): String? = when (item) {
+    is GalleryItem.CloudOnly -> item.cloud.linkId
+    is GalleryItem.Synced    -> item.cloud.linkId
+    is GalleryItem.LocalOnly -> null
+}
+
+/**
+ * Staggered-grid twin of [ScrollDateLabel] for the mosaic timeline. Same off-composition snapshot
+ * driving and fade behaviour; only the scroll-state type differs.
+ */
+@Composable
+private fun BoxScope.ScrollDateLabelStaggered(
+    gridState: LazyStaggeredGridState,
+    items: List<GalleryItem>,
+    grouping: TimelineGrouping,
+    topPadding: Dp,
+    suppressed: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val dateFormat = rememberTimelineDateFormat(grouping)
+
+    var label by remember { mutableStateOf("") }
+    var scrolling by remember { mutableStateOf(false) }
+
+    LaunchedEffect(gridState, items, dateFormat) {
+        snapshotFlow { gridState.firstVisibleItemIndex }
+            .distinctUntilChanged()
+            .collect { firstIndex ->
+                label = timelineDateLabel(
+                    firstIndex,
+                    gridState.layoutInfo.totalItemsCount,
+                    items,
+                    dateFormat,
+                )
+            }
+    }
+    LaunchedEffect(gridState) {
+        snapshotFlow { gridState.isScrollInProgress }
+            .distinctUntilChanged()
+            .collectLatest { inProgress ->
+                if (inProgress) {
+                    scrolling = true
+                } else {
+                    delay(900)
+                    scrolling = false
+                }
+            }
+    }
+
+    AnimatedVisibility(
+        visible = scrolling && !suppressed && label.isNotEmpty() && items.isNotEmpty(),
+        enter = fadeIn(tween(120)),
+        exit = fadeOut(tween(220)),
+        modifier = modifier
+            .padding(top = topPadding)
+            .wrapContentSize(),
+    ) {
+        Box(
+            modifier = Modifier
+                .background(Color.Black.copy(alpha = 0.78f), RoundedCornerShape(999.dp))
+                .padding(horizontal = 14.dp, vertical = 7.dp),
+        ) {
+            Text(
+                text = label,
+                color = Color.White,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                softWrap = false,
+            )
+        }
+    }
+}
+
+/**
+ * Floating month/year pill shown over the timeline while it scrolls, giving a time reference for the
+ * topmost visible photo. The label + visibility are driven entirely off the composition via
+ * [snapshotFlow] — `firstVisibleItemIndex` is never read in the composable body (that read was the
+ * dominant scroll-jank source), only inside the flow. Fades out a beat after scrolling stops.
+ */
+@Composable
+private fun BoxScope.ScrollDateLabel(
+    gridState: LazyGridState,
+    items: List<GalleryItem>,
+    grouping: TimelineGrouping,
+    topPadding: Dp,
+    suppressed: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val dateFormat = rememberTimelineDateFormat(grouping)
+
+    var label by remember { mutableStateOf("") }
+    var scrolling by remember { mutableStateOf(false) }
+
+    // Recompute the label off-composition whenever the first visible grid index changes, mapping that
+    // grid index (headers + memories row included) to the photo's capture date via the shared helper.
+    LaunchedEffect(gridState, items, dateFormat) {
+        snapshotFlow { gridState.firstVisibleItemIndex }
+            .distinctUntilChanged()
+            .collect { firstIndex ->
+                label = timelineDateLabel(
+                    firstIndex,
+                    gridState.layoutInfo.totalItemsCount,
+                    items,
+                    dateFormat,
+                )
+            }
+    }
+    // Visibility tracks the grid's scroll activity, with a short tail so the label lingers briefly
+    // after a fling settles instead of blinking out the instant motion stops.
+    LaunchedEffect(gridState) {
+        snapshotFlow { gridState.isScrollInProgress }
+            .distinctUntilChanged()
+            .collectLatest { inProgress ->
+                if (inProgress) {
+                    scrolling = true
+                } else {
+                    delay(900)
+                    scrolling = false
+                }
+            }
+    }
+
+    AnimatedVisibility(
+        visible = scrolling && !suppressed && label.isNotEmpty() && items.isNotEmpty(),
+        enter = fadeIn(tween(120)),
+        exit = fadeOut(tween(220)),
+        modifier = modifier
+            .padding(top = topPadding)
+            .wrapContentSize(),
+    ) {
+        Box(
+            modifier = Modifier
+                .background(Color.Black.copy(alpha = 0.78f), RoundedCornerShape(999.dp))
+                .padding(horizontal = 14.dp, vertical = 7.dp),
+        ) {
+            Text(
+                text = label,
+                color = Color.White,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                softWrap = false,
+            )
+        }
     }
 }
 

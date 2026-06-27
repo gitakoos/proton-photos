@@ -37,6 +37,7 @@ import me.proton.core.crypto.common.pgp.SessionKey
 import me.proton.core.domain.entity.UserId
 import me.proton.core.network.data.ApiProvider
 import eu.akoos.photos.data.api.DriveApiService
+import eu.akoos.photos.data.api.dto.BatchLinkDto
 import eu.akoos.photos.data.api.dto.RevisionBlockDto
 import eu.akoos.photos.crypto.CryptoServiceClient
 import eu.akoos.photos.data.crypto.DriveCryptoHelper
@@ -110,6 +111,7 @@ class PhotoDownloadService @Inject constructor(
     suspend fun downloadFullResPhoto(
         userId: UserId,
         photo: CloudPhoto,
+        preResolvedLinkDetail: BatchLinkDto? = null,
         onProgress: ((doneBytes: Long, totalBytes: Long) -> Unit)? = null,
     ): File {
         inFlight[photo.linkId]?.takeIf { !it.isCompleted }?.let { return it.await() }
@@ -127,7 +129,7 @@ class PhotoDownloadService @Inject constructor(
             }
         }
         try {
-            val file = doDownload(userId, photo, onProgress)
+            val file = doDownload(userId, photo, preResolvedLinkDetail, onProgress)
             deferred.complete(file)
             return file
         } catch (t: Throwable) {
@@ -143,6 +145,7 @@ class PhotoDownloadService @Inject constructor(
     private suspend fun doDownload(
         userId: UserId,
         photo: CloudPhoto,
+        preResolvedLinkDetail: BatchLinkDto? = null,
         onProgress: ((doneBytes: Long, totalBytes: Long) -> Unit)? = null,
     ): File = withContext(Dispatchers.IO) {
         val cacheDir = File(context.cacheDir, "fullres").also { it.mkdirs() }
@@ -181,8 +184,13 @@ class PhotoDownloadService @Inject constructor(
         val manager = apiProvider.get<DriveApiService>(userId)
 
         // ── Node key ─────────────────────────────────────────────────────────────
-        val linkDetailMap = linkDetailHelpers.batchFetchLinkDetails(userId, photo.volumeId, listOf(photo.linkId))
-        val link = linkDetailMap[photo.linkId]?.link ?: error("Link not found: ${photo.linkId}")
+        // Use the caller-prefetched link detail when present (bulk-download path resolved it in a
+        // 50-wide batch up front); otherwise fall back to the per-file one-element batch fetch.
+        // Keyed strictly by this photo's linkId, so no cross-file key material can leak in.
+        val linkDetail: BatchLinkDto = preResolvedLinkDetail
+            ?: linkDetailHelpers.batchFetchLinkDetails(userId, photo.volumeId, listOf(photo.linkId))[photo.linkId]
+            ?: error("Link not found: ${photo.linkId}")
+        val link = linkDetail.link
         val nodeKeyArmored = link.nodeKey ?: error("No nodeKey for ${photo.linkId}")
         val nodePassphraseArmored = link.nodePassphrase ?: error("No nodePassphrase for ${photo.linkId}")
 
@@ -213,7 +221,7 @@ class PhotoDownloadService @Inject constructor(
         //   5. listRevisions API call
         val revisionId: String = photo.revisionId.ifEmpty {
             link.fileProperties?.activeRevision?.id?.takeIf { it.isNotEmpty() }
-                ?: linkDetailMap[photo.linkId]?.photo?.activeRevision?.revisionId?.takeIf { it.isNotEmpty() }
+                ?: linkDetail.photo?.activeRevision?.revisionId?.takeIf { it.isNotEmpty() }
                 ?: link.activeRevision?.id?.takeIf { it.isNotEmpty() }
         } ?: run {
             Log.d(TAG, "downloadFullResPhoto: revisionId missing, trying listRevisions for ${photo.linkId}")
@@ -250,7 +258,7 @@ class PhotoDownloadService @Inject constructor(
         //   2. FileProperties.ContentKeyPacket — primary for standard Drive files
         //   3. Revision.ContentKeyPacket / Revision.Photo.ContentKeyPacket — legacy fallbacks
         //   4. ActiveRevision.ContentKeyPacket — wrong place but kept as last resort
-        val ckpBatchPhoto = linkDetailMap[photo.linkId]?.photo?.contentKeyPacket   // ← PRIMARY for photos
+        val ckpBatchPhoto = linkDetail.photo?.contentKeyPacket                     // ← PRIMARY for photos
         val ckpFileProps  = link.fileProperties?.contentKeyPacket                  // standard Drive files
         val ckpRev        = revisionResp.revision.contentKeyPacket                 // revision endpoint (legacy)
         val ckpPhoto      = revisionResp.revision.photo?.contentKeyPacket          // photo sub-object in revision

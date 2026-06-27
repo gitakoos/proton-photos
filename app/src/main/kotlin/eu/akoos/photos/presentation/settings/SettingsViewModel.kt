@@ -357,6 +357,9 @@ class SettingsViewModel @Inject constructor(
                             userEmail = user?.email ?: "",
                             cloudUsedBytes = user?.usedDriveSpace ?: user?.usedSpace ?: 0L,
                             cloudMaxBytes = user?.maxDriveSpace ?: user?.maxSpace ?: 0L,
+                            // First emission resolves the account skeleton, even if the value
+                            // is empty (genuinely signed-out / nameless), so the shimmer ends.
+                            accountLoading = false,
                         )
                     }
                 }
@@ -412,6 +415,9 @@ class SettingsViewModel @Inject constructor(
                             syncedPhotoCount  = snap.photos,
                             syncedVideoCount  = snap.videos,
                             notSyncedCount    = snap.pending,
+                            // First snapshot resolves the counts skeleton, even when all
+                            // counts are 0 (genuinely empty), so the shimmer ends.
+                            countsLoading     = false,
                         )
                     }
                 }
@@ -513,6 +519,7 @@ class SettingsViewModel @Inject constructor(
                     freeUpWifiOnly = migratedPrefs[SettingsKeys.FREE_UP_WIFI_ONLY] ?: true,
                     themeMode = ThemeMode.fromKey(migratedPrefs[SettingsKeys.THEME_MODE]),
                     palette = ThemePalette.fromKey(migratedPrefs[SettingsKeys.THEME_PALETTE]),
+                    landingTab = LandingTab.fromIndex(migratedPrefs[SettingsKeys.LANDING_TAB]),
                     lastSyncMs = migratedPrefs[SettingsKeys.LAST_SYNC_MS],
                     language = migratedPrefs[SettingsKeys.LANGUAGE] ?: "system",
                     stripOnUpload = migratedPrefs[SettingsKeys.STRIP_ON_UPLOAD] ?: false,
@@ -527,6 +534,9 @@ class SettingsViewModel @Inject constructor(
                     appLockTimeoutMinutes = migratedPrefs[SettingsKeys.APP_LOCK_TIMEOUT_MINUTES] ?: 0,
                     clearCacheOnAppClose = migratedPrefs[SettingsKeys.CLEAR_CACHE_ON_APP_CLOSE] ?: false,
                     hidePhotosInAlbums = migratedPrefs[SettingsKeys.HIDE_PHOTOS_IN_ALBUMS] ?: false,
+                    showScrollDate = migratedPrefs[SettingsKeys.SHOW_SCROLL_DATE] ?: false,
+                    reverseTimelineOrder = migratedPrefs[SettingsKeys.REVERSE_TIMELINE_ORDER] ?: false,
+                    mosaicGrid = migratedPrefs[SettingsKeys.MOSAIC_GRID] ?: false,
                     gridRememberLast = migratedPrefs[SettingsKeys.GRID_REMEMBER_LAST] ?: false,
                     gridDefaultColumns = migratedPrefs[SettingsKeys.GRID_DEFAULT_COLUMNS] ?: 3,
                 )
@@ -758,6 +768,15 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    /** Persist which top-level tab the gallery opens on at app start. The gallery reads the key
+     *  once on first composition; this setter is for immediate UI feedback in Settings. */
+    fun setLandingTab(tab: LandingTab) {
+        viewModelScope.launch {
+            context.settingsDataStore.edit { it[SettingsKeys.LANDING_TAB] = tab.index }
+            _uiState.update { it.copy(landingTab = tab) }
+        }
+    }
+
     fun setGridRememberLast(enabled: Boolean) {
         viewModelScope.launch {
             context.settingsDataStore.edit { it[SettingsKeys.GRID_REMEMBER_LAST] = enabled }
@@ -888,6 +907,33 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    /** Persist the "show a floating date while scrolling the timeline" toggle. The Photos grid
+     *  observes the key directly; this setter is for immediate UI feedback in Settings. */
+    fun setShowScrollDate(enabled: Boolean) {
+        viewModelScope.launch {
+            context.settingsDataStore.edit { it[SettingsKeys.SHOW_SCROLL_DATE] = enabled }
+            _uiState.update { it.copy(showScrollDate = enabled) }
+        }
+    }
+
+    /** Persist the "reverse timeline order" toggle. The Photos grid observes the key directly;
+     *  this setter is for immediate UI feedback in Settings. */
+    fun setReverseTimelineOrder(enabled: Boolean) {
+        viewModelScope.launch {
+            context.settingsDataStore.edit { it[SettingsKeys.REVERSE_TIMELINE_ORDER] = enabled }
+            _uiState.update { it.copy(reverseTimelineOrder = enabled) }
+        }
+    }
+
+    /** Persist the "mosaic (staggered) grid" toggle. The Photos grid observes the key directly;
+     *  this setter is for immediate UI feedback in Settings. */
+    fun setMosaicGrid(enabled: Boolean) {
+        viewModelScope.launch {
+            context.settingsDataStore.edit { it[SettingsKeys.MOSAIC_GRID] = enabled }
+            _uiState.update { it.copy(mosaicGrid = enabled) }
+        }
+    }
+
     @OptIn(coil.annotation.ExperimentalCoilApi::class)
     fun signOut() {
         viewModelScope.launch {
@@ -941,6 +987,9 @@ class SettingsViewModel @Inject constructor(
                             // as a different account inherits the previous user's choice.
                             SettingsKeys.HIDE_PHOTOS_IN_ALBUMS,
                             SettingsKeys.HIDE_DEVICE_FOLDERS_IN_ALBUMS,
+                            SettingsKeys.SHOW_SCROLL_DATE,
+                            SettingsKeys.REVERSE_TIMELINE_ORDER,
+                            SettingsKeys.MOSAIC_GRID,
                             // Timeline folder filter is likewise a per-user view preference.
                             SettingsKeys.TIMELINE_EXCLUDED_FOLDER_NAMES,
                         )

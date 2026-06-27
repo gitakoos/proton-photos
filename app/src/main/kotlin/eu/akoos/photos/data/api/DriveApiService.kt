@@ -147,12 +147,14 @@ interface DriveApiService : BaseRetrofitApi {
     ): eu.akoos.photos.data.api.dto.AddAlbumMultipleResponse
 
     // Removes the album reference for each listed linkId. Photos stay in Photos root.
+    // Returns the same per-photo response array as add-multiple: the top-level Code only
+    // means the batch was processed, so each entry's own code is the truth for what left the album.
     @POST("drive/photos/volumes/{volumeId}/albums/{albumLinkId}/remove-multiple")
     suspend fun removePhotosFromAlbum(
         @Path("volumeId") volumeId: String,
         @Path("albumLinkId") albumLinkId: String,
         @Body request: eu.akoos.photos.data.api.dto.RemoveFromAlbumRequest,
-    ): BaseResponse
+    ): eu.akoos.photos.data.api.dto.AddAlbumMultipleResponse
 
     // Rename (Link.Name + Hash + …), set CoverLinkID, or both.
     @PUT("drive/photos/volumes/{volumeId}/albums/{albumLinkId}")
@@ -228,8 +230,9 @@ interface DriveApiService : BaseRetrofitApi {
     @GET("drive/volumes/{volumeId}/photos")
     suspend fun getPhotoLinks(
         @Path("volumeId") volumeId: String,
+        // Matches the official Drive SDK: the photos timeline endpoint takes no Limit/PageSize.
+        // It is paginated purely by PreviousPageLastLinkID and walked until it returns no photos.
         @Query("PreviousPageLastLinkID") anchorId: String? = null,
-        @Query("Limit") limit: Int = 500,
     ): PhotoLinksResponse
 
     // Batch fetch thumbnail download URLs by ThumbnailID.

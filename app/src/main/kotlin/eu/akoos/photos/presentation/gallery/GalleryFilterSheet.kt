@@ -220,7 +220,6 @@ internal fun ContentFilterSheet(
                 applyNow(y = y, m = m, d = d)
             },
         )
-
     }
 }
 

@@ -22,14 +22,24 @@
 
 package eu.akoos.photos.presentation.gallery
 
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.PointerInputChange
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import kotlinx.coroutines.flow.map
+import kotlin.math.hypot
+import kotlin.math.max
 
 /**
  * Shared zoom ladder for the photo grid. The timeline pinch-zooms through [LEVELS] (a column
@@ -75,4 +85,72 @@ fun rememberDefaultGridColumns(): Int {
         context.settingsDataStore.data.map { it[SettingsKeys.GRID_DEFAULT_COLUMNS] ?: GridZoom.DEFAULT_COLUMNS }
     }.collectAsStateWithLifecycle(initialValue = GridZoom.DEFAULT_COLUMNS)
     return cols
+}
+
+/**
+ * Reusable two-finger pinch-to-zoom for a photo grid. Mirrors the timeline's inline detector: it
+ * activates only once a second finger goes down (so single-finger drags fall through to the grid's
+ * own scroll), and commits exactly one [onStep] in either direction each time the finger distance
+ * crosses ±30% since the last step. Pinch-out (spread) steps toward [levelCount]-1 (bigger tiles),
+ * pinch-in steps toward 0. [onStep] receives the new, already-clamped level index.
+ */
+@Composable
+fun rememberGridPinchZoomModifier(
+    levelIndex: Int,
+    levelCount: Int,
+    onStep: (Int) -> Unit,
+): Modifier {
+    val haptics = LocalHapticFeedback.current
+    // The gesture loop is keyed on Unit so it survives recomposition; read the live level through an
+    // updated-state holder so each step computes off the current index, not a stale snapshot.
+    val latestLevel by rememberUpdatedState(levelIndex)
+    val lastIndex = levelCount - 1
+    return Modifier.pointerInput(Unit) {
+        awaitEachGesture {
+            val firstDown = awaitFirstDown(requireUnconsumed = false)
+            var second: PointerInputChange? = null
+            // Wait for a second finger (pinch mode) or the first finger lifting (bail to scroll).
+            while (second == null) {
+                val event = awaitPointerEvent()
+                if (event.changes.none { p -> p.pressed }) return@awaitEachGesture
+                second = event.changes.firstOrNull { p -> p.id != firstDown.id && p.pressed }
+            }
+            var refDist = max(
+                1f,
+                hypot(
+                    (firstDown.position.x - second.position.x).toDouble(),
+                    (firstDown.position.y - second.position.y).toDouble(),
+                ).toFloat(),
+            )
+            while (true) {
+                val event = awaitPointerEvent()
+                val p1 = event.changes.firstOrNull { p -> p.id == firstDown.id }
+                val p2 = event.changes.firstOrNull { p -> p.id == second.id }
+                if (p1 == null || p2 == null || !p1.pressed || !p2.pressed) break
+                val curDist = max(
+                    1f,
+                    hypot(
+                        (p1.position.x - p2.position.x).toDouble(),
+                        (p1.position.y - p2.position.y).toDouble(),
+                    ).toFloat(),
+                )
+                val ratio = curDist / refDist
+                // refDist resets after each snap so one gesture can roll through multiple levels.
+                when {
+                    ratio >= 1.30f && latestLevel < lastIndex -> {
+                        onStep(latestLevel + 1)
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        refDist = curDist
+                    }
+                    ratio <= 1f / 1.30f && latestLevel > 0 -> {
+                        onStep(latestLevel - 1)
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        refDist = curDist
+                    }
+                }
+                // Consume so the grid doesn't scroll while both fingers are down.
+                p1.consume(); p2.consume()
+            }
+        }
+    }
 }

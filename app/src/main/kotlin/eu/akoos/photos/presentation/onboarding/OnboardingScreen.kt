@@ -92,6 +92,7 @@ import eu.akoos.photos.presentation.common.SecondaryButton
 import eu.akoos.photos.presentation.onboarding.steps.AppearanceStep
 import eu.akoos.photos.presentation.onboarding.steps.BackupModeStep
 import eu.akoos.photos.presentation.onboarding.steps.DoneStep
+import eu.akoos.photos.presentation.onboarding.steps.FaqStep
 import eu.akoos.photos.presentation.onboarding.steps.FolderPickerStep
 import eu.akoos.photos.presentation.onboarding.steps.ManageMediaStep
 import eu.akoos.photos.presentation.onboarding.steps.MirrorOptInStep
@@ -375,14 +376,15 @@ fun OnboardingScreen(
     val showManageMedia = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
     val showNotifications = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
 
-    // Step list — order is About → Welcome → Appearance → Photos perm → Backup
-    // mode → conditional Folder picker → Privacy → App lock → Notifications →
+    // Step list — order is About → Welcome → FAQ → Appearance → Photos perm →
+    // Backup mode → conditional Folder picker → Privacy → App lock → Notifications →
     // Manage media → Done. Photos perm comes before the folder picker so when
     // we hit that step MediaStore can actually enumerate buckets; otherwise the
     // list would render empty.
     val steps = buildList {
         add(OnboardingStep.About)
         add(OnboardingStep.Welcome)
+        add(OnboardingStep.Faq)
         add(OnboardingStep.Appearance)
         add(OnboardingStep.PhotosAccess)
         add(OnboardingStep.BackupMode)
@@ -469,6 +471,7 @@ fun OnboardingScreen(
                     when (step) {
                         OnboardingStep.About -> AboutStep()
                         OnboardingStep.Welcome -> WelcomeStep()
+                        OnboardingStep.Faq -> FaqStep()
                         OnboardingStep.Appearance -> AppearanceStep(
                             themeMode = themeMode,
                             palette = palette,
@@ -655,7 +658,7 @@ fun OnboardingScreen(
 }
 
 private enum class OnboardingStep {
-    About, Welcome, Appearance, PhotosAccess, BackupMode, FolderPicker,
+    About, Welcome, Faq, Appearance, PhotosAccess, BackupMode, FolderPicker,
     AlbumMirrorOptIn, Privacy, MirrorOptIn, AppLock, Notifications, ManageMedia, Done,
 }
 

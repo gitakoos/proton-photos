@@ -51,6 +51,11 @@ class ReconcileSyncStateUseCaseTest {
         every { mockPrefs[SettingsKeys.SYNC_FOLDER_NAMES] } returns setOf("Camera")  // back up Camera folder
         every { mockPrefs[SettingsKeys.BACKUP_EVERYTHING] } returns false
         every { mockPrefs[SettingsKeys.EXCLUDED_FOLDER_NAMES] } returns emptySet()
+        every { mockPrefs[SettingsKeys.STRIP_ON_UPLOAD] } returns false
+        every { mockPrefs[SettingsKeys.PENDING_ALBUM_ADDS] } returns emptySet()
+        // No ever-complete flag → the content-hash recompute path is skipped; the name/size and
+        // cloud-linkId matchers still run, which is what these tests exercise.
+        every { mockPrefs.asMap() } returns emptyMap()
 
         useCase = ReconcileSyncStateUseCase(localRepo, cloudRepo, syncStateRepo, context)
     }

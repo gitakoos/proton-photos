@@ -75,11 +75,20 @@ data class PhotoLinksResponse(
 @Serializable
 data class PhotoLinkDto(
     @SerialName("LinkID") val linkId: String,
-    @SerialName("CaptureTime") val captureTime: Long,
+    // Tolerant by design: the photos endpoint can send null (or omit) any of these for an odd photo
+    // — e.g. "Tags": null, or a photo with no CaptureTime. kotlinx rejects a null on a non-null
+    // field, and ONE rejected photo fails the whole page parse, which truncated the entire library
+    // at that point. Nullable + null-handled at the use sites keeps one odd photo from blocking the
+    // listing; the parse-error diagnostic still logs which field tripped so it can be supported.
+    @SerialName("CaptureTime") val captureTime: Long? = null,
     @SerialName("Hash") val hash: String? = null,
     @SerialName("ContentHash") val contentHash: String? = null,
-    @SerialName("Tags") val tags: List<Int> = emptyList(),
-    @SerialName("RelatedPhotos") val relatedPhotos: List<String> = emptyList(),
+    @SerialName("Tags") val tags: List<Int>? = null,
+    // RelatedPhotos elements are OBJECTS (burst / related-photo entries), not strings. Declaring them
+    // as List<String> failed the whole page parse the moment one photo had a related entry, which
+    // truncated the library at that point. Kept as raw JsonElement so any element shape parses; we do
+    // not read it yet (it is the hook for motion-photo / burst grouping later).
+    @SerialName("RelatedPhotos") val relatedPhotos: List<kotlinx.serialization.json.JsonElement>? = null,
 )
 
 // PhotoData may be null for the basic call; set it (re-encrypted passphrase/name/hash, like

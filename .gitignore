@@ -16,6 +16,7 @@ local.properties
 keystore.properties
 *.har
 *.log
+/test_out*.txt
 
 # Gradle wrapper except the jar
 !gradle/wrapper/gradle-wrapper.jar

@@ -81,6 +81,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -93,6 +94,8 @@ import eu.akoos.photos.R
 import eu.akoos.photos.presentation.common.ConfirmDialog
 import eu.akoos.photos.presentation.common.ErrorPopup
 import eu.akoos.photos.presentation.common.IconBubble
+import eu.akoos.photos.presentation.common.ShimmerBox
+import eu.akoos.photos.presentation.common.ShimmerTextLine
 import eu.akoos.photos.util.sanitizeErrorMessage
 import eu.akoos.photos.presentation.settings.components.AppLockTimeoutRow
 import eu.akoos.photos.presentation.settings.components.CollapsibleSection
@@ -150,6 +153,7 @@ fun SettingsScreen(
     onAppearanceClick: () -> Unit = {},
     onLanguageClick: () -> Unit = {},
     onAboutClick: () -> Unit = {},
+    onFaqClick: () -> Unit = {},
     onAccountClick: () -> Unit = {},
     onCheckForUpdatesClick: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel(),
@@ -157,6 +161,9 @@ fun SettingsScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val colors = AppColors.current
     val snackbarHostState = remember { SnackbarHostState() }
+    val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
+    val diagnosticsCopiedMsg = stringResource(R.string.settings_diagnostics_copied)
 
     // Sync errors render in a copyable [ErrorPopup]: `state.syncError` is set from raw
     // exception messages whose payload can be a multi-line backend response, so a
@@ -229,24 +236,34 @@ fun SettingsScreen(
                         .padding(horizontal = 16.dp, vertical = 14.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Box(
-                        modifier = Modifier.size(38.dp).background(
-                            Brush.linearGradient(listOf(colors.accent, colors.accent2), Offset.Zero, Offset(80f, 80f)),
-                            CircleShape,
-                        ),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            text = state.userDisplayName.firstOrNull()?.uppercaseChar()?.toString()
-                                ?: state.userEmail.firstOrNull()?.uppercaseChar()?.toString() ?: "?",
-                            color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold,
-                        )
-                    }
-                    Spacer(Modifier.width(12.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(state.userDisplayName.ifEmpty { state.userEmail }, color = colors.fgPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
-                        if (state.userDisplayName.isNotEmpty()) {
-                            Text(state.userEmail, color = colors.fgMute, fontSize = 12.sp)
+                    if (state.accountLoading) {
+                        ShimmerBox(modifier = Modifier.size(38.dp).clip(CircleShape), cornerRadius = 19.dp)
+                        Spacer(Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            ShimmerTextLine(widthFraction = 0.55f, height = 14.dp)
+                            Spacer(Modifier.height(6.dp))
+                            ShimmerTextLine(widthFraction = 0.35f, height = 12.dp)
+                        }
+                    } else {
+                        Box(
+                            modifier = Modifier.size(38.dp).background(
+                                Brush.linearGradient(listOf(colors.accent, colors.accent2), Offset.Zero, Offset(80f, 80f)),
+                                CircleShape,
+                            ),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                text = state.userDisplayName.firstOrNull()?.uppercaseChar()?.toString()
+                                    ?: state.userEmail.firstOrNull()?.uppercaseChar()?.toString() ?: "?",
+                                color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold,
+                            )
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(state.userDisplayName.ifEmpty { state.userEmail }, color = colors.fgPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                            if (state.userDisplayName.isNotEmpty()) {
+                                Text(state.userEmail, color = colors.fgMute, fontSize = 12.sp)
+                            }
                         }
                     }
                     Icon(
@@ -274,41 +291,51 @@ fun SettingsScreen(
                 ) {
                     Column {
                         Text(stringResource(R.string.sync_backed_up), color = colors.fgMute, fontSize = 11.sp)
-                        // Split photos vs videos so the user can spot at a glance that the
-                        // backed-up total isn't pure-photos. Reuses the same selection_* strings
-                        // as the gallery/album selection counter — already translated to 6 locales.
-                        val backedUpLabel = when {
-                            state.syncedPhotoCount > 0 && state.syncedVideoCount > 0 ->
-                                stringResource(R.string.selection_mixed, state.syncedPhotoCount, state.syncedVideoCount)
-                            state.syncedVideoCount > 0 ->
-                                stringResource(R.string.selection_videos_only, state.syncedVideoCount)
-                            state.syncedPhotoCount > 0 ->
-                                stringResource(R.string.selection_photos_only, state.syncedPhotoCount)
-                            // A running sync with zero rows yet is the fresh-login first-sync
-                            // window: the DB-backed count is genuinely 0 because the listing is
-                            // still being page-fetched. Show progress copy instead of a bald
-                            // "None" so the user doesn't read it as "nothing is backed up".
-                            state.isSyncing ->
-                                stringResource(R.string.sync_first_run_in_progress)
-                            else ->
-                                stringResource(R.string.sync_none)
+                        if (state.countsLoading) {
+                            Spacer(Modifier.height(4.dp))
+                            ShimmerTextLine(widthFraction = 1f, height = 14.dp, modifier = Modifier.width(72.dp))
+                        } else {
+                            // Split photos vs videos so the user can spot at a glance that the
+                            // backed-up total isn't pure-photos. Reuses the same selection_* strings
+                            // as the gallery/album selection counter — already translated to 6 locales.
+                            val backedUpLabel = when {
+                                state.syncedPhotoCount > 0 && state.syncedVideoCount > 0 ->
+                                    stringResource(R.string.selection_mixed, state.syncedPhotoCount, state.syncedVideoCount)
+                                state.syncedVideoCount > 0 ->
+                                    stringResource(R.string.selection_videos_only, state.syncedVideoCount)
+                                state.syncedPhotoCount > 0 ->
+                                    stringResource(R.string.selection_photos_only, state.syncedPhotoCount)
+                                // A running sync with zero rows yet is the fresh-login first-sync
+                                // window: the DB-backed count is genuinely 0 because the listing is
+                                // still being page-fetched. Show progress copy instead of a bald
+                                // "None" so the user doesn't read it as "nothing is backed up".
+                                state.isSyncing ->
+                                    stringResource(R.string.sync_first_run_in_progress)
+                                else ->
+                                    stringResource(R.string.sync_none)
+                            }
+                            Text(
+                                backedUpLabel,
+                                color = StatusSynced, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+                            )
                         }
-                        Text(
-                            backedUpLabel,
-                            color = StatusSynced, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
-                        )
                     }
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(stringResource(R.string.sync_pending), color = colors.fgMute, fontSize = 11.sp)
-                        Text(
-                            when {
-                                state.notSyncedCount <= 0 -> stringResource(R.string.sync_none)
-                                state.notSyncedCount == 1 -> stringResource(R.string.sync_photo_count_singular)
-                                else -> stringResource(R.string.sync_photo_count, state.notSyncedCount)
-                            },
-                            color = if (state.notSyncedCount > 0) StatusPending else colors.fgMute,
-                            fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
-                        )
+                        if (state.countsLoading) {
+                            Spacer(Modifier.height(4.dp))
+                            ShimmerTextLine(widthFraction = 1f, height = 14.dp, modifier = Modifier.width(56.dp))
+                        } else {
+                            Text(
+                                when {
+                                    state.notSyncedCount <= 0 -> stringResource(R.string.sync_none)
+                                    state.notSyncedCount == 1 -> stringResource(R.string.sync_photo_count_singular)
+                                    else -> stringResource(R.string.sync_photo_count, state.notSyncedCount)
+                                },
+                                color = if (state.notSyncedCount > 0) StatusPending else colors.fgMute,
+                                fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+                            )
+                        }
                     }
                     if (state.isSyncing) {
                         CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = colors.accent)
@@ -422,6 +449,36 @@ fun SettingsScreen(
                     label = stringResource(R.string.about_title),
                     description = stringResource(R.string.settings_about_desc),
                     onClick = onAboutClick,
+                )
+                RowDivider()
+                NavRow(
+                    label = stringResource(R.string.faq_settings_entry),
+                    description = stringResource(R.string.faq_title),
+                    onClick = onFaqClick,
+                )
+                RowDivider()
+                NavRow(
+                    label = stringResource(R.string.settings_copy_diagnostics),
+                    description = stringResource(R.string.settings_copy_diagnostics_desc),
+                    onClick = {
+                        val header = buildString {
+                            append("Photos for Proton ")
+                            append(BuildConfig.VERSION_NAME)
+                            append(" (")
+                            append(BuildConfig.VERSION_CODE)
+                            append(")\n")
+                            append(Build.MANUFACTURER).append(' ').append(Build.MODEL).append('\n')
+                            append("Android ").append(Build.VERSION.RELEASE)
+                            append(" (sdk ").append(Build.VERSION.SDK_INT).append(')')
+                        }
+                        val body = if (eu.akoos.photos.util.SyncDiagnostics.isEmpty()) "no log yet"
+                            else eu.akoos.photos.util.SyncDiagnostics.dump()
+                        val fullText = "```\n$header\n\n$body\n```"
+                        clipboard.setText(androidx.compose.ui.text.AnnotatedString(fullText))
+                        android.widget.Toast.makeText(
+                            context, diagnosticsCopiedMsg, android.widget.Toast.LENGTH_SHORT,
+                        ).show()
+                    },
                 )
             }
             }

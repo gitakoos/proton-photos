@@ -71,6 +71,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import eu.akoos.photos.R
 import eu.akoos.photos.presentation.common.IconBubble
+import eu.akoos.photos.presentation.common.allLocalOnly
+import eu.akoos.photos.presentation.common.anyLocalOnly
+import eu.akoos.photos.presentation.common.hasDownloadable
+import eu.akoos.photos.presentation.common.selectionMimeCounts
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.AppColors
@@ -123,15 +127,9 @@ fun GallerySelectionHeader(
             borderColor = PillBorder,
             tint = appColors.fgPrimary,
         )
-        val selectedPhotosCount = selectedItems.count { item ->
-            val mt: String = when (item) {
-                is GalleryItem.LocalOnly -> item.local.mimeType
-                is GalleryItem.Synced    -> item.local.mimeType
-                is GalleryItem.CloudOnly -> item.cloud.mimeType
-            }
-            !mt.startsWith("video/")
-        }
-        val selectedVideosCount = selectedCount - selectedPhotosCount
+        val mimeCounts = selectionMimeCounts(selectedItems)
+        val selectedPhotosCount = mimeCounts.photos
+        val selectedVideosCount = mimeCounts.videos
         val selPhotosText = pluralStringResource(
             R.plurals.count_photos_plural, selectedPhotosCount, selectedPhotosCount,
         )
@@ -223,6 +221,7 @@ fun GallerySelectionBottomBar(
     multiHideState: MultiDeleteState,
     multiStripState: MultiStripState,
     addToAlbumState: AddToAlbumState,
+    anyLocalOnly: Boolean,
     onDownload: () -> Unit,
     onRequestAddToAlbum: () -> Unit,
     onBackUp: () -> Unit,
@@ -234,9 +233,9 @@ fun GallerySelectionBottomBar(
     val isDownloading = multiDownloadState is MultiDownloadState.Working
     val isStripping = multiStripState is MultiStripState.Working
     val isHiding = multiHideState is MultiDeleteState.Working
-    val hasLocalOnly = selectedItems.any { it is GalleryItem.LocalOnly }
-    val hasDownloadable = selectedItems.any { it is GalleryItem.CloudOnly }
-    val allDeviceOnly = selectedItems.isNotEmpty() && selectedItems.all { it is GalleryItem.LocalOnly }
+    val hasLocalOnly = anyLocalOnly(selectedItems)
+    val hasDownloadable = hasDownloadable(selectedItems)
+    val allDeviceOnly = allLocalOnly(selectedItems)
 
     Row(
         modifier = Modifier
@@ -308,25 +307,29 @@ fun GallerySelectionBottomBar(
                             onStripMetadata()
                         },
                     )
-                    DropdownMenuItem(
-                        text = {
-                            Text(
-                                stringResource(R.string.gallery_hide_selected),
-                                color = appColors.fgPrimary,
-                            )
-                        },
-                        leadingIcon = {
-                            Icon(
-                                Icons.Default.VisibilityOff, null,
-                                tint = appColors.fgPrimary, modifier = Modifier.size(20.dp),
-                            )
-                        },
-                        enabled = !isHiding,
-                        onClick = {
-                            moreExpanded = false
-                            onHideSelected()
-                        },
-                    )
+                    // Vault-hide is only meaningful for on-device-only photos — a cloud
+                    // copy stays on Drive, so it can't truly be hidden.
+                    if (anyLocalOnly) {
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    stringResource(R.string.gallery_hide_selected),
+                                    color = appColors.fgPrimary,
+                                )
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    Icons.Default.VisibilityOff, null,
+                                    tint = appColors.fgPrimary, modifier = Modifier.size(20.dp),
+                                )
+                            },
+                            enabled = !isHiding,
+                            onClick = {
+                                moreExpanded = false
+                                onHideSelected()
+                            },
+                        )
+                    }
                 }
             }
         }

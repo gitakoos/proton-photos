@@ -24,11 +24,15 @@ package eu.akoos.photos.domain.usecase
 
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.sample
 import kotlinx.coroutines.flow.shareIn
 import me.proton.core.domain.entity.UserId
 import eu.akoos.photos.di.AppScope
@@ -43,6 +47,10 @@ import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
 
+/** Cap the merge+sort to a few runs/sec during a DB write burst (the cold cloud listing).
+ *  Sub-frame-budget so the steady-state single emit is imperceptible. */
+private const val RECOMPUTE_THROTTLE_MS = 280L
+
 @Singleton
 class GetGalleryItemsUseCase @Inject constructor(
     private val localRepo: LocalMediaRepository,
@@ -54,22 +62,41 @@ class GetGalleryItemsUseCase @Inject constructor(
     // collectors (Gallery, Search, Calendar, …) instead of re-running per cold subscription.
     private val cache = ConcurrentHashMap<UserId, SharedFlow<List<GalleryItem>>>()
 
+    @OptIn(FlowPreview::class)
     fun invoke(userId: UserId): Flow<List<GalleryItem>> =
         cache.getOrPut(userId) {
             combine(
-                localRepo.observeLocalMedia(),
-                cloudRepo.observeCloudPhotos(userId),
-                syncStateRepo.observeAll(userId),
+                // distinctUntilChanged on each source BEFORE the merge: the cold listing's stub
+                // pre-pass and the cache-hit chunks that wrote nothing new make Room re-emit a
+                // structurally identical list. Dropping those here means the N-log-N merge+sort
+                // below never re-runs for a write that changed nothing.
+                localRepo.observeLocalMedia().distinctUntilChanged(),
+                cloudRepo.observeCloudPhotos(userId).distinctUntilChanged(),
+                syncStateRepo.observeAll(userId).distinctUntilChanged(),
             ) { local, cloud, syncStates ->
-                merge(local, cloud, syncStates)
+                Triple(local, cloud, syncStates)
             }
+                // Throttle the EXPENSIVE recompute. On a large library the cold listing writes the
+                // DB thousands of times; without this gate the merge+sort would re-run on the full,
+                // growing list per write (seconds of CPU + GC thrash). `sample` caps the merge to a
+                // few runs/sec regardless of the DB write rate. It cannot drop the final state: the
+                // source flows are infinite (Room observers stay subscribed), so the last write's
+                // value sits in sample's conflated buffer and is delivered on the next tick (≤ the
+                // period), then cached by shareIn(replay=1) for any late collector. `distinctUntilChanged`
+                // above already suppressed no-op re-emits, so a quiet library samples its one real value.
+                .sample(RECOMPUTE_THROTTLE_MS)
+                .map { (local, cloud, syncStates) -> merge(local, cloud, syncStates) }
                 // The merge/sort over the full library is CPU work that must not run on the
                 // collector's Main dispatcher — a decrypt burst re-emits this per write.
                 .flowOn(Dispatchers.Default)
+                .distinctUntilChanged()
                 .shareIn(appScope, SharingStarted.WhileSubscribed(5_000), replay = 1)
         }
 
-    private fun merge(
+    // internal (not private) so the unit test exercises this pure merge / classification / sort
+    // logic directly, instead of driving it through the shared flow + Dispatchers.Default pipeline
+    // above (which a virtual-time test harness cannot pump).
+    internal fun merge(
         local: List<LocalMediaItem>,
         cloud: List<CloudPhoto>,
         syncStates: List<SyncState>,
@@ -163,15 +190,21 @@ class GetGalleryItemsUseCase @Inject constructor(
         // instead of sinking to the list tail. linkId/uri tiebreak keeps equal-timestamp bursts
         // in a stable total order across re-emissions.
         //
-        // captureTimeMs and stableId are computed getters; evaluate each exactly once by
-        // precomputing a lightweight (captureTimeMs, stableId, item) key per item, then sort the
-        // keys. Identical ordering to compareByDescending(captureTimeMs).thenBy(stableId).
-        return result
-            .map { Triple(it.captureTimeMs, it.stableId, it) }
-            .sortedWith(
-                compareByDescending<Triple<Long, String, GalleryItem>> { it.first }
-                    .thenBy { it.second }
-            )
-            .map { it.third }
+        // captureTimeMs and stableId are computed getters; evaluate each EXACTLY once. Sort an
+        // index array against precomputed primitive key arrays (no per-item Triple, no Long
+        // boxing, no double .map over the whole library), then materialise the ordered list in a
+        // single pass. Ordering is identical to compareByDescending(captureTimeMs).thenBy(stableId).
+        val n = result.size
+        val times = LongArray(n)
+        val ids = arrayOfNulls<String>(n)
+        for (i in 0 until n) {
+            times[i] = result[i].captureTimeMs
+            ids[i] = result[i].stableId
+        }
+        val order = (0 until n).sortedWith(Comparator { a, b ->
+            val byTime = times[b].compareTo(times[a]) // descending captureTime
+            if (byTime != 0) byTime else ids[a]!!.compareTo(ids[b]!!) // ascending stableId tiebreak
+        })
+        return order.map { result[it] }
     }
 }

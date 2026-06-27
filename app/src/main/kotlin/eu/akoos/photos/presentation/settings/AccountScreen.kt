@@ -45,6 +45,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.geometry.Offset
@@ -58,6 +59,8 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import eu.akoos.photos.R
 import eu.akoos.photos.presentation.common.ConfirmDialog
+import eu.akoos.photos.presentation.common.ShimmerBox
+import eu.akoos.photos.presentation.common.ShimmerTextLine
 import eu.akoos.photos.presentation.settings.components.CollapsibleSection
 import eu.akoos.photos.presentation.settings.components.RowDivider
 import eu.akoos.photos.presentation.settings.components.SettingsCard
@@ -100,39 +103,47 @@ fun AccountScreen(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 20.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Box(
-                    modifier = Modifier.size(96.dp).background(
-                        Brush.linearGradient(
-                            listOf(colors.accent, colors.accent2),
-                            Offset.Zero,
-                            Offset(220f, 220f),
+                if (state.accountLoading) {
+                    ShimmerBox(modifier = Modifier.size(96.dp).clip(CircleShape), cornerRadius = 48.dp)
+                    Spacer(Modifier.height(14.dp))
+                    ShimmerTextLine(widthFraction = 0.5f, height = 17.dp)
+                    Spacer(Modifier.height(6.dp))
+                    ShimmerTextLine(widthFraction = 0.35f, height = 13.dp)
+                } else {
+                    Box(
+                        modifier = Modifier.size(96.dp).background(
+                            Brush.linearGradient(
+                                listOf(colors.accent, colors.accent2),
+                                Offset.Zero,
+                                Offset(220f, 220f),
+                            ),
+                            CircleShape,
                         ),
-                        CircleShape,
-                    ),
-                    contentAlignment = Alignment.Center,
-                ) {
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            text = state.userDisplayName.firstOrNull()?.uppercaseChar()?.toString()
+                                ?: state.userEmail.firstOrNull()?.uppercaseChar()?.toString() ?: "?",
+                            color = Color.White,
+                            fontSize = 38.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                    Spacer(Modifier.height(14.dp))
                     Text(
-                        text = state.userDisplayName.firstOrNull()?.uppercaseChar()?.toString()
-                            ?: state.userEmail.firstOrNull()?.uppercaseChar()?.toString() ?: "?",
-                        color = Color.White,
-                        fontSize = 38.sp,
-                        fontWeight = FontWeight.Bold,
+                        state.userDisplayName.ifEmpty { state.userEmail },
+                        color = colors.fgPrimary,
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.SemiBold,
                     )
-                }
-                Spacer(Modifier.height(14.dp))
-                Text(
-                    state.userDisplayName.ifEmpty { state.userEmail },
-                    color = colors.fgPrimary,
-                    fontSize = 17.sp,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                if (state.userDisplayName.isNotEmpty() && state.userEmail.isNotEmpty()) {
-                    Spacer(Modifier.height(2.dp))
-                    Text(
-                        state.userEmail,
-                        color = colors.fgMute,
-                        fontSize = 13.sp,
-                    )
+                    if (state.userDisplayName.isNotEmpty() && state.userEmail.isNotEmpty()) {
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            state.userEmail,
+                            color = colors.fgMute,
+                            fontSize = 13.sp,
+                        )
+                    }
                 }
             }
         }

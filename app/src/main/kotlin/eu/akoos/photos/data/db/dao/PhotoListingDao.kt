@@ -29,6 +29,7 @@ import androidx.room.Query
 import androidx.room.Upsert
 import kotlinx.coroutines.flow.Flow
 import eu.akoos.photos.data.db.entity.PhotoListingEntity
+import eu.akoos.photos.data.db.entity.PhotoListingLite
 
 @Dao
 interface PhotoListingDao {
@@ -47,6 +48,21 @@ interface PhotoListingDao {
             "ORDER BY captureTime DESC",
     )
     fun observeOwnStream(userId: String): Flow<List<PhotoListingEntity>>
+
+    /**
+     * Display-only projection of [observeOwnStream] for the timeline feed — selects just the columns
+     * the grid binds, NOT the per-row crypto material. The full entity's encNodeKey / contentKeyPacket
+     * / encNodePassphrase / encXAttr are armored PGP blocks (kilobytes each); selecting them for the
+     * whole library on every Room re-emit, only to drop them in toDomain(), pins the heap at its
+     * ceiling on a large library. The crypto stays in the table for the per-linkId decrypt lookup.
+     */
+    @Query(
+        "SELECT linkId, shareId, volumeId, captureTime, displayName, mimeType, sizeBytes, revisionId, " +
+            "thumbnailUrl, contentHash, tagsCsv FROM photo_listing WHERE userId = :userId AND " +
+            "(parentLinkId IS NULL OR parentLinkId NOT IN (SELECT DISTINCT albumLinkId FROM album_photo_membership)) " +
+            "ORDER BY captureTime DESC",
+    )
+    fun observeOwnStreamLite(userId: String): Flow<List<PhotoListingLite>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(entities: List<PhotoListingEntity>)

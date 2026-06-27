@@ -101,6 +101,21 @@ private data class GallerySources(
     val timelineExcludedBuckets: Set<String>,
 )
 
+/**
+ * Bucket [items] into ("MMMM yyyy", items) pairs in first-seen order. One [SimpleDateFormat] and one
+ * reused [Date] (set via [Date.setTime]) for the whole list — at 52k items the previous
+ * `Date(item.captureTimeMs)` per element churned the allocator on every recompute. Label format,
+ * locale and first-seen order are identical to the prior inline grouping, so the timeline is
+ * unchanged. groupBy yields a LinkedHashMap, preserving encounter order.
+ */
+private fun groupByMonth(items: List<GalleryItem>): List<Pair<String, List<GalleryItem>>> {
+    val fmt = SimpleDateFormat("MMMM yyyy", Locale.getDefault())
+    val scratch = Date()
+    return items
+        .groupBy { item -> scratch.time = item.captureTimeMs; fmt.format(scratch) }
+        .entries.map { it.key to it.value }
+}
+
 /** Output of the off-main gallery computation: the hidden/bucket-filtered list (→ items), the
  *  tab/content-filtered list (→ filteredItems), the local-only pending count, and the month +
  *  "On this day" groupings now produced here instead of inside Compose composition. */
@@ -560,10 +575,7 @@ class GalleryViewModel @Inject constructor(
                         // unchanged. groupBy yields a LinkedHashMap, preserving first-seen month
                         // order. "On this day" reads the unfiltered [items] to match the carousel's
                         // filter-independent source (the grid binds allItems = state.items).
-                        val monthFormat = SimpleDateFormat("MMMM yyyy", Locale.getDefault())
-                        val monthGroups = filtered
-                            .groupBy { item -> monthFormat.format(Date(item.captureTimeMs)) }
-                            .entries.map { it.key to it.value }
+                        val monthGroups = groupByMonth(filtered)
                         val onThisDay = computeOnThisDay(items)
                         GalleryComputed(items, filtered, pending, monthGroups, onThisDay)
                     }
@@ -697,11 +709,7 @@ class GalleryViewModel @Inject constructor(
     private fun recomputeMonthGroups(filtered: List<GalleryItem>) {
         monthGroupsJob?.cancel()
         monthGroupsJob = viewModelScope.launch {
-            val groups = withContext(Dispatchers.Default) {
-                val fmt = SimpleDateFormat("MMMM yyyy", Locale.getDefault())
-                filtered.groupBy { item -> fmt.format(Date(item.captureTimeMs)) }
-                    .entries.map { it.key to it.value }
-            }
+            val groups = withContext(Dispatchers.Default) { groupByMonth(filtered) }
             _uiState.update { it.copy(monthGroups = groups) }
         }
     }
@@ -896,9 +904,13 @@ class GalleryViewModel @Inject constructor(
             )
             when (result) {
                 is DeletePhotoUseCase.Result.Success -> {
+                    // Cloud-trash is the only reversible part of a delete: a local-only removal
+                    // (system trash / pre-R) is not app-restorable, so it carries no undo.
+                    val undoLinkIds = if (deleteFromCloud) cloudLinkIdsOf(items) else emptyList()
                     _uiState.update { it.copy(
                         selectedItems    = emptySet(),
                         multiDeleteState = MultiDeleteState.Done,
+                        undoAction       = if (undoLinkIds.isNotEmpty()) UndoAction.CloudTrash(undoLinkIds) else null,
                     ) }
                 }
                 is DeletePhotoUseCase.Result.CloudDeleteFailed ->
@@ -952,11 +964,23 @@ class GalleryViewModel @Inject constructor(
             }
             // If a multi-hide flow was waiting on this permission, commit the private URIs now
             // so the photos start appearing in the Hidden album. No-op if no hide was pending.
-            if (pendingHidePrivateUris.isNotEmpty()) commitPendingHide()
+            // Snapshot the URIs first — commitPendingHide() clears the pending list.
+            val hideUris = pendingHidePrivateUris
+            if (hideUris.isNotEmpty()) commitPendingHide()
+            // Offer Undo for whichever reversible action just landed: a hide (restore the
+            // vault URIs) or a cloud-trash delete (restore the Drive linkIds). A plain local
+            // free-up-space delete carries no undo. A cancelled dialog never reaches here.
+            val undo: UndoAction? = when {
+                hideUris.isNotEmpty()                  -> UndoAction.Hide(hideUris)
+                pending != null && pending.cloudLinkIds.isNotEmpty() && !pending.hide ->
+                    UndoAction.CloudTrash(pending.cloudLinkIds)
+                else                                   -> null
+            }
             _uiState.update { it.copy(
                 selectedItems       = emptySet(),
                 multiDeleteState    = MultiDeleteState.Done,
                 pendingDeleteIntent = null,
+                undoAction          = undo,
             ) }
         }
     }
@@ -984,45 +1008,21 @@ class GalleryViewModel @Inject constructor(
             // The two operations end with a destructive step but the bar surface
             // should reflect "the action the user just tapped".
             _uiState.update { it.copy(multiHideState = MultiDeleteState.Working) }
-            val hideables = items.filter { it is GalleryItem.LocalOnly || it is GalleryItem.Synced }
+            // Only on-device-only photos are vaultable: a cloud-backed copy can't truly be
+            // hidden because its Drive entry stays, so Synced/CloudOnly are skipped here.
+            val hideables = items.filterIsInstance<GalleryItem.LocalOnly>()
             if (hideables.isEmpty()) {
                 _uiState.update { it.copy(multiHideState = MultiDeleteState.Failed(context.getString(R.string.gallery_no_local_to_hide))) }
                 return@launch
             }
             // Step 1: copy every local file into app-private hidden storage.
-            // Each entry is paired with the cloud linkId (when the item was Synced) so
-            // unhide can later restore the SyncState row → reconcile pairs by ID and
-            // the photo doesn't get re-uploaded as a duplicate Drive entry.
             val collected = mutableListOf<String>()
-            val cloudIdMapping = mutableListOf<Pair<String, String>>() // hiddenUri → cloudLinkId
             for (item in hideables) {
-                val uri: String; val name: String; val mime: String; val dateTaken: Long; val cloudLinkId: String?
-                when (item) {
-                    is GalleryItem.LocalOnly -> {
-                        uri = item.local.uri; name = item.local.displayName
-                        mime = item.local.mimeType; dateTaken = item.local.dateTaken; cloudLinkId = null
-                    }
-                    is GalleryItem.Synced -> {
-                        uri = item.local.uri; name = item.local.displayName
-                        mime = item.local.mimeType; dateTaken = item.local.dateTaken; cloudLinkId = item.cloud.linkId
-                    }
-                    else -> continue
-                }
-                val privateUri = hiddenStorage.store(uri, name, mime, captureTimeMs = dateTaken)
-                if (privateUri != null) {
-                    collected += privateUri
-                    if (cloudLinkId != null) cloudIdMapping += (privateUri to cloudLinkId)
-                }
-            }
-            // Persist the hidden→cloudId pairs so unhide can pick up where we left off
-            // even if the process gets killed between hide and unhide. Encoded as
-            // "hiddenUri|cloudLinkId" tokens in the existing StringSet pref.
-            if (cloudIdMapping.isNotEmpty()) {
-                context.settingsDataStore.edit { prefs ->
-                    val existing = prefs[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] ?: emptySet()
-                    prefs[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] =
-                        existing + cloudIdMapping.map { (h, c) -> "$h|$c" }
-                }
+                val local = item.local
+                val privateUri = hiddenStorage.store(
+                    local.uri, local.displayName, local.mimeType, captureTimeMs = local.dateTaken,
+                )
+                if (privateUri != null) collected += privateUri
             }
             if (collected.isEmpty()) {
                 _uiState.update { it.copy(multiHideState = MultiDeleteState.Failed(context.getString(R.string.gallery_copy_to_hidden_failed))) }
@@ -1045,11 +1045,14 @@ class GalleryViewModel @Inject constructor(
             )
             when (result) {
                 is DeletePhotoUseCase.Result.Success -> {
+                    // Snapshot before commitPendingHide() clears the pending list, so Undo
+                    // can restore exactly the URIs that were just moved into the vault.
+                    val hideUris = pendingHidePrivateUris
                     commitPendingHide()
                     _uiState.update { it.copy(
                         selectedItems          = emptySet(),
                         multiHideState         = MultiDeleteState.Done,
-                        hideCloudNoticePending = cloudIdMapping.isNotEmpty(),
+                        undoAction             = if (hideUris.isNotEmpty()) UndoAction.Hide(hideUris) else null,
                     ) }
                 }
                 is DeletePhotoUseCase.Result.NeedsMediaWritePermission -> {
@@ -1072,6 +1075,62 @@ class GalleryViewModel @Inject constructor(
 
     fun resetMultiHideState() {
         _uiState.update { it.copy(multiHideState = MultiDeleteState.Idle, hideCloudNoticePending = false) }
+    }
+
+    /** The cloud linkIds a delete with deleteFromCloud=true sends to Proton trash — the same set
+     *  [DeletePhotoUseCase] computes, mirrored here so Undo can restore exactly those links. */
+    private fun cloudLinkIdsOf(items: List<GalleryItem>): List<String> =
+        items.mapNotNull { item ->
+            when (item) {
+                is GalleryItem.Synced    -> item.cloud.linkId
+                is GalleryItem.CloudOnly -> item.cloud.linkId
+                else                     -> null
+            }
+        }
+
+    /** Drop the pending undo target (snackbar dismissed or timed out) without restoring anything. */
+    fun clearUndoAction() {
+        _uiState.update { it.copy(undoAction = null) }
+    }
+
+    /**
+     * Reverse the action the last terminal snackbar offered to undo: a Hide restores each vault
+     * URI back to MediaStore (mirrors the viewer's unhide); a CloudTrash delete moves the Drive
+     * linkIds back out of Proton trash. Either way the affected view is refreshed so the items
+     * reappear. No-op if nothing is pending.
+     */
+    fun undoLastAction() {
+        val action = _uiState.value.undoAction ?: return
+        _uiState.update { it.copy(undoAction = null) }
+        viewModelScope.launch {
+            try {
+                when (action) {
+                    is UndoAction.Hide -> {
+                        withContext(Dispatchers.IO) {
+                            for (hiddenUri in action.hiddenUris) {
+                                hiddenStorage.restore(hiddenUri)
+                            }
+                            context.settingsDataStore.edit { prefs ->
+                                val current = prefs[SettingsKeys.HIDDEN_PHOTO_URIS] ?: emptySet()
+                                prefs[SettingsKeys.HIDDEN_PHOTO_URIS] = current - action.hiddenUris.toSet()
+                                val mapping = prefs[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] ?: emptySet()
+                                prefs[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] =
+                                    mapping.filterNot { entry -> action.hiddenUris.any { entry.startsWith("$it|") } }.toSet()
+                            }
+                        }
+                        refresh(force = false)
+                    }
+                    is UndoAction.CloudTrash -> {
+                        val userId = accountManager.getPrimaryUserId().first() ?: return@launch
+                        // restoreFromCloudTrash refreshes the cloud stream internally on success.
+                        cloudRepo.restoreFromCloudTrash(userId, action.linkIds)
+                    }
+                }
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                android.util.Log.w("GalleryVM", "undoLastAction failed: ${e.message}")
+            }
+        }
     }
 
     /** Persist the pending hide-URIs into HIDDEN_PHOTO_URIS and clear the pending state. */

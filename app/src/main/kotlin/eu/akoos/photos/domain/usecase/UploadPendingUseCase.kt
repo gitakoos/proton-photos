@@ -818,13 +818,16 @@ class UploadPendingUseCase @Inject constructor(
      */
     /**
      * Decodes the PENDING_ALBUM_ADDS set ("localUri=albumLinkId" entries) into a localUri→linkId
-     * map. The split is on the LAST '=' because a content:// URI can contain '=' in a query
-     * string while a Drive album linkId never does. A localUri with multiple queued albums keeps
-     * only the last one in the map, but every raw entry is still removed individually on success.
+     * map. The split is on the FIRST '=': the localUri is a canonical content:// MediaStore URI
+     * (no '='), while a Drive album linkId is base64 and ends in '=' padding — so the first '=' is
+     * the separator. Splitting on the last '=' mis-parsed any linkId ending in '=' and dropped the
+     * entry outright when its final char was the padding '=', so the forced upload never ran.
+     * A localUri with multiple queued albums keeps only the last one in the map, but every raw
+     * entry is still removed individually on success.
      */
     private fun decodePendingAlbumAdds(raw: Set<String>): Map<String, String> =
         raw.mapNotNull { entry ->
-            val idx = entry.lastIndexOf('=')
+            val idx = entry.indexOf('=')
             if (idx <= 0 || idx == entry.length - 1) null
             else entry.substring(0, idx) to entry.substring(idx + 1)
         }.toMap()

@@ -61,6 +61,8 @@ data class SettingsUiState(
     val syncedVideoCount: Int = 0,
     val themeMode: ThemeMode = ThemeMode.System,
     val palette: ThemePalette = ThemePalette.Default,
+    /** Which top-level tab the gallery opens on at app start. Default Photos. */
+    val landingTab: LandingTab = LandingTab.Photos,
     /** Grid-layout settings (Appearance → Grid layout). [gridRememberLast] on = the timeline
      *  remembers the last pinched zoom; off = it opens at [gridDefaultColumns], which also sets
      *  the album / device-folder / hidden grids. 3 = the default columns-per-row baseline. */
@@ -70,6 +72,12 @@ data class SettingsUiState(
     val userEmail: String = "",
     val cloudUsedBytes: Long = 0L,
     val cloudMaxBytes: Long = 0L,
+    /** True until the account user Flow first emits — gates a shimmer over the avatar /
+     *  name / email so a cold start shows a skeleton instead of a bare "?" placeholder. */
+    val accountLoading: Boolean = true,
+    /** True until the backed-up / pending counts first compute — gates a shimmer over the
+     *  count values so a cold start shows a skeleton instead of "None" / 0. */
+    val countsLoading: Boolean = true,
     val language: String = "system",
     // Metadata stripping
     val stripOnUpload: Boolean = true,
@@ -92,6 +100,14 @@ data class SettingsUiState(
     /** When true, the main Photos timeline hides every photo already filed into an
      *  album. Off by default. The Albums + Shared tabs are unaffected. */
     val hidePhotosInAlbums: Boolean = false,
+    /** When true, the Photos timeline shows a floating month/year label while scrolling.
+     *  Off by default. */
+    val showScrollDate: Boolean = false,
+    /** When true, the Photos timeline runs oldest-first (newest at the bottom). Off by default. */
+    val reverseTimelineOrder: Boolean = false,
+    /** When true, the Photos timeline uses a staggered (masonry) grid that keeps each photo's
+     *  aspect ratio. Off by default — the fixed square grid stays the baseline. */
+    val mosaicGrid: Boolean = false,
     // Trash
     val trashedCount: Int = 0,
     /** Drive (cloud) trash count. `null` = unknown — UI then falls back to the
@@ -165,6 +181,22 @@ enum class ThemePalette(val storageKey: String, val labelRes: Int) {
 
     companion object {
         fun fromKey(key: String?): ThemePalette = entries.firstOrNull { it.storageKey == key } ?: Default
+    }
+}
+
+/**
+ * Top-level gallery tab the app opens on at start. [index] matches the pager page
+ * (0 = Photos, 1 = Albums, 2 = Shared) so it maps straight to the saved [SettingsKeys.LANDING_TAB]
+ * int and the [androidx.compose.foundation.pager.PagerState] without a lookup table. Labels reuse
+ * the existing gallery tab strings.
+ */
+enum class LandingTab(val index: Int, val labelRes: Int) {
+    Photos(0, eu.akoos.photos.R.string.gallery_tab_photos),
+    Albums(1, eu.akoos.photos.R.string.gallery_tab_albums),
+    Shared(2, eu.akoos.photos.R.string.gallery_tab_shared);
+
+    companion object {
+        fun fromIndex(index: Int?): LandingTab = entries.firstOrNull { it.index == index } ?: Photos
     }
 }
 

@@ -52,6 +52,10 @@ data class GalleryUiState(
     val multiHideState: MultiDeleteState = MultiDeleteState.Idle,
     /** Last hide batch included backed-up photos — the snackbar then notes the Drive copies stay. */
     val hideCloudNoticePending: Boolean = false,
+    /** Set after a reversible hide / cloud-trash delete just succeeded, so the terminal snackbar
+     *  can offer Undo and restore exactly those items. Null = nothing to undo (e.g. a local-only
+     *  delete, which is not app-reversible). Cleared once the snackbar is consumed. */
+    val undoAction: UndoAction? = null,
     val pendingDeleteIntent: android.app.PendingIntent? = null,
     val multiDownloadState: MultiDownloadState = MultiDownloadState.Idle,
     val multiShareState: MultiShareState = MultiShareState.Idle,
@@ -95,6 +99,20 @@ sealed class MultiDeleteState {
     data object Working : MultiDeleteState()
     data object Done    : MultiDeleteState()
     data class  Failed(val message: String) : MultiDeleteState()
+}
+
+/** A just-completed action that can be reversed via the snackbar's Undo. [count] drives the
+ *  message; the payload is whatever the matching restore path needs. */
+sealed class UndoAction {
+    abstract val count: Int
+    /** Undo a Hide: restore each private-vault URI back to MediaStore. */
+    data class Hide(val hiddenUris: List<String>) : UndoAction() {
+        override val count: Int get() = hiddenUris.size
+    }
+    /** Undo a cloud-trash delete: move each Drive linkId back out of Proton trash. */
+    data class CloudTrash(val linkIds: List<String>) : UndoAction() {
+        override val count: Int get() = linkIds.size
+    }
 }
 
 sealed class MultiDownloadState {

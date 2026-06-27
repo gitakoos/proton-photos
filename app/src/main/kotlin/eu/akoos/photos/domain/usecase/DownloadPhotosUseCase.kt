@@ -34,6 +34,8 @@ import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.entity.SyncState
 import eu.akoos.photos.domain.entity.SyncStatus
+import eu.akoos.photos.data.api.dto.BatchLinkDto
+import eu.akoos.photos.data.repository.drive.LinkDetailHelpers
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.SyncStateRepository
 import java.io.File
@@ -50,18 +52,63 @@ import javax.inject.Singleton
 private const val TAG = "DownloadPhotos"
 
 /** How many album photos download concurrently. Each photo already fetches its blocks in
- *  parallel, so a small fan-out is enough; the rate-limit-sensitive metadata calls stay
- *  bounded by the shared network semaphore, and the CDN block fetches carry their own
- *  retry/backoff, so a couple of photos in flight stays well within Drive's limits. */
-private const val DOWNLOAD_PARALLELISM = 2
+ *  parallel, so a moderate fan-out keeps the pipeline busy without overwhelming the device;
+ *  the rate-limit-sensitive metadata calls stay bounded by the shared network semaphore, and
+ *  the CDN block fetches carry their own retry/backoff, so a handful of photos in flight stays
+ *  well within Drive's limits. This is the dominant limiter for large-album downloads. */
+private const val DOWNLOAD_PARALLELISM = 4
 
 @Singleton
 class DownloadPhotosUseCase @Inject constructor(
     @ApplicationContext private val context: Context,
     private val cloudRepo: DrivePhotoRepository,
     private val syncStateRepo: SyncStateRepository,
+    private val linkDetailHelpers: LinkDetailHelpers,
 ) {
     data class Progress(val done: Int, val total: Int, val failed: Int, val skipped: Int = 0)
+
+    /** Pre-resolved per-file metadata for a download set, keyed strictly by linkId. A linkId
+     *  absent from a map means "not prefetched" — the downloader falls back to its per-file
+     *  fetch for that file, so behaviour is identical to a download with no prefetch at all. */
+    private data class PrefetchedDownloadMetadata(
+        val linkDetailByLinkId: Map<String, BatchLinkDto>,
+    )
+
+    /**
+     * Batch-prefetches the redundant per-file link-detail round-trip for every photo in [photos],
+     * in 50-chunks, reusing the exact batch helper the listing path uses. This collapses the
+     * serialized one-element batch call × N files into a couple of full-width batch calls. The
+     * prefetched link detail already carries the photo's ContentKeyPacket fields, so the
+     * downloader's CKP chain resolves from it without a separate fetch.
+     *
+     * Best-effort and additive: a chunk that fails (network/rate-limit) is logged and skipped so
+     * those linkIds simply stay unresolved and fall back to the per-file fetch — the whole
+     * download is never aborted. Grouped by (volumeId, shareId) because the batch link endpoint
+     * is keyed on volumeId; a mixed-source set (e.g. own + shared album) is handled per group.
+     */
+    private suspend fun prefetchDownloadMetadata(
+        userId: UserId,
+        photos: List<CloudPhoto>,
+    ): PrefetchedDownloadMetadata {
+        val linkDetail = mutableMapOf<String, BatchLinkDto>()
+        // Distinct linkIds per (volumeId, shareId) — the batch link endpoint keys on volumeId,
+        // so a group sharing it is one clean batch pass.
+        val groups = photos
+            .distinctBy { it.linkId }
+            .groupBy { it.volumeId to it.shareId }
+        for ((key, group) in groups) {
+            val (volumeId, _) = key
+            val linkIds = group.map { it.linkId }
+            try {
+                linkDetail.putAll(linkDetailHelpers.batchFetchLinkDetails(userId, volumeId, linkIds))
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                Log.w(TAG, "prefetchDownloadMetadata: link-detail prefetch skipped for a chunk: ${e.message}")
+            }
+        }
+        Log.d(TAG, "prefetchDownloadMetadata: ${linkDetail.size} link details for ${photos.size} photo(s)")
+        return PrefetchedDownloadMetadata(linkDetail)
+    }
 
     /**
      * Downloads cloud photos into the per-photo folder. Caller passes [folderName] as the
@@ -81,6 +128,11 @@ class DownloadPhotosUseCase @Inject constructor(
         val done = AtomicInteger(0); val failed = AtomicInteger(0); val skipped = AtomicInteger(0)
         val gate = Semaphore(DOWNLOAD_PARALLELISM)
         fun snapshot() = Progress(done.get() + skipped.get() + failed.get(), photos.size, failed.get(), skipped.get())
+        // Batch-prefetch the redundant per-file link details for the whole set in 50-chunks
+        // BEFORE the fan-out, so each photo's download skips its own one-element batch round-trip.
+        // Any entry missing here falls back to the per-file fetch inside the downloader, so the
+        // result is identical when prefetch yields nothing.
+        val prefetch = prefetchDownloadMetadata(userId, photos)
         photos.map { photo ->
             async {
                 gate.withPermit {
@@ -101,7 +153,10 @@ class DownloadPhotosUseCase @Inject constructor(
                             Log.d(TAG, "Already on device, skipped: ${photo.displayName}")
                         } else {
                             val folder = folderByLinkId[photo.linkId] ?: folderName
-                            val file = cloudRepo.downloadFullResPhoto(userId, photo)
+                            val file = cloudRepo.downloadFullResPhoto(
+                                userId, photo,
+                                preResolvedLinkDetail = prefetch.linkDetailByLinkId[photo.linkId],
+                            )
                             val savedUri = saveFileToMediaStore(
                                 file, photo.displayName, photo.mimeType, folder,
                                 captureTimeSeconds = photo.captureTime,
@@ -150,6 +205,9 @@ class DownloadPhotosUseCase @Inject constructor(
         fun snapshot() = Progress(done.get() + skipped.get() + failed.get(), items.size, failed.get(), skipped.get())
         onProgress(snapshot())
 
+        // Same batch-prefetch as the album path: resolve link details for the whole multi-select
+        // up front so each photo skips its own one-element metadata batch.
+        val prefetch = prefetchDownloadMetadata(userId, cloudItems)
         cloudItems.map { photo ->
             async {
                 gate.withPermit {
@@ -163,7 +221,10 @@ class DownloadPhotosUseCase @Inject constructor(
                             // Per-photo override beats the default folder. Album-bound photos land in
                             // Pictures/<AlbumName>/; non-album photos in Pictures/ root (folder = "").
                             val folder = folderByLinkId[photo.linkId] ?: folderName
-                            val file = cloudRepo.downloadFullResPhoto(userId, photo)
+                            val file = cloudRepo.downloadFullResPhoto(
+                                userId, photo,
+                                preResolvedLinkDetail = prefetch.linkDetailByLinkId[photo.linkId],
+                            )
                             val savedUri = saveFileToMediaStore(
                                 file, photo.displayName, photo.mimeType, folder,
                                 captureTimeSeconds = photo.captureTime,

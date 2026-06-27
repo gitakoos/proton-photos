@@ -30,6 +30,7 @@ import eu.akoos.photos.data.api.DriveApiService
 import eu.akoos.photos.data.api.dto.BatchLinkDto
 import eu.akoos.photos.data.api.dto.BatchLinksRequest
 import eu.akoos.photos.data.api.dto.ThumbnailBatchRequest
+import eu.akoos.photos.util.isTransientApiError
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -56,8 +57,13 @@ class LinkDetailHelpers @Inject constructor(
     /**
      * Returns linkId → BatchLinkDto for every link in [linkIds] that the server returns.
      * Missing entries (404, permission errors) are silently omitted; the caller decides
-     * how to react to a partial map. Each chunk failure is logged and skipped, mirroring
-     * the original façade behavior.
+     * how to react to a partial map.
+     *
+     * A TRANSIENT failure (429 / 5xx / network — see [isTransientApiError]) PROPAGATES instead
+     * of being swallowed: a rate-limited chunk must surface as a thrown error so the caller's
+     * retry + failure accounting can act, not return a short map that looks like success and
+     * silently truncates the listing. A genuinely non-transient single-chunk quirk is still
+     * logged and skipped so one odd link can't fail the whole batch.
      */
     suspend fun batchFetchLinkDetails(
         userId: UserId,
@@ -78,6 +84,7 @@ class LinkDetailHelpers @Inject constructor(
                 }
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
+                if (isTransientApiError(e)) throw e
                 Log.e(TAG, "batchFetchLinkDetails chunk failed: ${e.message}")
             }
         }
@@ -111,6 +118,9 @@ class LinkDetailHelpers @Inject constructor(
                 }
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
+                // Propagate a rate-limit / transient error so the caller retries instead of
+                // building rows with missing content-key packets (undecryptable thumbnails).
+                if (isTransientApiError(e)) throw e
                 Log.w(TAG, "batchFetchContentKeyPackets failed: ${e.message}")
             }
         }
@@ -237,6 +247,9 @@ class LinkDetailHelpers @Inject constructor(
                 }
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
+                // A rate-limit / transient error propagates so the caller's retry runs rather
+                // than the grid silently sticking on placeholder tiles for the dropped chunk.
+                if (isTransientApiError(e)) throw e
                 Log.w(TAG, "batchFetchThumbnailUrls chunk failed: ${e.message}")
             }
         }

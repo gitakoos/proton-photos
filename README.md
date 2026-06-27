@@ -33,7 +33,7 @@
 | **Edit** | Photo editor (eight adjustments, filter, redact, rotate, free-form crop, undo and redo) and video editor (trim, crop, rotate, music overlay, strips location metadata); RAW and DNG previews; open a photo from any app straight into the viewer or editor. |
 | **Privacy & lock** | Hidden vault behind biometric or PIN with a blur overlay, per-field metadata stripping (GPS, camera, timestamp, software) on upload or in bulk, mirror-to-local so your on-device copy matches the cloud, in-app cloud trash, and a configurable app lock with timeout. |
 | **Hardened** | TLS cert pinning on every Proton call, a strict host allowlist with cleartext blocked, no app state carried in cloud auto-backup or device transfer, and logs stripped from release builds. |
-| **Comfort** | Offline browsing of cached photos, a full-screen viewer with slideshow, a background thumbnail warm-up for smooth scrolling, a home-screen widget (including a Cloud Photos mode served from the encrypted cache), an in-app updater, 6 languages, light, dark and system themes, and 6 colour palettes. |
+| **Comfort** | Offline browsing of cached photos, a full-screen viewer with slideshow, a background thumbnail warm-up for smooth scrolling, a home-screen widget (including a Cloud Photos mode served from the encrypted cache), an in-app FAQ, an in-app updater, 11 languages, light, dark and system themes, and 6 colour palettes. |
 
 ## Install
 
@@ -61,6 +61,8 @@ app/src/main/kotlin/eu/akoos/photos/
 │   ├── gallery/      Photos tab + multi-select
 │   ├── albums/       Albums tab + detail + sharing
 │   ├── shared/       Shared-with-me albums tab
+│   ├── folders/      Per-device-folder detail + multi-select
+│   ├── memories/     On this day + seasons memories
 │   ├── calendar/     Calendar view + per-day metadata editor
 │   ├── map/          Photo map (osmdroid thumbnail pins, place drawer, city search)
 │   ├── location/     Per-place detail page
@@ -68,7 +70,7 @@ app/src/main/kotlin/eu/akoos/photos/
 │   ├── editor/       Photo + video editor
 │   ├── search/       Search with filename + content filters
 │   ├── hidden/       Hidden vault (PIN / biometric)
-│   ├── settings/     Settings, About, Privacy, Language, Theme, Palette, Trash, folder-mirror
+│   ├── settings/     Settings, About, Privacy, Language, Theme, Palette, Trash, FAQ, folder-mirror
 │   ├── lock/         App lock
 │   ├── updater/      In-app update orchestration
 │   ├── common/       Shared composables (ErrorPopup, ConfirmDialog, EmptyState, ThemedSnackbar)

@@ -2,11 +2,12 @@ package eu.akoos.photos.data.db.dao
 
 import androidx.room.Database
 import androidx.room.RoomDatabase
+import eu.akoos.photos.data.db.entity.AlbumPhotoMembershipEntity
 import eu.akoos.photos.data.db.entity.PhotoListingEntity
 import eu.akoos.photos.data.db.entity.SyncStateEntity
 
 @Database(
-    entities = [PhotoListingEntity::class, SyncStateEntity::class],
+    entities = [PhotoListingEntity::class, SyncStateEntity::class, AlbumPhotoMembershipEntity::class],
     version = 1,
     exportSchema = false,
 )

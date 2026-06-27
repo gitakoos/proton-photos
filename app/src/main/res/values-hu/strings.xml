@@ -321,6 +321,16 @@
     <string name="settings_hide_all_folders_desc">Az elrejtett eszközmappákban lévő fotók nem jelennek meg a fő Fotók idővonaladon. A készülékeden maradnak.</string>
     <string name="settings_hide_album_photos_desc">A Drive-albumba (felhő) rakott fotók nem jelennek meg a fő Fotók idővonaladon. Az Albumok és Megosztott füleken továbbra is láthatók.</string>
     <string name="settings_timeline_filter">Idővonal szűrő</string>
+    <string name="settings_timeline">Idővonal</string>
+    <string name="settings_timeline_section_layout">Elrendezés</string>
+    <string name="settings_timeline_section_shows">Mit mutasson</string>
+    <string name="settings_timeline_section_display">Megjelenítés</string>
+    <string name="settings_show_scroll_date">Dátum mutatása görgetés közben</string>
+    <string name="settings_show_scroll_date_desc">Görgetés közben egy lebegő hónap- és évcímke jelenik meg az idővonal felett, így mindig van időbeli viszonyítási pontod.</string>
+    <string name="settings_reverse_timeline">Idővonal fordított sorrendje</string>
+    <string name="settings_reverse_timeline_desc">A legrégebbi fotók legyenek felül, a legújabbak alul. Az idővonal a legújabb fotóidnál nyílik meg.</string>
+    <string name="settings_mosaic_grid">Mozaik rács</string>
+    <string name="settings_mosaic_grid_desc">Az idővonal lépcsőzetes mozaikként jelenik meg, ahol minden fotó megtartja a saját formáját, így az álló fotók magasabbak lesznek.</string>
     <string name="timeline_filter_title">Idővonal szűrő</string>
     <string name="timeline_filter_subtitle">Válaszd ki, mit rejtsünk el a fő Fotók idővonaladról. Az elrejtett fotók az eszközön maradnak és tovább mentődnek.</string>
     <string name="timeline_filter_categories_header">Kategória sáv</string>
@@ -339,6 +349,8 @@
     <string name="settings_media_management_grant_action">Engedélyezés</string>
     <string name="settings_appearance">Megjelenés és nyelv</string>
     <string name="settings_appearance_desc">Téma, paletta, alkalmazás nyelve</string>
+    <string name="settings_landing_tab">Kezdő fül</string>
+    <string name="settings_landing_tab_desc">Melyik fül nyíljon meg az alkalmazás indításakor</string>
     <string name="settings_strip_customize">Eltávolítandó mezők testreszabása</string>
     <string name="settings_about_desc">Verzió, közreműködők és licencek</string>
 
@@ -413,6 +425,10 @@
     <string name="language_hu">Magyar</string>
     <string name="language_it">Olasz, Italiano</string>
     <string name="language_nl">Holland, Nederlands</string>
+    <string name="language_pl">Lengyel, Polski</string>
+    <string name="language_sk">Szlovák, Slovenčina</string>
+    <string name="language_sl">Szlovén, Slovenščina</string>
+    <string name="language_cs">Cseh, Čeština</string>
     <string name="language_section">Felület nyelve</string>
 
     <!-- About -->
@@ -767,7 +783,7 @@
     <string name="offline_banner_dismiss_cd">Értesítés bezárása</string>
     <string name="network_error_offline">Nincs internetkapcsolat. Próbáld újra, amint helyreáll.</string>
     <string name="network_error_transient">A kapcsolat megszakadt. Próbáld újra később.</string>
-    <string name="cd_status_backed_up_device">Drive-ra mentve és az eszközön is</string>
+    <string name="cd_status_backed_up_device">Proton Drive és eszköz</string>
     <string name="cd_status_cloud_only">Csak a Proton Drive-on</string>
     <string name="cd_status_hidden_local">Elrejtve ezen az eszközön</string>
     <string name="cd_status_device_only">Csak az eszközön</string>
@@ -916,9 +932,9 @@
     <string name="viewer_meta_orientation_180">Elforgatva 180°</string>
     <string name="viewer_meta_orientation_90_cw">Elforgatva 90° jobbra</string>
     <string name="viewer_meta_orientation_90_ccw">Elforgatva 90° balra</string>
-    <string name="viewer_meta_source_device_only">Csak az eszközön</string>
-    <string name="viewer_meta_source_backed_up">Mentve a Proton Drive-ra</string>
-    <string name="viewer_meta_source_cloud">Proton Drive</string>
+    <string name="viewer_meta_source_device_only">Csak ezen az eszközön</string>
+    <string name="viewer_meta_source_backed_up">Proton Drive és eszköz</string>
+    <string name="viewer_meta_source_cloud">Csak a Proton Drive-on</string>
     <string name="viewer_meta_strip">Eltávolítás</string>
     <string name="viewer_meta_strip_all">Minden privát metaadat eltávolítása</string>
     <string name="viewer_meta_strip_all_desc">Eltávolítja a GPS-, kamera- és szoftveradatokat ebből a fájlból</string>
@@ -975,6 +991,15 @@
     <!-- Gallery snackbar / error fallbacks -->
     <string name="gallery_error_title">Hiba</string>
     <string name="gallery_no_local_to_hide">Nincs elrejthető helyi fotó</string>
+    <string name="gallery_undo">Visszavonás</string>
+    <plurals name="gallery_hidden_snackbar">
+        <item quantity="one">1 elrejtve</item>
+        <item quantity="other">%d elrejtve</item>
+    </plurals>
+    <plurals name="gallery_moved_to_trash_snackbar">
+        <item quantity="one">1 áthelyezve a kukába</item>
+        <item quantity="other">%d áthelyezve a kukába</item>
+    </plurals>
     <string name="gallery_copy_to_hidden_failed">Nem sikerült a Rejtettek közé másolni</string>
     <string name="gallery_move_to_hidden_failed">Nem sikerült a Rejtettek közé helyezni</string>
     <string name="gallery_add_to_cloud_album_failed">Nem sikerült a felhőalbumhoz adni</string>
@@ -983,6 +1008,11 @@
     <string name="gallery_create_album_failed">Nem sikerült létrehozni az albumot: %1$s</string>
     <string name="gallery_enable_metadata_category">Először engedélyezz egy metaadat-kategóriát a Beállítások → Adatvédelem menüben</string>
     <string name="gallery_album_picker_count_drive">%1$s · Drive</string>
+    <string name="album_add_photos">Fotók hozzáadása</string>
+    <string name="album_picker_title">Albumhoz adás</string>
+    <string name="album_picker_selected">%1$d kijelölve</string>
+    <string name="album_add_count">Hozzáadás (%1$d)</string>
+    <string name="album_picker_empty">Nincs hozzáadható fotó.</string>
 
     <!-- Album create/rename/delete snackbar fallbacks -->
     <string name="albums_name_empty">Az album neve nem lehet üres</string>
@@ -1077,4 +1107,21 @@
     <string name="grid_remember_last">Utolsó nézet megjegyzése</string>
     <string name="grid_remember_last_desc">A fotók az utoljára használt nagyításon nyíljanak meg</string>
     <string name="grid_default_columns_section">Kép / sor</string>
+    <!-- FAQ -->
+    <string name="faq_title">Gyakori kérdések</string>
+    <string name="faq_settings_entry">GYIK</string>
+    <string name="faq_onboarding_intro">Néhány gyors válasz a kezdéshez. Ezeket később a Beállításokban is megtalálod.</string>
+    <string name="faq_q_cloud_icons">Mit jelentenek a felhő ikonok?</string>
+    <string name="faq_a_cloud_icons">A zöld felhő azt jelenti, hogy a fotó mentve van a Proton Drive-ra, és még ezen az eszközön is megvan. A fehér felhő azt jelenti, hogy csak a Proton Drive-on van, ezen az eszközön nincs. Ha nincs ikon, akkor csak ezen az eszközön van, és még nincs mentve.</string>
+    <string name="faq_q_backup">Hogyan működik a mentés?</string>
+    <string name="faq_a_backup">Az új fotók és videók automatikusan mentésre kerülnek, amint a mentés be van kapcsolva. A Beállításokban a mentést csak Wi-Fi-re korlátozhatod, így mobiladaton szünetel.</string>
+    <string name="faq_q_albums">Mik az albumok, és mit csinál a mappatükrözés?</string>
+    <string name="faq_a_albums">Az albumok a fotókat csoportosítják a Proton Drive-on. Az \"Eszközmappák tükrözése Drive-albumként\" hatására a telefonod mappái, például a Camera vagy a Screenshots, a mentés során megfelelő albumokként jelennek meg a Drive-on.</string>
+    <string name="faq_q_mirror_local">Mit csinál a \"Változások tükrözése a helyi fájlokra\"?</string>
+    <string name="faq_a_mirror_local">Amikor az alkalmazás a mentés során eltávolítja a metaadatokat vagy átnevez egy fotót, ugyanezeket a változtatásokat a telefonodon lévő eredetin is alkalmazza, így a helyi fájl és a mentett másolat azonos marad. Ez csak az alkalmazás által mentett fotókra vonatkozik, mostantól kezdve, és nem tölti vissza a telefonodra a Proton Drive webes felületén végzett módosításokat.</string>
+    <string name="faq_q_existing">Módosítja az alkalmazás a meglévő fotóimat?</string>
+    <string name="faq_a_existing">Nem. Metaadat-változás csak akkor történik, amikor az alkalmazás ment egy fotót, és csak akkor, ha bekapcsolod a metaadatok eltávolítását vagy a helyi tükrözést. A telefonodon már meglévő fotók változatlanok maradnak, hacsak nem választasz egy fotóra vonatkozó műveletet.</string>
+    <string name="settings_copy_diagnostics">Diagnosztikai napló másolása</string>
+    <string name="settings_copy_diagnostics_desc">Szinkronizálási hibakereséshez. Nem tartalmaz fiókadatokat.</string>
+    <string name="settings_diagnostics_copied">Diagnosztikai napló kimásolva</string>
 </resources>

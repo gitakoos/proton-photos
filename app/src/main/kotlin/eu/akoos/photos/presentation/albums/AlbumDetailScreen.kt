@@ -71,6 +71,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.PlayArrow
@@ -164,6 +165,9 @@ fun AlbumDetailScreen(
     coverThumbnailUrl: String? = null,
     /** Passes the full album photo list AND the index of the clicked photo so the viewer can swipe through siblings. */
     onPhotoClick: (List<GalleryItem>, Int) -> Unit,
+    /** Owner-only: opens the photo picker to add more photos. Carries the album's current cloud
+     *  member linkIds so the picker pre-filters out photos already in the album. */
+    onAddPhotosClick: (Set<String>) -> Unit = {},
     onBack: () -> Unit,
     viewModel: AlbumDetailViewModel = hiltViewModel(),
 ) {
@@ -209,6 +213,16 @@ fun AlbumDetailScreen(
         state.error?.let {
             snackbarHostState.showSnackbar(it)
             viewModel.clearError()
+        }
+    }
+
+    // After a hide moves backed-up photos to the vault, reassure the user their Drive copies are
+    // untouched — the same notice the timeline shows. Mirrors the gallery's hideCloudNoticePending.
+    val hideCloudNotice = stringResource(R.string.hide_cloud_copy_notice)
+    LaunchedEffect(state.hideCloudNoticePending) {
+        if (state.hideCloudNoticePending) {
+            snackbarHostState.showSnackbar(hideCloudNotice)
+            viewModel.clearHideCloudNotice()
         }
     }
 
@@ -329,12 +343,16 @@ fun AlbumDetailScreen(
         // Cells are keyed by linkId, so the swept indices map back to the selected linkIds.
         val selectableLinkIds = remember(state.photos) { state.photos.map { it.linkId } }
         val linkIdToIndex = remember(state.photos) { state.photos.mapIndexed { i, p -> p.linkId to i }.toMap() }
+        // Armed at the long-press anchor so the cell's release-tap skips toggling the just-selected
+        // cell back off (otherwise a stationary long-press would select then immediately deselect).
+        val tapGuard = remember { mutableStateOf(false) }
         val dragSelectModifier = eu.akoos.photos.presentation.gallery.rememberDragMultiSelectModifier(
             gridState = gridState,
             items = selectableLinkIds,
             indexByKey = linkIdToIndex,
             selected = state.selectedPhotos,
             onSelectionChange = viewModel::setSelectedPhotos,
+            tapGuard = tapGuard,
         )
         LazyVerticalGrid(
             columns = GridCells.Fixed(cols),
@@ -395,6 +413,26 @@ fun AlbumDetailScreen(
                         }
                     },
                     titleActions = {
+                            // Add photos — owner-only (a shared-with-me guest can't edit the album).
+                            if (!state.isSharedWithMe) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(40.dp)
+                                        .background(PillBg, CircleShape)
+                                        .border(0.5.dp, PillBorder, CircleShape)
+                                        .clickable {
+                                            onAddPhotosClick(state.photos.map { it.linkId }.toSet())
+                                        },
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Icon(
+                                        Icons.Default.Add,
+                                        contentDescription = stringResource(R.string.album_add_photos),
+                                        tint = Accent, modifier = Modifier.size(18.dp),
+                                    )
+                                }
+                            }
+
                             // Primary action: owner downloads the album; shared-with-me saves it into their own library.
                             val isDownloading = state.downloadState is AlbumDownloadState.Working
                             val onAction: () -> Unit = if (state.isSharedWithMe) {
@@ -627,7 +665,11 @@ fun AlbumDetailScreen(
                             // Long-press enters multi-select directly; cover/remove live in the selection dock.
                             showLongPressMenu = false,
                             onTap = {
-                                if (state.isSelectionMode) viewModel.togglePhotoSelection(photo.linkId)
+                                // Skip the release-tap that follows a long-press select; it would
+                                // otherwise toggle the just-anchored cell back off.
+                                if (tapGuard.value) {
+                                    tapGuard.value = false
+                                } else if (state.isSelectionMode) viewModel.togglePhotoSelection(photo.linkId)
                                 else {
                                     // Wrap as Synced where a local copy exists so the viewer offers device + cloud + both.
                                     val viewerItems = state.photos.map { p ->
@@ -644,7 +686,8 @@ fun AlbumDetailScreen(
                                 }
                             },
                             // Long-press + drag is handled by the grid-level drag-select; a plain
-                            // long-press there selects this single cell and enters selection mode.
+                            // long-press there selects this single cell, and the tap-guard keeps the
+                            // release-tap from undoing it.
                             onLongPress = null,
                             onSetAsCover = { viewModel.setPhotoAsCover(photo.linkId) },
                             onRemoveFromAlbum = {
@@ -923,7 +966,10 @@ fun AlbumDetailScreen(
         val opDeletingLabel = stringResource(R.string.op_deleting)
         val opRemovingLabel = stringResource(R.string.op_removing_from_album)
         val albumBusyProgress = if (state.isDeletingPhotos) {
-            val label = if (state.busyOp == AlbumBusyOp.Removing) opRemovingLabel else opDeletingLabel
+            val label = when (state.busyOp) {
+                AlbumBusyOp.Removing -> opRemovingLabel
+                else -> opDeletingLabel
+            }
             eu.akoos.photos.presentation.common.OperationProgress(0, 0, label, indeterminate = true)
         } else null
         eu.akoos.photos.presentation.common.BlockingOperationSheet(albumBusyProgress)

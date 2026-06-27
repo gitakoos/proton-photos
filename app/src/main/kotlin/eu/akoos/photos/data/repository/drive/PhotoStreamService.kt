@@ -104,13 +104,58 @@ private const val REFRESH_BATCH = 100
  */
 private const val PHOTO_PAGE_MAX_ATTEMPTS = 3
 private const val PHOTO_PAGE_RETRY_BASE_MS: Long = 800L
-// When fetchPhotoPageWithRetry's short per-page backoff is exhausted mid-walk (a sustained
-// rate-limit), the listing pauses on this slower OUTER backoff and resumes from the saved cursor,
-// up to MAX_STREAM_RESUME_PAUSES times before giving up for this pass (the cursor is preserved
-// either way, so a later run continues). Bounds the extra in-pass patience to a few minutes.
-private const val MAX_STREAM_RESUME_PAUSES = 4
+// When a listing page still throws after fetchPhotoPageWithRetry's short per-page backoff (a
+// sustained rate-limit), the walk waits the page out on this slower OUTER backoff — honouring the
+// server's Retry-After when present — and resumes the SAME page from the saved cursor. The counter
+// resets after every page that succeeds, so a large library completes however many pages need a
+// wait; only one page that keeps failing past MAX_LISTING_PAGE_RETRIES retries (server truly down) gives
+// up for this pass, with the cursor preserved so a later run continues.
+private const val MAX_LISTING_PAGE_RETRIES = 6
 private const val STREAM_RESUME_BASE_MS: Long = 30_000L
 private const val STREAM_RESUME_MAX_MS: Long = 180_000L
+// Gap between successful listing pages. The listing only fetches light link ids, so a modest pace
+// keeps it fast while easing the burst that trips Proton's rate-limit on large libraries.
+private const val LISTING_PAGE_DELAY_MS: Long = 400L
+
+/** Privacy-safe one-line description of a listing error for the diagnostics buffer: exception type,
+ *  the ProtonCore error variant, the HTTP status, and the Retry-After (seconds) when present. Never
+ *  the message body, ids, or any account data. */
+private fun listingErrorDetail(e: Throwable): String {
+    val apiError = (e as? me.proton.core.network.domain.ApiException)?.error
+    val http = apiError as? me.proton.core.network.domain.ApiResult.Error.Http
+    return buildString {
+        append(e.javaClass.simpleName)
+        if (apiError != null) append('/').append(apiError.javaClass.simpleName)
+        if (http != null) append("/http=").append(http.httpCode)
+        // A Parse error's cause (a SerializationException) names the DTO field that didn't match —
+        // log a truncated form (field name, no values) so a tester log pinpoints which photo field
+        // tripped the listing parse.
+        (apiError as? me.proton.core.network.domain.ApiResult.Error.Parse)?.cause?.message?.let {
+            append("/cause=").append(it.replace('\n', ' ').take(160))
+        }
+        val ra = http?.retryAfter?.inWholeSeconds
+        if (ra != null && ra > 0) append("/retryAfter=").append(ra).append('s')
+    }
+}
+
+/** Only a clearly-permanent auth failure (401/403) is worth abandoning the listing for — a retry
+ *  can't fix those. Every other error is waited out and resumed, since completing the listing is
+ *  what makes the whole library load and the saved cursor makes a retry safe. */
+private fun isPermanentListingError(e: Throwable): Boolean {
+    val http = (e as? me.proton.core.network.domain.ApiException)?.error
+        as? me.proton.core.network.domain.ApiResult.Error.Http ?: return false
+    return http.httpCode == 401 || http.httpCode == 403
+}
+
+/** How long to wait before re-trying a failed listing page: the server's Retry-After when it sent
+ *  one (so we back off exactly as asked), otherwise an escalating, capped backoff. */
+private fun listingRetryWaitMs(e: Throwable, attempt: Int): Long {
+    val serverWait = ((e as? me.proton.core.network.domain.ApiException)?.error
+        as? me.proton.core.network.domain.ApiResult.Error.Http)
+        ?.retryAfter?.inWholeMilliseconds?.takeIf { it > 0 }
+    val backoff = minOf(STREAM_RESUME_BASE_MS shl (attempt - 1), STREAM_RESUME_MAX_MS)
+    return (serverWait ?: backoff).coerceAtMost(STREAM_RESUME_MAX_MS)
+}
 
 /**
  * Cloud photo stream: paginated full refresh + event-based incremental refresh +
@@ -252,12 +297,15 @@ class PhotoStreamService @Inject constructor(
     }
 
     fun observeCloudPhotos(userId: UserId): Flow<List<CloudPhoto>> =
-        // observeOwnStream, not observeAll: rows loaded from shared-with-me albums sit in the
+        // observeOwnStreamLite, not observeAll: rows loaded from shared-with-me albums sit in the
         // same table and must not surface in the user's own timeline.
-        // flowOn(Default) runs the per-row toDomain() decode off the collector's Main thread —
-        // a thumbnail-decrypt burst re-emits the whole listing, and mapping ~1000 rows on the UI
-        // thread per emission was a source of gallery scroll stutter.
-        photoListingDao.observeOwnStream(userId.id)
+        // The LITE projection selects only the display columns — NOT the per-row crypto material
+        // (encNodeKey / contentKeyPacket / encNodePassphrase / encXAttr, kilobytes each). A
+        // thumbnail-decrypt burst re-emits the whole listing on every DB write; selecting the crypto
+        // blobs for the entire library each time, only to drop them in toDomain(), materialised
+        // hundreds of MB of transient garbage per write on a large library and pinned the heap at
+        // its ceiling. flowOn(Default) keeps the per-row map off the collector's Main thread.
+        photoListingDao.observeOwnStreamLite(userId.id)
             .map { list -> list.map { it.toDomain() } }
             .flowOn(Dispatchers.Default)
 
@@ -286,7 +334,6 @@ class PhotoStreamService @Inject constructor(
         manager: ApiManager<out DriveApiService>,
         volumeId: String,
         previousPageLastLinkId: String?,
-        pageLimit: Int,
     ): PhotoLinksResponse =
         // Route through the shared 429 / 5xx-aware helper (jittered exponential backoff) rather
         // than a bespoke linear retry, so a rate-limited large-library listing backs off properly
@@ -296,7 +343,7 @@ class PhotoStreamService @Inject constructor(
             baseMs = PHOTO_PAGE_RETRY_BASE_MS,
         ) {
             semaphore.withPermit {
-                manager.invoke { getPhotoLinks(volumeId, previousPageLastLinkId, pageLimit) }.valueOrThrow
+                manager.invoke { getPhotoLinks(volumeId, previousPageLastLinkId) }.valueOrThrow
             }
         }
 
@@ -347,6 +394,7 @@ class PhotoStreamService @Inject constructor(
             // sees its tail, so it suppresses the prune, which is the right call mid-backfill.
             val resumeCursor = if (previouslyComplete) null else listingPrefs[cursorKey]
             val startedFresh = resumeCursor == null
+            eu.akoos.photos.util.SyncDiagnostics.log("refresh start (force=$force, resume=${!startedFresh})")
             // A forced refresh mid-backfill resumes the saved cursor, so it only re-walks the older
             // tail and would miss photos added at the TOP of the library since (e.g. uploaded from
             // Drive web) until the backfill finally completes. Pull the newest page first — insert-
@@ -363,9 +411,9 @@ class PhotoStreamService @Inject constructor(
             // up front so a crash/abort midway correctly leaves the listing marked incomplete.
             context.settingsDataStore.edit { it[completeKey] = false }
 
-            // 2. Paginated photo stream.
-            // Pagination: PreviousPageLastLinkID = last LinkID on current page; stop when page < limit.
-            val pageLimit = 500
+            // 2. Paginated photo stream — matches the official Drive SDK: the photos timeline
+            // endpoint takes no Limit/PageSize param. Pass the last LinkID as PreviousPageLastLinkID
+            // and walk until the server returns an empty page.
             val streamLinks = mutableListOf<PhotoLinkDto>()
             // Track whether the stream API responded without throwing (even if it returned 0 photos).
             // Used below to decide if it's safe to delete DB entries not found in this refresh.
@@ -375,48 +423,75 @@ class PhotoStreamService @Inject constructor(
                 if (resumeCursor != null) {
                     Log.d(TAG, "refreshCloudPhotos: resuming stream listing from saved cursor")
                 }
-                var resumePauses = 0
+                // Per-page failure counter. Reset to zero after every page that succeeds, so the
+                // patience is "this one page failed N times in a row", not "the whole walk failed N
+                // times". A large library that needs a rate-limit wait on many pages still completes;
+                // only a page that keeps failing with no progress (server truly down) gives up for
+                // this pass — the saved cursor lets a later run resume.
+                var consecutiveFailures = 0
                 do {
                     // fetchPhotoPageWithRetry already absorbs brief blips with a short jittered
-                    // backoff. If it still throws on a transient error, it's a sustained rate-limit:
-                    // pause on a slower OUTER backoff and retry the SAME page from the saved cursor
-                    // rather than abandoning the walk (which would leave older photos unfetched until
-                    // a later launch), capped at MAX_STREAM_RESUME_PAUSES so a permanently-failing
-                    // page can't loop forever. A non-transient error rethrows immediately. Every wait
+                    // backoff. If a page still throws, completing the listing is what makes the whole
+                    // library load, and the per-page cursor saved below makes resuming safe — so wait
+                    // the page out (honouring the server's Retry-After) and retry the SAME page rather
+                    // than abandoning the walk. Only a clearly-permanent auth failure rethrows
+                    // immediately; every other error (a rate-limit the shared classifier doesn't
+                    // recognise, a 5xx, a parse blip, a dropped connection) is waited out. Every wait
                     // is a delay(), never a spin.
                     var fetched: PhotoLinksResponse? = null
                     while (fetched == null) {
                         try {
-                            fetched = fetchPhotoPageWithRetry(manager, activeVolumeId, lastLinkId, pageLimit)
+                            fetched = fetchPhotoPageWithRetry(manager, activeVolumeId, lastLinkId)
                         } catch (e: Exception) {
                             if (e is kotlinx.coroutines.CancellationException) throw e
-                            if (resumePauses >= MAX_STREAM_RESUME_PAUSES ||
-                                !eu.akoos.photos.util.isTransientApiError(e)) throw e
-                            resumePauses++
-                            val waitMs = minOf(STREAM_RESUME_BASE_MS shl (resumePauses - 1), STREAM_RESUME_MAX_MS)
-                            Log.w(TAG, "refreshCloudPhotos: rate-limited mid-walk, pausing ${waitMs}ms then resuming from cursor (pause $resumePauses/$MAX_STREAM_RESUME_PAUSES)")
+                            if (isPermanentListingError(e)) throw e
+                            consecutiveFailures++
+                            if (consecutiveFailures > MAX_LISTING_PAGE_RETRIES) {
+                                eu.akoos.photos.util.SyncDiagnostics.log("listing give up: page stuck after $consecutiveFailures tries (${listingErrorDetail(e)})")
+                                throw e
+                            }
+                            val waitMs = listingRetryWaitMs(e, consecutiveFailures)
+                            eu.akoos.photos.util.SyncDiagnostics.log("listing rate-limited (${listingErrorDetail(e)}), wait ${waitMs}ms, try $consecutiveFailures")
+                            Log.w(TAG, "refreshCloudPhotos: listing rate-limited, pausing ${waitMs}ms then resuming from cursor (try $consecutiveFailures)")
                             delay(waitMs)
                         }
                     }
+                    consecutiveFailures = 0
                     val page = checkNotNull(fetched)
                     streamLinks.addAll(page.links)
-                    val nextCursor = if (page.links.size >= pageLimit) page.links.last().linkId else null
-                    if (nextCursor != null) {
+                    eu.akoos.photos.util.SyncDiagnostics.log("listing page: +${page.links.size} (total ${streamLinks.size})")
+                    // Stop ONLY on an empty page, never on a merely-short one. The Proton photos
+                    // timeline endpoint can return a page with fewer than the requested limit while
+                    // more photos still follow — it carries no More/AnchorID, so pagination is purely
+                    // "give me what's after this LinkID". Treating any short page as the end truncated
+                    // large libraries mid-listing and dropped every older photo after the short page
+                    // (the root cause of the "timeline only goes back a few years" reports). The
+                    // official Drive SDK paginates the same way: keep walking while a page returns any
+                    // photos, stop when one comes back empty.
+                    val nextCursor = if (page.links.isNotEmpty()) page.links.last().linkId else null
+                    if (nextCursor != null && nextCursor == lastLinkId) {
+                        // Defensive: a backend that returns a page ending on the same cursor we just
+                        // queried would otherwise loop forever. Stop rather than hammer the API.
+                        Log.w(TAG, "refreshCloudPhotos: cursor did not advance ($nextCursor), stopping the walk")
+                        lastLinkId = null
+                    } else if (nextCursor != null) {
                         // Persist the cursor before fetching the next page so a crash, process
                         // kill, or thrown page resumes from here rather than the newest photo.
                         context.settingsDataStore.edit { it[cursorKey] = nextCursor }
                         lastLinkId = nextCursor
-                        delay(100)
+                        delay(LISTING_PAGE_DELAY_MS)
                     } else {
                         lastLinkId = null
                     }
                 } while (lastLinkId != null)
                 streamCallSucceeded = true
+                eu.akoos.photos.util.SyncDiagnostics.log("listing done: ${streamLinks.size} links")
                 Log.d(TAG, "refreshCloudPhotos: stream walk reached the end, ${streamLinks.size} photos this pass")
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 // The cursor saved per page above stays pointing at the last good page, so the
                 // next run resumes from there instead of restarting from the newest photo.
+                eu.akoos.photos.util.SyncDiagnostics.log("listing PAUSED (${listingErrorDetail(e)}) at ${streamLinks.size} links")
                 Log.w(TAG, "refreshCloudPhotos: stream paused at saved cursor (${e.javaClass.simpleName}: ${e.message})")
             }
 
@@ -461,7 +536,7 @@ class PhotoStreamService @Inject constructor(
             // REFRESH_BATCH at a time inside the loop below and are released before the next
             // batch — that bound is the fix for the fresh-login OutOfMemoryError on big
             // libraries, where fetching every link's metadata into one map blew the heap.
-            val allPhotoLinks = streamLinks.sortedByDescending { it.captureTime }
+            val allPhotoLinks = streamLinks.sortedByDescending { it.captureTime ?: 0L }
             Log.d(TAG, "refreshCloudPhotos: ${allPhotoLinks.size} photos in stream")
 
             // Persist a minimal stub per streamed link up front, so a photo is in the dedup index
@@ -476,17 +551,18 @@ class PhotoStreamService @Inject constructor(
                         shareId = effectiveShareId,
                         volumeId = activeVolumeId,
                         userId = userId.id,
-                        captureTime = link.captureTime,
+                        captureTime = link.captureTime ?: 0L,
                         displayName = "",
                         mimeType = "",
                         sizeBytes = 0L,
                         revisionId = "",
                         thumbnailUrl = null,
                         contentHash = link.contentHash,
-                        tagsCsv = link.tags.sorted().joinToString(","),
+                        tagsCsv = (link.tags ?: emptyList()).sorted().joinToString(","),
                     )
                 }
                 stubRows.chunked(500).forEach { photoListingDao.insertStubsIgnore(it) }
+                eu.akoos.photos.util.SyncDiagnostics.log("stubs inserted: ${allPhotoLinks.size}")
             }
 
             val rootLinkId = shareService.photosRootLinkId()
@@ -505,6 +581,8 @@ class PhotoStreamService @Inject constructor(
             // the incremental-anchor save (an incomplete picture must not prune valid rows or
             // declare the library caught-up).
             var failedBatches = 0
+            // Running tally of detail rows whose batch completed, for the diagnostics buffer only.
+            var processed = 0
             // Fire the first-screen thumbnail pre-warm exactly once, after the first batch's
             // rows have been persisted. prefetch dedupes + bounds, so a re-fire would be
             // harmless, but the flag keeps it to the one batch whose rows the gallery shows first.
@@ -607,6 +685,14 @@ class PhotoStreamService @Inject constructor(
                     // The window is stepped by an index (not a one-shot `.chunked()`) so the
                     // chunk size + delay can be re-read from [gentleSyncActive] on every chunk —
                     // a flip to non-gentle mid-batch speeds the remaining chunks up immediately.
+                    // Accumulate every built/merged row for the WHOLE REFRESH_BATCH and upsert
+                    // once after the chunk loop, instead of an upsert per 5-to-10-row crypto chunk.
+                    // Each upsert makes Room re-emit the entire photo_listing table; collapsing
+                    // ~10-20 per-chunk writes into one per batch cuts the gallery's full
+                    // merge+sort+regroup re-runs by the same factor during the cold listing. The
+                    // crypto-paced yield/delay cadence stays PER CHUNK so JNI/GC pressure is
+                    // unchanged — only the DB write frequency drops.
+                    val batchToSave = mutableListOf<eu.akoos.photos.data.db.entity.PhotoListingEntity>()
                     var chunkStart = 0
                     while (chunkStart < batch.size) {
                         val gentle = gentleSyncActive
@@ -615,6 +701,10 @@ class PhotoStreamService @Inject constructor(
                         val chunk = batch.subList(chunkStart, minOf(chunkStart + chunkSize, batch.size))
                         chunkStart += chunkSize
                         val chunkLinkIds = chunk.map { it.linkId }
+                        // True once this chunk ran the heavy decrypt/build path (a cache miss). A
+                        // pure cache-hit chunk leaves it false and skips the yield/delay, so the
+                        // steady-state refresh stays snappy exactly as before.
+                        var chunkDidCryptoWork = false
                         // Fast path: photos already in DB with a still-on-disk cached thumbnail
                         // get re-used as-is. This avoids re-running the per-photo decrypt +
                         // thumbnail-decrypt pipeline on every cold start, which is what pushes
@@ -623,7 +713,6 @@ class PhotoStreamService @Inject constructor(
                         // path (no cache hits possible), but the steady-state app launch with
                         // existing local cache touches almost no Go code at all.
                         val existingByLinkId = photoListingDao.getByLinkIds(chunkLinkIds).associateBy { it.linkId }
-                        val chunkToSave = mutableListOf<eu.akoos.photos.data.db.entity.PhotoListingEntity>()
                         for (stub in chunk) {
                             val cached = existingByLinkId[stub.linkId]
                             // Reuse an existing row when its decrypted thumbnail is still on disk OR it's a
@@ -645,7 +734,7 @@ class PhotoStreamService @Inject constructor(
                                 // dropped those updates silently, so the heart icon never appeared
                                 // even after a forced pull-to-refresh. Merge the stub's tags into
                                 // the cached row when they differ, otherwise leave it alone.
-                                val stubTagsCsv = stub.tags.sorted().joinToString(",")
+                                val stubTagsCsv = (stub.tags ?: emptyList()).sorted().joinToString(",")
                                 val cachedTagsCsv = cached.tagsCsv
                                     .split(',')
                                     .mapNotNull { it.toIntOrNull() }
@@ -659,7 +748,7 @@ class PhotoStreamService @Inject constructor(
                                 val staleThumb = cached.thumbnailUrl != null &&
                                     !thumbnailHelpers.isCachedValid(cached.thumbnailUrl)
                                 if (stubTagsCsv != cachedTagsCsv || staleThumb) {
-                                    chunkToSave += cached.copy(
+                                    batchToSave += cached.copy(
                                         tagsCsv = if (stubTagsCsv != cachedTagsCsv) stubTagsCsv else cached.tagsCsv,
                                         thumbnailUrl = if (staleThumb) null else cached.thumbnailUrl,
                                     )
@@ -667,6 +756,8 @@ class PhotoStreamService @Inject constructor(
                                 foundIds += stub.linkId
                                 continue
                             }
+                            // Cache miss: the build() below runs the Go-crypto path.
+                            chunkDidCryptoWork = true
                             val detail = linkDetailMap[stub.linkId]
                             val parentId = detail?.link?.parentLinkId
                             val parentKeyBytes = parentKeyCache[parentId] ?: rootLinkKeyBytes
@@ -704,18 +795,21 @@ class PhotoStreamService @Inject constructor(
                             // finally sees it gone. Treating it as "not found" also lets the
                             // stale-entry cleanup drop any lingering row immediately.
                             if (!isRecentlyTrashed(stub.linkId)) {
-                                chunkToSave += merged
+                                batchToSave += merged
                                 foundIds += stub.linkId
                             }
                         }
-                        if (chunkToSave.isNotEmpty()) {
-                            photoListingDao.upsertAll(chunkToSave)
-                            // Yielding + delaying only matter when we actually did Go-crypto work;
-                            // a pure cache-hit chunk skips both so the steady-state refresh stays
-                            // snappy.
+                        // Pace only when this chunk actually did Go-crypto work; a pure cache-hit
+                        // chunk skips both so the steady-state refresh stays snappy. The DB write
+                        // itself is deferred to one upsert after the loop (below).
+                        if (chunkDidCryptoWork) {
                             yield()
                             delay(interChunkDelayMs)
                         }
+                    }
+                    // Single write for the whole batch — one Room re-emission instead of one per chunk.
+                    if (batchToSave.isNotEmpty()) {
+                        photoListingDao.upsertAll(batchToSave)
                     }
 
                     // First-screen pre-warm: as soon as the first batch's rows are in the DB,
@@ -737,19 +831,24 @@ class PhotoStreamService @Inject constructor(
                         }
                     }
                     }
+                    processed += batch.size
+                    eu.akoos.photos.util.SyncDiagnostics.log("detail: ${processed}/${allPhotoLinks.size}")
                 } catch (e: Exception) {
                     if (e is kotlinx.coroutines.CancellationException) throw e
-                    // One batch failing (a decode error, transient OOM on a single oversized batch)
-                    // must not abort the whole refresh: the chunks that already upserted stay in the
-                    // DB, and we press on to the next batch. A transient rate-limit/5xx that even the
-                    // retries above couldn't outlast does NOT count as a failed batch — the stubs
-                    // already hold the photos in the dedup index and the backfill pass below
-                    // completes their detail rows, so it must not block the ever-complete marker or
-                    // the stale-entry prune. Only a genuinely non-transient error suppresses those.
-                    if (!eu.akoos.photos.util.isTransientApiError(e)) failedBatches++
+                    // One batch failing (a decode error, transient OOM on a single oversized batch,
+                    // or a rate-limit that even the per-batch retry above couldn't outlast) must not
+                    // abort the whole refresh: the chunks that already upserted stay in the DB and we
+                    // press on to the next batch. But it DID leave a detail region unfetched, so it
+                    // counts as a failed batch — that keeps the listing marked incomplete (below), so
+                    // the next run re-walks fresh and re-fetches the gap once the limit clears. The
+                    // stubs still hold every photo in the dedup index, so a failed batch never causes
+                    // a re-upload; it only defers the "listing complete" declaration.
+                    failedBatches++
+                    eu.akoos.photos.util.SyncDiagnostics.log("detail batch FAILED (${e.javaClass.simpleName})")
                     Log.w(TAG, "refreshCloudPhotos: batch failed (${e.javaClass.simpleName}: ${e.message}), continuing")
                 }
             }
+            eu.akoos.photos.util.SyncDiagnostics.log("detail complete: processed $processed, $failedBatches failed batches")
 
             // Backfill any rows still left as stubs by a failed detail batch (rare, since the
             // per-batch retry above absorbs ordinary rate limits). One bounded pass over just the
@@ -790,33 +889,35 @@ class PhotoStreamService @Inject constructor(
             // process kill between upload and refresh can't drop a fresh upload); the in-refresh
             // protection only needs to span the upload→stream visibility race, which is orders of
             // magnitude shorter.
-            // The whole library has been listed once the walk reached the final short page
-            // (streamCallSucceeded). Persist that so future launches go straight to the
-            // incremental event feed instead of re-walking, and clear the resume cursor. If a
-            // processing batch failed, leave the flag false so the next run walks fresh and
-            // re-processes the gap.
-            val libraryFullyListed = streamCallSucceeded
-            if (libraryFullyListed) {
+            // Completion is gated strictly: the listing is COMPLETE only when THIS pass started
+            // fresh from the newest photo, paginated all the way to the final short page, AND had
+            // zero failed detail batches. A resumed-tail pass (it only saw the older tail) or any
+            // pass with a 429-truncated page or detail batch leaves the listing INCOMPLETE, so the
+            // next run walks fresh and re-fetches the missing region once the limit clears.
+            val listingComplete = startedFresh && streamCallSucceeded && failedBatches == 0
+            // Pagination reaching the end is enough to clear the resume cursor (nothing left to
+            // resume) and to open the sticky upload-dedup gate — every streamed link already has a
+            // stub row in the dedup index, so a pass with a failed detail batch still can't cause a
+            // re-upload (the backfill fills the row, the next fresh walk completes it).
+            if (streamCallSucceeded) {
                 context.settingsDataStore.edit {
-                    // Pagination saw the whole library, and every streamed link already has a stub
-                    // row in the dedup index — so the listing is "complete enough" to open the
-                    // upload gate even if a detail batch failed (its row is filled by the backfill,
-                    // never re-uploaded). Tie both flags to pagination success, not failedBatches,
-                    // so a transient 429 mid-walk can't strand the upload on "Preparing backup".
-                    it[completeKey] = streamCallSucceeded
-                    // Sticky "listed at least once" marker — never cleared at a later walk start, so
-                    // the upload path can defer the post-reinstall bulk upload until the cloud library
-                    // is fully known.
-                    if (streamCallSucceeded) it[everCompleteKey] = true
+                    // Strict: only a clean fresh full walk marks the listing complete, so the
+                    // fresh-vs-resume decision and the prune downstream never act on a truncated set.
+                    it[completeKey] = listingComplete
+                    // Sticky "listed at least once" marker — keyed on pagination success (not
+                    // failedBatches) so a transient 429 on a detail batch can't strand the upload on
+                    // "Preparing backup"; never cleared at a later walk start (only on sign-out).
+                    it[everCompleteKey] = true
                     it.remove(cursorKey)
                 }
             }
 
             // Stale-entry cleanup needs a COMPLETE picture of the server's photos, so it only runs
-            // after a FRESH top-to-bottom walk that finished with no failed batches. A resumed walk
-            // only saw the older tail this pass, so its found-set would wrongly treat the newer rows
-            // (listed in an earlier run) as gone and delete them.
-            val safeToPrune = startedFresh && streamCallSucceeded && failedBatches == 0
+            // after a FRESH top-to-bottom walk that finished with no failed batches — the exact same
+            // condition that marks the listing complete above. A resumed walk only saw the older tail
+            // this pass, so its found-set would wrongly treat the newer rows (listed in an earlier
+            // run) as gone and delete them.
+            val safeToPrune = listingComplete
             if (safeToPrune) {
                 // Whole picture in hand → safe to clean up stale entries. Use the tight
                 // protection window (see comment above) rather than the full TTL.
@@ -847,9 +948,9 @@ class PhotoStreamService @Inject constructor(
                 Log.d(TAG, "refreshCloudPhotos: partial/resumed pass (fresh=$startedFresh, streamOk=$streamCallSucceeded, failedBatches=$failedBatches) — upserted ${foundIds.size} photos, skipping stale-entry cleanup to avoid data loss")
             }
             // Report completeness so the incremental fallback knows whether the event anchor
-            // may be persisted (see [lastFullRefreshComplete]). Only true once the entire library
-            // is in the DB: the listing walked to the end AND every batch processed cleanly.
-            lastFullRefreshComplete = libraryFullyListed && failedBatches == 0
+            // may be persisted (see [lastFullRefreshComplete]). Only true after a clean fresh full
+            // walk: the pass started fresh, listed to the end, AND every batch processed cleanly.
+            lastFullRefreshComplete = listingComplete
         } catch (e: DriveNotFoundException) {
             Log.w(TAG, "refreshCloudPhotos: DriveNotFoundException: ${e.message}")
         } catch (e: Exception) {
@@ -995,7 +1096,7 @@ class PhotoStreamService @Inject constructor(
             val rootLinkId = shareService.photosRootLinkId()
             val ownPublicKeys = cryptoHelper.getOwnPublicKeysArmored(userId)
 
-            val page = fetchPhotoPageWithRetry(manager, activeVolumeId, null, 500)
+            val page = fetchPhotoPageWithRetry(manager, activeVolumeId, null)
             if (page.links.isEmpty()) return
 
             // Only photos we don't already have are interesting — new uploads. Tag changes and
