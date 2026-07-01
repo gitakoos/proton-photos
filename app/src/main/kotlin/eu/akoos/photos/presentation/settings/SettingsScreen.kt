@@ -59,7 +59,11 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.OfflinePin
+import androidx.compose.material.icons.filled.PhoneAndroid
+import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
@@ -79,6 +83,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -93,7 +101,9 @@ import eu.akoos.photos.BuildConfig
 import eu.akoos.photos.R
 import eu.akoos.photos.presentation.common.ConfirmDialog
 import eu.akoos.photos.presentation.common.ErrorPopup
+import eu.akoos.photos.presentation.common.FloatingHeaderScrim
 import eu.akoos.photos.presentation.common.IconBubble
+import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
 import eu.akoos.photos.presentation.common.ShimmerBox
 import eu.akoos.photos.presentation.common.ShimmerTextLine
 import eu.akoos.photos.util.sanitizeErrorMessage
@@ -146,10 +156,13 @@ private fun recentlyDeletedSubtitle(deviceCount: Int, cloudCount: Int?): String 
 fun SettingsScreen(
     onBack: () -> Unit,
     onSyncSettingsClick: () -> Unit = {},
+    onActivityClick: () -> Unit = {},
     onStorageClick: () -> Unit = {},
     onPrivacySecurityClick: () -> Unit = {},
+    onPermissionsClick: () -> Unit = {},
     onNotificationsClick: () -> Unit = {},
     onRecentlyDeletedClick: () -> Unit = {},
+    onFindDuplicatesClick: () -> Unit = {},
     onAppearanceClick: () -> Unit = {},
     onLanguageClick: () -> Unit = {},
     onAboutClick: () -> Unit = {},
@@ -192,34 +205,17 @@ fun SettingsScreen(
     }
 
     Box(modifier = Modifier.fillMaxSize().background(colors.pageBg)) {
+        val contentTopPad = floatingHeaderContentTopPadding()
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .statusBarsPadding()
                 .navigationBarsPadding()
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp)
                 .padding(bottom = 32.dp),
         ) {
-            // ── Header ────────────────────────────────────────────────────────
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(top = 16.dp, bottom = 24.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(stringResource(R.string.settings_title), color = colors.fgPrimary, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
-                val debouncedBack = rememberDebouncedAction { onBack() }
-                IconBubble(
-                    icon = Icons.Default.Close,
-                    contentDescription = null,
-                    onClick = debouncedBack,
-                    diameter = 40.dp,
-                    iconSize = 16.dp,
-                    background = colors.surfaceWeak,
-                    borderColor = colors.pillBorder,
-                    tint = colors.fgDim,
-                )
-            }
+            // Clear the floating header that draws over this scrolling content.
+            Spacer(Modifier.height(contentTopPad))
 
             // ── Account ───────────────────────────────────────────────────────
             // The whole row is now a tap target — opens AccountScreen with avatar,
@@ -284,7 +280,7 @@ fun SettingsScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable(onClick = onSyncSettingsClick)
+                        .clickable(onClick = onActivityClick)
                         .padding(horizontal = 16.dp, vertical = 14.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
@@ -381,6 +377,21 @@ fun SettingsScreen(
                         bytesPerSecond = state.uploadBytesPerSecond,
                     )
                 }
+                // The whole status card opens the live Activity view; this row names that target so
+                // the tap is obvious (transfers + photos still waiting to upload).
+                RowDivider()
+                NavRow(
+                    label = stringResource(R.string.activity_title),
+                    description = stringResource(R.string.activity_row_desc),
+                    onClick = onActivityClick,
+                )
+                // Explicit entry to the backup settings — clearer than only the tappable status row.
+                RowDivider()
+                NavRow(
+                    label = stringResource(R.string.sync_open_settings),
+                    description = stringResource(R.string.sync_open_settings_desc),
+                    onClick = onSyncSettingsClick,
+                )
             }
             }
 
@@ -403,6 +414,12 @@ fun SettingsScreen(
                     description = recentlyDeletedSubtitle(state.trashedCount, state.cloudTrashCount),
                     onClick = onRecentlyDeletedClick,
                 )
+                RowDivider()
+                NavRow(
+                    label = stringResource(R.string.settings_find_duplicates),
+                    description = stringResource(R.string.settings_find_duplicates_desc),
+                    onClick = onFindDuplicatesClick,
+                )
             }
             }
 
@@ -414,6 +431,12 @@ fun SettingsScreen(
                 NavRow(
                     label = stringResource(R.string.settings_privacy_security),
                     onClick = onPrivacySecurityClick,
+                )
+                RowDivider()
+                NavRow(
+                    label = stringResource(R.string.permissions_title),
+                    description = stringResource(R.string.permissions_intro),
+                    onClick = onPermissionsClick,
                 )
                 RowDivider()
                 NavRow(
@@ -492,6 +515,38 @@ fun SettingsScreen(
         }
 
         eu.akoos.photos.presentation.common.ThemedSnackbarHost(snackbarHostState, modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding())
+
+        // Floating header — close button on the left (the same side every sub-page puts back),
+        // title centered in a pill; the list scrolls under it.
+        val debouncedClose = rememberDebouncedAction { onBack() }
+        FloatingHeaderScrim()
+        Row(
+            modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(start = 12.dp, end = 12.dp, top = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconBubble(
+                icon = Icons.Default.Close,
+                contentDescription = stringResource(R.string.close),
+                onClick = debouncedClose,
+                diameter = 40.dp,
+                iconSize = 16.dp,
+                background = colors.surfaceWeak,
+                borderColor = colors.pillBorder,
+                tint = colors.fgDim,
+            )
+            Spacer(Modifier.weight(1f))
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(colors.surfaceWeak, RoundedCornerShape(20.dp))
+                    .border(0.5.dp, colors.pillBorder, RoundedCornerShape(20.dp))
+                    .padding(horizontal = 16.dp, vertical = 9.dp),
+            ) {
+                Text(stringResource(R.string.settings_title), color = colors.fgPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            }
+            Spacer(Modifier.weight(1f))
+            Spacer(Modifier.size(40.dp))
+        }
     }
 
 }
@@ -504,6 +559,7 @@ fun SyncSettingsScreen(
     onBackupContentClick: () -> Unit = {},
     onBackupBehaviorClick: () -> Unit = {},
     onNetworkClick: () -> Unit = {},
+    onMetadataClick: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -525,6 +581,13 @@ fun SyncSettingsScreen(
             NavRow(
                 label = stringResource(R.string.settings_network_section),
                 onClick = onNetworkClick,
+            )
+            RowDivider()
+            // Metadata processing belongs with backup — stripping/renaming happens on upload.
+            NavRow(
+                label = stringResource(R.string.settings_metadata),
+                description = stringResource(R.string.settings_metadata_desc),
+                onClick = onMetadataClick,
             )
         }
 
@@ -570,7 +633,6 @@ fun BackupContentSettingsScreen(
     onBack: () -> Unit,
     onBackupFoldersClick: () -> Unit = {},
     onExcludedFoldersClick: () -> Unit = {},
-    onAlbumMirrorFoldersClick: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -607,15 +669,6 @@ fun BackupContentSettingsScreen(
                     enabled = state.autoSync,
                 )
             }
-            // Album-mirror drilldown answers "which device folders also surface as Drive
-            // albums when their photos upload?" — orthogonal to the everything toggle.
-            RowDivider()
-            IndentedNavRow(
-                label = stringResource(R.string.settings_album_mirror_folders),
-                description = stringResource(R.string.settings_album_mirror_folders_desc),
-                onClick = onAlbumMirrorFoldersClick,
-                enabled = state.autoSync,
-            )
         }
     }
 }
@@ -685,7 +738,7 @@ fun BackupNetworkSettingsScreen(
 @Composable
 fun StorageSettingsScreen(
     onBack: () -> Unit,
-    onRecentlyDeletedClick: () -> Unit = {},
+    onOpenTrash: (cloud: Boolean) -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -704,12 +757,12 @@ fun StorageSettingsScreen(
     LaunchedEffect(Unit) { viewModel.refreshLocalStorage() }
 
     SettingsSubPageScaffold(title = stringResource(R.string.settings_storage_section), onBack = onBack) {
+        // Manual refresh sits top-right; the two storage groups label themselves below.
         Row(
             modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            SectionLabel(stringResource(R.string.settings_storage_section))
-            Spacer(Modifier.weight(1f))
             Box(
                 modifier = Modifier
                     .size(24.dp)
@@ -726,21 +779,13 @@ fun StorageSettingsScreen(
             }
         }
         Spacer(Modifier.height(8.dp))
-        SettingsCard {
-            StorageContent(
-                state = state,
-                isFreeingUp = state.isFreeingUp,
-                onFreeUp = { viewModel.freeUpNow() },
-                onClearCache = { viewModel.clearAppCache() },
-            )
-        }
-        Spacer(Modifier.height(24.dp))
-        SectionLabel(stringResource(R.string.settings_recently_deleted))
-        Spacer(Modifier.height(8.dp))
-        RecentlyDeletedCard(
-            count = state.trashedCount,
-            cloudCount = state.cloudTrashCount,
-            onClick = onRecentlyDeletedClick,
+        StorageContent(
+            state = state,
+            isFreeingUp = state.isFreeingUp,
+            onFreeUp = { viewModel.freeUpNow() },
+            onClearCache = { viewModel.clearAppCache() },
+            onClearOffline = { viewModel.clearOfflineStorage() },
+            onOpenTrash = onOpenTrash,
         )
     }
 }
@@ -757,8 +802,8 @@ fun PrivacySecuritySettingsScreen(
     SettingsSubPageScaffold(title = stringResource(R.string.settings_privacy_security), onBack = onBack) {
         SettingsCard {
             NavRow(
-                label = stringResource(R.string.settings_privacy_metadata),
-                description = stringResource(R.string.settings_privacy_metadata_desc),
+                label = stringResource(R.string.settings_privacy),
+                description = stringResource(R.string.settings_privacy_desc),
                 onClick = onPrivacyClick,
             )
             RowDivider()
@@ -771,22 +816,18 @@ fun PrivacySecuritySettingsScreen(
     }
 }
 
-// ── Privacy Settings sub-page ─────────────────────────────────────────────────
+// ── Metadata Settings sub-page (under Backup) ─────────────────────────────────
+// Rename + EXIF stripping happen when a photo is backed up, so these controls live under
+// Sync/Backup alongside the other backup options.
 
 @Composable
-fun PrivacySettingsScreen(
+fun MetadataSettingsScreen(
     onBack: () -> Unit,
-    onHiddenAlbumClick: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    SettingsSubPageScaffold(title = stringResource(R.string.settings_privacy_metadata), onBack = onBack) {
-        // ── Metadata card ───────────────────────────────────────────────────
-        // Strip sub-toggles collapse under the main strip-on-upload switch — they
-        // only exist to attenuate WHICH metadata categories get stripped, so showing
-        // them while strip is off was pure noise. Rename stays at the top because
-        // it modifies displayName (a separate decision from EXIF stripping).
+    SettingsSubPageScaffold(title = stringResource(R.string.settings_metadata), onBack = onBack) {
         CollapsibleSection(label = stringResource(R.string.settings_privacy_section_metadata)) {
         SettingsCard {
             ToggleRow(
@@ -802,12 +843,6 @@ fun PrivacySettingsScreen(
                 checked = state.stripOnUpload,
                 onCheckedChange = viewModel::setStripOnUpload,
             )
-            // Sub-toggles live behind a collapsed "Customize" row by default — even
-            // with strip enabled they're rarely tweaked, so they were eating screen
-            // real estate every time the user opened Privacy & Metadata. Pressing the
-            // chevron row expands the four GPS / Camera / Timestamp / Software
-            // overrides; defaults match what the upload pipeline actually does when
-            // none of them are explicitly set.
             if (state.stripOnUpload) {
                 RowDivider()
                 ToggleRow(
@@ -884,12 +919,22 @@ fun PrivacySettingsScreen(
             }
         }
         }
+    }
+}
 
-        Spacer(Modifier.height(20.dp))
+// ── Privacy Settings sub-page ─────────────────────────────────────────────────
 
+@Composable
+fun PrivacySettingsScreen(
+    onBack: () -> Unit,
+    onOfflinePhotosClick: () -> Unit = {},
+    viewModel: SettingsViewModel = hiltViewModel(),
+) {
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    SettingsSubPageScaffold(title = stringResource(R.string.settings_privacy), onBack = onBack) {
         // ── Device-side privacy card ─────────────────────────────────────────
-        // Clear-cache-on-close + Hidden vault — what stays on this device after
-        // close.
+        // What this device keeps locally after close: the cache, the offline copies,
+        // and the read-only telemetry mirror.
         CollapsibleSection(label = stringResource(R.string.settings_privacy_section_device)) {
         SettingsCard {
             ToggleRow(
@@ -900,9 +945,9 @@ fun PrivacySettingsScreen(
             )
             RowDivider()
             NavRow(
-                label = stringResource(R.string.settings_hidden_photos),
-                description = stringResource(R.string.settings_hidden_photos_desc),
-                onClick = onHiddenAlbumClick,
+                label = stringResource(R.string.settings_offline_photos),
+                description = stringResource(R.string.offline_screen_empty),
+                onClick = onOfflinePhotosClick,
             )
             RowDivider()
             // Telemetry events fired by the embedded ProtonCore stack are gated by
@@ -925,11 +970,10 @@ fun PrivacySettingsScreen(
 @Composable
 fun SecuritySettingsScreen(
     onBack: () -> Unit,
-    @Suppress("UNUSED_PARAMETER") onHiddenAlbumClick: () -> Unit = {},
+    onHiddenAlbumClick: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
-    val colors = AppColors.current
     SettingsSubPageScaffold(title = stringResource(R.string.settings_security), onBack = onBack) {
         CollapsibleSection(label = stringResource(R.string.settings_security_section_lock)) {
             SettingsCard {
@@ -951,36 +995,14 @@ fun SecuritySettingsScreen(
             }
         }
 
-        // OS-level media management permission (Android 12+)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            Spacer(Modifier.height(20.dp))
-            val context = LocalContext.current
-            val canManage = remember { MediaStore.canManageMedia(context) }
-            CollapsibleSection(label = stringResource(R.string.settings_security_section_media)) {
-                SettingsCard {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(stringResource(R.string.settings_media_management), color = colors.fgPrimary, fontSize = 13.5.sp)
-                            Text(
-                                if (canManage) stringResource(R.string.settings_media_management_granted)
-                                else stringResource(R.string.settings_media_management_grant_desc),
-                                color = if (canManage) StatusSynced else colors.fgMute, fontSize = 11.5.sp,
-                            )
-                        }
-                        if (!canManage) {
-                            Text(
-                                stringResource(R.string.settings_media_management_grant_action), color = colors.accent, fontSize = 13.sp, fontWeight = FontWeight.Medium,
-                                modifier = Modifier.clickable {
-                                    context.startActivity(Intent(android.provider.Settings.ACTION_REQUEST_MANAGE_MEDIA))
-                                },
-                            )
-                        }
-                    }
-                }
-            }
+        Spacer(Modifier.height(20.dp))
+        // Hidden vault — a lock/biometric-gated photo collection, so it belongs with the app lock.
+        SettingsCard {
+            NavRow(
+                label = stringResource(R.string.settings_hidden_photos),
+                description = stringResource(R.string.settings_hidden_photos_desc),
+                onClick = onHiddenAlbumClick,
+            )
         }
     }
 }
@@ -988,14 +1010,15 @@ fun SecuritySettingsScreen(
 // ── Shared scaffold ───────────────────────────────────────────────────────────
 
 
-// ── Sync progress panel (inside Sync card while syncing) ─────────────────────
+// ── Sync progress panel (inside Sync card while syncing; reused by the Activity screen) ──
 
 @Composable
-private fun SyncProgressPanel(
+internal fun SyncProgressPanel(
     done: Int,
     total: Int,
     events: List<UploadEvent>,
     bytesPerSecond: Long?,
+    initiallyExpanded: Boolean = false,
 ) {
     val colors = AppColors.current
     val fraction = if (total > 0) (done.toFloat() / total).coerceIn(0f, 1f) else 0f
@@ -1005,7 +1028,7 @@ private fun SyncProgressPanel(
         animationSpec = tween(450),
         label = "sync_progress_bar",
     )
-    var expanded by remember { mutableStateOf(false) }
+    var expanded by remember { mutableStateOf(initiallyExpanded) }
 
     Column(modifier = Modifier.padding(horizontal = 16.dp).padding(bottom = 14.dp)) {
         // Linear progress bar — Material 3 default; we override only the track/indicator
@@ -1182,15 +1205,14 @@ private fun UploadEventRow(evt: UploadEvent) {
 
 // ── Storage content ───────────────────────────────────────────────────────────
 
+/** Every storage card is locked to this height so a carousel never resizes as you swipe. */
+private val storageCardHeight = 134.dp
+
 /**
- * Storage card: three stacked sections inside one [SettingsCard], divided by row separators.
- *
- *  1. Proton Drive — cloud quota (existing X/Y GB rendering, just relabelled).
- *  2. On this device — /data partition free/total via StatFs.
- *  3. App cache — context.cacheDir size + "Clear cache" pill (confirm dialog).
- *
- * Followed by the existing "Free up space now" row which still belongs to the Proton scope
- * (it deletes already-backed-up local files, not cache files).
+ * Storage overview as two swipeable carousels: a Proton Drive group (cloud quota + cloud trash) and
+ * an on-device group (app cache, offline copies, device storage, device trash). Each card is a
+ * full-width rectangle that fills with its usage fraction; one card shows at a time and the dots
+ * track the position.
  */
 @Composable
 private fun StorageContent(
@@ -1198,77 +1220,291 @@ private fun StorageContent(
     isFreeingUp: Boolean = false,
     onFreeUp: () -> Unit = {},
     onClearCache: () -> Unit = {},
+    onClearOffline: () -> Unit = {},
+    onOpenTrash: (cloud: Boolean) -> Unit = {},
 ) {
-    // ── 1. Proton Drive ─────────────────────────────────────────────────────────
-    ProtonStorageRow(state = state)
-    RowDivider()
+    val deviceTotal = state.deviceTotalBytes
+    val deviceUsed = (deviceTotal - state.deviceFreeBytes).coerceAtLeast(0L)
 
-    // ── 2. On this device ───────────────────────────────────────────────────────
-    DeviceStorageRow(state = state)
-    RowDivider()
-
-    // ── 3. App cache ────────────────────────────────────────────────────────────
-    AppCacheRow(state = state, onClearCache = onClearCache)
-
-    // ── 4. Free up space now (existing) ─────────────────────────────────────────
-    RowDivider()
-    var showFreeUpConfirm by remember { mutableStateOf(false) }
-    val colors = AppColors.current
-    Column(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
-    ) {
-        // Title + action button on top, the explanatory description full-width underneath so
-        // it doesn't get squeezed against the button on narrow screens.
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                stringResource(R.string.settings_free_up_now),
-                color = colors.fgPrimary, fontSize = 13.5.sp,
-                modifier = Modifier.weight(1f),
+    SectionLabel(stringResource(R.string.settings_storage_proton))
+    Spacer(Modifier.height(8.dp))
+    StorageCarousel(pageCount = 2) { page ->
+        if (page == 0) {
+            StorageGaugeCard(
+                icon = Icons.Default.Cloud,
+                label = stringResource(R.string.settings_storage_proton),
+                value = formatBytes(state.cloudUsedBytes),
+                detail = if (state.cloudMaxBytes > 0L)
+                    stringResource(R.string.settings_storage_used_of, formatBytes(state.cloudUsedBytes), formatBytes(state.cloudMaxBytes))
+                else formatBytes(state.cloudUsedBytes),
             )
-            Spacer(Modifier.width(12.dp))
-            if (isFreeingUp) {
-                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = colors.accent)
-            } else {
-                // Pill-style destructive button — confirm dialog gates the actual delete so
-                // an accidental tap doesn't immediately wipe device copies of every
-                // backed-up file. The dialog text spells out the irreversible scope.
+        } else {
+            StorageTrashCard(
+                label = stringResource(R.string.settings_recently_deleted),
+                count = state.cloudTrashCount ?: 0,
+                onOpen = { onOpenTrash(true) },
+            )
+        }
+    }
+
+    Spacer(Modifier.height(20.dp))
+
+    SectionLabel(stringResource(R.string.settings_storage_device))
+    Spacer(Modifier.height(8.dp))
+    StorageCarousel(pageCount = 4) { page ->
+        when (page) {
+            0 -> StorageGaugeCard(
+                icon = Icons.Default.Storage,
+                label = stringResource(R.string.settings_storage_app_cache),
+                value = formatBytes(state.appCacheBytes),
+                detail = stringResource(R.string.settings_storage_app_cache_desc),
+                action = {
+                    StorageClearAction(
+                        enabled = state.appCacheBytes > 0L,
+                        dialogTitle = stringResource(R.string.settings_storage_clear_cache_dialog_title),
+                        dialogMessage = stringResource(R.string.settings_storage_clear_cache_dialog_message, formatBytes(state.appCacheBytes)),
+                        onConfirm = onClearCache,
+                    )
+                },
+            )
+            1 -> StorageGaugeCard(
+                icon = Icons.Default.OfflinePin,
+                label = stringResource(R.string.settings_offline_storage_title),
+                value = formatBytes(state.offlineBytes),
+                detail = stringResource(R.string.settings_offline_storage_subtitle),
+                action = {
+                    StorageClearAction(
+                        enabled = state.offlineBytes > 0L,
+                        dialogTitle = stringResource(R.string.settings_offline_storage_clear_dialog_title),
+                        dialogMessage = stringResource(R.string.settings_offline_storage_clear_dialog_message, formatBytes(state.offlineBytes)),
+                        onConfirm = onClearOffline,
+                    )
+                },
+            )
+            2 -> StorageGaugeCard(
+                icon = Icons.Default.PhoneAndroid,
+                label = stringResource(R.string.settings_storage_device),
+                value = formatBytes(state.deviceFreeBytes),
+                detail = stringResource(R.string.settings_storage_device_free, formatBytes(state.deviceFreeBytes), formatBytes(deviceTotal)),
+                action = { StorageFreeUpAction(isFreeingUp = isFreeingUp, onFreeUp = onFreeUp) },
+            )
+            else -> StorageTrashCard(
+                label = stringResource(R.string.settings_recently_deleted),
+                count = state.trashedCount,
+                onOpen = { onOpenTrash(false) },
+            )
+        }
+    }
+}
+
+/** One-card-at-a-time carousel with page dots underneath. */
+@Composable
+private fun StorageCarousel(pageCount: Int, content: @Composable (Int) -> Unit) {
+    val pagerState = rememberPagerState(pageCount = { pageCount })
+    Column(modifier = Modifier.fillMaxWidth()) {
+        HorizontalPager(
+            state = pagerState,
+            pageSpacing = 10.dp,
+            modifier = Modifier.fillMaxWidth().height(storageCardHeight),
+        ) { page ->
+            content(page)
+        }
+        Spacer(Modifier.height(12.dp))
+        StoragePagerDots(current = pagerState.currentPage, count = pageCount)
+    }
+}
+
+/** A storage type as a full-width card: an icon + label, the size as a big value, and a detail line,
+ *  with an optional action square separated at the right. */
+@Composable
+private fun StorageGaugeCard(
+    icon: ImageVector,
+    label: String,
+    value: String,
+    detail: String,
+    action: (@Composable () -> Unit)? = null,
+) {
+    val colors = AppColors.current
+    Row(
+        modifier = Modifier
+            .fillMaxSize()
+            .clip(RoundedCornerShape(18.dp))
+            .background(colors.cardBg)
+            .border(0.5.dp, colors.cardBorder, RoundedCornerShape(18.dp)),
+    ) {
+        Box(modifier = Modifier.weight(1f).fillMaxHeight()) {
+            Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(icon, contentDescription = null, tint = colors.accent, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(label, color = colors.fgMute, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                }
+                Spacer(Modifier.weight(1f))
+                Text(value, color = colors.fgPrimary, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    detail, color = colors.fgMute, fontSize = 12.sp,
+                    maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                )
+            }
+        }
+        if (action != null) {
+            Box(modifier = Modifier.width(0.5.dp).fillMaxHeight().background(colors.cardBorder))
+            Box(
+                modifier = Modifier.fillMaxHeight().padding(horizontal = 14.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                action()
+            }
+        }
+    }
+}
+
+/** Recently-deleted as a card: the item count fills the rectangle, with a centered action that
+ *  opens the trash. */
+@Composable
+private fun StorageTrashCard(label: String, count: Int, onOpen: () -> Unit) {
+    val colors = AppColors.current
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .clip(RoundedCornerShape(18.dp))
+            .background(colors.cardBg)
+            .border(0.5.dp, colors.cardBorder, RoundedCornerShape(18.dp))
+            .clickable(onClick = onOpen),
+    ) {
+        Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Delete, contentDescription = null, tint = colors.accent, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(label, color = colors.fgMute, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                Icon(Icons.AutoMirrored.Filled.ArrowForwardIos, contentDescription = null, tint = colors.fgMute, modifier = Modifier.size(13.dp))
+            }
+            // The count sits centred on its own soft accent panel so the card reads as a real tile,
+            // not a bare number.
+            Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                 Box(
                     modifier = Modifier
-                        .background(colors.deleteTint, RoundedCornerShape(10.dp))
-                        .border(0.5.dp, colors.errorColor.copy(alpha = 0.3f), RoundedCornerShape(10.dp))
-                        .clickable(enabled = !isFreeingUp) { showFreeUpConfirm = true }
-                        .padding(horizontal = 14.dp, vertical = 7.dp),
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(
+                            Brush.linearGradient(
+                                listOf(colors.accent.copy(alpha = 0.20f), colors.accent2.copy(alpha = 0.10f)),
+                            ),
+                        )
+                        .border(0.5.dp, colors.accent.copy(alpha = 0.25f), RoundedCornerShape(16.dp))
+                        .padding(horizontal = 34.dp, vertical = 14.dp),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Icon(
-                            imageVector = Icons.Default.Delete,
-                            contentDescription = null,
-                            tint = colors.errorColor,
-                            modifier = Modifier.size(14.dp),
-                        )
-                        Text(
-                            stringResource(R.string.settings_free_up_action),
-                            color = colors.errorColor, fontSize = 13.sp, fontWeight = FontWeight.Medium,
-                        )
-                    }
+                    Text(count.toString(), color = colors.fgPrimary, fontSize = 30.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }
-        Spacer(Modifier.height(8.dp))
-        Text(
-            stringResource(R.string.settings_free_up_desc),
-            color = colors.fgMute, fontSize = 11.5.sp,
+    }
+}
+
+/** Carousel page-indicator dots; the active one stretches into a pill. */
+@Composable
+private fun StoragePagerDots(current: Int, count: Int) {
+    val colors = AppColors.current
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        repeat(count) { i ->
+            val active = i == current
+            Box(
+                modifier = Modifier
+                    .padding(horizontal = 3.dp)
+                    .size(width = if (active) 18.dp else 6.dp, height = 6.dp)
+                    .clip(RoundedCornerShape(3.dp))
+                    .background(if (active) colors.accent else colors.line2),
+            )
+        }
+    }
+}
+
+/** A separated square action at the card's right edge: a delete icon over a short label, dimmed when
+ *  disabled. */
+@Composable
+private fun StorageActionSquare(label: String, destructive: Boolean, enabled: Boolean, onClick: () -> Unit) {
+    val colors = AppColors.current
+    val tint = when {
+        !enabled -> colors.fgMute
+        destructive -> colors.errorColor
+        else -> colors.accent
+    }
+    val bg = if (destructive && enabled) colors.deleteTint else colors.surfaceWeak
+    val borderColor = if (destructive && enabled) colors.errorColor.copy(alpha = 0.3f) else colors.pillBorder
+    Column(
+        modifier = Modifier
+            .size(58.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(bg)
+            .border(0.5.dp, borderColor, RoundedCornerShape(12.dp))
+            .clickable(enabled = enabled, onClick = onClick),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Icon(Icons.Default.Delete, contentDescription = label, tint = tint, modifier = Modifier.size(20.dp))
+        Spacer(Modifier.height(3.dp))
+        Text(label, color = tint, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+/** Square button that confirms clearing a reclaimable store (cache / offline copies). */
+@Composable
+private fun StorageClearAction(
+    enabled: Boolean,
+    dialogTitle: String,
+    dialogMessage: String,
+    onConfirm: () -> Unit,
+) {
+    var showConfirm by remember { mutableStateOf(false) }
+    StorageActionSquare(
+        label = stringResource(R.string.settings_storage_clear),
+        destructive = false,
+        enabled = enabled,
+        onClick = { showConfirm = true },
+    )
+    if (showConfirm) {
+        ConfirmDialog(
+            title = dialogTitle,
+            message = dialogMessage,
+            confirmLabel = stringResource(R.string.settings_storage_clear),
+            dismissLabel = stringResource(R.string.cancel),
+            onConfirm = { showConfirm = false; onConfirm() },
+            onDismiss = { showConfirm = false },
         )
     }
-    if (showFreeUpConfirm) {
+}
+
+/** Reclaims on-device space used by already-backed-up copies; a short note explains it and a confirm
+ *  guards it. The whole control is centered under the device gauge. */
+@Composable
+private fun StorageFreeUpAction(isFreeingUp: Boolean, onFreeUp: () -> Unit) {
+    val colors = AppColors.current
+    var showConfirm by remember { mutableStateOf(false) }
+    if (isFreeingUp) {
+        Box(modifier = Modifier.size(58.dp), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = colors.accent)
+        }
+    } else {
+        StorageActionSquare(
+            label = stringResource(R.string.settings_storage_free_up),
+            destructive = true,
+            enabled = true,
+            onClick = { showConfirm = true },
+        )
+    }
+    if (showConfirm) {
         ConfirmDialog(
             title = stringResource(R.string.settings_free_up_confirm_title),
             message = stringResource(R.string.settings_free_up_confirm_message),
             confirmLabel = stringResource(R.string.settings_free_up_action),
             dismissLabel = stringResource(R.string.cancel),
-            onConfirm = { showFreeUpConfirm = false; onFreeUp() },
-            onDismiss = { showFreeUpConfirm = false },
+            onConfirm = { showConfirm = false; onFreeUp() },
+            onDismiss = { showConfirm = false },
             destructive = true,
         )
     }
@@ -1311,120 +1547,6 @@ internal fun ProtonStorageRow(state: SettingsUiState) {
     }
 }
 
-@Composable
-private fun DeviceStorageRow(state: SettingsUiState) {
-    val colors = AppColors.current
-    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
-        val hasData = state.deviceTotalBytes > 0L
-        val used = (state.deviceTotalBytes - state.deviceFreeBytes).coerceAtLeast(0L)
-        val fraction = if (hasData) (used.toFloat() / state.deviceTotalBytes).coerceIn(0f, 1f) else 0f
-        val usedPct  = (fraction * 100).toInt()
-        val barColor = storageColor(fraction)
-        val animFraction by animateFloatAsState(targetValue = fraction, animationSpec = tween(800), label = "storage_bar_device")
-
-        Text(
-            stringResource(R.string.settings_storage_device),
-            color = colors.fgMute, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
-        )
-        Spacer(Modifier.height(4.dp))
-        Row(verticalAlignment = Alignment.Bottom) {
-            Text(
-                formatBytes(state.deviceFreeBytes),
-                color = if (hasData) barColor else colors.fgPrimary,
-                fontSize = 22.sp, fontWeight = FontWeight.Bold,
-            )
-            if (hasData) {
-                Spacer(Modifier.width(6.dp))
-                Text(
-                    "/ ${formatBytes(state.deviceTotalBytes)}",
-                    color = colors.fgDim, fontSize = 13.sp, modifier = Modifier.padding(bottom = 3.dp),
-                )
-                Spacer(Modifier.weight(1f))
-                Text("$usedPct%", color = barColor, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(bottom = 3.dp))
-            }
-        }
-        Spacer(Modifier.height(10.dp))
-        Box(modifier = Modifier.fillMaxWidth().height(6.dp).background(colors.line2, RoundedCornerShape(3.dp))) {
-            if (hasData && animFraction > 0f) {
-                Box(modifier = Modifier.fillMaxWidth(animFraction).height(6.dp).background(barColor, RoundedCornerShape(3.dp)))
-            }
-        }
-        if (hasData) {
-            Spacer(Modifier.height(8.dp))
-            Text(
-                stringResource(
-                    R.string.settings_storage_device_free,
-                    formatBytes(state.deviceFreeBytes),
-                    formatBytes(state.deviceTotalBytes),
-                ),
-                color = colors.fgMute, fontSize = 11.5.sp,
-            )
-        }
-    }
-}
-
-@Composable
-private fun AppCacheRow(state: SettingsUiState, onClearCache: () -> Unit) {
-    val colors = AppColors.current
-    var showConfirm by remember { mutableStateOf(false) }
-    // The cache is self-managing (Coil's image cache is hard-capped + evicts oldest; the rest is
-    // temporary and cleared automatically) and grows naturally with the library, so its size is
-    // never flagged as a problem — just shown so the user can clear it to reclaim space if wanted.
-    val valueColor = colors.fgPrimary
-
-    Column(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
-    ) {
-        // Label + size on the left, the Clear-cache pill aligned to them on the right; the
-        // longer description sits on its own full-width line below so it never crowds the pill.
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    stringResource(R.string.settings_storage_app_cache),
-                    color = colors.fgMute, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
-                )
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    formatBytes(state.appCacheBytes),
-                    color = valueColor, fontSize = 22.sp, fontWeight = FontWeight.Bold,
-                )
-            }
-            Spacer(Modifier.width(12.dp))
-            Box(
-                modifier = Modifier
-                    .background(colors.surfaceWeak, RoundedCornerShape(10.dp))
-                    .border(0.5.dp, colors.pillBorder, RoundedCornerShape(10.dp))
-                    .clickable(enabled = state.appCacheBytes > 0L) { showConfirm = true }
-                    .padding(horizontal = 14.dp, vertical = 7.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    stringResource(R.string.settings_storage_clear_cache),
-                    color = if (state.appCacheBytes > 0L) colors.accent else colors.fgMute,
-                    fontSize = 13.sp, fontWeight = FontWeight.Medium,
-                )
-            }
-        }
-        Spacer(Modifier.height(8.dp))
-        Text(
-            stringResource(R.string.settings_storage_app_cache_desc),
-            color = colors.fgMute, fontSize = 11.5.sp,
-        )
-    }
-    if (showConfirm) {
-        ConfirmDialog(
-            title = stringResource(R.string.settings_storage_clear_cache_dialog_title),
-            message = stringResource(
-                R.string.settings_storage_clear_cache_dialog_message,
-                formatBytes(state.appCacheBytes),
-            ),
-            confirmLabel = stringResource(R.string.settings_storage_clear_cache),
-            dismissLabel = stringResource(R.string.cancel),
-            onConfirm = { showConfirm = false; onClearCache() },
-            onDismiss = { showConfirm = false },
-        )
-    }
-}
 
 // ── Shared composables ────────────────────────────────────────────────────────
 
@@ -1498,62 +1620,5 @@ private fun LargeLibrarySimCard(
     }
 }
 
-@Composable
-private fun RecentlyDeletedCard(
-    count: Int,
-    cloudCount: Int?,
-    onClick: () -> Unit,
-) {
-    val colors = AppColors.current
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(colors.cardBg, cardShape)
-            .border(0.5.dp, colors.cardBorder, cardShape)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 14.dp),
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            // Trash icon badge
-            Box(
-                modifier = Modifier
-                    .size(36.dp)
-                    .background(StatusError.copy(alpha = 0.13f), RoundedCornerShape(10.dp)),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Delete,
-                    contentDescription = null,
-                    tint = colors.errorColor,
-                    modifier = Modifier.size(18.dp),
-                )
-            }
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    stringResource(R.string.settings_recently_deleted),
-                    color = colors.fgPrimary,
-                    fontSize = 13.5.sp,
-                    fontWeight = FontWeight.Medium,
-                )
-                Text(
-                    recentlyDeletedSubtitle(count, cloudCount),
-                    color = if (count > 0 || (cloudCount ?: 0) > 0) {
-                        colors.errorColor.copy(alpha = 0.75f)
-                    } else colors.fgMute,
-                    fontSize = 11.5.sp,
-                )
-            }
-            Icon(
-                imageVector = Icons.AutoMirrored.Filled.ArrowForwardIos,
-                contentDescription = null,
-                tint = colors.fgMute,
-                modifier = Modifier.size(13.dp),
-            )
-        }
-    }
-}
 
 

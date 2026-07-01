@@ -733,11 +733,21 @@ internal fun PermissionDropdown(
             border = androidx.compose.foundation.BorderStroke(0.5.dp, menuColors.pillBorder),
         ) {
             DropdownMenuItem(
-                text = { Text(stringResource(R.string.share_role_can_view), color = menuColors.fgPrimary) },
+                text = {
+                    Column {
+                        Text(stringResource(R.string.share_role_can_view), color = menuColors.fgPrimary)
+                        Text(stringResource(R.string.share_role_can_view_desc), color = menuColors.fgDim, fontSize = 11.sp)
+                    }
+                },
                 onClick = { expanded = false; onSelect(4) },
             )
             DropdownMenuItem(
-                text = { Text(stringResource(R.string.share_role_can_edit), color = menuColors.fgPrimary) },
+                text = {
+                    Column {
+                        Text(stringResource(R.string.share_role_can_edit), color = menuColors.fgPrimary)
+                        Text(stringResource(R.string.share_role_can_edit_desc), color = menuColors.fgDim, fontSize = 11.sp)
+                    }
+                },
                 onClick = { expanded = false; onSelect(6) },
             )
         }

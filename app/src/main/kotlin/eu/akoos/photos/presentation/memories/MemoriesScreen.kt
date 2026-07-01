@@ -66,6 +66,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.GalleryItem
+import eu.akoos.photos.presentation.common.FloatingHeaderScrim
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.PillBg
 import eu.akoos.photos.presentation.theme.PillBorder
@@ -230,14 +231,16 @@ internal fun FloatingMemoriesHeader(
 ) {
     val colors = AppColors.current
     var menuExpanded by remember { mutableStateOf(false) }
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .statusBarsPadding()
-            .padding(start = 12.dp, top = 8.dp, end = 12.dp),
-        verticalAlignment = Alignment.Top,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
+    Box(modifier = Modifier.fillMaxWidth()) {
+        FloatingHeaderScrim()
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .statusBarsPadding()
+                .padding(start = 12.dp, top = 8.dp, end = 12.dp),
+            verticalAlignment = Alignment.Top,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
         Box(
             modifier = Modifier
                 .size(40.dp)
@@ -303,6 +306,7 @@ internal fun FloatingMemoriesHeader(
         if (trailing != null) {
             Spacer(modifier = Modifier.weight(1f))
             trailing()
+        }
         }
     }
 }

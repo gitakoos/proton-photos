@@ -91,6 +91,10 @@ object MotionPhotoUtil {
             }
 
             val videoOffset = findFtypOffset(file, searchStart, fileSize, hintedLength)
+                // A wrong hinted length (e.g. a GainMap's, on a multi-item Container) can skip the
+                // search window past the real ftyp. Retry once with a full bounded tail scan, hint
+                // ignored, before trusting the hinted boundary.
+                ?: findFtypOffset(file, (fileSize - MAX_TAIL_SCAN_BYTES).coerceAtLeast(0L), fileSize, null)
                 ?: run {
                     // No ftyp box found in the tail. If the XMP hint is firm, trust it as a
                     // last resort so a non-standard box layout still yields a usable split.
@@ -196,10 +200,15 @@ object MotionPhotoUtil {
                 // Container directory form: an Item with Semantic="MotionPhoto".
                 Regex("""Semantic\s*=\s*["']MotionPhoto["']""").containsMatchIn(xmp)
 
-        // Modern Container form pairs Item:Length with the MotionPhoto-semantic item; the legacy
-        // form uses GCamera:MicroVideoOffset. Both name the trailer byte count.
-        val length = Regex("""(?:Item:Length|GCamera:MicroVideoOffset)\s*=\s*["']?(\d+)""")
+        // The trailer byte count. A modern Container lists several items (Primary, an optional HDR
+        // GainMap, then the MotionPhoto video appended LAST), so the video's Item:Length is the last
+        // one. Taking the FIRST Item:Length grabbed the GainMap's length on multi-item files and
+        // pointed the extractor past the real ftyp, producing a corrupt clip that crashed playback.
+        // The legacy GCamera form carries a single MicroVideoOffset.
+        val length = Regex("""GCamera:MicroVideoOffset\s*=\s*["']?(\d+)""")
             .find(xmp)?.groupValues?.getOrNull(1)?.toLongOrNull()
+            ?: Regex("""Item:Length\s*=\s*["']?(\d+)""")
+                .findAll(xmp).mapNotNull { it.groupValues.getOrNull(1)?.toLongOrNull() }.lastOrNull()
 
         return XmpHint(hasMotionFlag = hasMotionFlag, videoLength = length)
     }

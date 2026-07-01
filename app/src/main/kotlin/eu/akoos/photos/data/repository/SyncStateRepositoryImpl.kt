@@ -49,6 +49,8 @@ class SyncStateRepositoryImpl @Inject constructor(
         dao.upsertAll(states.map { it.toEntity(userId.id) })
     }
 
+    // Named for the caller's flow: the caller deletes the local MediaStore copy first, then this
+    // flips the row's status (to CLOUD_ONLY). It does not itself delete anything.
     override suspend fun updateStatusAndDeleteLocal(localUri: String, newStatus: SyncStatus) {
         dao.updateStatus(localUri, newStatus)
     }

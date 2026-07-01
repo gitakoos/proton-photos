@@ -77,6 +77,12 @@ class SearchViewModel @Inject constructor(
         it[SettingsKeys.HIDDEN_PHOTO_URIS] ?: emptySet()
     }
 
+    /** Cloud linkIds pinned for offline — the Offline category chip filters results to these.
+     *  Same DataStore key the gallery and album-detail surfaces read. */
+    private val offlinePinIdsFlow = context.settingsDataStore.data.map {
+        it[SettingsKeys.OFFLINE_PIN_IDS] ?: emptySet()
+    }
+
     private fun List<GalleryItem>.dropHidden(hiddenUris: Set<String>): List<GalleryItem> =
         filter { item ->
             val uri = when (item) {
@@ -178,10 +184,12 @@ class SearchViewModel @Inject constructor(
                 getGalleryItems.invoke(userId),
                 debouncedQuery,
                 _contentFilter,
-                _selectedCategory,
+                // Category + the offline-pin set travel together so the 6th source stays within the
+                // typed combine arity; the Offline chip filters on the pinned linkIds in applyAll.
+                combine(_selectedCategory, offlinePinIdsFlow) { category, pins -> category to pins },
                 hiddenUrisFlow,
-            ) { all, q, filter, category, hidden ->
-                applyAll(all.dropHidden(hidden), q, filter, category)
+            ) { all, q, filter, categoryAndPins, hidden ->
+                applyAll(all.dropHidden(hidden), q, filter, categoryAndPins.first, categoryAndPins.second)
             }
         }
         // Fold/normalize + per-item category checks over the whole library are heavy; run them off
@@ -203,6 +211,7 @@ class SearchViewModel @Inject constructor(
         q: String,
         filter: ContentFilter,
         category: GalleryFilter,
+        offlinePinIds: Set<String> = emptySet(),
     ): List<GalleryItem> {
         val qTrimmed = q.trim()
         if (qTrimmed.isEmpty() && filter == ContentFilter() && category == GalleryFilter.All) {
@@ -236,6 +245,10 @@ class SearchViewModel @Inject constructor(
                 // and share one chip, so either tag matches both — mirror the gallery filter.
                 GalleryFilter.LivePhotos, GalleryFilter.MotionPhotos ->
                     out.filter { CategorizeItem.belongsTo(it, 3) || CategorizeItem.belongsTo(it, 4) }
+                // Offline = the cloud photos pinned for offline; not a server tag, so it filters on
+                // the pinned linkId set rather than CategorizeItem. Mirrors the gallery filter.
+                GalleryFilter.Offline ->
+                    out.filter { (it as? GalleryItem.CloudOnly)?.cloud?.linkId?.let { id -> id in offlinePinIds } == true }
                 else -> category.tagId?.let { id -> out.filter { CategorizeItem.belongsTo(it, id) } } ?: out
             }
         }

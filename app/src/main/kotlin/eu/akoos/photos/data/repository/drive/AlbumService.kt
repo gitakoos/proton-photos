@@ -98,13 +98,15 @@ class AlbumService @Inject constructor(
     /**
      * In-memory cache of `photoLinkId → albumName` so the gallery / photo-viewer download
      * paths can route album-bound photos into per-album folders without re-fetching every
-     * album's children on every download click. TTL is intentionally short (5 min) —
-     * stale entries only hurt routing, not correctness, and any album mutation immediately
-     * invalidates via [invalidateMembershipCache].
+     * album's children on every download click. Every in-app album mutation invalidates this
+     * immediately via [invalidateMembershipCache], so the TTL only bounds how long an
+     * out-of-app (web) album change can leave a stale routing entry — and a stale entry only
+     * misroutes a download folder, never affects correctness — so a longer TTL is safe and
+     * spares the full album-walk refetch on routine downloads.
      */
     @Volatile private var membershipCache: Map<String, String>? = null
     @Volatile private var membershipCacheTime: Long = 0L
-    private val membershipCacheTtlMs = 5 * 60 * 1000L
+    private val membershipCacheTtlMs = 20 * 60 * 1000L
 
     /**
      * Full multi-album membership lookup: `photoLinkId → Set<albumLinkId>`. Distinct from
@@ -113,7 +115,7 @@ class AlbumService @Inject constructor(
      * can show a checkmark next to every album the current photo is already in — and let
      * the user tap one of them to remove the photo from that album.
      *
-     * Same 5-minute TTL + invalidation as [membershipCache] (both are dropped together by
+     * Same TTL + invalidation as [membershipCache] (both are dropped together by
      * [invalidateMembershipCache]). Both maps are built in the same loop in
      * [getAlbumMemberships], so adding the second map costs nothing extra at refresh time.
      */
@@ -124,8 +126,8 @@ class AlbumService @Inject constructor(
      * For photos that live in multiple albums, the alphabetically first album wins
      * (stable, deterministic, no surprises for users sorting by name in their gallery).
      *
-     * Cached for 5 minutes; per-album errors are logged and skipped so one broken album
-     * never poisons the whole map.
+     * Cached with the membership TTL; per-album errors are logged and skipped so one broken
+     * album never poisons the whole map.
      */
     suspend fun getAlbumMemberships(userId: UserId): Map<String, String> = withContext(Dispatchers.IO) {
         ensureMembershipCachesFresh(userId)
@@ -145,7 +147,7 @@ class AlbumService @Inject constructor(
     /**
      * Builds both [membershipCache] (name lookup, alphabetically-first wins) and
      * [fullMembershipCache] (full set of album linkIds) in a single album-walk pass. Both
-     * maps share a 5-minute TTL and a single invalidation entry point.
+     * maps share one TTL and a single invalidation entry point.
      */
     private suspend fun ensureMembershipCachesFresh(userId: UserId) {
         val now = System.currentTimeMillis()
@@ -1222,7 +1224,7 @@ class AlbumService @Inject constructor(
             error("addPhotosToAlbum: all ${photoLinkIds.size} photos failed crypto preparation")
         }
 
-        // 6. POST in chunks of 50. The backend acks the BATCH with top-level Code=1000
+        // 6. POST in chunks of ALBUM_LINK_BATCH_MAX. The backend acks the BATCH with top-level Code=1000
         //    even when individual entries fail their own validation, so the per-photo
         //    response array is the only source of truth for what actually landed.
         //    Move every photo the backend rejected from `succeeded` into `failed` so
@@ -1313,10 +1315,14 @@ class AlbumService @Inject constructor(
         // ("This collection should contain 10 elements or less"), so a larger chunk fails wholesale.
         for (chunk in photoLinkIds.chunked(ALBUM_LINK_BATCH_MAX)) {
             try {
-                val resp = semaphore.withPermit {
-                    manager.invoke {
-                        removePhotosFromAlbum(volumeId, albumLinkId, RemoveFromAlbumRequest(chunk))
-                    }.valueOrThrow
+                // Wrap the chunk so a 429 / 5xx backs off and retries (honouring any Retry-After)
+                // instead of being caught below and silently dropping the whole chunk from `removed`.
+                val resp = eu.akoos.photos.util.retryWithBackoff {
+                    semaphore.withPermit {
+                        manager.invoke {
+                            removePhotosFromAlbum(volumeId, albumLinkId, RemoveFromAlbumRequest(chunk))
+                        }.valueOrThrow
+                    }
                 }
                 // remove-multiple returns a per-photo response array, exactly like add-multiple: the
                 // top-level Code only means the batch was processed, so each entry's own code is the

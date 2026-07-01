@@ -66,6 +66,8 @@ class ExcludedFoldersViewModel @Inject constructor(
         val itemCount: Int,
         /** True = excluded from backup. False = included (default). */
         val isExcluded: Boolean,
+        /** True = also surfaced as a Drive album (the second per-folder checkbox). */
+        val isMirrored: Boolean = false,
     )
 
     data class UiState(
@@ -77,6 +79,9 @@ class ExcludedFoldersViewModel @Inject constructor(
     }
 
     private var excludedNames: Set<String> = emptySet()
+    // Folders opted in to also surface as a Drive album — the same ALBUM_OPT_IN_FOLDER_NAMES set
+    // the include picker and the upload pipeline read.
+    private var mirroredNames: Set<String> = emptySet()
 
     private val _uiState = MutableStateFlow(UiState())
     val uiState: StateFlow<UiState> = _uiState.asStateFlow()
@@ -85,8 +90,9 @@ class ExcludedFoldersViewModel @Inject constructor(
         viewModelScope.launch {
             // Seed excluded set BEFORE the first media emission so the initial UI
             // already carries the persisted exclusions.
-            excludedNames = context.settingsDataStore.data.first()[SettingsKeys.EXCLUDED_FOLDER_NAMES]
-                ?: emptySet()
+            val initial = context.settingsDataStore.data.first()
+            excludedNames = initial[SettingsKeys.EXCLUDED_FOLDER_NAMES] ?: emptySet()
+            mirroredNames = initial[SettingsKeys.ALBUM_OPT_IN_FOLDER_NAMES] ?: emptySet()
 
             localMediaRepo.observeLocalMedia().collectLatest { items ->
                 val populated = items
@@ -99,6 +105,7 @@ class ExcludedFoldersViewModel @Inject constructor(
                             coverUri   = sorted.firstOrNull()?.uri,
                             itemCount  = sorted.size,
                             isExcluded = name in excludedNames,
+                            isMirrored = name in mirroredNames,
                         )
                     }
                 val populatedNames = populated.map { it.name }.toSet()
@@ -108,7 +115,7 @@ class ExcludedFoldersViewModel @Inject constructor(
                 val emptyExcluded = excludedNames
                     .filter { it.isNotBlank() && it !in populatedNames }
                     .map { name ->
-                        ExcludedFolder(name, coverUri = null, itemCount = 0, isExcluded = true)
+                        ExcludedFolder(name, coverUri = null, itemCount = 0, isExcluded = true, isMirrored = name in mirroredNames)
                     }
                     .sortedBy { it.name.lowercase() }
 
@@ -131,6 +138,20 @@ class ExcludedFoldersViewModel @Inject constructor(
             s.copy(folders = s.folders.map { f -> f.copy(isExcluded = f.name in newExcluded) })
         }
         persist(newExcluded)
+    }
+
+    /** Opt a folder in/out of also surfacing as a Drive album — the second per-folder checkbox,
+     *  writing the same set the include picker and the upload pipeline use. */
+    fun toggleMirror(folderName: String) {
+        val next = if (folderName in mirroredNames) mirroredNames - folderName
+                   else mirroredNames + folderName
+        mirroredNames = next
+        _uiState.update { s ->
+            s.copy(folders = s.folders.map { f -> f.copy(isMirrored = f.name in next) })
+        }
+        viewModelScope.launch {
+            context.settingsDataStore.edit { it[SettingsKeys.ALBUM_OPT_IN_FOLDER_NAMES] = next }
+        }
     }
 
     fun excludeAll() {

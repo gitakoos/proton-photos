@@ -57,6 +57,36 @@ class HiddenStorageManager @Inject constructor(
     private val hiddenDir: File
         get() = File(context.filesDir, "hidden").also { it.mkdirs() }
 
+    /** Deletes every blob in the vault. Used on sign-out, after the hidden index is cleared, so the
+     *  now-orphaned decrypted photos do not linger on disk for the next account on this device. */
+    fun clearVault() {
+        hiddenDir.deleteRecursively()
+    }
+
+    /**
+     * Resolves the full folder a source media item lives in, stashed at hide time so [restore] can
+     * return the file to its EXACT original location — including non-MediaStore folders such as an
+     * app's "Android/media/<pkg>/…". Returns the real MediaStore RELATIVE_PATH unchanged (e.g.
+     * "DCIM/Camera", "Pictures/Vacation", "Android/media/com.whatsapp/Media/WhatsApp Images"), or
+     * [fallbackBucketName] when RELATIVE_PATH is unreadable (pre-Q / non-MediaStore URI), or null.
+     */
+    fun sourceFolderFor(srcUri: String, fallbackBucketName: String?): String? {
+        val relativePath: String? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            runCatching {
+                val src = Uri.parse(srcUri)
+                context.contentResolver.query(
+                    src, arrayOf(MediaStore.MediaColumns.RELATIVE_PATH), null, null, null,
+                )?.use { c ->
+                    if (c.moveToFirst()) c.getString(0) else null
+                }
+            }.getOrNull()
+        } else null
+        // Keep the FULL original RELATIVE_PATH so restore can put the file back exactly where it
+        // came from, not just somewhere under Pictures/.
+        val resolved = relativePath?.trim('/')?.takeIf { it.isNotBlank() }
+        return (resolved ?: fallbackBucketName?.trim('/'))?.takeIf { it.isNotBlank() }
+    }
+
     /** Returns true when [uri] is a private hidden-storage file URI managed by this class. */
     fun isHiddenUri(uri: String): Boolean {
         val parsed = runCatching { Uri.parse(uri) }.getOrNull() ?: return false
@@ -82,7 +112,13 @@ class HiddenStorageManager @Inject constructor(
         captureTimeMs: Long? = null,
     ): String? =
         withContext(Dispatchers.IO) {
-            val src = runCatching { Uri.parse(srcUri) }.getOrNull() ?: return@withContext null
+            // Non-reversible per-file token so a failure can be correlated in the diagnostics
+            // log without recording the file name (which would leak what was being hidden).
+            val ref = logRef(srcUri)
+            val src = runCatching { Uri.parse(srcUri) }.getOrNull() ?: run {
+                eu.akoos.photos.util.SyncDiagnostics.log("hide $ref: skipped, bad source uri")
+                return@withContext null
+            }
             val ext = (mimeType ?: context.contentResolver.getType(src))
                 ?.substringAfterLast('/')
                 ?.let { if (it == "jpeg") "jpg" else it }
@@ -94,9 +130,15 @@ class HiddenStorageManager @Inject constructor(
             try {
                 context.contentResolver.openInputStream(src)?.use { input ->
                     dest.outputStream().use { output -> input.copyTo(output) }
-                } ?: return@withContext null
+                } ?: run {
+                    eu.akoos.photos.util.SyncDiagnostics.log("hide $ref: skipped, source stream unavailable")
+                    return@withContext null
+                }
             } catch (e: Exception) {
-                Log.w(TAG, "store: failed to copy $srcUri → ${dest.absolutePath}: ${e.message}")
+                Log.w(TAG, "store: failed to copy source → ${dest.absolutePath}: ${e.message}")
+                eu.akoos.photos.util.SyncDiagnostics.log(
+                    "hide $ref: failed copy (${e.javaClass.simpleName})",
+                )
                 dest.delete()
                 return@withContext null
             }
@@ -108,12 +150,9 @@ class HiddenStorageManager @Inject constructor(
      * gallery apps again. The hidden private file is removed once the MediaStore entry is
      * created. Returns the new MediaStore content URI string, or null on failure.
      *
-     * @param albumFolderName Optional album name — when the file's cloud sibling belongs to
-     *   an album, pass the (sanitized) album name so the restored copy lands in the matching
-     *   `Pictures/<AlbumName>/` folder, where downloads for that album also go. When null,
-     *   the file lands in `Pictures/` root, matching where non-album downloads go. The legacy
-     *   `Pictures/Proton Photos/Recovered/` location is no longer used — it created a phantom
-     *   album in the device gallery that didn't match the unified download routing.
+     * @param albumFolderName No longer used for routing — restored files always land in the
+     *   `Pictures/` (or `Movies/`) root, never a subfolder, matching where downloads now go. A
+     *   per-album subfolder used to surface as a redundant phantom album in the device gallery.
      */
     suspend fun restore(
         hiddenUri: String,
@@ -143,11 +182,7 @@ class HiddenStorageManager @Inject constructor(
                 MediaStore.Video.Media.EXTERNAL_CONTENT_URI
             else
                 MediaStore.Images.Media.EXTERNAL_CONTENT_URI
-            // Mirror DownloadPhotosUseCase's routing — album-bound files into
-            // Pictures/<AlbumName>/ (or Movies/<AlbumName>/), unaffiliated files into the
-            // Pictures/ or Movies/ root.
             val baseDir = if (isVideo) "Movies" else "Pictures"
-            val relPath = if (albumFolderName.isNullOrBlank()) baseDir else "$baseDir/$albumFolderName"
 
             // Preserve the original capture time across hide → unhide. Without this, the
             // restored MediaStore row gets DATE_TAKEN = now, which makes the file look like
@@ -182,6 +217,41 @@ class HiddenStorageManager @Inject constructor(
                         fmt.parse(dt)?.time
                     }
             }.getOrNull() else null
+
+            // Restore the file to exactly where it came from. [albumFolderName] is the full original
+            // RELATIVE_PATH stashed at hide time (e.g. "DCIM/Camera", "Pictures/Vacation", or an app's
+            // "Android/media/com.whatsapp/Media/WhatsApp Images").
+            val origPath = albumFolderName?.trim()?.trim('/')?.takeIf { it.isNotBlank() }
+            val firstSeg = origPath?.substringBefore('/')
+            // MediaStore can only create image/video rows under these roots; anything else (an app's
+            // Android/media folder, Download/, …) has to be written by hand and then scanned in.
+            val mediaStoreRoots = if (isVideo) setOf("DCIM", "Movies") else setOf("DCIM", "Pictures")
+            val standardRoots = setOf(
+                "DCIM", "Pictures", "Movies", "Music", "Download", "Documents",
+                "Android", "Audiobooks", "Podcasts", "Ringtones", "Alarms", "Notifications", "Recordings",
+            )
+
+            // 1. Original location is a real path OUTSIDE MediaStore's image/video roots (e.g. the
+            //    WhatsApp media folder) — write the bytes straight back there and index them. Needs
+            //    all-files access; if that is not granted the write fails and we fall through to the
+            //    Pictures/Movies root below.
+            if (origPath != null && firstSeg != null && firstSeg in standardRoots && firstSeg !in mediaStoreRoots) {
+                val restored = restoreToOriginalPath(srcFile, origPath, resolvedName, captureTimeMs)
+                if (restored != null) {
+                    srcFile.delete()
+                    return@withContext restored
+                }
+            }
+
+            // 2. MediaStore path. A standard image/video dir (DCIM/Pictures/Movies) is restored in
+            //    place; an older stripped bare folder name lands under Pictures/<name>; nothing known
+            //    falls back to the Pictures/ (or Movies/) root.
+            val relPath = when {
+                origPath == null -> baseDir
+                firstSeg in mediaStoreRoots -> origPath
+                firstSeg in standardRoots -> baseDir
+                else -> "$baseDir/$origPath"
+            }
 
             val values = ContentValues().apply {
                 put(MediaStore.MediaColumns.DISPLAY_NAME, resolvedName)
@@ -227,6 +297,21 @@ class HiddenStorageManager @Inject constructor(
                 null
             }
         }
+
+    /** Writes a restored file straight to its original [relPath] under primary external storage and
+     *  indexes it with the media scanner. Returns the file:// URI on success, or null on any failure
+     *  (e.g. all-files access not granted) so the caller can fall back to a MediaStore location. */
+    private fun restoreToOriginalPath(srcFile: File, relPath: String, name: String, captureTimeMs: Long?): String? =
+        runCatching {
+            @Suppress("DEPRECATION")
+            val root = android.os.Environment.getExternalStorageDirectory()
+            val destDir = File(root, relPath).apply { mkdirs() }
+            val dest = File(destDir, name)
+            srcFile.inputStream().use { input -> dest.outputStream().use { input.copyTo(it) } }
+            if (captureTimeMs != null && captureTimeMs > 0L) dest.setLastModified(captureTimeMs)
+            android.media.MediaScannerConnection.scanFile(context, arrayOf(dest.absolutePath), null, null)
+            Uri.fromFile(dest).toString()
+        }.getOrNull()
 
     /** Hard-deletes a hidden file from app-private storage. */
     fun delete(hiddenUri: String): Boolean {
@@ -275,5 +360,10 @@ class HiddenStorageManager @Inject constructor(
 
     private companion object {
         const val TAG = "HiddenStorage"
+
+        /** Stable, non-reversible 6-char token from a source URI for privacy-safe diagnostics
+         *  correlation — matches PhotoUploadService.logRef so log lines read the same way. */
+        fun logRef(uri: String): String =
+            uri.hashCode().toUInt().toString(16).padStart(8, '0').take(6)
     }
 }

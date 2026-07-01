@@ -143,23 +143,20 @@ class PhotoWidget : GlanceAppWidget() {
          * the same file reuses it. The worker rewrites the file when it advances to the next
          * photo, which changes lastModified ⇒ stale entries are dropped automatically.
          */
-        @Volatile private var cachedPath: String? = null
-        @Volatile private var cachedLastModified: Long = 0L
-        @Volatile private var cachedBitmap: Bitmap? = null
+        // Decoded-bitmap cache keyed by path + lastModified, sized for a handful of widgets so two
+        // widgets pointing at different files don't evict each other on every update. A single slot
+        // would thrash and could briefly render one widget's photo in another.
+        private val bitmapCache = android.util.LruCache<String, Bitmap>(4)
 
         @JvmStatic
         @Synchronized
         fun loadCachedBitmap(path: String): Bitmap? {
             val file = File(path)
             if (!file.exists()) return null
-            val lastMod = file.lastModified()
-            if (cachedPath == path && cachedLastModified == lastMod && cachedBitmap != null) {
-                return cachedBitmap
-            }
+            val key = "$path|${file.lastModified()}"
+            bitmapCache.get(key)?.let { return it }
             val decoded = runCatching { BitmapFactory.decodeFile(path) }.getOrNull() ?: return null
-            cachedPath = path
-            cachedLastModified = lastMod
-            cachedBitmap = decoded
+            bitmapCache.put(key, decoded)
             return decoded
         }
     }

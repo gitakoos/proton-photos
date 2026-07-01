@@ -40,7 +40,7 @@
     <string name="onboarding_photos_subtitle">Potrebujeme prístup na čítanie vašich fotiek a videí, aby sme ich mohli šifrovať a zálohovať na Drive.</string>
 
     <string name="onboarding_manage_media_title">Spravovať médiá</string>
-    <string name="onboarding_manage_media_subtitle">Dôrazne odporúčané. Umožňuje aplikácii upravovať, mazať a premenovávať fotky a videá vo vašom zariadení bez systémového potvrdzovacieho dialógu zakaždým — používa sa pri úpravách v aplikácii, ukladaní späť do zariadenia, presune do koša a mazaní po zálohovaní. Ťuknutím otvoríte systémové nastavenia.</string>
+    <string name="onboarding_manage_media_subtitle">Dôrazne odporúčané. Umožňuje aplikácii upravovať, mazať a premenovávať fotky a videá vo vašom zariadení bez systémového potvrdzovacieho dialógu zakaždým. Používa sa pri úpravách v aplikácii, ukladaní späť do zariadenia, presune do koša a mazaní po zálohovaní. Ťuknutím otvoríte systémové nastavenia.</string>
     <string name="onboarding_folders_include_title">Priečinky na zálohovanie</string>
     <string name="onboarding_folders_include_subtitle">Vyberte, ktoré priečinky sa majú nahrávať na Drive. Položky v ostatných priečinkoch zostanú len v tomto zariadení.</string>
     <string name="onboarding_folders_exclude_title">Priečinky na preskočenie</string>
@@ -142,7 +142,7 @@
     <string name="editor_save_sheet_synced_video">Vyberte, ako sa upravené video uloží. Zálohované originály zostanú na Drive.</string>
     <string name="editor_save_sheet_device_video">Vyberte, ako sa upravené video uloží do vášho zariadenia.</string>
     <string name="editor_save_copy_subtitle_cloud">Nahrá sa ako nová fotka. Originál zostane na Drive.</string>
-    <string name="editor_save_copy_subtitle_cloud_video">Nahrá sa ako nový súbor na Proton Drive — originál zostane zachovaný.</string>
+    <string name="editor_save_copy_subtitle_cloud_video">Nahrá sa ako nový súbor na Proton Drive. Originál zostane zachovaný.</string>
     <string name="editor_save_copy_subtitle_synced">Vytvorí nový súbor vo vašej galérii A nahrá spárovanú kópiu na Drive.</string>
     <string name="editor_save_copy_subtitle_device">Vytvorí nový súbor vo vašej galérii.</string>
     <string name="editor_saving">Ukladá sa…</string>
@@ -160,10 +160,10 @@
     <string name="hidden_photos_auth_prompt">Overte sa, aby ste videli svoje skryté fotky</string>
     <string name="hidden_photos_unlock">Odomknúť</string>
     <string name="app_lock_authenticate_prompt">Overte sa, aby ste mohli pokračovať</string>
-    <string name="hidden_no_device_lock_notice">Nie je nastavený zámok zariadenia — trezor nie je chránený.</string>
+    <string name="hidden_no_device_lock_notice">Nie je nastavený zámok zariadenia. Trezor nie je chránený.</string>
     <string name="hidden_auth_title">Skryté fotky</string>
     <string name="hidden_auth_description">Overte sa, aby ste videli svoje skryté fotky</string>
-    <string name="hide_cloud_copy_notice">Zálohované fotky zostanú na vašom Proton Drive — skrytie ich len odstráni z galérie tohto zariadenia.</string>
+    <string name="hide_cloud_copy_notice">Zálohované fotky zostanú na vašom Proton Drive. Skrytie ich len odstráni z galérie tohto zariadenia.</string>
     <string name="hidden_empty_title">Žiadne skryté fotky</string>
     <string name="hidden_empty_subtitle">Podržte fotku v galérii a vyberte „Skryť“</string>
     <string name="gallery_cancel_selection">Zrušiť výber</string>
@@ -205,6 +205,14 @@
     <string name="gallery_share_cloud_warning_body">Niektoré z nich sú uložené len v cloude. Aplikácia získa dočasnú súkromnú kópiu a odovzdá ju len aplikácii, ktorú vyberiete. Nič sa nepridá do vašej galérie ani nebude viditeľné pre ostatné aplikácie.</string>
     <string name="gallery_share_cloud_warning_continue">Zdieľať</string>
     <string name="gallery_add_to_album">Pridať do albumu</string>
+    <string name="offline_make_available">Sprístupniť offline</string>
+    <string name="offline_available">Dostupné offline</string>
+    <string name="offline_removed">Odstránené z offline</string>
+    <string name="offline_failed">Nepodarilo sa uložiť offline</string>
+    <string name="offline_screen_title">Offline fotky</string>
+    <string name="offline_screen_empty">Fotky, ktoré sprístupníte offline, sa zobrazia tu</string>
+    <string name="settings_offline_photos">Offline fotky</string>
+    <string name="filter_offline">Offline</string>
     <string name="gallery_add_to_album_local_note">Tieto fotky sa najprv zálohujú a potom sa pridajú do albumu.</string>
     <string name="gallery_no_albums_yet">Zatiaľ žiadne albumy. Vytvorte jeden vyššie.</string>
     <string name="gallery_add_to_album_mixed_hint">Zmiešaný výber zariadenia a iba cloudu sa nedá čisto vložiť do albumu. Vyberte jeden typ.</string>
@@ -248,6 +256,12 @@
     </plurals>
     <string name="gallery_copy_to_hidden_failed">Nepodarilo sa skopírovať do skrytých</string>
     <string name="gallery_move_to_hidden_failed">Nepodarilo sa presunúť do skrytých</string>
+    <plurals name="gallery_hide_partial_failed">
+        <item quantity="one">Skryté, ale 1 fotku sa nepodarilo skryť</item>
+        <item quantity="few">Skryté, ale %d fotky sa nepodarilo skryť</item>
+        <item quantity="many">Skryté, ale %d fotiek sa nepodarilo skryť</item>
+        <item quantity="other">Skryté, ale %d fotiek sa nepodarilo skryť</item>
+    </plurals>
     <string name="gallery_add_to_cloud_album_failed">Nepodarilo sa pridať do cloudového albumu</string>
     <string name="gallery_add_to_album_failed">Nepodarilo sa pridať do albumu</string>
     <string name="gallery_select_photos_first">Najprv vyberte fotky</string>
@@ -368,7 +382,7 @@
     <string name="settings_excluded_folders_select_all">Vylúčiť všetky</string>
     <string name="settings_excluded_folders_deselect_all">Zahrnúť všetky</string>
     <!-- Album mirror -->
-    <string name="settings_album_mirror_folders">Zrkadliť priečinky zariadenia ako albumy na Drive</string>
+    <string name="settings_album_mirror_folders">Priečinky ako albumy</string>
     <string name="settings_album_mirror_folders_desc">Vyberte, ktoré priečinky zariadenia sa pri nahrávaní fotiek objavia aj ako albumy na Drive</string>
     <string name="album_mirror_folders_title">Zrkadliť priečinky ako albumy na Drive</string>
     <string name="album_mirror_folders_subtitle">Fotky v zaškrtnutých priečinkoch sa objavia aj v zodpovedajúcich albumoch na Drive. Fotky sa tak či tak nahrajú do vášho prúdu.</string>
@@ -390,7 +404,7 @@
     <string name="trash_cloud_empty_confirm_action">Vyprázdniť</string>
     <string name="trash_cloud_restore_done">Obnovených %1$d fotka(-iek)</string>
     <string name="trash_cloud_restore_partial">Obnovených %1$d, %2$d sa nepodarilo obnoviť</string>
-    <string name="trash_cloud_restore_refresh_failed">Obnovené — potiahnutím nadol v galérii obnovíte zobrazenie</string>
+    <string name="trash_cloud_restore_refresh_failed">Obnovené. Potiahnutím nadol v galérii obnovíte zobrazenie</string>
     <string name="trash_cloud_restore_failed">Obnovenie zlyhalo</string>
     <string name="trash_cloud_emptied">Cloudový kôš vyprázdnený</string>
     <string name="trash_cloud_empty_partial">Odstránených %1$d, %2$d sa nepodarilo odstrániť</string>
@@ -436,6 +450,10 @@
     <string name="settings_storage_clear_cache">Vymazať vyrovnávaciu pamäť</string>
     <string name="settings_storage_clear_cache_dialog_title">Vymazať vyrovnávaciu pamäť aplikácie?</string>
     <string name="settings_storage_clear_cache_dialog_message">Týmto sa odstráni %s súborov vo vyrovnávacej pamäti. V prípade potreby sa znova stiahnu.</string>
+    <string name="settings_offline_storage_title">Fotky offline</string>
+    <string name="settings_offline_storage_subtitle">Uložené súkromne v tejto aplikácii, nie v galérii</string>
+    <string name="settings_offline_storage_clear_dialog_title">Odstrániť offline fotky?</string>
+    <string name="settings_offline_storage_clear_dialog_message">Týmto sa z tohto zariadenia odstráni %s offline fotiek. V Proton Drive zostanú.</string>
     <string name="settings_storage_refresh">Obnoviť úložisko</string>
     <string name="settings_section_settings">Nastavenia</string>
     <string name="settings_privacy_metadata">Súkromie a metadáta</string>
@@ -454,7 +472,7 @@
     <string name="settings_rename_on_upload">Premenovať na dátum nasnímania pri nahrávaní</string>
     <string name="settings_rename_on_upload_desc">Použije metadáta fotky alebo videa na nastavenie názvu súboru podľa dátumu a času nasnímania pred nahraním. Pôvodný súbor v zariadení zostane nedotknutý.</string>
     <string name="settings_delete_after_backup">Odstrániť súbor zo zariadenia po zálohovaní</string>
-    <string name="settings_delete_after_backup_desc">Odstráni lokálnu kópiu zo zariadenia, keď je nahranie na Drive hotové — súbor zostane len vo vašom šifrovanom Proton Drive.</string>
+    <string name="settings_delete_after_backup_desc">Odstráni lokálnu kópiu zo zariadenia, keď je nahranie na Drive hotové. Súbor zostane len vo vašom šifrovanom Proton Drive.</string>
     <string name="settings_strip_gps">Odstrániť polohu GPS</string>
     <string name="settings_strip_gps_desc">Odstrániť súradnice GPS a údaje o polohe</string>
     <string name="settings_strip_camera">Odstrániť informácie o fotoaparáte</string>
@@ -547,6 +565,10 @@
     <string name="palette_sea">More</string>
     <string name="palette_sepia">Sépia</string>
     <string name="palette_mono">Mono</string>
+
+    <!-- AMOLED pure-black dark theme -->
+    <string name="settings_amoled_black">Čistá čierna (AMOLED)</string>
+    <string name="settings_amoled_black_summary">V tmavom režime používať skutočne čierne pozadie pre úsporu energie na OLED displejoch.</string>
 
     <!-- Language -->
     <string name="language_en">English</string>
@@ -654,7 +676,7 @@
     <string name="album_leave_missing_details">Tento album teraz nemožno opustiť</string>
     <string name="album_delete_photos_failed">Fotky sa nepodarilo odstrániť</string>
     <string name="album_remove_photos_failed">Fotky sa nepodarilo odstrániť</string>
-    <string name="album_remove_partial">Odstránených %1$d z %2$d — niektoré sa nepodarilo odstrániť</string>
+    <string name="album_remove_partial">Odstránených %1$d z %2$d, niektoré sa nepodarilo odstrániť</string>
     <string name="album_rename_failed">Album sa nepodarilo premenovať</string>
     <string name="album_set_cover_failed">Obal albumu sa nepodarilo nastaviť</string>
     <string name="shared_save_failed">Album sa nepodarilo uložiť do vašej knižnice</string>
@@ -769,6 +791,12 @@
         <item quantity="few">%d fotky</item>
         <item quantity="many">%d fotky</item>
         <item quantity="other">%d fotiek</item>
+    </plurals>
+    <plurals name="offline_batch_result">
+        <item quantity="one">%d fotka dostupná offline</item>
+        <item quantity="few">%d fotky dostupné offline</item>
+        <item quantity="many">%d fotky dostupné offline</item>
+        <item quantity="other">%d fotiek dostupných offline</item>
     </plurals>
     <plurals name="map_card_subtitle_count">
         <item quantity="one">%1$d fotka na mape</item>
@@ -958,7 +986,7 @@
     <string name="device_folder_backup_timeline">Zálohovať len fotky</string>
     <string name="device_folder_backup_timeline_sub">Jednorazové nahranie fotiek odtiaľto na vašu časovú os.</string>
     <string name="device_folder_backup_mirror">Vytvoriť aj album</string>
-    <string name="device_folder_backup_mirror_sub">Naďalej sa synchronizuje — nové fotky v tomto priečinku sa pridajú aj do albumu.</string>
+    <string name="device_folder_backup_mirror_sub">Naďalej sa synchronizuje. Nové fotky v tomto priečinku sa pridajú aj do albumu.</string>
     <string name="sync_folders_add_dialog_title">Pridať priečinok</string>
     <string name="sync_folders_add_row_title">Pridať priečinok podľa názvu</string>
     <string name="sync_folders_add_dialog_name_hint">Názov priečinka</string>
@@ -973,7 +1001,7 @@
     <string name="sync_folders_selected_cd">Vybrané</string>
     <!-- Mirror device folders as albums screen -->
     <string name="mirror_opted_in_cd">Zapnuté</string>
-    <string name="mirror_custom_pending">Čaká sa — uplatní sa, keď sa objaví priečinok s týmto názvom</string>
+    <string name="mirror_custom_pending">Čaká sa. Uplatní sa, keď sa objaví priečinok s týmto názvom</string>
     <string name="mirror_remove_cd">Odstrániť</string>
     <string name="mirror_name_empty">Názov priečinka nemôže byť prázdny</string>
     <string name="mirror_name_invalid_chars">Názov nesmie obsahovať \'/\' ani \'=\'</string>
@@ -1003,7 +1031,7 @@
     <string name="rename_sheet_option_local_subtitle">Aktualizuje súbor priamo vo vašom zariadení.</string>
     <string name="rename_sheet_option_copy_title">Uložiť ako kópiu</string>
     <string name="rename_sheet_option_copy_subtitle_cloud">Nahrá sa ako nová fotka. Originál zostane na Drive.</string>
-    <string name="rename_sheet_option_copy_subtitle_local">Vytvorí nový súbor v Pictures/Proton Photos.</string>
+    <string name="rename_sheet_option_copy_subtitle_local">Vytvorí nový súbor v Pictures.</string>
     <string name="save_to_library_confirm_title">Uložiť do mojej knižnice</string>
     <string name="save_to_library_confirm_body_fmt">Skopírujeme %1$d položiek do vašej knižnice. Objavia sa vo vašich Fotkách hneď po dokončení kopírovania.</string>
     <string name="save_to_library_action_cancel">Zrušiť ukladanie</string>
@@ -1169,4 +1197,128 @@
     <string name="settings_copy_diagnostics">Kopírovať diagnostický protokol</string>
     <string name="settings_copy_diagnostics_desc">Na riešenie problémov so synchronizáciou. Neobsahuje žiadne údaje účtu.</string>
     <string name="settings_diagnostics_copied">Diagnostický protokol skopírovaný</string>
+    <!-- Duplicate finder -->
+    <string name="settings_find_duplicates">Nájsť duplikáty</string>
+    <string name="settings_find_duplicates_desc">Skontrolovať a odstrániť identické kópie</string>
+    <string name="duplicates_title">Nájsť duplikáty</string>
+    <string name="duplicates_section_device">V tomto zariadení</string>
+    <string name="duplicates_section_cloud">Vo vašom cloude</string>
+    <string name="duplicates_empty">Nenašli sa žiadne duplicitné fotky</string>
+    <string name="duplicates_copies">%1$d identických kópií</string>
+    <string name="duplicates_pick_keep">Ťuknite na kópiu, ktorú chcete ponechať, a potom odstráňte ostatné</string>
+    <string name="duplicates_keep">Ponechať</string>
+    <string name="duplicates_delete_others">Odstrániť ostatné</string>
+    <string name="duplicates_confirm_title">Odstrániť duplikáty?</string>
+    <string name="duplicates_confirm_message">Ponechaná kópia zostane. Ostatné kópie sa odstránia.</string>
+    <string name="duplicates_confirm_delete">Odstrániť</string>
+    <string name="duplicates_delete_failed">Odstránenie z Drive zlyhalo. Skúste to znova.</string>
+    <string name="duplicates_section_similar">Podobné fotky</string>
+    <string name="duplicates_scanning">Hľadanie podobných fotiek…</string>
+    <string name="duplicates_similar_hint">Vyzerajú podobne, ale súbor alebo metadáta sa môžu líšiť</string>
+    <string name="duplicates_similar_count">%1$d podobných fotiek</string>
+    <string name="duplicates_view_large">Zobraziť väčšie</string>
+    <string name="offline_remove">Odstrániť z offline</string>
+    <string name="whats_new_title">Novinky</string>
+    <string name="whats_new_done">Rozumiem</string>
+    <string name="whats_new_open">Otvoriť</string>
+    <string name="whats_new_dup_title">Nájsť duplicitné fotky</string>
+    <string name="whats_new_dup_body">Nájde presné kópie a vizuálne podobné zábery, potom jednu bezpečne ponecháš a zvyšok odstrániš.</string>
+    <string name="whats_new_offline_title">Dostupné offline</string>
+    <string name="whats_new_offline_body">Pripni fotky z cloudu, aby ich plná kvalita zostala v zariadení a otvárali sa bez pripojenia.</string>
+    <string name="whats_new_activity_title">Zobrazenie aktivity</string>
+    <string name="whats_new_activity_body">Nahrávania, sťahovania a offline uloženia na jednom mieste, spolu s históriou toho, čo sa stalo.</string>
+    <string name="whats_new_motion_title">Pohyblivé fotky</string>
+    <string name="whats_new_motion_body">Pohyblivé fotky sa opäť prehrávajú, vrátane tých od Googlu a v HDR.</string>
+    <string name="whats_new_more">Plus usporiadanejšie Nastavenia, svieže albumy a opravy na pozadí.</string>
+    <string name="offline_card_subtitle">Fotky uložené na offline prezeranie</string>
+    <string name="duplicates_filter_identical">Rovnaké</string>
+    <string name="duplicates_filter_similar">Podobné</string>
+
+    <!-- Duplicate-finder source badges -->
+    <string name="duplicates_badge_cloud">Cloud</string>
+    <string name="duplicates_badge_device">Zariadenie</string>
+    <string name="duplicates_badge_synced">Synchronizované</string>
+
+    <!-- Permissions overview screen -->
+    <string name="permissions_title">Povolenia</string>
+    <string name="permissions_intro">Spravujte, k čomu má Photos for Proton prístup. Pri každej položke je vysvetlené, prečo sa používa.</string>
+    <string name="permissions_state_granted">Udelené</string>
+    <string name="permissions_action_allow">Povoliť</string>
+    <string name="permissions_photos_title">Fotky &amp; videá</string>
+    <string name="permissions_photos_why">Na zobrazenie vašej galérie a zálohovanie vašich fotiek a videí.</string>
+    <string name="permissions_notifications_title">Oznámenia</string>
+    <string name="permissions_notifications_why">Na zobrazenie priebehu zálohovania a nahrávania.</string>
+    <string name="permissions_location_title">Poloha fotky</string>
+    <string name="permissions_location_why">Na zobrazenie miesta nasnímania fotiek na mape a na zachovanie ich polohy pri zálohovaní.</string>
+    <string name="permissions_managemedia_title">Spravovať médiá</string>
+    <string name="permissions_managemedia_why">Na plynulé presúvanie a mazanie fotiek bez systémového potvrdenia pri každom jednotlivom súbore.</string>
+    <string name="permissions_allfiles_title">Prístup ku všetkým súborom</string>
+    <string name="permissions_allfiles_why">Na obnovenie skrytých a stiahnutých fotiek do ich pôvodného priečinka (napríklad WhatsApp) a na prístup k fotkám uloženým mimo štandardných priečinkov médií.</string>
+    <string name="permissions_install_title">Inštalovať aktualizácie</string>
+    <string name="permissions_install_why">Na inštaláciu aktualizácií aplikácie, ktoré stiahnete v aplikácii.</string>
+    <string name="permissions_network_note">Prístup k sieti je vždy zapnutý a používa sa len na komunikáciu s Proton Drive.</string>
+
+    <!-- All-files-access onboarding step -->
+    <string name="onboarding_all_files_title">Prístup ku všetkým súborom</string>
+    <string name="onboarding_all_files_subtitle">Odporúčané. Umožňuje aplikácii vrátiť obnovené skryté fotky do ich pôvodného priečinka (napríklad do priečinka médií chatovacej aplikácie, nielen do Pictures) a zapisovať zmeny do vašich lokálnych súborov priamo na mieste. Ťuknutím otvoríte systémové nastavenia.</string>
+
+    <!-- All-files-access settings row -->
+    <string name="settings_all_files_title">Prístup ku všetkým súborom</string>
+    <string name="settings_all_files_desc">Umožňuje vrátiť obnovené skryté fotky do ich pôvodného priečinka a aktualizovať lokálne súbory priamo na mieste. Ťuknutím udelíte v systémových nastaveniach.</string>
+
+    <!-- Storage card action badges -->
+    <string name="settings_storage_clear">Vymazať</string>
+    <string name="settings_storage_free_up">Uvoľniť</string>
+    <string name="settings_storage_used_of">%1$s z %2$s</string>
+
+    <!-- Akcie albumu + zdieľanie -->
+    <string name="album_download_all_confirm_title">Stiahnuť celý album?</string>
+    <string name="album_download_all_confirm_body">Každá fotka v tomto albume sa uloží do vášho zariadenia.</string>
+    <string name="album_set_cover_confirm_title">Nastaviť ako obal albumu?</string>
+    <string name="album_set_cover_confirm_body">Táto fotka sa stane obalom albumu.</string>
+    <string name="album_remove_confirm_title">Odstrániť z tohto albumu?</string>
+    <string name="album_remove_confirm_body">Toto odstráni z albumu iba výber. Vaše fotky zostanú na časovej osi.</string>
+    <string name="action_remove">Odstrániť</string>
+    <string name="gallery_add_to_album_queued">Fotky sa pridajú po dokončení nahrávania</string>
+    <string name="share_role_can_view_desc">Môže prezerať album a jeho fotky.</string>
+    <string name="share_role_can_edit_desc">Môže pridávať a odstraňovať fotky a meniť obal.</string>
+    <string name="settings_show_selection_labels">Popisky tlačidiel</string>
+    <string name="settings_show_selection_labels_desc">Pri výbere fotiek zobrazí pod každým tlačidlom krátky popisok, aby bolo jasné, čo ktoré robí.</string>
+    <string name="sel_label_download">Stiahnuť</string>
+    <string name="sel_label_delete">Odstrániť</string>
+    <string name="sel_label_cover">Obal</string>
+    <string name="sel_label_offline">Offline</string>
+    <string name="sel_label_album">Album</string>
+    <string name="sel_label_upload">Nahrať</string>
+    <string name="op_offline_fmt">Ukladanie offline %1$d / %2$d</string>
+    <string name="picker_filter_all">Všetko</string>
+    <string name="picker_filter_cloud">Cloud</string>
+    <string name="picker_filter_device">Zariadenie</string>
+    <string name="sync_open_settings">Nastavenia zálohovania</string>
+    <string name="sync_open_settings_desc">Vyberte, čo a ako zálohovať a ktorú sieť použiť.</string>
+    <string name="settings_privacy">Súkromie</string>
+    <string name="settings_privacy_desc">Vyrovnávacia pamäť, offline fotky a telemetria</string>
+    <string name="settings_metadata">Metadáta</string>
+    <string name="settings_metadata_desc">Premenovanie záloh a odstránenie EXIF (GPS, fotoaparát, časová pečiatka)</string>
+    <string name="about_support_title">Kúp mi kávu</string>
+    <string name="about_support_subtitle">Podporte aplikáciu a jej vývoj</string>
+    <string name="sync_folder_backup_label">Zálohovať</string>
+    <string name="sync_folder_album_label">Album</string>
+    <string name="sync_view_activity">Podrobnosti</string>
+    <string name="activity_title">Aktivita</string>
+    <string name="activity_uploading">Nahráva sa</string>
+    <string name="activity_pending">Čaká na nahranie (%1$d)</string>
+    <string name="activity_empty">Práve sa nič neprenáša</string>
+    <string name="activity_row_desc">Zobraziť prebiehajúce prenosy a fotky čakajúce na nahranie</string>
+    <string name="activity_offline">Offline</string>
+    <string name="activity_photos">Fotky</string>
+    <string name="activity_tab_active">Aktívne</string>
+    <string name="activity_tab_history">História</string>
+    <string name="activity_history_empty">Zatiaľ žiadne dokončené prenosy</string>
+    <string name="activity_history_clear">Vymazať históriu</string>
+    <string name="activity_hist_upload">Zálohovaných %1$d fotiek</string>
+    <string name="activity_hist_download">Stiahnutých %1$d fotiek</string>
+    <string name="activity_hist_download_named">Stiahnutých %1$d z albumu \"%2$s\"</string>
+    <string name="activity_hist_offline">Uložených %1$d fotiek offline</string>
+    <string name="activity_downloading">Sťahovanie</string>
 </resources>

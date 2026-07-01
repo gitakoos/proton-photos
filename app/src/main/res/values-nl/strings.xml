@@ -40,7 +40,7 @@
     <string name="onboarding_photos_subtitle">We hebben leestoegang tot je foto\'s en video\'s nodig om ze te versleutelen en naar Drive te back-uppen.</string>
 
     <string name="onboarding_manage_media_title">Media beheren</string>
-    <string name="onboarding_manage_media_subtitle">Sterk aanbevolen. Hiermee kan de app foto\'s en video\'s op je apparaat bewerken, verwijderen en hernoemen zonder telkens een systeemvenster ter bevestiging — gebruikt voor bewerken in de app, terug opslaan op apparaat, de prullenbakflow en Verwijderen na back-up. Tik om de systeeminstellingen te openen.</string>
+    <string name="onboarding_manage_media_subtitle">Sterk aanbevolen. Hiermee kan de app foto\'s en video\'s op je apparaat bewerken, verwijderen en hernoemen zonder telkens een systeemvenster ter bevestiging. Gebruikt voor bewerken in de app, terug opslaan op apparaat, de prullenbakflow en Verwijderen na back-up. Tik om de systeeminstellingen te openen.</string>
     <string name="onboarding_folders_include_title">Mappen om te back-uppen</string>
     <string name="onboarding_folders_include_subtitle">Kies welke mappen naar Drive geüpload moeten worden. Items in andere mappen blijven alleen op dit apparaat.</string>
     <string name="onboarding_folders_exclude_title">Mappen om over te slaan</string>
@@ -115,10 +115,10 @@
     <string name="hidden_photos_auth_prompt">Verifieer je identiteit om je verborgen foto\'s te bekijken</string>
     <string name="hidden_photos_unlock">Ontgrendelen</string>
     <string name="app_lock_authenticate_prompt">Verifieer om door te gaan</string>
-    <string name="hidden_no_device_lock_notice">Geen schermvergrendeling ingesteld — de kluis is niet beschermd.</string>
+    <string name="hidden_no_device_lock_notice">Geen schermvergrendeling ingesteld. De kluis is niet beschermd.</string>
     <string name="hidden_auth_title">Verborgen foto\'s</string>
     <string name="hidden_auth_description">Verifieer je identiteit om je verborgen foto\'s te bekijken</string>
-    <string name="hide_cloud_copy_notice">Geback-upte foto\'s blijven in je Proton Drive — verbergen verwijdert ze alleen uit de galerij van dit apparaat.</string>
+    <string name="hide_cloud_copy_notice">Geback-upte foto\'s blijven in je Proton Drive. Verbergen verwijdert ze alleen uit de galerij van dit apparaat.</string>
     <string name="gallery_cancel_selection">Selectie annuleren</string>
     <string name="share_action">Delen</string>
     <string name="share_chooser_title">Delen via</string>
@@ -158,6 +158,14 @@
     <string name="gallery_share_cloud_warning_body">Sommige hiervan staan alleen in de cloud. De app haalt een tijdelijke privékopie op en geeft die alleen aan de app die je kiest. Er wordt niets aan je galerij toegevoegd of zichtbaar voor andere apps.</string>
     <string name="gallery_share_cloud_warning_continue">Delen</string>
     <string name="gallery_add_to_album">Aan album toevoegen</string>
+    <string name="offline_make_available">Offline beschikbaar maken</string>
+    <string name="offline_available">Offline beschikbaar</string>
+    <string name="offline_removed">Verwijderd uit offline</string>
+    <string name="offline_failed">Offline opslaan mislukt</string>
+    <string name="offline_screen_title">Offline foto\'s</string>
+    <string name="offline_screen_empty">Foto\'s die je offline beschikbaar maakt, verschijnen hier</string>
+    <string name="settings_offline_photos">Offline foto\'s</string>
+    <string name="filter_offline">Offline</string>
     <string name="gallery_add_to_album_local_note">Deze foto\'s worden eerst geback-upt en daarna aan het album toegevoegd.</string>
     <string name="gallery_no_albums_yet">Nog geen albums. Maak er hierboven een aan.</string>
     <string name="gallery_add_to_album_mixed_hint">Een gemengde selectie van alleen-apparaat en alleen-cloud kan niet netjes één album delen. Kies één type.</string>
@@ -292,7 +300,7 @@
     <string name="settings_excluded_folders_select_all">Alles uitsluiten</string>
     <string name="settings_excluded_folders_deselect_all">Alles opnemen</string>
     <!-- Album mirror -->
-    <string name="settings_album_mirror_folders">Apparaatmappen spiegelen als Drive-albums</string>
+    <string name="settings_album_mirror_folders">Mappen als albums</string>
     <string name="settings_album_mirror_folders_desc">Kies welke apparaatmappen ook als Drive-albums verschijnen wanneer hun foto\'s geüpload worden</string>
     <string name="album_mirror_folders_title">Mappen spiegelen als Drive-albums</string>
     <string name="album_mirror_folders_subtitle">Foto\'s in aangevinkte mappen verschijnen ook in bijbehorende Drive-albums. Foto\'s worden hoe dan ook naar je stroom geüpload.</string>
@@ -314,7 +322,7 @@
     <string name="trash_cloud_empty_confirm_action">Legen</string>
     <string name="trash_cloud_restore_done">%1$d foto(\'s) hersteld</string>
     <string name="trash_cloud_restore_partial">%1$d hersteld, %2$d konden niet worden hersteld</string>
-    <string name="trash_cloud_restore_refresh_failed">Hersteld — trek omlaag in je galerij om te vernieuwen</string>
+    <string name="trash_cloud_restore_refresh_failed">Hersteld. Trek omlaag in je galerij om te vernieuwen</string>
     <string name="trash_cloud_restore_failed">Herstellen mislukt</string>
     <string name="trash_cloud_emptied">Cloudprullenbak geleegd</string>
     <string name="trash_cloud_empty_partial">%1$d verwijderd, %2$d konden niet worden verwijderd</string>
@@ -334,6 +342,10 @@
     <string name="settings_storage_clear_cache">Cache wissen</string>
     <string name="settings_storage_clear_cache_dialog_title">App-cache wissen?</string>
     <string name="settings_storage_clear_cache_dialog_message">Hiermee verwijder je %s aan gecachete bestanden. Ze worden indien nodig opnieuw gedownload.</string>
+    <string name="settings_offline_storage_title">Offline foto\'s</string>
+    <string name="settings_offline_storage_subtitle">Privé bewaard in deze app, niet in je galerij</string>
+    <string name="settings_offline_storage_clear_dialog_title">Offline foto\'s wissen?</string>
+    <string name="settings_offline_storage_clear_dialog_message">Hiermee verwijder je %s aan offline foto\'s van dit apparaat. Ze blijven in Proton Drive staan.</string>
     <string name="settings_storage_refresh">Opslag vernieuwen</string>
     <string name="settings_section_settings">Instellingen</string>
     <string name="settings_privacy_metadata">Privacy &amp; metadata</string>
@@ -352,7 +364,7 @@
     <string name="settings_rename_on_upload">Hernoemen naar opnamedatum bij uploaden</string>
     <string name="settings_rename_on_upload_desc">Gebruik de metadata van de foto of video om de bestandsnaam vóór het uploaden in te stellen op de opnamedatum en -tijd. Het originele bestand op het apparaat blijft onaangeroerd.</string>
     <string name="settings_delete_after_backup">Apparaatbestand verwijderen na back-up</string>
-    <string name="settings_delete_after_backup_desc">Verwijdert de lokale kopie van je apparaat zodra Drive de upload heeft — bewaart het bestand alleen in je versleutelde Proton Drive.</string>
+    <string name="settings_delete_after_backup_desc">Verwijdert de lokale kopie van je apparaat zodra Drive de upload heeft. Bewaart het bestand alleen in je versleutelde Proton Drive.</string>
     <string name="settings_strip_gps">GPS-locatie verwijderen</string>
     <string name="settings_strip_gps_desc">GPS-coördinaten en locatiegegevens verwijderen</string>
     <string name="settings_strip_camera">Camera-info verwijderen</string>
@@ -445,6 +457,10 @@
     <string name="palette_sea">Zee</string>
     <string name="palette_sepia">Sepia</string>
     <string name="palette_mono">Mono</string>
+
+    <!-- AMOLED pure-black dark theme -->
+    <string name="settings_amoled_black">Puur zwart (AMOLED)</string>
+    <string name="settings_amoled_black_summary">Gebruik echt zwarte achtergronden in de donkere modus om stroom te besparen op OLED-schermen.</string>
 
     <!-- Language -->
     <string name="language_en">English, English</string>
@@ -545,7 +561,7 @@
     <string name="album_leave_missing_details">Kan dit album nu niet verlaten</string>
     <string name="album_delete_photos_failed">Kon de foto\'s niet verwijderen</string>
     <string name="album_remove_photos_failed">Kon de foto\'s niet verwijderen</string>
-    <string name="album_remove_partial">%1$d van %2$d verwijderd — sommige konden niet worden verwijderd</string>
+    <string name="album_remove_partial">%1$d van %2$d verwijderd, sommige konden niet worden verwijderd</string>
     <string name="album_rename_failed">Kon het album niet hernoemen</string>
     <string name="album_set_cover_failed">Kon de albumomslag niet instellen</string>
     <string name="shared_save_failed">Kon het album niet opslaan in je bibliotheek</string>
@@ -648,6 +664,10 @@
     <plurals name="count_photos_plural">
         <item quantity="one">1 foto</item>
         <item quantity="other">%d foto\'s</item>
+    </plurals>
+    <plurals name="offline_batch_result">
+        <item quantity="one">%d foto offline beschikbaar</item>
+        <item quantity="other">%d foto\'s offline beschikbaar</item>
     </plurals>
     <plurals name="map_card_subtitle_count">
         <item quantity="one">%1$d foto op de kaart</item>
@@ -755,7 +775,7 @@
     <string name="editor_save_sheet_synced_video">Kies hoe je de bewerkte video opslaat. Geback-upte originelen blijven in Drive.</string>
     <string name="editor_save_sheet_device_video">Kies hoe je de bewerkte video op je apparaat opslaat.</string>
     <string name="editor_save_copy_subtitle_cloud">Wordt geüpload als nieuwe foto. Het origineel blijft in Drive.</string>
-    <string name="editor_save_copy_subtitle_cloud_video">Wordt geüpload als nieuw bestand in Proton Drive — het origineel blijft behouden.</string>
+    <string name="editor_save_copy_subtitle_cloud_video">Wordt geüpload als nieuw bestand in Proton Drive. Het origineel blijft behouden.</string>
     <string name="editor_save_copy_subtitle_synced">Maakt een nieuw bestand in je galerij EN uploadt een gekoppelde kopie naar Drive.</string>
     <string name="editor_save_copy_subtitle_device">Maakt een nieuw bestand in je galerij.</string>
     <string name="editor_saving">Opslaan…</string>
@@ -857,7 +877,7 @@
     <string name="device_folder_backup_timeline">Alleen foto\'s back-uppen</string>
     <string name="device_folder_backup_timeline_sub">Eenmalige upload van de foto\'s hier naar je tijdlijn.</string>
     <string name="device_folder_backup_mirror">Ook een album maken</string>
-    <string name="device_folder_backup_mirror_sub">Blijft synchroniseren — nieuwe foto\'s in deze map komen ook in het album.</string>
+    <string name="device_folder_backup_mirror_sub">Blijft synchroniseren. Nieuwe foto\'s in deze map komen ook in het album.</string>
     <string name="sync_folders_add_dialog_title">Map toevoegen</string>
     <string name="sync_folders_add_row_title">Map toevoegen op naam</string>
     <string name="sync_folders_add_dialog_name_hint">Mapnaam</string>
@@ -871,7 +891,7 @@
     <string name="rename_sheet_option_local_subtitle">Werkt het bestand ter plaatse bij op je apparaat.</string>
     <string name="rename_sheet_option_copy_title">Opslaan als kopie</string>
     <string name="rename_sheet_option_copy_subtitle_cloud">Uploadt als een nieuwe foto. Het origineel blijft in Drive.</string>
-    <string name="rename_sheet_option_copy_subtitle_local">Maakt een nieuw bestand aan in Pictures/Proton Photos.</string>
+    <string name="rename_sheet_option_copy_subtitle_local">Maakt een nieuw bestand aan in Pictures.</string>
     <string name="save_to_library_confirm_title">Opslaan in mijn bibliotheek</string>
     <string name="save_to_library_confirm_body_fmt">We kopiëren %1$d items naar je bibliotheek. Ze verschijnen in je Foto\'s zodra het kopiëren klaar is.</string>
     <string name="save_to_library_action_cancel">Opslaan annuleren</string>
@@ -1022,6 +1042,10 @@
     </plurals>
     <string name="gallery_copy_to_hidden_failed">Kopiëren naar Verborgen mislukt</string>
     <string name="gallery_move_to_hidden_failed">Verplaatsen naar Verborgen mislukt</string>
+    <plurals name="gallery_hide_partial_failed">
+        <item quantity="one">Verborgen, maar 1 foto kon niet worden verborgen</item>
+        <item quantity="other">Verborgen, maar %d foto\'s konden niet worden verborgen</item>
+    </plurals>
     <string name="gallery_add_to_cloud_album_failed">Toevoegen aan cloudalbum mislukt</string>
     <string name="gallery_add_to_album_failed">Toevoegen aan album mislukt</string>
     <string name="gallery_select_photos_first">Selecteer eerst foto\'s</string>
@@ -1080,7 +1104,7 @@
 
     <!-- Mirror device folders as albums screen -->
     <string name="mirror_opted_in_cd">Ingeschakeld</string>
-    <string name="mirror_custom_pending">In afwachting — wordt toegepast wanneer een map met deze naam verschijnt</string>
+    <string name="mirror_custom_pending">In afwachting. Wordt toegepast wanneer een map met deze naam verschijnt</string>
     <string name="mirror_remove_cd">Verwijderen</string>
     <string name="mirror_name_empty">Mapnaam mag niet leeg zijn</string>
     <string name="mirror_name_invalid_chars">Naam mag geen \'/\' of \'=\' bevatten</string>
@@ -1143,4 +1167,131 @@
     <string name="settings_copy_diagnostics">Diagnostieklogboek kopiëren</string>
     <string name="settings_copy_diagnostics_desc">Voor het oplossen van synchronisatieproblemen. Er worden geen accountgegevens opgenomen.</string>
     <string name="settings_diagnostics_copied">Diagnostieklogboek gekopieerd</string>
+    <!-- Duplicate finder -->
+    <string name="settings_find_duplicates">Duplicaten zoeken</string>
+    <string name="settings_find_duplicates_desc">Identieke kopieën bekijken en verwijderen</string>
+    <string name="duplicates_title">Duplicaten zoeken</string>
+    <string name="duplicates_section_device">Op dit apparaat</string>
+    <string name="duplicates_section_cloud">In je cloud</string>
+    <string name="duplicates_empty">Geen duplicaten gevonden</string>
+    <string name="duplicates_copies">%1$d identieke kopieën</string>
+    <string name="duplicates_pick_keep">Tik op de kopie die je wilt houden en verwijder de rest</string>
+    <string name="duplicates_keep">Houden</string>
+    <string name="duplicates_delete_others">Andere verwijderen</string>
+    <string name="duplicates_confirm_title">Duplicaten verwijderen?</string>
+    <string name="duplicates_confirm_message">De kopie die je houdt blijft. De andere kopieën worden verwijderd.</string>
+    <string name="duplicates_confirm_delete">Verwijderen</string>
+    <string name="duplicates_delete_failed">Verwijderen uit Drive mislukt. Probeer het opnieuw.</string>
+    <string name="duplicates_section_similar">Vergelijkbare foto\'s</string>
+    <string name="duplicates_scanning">Zoeken naar vergelijkbare foto\'s…</string>
+    <string name="duplicates_similar_hint">Deze lijken op elkaar, maar bestand of metadata kan verschillen</string>
+    <string name="duplicates_similar_count">%1$d vergelijkbare foto\'s</string>
+    <string name="duplicates_view_large">Groter bekijken</string>
+    <string name="offline_remove">Uit offline verwijderen</string>
+    <string name="whats_new_title">Nieuw</string>
+    <string name="whats_new_done">Begrepen</string>
+    <string name="whats_new_open">Openen</string>
+    <string name="whats_new_dup_title">Dubbele foto\'s vinden</string>
+    <string name="whats_new_dup_body">Herkent exacte kopieën en visueel vergelijkbare opnames, houd er dan veilig één en verwijder de rest.</string>
+    <string name="whats_new_offline_title">Offline beschikbaar</string>
+    <string name="whats_new_offline_body">Zet cloudfoto\'s vast zodat hun volledige kwaliteit op je apparaat blijft en zonder verbinding openen.</string>
+    <string name="whats_new_activity_title">Activiteitsweergave</string>
+    <string name="whats_new_activity_body">Uploads, downloads en offline opslag op één plek, met een geschiedenis van wat er is gebeurd.</string>
+    <string name="whats_new_motion_title">Bewegingsfoto\'s</string>
+    <string name="whats_new_motion_body">Bewegingsfoto\'s spelen weer af, ook die van Google en in HDR.</string>
+    <string name="whats_new_more">Plus opgeruimdere Instellingen, frissere albums en achtergrondfixes.</string>
+    <string name="offline_card_subtitle">Foto\'s opgeslagen voor offline weergave</string>
+    <string name="duplicates_filter_identical">Identiek</string>
+    <string name="duplicates_filter_similar">Vergelijkbaar</string>
+
+    <!-- Duplicate badges -->
+    <string name="duplicates_badge_cloud">Cloud</string>
+    <string name="duplicates_badge_device">Apparaat</string>
+    <string name="duplicates_badge_synced">Gesynchroniseerd</string>
+
+    <!-- Map attribution -->
+    <string name="map_osm_attribution" translatable="false">© OpenStreetMap contributors</string>
+
+    <!-- Onboarding all-files access -->
+    <string name="onboarding_all_files_title">Toegang tot alle bestanden</string>
+    <string name="onboarding_all_files_subtitle">Aanbevolen. Hiermee kan de app herstelde verborgen foto\'s terugzetten in hun oorspronkelijke map (bijvoorbeeld de mediamap van een chat-app, niet alleen Afbeeldingen) en wijzigingen rechtstreeks in je lokale bestanden schrijven. Tik om de systeeminstellingen te openen.</string>
+
+    <!-- Permissions screen -->
+    <string name="permissions_title">Machtigingen</string>
+    <string name="permissions_intro">Beheer waartoe Photos for Proton toegang heeft. Bij elk item lees je waarvoor het wordt gebruikt.</string>
+    <string name="permissions_action_allow">Toestaan</string>
+    <string name="permissions_state_granted">Verleend</string>
+    <string name="permissions_photos_title">Foto\'s &amp; video\'s</string>
+    <string name="permissions_photos_why">Om je galerij te tonen en je foto\'s en video\'s te back-uppen.</string>
+    <string name="permissions_notifications_title">Meldingen</string>
+    <string name="permissions_notifications_why">Om de voortgang van back-ups en uploads te tonen.</string>
+    <string name="permissions_location_title">Fotolocatie</string>
+    <string name="permissions_location_why">Om op de kaart te tonen waar foto\'s zijn gemaakt en hun locatie te behouden bij het back-uppen.</string>
+    <string name="permissions_managemedia_title">Media beheren</string>
+    <string name="permissions_managemedia_why">Om foto\'s soepel te verplaatsen en verwijderen, zonder een systeembevestiging voor elk afzonderlijk bestand.</string>
+    <string name="permissions_allfiles_title">Toegang tot alle bestanden</string>
+    <string name="permissions_allfiles_why">Om verborgen en gedownloade foto\'s terug te zetten in hun oorspronkelijke map (zoals WhatsApp), en foto\'s buiten de standaard mediamappen te bereiken.</string>
+    <string name="permissions_install_title">Updates installeren</string>
+    <string name="permissions_install_why">Om app-updates te installeren die je binnen de app downloadt.</string>
+    <string name="permissions_network_note">Netwerktoegang staat altijd aan en wordt alleen gebruikt om met Proton Drive te communiceren.</string>
+
+    <!-- Settings all-files access -->
+    <string name="settings_all_files_title">Toegang tot alle bestanden</string>
+    <string name="settings_all_files_desc">Laat herstelde verborgen foto\'s terugkeren naar hun oorspronkelijke map en lokale bestanden ter plaatse bijwerken. Tik om te verlenen in de systeeminstellingen.</string>
+
+    <!-- Storage labels -->
+    <string name="settings_storage_clear">Wissen</string>
+    <string name="settings_storage_free_up">Vrijmaken</string>
+    <string name="settings_storage_used_of">%1$s van %2$s</string>
+
+    <!-- Albumacties + delen -->
+    <string name="album_download_all_confirm_title">Het hele album downloaden?</string>
+    <string name="album_download_all_confirm_body">Elke foto in dit album wordt op je apparaat opgeslagen.</string>
+    <string name="album_set_cover_confirm_title">Instellen als albumhoes?</string>
+    <string name="album_set_cover_confirm_body">Deze foto wordt de albumhoes.</string>
+    <string name="album_remove_confirm_title">Verwijderen uit dit album?</string>
+    <string name="album_remove_confirm_body">Dit verwijdert alleen de selectie uit het album. Je foto\'s blijven in je tijdlijn.</string>
+    <string name="action_remove">Verwijderen</string>
+    <string name="gallery_add_to_album_queued">Foto\'s worden toegevoegd zodra het uploaden klaar is</string>
+    <string name="share_role_can_view_desc">Kan het album en de foto\'s bekijken.</string>
+    <string name="share_role_can_edit_desc">Kan foto\'s toevoegen en verwijderen en de hoes wijzigen.</string>
+    <string name="settings_show_selection_labels">Knoplabels</string>
+    <string name="settings_show_selection_labels_desc">Toont een kort label onder elke knop wanneer je foto\'s selecteert, zodat duidelijk is wat elke knop doet.</string>
+    <string name="sel_label_download">Downloaden</string>
+    <string name="sel_label_delete">Verwijderen</string>
+    <string name="sel_label_cover">Hoes</string>
+    <string name="sel_label_offline">Offline</string>
+    <string name="sel_label_album">Album</string>
+    <string name="sel_label_upload">Uploaden</string>
+    <string name="op_offline_fmt">Offline opslaan %1$d / %2$d</string>
+    <string name="picker_filter_all">Alles</string>
+    <string name="picker_filter_cloud">Cloud</string>
+    <string name="picker_filter_device">Apparaat</string>
+    <string name="sync_open_settings">Back-upinstellingen</string>
+    <string name="sync_open_settings_desc">Kies wat en hoe er een back-up wordt gemaakt en welk netwerk wordt gebruikt.</string>
+    <string name="settings_privacy">Privacy</string>
+    <string name="settings_privacy_desc">Cache, offline foto\'s en telemetrie</string>
+    <string name="settings_metadata">Metadata</string>
+    <string name="settings_metadata_desc">Back-ups hernoemen en EXIF verwijderen (GPS, camera, tijdstempel)</string>
+    <string name="about_support_title">Trakteer op een koffie</string>
+    <string name="about_support_subtitle">Steun de app en de ontwikkeling</string>
+    <string name="sync_folder_backup_label">Back-up</string>
+    <string name="sync_folder_album_label">Album</string>
+    <string name="sync_view_activity">Details</string>
+    <string name="activity_title">Activiteit</string>
+    <string name="activity_uploading">Uploaden</string>
+    <string name="activity_pending">Wacht op uploaden (%1$d)</string>
+    <string name="activity_empty">Er wordt op dit moment niets overgezet</string>
+    <string name="activity_row_desc">Bekijk lopende overdrachten en foto\'s die wachten op uploaden</string>
+    <string name="activity_offline">Offline</string>
+    <string name="activity_photos">Foto\'s</string>
+    <string name="activity_tab_active">Actief</string>
+    <string name="activity_tab_history">Geschiedenis</string>
+    <string name="activity_history_empty">Nog geen voltooide overdrachten</string>
+    <string name="activity_history_clear">Geschiedenis wissen</string>
+    <string name="activity_hist_upload">%1$d foto\'s geback-upt</string>
+    <string name="activity_hist_download">%1$d foto\'s gedownload</string>
+    <string name="activity_hist_download_named">%1$d gedownload uit \"%2$s\"</string>
+    <string name="activity_hist_offline">%1$d foto\'s offline opgeslagen</string>
+    <string name="activity_downloading">Downloaden</string>
 </resources>

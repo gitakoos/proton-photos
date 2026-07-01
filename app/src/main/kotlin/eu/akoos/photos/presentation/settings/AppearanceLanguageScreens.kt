@@ -24,6 +24,7 @@ package eu.akoos.photos.presentation.settings
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -57,6 +58,7 @@ import eu.akoos.photos.presentation.settings.components.NavRow
 import eu.akoos.photos.presentation.settings.components.RowDivider
 import eu.akoos.photos.presentation.settings.components.SettingsCard
 import eu.akoos.photos.presentation.settings.components.SettingsSubPageScaffold
+import eu.akoos.photos.presentation.settings.components.ToggleRow
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.paletteAccent
 
@@ -70,6 +72,7 @@ fun AppearanceSettingsScreen(
     onBack: () -> Unit,
     onThemeClick: () -> Unit = {},
     onLanguageClick: () -> Unit = {},
+    onLayoutClick: () -> Unit = {},
     onTimelineFilterClick: () -> Unit = {},
     onLandingTabClick: () -> Unit = {},
 ) {
@@ -85,8 +88,15 @@ fun AppearanceSettingsScreen(
                 onClick = onLanguageClick,
             )
             RowDivider()
-            // Photos timeline page — grid layout, what shows on the Photos tab, and display
-            // toggles. A visualisation choice, so it sits with appearance rather than Privacy.
+            // Layout + display — grid columns, mosaic, and the button-label toggle. These are
+            // app-wide display choices (they also affect album/folder selection), so they sit at
+            // the appearance level rather than nested inside the timeline page.
+            NavRow(
+                label = stringResource(R.string.settings_timeline_section_layout),
+                onClick = onLayoutClick,
+            )
+            RowDivider()
+            // Photos timeline page — what shows on the Photos tab and its display filters.
             NavRow(
                 label = stringResource(R.string.settings_timeline),
                 onClick = onTimelineFilterClick,
@@ -157,6 +167,22 @@ fun ThemeSettingsScreen(
                             .clickable { viewModel.setThemePalette(p) },
                     )
                 }
+            }
+        }
+
+        // ── AMOLED pure-black toggle — only takes effect in dark mode, so it shows only when the
+        // effective theme is dark: an explicit Dark choice, or System while the system is dark. ──
+        val darkEffective = state.themeMode == ThemeMode.Dark ||
+            (state.themeMode == ThemeMode.System && isSystemInDarkTheme())
+        if (darkEffective) {
+            Spacer(Modifier.height(20.dp))
+            SettingsCard {
+                ToggleRow(
+                    label = stringResource(R.string.settings_amoled_black),
+                    description = stringResource(R.string.settings_amoled_black_summary),
+                    checked = state.amoledBlack,
+                    onCheckedChange = { viewModel.setAmoledBlack(it) },
+                )
             }
         }
     }

@@ -796,7 +796,7 @@ class DriveCryptoHelper @Inject constructor(
             )
             cryptoContext.pgpCrypto.getUnarmored(armoredSignature)
         }
-        Log.d(TAG, "signInvitationKeyPacket: matched invitee=$inviteeEmail addressId=${address.addressId.id}")
+        Log.d(TAG, "signInvitationKeyPacket: matched invitee addressId=${address.addressId.id}")
         return Base64.encodeToString(unarmored, Base64.NO_WRAP)
     }
 

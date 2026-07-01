@@ -64,6 +64,8 @@ import kotlin.math.min
  * @param onSelectionChange called with the new selection on every range change
  * @param tapGuard armed at the long-press anchor so the cell's release-tap can be skipped: without it
  *   the tap that ends a stationary long-press would toggle the just-selected cell back off
+ * @param enabled when false a new drag never anchors (used to freeze selection while a bulk action
+ *   like a multi-delete is in flight, so the swept range can't change under the running operation)
  */
 @Composable
 fun <T> rememberDragMultiSelectModifier(
@@ -73,10 +75,12 @@ fun <T> rememberDragMultiSelectModifier(
     selected: Set<T>,
     onSelectionChange: (Set<T>) -> Unit,
     tapGuard: MutableState<Boolean>? = null,
+    enabled: Boolean = true,
 ): Modifier {
     val density = LocalDensity.current
     val haptics = LocalHapticFeedback.current
     val edgeScrollPx = remember(density) { with(density) { 80.dp.toPx() } }
+    val latestEnabled by rememberUpdatedState(enabled)
 
     // Read through updated-state holders: the pointerInput block is keyed on Unit so the long-press
     // detector survives list re-emits during loading. Reading items/indexByKey/selected at call time
@@ -155,6 +159,12 @@ fun <T> rememberDragMultiSelectModifier(
     return Modifier.pointerInput(Unit) {
         detectDragGesturesAfterLongPress(
             onDragStart = { offset ->
+                // Don't anchor a fresh drag while disabled (e.g. a multi-delete is running) — the
+                // selection must stay frozen until the in-flight operation finishes.
+                if (!latestEnabled) {
+                    dragAnchorIndex = -1
+                    return@detectDragGesturesAfterLongPress
+                }
                 val idx = itemIndexAt(offset)
                 if (idx == null) {
                     dragAnchorIndex = -1
@@ -225,10 +235,12 @@ fun <T> rememberStaggeredDragMultiSelectModifier(
     selected: Set<T>,
     onSelectionChange: (Set<T>) -> Unit,
     tapGuard: MutableState<Boolean>? = null,
+    enabled: Boolean = true,
 ): Modifier {
     val density = LocalDensity.current
     val haptics = LocalHapticFeedback.current
     val edgeScrollPx = remember(density) { with(density) { 80.dp.toPx() } }
+    val latestEnabled by rememberUpdatedState(enabled)
 
     val latestSelected by rememberUpdatedState(selected)
     val latestItems by rememberUpdatedState(items)
@@ -290,6 +302,12 @@ fun <T> rememberStaggeredDragMultiSelectModifier(
     return Modifier.pointerInput(Unit) {
         detectDragGesturesAfterLongPress(
             onDragStart = { offset ->
+                // Don't anchor a fresh drag while disabled (e.g. a multi-delete is running) — the
+                // selection must stay frozen until the in-flight operation finishes.
+                if (!latestEnabled) {
+                    dragAnchorIndex = -1
+                    return@detectDragGesturesAfterLongPress
+                }
                 val idx = itemIndexAt(offset)
                 if (idx == null) {
                     dragAnchorIndex = -1

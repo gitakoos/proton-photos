@@ -39,6 +39,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.OfflinePin
 import androidx.compose.foundation.layout.height
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Photo
@@ -100,6 +101,8 @@ internal fun PhotoCell(
     localUri: String? = null,
     isSelected: Boolean,
     isSelectionMode: Boolean,
+    /** True when this album photo's linkId is pinned for offline; draws the bottom-start badge. */
+    isOffline: Boolean = false,
     /** True: long-press pops the per-cell menu. False: long-press toggles multi-select via [onLongPress].
      *  Off for shared-with-me albums and while already in multi-select. */
     showLongPressMenu: Boolean = false,
@@ -181,6 +184,26 @@ internal fun PhotoCell(
                 tint = if (localUri != null) StatusSynced else Color.White,
                 modifier = Modifier.size(11.dp),
             )
+        }
+
+        // Offline badge — bottom-start so it never overlaps the bottom-end cloud badge + type pill,
+        // the top-start selection circle, or the centred video play icon.
+        if (isOffline) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(4.dp)
+                    .size(18.dp)
+                    .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(4.dp)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Default.OfflinePin,
+                    contentDescription = stringResource(R.string.offline_make_available),
+                    tint = Color.White,
+                    modifier = Modifier.size(11.dp),
+                )
+            }
         }
 
         // Type + favorite badge pill from server category tags. 25dp end-padding clears the cloud badge (18dp + 4dp + 3dp).

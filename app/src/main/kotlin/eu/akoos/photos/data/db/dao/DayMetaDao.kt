@@ -41,15 +41,11 @@ interface DayMetaDao {
     @Query("SELECT * FROM day_meta WHERE userId = :userId AND date = :date LIMIT 1")
     suspend fun getByDate(userId: String, date: String): DayMetaEntity?
 
-    /** Days whose description text matches [needle] (caller supplies the `%` wildcards). */
-    @Query(
-        """
-        SELECT * FROM day_meta
-        WHERE userId = :userId
-          AND LOWER(IFNULL(description, '')) LIKE :needle
-        """
-    )
-    suspend fun searchByText(userId: String, needle: String): List<DayMetaEntity>
+    /** All of a user's day-meta rows — for the calendar's in-memory text search, which needs every
+     *  annotated day's description in the haystack regardless of which query term it matches. The
+     *  table is small (one row per user-annotated day), so loading all of it is cheap. */
+    @Query("SELECT * FROM day_meta WHERE userId = :userId")
+    suspend fun getAll(userId: String): List<DayMetaEntity>
 
     @Upsert
     suspend fun upsert(entity: DayMetaEntity)

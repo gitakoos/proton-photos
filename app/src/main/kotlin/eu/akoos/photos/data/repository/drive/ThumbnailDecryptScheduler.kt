@@ -487,6 +487,13 @@ class ThumbnailDecryptScheduler @Inject constructor(
         parentKeyCache.values.forEach { it.fill(0) }
         parentKeyCache.clear()
         pinnedCoverLinkIds.clear()
+        // Zero and drop the shared-album crypto contexts too, so a signed-out session's share /
+        // album key bytes don't outlive it in this Singleton's heap.
+        sharedAlbumContext.values.forEach {
+            it.sharedShareKeyBytes.fill(0)
+            it.albumKeyBytes.fill(0)
+        }
+        sharedAlbumContext.clear()
     }
 
     /** The `file://` URL of the decrypted thumbnail for [linkId] when it is already cached

@@ -29,6 +29,7 @@ import android.util.Log
 import androidx.work.WorkManager
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.data.preferences.syncEffectivelyEnabled
 import eu.akoos.photos.worker.SyncWorker
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -49,8 +50,9 @@ import kotlinx.coroutines.launch
  *     across reboots itself, but re-issuing with [ExistingPeriodicWorkPolicy.UPDATE]
  *     is a cheap belt-and-braces.
  *
- * Skips everything when AUTO_SYNC is false — the user has opted out of continuous
- * backup and we shouldn't ressurect the BG notification behind their back.
+ * Skips everything when backup is effectively off (auto-sync off, OR on with no folder
+ * selected) — there is nothing to upload, so we shouldn't resurrect the triggers behind
+ * the user's back.
  *
  * No-ops for non-`BOOT_COMPLETED` intents. Lifetime is the brief broadcast window
  * (~10s), so we use a SupervisorJob+IO scope and don't await — DataStore read +
@@ -68,13 +70,14 @@ class BootCompletedReceiver : BroadcastReceiver() {
 
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
             try {
-                val prefs = appContext.settingsDataStore.data.first()
-                val autoSync = prefs[SettingsKeys.AUTO_SYNC] != false
-                if (!autoSync) {
-                    Log.d(TAG, "boot: autoSync off, skipping re-arm")
+                // Skip the re-arm entirely when backup is effectively off (auto-sync off, OR on with
+                // no folder selected) — arming the triggers there only burns wake-ups with nothing
+                // to upload.
+                if (!syncEffectivelyEnabled(appContext)) {
+                    Log.d(TAG, "boot: backup effectively off, skipping re-arm")
                     return@launch
                 }
-                val wifiOnly = prefs[SettingsKeys.SYNC_WIFI_ONLY] != false
+                val wifiOnly = appContext.settingsDataStore.data.first()[SettingsKeys.SYNC_WIFI_ONLY] != false
 
                 SyncWorker.schedule(
                     WorkManager.getInstance(appContext),
@@ -85,8 +88,9 @@ class BootCompletedReceiver : BroadcastReceiver() {
                 // BackgroundSyncService.start would crash here on Android 14+ with
                 // ForegroundServiceStartNotAllowedException — dataSync FGS type is
                 // not allowed to start from BOOT_COMPLETED since Android 14. The
-                // service starts naturally on the next MainActivity launch, and the
-                // periodic SyncWorker scheduled above covers the gap until then.
+                // service starts naturally on the next MainActivity launch (via
+                // reconcileBackgroundWork), and the periodic SyncWorker scheduled above
+                // covers the gap until then.
                 Log.d(TAG, "boot: re-armed sync triggers (wifiOnly=$wifiOnly)")
             } catch (t: Throwable) {
                 Log.w(TAG, "boot re-arm failed: ${t.message}")

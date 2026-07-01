@@ -53,7 +53,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Icon
@@ -85,12 +84,12 @@ import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.presentation.gallery.CategoryRail
 import eu.akoos.photos.presentation.gallery.ContentFilter
 import eu.akoos.photos.presentation.gallery.ContentFilterSheet
-import eu.akoos.photos.presentation.gallery.FilterChip
 import eu.akoos.photos.presentation.gallery.GalleryFilter
 import eu.akoos.photos.presentation.gallery.MediaType
 import eu.akoos.photos.presentation.gallery.SyncStatusFilter
 import eu.akoos.photos.presentation.memories.FloatingMemoriesHeader
 import eu.akoos.photos.presentation.search.components.CalendarPreviewCard
+import eu.akoos.photos.presentation.search.components.OfflinePreviewCard
 import eu.akoos.photos.presentation.search.components.JumpToMonthGridSection
 import eu.akoos.photos.presentation.search.components.MapPreviewCard
 import eu.akoos.photos.presentation.search.components.OnThisDayRow
@@ -104,7 +103,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.util.computeOnThisDay
-import java.text.DateFormatSymbols
 import java.util.Calendar
 
 // Shared rounded shape for the filter rail's pill controls. A real corner radius —
@@ -119,6 +117,7 @@ fun SearchScreen(
     onPhotoClick: (List<GalleryItem>, Int) -> Unit,
     onOpenMap: () -> Unit = {},
     onOpenCalendar: () -> Unit = {},
+    onOpenOffline: () -> Unit = {},
     vm: SearchViewModel = hiltViewModel(),
 ) {
     val colors = AppColors.current
@@ -285,6 +284,9 @@ fun SearchScreen(
                 }
                 item(key = "calendar_preview_section") {
                     CalendarPreviewCard(onClick = onOpenCalendar)
+                }
+                item(key = "offline_preview_section") {
+                    OfflinePreviewCard(onClick = onOpenOffline)
                 }
                 if (recent.isNotEmpty()) {
                     item(key = "recent_section") {

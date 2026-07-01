@@ -96,6 +96,18 @@ class AlbumsViewModel @Inject constructor(
         viewModelScope.launch {
             albumListEvents.changes.collect { loadAlbums() }
         }
+        // A cover change patches only that album's thumbnail in place, so the grid card flips without
+        // reloading and flashing the whole list.
+        viewModelScope.launch {
+            albumListEvents.coverChanges.collect { (albumId, coverUrl) ->
+                if (coverUrl == null) return@collect
+                _uiState.update { st ->
+                    st.copy(albums = st.albums.map {
+                        if (it.linkId == albumId) it.copy(coverThumbnailUrl = coverUrl) else it
+                    })
+                }
+            }
+        }
     }
 
     /**

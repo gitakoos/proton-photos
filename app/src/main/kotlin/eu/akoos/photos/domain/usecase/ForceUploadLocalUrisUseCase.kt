@@ -31,6 +31,7 @@ import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.entity.SyncState
 import eu.akoos.photos.domain.entity.SyncStatus
+import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.SyncStateRepository
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -53,6 +54,7 @@ import javax.inject.Singleton
 class ForceUploadLocalUrisUseCase @Inject constructor(
     @ApplicationContext private val context: Context,
     private val syncStateRepo: SyncStateRepository,
+    private val cloudRepo: DrivePhotoRepository,
 ) {
 
     /** Force [uris] to back up with no album to join. Returns the number of URIs queued. */
@@ -76,7 +78,19 @@ class ForceUploadLocalUrisUseCase @Inject constructor(
             // A reinstall/re-index can leave a stale SYNCED/CLOUD_ONLY row with a null cloudFileId
             // (never actually uploaded); that case falls through to be reseeded as LOCAL_ONLY so it
             // uploads and then joins, instead of getting stuck.
-            if (existingRow?.cloudFileId != null) continue
+            val cloudFileId = existingRow?.cloudFileId
+            if (cloudFileId != null) {
+                // Already on Drive, so the upload pipeline never re-runs for it. If the album-join
+                // didn't complete on a prior pass (its marker is still queued) a retry must drain
+                // the join here, otherwise redoing the album-add does nothing. Best-effort: a
+                // failure leaves the marker for the next pass. A single linkId per request keeps
+                // the server's per-request link cap satisfied.
+                if (albumLinkId != SettingsKeys.PENDING_ALBUM_ADD_NO_ALBUM) {
+                    runCatching { cloudRepo.addPhotosToAlbum(userId, albumLinkId, listOf(cloudFileId)) }
+                        .onSuccess { removePendingAlbumAdd(uri, albumLinkId) }
+                }
+                continue
+            }
             if (existingRow?.status == SyncStatus.UPLOADING ||
                 existingRow?.status == SyncStatus.HIDDEN
             ) continue
@@ -103,5 +117,13 @@ class ForceUploadLocalUrisUseCase @Inject constructor(
         val wifiOnly = context.settingsDataStore.data.first()[SettingsKeys.SYNC_WIFI_ONLY] != false
         eu.akoos.photos.worker.SyncWorker.runNow(context, wifiOnly = wifiOnly, allowLowBattery = true)
         return uris.size
+    }
+
+    /** Removes a single "localUri=albumLinkId" entry from PENDING_ALBUM_ADDS after its add lands. */
+    private suspend fun removePendingAlbumAdd(localUri: String, albumLinkId: String) {
+        context.settingsDataStore.edit { p ->
+            val existing = p[SettingsKeys.PENDING_ALBUM_ADDS] ?: emptySet()
+            p[SettingsKeys.PENDING_ALBUM_ADDS] = existing - "$localUri=$albumLinkId"
+        }
     }
 }

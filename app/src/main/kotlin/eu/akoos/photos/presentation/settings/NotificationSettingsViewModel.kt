@@ -31,6 +31,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.service.BackgroundSyncService
+import eu.akoos.photos.worker.SyncWorker
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -49,9 +50,9 @@ import javax.inject.Inject
  * The backup-status switch carries extra weight: [SettingsKeys.NOTIFY_BACKUP_STATUS]
  * also decides whether the persistent [BackgroundSyncService] runs. Android refuses to
  * keep a foreground service alive without showing its notification, so opting out has to
- * stop the service rather than merely hide a banner. The handler mirrors how
- * [SettingsViewModel] conditionally starts/stops the same service: it only re-starts on
- * enable when continuous backup (AUTO_SYNC) is on.
+ * stop the service rather than merely hide a banner. The handler defers to
+ * [SyncWorker.reconcileBackgroundWork], the single arming/teardown point every site shares,
+ * so the service only re-starts on enable when backup is effectively on.
  */
 @HiltViewModel
 class NotificationSettingsViewModel @Inject constructor(
@@ -93,12 +94,10 @@ class NotificationSettingsViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 context.settingsDataStore.edit { it[SettingsKeys.NOTIFY_BACKUP_STATUS] = enabled }
-                if (enabled) {
-                    val autoSync = context.settingsDataStore.data.first()[SettingsKeys.AUTO_SYNC] != false
-                    if (autoSync) BackgroundSyncService.start(context)
-                } else {
-                    BackgroundSyncService.stop(context)
-                }
+                // reconcile reads the just-written flag: with backup effectively on it starts the
+                // keep-alive service on enable and stops it on disable, keeping the service in lock
+                // step with the same opt-in gate every other arming site uses.
+                SyncWorker.reconcileBackgroundWork(context)
             } catch (e: CancellationException) {
                 throw e
             }

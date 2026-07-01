@@ -129,6 +129,7 @@ internal fun PhotoGrid(
     onPhotoClick: (items: List<GalleryItem>, index: Int) -> Unit,
     selectedItems: Set<GalleryItem> = emptySet(),
     isSelectionMode: Boolean = false,
+    dragSelectEnabled: Boolean = true,
     onToggleSelect: (GalleryItem) -> Unit = {},
     onToggleGroup: (List<GalleryItem>) -> Unit = {},
     onSelectionChange: (Set<GalleryItem>) -> Unit = {},
@@ -139,6 +140,7 @@ internal fun PhotoGrid(
     hiddenCloudLinkIds: Set<String> = emptySet(),
     downloadedCloudLinkIds: Set<String> = emptySet(),
     favoriteIds: Set<String> = emptySet(),
+    offlinePinIds: Set<String> = emptySet(),
     onRequestThumbnail: (linkId: String) -> Unit = {},
     onCancelThumbnail: (linkId: String) -> Unit = {},
     denseGridWarningDismissed: Boolean = false,
@@ -414,6 +416,7 @@ internal fun PhotoGrid(
         selected = selectedItems,
         onSelectionChange = onSelectionChange,
         tapGuard = tapGuard,
+        enabled = dragSelectEnabled,
     )
     val staggeredDragSelectModifier = rememberStaggeredDragMultiSelectModifier(
         gridState = staggeredState,
@@ -422,6 +425,7 @@ internal fun PhotoGrid(
         selected = selectedItems,
         onSelectionChange = onSelectionChange,
         tapGuard = tapGuard,
+        enabled = dragSelectEnabled,
     )
 
     if (mosaicGrid) {
@@ -445,6 +449,7 @@ internal fun PhotoGrid(
             hiddenCloudLinkIds = hiddenCloudLinkIds,
             downloadedCloudLinkIds = downloadedCloudLinkIds,
             favoriteIds = favoriteIds,
+            offlinePinIds = offlinePinIds,
             keyOf = keyOf,
             indexByKey = indexByKey,
             dragSelectModifier = staggeredDragSelectModifier,
@@ -545,8 +550,8 @@ internal fun PhotoGrid(
                 // PhotoCell's inputs are resolved to primitives here in item scope so the cell stays
                 // skippable: an unstable Set/GalleryItem param would force EVERY visible cell to
                 // recompose on any selection toggle or thumbnail-decrypt re-emission.
-                val inputs = remember(item, favoriteIds, downloadedCloudLinkIds) {
-                    photoCellInputsFor(item, favoriteIds, downloadedCloudLinkIds)
+                val inputs = remember(item, favoriteIds, downloadedCloudLinkIds, offlinePinIds) {
+                    photoCellInputsFor(item, favoriteIds, downloadedCloudLinkIds, offlinePinIds)
                 }
                 PhotoCell(
                     imageData         = inputs.imageData,
@@ -559,6 +564,7 @@ internal fun PhotoGrid(
                     showCloudBadge    = inputs.showCloudBadge,
                     showSyncedBadge   = inputs.showSyncedBadge,
                     isFavorite        = inputs.isFavorite,
+                    isOffline         = inputs.isOffline,
                     typeBadgeRes      = inputs.typeBadgeRes,
                     typeBadgeCdRes    = inputs.typeBadgeCdRes,
                     showTypeBadges    = columnCount < 5,
@@ -688,6 +694,7 @@ private fun MosaicPhotoGrid(
     hiddenCloudLinkIds: Set<String>,
     downloadedCloudLinkIds: Set<String>,
     favoriteIds: Set<String>,
+    offlinePinIds: Set<String>,
     keyOf: (GalleryItem) -> String,
     indexByKey: Map<String, Int>,
     dragSelectModifier: Modifier,
@@ -773,8 +780,8 @@ private fun MosaicPhotoGrid(
                     contentType = { "photo" },
                 ) { item ->
                     val cloudId = cloudLinkIdOfMosaic(item)
-                    val inputs = remember(item, favoriteIds, downloadedCloudLinkIds) {
-                        photoCellInputsFor(item, favoriteIds, downloadedCloudLinkIds)
+                    val inputs = remember(item, favoriteIds, downloadedCloudLinkIds, offlinePinIds) {
+                        photoCellInputsFor(item, favoriteIds, downloadedCloudLinkIds, offlinePinIds)
                     }
                     // Prefer the stored MediaStore aspect (local-backed items) so they lay out with
                     // no relayout. A cloud-only cell has none, so it starts square and adopts the
@@ -792,6 +799,7 @@ private fun MosaicPhotoGrid(
                         showCloudBadge    = inputs.showCloudBadge,
                         showSyncedBadge   = inputs.showSyncedBadge,
                         isFavorite        = inputs.isFavorite,
+                        isOffline         = inputs.isOffline,
                         typeBadgeRes      = inputs.typeBadgeRes,
                         typeBadgeCdRes    = inputs.typeBadgeCdRes,
                         showTypeBadges    = columnCount < 5,
@@ -918,7 +926,7 @@ private fun BoxScope.ScrollDateLabelStaggered(
  * dominant scroll-jank source), only inside the flow. Fades out a beat after scrolling stops.
  */
 @Composable
-private fun BoxScope.ScrollDateLabel(
+internal fun BoxScope.ScrollDateLabel(
     gridState: LazyGridState,
     items: List<GalleryItem>,
     grouping: TimelineGrouping,

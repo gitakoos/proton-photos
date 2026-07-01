@@ -38,6 +38,7 @@ import kotlinx.coroutines.launch
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.repository.LocalMediaRepository
+import eu.akoos.photos.worker.SyncWorker
 import javax.inject.Inject
 
 @HiltViewModel
@@ -51,6 +52,9 @@ class SyncFoldersViewModel @Inject constructor(
         val coverUri: String?,
         val itemCount: Int,
         val isSelected: Boolean,
+        val isMirrored: Boolean = false,
+        /** True for a folder the user typed in by hand that has no real bucket yet — removable. */
+        val isManual: Boolean = false,
     )
 
     data class UiState(
@@ -64,6 +68,9 @@ class SyncFoldersViewModel @Inject constructor(
     /** null means "not yet configured" (first-run default = backup nothing). */
     private var selectedNames: Set<String>? = null
     private var manualNames: Set<String> = emptySet()
+    // Folders opted in to also surface as a Drive album — the second per-folder checkbox. Same
+    // ALBUM_OPT_IN_FOLDER_NAMES set the standalone mirror screen and the upload pipeline read.
+    private var mirroredNames: Set<String> = emptySet()
 
     private val _uiState = MutableStateFlow(UiState())
     val uiState: StateFlow<UiState> = _uiState.asStateFlow()
@@ -75,6 +82,7 @@ class SyncFoldersViewModel @Inject constructor(
             val initial = context.settingsDataStore.data.first()
             selectedNames = initial[SettingsKeys.SYNC_FOLDER_NAMES]
             manualNames = initial[SettingsKeys.MANUAL_LOCAL_FOLDER_NAMES] ?: emptySet()
+            mirroredNames = initial[SettingsKeys.ALBUM_OPT_IN_FOLDER_NAMES] ?: emptySet()
 
             localMediaRepo.observeLocalMedia().collectLatest { items ->
                 // Buckets we actually find media in.
@@ -88,6 +96,7 @@ class SyncFoldersViewModel @Inject constructor(
                             coverUri   = sorted.firstOrNull()?.uri,
                             itemCount  = sorted.size,
                             isSelected = selectedNames != null && name in selectedNames!!,
+                            isMirrored = name in mirroredNames,
                         )
                     }
                 val populatedNames = populated.map { it.name }.toSet()
@@ -97,7 +106,7 @@ class SyncFoldersViewModel @Inject constructor(
                 val emptySelected = (selectedNames ?: emptySet())
                     .filter { it.isNotBlank() && it !in populatedNames && it !in manualNames }
                     .map { name ->
-                        SyncFolder(name, coverUri = null, itemCount = 0, isSelected = true)
+                        SyncFolder(name, coverUri = null, itemCount = 0, isSelected = true, isMirrored = name in mirroredNames)
                     }
 
                 // Surface user-declared placeholder folders. They show as "empty" until photos
@@ -111,6 +120,8 @@ class SyncFoldersViewModel @Inject constructor(
                             coverUri = null,
                             itemCount = 0,
                             isSelected = selectedNames != null && name in selectedNames!!,
+                            isMirrored = name in mirroredNames,
+                            isManual = true,
                         )
                     }
 
@@ -154,9 +165,27 @@ class SyncFoldersViewModel @Inject constructor(
         // Re-emit so the UI shows the placeholder without waiting for the next media flow tick.
         _uiState.update { s ->
             if (s.folders.any { it.name == name }) s
-            else s.copy(folders = s.folders + SyncFolder(name, null, 0, isSelected = false))
+            else s.copy(folders = s.folders + SyncFolder(name, null, 0, isSelected = false, isManual = true))
         }
         return true
+    }
+
+    /** Delete a hand-added placeholder folder from the watch list entirely — drops it from the
+     *  manual set and from the backup / album opt-ins so it is no longer tracked. */
+    fun removeManualFolder(folderName: String) {
+        if (folderName !in manualNames) return
+        manualNames = manualNames - folderName
+        selectedNames = (selectedNames ?: emptySet()) - folderName
+        mirroredNames = mirroredNames - folderName
+        _uiState.update { s -> s.copy(folders = s.folders.filter { it.name != folderName }) }
+        viewModelScope.launch {
+            context.settingsDataStore.edit { prefs ->
+                prefs[SettingsKeys.MANUAL_LOCAL_FOLDER_NAMES] = manualNames
+                prefs[SettingsKeys.SYNC_FOLDER_NAMES] = selectedNames ?: emptySet()
+                prefs[SettingsKeys.ALBUM_OPT_IN_FOLDER_NAMES] = mirroredNames
+            }
+            SyncWorker.reconcileBackgroundWork(context)
+        }
     }
 
     fun toggle(folderName: String) {
@@ -171,6 +200,20 @@ class SyncFoldersViewModel @Inject constructor(
             s.copy(folders = s.folders.map { f -> f.copy(isSelected = f.name in newSelected) })
         }
         persistSelection(newSelected)
+    }
+
+    /** Opt a folder in/out of also surfacing as a Drive album when its photos upload — the second
+     *  per-folder checkbox, writing the same set the standalone mirror screen used. */
+    fun toggleMirror(folderName: String) {
+        val next = if (folderName in mirroredNames) mirroredNames - folderName
+                   else mirroredNames + folderName
+        mirroredNames = next
+        _uiState.update { s ->
+            s.copy(folders = s.folders.map { f -> f.copy(isMirrored = f.name in next) })
+        }
+        viewModelScope.launch {
+            context.settingsDataStore.edit { it[SettingsKeys.ALBUM_OPT_IN_FOLDER_NAMES] = next }
+        }
     }
 
     fun selectAll() {
@@ -189,6 +232,11 @@ class SyncFoldersViewModel @Inject constructor(
     private fun persistSelection(names: Set<String>) {
         viewModelScope.launch {
             context.settingsDataStore.edit { it[SettingsKeys.SYNC_FOLDER_NAMES] = names }
+            // Arming the background triggers is gated on a folder actually being selected, so the
+            // selection changing here is exactly when that gate flips: picking the first folder must
+            // re-arm everything, deselecting the last must tear it all down. reconcile reads the
+            // just-written set and does whichever applies.
+            SyncWorker.reconcileBackgroundWork(context)
         }
     }
 }

@@ -38,6 +38,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
+import androidx.compose.material.icons.filled.OfflinePin
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -290,6 +291,7 @@ internal fun GalleryCategoryIcon(filter: GalleryFilter, tint: Color) {
         GalleryFilter.Favorites -> Icons.Default.FavoriteBorder
         GalleryFilter.Selfies   -> Icons.Default.Person
         GalleryFilter.Portraits -> Icons.Default.AccountCircle
+        GalleryFilter.Offline   -> Icons.Default.OfflinePin
         else -> null
     }
     when {

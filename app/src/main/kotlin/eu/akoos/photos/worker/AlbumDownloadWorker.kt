@@ -73,11 +73,12 @@ class AlbumDownloadWorker @AssistedInject constructor(
     @Assisted private val params: WorkerParameters,
     private val driveRepo: DrivePhotoRepository,
     private val downloadPhotos: DownloadPhotosUseCase,
+    private val transferCenter: eu.akoos.photos.data.transfer.TransferCenter,
 ) : CoroutineWorker(context, params) {
 
-    // Per-run notification id so two concurrent album downloads no longer overwrite each other in
-    // the shade (the old fixed id meant only the last-started download stayed visible). Derived
-    // from this worker's UUID and kept well clear of the other fixed ids (4242-4245).
+    // Per-run notification id so two concurrent album downloads each keep their own entry in the
+    // shade instead of overwriting each other. Derived from this worker's UUID and kept well clear
+    // of the other fixed ids (4242-4245).
     private val notificationId: Int = 5000 + (kotlin.math.abs(id.hashCode()) % 50_000)
 
     override suspend fun doWork(): Result {
@@ -122,12 +123,20 @@ class AlbumDownloadWorker @AssistedInject constructor(
                 return Result.failure()
             }
 
-            val result = downloadPhotos.downloadCloudPhotos(userId, photos, albumName) { progress ->
+            val savedUris = java.util.concurrent.ConcurrentLinkedQueue<String>()
+            val result = downloadPhotos.downloadCloudPhotos(
+                userId, photos, albumName,
+                onSaved = { savedUris.add(it) },
+            ) { progress ->
                 // Publish progress to WorkManager so the in-app album screen can show a progress
                 // ring + cancel without depending on the notification (works even when the
                 // notification is opted out).
                 runCatching {
-                    setProgress(workDataOf(KEY_PROGRESS_DONE to progress.done, KEY_PROGRESS_TOTAL to progress.total))
+                    setProgress(workDataOf(
+                        KEY_PROGRESS_DONE to progress.done,
+                        KEY_PROGRESS_TOTAL to progress.total,
+                        KEY_ALBUM_NAME to albumName,
+                    ))
                 }
                 // Best-effort notification refresh. setForeground throws if the worker was
                 // already cancelled (Android 14 + WorkManager 2.9); swallow that and let
@@ -140,6 +149,12 @@ class AlbumDownloadWorker @AssistedInject constructor(
             }
 
             Log.d(TAG, "Album '$albumName' download done: $result")
+            transferCenter.log(
+                eu.akoos.photos.data.transfer.TransferCenter.Kind.DOWNLOAD,
+                result.total - result.failed,
+                albumName,
+                uris = savedUris.toList(),
+            )
             Result.success()
         } catch (e: kotlinx.coroutines.CancellationException) {
             // Cooperative cancellation (the user tapped "Cancel" on the notification).

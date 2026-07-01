@@ -40,7 +40,6 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyGridScope
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -53,8 +52,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.ExpandLess
-import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.outlined.Collections
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ModalBottomSheet
@@ -517,60 +514,6 @@ private fun AlbumActionRow(
     ) {
         Icon(icon, null, tint = tint, modifier = Modifier.size(20.dp))
         Text(label, color = AppColors.current.fgPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium)
-    }
-}
-
-/**
- * Appends the "Folders on this device" section to an albums grid: a full-span header followed
- * by one [UnifiedAlbumCard] per MediaStore bucket. Tapping a card opens the per-folder detail
- * screen via [onFolderClick]. No-op when [folders] is empty so callers can append unconditionally.
- */
-private fun LazyGridScope.deviceFoldersSection(
-    folders: List<DeviceFolder>,
-    collapsed: Boolean,
-    onToggle: () -> Unit,
-    onFolderClick: (bucketName: String) -> Unit,
-) {
-    if (folders.isEmpty()) return
-    // The section header doubles as the show/hide control: tapping it collapses the device
-    // folders out of the Albums grid. The choice is persisted, so it stays across launches.
-    item(span = { GridItemSpan(maxLineSpan) }) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable { onToggle() }
-                .padding(top = 8.dp, bottom = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = stringResource(R.string.device_folders_section),
-                color = FgMute,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.weight(1f),
-            )
-            Icon(
-                if (collapsed) Icons.Default.ExpandMore else Icons.Default.ExpandLess,
-                contentDescription = stringResource(R.string.albums_toggle_device_folders),
-                tint = FgMute,
-                modifier = Modifier.size(20.dp),
-            )
-        }
-    }
-    if (collapsed) return
-    items(
-        folders,
-        key = { "devfolder_${it.name}" },
-    ) { folder ->
-        UnifiedAlbumCard(
-            coverModel = folder.coverUri?.let(Uri::parse),
-            title = folder.name,
-            metaText = pluralStringResource(
-                R.plurals.count_photos_plural, folder.itemCount, folder.itemCount,
-            ),
-            isDeviceFolder = true,
-            onClick = { onFolderClick(folder.name) },
-        )
     }
 }
 

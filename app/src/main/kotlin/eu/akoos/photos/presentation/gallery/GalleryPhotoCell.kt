@@ -42,8 +42,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.OfflinePin
 import androidx.compose.material.icons.filled.Favorite
-import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.Photo
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.VisibilityOff
@@ -69,7 +69,6 @@ import eu.akoos.photos.domain.usecase.CategorizeItem
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.Bg2
 import eu.akoos.photos.presentation.theme.FgDim
-import eu.akoos.photos.presentation.theme.FgMute
 
 /** Primitive, Compose-stable snapshot of everything [PhotoCell] renders for one [GalleryItem].
  *  Computed in the caller's item scope so the cell itself takes only stable params (and stays
@@ -82,18 +81,20 @@ internal data class PhotoCellInputs(
     val showCloudBadge: Boolean,
     val showSyncedBadge: Boolean,
     val isFavorite: Boolean,
+    val isOffline: Boolean,
     val typeBadgeRes: Int?,
     val typeBadgeCdRes: Int?,
 )
 
 /** Resolve a [GalleryItem] to [PhotoCellInputs]. The category look-ups run once here rather than
  *  repeatedly inside the cell. [downloadedCloudLinkIds] upgrades a downloaded CloudOnly tile to the
- *  green synced badge; [favoriteIds] adds the heart. Both default empty for surfaces that don't
- *  track them (search, device folders). */
+ *  green synced badge; [favoriteIds] adds the heart; [offlinePinIds] adds the offline badge to a
+ *  CloudOnly tile pinned for offline. All default empty for surfaces that don't track them. */
 internal fun photoCellInputsFor(
     item: GalleryItem,
     favoriteIds: Set<String> = emptySet(),
     downloadedCloudLinkIds: Set<String> = emptySet(),
+    offlinePinIds: Set<String> = emptySet(),
 ): PhotoCellInputs {
     val cloudId = when (item) {
         is GalleryItem.CloudOnly -> item.cloud.linkId
@@ -125,6 +126,7 @@ internal fun photoCellInputsFor(
         showCloudBadge  = item is GalleryItem.CloudOnly && !isDownloaded,
         showSyncedBadge = item is GalleryItem.Synced || (item is GalleryItem.CloudOnly && isDownloaded),
         isFavorite     = favoriteKey in favoriteIds || 0 in cats,
+        isOffline      = item is GalleryItem.CloudOnly && cloudId != null && cloudId in offlinePinIds,
         typeBadgeRes   = when {
             2 in cats -> R.drawable.ic_video_camera
             4 in cats -> R.drawable.ic_live
@@ -167,6 +169,7 @@ internal fun PhotoCell(
     showCloudBadge: Boolean = false,
     showSyncedBadge: Boolean = false,
     isFavorite: Boolean = false,
+    isOffline: Boolean = false,
     typeBadgeRes: Int? = null,
     typeBadgeCdRes: Int? = null,
     showTypeBadges: Boolean = true,
@@ -258,6 +261,11 @@ internal fun PhotoCell(
             showSyncedBadge -> SyncedCloudBadge()
             showCloudBadge  -> CloudBadge()
         }
+
+        // Offline badge — a cloud-only photo pinned for offline. Bottom-start corner so it never
+        // overlaps the bottom-end cloud/synced badge + type pill, the top-end hidden eye, or the
+        // top-start selection circle.
+        if (isOffline) OfflineBadge()
 
         // Hidden-eye overlay — drawn on the cell when its cloud linkId is referenced by a
         // SyncState row with status HIDDEN. A heavy black scrim PLUS a real RenderEffect
@@ -402,6 +410,27 @@ private fun BoxScope.SyncedCloudBadge() {
     }
 }
 
+/** Offline-pin badge — this cloud photo is pinned for offline. Bottom-start corner so it sits clear
+ *  of the bottom-end cloud/synced badge and the top-corner overlays. */
+@Composable
+private fun BoxScope.OfflineBadge() {
+    Box(
+        modifier = Modifier
+            .align(Alignment.BottomStart)
+            .padding(5.dp)
+            .size(20.dp)
+            .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(4.dp)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            Icons.Default.OfflinePin,
+            contentDescription = stringResource(R.string.offline_make_available),
+            tint = Color.White,
+            modifier = Modifier.size(12.dp),
+        )
+    }
+}
+
 /** Crossed-out eye — this cloud photo's local twin lives in the Hidden vault. Visible only
  *  from this device, since HIDDEN_PHOTO_URIS / SyncStatus.HIDDEN are per-installation state.
  *  Placed in the top-end corner so the bottom-end cloud / device badge can coexist. */
@@ -424,22 +453,3 @@ private fun BoxScope.HiddenEyeBadge() {
     }
 }
 
-/** Phone icon — only on this device, NOT backed up. Do NOT delete without backup! */
-@Composable
-private fun BoxScope.DeviceBadge() {
-    Box(
-        modifier = Modifier
-            .align(Alignment.BottomEnd)
-            .padding(5.dp)
-            .size(20.dp)
-            .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(4.dp)),
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(
-            Icons.Default.Phone,
-            contentDescription = stringResource(R.string.cd_status_device_only),
-            tint = FgMute,
-            modifier = Modifier.size(11.dp),
-        )
-    }
-}

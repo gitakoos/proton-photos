@@ -29,21 +29,22 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Block
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -63,14 +64,13 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import eu.akoos.photos.R
-import eu.akoos.photos.presentation.common.IconBubble
+import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
+import eu.akoos.photos.presentation.settings.components.SettingsPillHeader
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.FgDim
 import eu.akoos.photos.presentation.theme.FgMute
 import eu.akoos.photos.presentation.theme.FgPrimary
-import eu.akoos.photos.presentation.theme.PillBorder
-import eu.akoos.photos.presentation.theme.StatusError
 
 private val cardShape = RoundedCornerShape(12.dp)
 
@@ -92,43 +92,19 @@ fun ExcludedFoldersScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val colors = AppColors.current
 
-    Column(
+    Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(colors.pageBg)
-            .statusBarsPadding()
-            .navigationBarsPadding(),
+            .background(colors.pageBg),
     ) {
-        // ── Header bar ─────────────────────────────────────────────────────────
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            IconBubble(
-                icon = Icons.AutoMirrored.Filled.ArrowBack,
-                contentDescription = stringResource(R.string.onboarding_back),
-                onClick = onBack,
-                diameter = 40.dp,
-                iconSize = 18.dp,
-                background = colors.surfaceWeak,
-                borderColor = PillBorder,
-                tint = FgDim,
-            )
-            Spacer(Modifier.weight(1f))
-            Text(
-                stringResource(R.string.settings_excluded_folders_title),
-                color = FgPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
-            )
-            Spacer(Modifier.weight(1f))
-            Box(Modifier.size(36.dp))
-        }
+        val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+        val contentTopPad = floatingHeaderContentTopPadding()
 
         if (state.isLoading) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .padding(top = contentTopPad)
                     .padding(horizontal = 20.dp)
                     .background(colors.cardBg, cardShape)
                     .border(0.5.dp, colors.cardBorder, cardShape),
@@ -159,7 +135,10 @@ fun ExcludedFoldersScreen(
                 }
             }
         } else {
-            LazyColumn(modifier = Modifier.fillMaxSize()) {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(top = contentTopPad, bottom = navBottom),
+            ) {
                 // ── Intro text ───────────────────────────────────────────────
                 item {
                     Text(
@@ -222,6 +201,7 @@ fun ExcludedFoldersScreen(
                             ExcludeRow(
                                 folder   = folder,
                                 onToggle = { viewModel.toggle(folder.name) },
+                                onMirrorToggle = { viewModel.toggleMirror(folder.name) },
                             )
                             if (i < state.folders.lastIndex) {
                                 HorizontalDivider(
@@ -251,6 +231,11 @@ fun ExcludedFoldersScreen(
                 item { Spacer(Modifier.height(32.dp)) }
             }
         }
+
+        SettingsPillHeader(
+            title = stringResource(R.string.settings_excluded_folders_title),
+            onBack = onBack,
+        )
     }
 }
 
@@ -258,18 +243,18 @@ fun ExcludedFoldersScreen(
 private fun ExcludeRow(
     folder: ExcludedFoldersViewModel.ExcludedFolder,
     onToggle: () -> Unit,
+    onMirrorToggle: () -> Unit,
 ) {
     val colors = AppColors.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onToggle)
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(14.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        // Thumbnail tile (folder icon fallback for empty buckets, dimmed to 0.6 alpha
-        // when excluded so the eye instantly reads "this one is greyed out").
+        // Thumbnail tile (folder icon fallback for empty buckets, dimmed when the folder is
+        // excluded from backup so the eye reads "this one is off").
         val tileAlpha = if (folder.isExcluded) 0.55f else 1f
         Box(
             modifier = Modifier
@@ -303,6 +288,7 @@ private fun ExcludeRow(
                 color      = if (folder.isExcluded) FgMute else FgPrimary,
                 fontSize   = 14.sp,
                 fontWeight = FontWeight.Medium,
+                maxLines = 2,
             )
             Text(
                 pluralStringResource(R.plurals.count_photos_plural, folder.itemCount, folder.itemCount),
@@ -311,19 +297,42 @@ private fun ExcludeRow(
             )
         }
 
-        // Selection indicator — red Block icon when excluded, hollow circle when included.
-        if (folder.isExcluded) {
-            Icon(
-                Icons.Default.Block, stringResource(R.string.cd_status_excluded),
-                tint     = StatusError,
-                modifier = Modifier.size(22.dp),
-            )
+        // Same two checkboxes as the include picker: back up (checked = not excluded) + album.
+        ExcludeFolderCheck(
+            checked = !folder.isExcluded,
+            label = stringResource(R.string.sync_folder_backup_label),
+            onClick = onToggle,
+        )
+        ExcludeFolderCheck(
+            checked = folder.isMirrored,
+            label = stringResource(R.string.sync_folder_album_label),
+            onClick = onMirrorToggle,
+        )
+    }
+}
+
+/** One labelled checkbox in an [ExcludeRow] — matches the include picker's per-folder toggles. */
+@Composable
+private fun ExcludeFolderCheck(checked: Boolean, label: String, onClick: () -> Unit) {
+    val colors = AppColors.current
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 6.dp, vertical = 4.dp),
+    ) {
+        if (checked) {
+            Icon(Icons.Default.CheckCircle, null, tint = Accent, modifier = Modifier.size(22.dp))
         } else {
-            Box(
-                modifier = Modifier
-                    .size(22.dp)
-                    .border(1.5.dp, colors.pillBorder, CircleShape),
-            )
+            Box(modifier = Modifier.size(22.dp).border(1.5.dp, colors.pillBorder, CircleShape))
         }
+        Spacer(Modifier.height(3.dp))
+        Text(
+            label,
+            color = if (checked) Accent else FgMute,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Medium,
+        )
     }
 }

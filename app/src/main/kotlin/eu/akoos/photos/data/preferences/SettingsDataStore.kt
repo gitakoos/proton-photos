@@ -31,6 +31,7 @@ import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import kotlinx.coroutines.flow.first
 
 val Context.settingsDataStore: DataStore<Preferences> by preferencesDataStore(name = "settings")
 
@@ -44,6 +45,11 @@ object SettingsKeys {
     /** When true, a floating month/year label fades in over the Photos timeline while it is
      *  actively scrolling, giving a time reference for the topmost visible photo. Off by default. */
     val SHOW_SCROLL_DATE = booleanPreferencesKey("show_scroll_date")
+
+    /** When true, the selection-mode action buttons (share, delete, download, set as cover, remove)
+     *  show a short text label beneath the icon. On by default; users who prefer icon-only can
+     *  turn it off so the action bars stay compact. */
+    val SHOW_SELECTION_LABELS = booleanPreferencesKey("show_selection_labels")
 
     /** When true, the Photos timeline is flipped so the oldest photos sit at the top and the
      *  newest at the bottom (scroll up for older). Off by default — the timeline stays newest-first.
@@ -84,6 +90,13 @@ object SettingsKeys {
      * visual change until they pick a different palette.
      */
     val THEME_PALETTE = stringPreferencesKey("theme_palette")
+    /**
+     * When true and the app is in dark mode, the base surfaces are forced to true black
+     * (#000000) instead of the near-black defaults, saving power on OLED panels. Ignored in
+     * light mode. Independent of [THEME_PALETTE] — palette only shifts accent tokens, never the
+     * base surfaces. Default false so existing installs keep the near-black dark theme.
+     */
+    val AMOLED_BLACK = booleanPreferencesKey("amoled_black")
     val LAST_SYNC_MS = longPreferencesKey("last_sync_ms")
 
     /** Wall-clock millis of the last successful GitHub release check. Used to throttle
@@ -153,6 +166,26 @@ object SettingsKeys {
      * a visible duplicate in Drive.
      */
     val HIDDEN_URI_CLOUD_ID_MAP = stringSetPreferencesKey("hidden_uri_cloud_id_map")
+
+    /**
+     * hiddenUri → source-folder mapping persisted as a set of "hiddenUri|folderName"
+     * strings (same flatten as [HIDDEN_URI_CLOUD_ID_MAP], since DataStore lacks a Map).
+     * Captured at hide time from the source file's MediaStore RELATIVE_PATH (or its bucket
+     * name as a fallback). Read at unhide so the restored MediaStore entry lands back in the
+     * folder it came from instead of the Pictures/Movies root. The entry is removed after a
+     * successful restore. Absent for items hidden before this map existed — those keep the
+     * Pictures/Movies-root default.
+     */
+    val HIDDEN_URI_SOURCE_FOLDER_MAP = stringSetPreferencesKey("hidden_uri_source_folder_map")
+
+    /**
+     * hiddenUri → original-display-name mapping persisted as a set of "hiddenUri|originalName"
+     * strings (same flatten as [HIDDEN_URI_SOURCE_FOLDER_MAP]). Captured at hide time from the
+     * source item's display name and read at unhide so the restored MediaStore entry keeps its
+     * original filename instead of a generated one. The entry is removed after a successful
+     * restore. Absent for items hidden before this map existed.
+     */
+    val HIDDEN_URI_ORIGINAL_NAME_MAP = stringSetPreferencesKey("hidden_uri_original_name_map")
 
     /**
      * User-declared local folder names that aren't backed by an existing MediaStore bucket yet.
@@ -316,6 +349,16 @@ object SettingsKeys {
      */
     val ONBOARDING_COMPLETE = booleanPreferencesKey("onboarding_complete")
 
+    /**
+     * Highest BuildConfig.VERSION_CODE for which the one-time "What's new" screen has
+     * already been shown. Default 0 (absent), so a fresh install or any upgrade whose
+     * versionCode is higher than the stored value surfaces the screen once, on the first
+     * Gallery entry. Written to the current versionCode on any exit from that screen
+     * (the Got-it button, a feature Open button, or back), so it never reappears until
+     * the next versioned release raises the code again.
+     */
+    val WHATS_NEW_SEEN_VERSION = intPreferencesKey("whats_new_seen_version")
+
     /** Privacy opt-in: when true, wipe the full-res blob cache every time the app
      *  process is backgrounded. Off by default — most users prefer the 30-min TTL
      *  + offline grace behaviour. Security-conscious users who want zero on-disk
@@ -350,6 +393,11 @@ object SettingsKeys {
     // Favorites — stores URIs (local) or linkIds (cloud) of favorited photos
     val FAVORITE_IDS = stringSetPreferencesKey("favorite_ids")
 
+    /** Drive linkIds the user has pinned for offline access. The full-res blob for each
+     *  pinned id is kept in app-private storage (filesDir/offline) so it stays viewable
+     *  with no network and survives a cache clear. */
+    val OFFLINE_PIN_IDS = stringSetPreferencesKey("offline_pin_ids")
+
     /**
      * Drive linkIds of photos uploaded by this client, encoded as `linkId|uploadedAtMs`.
      * Persisted so a process restart between upload and the photo stream catching up cannot
@@ -368,4 +416,19 @@ object SettingsKeys {
      * listing / decrypt / cache paths never consult it.
      */
     val SIM_LARGE_LIBRARY_COUNT = intPreferencesKey("sim_large_library_count")
+}
+
+/**
+ * Single source of truth for "is auto-backup actually going to upload anything". Auto-sync can be
+ * ON yet effectively idle when no folder is selected and back-up-everything is off — in that state
+ * the upload pipeline already early-returns (UploadPendingUseCase / LocalMediaRepositoryImpl), so
+ * the background triggers should not be armed either. Mirrors that exact predicate so the
+ * trigger-arming gate and the upload gate can never disagree. AUTO_SYNC absent = ON.
+ */
+suspend fun syncEffectivelyEnabled(context: Context): Boolean {
+    val prefs = context.settingsDataStore.data.first()
+    val autoSync = prefs[SettingsKeys.AUTO_SYNC] != false
+    val backupEverything = prefs[SettingsKeys.BACKUP_EVERYTHING] ?: false
+    val folders = prefs[SettingsKeys.SYNC_FOLDER_NAMES]
+    return autoSync && (backupEverything || !folders.isNullOrEmpty())
 }

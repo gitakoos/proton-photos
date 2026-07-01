@@ -29,22 +29,24 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
@@ -70,13 +72,13 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import eu.akoos.photos.R
-import eu.akoos.photos.presentation.common.IconBubble
+import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
+import eu.akoos.photos.presentation.settings.components.SettingsPillHeader
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.FgDim
 import eu.akoos.photos.presentation.theme.FgMute
 import eu.akoos.photos.presentation.theme.FgPrimary
-import eu.akoos.photos.presentation.theme.PillBorder
 
 private val cardShape = RoundedCornerShape(12.dp)
 
@@ -88,45 +90,20 @@ fun SyncFoldersScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val colors = AppColors.current
 
-    Column(
+    Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(colors.pageBg)
-            .statusBarsPadding()
-            .navigationBarsPadding(),
+            .background(colors.pageBg),
     ) {
-        // ── Header bar ─────────────────────────────────────────────────────────
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            IconBubble(
-                icon = Icons.AutoMirrored.Filled.ArrowBack,
-                contentDescription = stringResource(R.string.onboarding_back),
-                onClick = onBack,
-                diameter = 40.dp,
-                iconSize = 18.dp,
-                background = colors.surfaceWeak,
-                borderColor = PillBorder,
-                tint = FgDim,
-            )
-            Spacer(Modifier.weight(1f))
-            Text(
-                stringResource(R.string.sync_folders_title),
-                color = FgPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
-            )
-            Spacer(Modifier.weight(1f))
-            // Mirror of back button to keep title centred
-            Box(Modifier.size(36.dp))
-        }
+        val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+        val contentTopPad = floatingHeaderContentTopPadding()
 
         if (state.isLoading) {
             // Skeleton folder rows so the layout previews itself before content arrives.
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .padding(top = contentTopPad)
                     .padding(horizontal = 20.dp)
                     .background(colors.cardBg, cardShape)
                     .border(0.5.dp, colors.cardBorder, cardShape),
@@ -157,7 +134,10 @@ fun SyncFoldersScreen(
                 }
             }
         } else {
-            LazyColumn(modifier = Modifier.fillMaxSize()) {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(top = contentTopPad, bottom = navBottom),
+            ) {
                 // ── Description ──────────────────────────────────────────────
                 item {
                     Text(
@@ -211,6 +191,8 @@ fun SyncFoldersScreen(
                             FolderRow(
                                 folder   = folder,
                                 onToggle = { viewModel.toggle(folder.name) },
+                                onMirrorToggle = { viewModel.toggleMirror(folder.name) },
+                                onRemove = { viewModel.removeManualFolder(folder.name) },
                             )
                             if (i < state.folders.lastIndex) {
                                 HorizontalDivider(
@@ -317,6 +299,8 @@ fun SyncFoldersScreen(
                 item { Spacer(Modifier.height(32.dp)) }
             }
         }
+
+        SettingsPillHeader(title = stringResource(R.string.sync_folders_title), onBack = onBack)
     }
 }
 
@@ -324,15 +308,16 @@ fun SyncFoldersScreen(
 private fun FolderRow(
     folder: SyncFoldersViewModel.SyncFolder,
     onToggle: () -> Unit,
+    onMirrorToggle: () -> Unit,
+    onRemove: () -> Unit,
 ) {
     val colors = AppColors.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onToggle)
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(14.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         // Thumbnail (fallback folder icon when empty)
         Box(
@@ -366,6 +351,7 @@ private fun FolderRow(
                 color      = FgPrimary,
                 fontSize   = 14.sp,
                 fontWeight = FontWeight.Medium,
+                maxLines = 2,
             )
             Text(
                 pluralStringResource(R.plurals.count_photos_plural, folder.itemCount, folder.itemCount),
@@ -374,19 +360,57 @@ private fun FolderRow(
             )
         }
 
-        // Selection indicator
-        if (folder.isSelected) {
+        // Hand-added placeholder folders can be removed from the watch list entirely.
+        if (folder.isManual) {
             Icon(
-                Icons.Default.CheckCircle, stringResource(R.string.sync_folders_selected_cd),
-                tint     = Accent,
-                modifier = Modifier.size(22.dp),
-            )
-        } else {
-            Box(
+                Icons.Default.Close,
+                contentDescription = stringResource(R.string.action_remove),
+                tint = FgMute,
                 modifier = Modifier
-                    .size(22.dp)
-                    .border(1.5.dp, colors.pillBorder, CircleShape),
+                    .clip(CircleShape)
+                    .clickable(onClick = onRemove)
+                    .padding(4.dp)
+                    .size(18.dp),
             )
         }
+
+        // Two checkboxes side by side: back it up, and also surface it as a Drive album.
+        FolderCheck(
+            checked = folder.isSelected,
+            label = stringResource(R.string.sync_folder_backup_label),
+            onClick = onToggle,
+        )
+        FolderCheck(
+            checked = folder.isMirrored,
+            label = stringResource(R.string.sync_folder_album_label),
+            onClick = onMirrorToggle,
+        )
+    }
+}
+
+/** One labelled checkbox in a [FolderRow] — an icon over a short caption so the two per-folder
+ *  choices (back up / album) read clearly. */
+@Composable
+private fun FolderCheck(checked: Boolean, label: String, onClick: () -> Unit) {
+    val colors = AppColors.current
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 6.dp, vertical = 4.dp),
+    ) {
+        if (checked) {
+            Icon(Icons.Default.CheckCircle, null, tint = Accent, modifier = Modifier.size(22.dp))
+        } else {
+            Box(modifier = Modifier.size(22.dp).border(1.5.dp, colors.pillBorder, CircleShape))
+        }
+        Spacer(Modifier.height(3.dp))
+        Text(
+            label,
+            color = if (checked) Accent else FgMute,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Medium,
+        )
     }
 }

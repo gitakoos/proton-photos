@@ -113,6 +113,54 @@ class AppDatabaseMigrationTest {
     }
 
     @Test
+    fun migrate_v13_to_v14_createsPerceptualHashTable_acceptsRow() {
+        Migrations.MIGRATION_13_14.migrate(db)
+
+        // The table exists and accepts a row shaped exactly like PerceptualHashEntity.
+        db.execSQL(
+            """
+            INSERT INTO perceptual_hash (`key`, hash, isCloud, freshness, algoVersion, computedAt)
+            VALUES ('link-1', 1234567890, 1, 'link-1', 1, 5000)
+            """.trimIndent()
+        )
+
+        db.query(
+            "SELECT `key`, hash, isCloud, freshness, algoVersion, computedAt FROM perceptual_hash WHERE `key` = 'link-1'"
+        ).use { cur ->
+            assertTrue("expected the inserted fingerprint row to be readable", cur.moveToFirst())
+            assertEquals("link-1", cur.getString(0))
+            assertEquals(1234567890L, cur.getLong(1))
+            assertEquals("isCloud stored as INTEGER 1", 1, cur.getInt(2))
+            assertEquals("link-1", cur.getString(3))
+            assertEquals(1, cur.getInt(4))
+            assertEquals(5000L, cur.getLong(5))
+        }
+    }
+
+    @Test
+    fun migrate_v13_to_v14_perceptualHashKeyIsPrimaryKey_upsertReplaces() {
+        Migrations.MIGRATION_13_14.migrate(db)
+
+        db.execSQL(
+            "INSERT INTO perceptual_hash (`key`, hash, isCloud, freshness, algoVersion, computedAt) " +
+                "VALUES ('u', 1, 0, 'a_10', 1, 1)"
+        )
+        // A second write for the same key replaces it (PRIMARY KEY on `key`), mirroring @Upsert.
+        db.execSQL(
+            "INSERT OR REPLACE INTO perceptual_hash (`key`, hash, isCloud, freshness, algoVersion, computedAt) " +
+                "VALUES ('u', 99, 0, 'a_20', 1, 2)"
+        )
+
+        db.query("SELECT COUNT(*), MAX(hash), MAX(freshness) FROM perceptual_hash WHERE `key` = 'u'")
+            .use { cur ->
+                assertTrue(cur.moveToFirst())
+                assertEquals("the key is a primary key, so only one row survives", 1, cur.getInt(0))
+                assertEquals("the replacement hash won", 99L, cur.getLong(1))
+                assertEquals("the replacement freshness won", "a_20", cur.getString(2))
+            }
+    }
+
+    @Test
     fun migrate_v2_through_v4_chain_appliesBothMigrations() {
         // Seed a pure v2 row.
         db.execSQL(

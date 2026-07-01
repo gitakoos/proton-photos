@@ -53,6 +53,7 @@ import me.proton.core.accountmanager.domain.AccountManager
 import eu.akoos.photos.R
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.data.preferences.syncEffectivelyEnabled
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.usecase.ReconcileSyncStateUseCase
 import eu.akoos.photos.domain.usecase.UploadPendingUseCase
@@ -151,10 +152,13 @@ class SyncWorker @AssistedInject constructor(
                 NotificationManagerCompat.from(context).cancel(NOTIFICATION_ID)
             }
             // Content-URI trigger is OneTime; re-arm from finally so it keeps firing
-            // after each capture.
+            // after each capture — but only while backup is effectively on, so an idle
+            // fire (auto-sync on, no folder selected) stops re-arming itself.
             runCatching {
-                val wifiOnly = context.settingsDataStore.data.first()[SettingsKeys.SYNC_WIFI_ONLY] != false
-                scheduleContentObserver(context, wifiOnly)
+                if (syncEffectivelyEnabled(context)) {
+                    val wifiOnly = context.settingsDataStore.data.first()[SettingsKeys.SYNC_WIFI_ONLY] != false
+                    scheduleContentObserver(context, wifiOnly)
+                }
             }
         }
     }
@@ -414,6 +418,39 @@ class SyncWorker @AssistedInject constructor(
                 ExistingWorkPolicy.APPEND_OR_REPLACE,
                 request,
             )
+        }
+
+        /**
+         * Single arming/teardown point for ALL background auto-sync triggers. Gates on
+         * [syncEffectivelyEnabled] so the periodic worker, the content-URI trigger and the opt-in
+         * keep-alive service are armed ONLY when backup will actually upload — auto-sync ON with no
+         * folder selected leaves nothing to do, so waking + flashing the "Checking…" notification is
+         * pure battery drain. Tearing down the same set when sync goes idle (e.g. the last folder is
+         * deselected) means the triggers stop the same session instead of lingering until restart.
+         *
+         * Does NOT touch the forced-upload path ([NAME_ONESHOT] / inline upload from a queued
+         * album-add or an explicit "back up now"): those legitimately bypass the folder gate and are
+         * never routed through here.
+         */
+        suspend fun reconcileBackgroundWork(context: Context) {
+            val workManager = WorkManager.getInstance(context)
+            val enabled = syncEffectivelyEnabled(context)
+            val prefs = context.settingsDataStore.data.first()
+            val wifiOnly = prefs[SettingsKeys.SYNC_WIFI_ONLY] != false
+            val notifyBackupStatus = prefs[SettingsKeys.NOTIFY_BACKUP_STATUS] == true
+            if (enabled) {
+                schedule(workManager, wifiOnly, MIN_INTERVAL_MINUTES)
+                scheduleContentObserver(context, wifiOnly)
+                // The keep-alive foreground service stays opt-in: only start it when its
+                // notification has been turned on (it cannot be foreground without one).
+                if (notifyBackupStatus) {
+                    eu.akoos.photos.service.BackgroundSyncService.start(context)
+                }
+            } else {
+                cancel(workManager)
+                workManager.cancelUniqueWork(NAME_CONTENT_OBSERVER)
+                eu.akoos.photos.service.BackgroundSyncService.stop(context)
+            }
         }
     }
 }

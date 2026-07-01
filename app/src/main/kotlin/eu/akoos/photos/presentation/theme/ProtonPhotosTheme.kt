@@ -166,15 +166,23 @@ private fun lightAccentFor(palette: ThemePalette): Pair<Color, Color> = when (pa
     ThemePalette.Mono    -> AccentLightMono    to Accent2LightMono
 }
 
-private fun darkAppColors(palette: ThemePalette): AppColorsTokens {
+// AMOLED override — base surfaces drop to true black while cards/panels stay one step up so
+// rows, dividers, and the editor panels keep their separation against the black page.
+private val Bg0Amoled = Color(0xFF000000)
+private val Bg1Amoled = Color(0xFF000000)
+private val Bg2Amoled = Color(0xFF101010)
+private val PageBgAmoled = Color(0xFF000000)
+private val CardBgAmoled = Color(0xFF0C0C0D)
+
+private fun darkAppColors(palette: ThemePalette, amoled: Boolean = false): AppColorsTokens {
     val (accent, accent2) = darkAccentFor(palette)
     return AppColorsTokens(
         isLight        = false,
-        bg0            = Bg0Dark,
-        bg1            = Bg1Dark,
-        bg2            = Bg2Dark,
-        pageBg         = Color(0xFF0E0E0F),
-        cardBg         = Color(0xFF1C1C1E),
+        bg0            = if (amoled) Bg0Amoled else Bg0Dark,
+        bg1            = if (amoled) Bg1Amoled else Bg1Dark,
+        bg2            = if (amoled) Bg2Amoled else Bg2Dark,
+        pageBg         = if (amoled) PageBgAmoled else Color(0xFF0E0E0F),
+        cardBg         = if (amoled) CardBgAmoled else Color(0xFF1C1C1E),
         cardBorder     = Color(0xFF2C2C2E),
         surfaceWeak    = Color(0x14FFFFFF),
         fgPrimary      = FgPrimaryDark,
@@ -236,7 +244,7 @@ private fun lightAppColors(palette: ThemePalette): AppColorsTokens {
     )
 }
 
-private fun darkColorSchemeFor(palette: ThemePalette) = darkColorScheme(
+private fun darkColorSchemeFor(palette: ThemePalette, amoled: Boolean = false) = darkColorScheme(
     primary = darkAccentFor(palette).first,
     onPrimary = Color.White,
     // Chips / switches sit on a tinted accent container — derive it from the active
@@ -245,11 +253,11 @@ private fun darkColorSchemeFor(palette: ThemePalette) = darkColorScheme(
     onPrimaryContainer = FgPrimaryDark,
     secondary = darkAccentFor(palette).second,
     onSecondary = Color.White,
-    background = Bg0Dark,
+    background = if (amoled) Bg0Amoled else Bg0Dark,
     onBackground = FgPrimaryDark,
-    surface = Bg1Dark,
+    surface = if (amoled) Bg1Amoled else Bg1Dark,
     onSurface = FgPrimaryDark,
-    surfaceVariant = Bg2Dark,
+    surfaceVariant = if (amoled) Bg2Amoled else Bg2Dark,
     onSurfaceVariant = FgDimDark,
     surfaceContainer = PillBgDark,
     outline = Line2Dark,
@@ -441,10 +449,12 @@ private val InterTypography: Typography = Typography().let { b ->
 fun ProtonPhotosTheme(
     darkTheme: Boolean = true,
     palette: ThemePalette = ThemePalette.Default,
+    amoledBlack: Boolean = false,
     content: @Composable () -> Unit,
 ) {
-    val colors  = if (darkTheme) darkAppColors(palette) else lightAppColors(palette)
-    val scheme  = if (darkTheme) darkColorSchemeFor(palette) else lightColorSchemeFor(palette)
+    val amoled  = darkTheme && amoledBlack
+    val colors  = if (darkTheme) darkAppColors(palette, amoled) else lightAppColors(palette)
+    val scheme  = if (darkTheme) darkColorSchemeFor(palette, amoled) else lightColorSchemeFor(palette)
     MaterialTheme(colorScheme = scheme, typography = InterTypography) {
         CompositionLocalProvider(
             LocalIndication provides NoIndication,

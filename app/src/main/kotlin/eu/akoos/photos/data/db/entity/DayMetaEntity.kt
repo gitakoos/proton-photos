@@ -27,8 +27,10 @@ import androidx.room.PrimaryKey
 
 /**
  * Per-day user-authored metadata for the Calendar view, keyed on an ISO-8601 date string.
- * Keyed on date alone (Room @PrimaryKey is single-column), so [DayMetaDao] queries filter by
- * [userId] to keep a second account from reading or overwriting the previous account's notes.
+ * The Room @PrimaryKey is single-column ([date]), so READS filter by [userId], but a WRITE for a
+ * date another account already annotated replaces that row (the PK ignores userId). A composite
+ * (userId, date) key is the correct fix and needs a migration; until then this is correct only for
+ * a single account per device.
  */
 @Entity(tableName = "day_meta")
 data class DayMetaEntity(

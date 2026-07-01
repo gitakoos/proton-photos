@@ -59,6 +59,7 @@ import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.usecase.DeletePhotoUseCase
 import eu.akoos.photos.data.db.dao.PhotoLocationDao
 import eu.akoos.photos.data.hidden.HiddenStorageManager
+import eu.akoos.photos.data.offline.OfflineStorageManager
 import eu.akoos.photos.domain.usecase.DownloadPhotosUseCase
 import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
 import eu.akoos.photos.util.ExifHelper
@@ -83,6 +84,7 @@ class PhotoViewerViewModel @Inject constructor(
     private val deletePhotoUseCase: DeletePhotoUseCase,
     private val downloadPhotos: DownloadPhotosUseCase,
     private val hiddenStorage: HiddenStorageManager,
+    private val offlineStore: OfflineStorageManager,
     private val syncStateRepo: eu.akoos.photos.domain.repository.SyncStateRepository,
     private val networkObserver: eu.akoos.photos.util.NetworkObserver,
     private val albumListEvents: eu.akoos.photos.util.AlbumListEventBus,
@@ -250,6 +252,17 @@ class PhotoViewerViewModel @Inject constructor(
 
     private val _isFavorite = MutableStateFlow(false)
     val isFavorite: StateFlow<Boolean> = _isFavorite.asStateFlow()
+
+    /** True when the settled cloud-only photo is pinned for offline (a blob exists in the
+     *  offline store). Recomputed per item alongside [_isFavorite]; always false off a
+     *  CloudOnly item. */
+    private val _isOffline = MutableStateFlow(false)
+    val isOffline: StateFlow<Boolean> = _isOffline.asStateFlow()
+
+    /** One-shot offline pin/un-pin status for the screen to snackbar; same replay=0 +
+     *  single-buffer shape as [addToAlbumDone] so a paused screen never blocks the toggle. */
+    private val _offlineMessage = MutableSharedFlow<String>(replay = 0, extraBufferCapacity = 1)
+    val offlineMessage: SharedFlow<String> = _offlineMessage.asSharedFlow()
 
     /** The category PhotoTag ids on the currently-shown photo, so the details sheet's tag chips
      *  reflect adds/removes immediately (optimistic, before the next sync). */
@@ -636,6 +649,16 @@ class PhotoViewerViewModel @Inject constructor(
      *  after the delete succeeds; cleared (and the file removed) if the user cancels. */
     private var pendingHidePrivateUri: String? = null
 
+    /** Source folder of [pendingHidePrivateUri], captured at hide time so the eventual unhide
+     *  can return the file to its original location. Persisted alongside the private URI in
+     *  [SettingsKeys.HIDDEN_URI_SOURCE_FOLDER_MAP] once the hide commits. */
+    private var pendingHideSourceFolder: String? = null
+
+    /** Original display name of [pendingHidePrivateUri], captured at hide time and persisted in
+     *  [SettingsKeys.HIDDEN_URI_ORIGINAL_NAME_MAP] once the hide commits so unhide can restore
+     *  the original filename. */
+    private var pendingHideOriginalName: String? = null
+
     /**
      * Moves a photo to the Hidden vault: copy bytes to app-private storage, stage the URI as
      * pending (not yet in HIDDEN_PHOTO_URIS), then delete the MediaStore original (Android 11+
@@ -647,15 +670,17 @@ class PhotoViewerViewModel @Inject constructor(
             // Pull dateTaken alongside so the hidden file can preserve its capture-time
             // through the round-trip — see HiddenStorageManager.store(captureTimeMs).
             val sourceUri: String; val displayName: String; val mime: String; val dateTakenMs: Long
-            val cloudLinkId: String?
+            val cloudLinkId: String?; val bucketName: String?
             when (item) {
                 is GalleryItem.LocalOnly -> {
                     sourceUri = item.local.uri; displayName = item.local.displayName
                     mime = item.local.mimeType; dateTakenMs = item.local.dateTaken; cloudLinkId = null
+                    bucketName = item.local.bucketName
                 }
                 is GalleryItem.Synced -> {
                     sourceUri = item.local.uri; displayName = item.local.displayName
                     mime = item.local.mimeType; dateTakenMs = item.local.dateTaken; cloudLinkId = item.cloud.linkId
+                    bucketName = item.local.bucketName
                 }
                 is GalleryItem.CloudOnly -> return@launch
             }
@@ -663,6 +688,9 @@ class PhotoViewerViewModel @Inject constructor(
             if (hiddenStorage.isHiddenUri(sourceUri)) {
                 Log.w("PhotoViewerVM", "hideItem called on already-hidden URI; use unhideHiddenItem instead")
                 return@launch
+            }
+            val sourceFolder = withContext(Dispatchers.IO) {
+                hiddenStorage.sourceFolderFor(sourceUri, bucketName)
             }
             val privateUri = withContext(Dispatchers.IO) {
                 hiddenStorage.store(sourceUri, displayName, mime, captureTimeMs = dateTakenMs)
@@ -681,6 +709,8 @@ class PhotoViewerViewModel @Inject constructor(
                 }
             }
             pendingHidePrivateUri = privateUri
+            pendingHideSourceFolder = sourceFolder
+            pendingHideOriginalName = displayName.takeIf { it.isNotBlank() }
 
             val userId = accountManager.getPrimaryUserId().first() ?: run {
                 cancelPendingHide()
@@ -713,11 +743,23 @@ class PhotoViewerViewModel @Inject constructor(
 
     private fun commitPendingHide() {
         val privateUri = pendingHidePrivateUri ?: return
+        val sourceFolder = pendingHideSourceFolder
+        val originalName = pendingHideOriginalName
         pendingHidePrivateUri = null
+        pendingHideSourceFolder = null
+        pendingHideOriginalName = null
         viewModelScope.launch {
             context.settingsDataStore.edit { prefs ->
                 val current = prefs[SettingsKeys.HIDDEN_PHOTO_URIS] ?: emptySet()
                 prefs[SettingsKeys.HIDDEN_PHOTO_URIS] = current + privateUri
+                if (!sourceFolder.isNullOrBlank()) {
+                    val folders = prefs[SettingsKeys.HIDDEN_URI_SOURCE_FOLDER_MAP] ?: emptySet()
+                    prefs[SettingsKeys.HIDDEN_URI_SOURCE_FOLDER_MAP] = folders + "$privateUri|$sourceFolder"
+                }
+                if (!originalName.isNullOrBlank()) {
+                    val names = prefs[SettingsKeys.HIDDEN_URI_ORIGINAL_NAME_MAP] ?: emptySet()
+                    prefs[SettingsKeys.HIDDEN_URI_ORIGINAL_NAME_MAP] = names + "$privateUri|$originalName"
+                }
             }
             _isHidden.value = true
         }
@@ -726,6 +768,8 @@ class PhotoViewerViewModel @Inject constructor(
     private fun cancelPendingHide() {
         val privateUri = pendingHidePrivateUri ?: return
         pendingHidePrivateUri = null
+        pendingHideSourceFolder = null
+        pendingHideOriginalName = null
         // Drop the orphaned private copy — the user did not confirm the system delete.
         viewModelScope.launch(Dispatchers.IO) {
             hiddenStorage.delete(privateUri)
@@ -739,13 +783,31 @@ class PhotoViewerViewModel @Inject constructor(
      */
     fun unhideHiddenItem(hiddenUri: String, originalDisplayName: String? = null) {
         viewModelScope.launch(Dispatchers.IO) {
-            hiddenStorage.restore(hiddenUri, originalDisplayName)
+            // Restore to the folder the file was hidden from (recorded at hide time); falls
+            // back to the Pictures/Movies root when no source folder was captured.
+            val prefsSnapshot = context.settingsDataStore.data.first()
+            val sourceFolder = prefsSnapshot[SettingsKeys.HIDDEN_URI_SOURCE_FOLDER_MAP]
+                ?.firstOrNull { it.startsWith("$hiddenUri|") }
+                ?.substringAfter('|')
+            // Prefer the name persisted at hide time over any passed-in name, which may be
+            // derived from the private UUID file and would restore as a code.
+            val resolvedName = prefsSnapshot[SettingsKeys.HIDDEN_URI_ORIGINAL_NAME_MAP]
+                ?.firstOrNull { it.startsWith("$hiddenUri|") }
+                ?.substringAfter('|')
+                ?: originalDisplayName
+            hiddenStorage.restore(hiddenUri, resolvedName, albumFolderName = sourceFolder)
             context.settingsDataStore.edit { prefs ->
                 val current = prefs[SettingsKeys.HIDDEN_PHOTO_URIS] ?: emptySet()
                 prefs[SettingsKeys.HIDDEN_PHOTO_URIS] = current - hiddenUri
                 val mapping = prefs[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] ?: emptySet()
                 prefs[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] =
                     mapping.filterNot { it.startsWith("$hiddenUri|") }.toSet()
+                val folders = prefs[SettingsKeys.HIDDEN_URI_SOURCE_FOLDER_MAP] ?: emptySet()
+                prefs[SettingsKeys.HIDDEN_URI_SOURCE_FOLDER_MAP] =
+                    folders.filterNot { it.startsWith("$hiddenUri|") }.toSet()
+                val names = prefs[SettingsKeys.HIDDEN_URI_ORIGINAL_NAME_MAP] ?: emptySet()
+                prefs[SettingsKeys.HIDDEN_URI_ORIGINAL_NAME_MAP] =
+                    names.filterNot { it.startsWith("$hiddenUri|") }.toSet()
             }
             _isHidden.value = false
         }
@@ -795,6 +857,12 @@ class PhotoViewerViewModel @Inject constructor(
                 is GalleryItem.LocalOnly -> false
             }
             _isFavorite.value = id in favIds || cloudFlag
+            // Offline pin reflects only a cloud-only item — a Synced/LocalOnly photo already
+            // has its bytes on the device, so it has no separate offline blob. The check is a
+            // directory walk, so keep it off the main thread (this runs on every page-settle).
+            _isOffline.value = (item as? GalleryItem.CloudOnly)?.let {
+                withContext(Dispatchers.IO) { offlineStore.isOffline(it.cloud.linkId) }
+            } ?: false
             // Seed the category tags for the details-sheet chips (cloud-backed photos only).
             _currentPhotoTags.value = when (item) {
                 is GalleryItem.Synced    -> item.cloud.tags
@@ -827,6 +895,65 @@ class PhotoViewerViewModel @Inject constructor(
             if (cloudPhoto != null) {
                 val userId = accountManager.getPrimaryUserId().first() ?: return@launch
                 cloudRepo.setCloudFavorite(userId, cloudPhoto, favorite = nowFavorite)
+            }
+        }
+    }
+
+    /**
+     * Pins (downloads a full-res blob into the offline store) or un-pins the current cloud-only
+     * photo for offline viewing. CloudOnly only — a Synced/LocalOnly item already has its bytes
+     * on the device. The pin set in [SettingsKeys.OFFLINE_PIN_IDS] is flipped optimistically
+     * (mirroring [toggleFavorite]); a failed download reverts both the pin and the blob.
+     */
+    fun toggleOfflinePin(item: GalleryItem) {
+        val cloud = (item as? GalleryItem.CloudOnly)?.cloud ?: return
+        val linkId = cloud.linkId
+        // Branch on the displayed state (kept current by checkIfFavorite) instead of a disk walk
+        // on the main thread; the button always reflects the settled item being toggled.
+        if (_isOffline.value) {
+            // Un-pin: drop the blob and the pin immediately; no network needed.
+            viewModelScope.launch {
+                context.settingsDataStore.edit { prefs ->
+                    val current = prefs[SettingsKeys.OFFLINE_PIN_IDS] ?: emptySet()
+                    prefs[SettingsKeys.OFFLINE_PIN_IDS] = current - linkId
+                }
+                offlineStore.delete(linkId)
+                _isOffline.value = false
+                _offlineMessage.emit(context.getString(R.string.offline_removed))
+            }
+            return
+        }
+        // Pin: optimistically mark on, then download the full-res blob into offline storage.
+        _isOffline.value = true
+        viewModelScope.launch {
+            context.settingsDataStore.edit { prefs ->
+                val current = prefs[SettingsKeys.OFFLINE_PIN_IDS] ?: emptySet()
+                prefs[SettingsKeys.OFFLINE_PIN_IDS] = current + linkId
+            }
+            try {
+                val userId = accountManager.getPrimaryUserId().first()
+                    ?: error("not logged in")
+                val file = cloudRepo.downloadFullResPhoto(userId, cloud)
+                offlineStore.store(linkId, file)
+                // If the photo was un-pinned (or the user signed out) while this was downloading,
+                // the blob would outlive its pin — drop it so the disk never drifts from the set.
+                val stillPinned = context.settingsDataStore.data.first()[SettingsKeys.OFFLINE_PIN_IDS]
+                    ?.contains(linkId) == true
+                if (!stillPinned) {
+                    offlineStore.delete(linkId)
+                    return@launch
+                }
+                _offlineMessage.emit(context.getString(R.string.offline_available))
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                // Revert the optimistic pin so the button doesn't claim an offline copy exists.
+                context.settingsDataStore.edit { prefs ->
+                    val current = prefs[SettingsKeys.OFFLINE_PIN_IDS] ?: emptySet()
+                    prefs[SettingsKeys.OFFLINE_PIN_IDS] = current - linkId
+                }
+                offlineStore.delete(linkId)
+                _isOffline.value = false
+                _offlineMessage.emit(context.getString(R.string.offline_failed))
             }
         }
     }
@@ -929,6 +1056,16 @@ class PhotoViewerViewModel @Inject constructor(
                     else entry
                 }.toSet()
                 prefs[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] = updatedMapping
+                val folders = prefs[SettingsKeys.HIDDEN_URI_SOURCE_FOLDER_MAP] ?: emptySet()
+                prefs[SettingsKeys.HIDDEN_URI_SOURCE_FOLDER_MAP] = folders.map { entry ->
+                    if (entry.startsWith("$uri|")) "$newUri|${entry.substringAfter('|')}"
+                    else entry
+                }.toSet()
+                val names = prefs[SettingsKeys.HIDDEN_URI_ORIGINAL_NAME_MAP] ?: emptySet()
+                prefs[SettingsKeys.HIDDEN_URI_ORIGINAL_NAME_MAP] = names.map { entry ->
+                    if (entry.startsWith("$uri|")) "$newUri|${entry.substringAfter('|')}"
+                    else entry
+                }.toSet()
             }
             return
         }
@@ -953,9 +1090,23 @@ class PhotoViewerViewModel @Inject constructor(
         else
             eu.akoos.photos.util.ProtonPhotosStorage.DEFAULT_PICTURES
 
+        // Carry the source's capture date onto the copy. Without it the new row gets
+        // DATE_TAKEN = insert time (today), so a renamed copy would jump to the top of the
+        // gallery. The raw byte copy keeps the original EXIF for the scanner, and the column is
+        // re-asserted after the IS_PENDING flip because the publish scan can clobber a timestamp
+        // set during insert (the same Android 13+ behaviour the download path handles).
+        val srcDateTakenMs = runCatching {
+            context.contentResolver.query(
+                parsed, arrayOf(android.provider.MediaStore.MediaColumns.DATE_TAKEN), null, null, null,
+            )?.use { c -> if (c.moveToFirst() && !c.isNull(0)) c.getLong(0) else 0L } ?: 0L
+        }.getOrDefault(0L)
         val values = android.content.ContentValues().apply {
             put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, newName)
             put(android.provider.MediaStore.MediaColumns.MIME_TYPE, mime)
+            if (srcDateTakenMs > 0L) {
+                put(android.provider.MediaStore.MediaColumns.DATE_TAKEN, srcDateTakenMs)
+                put(android.provider.MediaStore.MediaColumns.DATE_MODIFIED, srcDateTakenMs / 1000L)
+            }
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
                 put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, relPath)
                 put(android.provider.MediaStore.MediaColumns.IS_PENDING, 1)
@@ -973,6 +1124,13 @@ class PhotoViewerViewModel @Inject constructor(
                 put(android.provider.MediaStore.MediaColumns.IS_PENDING, 0)
             }
             context.contentResolver.update(target, finalValues, null, null)
+            if (srcDateTakenMs > 0L) {
+                val dateValues = android.content.ContentValues().apply {
+                    put(android.provider.MediaStore.MediaColumns.DATE_TAKEN, srcDateTakenMs)
+                    put(android.provider.MediaStore.MediaColumns.DATE_MODIFIED, srcDateTakenMs / 1000L)
+                }
+                context.contentResolver.update(target, dateValues, null, null)
+            }
         }
     }
 
@@ -1020,15 +1178,26 @@ class PhotoViewerViewModel @Inject constructor(
     fun loadAlbums() {
         viewModelScope.launch {
             val userId = accountManager.getPrimaryUserId().first() ?: return@launch
+            // Seed from the cached set first — the same full list the Albums tab and the gallery
+            // picker show (including albums created this session). A fresh network fetch alone can
+            // surface fewer entries while it's slow or a detail chunk fails, which left the viewer's
+            // picker missing albums. Then refresh from the network.
+            runCatching { cloudRepo.loadAlbumsCached() }.getOrNull()
+                ?.takeIf { it.isNotEmpty() }
+                ?.let { _albums.value = it }
             runCatching { cloudRepo.loadAlbums(userId) }
                 .onSuccess { _albums.value = it }
                 .onFailure { e ->
-                    val friendly = friendlyNetworkError(e, networkObserver.isOnline.value, context)
-                    _transientError.value = friendly
-                        ?: context.getString(
+                    // Passive prefetch on viewer open: a no-network failure is expected (e.g.
+                    // opening a pinned photo offline) and must not pop a "no connection" snackbar.
+                    // Surface only a genuine, non-connectivity error; the add-to-album sheet copes
+                    // with an empty list.
+                    if (friendlyNetworkError(e, networkObserver.isOnline.value, context) == null) {
+                        _transientError.value = context.getString(
                             R.string.viewer_load_albums_failed,
                             eu.akoos.photos.util.sanitizeErrorMessage(e.message),
                         )
+                    }
                 }
         }
     }
@@ -1270,9 +1439,27 @@ class PhotoViewerViewModel @Inject constructor(
                     is GalleryItem.LocalOnly -> Uri.parse(item.local.uri)
                     is GalleryItem.Synced    -> Uri.parse(item.local.uri)
                     is GalleryItem.CloudOnly -> {
-                        val userId = accountManager.getPrimaryUserId().first()
-                            ?: error(context.getString(R.string.viewer_not_signed_in))
-                        val file = cloudRepo.downloadFullResPhoto(userId, item.cloud)
+                        // Offline pin short-circuit: a pinned blob already holds the full-res
+                        // bytes in app-private storage, so share it with no network download. The
+                        // blob dir isn't a configured FileProvider root, so copy it into the
+                        // canonical fullres path the provider already exposes (a local, instant copy).
+                        val file = withContext(Dispatchers.IO) {
+                            offlineStore.findBlob(item.cloud.linkId)
+                                ?.takeIf { it.length() > 0 }
+                                ?.let { blob ->
+                                    eu.akoos.photos.data.repository.drive.PhotoDownloadService
+                                        .fullResFile(context, item.cloud)?.also { dest ->
+                                        if (!dest.exists() || dest.length() == 0L) {
+                                            dest.parentFile?.mkdirs()
+                                            blob.copyTo(dest, overwrite = true)
+                                        }
+                                    }
+                                }
+                        } ?: run {
+                            val userId = accountManager.getPrimaryUserId().first()
+                                ?: error(context.getString(R.string.viewer_not_signed_in))
+                            cloudRepo.downloadFullResPhoto(userId, item.cloud)
+                        }
                         androidx.core.content.FileProvider.getUriForFile(
                             context, "${context.packageName}.share.fileprovider", file,
                         ).also {
@@ -1351,6 +1538,22 @@ class PhotoViewerViewModel @Inject constructor(
         viewModelScope.launch {
             val userId = accountManager.getPrimaryUserId().first() ?: run {
                 if (photo.thumbnailUrl == null) _state.value = ViewerState.Error(context.getString(R.string.viewer_not_logged_in))
+                return@launch
+            }
+            // Offline pin short-circuit: a pinned photo's full-res blob lives in app-private
+            // storage, so serve it straight from disk (no network, works fully offline) before
+            // the metered gate or any download. Mirrors the cached-blob success branch below.
+            val pinned = offlineStore.findBlob(photo.linkId)
+            if (pinned != null && pinned.length() > 0) {
+                val pinnedUri = Uri.fromFile(pinned)
+                _cloudFullResSize.value = pinned.length()
+                if (_state.value.itemKey != itemKey) return@launch
+                _state.value = if (isVideo)
+                    ViewerState.ShowVideo(pinnedUri, itemKey = itemKey, isFullRes = true)
+                else
+                    ViewerState.ShowImage(pinnedUri, itemKey = itemKey, isFullRes = true)
+                if (!isVideo) loadMetadata(pinnedUri.toString())
+                else _cloudVideoMeta.value = readVideoMeta(pinned)
                 return@launch
             }
             // Wi-Fi-only-for-fullres gate: on a metered network hold the auto-download and let the

@@ -169,7 +169,8 @@ class AlbumPhotoPickerViewModel @Inject constructor(
                     return@launch
                 }
             }
-            val queued = if (localUris.isNotEmpty()) {
+            val hadLocal = localUris.isNotEmpty()
+            if (hadLocal) {
                 try {
                     forceUploadLocalUris.queueForAlbum(userId, albumLinkId, localUris)
                 } catch (e: Exception) {
@@ -180,15 +181,20 @@ class AlbumPhotoPickerViewModel @Inject constructor(
                     }
                     return@launch
                 }
-            } else 0
+            }
 
-            if (added == 0 && queued == 0) {
+            // A local pick is queued to upload and joins the album once it finishes; queueForAlbum
+            // reporting 0 newly-scheduled items (already pending) is not a failure. Only a genuinely
+            // empty result — nothing added to the cloud and nothing local to queue — is a real failure.
+            if (added == 0 && !hadLocal) {
                 _addState.update { PickerAddState.Failed(context.getString(R.string.gallery_add_to_album_failed)) }
                 return@launch
             }
             albumListEvents.notifyChanged()
             _selected.update { emptySet() }
-            _addState.update { PickerAddState.Done(added, queued) }
+            // Report the local count as "queued" so the picker can tell the user those photos will
+            // appear after upload, even when queueForAlbum reported nothing newly scheduled.
+            _addState.update { PickerAddState.Done(added, if (hadLocal) localUris.size else 0) }
         }
     }
 

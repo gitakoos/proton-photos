@@ -192,15 +192,13 @@ class CalendarViewModel @Inject constructor(
         val terms = needle.split(Regex("\\s+")).filter { it.isNotBlank() }
         if (terms.isEmpty()) return emptyList()
 
-        // Pull all DayMeta rows for cross-checking the description against the
-        // user-authored fields stored in the DB. We bias the DAO call against the FIRST
-        // term — Room narrows the row set cheaply by ISO LIKE, then we intersect the
-        // remaining terms in-memory across the day-bucket-derived strings.
+        // Pull EVERY DayMeta row so each annotated day's description is in the haystack below.
+        // Biasing the fetch on one term used to drop matches whose term lived only in the
+        // description of a row the bias filtered out; the table is small (one row per annotated
+        // day), so loading all of it is cheap and correct.
         val uid = primaryUserId
         val metaByDate: Map<String, DayMetaEntity> = if (uid != null) {
-            runCatching {
-                dayMetaDao.searchByText(uid, "%${terms.first()}%")
-            }.getOrDefault(emptyList()).associateBy { it.date }
+            runCatching { dayMetaDao.getAll(uid) }.getOrDefault(emptyList()).associateBy { it.date }
         } else {
             emptyMap()
         }

@@ -50,6 +50,9 @@ import androidx.navigation.navArgument
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import android.content.Context
+import androidx.compose.ui.platform.LocalContext
+import eu.akoos.photos.BuildConfig
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
@@ -73,6 +76,7 @@ import eu.akoos.photos.presentation.editor.VideoEditorScreen
 import eu.akoos.photos.presentation.folders.DeviceFolderDetailScreen
 import eu.akoos.photos.presentation.gallery.GalleryScreen
 import eu.akoos.photos.presentation.hidden.HiddenAlbumScreen
+import eu.akoos.photos.presentation.offline.OfflinePhotosScreen
 import eu.akoos.photos.presentation.memories.MemoriesScreen
 import eu.akoos.photos.presentation.memories.MemoryCategory
 import eu.akoos.photos.presentation.memories.MemoryCategoryScreen
@@ -100,12 +104,15 @@ import eu.akoos.photos.presentation.map.MapScreen
 import eu.akoos.photos.presentation.search.SearchScreen
 import eu.akoos.photos.presentation.settings.TrashScreen
 import eu.akoos.photos.presentation.viewer.PhotoViewerScreen
+import eu.akoos.photos.presentation.whatsnew.WhatsNewScreen
 import javax.inject.Inject
 
 sealed class Screen(val route: String) {
     data object Gallery : Screen("gallery")
     data object Settings : Screen("settings")
     data object SyncSettings : Screen("sync_settings")
+    data object MetadataSettings : Screen("metadata_settings")
+    data object Activity : Screen("activity")
     data object BackupContent : Screen("backup_content")
     data object BackupBehavior : Screen("backup_behavior")
     data object BackupNetwork : Screen("backup_network")
@@ -113,15 +120,17 @@ sealed class Screen(val route: String) {
     data object PrivacySettings : Screen("privacy_settings")
     data object SecuritySettings : Screen("security_settings")
     data object PrivacySecuritySettings : Screen("privacy_security_settings")
+    data object Permissions : Screen("permissions")
     data object Viewer : Screen("viewer")
     data object AlbumDetail : Screen("album_detail")
     data object AlbumPhotoPicker : Screen("album_photo_picker")
     data object SyncFolders : Screen("sync_folders")
     data object DeviceFolderDetail : Screen("device_folder_detail")
     data object ExcludedFolders : Screen("excluded_folders")
-    data object AlbumMirrorFolders : Screen("album_mirror_folders")
     data object Trash : Screen("trash")
+    data object DuplicateFinder : Screen("duplicate_finder")
     data object HiddenAlbum : Screen("hidden_album")
+    data object Offline : Screen("offline_photos")
     data object PhotoEditor : Screen("photo_editor")
     data object Loading : Screen("loading")
     data object Login : Screen("login")
@@ -129,6 +138,7 @@ sealed class Screen(val route: String) {
     data object Faq : Screen("faq")
     data object Account : Screen("account_settings")
     data object Onboarding : Screen("onboarding")
+    data object WhatsNew : Screen("whats_new")
     data object AppearanceSettings : Screen("appearance_settings")
     data object LandingTab : Screen("landing_tab")
     data object ThemeSettings : Screen("theme_settings")
@@ -233,6 +243,12 @@ fun NavGraph(
     var selectedDayDate by remember { mutableStateOf<String?>(null) }
     // The device folder (MediaStore bucket name) the user tapped on the device-folder browser.
     var selectedDeviceFolder by remember { mutableStateOf<String?>(null) }
+
+    // One-shot latch for the post-update "What's new" gate. Flipped the first time the Gallery
+    // route mounts so the version check + navigate fires at most once per process, even if the
+    // user navigates back to the gallery from a sub-screen. The persisted seen-version pref is
+    // the durable guard across launches; this just prevents a re-fire before the async write lands.
+    var whatsNewChecked by remember { mutableStateOf(false) }
 
     val isLoggedIn = navViewModel.isLoggedIn
 
@@ -357,12 +373,47 @@ fun NavGraph(
             )
         }
 
+        composable(Screen.WhatsNew.route) {
+            // The screen marks the version seen internally (markSeen) before invoking any of these,
+            // so every exit path settles the gate. Done/back simply pop back to the gallery the
+            // screen sits on top of. The Open buttons navigate to the feature AND pop WhatsNew so a
+            // back press from the feature returns to the gallery, not to this screen.
+            WhatsNewScreen(
+                onDone = { navController.popBackStack() },
+                onOpenDuplicates = {
+                    navController.navigate(Screen.DuplicateFinder.route) {
+                        popUpTo(Screen.WhatsNew.route) { inclusive = true }
+                    }
+                },
+                onOpenOffline = {
+                    navController.navigate(Screen.Offline.route) {
+                        popUpTo(Screen.WhatsNew.route) { inclusive = true }
+                    }
+                },
+            )
+        }
+
         composable(Screen.Gallery.route) {
             // Foreground drain for the upload worker's pending delete queue. Mounted
             // here on the Gallery route so it lives for the entire authenticated
             // session and renders nothing of its own until there is actually a queue
             // to surface to the user.
             PendingDeleteHandler()
+            // One-time post-update highlights. The startup router only lands here once the user is
+            // fully Ready (logged in AND onboarded), so reaching this composable already implies
+            // that gate. We read the seen-version pref once and, if this build's versionCode is
+            // newer, push the What's-new screen on top of the gallery. The latch + the pref check
+            // together keep it to a single show: markSeen() (called on every exit) raises the
+            // stored version so the condition is false on the next launch.
+            val whatsNewContext = LocalContext.current
+            LaunchedEffect(Unit) {
+                if (whatsNewChecked) return@LaunchedEffect
+                whatsNewChecked = true
+                val seen = whatsNewContext.settingsDataStore.data.first()[SettingsKeys.WHATS_NEW_SEEN_VERSION] ?: 0
+                if (seen < BuildConfig.VERSION_CODE) {
+                    navController.navigate(Screen.WhatsNew.route)
+                }
+            }
             GalleryScreen(
                 onPhotoClick = { items, index, hiddenCloudLinkIds ->
                     selectedViewerItems = items
@@ -733,10 +784,13 @@ fun NavGraph(
             SettingsScreen(
                 onBack                    = { navController.popBackStack() },
                 onSyncSettingsClick       = { navController.navigate(Screen.SyncSettings.route) },
+                onActivityClick           = { navController.navigate(Screen.Activity.route) },
                 onStorageClick            = { navController.navigate(Screen.StorageSettings.route) },
                 onPrivacySecurityClick    = { navController.navigate(Screen.PrivacySecuritySettings.route) },
+                onPermissionsClick        = { navController.navigate(Screen.Permissions.route) },
                 onNotificationsClick      = { navController.navigate(Screen.NotificationSettings.route) },
                 onRecentlyDeletedClick    = { navController.navigate(Screen.Trash.route) },
+                onFindDuplicatesClick     = { navController.navigate(Screen.DuplicateFinder.route) },
                 onAppearanceClick         = { navController.navigate(Screen.AppearanceSettings.route) },
                 onLanguageClick           = { navController.navigate(Screen.LanguageSettings.route) },
                 onAboutClick              = { navController.navigate(Screen.About.route) },
@@ -744,6 +798,10 @@ fun NavGraph(
                 onAccountClick            = { navController.navigate(Screen.Account.route) },
                 onCheckForUpdatesClick    = onCheckForUpdates,
             )
+        }
+
+        composable(Screen.Permissions.route) {
+            eu.akoos.photos.presentation.settings.PermissionsScreen(onBack = { navController.popBackStack() })
         }
 
         composable(Screen.About.route) {
@@ -759,6 +817,7 @@ fun NavGraph(
                 onBack = { navController.popBackStack() },
                 onThemeClick = { navController.navigate(Screen.ThemeSettings.route) },
                 onLanguageClick = { navController.navigate(Screen.LanguageSettings.route) },
+                onLayoutClick = { navController.navigate(Screen.TimelineLayout.route) },
                 onTimelineFilterClick = { navController.navigate(Screen.TimelineFilter.route) },
                 onLandingTabClick = { navController.navigate(Screen.LandingTab.route) },
             )
@@ -786,6 +845,19 @@ fun NavGraph(
                 onBackupContentClick  = { navController.navigate(Screen.BackupContent.route) },
                 onBackupBehaviorClick = { navController.navigate(Screen.BackupBehavior.route) },
                 onNetworkClick        = { navController.navigate(Screen.BackupNetwork.route) },
+                onMetadataClick       = { navController.navigate(Screen.MetadataSettings.route) },
+            )
+        }
+
+        composable(Screen.MetadataSettings.route) {
+            eu.akoos.photos.presentation.settings.MetadataSettingsScreen(
+                onBack = { navController.popBackStack() },
+            )
+        }
+
+        composable(Screen.Activity.route) {
+            eu.akoos.photos.presentation.settings.ActivityScreen(
+                onBack = { navController.popBackStack() },
             )
         }
 
@@ -794,7 +866,6 @@ fun NavGraph(
                 onBack                    = { navController.popBackStack() },
                 onBackupFoldersClick      = { navController.navigate(Screen.SyncFolders.route) },
                 onExcludedFoldersClick    = { navController.navigate(Screen.ExcludedFolders.route) },
-                onAlbumMirrorFoldersClick = { navController.navigate(Screen.AlbumMirrorFolders.route) },
             )
         }
 
@@ -810,23 +881,17 @@ fun NavGraph(
             )
         }
 
-        composable(Screen.AlbumMirrorFolders.route) {
-            eu.akoos.photos.presentation.settings.AlbumMirrorFoldersScreen(
-                onBack = { navController.popBackStack() },
-            )
-        }
-
         composable(Screen.StorageSettings.route) {
             eu.akoos.photos.presentation.settings.StorageSettingsScreen(
-                onBack                 = { navController.popBackStack() },
-                onRecentlyDeletedClick = { navController.navigate(Screen.Trash.route) },
+                onBack      = { navController.popBackStack() },
+                onOpenTrash = { cloud -> navController.navigate("trash?tab=" + if (cloud) "cloud" else "device") },
             )
         }
 
         composable(Screen.PrivacySettings.route) {
             PrivacySettingsScreen(
                 onBack = { navController.popBackStack() },
-                onHiddenAlbumClick = { navController.navigate(Screen.HiddenAlbum.route) },
+                onOfflinePhotosClick = { navController.navigate(Screen.Offline.route) },
             )
         }
 
@@ -871,6 +936,22 @@ fun NavGraph(
             )
         }
 
+        composable(Screen.Offline.route) {
+            OfflinePhotosScreen(
+                onBack = { navController.popBackStack() },
+                onPhotoClick = { items, index ->
+                    // Pinned items are already cloud GalleryItems — open the normal (non-secure)
+                    // viewer over the whole offline list so the user can swipe between them.
+                    selectedViewerItems = items
+                    selectedViewerIndex = index
+                    selectedViewerHiddenLinkIds = emptySet()
+                    viewerFromAlbum = false
+                    viewerSecure = false
+                    navController.navigate(Screen.Viewer.route)
+                },
+            )
+        }
+
         composable(Screen.SyncFolders.route) {
             SyncFoldersScreen(onBack = { navController.popBackStack() })
         }
@@ -901,7 +982,6 @@ fun NavGraph(
         composable(Screen.TimelineFilter.route) {
             TimelineFilterScreen(
                 onBack = { navController.popBackStack() },
-                onOpenLayout = { navController.navigate(Screen.TimelineLayout.route) },
                 onOpenCategories = { navController.navigate(Screen.TimelineCategories.route) },
                 onOpenAlbums = { navController.navigate(Screen.TimelineAlbums.route) },
                 onOpenDeviceFolders = { navController.navigate(Screen.TimelineDeviceFolders.route) },
@@ -928,8 +1008,34 @@ fun NavGraph(
             NotificationSettingsScreen(onBack = { navController.popBackStack() })
         }
 
-        composable(Screen.Trash.route) {
-            TrashScreen(onBack = { navController.popBackStack() })
+        composable(
+            route = "trash?tab={tab}",
+            arguments = listOf(navArgument("tab") { type = NavType.StringType; defaultValue = "device" }),
+        ) { backStackEntry ->
+            val tab = backStackEntry.arguments?.getString("tab")
+            TrashScreen(
+                onBack = { navController.popBackStack() },
+                initialTab = if (tab == "cloud")
+                    eu.akoos.photos.presentation.settings.TrashTab.Cloud
+                else
+                    eu.akoos.photos.presentation.settings.TrashTab.Device,
+            )
+        }
+
+        composable(Screen.DuplicateFinder.route) {
+            eu.akoos.photos.presentation.duplicates.DuplicateFinderScreen(
+                onBack = { navController.popBackStack() },
+                onOpenViewer = { items, index ->
+                    // Open the normal (non-secure) viewer over the tapped group so the user can
+                    // compare copies full-screen and swipe between them.
+                    selectedViewerItems = items
+                    selectedViewerIndex = index
+                    selectedViewerHiddenLinkIds = emptySet()
+                    viewerFromAlbum = false
+                    viewerSecure = false
+                    navController.navigate(Screen.Viewer.route)
+                },
+            )
         }
 
         composable(Screen.Search.route) {
@@ -949,6 +1055,7 @@ fun NavGraph(
                         launchSingleTop = true
                     }
                 },
+                onOpenOffline = { navController.navigate(Screen.Offline.route) },
             )
         }
 

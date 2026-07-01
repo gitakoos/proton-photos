@@ -10,6 +10,7 @@ import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.mockkStatic
+import io.mockk.slot
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import me.proton.core.domain.entity.UserId
@@ -24,6 +25,8 @@ import eu.akoos.photos.domain.repository.LocalMediaRepository
 import eu.akoos.photos.domain.repository.SyncStateRepository
 import eu.akoos.photos.util.NetworkObserver
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
@@ -35,6 +38,8 @@ class UploadPendingUseCaseTest {
     private lateinit var networkObserver: NetworkObserver
     private lateinit var context: Context
     private lateinit var useCase: UploadPendingUseCase
+    // Hoisted so individual tests can flip a single pref (e.g. the strip-timestamp flags) after setUp.
+    private lateinit var mockPrefsRef: Preferences
     private val userId = UserId("test-user")
 
     @Before
@@ -57,6 +62,7 @@ class UploadPendingUseCaseTest {
 
         // Mock DataStore extension so settingsDataStore.data.first() and .edit{} work.
         val mockPrefs = mockk<Preferences>()
+        mockPrefsRef = mockPrefs
         val mockDataStore = mockk<DataStore<Preferences>>(relaxed = true)
         mockkStatic("eu.akoos.photos.data.preferences.SettingsDataStoreKt")
         every { context.settingsDataStore } returns mockDataStore
@@ -106,6 +112,15 @@ class UploadPendingUseCaseTest {
     private fun localItem(uri: String) = LocalMediaItem(
         uri = uri,
         dateTaken = 1000L,
+        displayName = "photo.jpg",
+        mimeType = "image/jpeg",
+        sizeBytes = 1024L,
+        bucketName = "Camera",
+    )
+
+    private fun localItemAt(uri: String, dateTakenMs: Long) = LocalMediaItem(
+        uri = uri,
+        dateTaken = dateTakenMs,
         displayName = "photo.jpg",
         mimeType = "image/jpeg",
         sizeBytes = 1024L,
@@ -197,5 +212,78 @@ class UploadPendingUseCaseTest {
         useCase(userId)
 
         coVerify(exactly = 0) { cloudRepo.uploadFile(any(), any(), any(), any(), any(), any()) }
+    }
+
+    // ─── capture-time handling ────────────────────────────────────────────────
+
+    @Test
+    fun `the original capture time flows to the uploaded item and converts to whole seconds`() = runTest {
+        // dateTaken stays in ms through the use-case; PhotoUploadService later sends
+        // captureTime = dateTaken / 1000L (Proton wire format is seconds). Capture the
+        // LocalMediaItem handed to uploadFile and assert that seconds conversion.
+        val dateTakenMs = 1_700_000_123_000L // a clean second boundary
+        val state = syncState("uri://1", SyncStatus.LOCAL_ONLY)
+        every { syncStateRepo.observeAll(userId) } returns flowOf(listOf(state))
+        coEvery { localRepo.queryByUri("uri://1") } returns localItemAt("uri://1", dateTakenMs)
+        val itemSlot = slot<LocalMediaItem>()
+        coEvery {
+            cloudRepo.uploadFile(userId, capture(itemSlot), any(), any(), any(), any())
+        } returns "cloud-id"
+
+        useCase(userId)
+
+        assertEquals(dateTakenMs, itemSlot.captured.dateTaken)
+        // The exact value PhotoUploadService puts on the wire.
+        assertEquals(1_700_000_123L, itemSlot.captured.dateTaken / 1000L)
+    }
+
+    @Test
+    fun `strip-timestamp floors the uploaded capture time to upload time, discarding the original`() = runTest {
+        // STRIP_ON_UPLOAD + STRIP_TIMESTAMP rewrites the photo's capture time to "now" so the cloud
+        // metadata can't reconstruct when the shot was taken. Assert the dateTaken handed to uploadFile
+        // is the upload moment (≈ now), NOT the original 2019 timestamp.
+        every { mockPrefsRef[SettingsKeys.STRIP_ON_UPLOAD] } returns true
+        every { mockPrefsRef[SettingsKeys.STRIP_TIMESTAMP] } returns true
+
+        val originalMs = 1_550_000_000_000L // 2019-02-12, clearly not "now"
+        val state = syncState("uri://1", SyncStatus.LOCAL_ONLY)
+        every { syncStateRepo.observeAll(userId) } returns flowOf(listOf(state))
+        coEvery { localRepo.queryByUri("uri://1") } returns localItemAt("uri://1", originalMs)
+        val itemSlot = slot<LocalMediaItem>()
+        coEvery {
+            cloudRepo.uploadFile(userId, capture(itemSlot), any(), any(), any(), any())
+        } returns "cloud-id"
+
+        val before = System.currentTimeMillis()
+        useCase(userId)
+        val after = System.currentTimeMillis()
+
+        val sent = itemSlot.captured.dateTaken
+        assertNotEquals("strip-timestamp must discard the original capture time", originalMs, sent)
+        // Floored to the upload moment — inside the [before, after] window the call spanned.
+        assertTrue("sent=$sent should be >= $before", sent >= before)
+        assertTrue("sent=$sent should be <= $after", sent <= after)
+    }
+
+    @Test
+    fun `capture time is preserved when only GPS is stripped (strip-timestamp off)`() = runTest {
+        // Stripping GPS but NOT timestamp must leave the capture time intact — the floor only applies
+        // when STRIP_TIMESTAMP is on. Guards against an over-broad "any strip floors the date" bug.
+        every { mockPrefsRef[SettingsKeys.STRIP_ON_UPLOAD] } returns true
+        every { mockPrefsRef[SettingsKeys.STRIP_GPS] } returns true
+        every { mockPrefsRef[SettingsKeys.STRIP_TIMESTAMP] } returns false
+
+        val originalMs = 1_550_000_000_000L
+        val state = syncState("uri://1", SyncStatus.LOCAL_ONLY)
+        every { syncStateRepo.observeAll(userId) } returns flowOf(listOf(state))
+        coEvery { localRepo.queryByUri("uri://1") } returns localItemAt("uri://1", originalMs)
+        val itemSlot = slot<LocalMediaItem>()
+        coEvery {
+            cloudRepo.uploadFile(userId, capture(itemSlot), any(), any(), any(), any())
+        } returns "cloud-id"
+
+        useCase(userId)
+
+        assertEquals(originalMs, itemSlot.captured.dateTaken)
     }
 }

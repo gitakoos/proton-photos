@@ -77,6 +77,7 @@ import eu.akoos.photos.data.preferences.LanguagePrefsBoot
 import eu.akoos.photos.data.updater.UpdateInstaller
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.data.preferences.syncEffectivelyEnabled
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.usecase.PendingDeleteNotificationUseCase
 import eu.akoos.photos.presentation.common.ConfirmDialog
@@ -175,22 +176,16 @@ class MainActivity : AppCompatActivity() {
             if (userId == null) return@launch
 
             val prefs = settingsDataStore.data.first()
-            val autoSync = prefs[SettingsKeys.AUTO_SYNC] != false
             val wifiOnly = prefs[SettingsKeys.SYNC_WIFI_ONLY] != false
-            // Three triggers: content-URI (sub-second on stock Android), periodic 15-min (OEM-throttle
-            // safety net), and the BG service (keeps the observer alive on Samsung One UI where the
-            // content trigger doesn't survive a Recents-swipe).
-            if (autoSync) {
-                SyncWorker.schedule(workManager, wifiOnly, SyncWorker.MIN_INTERVAL_MINUTES)
-                // Kick a OneTime run now so pending uploads start at launch; APPEND_OR_REPLACE coalesces
-                // with the periodic run.
+            // Arm (or, if sync is effectively off, tear down) the three triggers in one place:
+            // content-URI (sub-second on stock Android), periodic 15-min (OEM-throttle safety net),
+            // and the opt-in BG service (keeps the observer alive on Samsung One UI). Gated so
+            // auto-sync ON with no folder selected arms nothing.
+            SyncWorker.reconcileBackgroundWork(this@MainActivity)
+            // Kick a OneTime run now so pending uploads start at launch; APPEND_OR_REPLACE coalesces
+            // with the periodic run. Only when backup will actually upload.
+            if (syncEffectivelyEnabled(this@MainActivity)) {
                 SyncWorker.runNow(this@MainActivity, wifiOnly)
-                SyncWorker.scheduleContentObserver(this@MainActivity, wifiOnly)
-                // The persistent keep-alive foreground service is opt-in and OFF by default — the
-                // content trigger + periodic worker keep backups flowing without it (and without a
-                // standing notification). Only start it when the user has explicitly opted in.
-                val backupNotif = prefs[SettingsKeys.NOTIFY_BACKUP_STATUS] == true
-                if (backupNotif) eu.akoos.photos.service.BackgroundSyncService.start(this@MainActivity)
             }
         }
 
@@ -295,6 +290,12 @@ class MainActivity : AppCompatActivity() {
             val paletteKey by paletteFlow.collectAsState(initial = null)
             val palette = ThemePalette.fromKey(paletteKey)
 
+            // AMOLED pure-black switch — DataStore-backed, re-collected so it applies live.
+            val amoledFlow = remember {
+                settingsDataStore.data.map { it[SettingsKeys.AMOLED_BLACK] == true }
+            }
+            val amoledBlack by amoledFlow.collectAsState(initial = false)
+
             // Active locale — DataStore-driven so a change reflows string resolution without an
             // Activity recreate. Initial value from the boot-mirror to avoid a first-composition flash.
             val languageFlow = remember {
@@ -318,7 +319,7 @@ class MainActivity : AppCompatActivity() {
             }
 
             LocaleOverride(language) {
-                ProtonPhotosTheme(darkTheme = useDark, palette = palette) {
+                ProtonPhotosTheme(darkTheme = useDark, palette = palette, amoledBlack = amoledBlack) {
                     val forceUpdateFlow = remember {
                         settingsDataStore.data.map { it[FORCE_UPDATE_REQUIRED] == true }
                     }
@@ -532,13 +533,13 @@ class MainActivity : AppCompatActivity() {
                 val lastSync = prefs[SettingsKeys.LAST_SYNC_MS] ?: 0L
                 if (System.currentTimeMillis() - lastSync < resumeRefreshThresholdMs) return@launch
                 val userId = accountManager.getPrimaryUserId().first() ?: return@launch
-                val autoSync = prefs[SettingsKeys.AUTO_SYNC] != false
                 val wifiOnly = prefs[SettingsKeys.SYNC_WIFI_ONLY] != false
                 // Lightweight pair: events-based Drive delta, then one SyncState pass.
                 driveRepo.refreshCloudPhotosIncremental(userId)
                 reconcile(userId).collect {}
-                // OneTime sync if backup is on — picks up LOCAL_ONLY entries reconcile just flagged.
-                if (autoSync) SyncWorker.runNow(this@MainActivity, wifiOnly)
+                // OneTime sync if backup is effectively on — picks up LOCAL_ONLY entries reconcile
+                // just flagged. Skipped when no folder is selected (nothing would upload).
+                if (syncEffectivelyEnabled(this@MainActivity)) SyncWorker.runNow(this@MainActivity, wifiOnly)
             } catch (_: Exception) {
                 // Silent — onResume must never crash; the next refresh or SyncWorker tick retries.
             }

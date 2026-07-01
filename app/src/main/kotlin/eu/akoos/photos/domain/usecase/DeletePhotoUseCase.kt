@@ -91,30 +91,68 @@ class DeletePhotoUseCase @Inject constructor(
             }
         }
 
+        // Batch shape up front: item count (overload signal) plus the type mix and cloud/local
+        // split, so a delete that later fails is diagnosable from logcat rather than opaque.
+        Log.d(
+            TAG,
+            "delete: items=${items.size} " +
+                "[synced=${items.count { it is GalleryItem.Synced }}, " +
+                "cloudOnly=${items.count { it is GalleryItem.CloudOnly }}, " +
+                "localOnly=${items.count { it is GalleryItem.LocalOnly }}], " +
+                "cloudLinks=${cloudLinkIds.size}, localUris=${localUriStrings.size}, " +
+                "freeUp=$freeUpSpace, fromCloud=$deleteFromCloud, hide=$hide"
+        )
+
         // Android 11+ with local URIs: defer the cloud delete until the user confirms the
         // system trash dialog. Returning here means cancel ↔ no cloud delete, no divergence.
         // HIDE flows use createDeleteRequest (permanent removal) instead of createTrashRequest:
         // the file is already preserved in the app-private Hidden vault, so leaving a copy in
         // MediaStore Trash for 30 days would just clutter the user's Recently Deleted list.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && localUriStrings.isNotEmpty()) {
-            val allLocalUris = localUriStrings.map { Uri.parse(it) }
-            val pi = if (hide)
-                MediaStore.createDeleteRequest(context.contentResolver, allLocalUris)
-            else
-                MediaStore.createTrashRequest(context.contentResolver, allLocalUris, true)
-            return Result.NeedsMediaWritePermission(
-                pendingIntent       = pi,
-                cloudLinkIds        = cloudLinkIds,
-                itemsBeingDeleted   = items,
-                freeUpSpace         = freeUpSpace,
-                hide                = hide,
-            )
+            // Parse defensively so one malformed URI string can't abort the whole batch.
+            val allLocalUris = localUriStrings.mapNotNull { runCatching { Uri.parse(it) }.getOrNull() }
+            if (allLocalUris.isNotEmpty()) {
+                val pi = try {
+                    if (hide)
+                        MediaStore.createDeleteRequest(context.contentResolver, allLocalUris)
+                    else
+                        MediaStore.createTrashRequest(context.contentResolver, allLocalUris, true)
+                } catch (e: Exception) {
+                    if (e is kotlinx.coroutines.CancellationException) throw e
+                    // A foreign or unindexable URI can throw while building the request. Log the
+                    // batch size and a MIME sample so a size- or type-specific failure is visible
+                    // in logcat, then fail the delete safely instead of crashing the caller.
+                    val types = allLocalUris.take(8).joinToString {
+                        runCatching { context.contentResolver.getType(it) }.getOrNull() ?: "?"
+                    }
+                    Log.e(TAG, "Building the trash/delete request failed for ${allLocalUris.size} uri(s); sample types=[$types]", e)
+                    return Result.CloudDeleteFailed
+                }
+                return Result.NeedsMediaWritePermission(
+                    pendingIntent       = pi,
+                    cloudLinkIds        = cloudLinkIds,
+                    itemsBeingDeleted   = items,
+                    freeUpSpace         = freeUpSpace,
+                    hide                = hide,
+                )
+            }
+            Log.w(TAG, "No parseable local URIs out of ${localUriStrings.size}; continuing to the cloud-only path")
         }
 
         // No local trash to wait on → run cloud delete (if any) immediately.
         if (cloudLinkIds.isNotEmpty()) {
             try {
-                cloudRepo.deleteFiles(userId, cloudLinkIds)
+                val outcome = cloudRepo.deleteFiles(userId, cloudLinkIds)
+                // The bulk endpoint can accept the batch yet reject individual links (per-link
+                // code != 1000); when NONE were trashed the delete wholly failed, so surface it
+                // the same way a thrown error would instead of silently claiming success.
+                if (outcome.trashedLinkIds.isEmpty()) {
+                    Log.w(TAG, "Cloud delete: server trashed 0/${cloudLinkIds.size} link(s)")
+                    return Result.CloudDeleteFailed
+                }
+                if (outcome.failedLinkIds.isNotEmpty()) {
+                    Log.w(TAG, "Cloud delete: ${outcome.failedLinkIds.size}/${cloudLinkIds.size} link(s) stayed on cloud")
+                }
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 Log.w(TAG, "Cloud delete failed for ${cloudLinkIds.size} link(s)", e)
@@ -122,10 +160,15 @@ class DeletePhotoUseCase @Inject constructor(
             }
         }
 
-        // Pre-R: direct delete (no system trash support).
+        // Pre-R: direct delete (no system trash support). Asymmetry note vs the R+ path: the cloud
+        // delete above has already run, so a local delete that fails here would leave the cloud copy
+        // trashed while the device copy survives. Pre-R local deletes of the app's own media
+        // effectively never fail (the storage permission is granted at install), so this is kept
+        // best-effort rather than reordered, which would risk the far more common R+ flow.
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R && localUriStrings.isNotEmpty()) {
-            for (uri in localUriStrings.map(Uri::parse)) {
+            for (uri in localUriStrings.mapNotNull { runCatching { Uri.parse(it) }.getOrNull() }) {
                 runCatching { context.contentResolver.delete(uri, null, null) }
+                    .onFailure { Log.w(TAG, "Pre-R local delete failed for one uri", it) }
             }
             updateSyncStateAfterLocalDelete(items, freeUpSpace, hide)
         }
@@ -145,7 +188,14 @@ class DeletePhotoUseCase @Inject constructor(
     ): Result {
         if (cloudLinkIds.isNotEmpty()) {
             try {
-                cloudRepo.deleteFiles(userId, cloudLinkIds)
+                val outcome = cloudRepo.deleteFiles(userId, cloudLinkIds)
+                if (outcome.trashedLinkIds.isEmpty()) {
+                    Log.w(TAG, "Cloud delete: server trashed 0/${cloudLinkIds.size} link(s)")
+                    return Result.CloudDeleteFailed
+                }
+                if (outcome.failedLinkIds.isNotEmpty()) {
+                    Log.w(TAG, "Cloud delete: ${outcome.failedLinkIds.size}/${cloudLinkIds.size} link(s) stayed on cloud")
+                }
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 Log.w(TAG, "Cloud delete failed for ${cloudLinkIds.size} link(s)", e)
@@ -158,17 +208,23 @@ class DeletePhotoUseCase @Inject constructor(
 
     private suspend fun updateSyncStateAfterLocalDelete(items: List<GalleryItem>, freeUpSpace: Boolean, hide: Boolean) {
         for (item in items) {
-            when {
-                item is GalleryItem.LocalOnly ->
-                    syncStateRepo.updateStatusAndDeleteLocal(item.local.uri, SyncStatus.LOCAL_ONLY)
-                // HIDE wins over freeUpSpace: a hidden synced photo must not appear in the
-                // gallery as a plain CLOUD_ONLY photo or the user has no way to tell which
-                // cloud photos are hidden. The HIDDEN status also keeps reconcile from
-                // demoting it on every refresh and the upload pipeline from re-uploading it.
-                item is GalleryItem.Synced && hide ->
-                    syncStateRepo.updateStatusAndDeleteLocal(item.local.uri, SyncStatus.HIDDEN)
-                item is GalleryItem.Synced && freeUpSpace ->
-                    syncStateRepo.updateStatusAndDeleteLocal(item.local.uri, SyncStatus.CLOUD_ONLY)
+            try {
+                when {
+                    item is GalleryItem.LocalOnly ->
+                        syncStateRepo.updateStatusAndDeleteLocal(item.local.uri, SyncStatus.LOCAL_ONLY)
+                    // HIDE wins over freeUpSpace: a hidden synced photo must not appear in the
+                    // gallery as a plain CLOUD_ONLY photo or the user has no way to tell which
+                    // cloud photos are hidden. The HIDDEN status also keeps reconcile from
+                    // demoting it on every refresh and the upload pipeline from re-uploading it.
+                    item is GalleryItem.Synced && hide ->
+                        syncStateRepo.updateStatusAndDeleteLocal(item.local.uri, SyncStatus.HIDDEN)
+                    item is GalleryItem.Synced && freeUpSpace ->
+                        syncStateRepo.updateStatusAndDeleteLocal(item.local.uri, SyncStatus.CLOUD_ONLY)
+                }
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                // One item's DB update failing must not strand the rest of the batch mid-loop.
+                Log.w(TAG, "Sync-state update failed for one item after local delete", e)
             }
         }
     }

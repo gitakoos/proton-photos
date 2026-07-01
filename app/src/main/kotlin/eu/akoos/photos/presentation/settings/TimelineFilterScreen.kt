@@ -95,15 +95,12 @@ import eu.akoos.photos.presentation.theme.StatusError
 @Composable
 fun TimelineFilterScreen(
     onBack: () -> Unit,
-    onOpenLayout: () -> Unit = {},
     onOpenCategories: () -> Unit = {},
     onOpenAlbums: () -> Unit = {},
     onOpenDeviceFolders: () -> Unit = {},
 ) {
     SettingsSubPageScaffold(title = stringResource(R.string.settings_timeline), onBack = onBack) {
         SettingsCard {
-            NavRow(label = stringResource(R.string.settings_timeline_section_layout), onClick = onOpenLayout)
-            RowDivider()
             NavRow(label = stringResource(R.string.timeline_filter_categories_header), onClick = onOpenCategories)
             RowDivider()
             NavRow(label = stringResource(R.string.timeline_filter_albums_header), onClick = onOpenAlbums)
@@ -182,6 +179,13 @@ fun TimelineLayoutScreen(
                 description = stringResource(R.string.settings_mosaic_grid_desc),
                 checked = settings.mosaicGrid,
                 onCheckedChange = settingsViewModel::setMosaicGrid,
+            )
+            RowDivider()
+            ToggleRow(
+                label = stringResource(R.string.settings_show_selection_labels),
+                description = stringResource(R.string.settings_show_selection_labels_desc),
+                checked = settings.showSelectionLabels,
+                onCheckedChange = settingsViewModel::setShowSelectionLabels,
             )
             RowDivider()
             // "On this day" memories carousel on the Photos tab — display toggle, default on.

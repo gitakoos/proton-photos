@@ -1,20 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-    Explicit egress allowlist. Any OkHttpClient call to a host outside this set
-    fails at the TLS layer rather than silently leaking data. The base-config
-    disables cleartext globally; per-domain entries only narrow the set, never
-    re-enable HTTP.
+    Network security policy. This is NOT an egress allowlist: a Network Security Config governs
+    cleartext traffic and trust anchors, not which hosts the app may reach over HTTPS. Egress is
+    constrained instead by the app's own host usage and by certificate pinning on the Proton
+    OkHttp clients (see CoreModule) for the API and the CDN/thumbnail traffic.
 
-    Hosts:
-      proton.me            - Drive API, account, mail, calendar, alt routing.
-                             includeSubdomains catches drive.proton.me,
-                             account.proton.me, verify.proton.me, the CDN
-                             block hosts, and ProtonCore alt-routing hosts
-                             which are always proton.me subdomains.
-      quad9.net            - DoH primary (dns11.quad9.net).
-      cloudflare-dns.com   - DoH fallback (no Google DoH).
+    base-config: cleartext disabled globally, and only the system trust store is trusted (no
+    user-added CAs), which resists casual local MITM of API/CDN traffic.
 
-    Anything else - rejected.
+    The per-domain entries restate the cleartext ban for the Proton API, account, alt-routing and
+    CDN block hosts (all proton.me subdomains via includeSubdomains) and the two DoH resolvers
+    (quad9.net, cloudflare-dns.com; no Google DoH). HTTPS to the other hosts the app legitimately
+    uses (the GitHub update check, OpenStreetMap map tiles) still works via the system trust store.
 -->
 <network-security-config>
     <base-config cleartextTrafficPermitted="false">

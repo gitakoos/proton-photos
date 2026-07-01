@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.presentation.albums
 
+import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -71,6 +72,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -105,6 +108,9 @@ import androidx.compose.runtime.snapshotFlow
  * entire screen is always in selection mode. [excludeLinkIds] are the album's current cloud members,
  * pre-filtered out so the user can't re-add duplicates.
  */
+/** Type filter for the album photo picker: everything, cloud-backed only, or on-device only. */
+private enum class PickerFilter { All, Cloud, Device }
+
 @Composable
 fun AlbumPhotoPickerScreen(
     albumLinkId: String,
@@ -121,14 +127,16 @@ fun AlbumPhotoPickerScreen(
     val addState by viewModel.addState.collectAsStateWithLifecycle()
     val gridState = rememberLazyGridState()
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     val showScrollTop by remember { derivedStateOf { gridState.firstVisibleItemIndex > 4 } }
-    // Status bar + the floating back-pill height, so the grid's first row starts cleanly below the
-    // header and the scrubber track begins under it — mirrors the Map content inset (statusBars + 56dp).
-    val headerTopInset = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 56.dp
+    var pickerFilter by remember { mutableStateOf(PickerFilter.All) }
+    // Status bar + the floating back-pill + the type-filter row, so the grid's first row and the
+    // scrubber track start cleanly below both.
+    val headerTopInset = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 100.dp
 
     // Drop photos already in this album, and photos hidden on this device, so the picker only
     // offers addable new ones. A hidden photo re-added to an album would un-hide it.
-    val photos = remember(allItems, excludeLinkIds, hiddenCloudLinkIds) {
+    val basePhotos = remember(allItems, excludeLinkIds, hiddenCloudLinkIds) {
         if (excludeLinkIds.isEmpty() && hiddenCloudLinkIds.isEmpty()) allItems
         else allItems.filter { item ->
             val cloudId = when (item) {
@@ -139,10 +147,29 @@ fun AlbumPhotoPickerScreen(
             cloudId == null || (cloudId !in excludeLinkIds && cloudId !in hiddenCloudLinkIds)
         }
     }
+    // Type filter (#40): narrow the mixed library to cloud-backed photos (CloudOnly + Synced) or
+    // on-device-only photos (LocalOnly), so it is clear which source a photo comes from.
+    val photos = remember(basePhotos, pickerFilter) {
+        when (pickerFilter) {
+            PickerFilter.All -> basePhotos
+            PickerFilter.Cloud -> basePhotos.filter { it is GalleryItem.CloudOnly || it is GalleryItem.Synced }
+            PickerFilter.Device -> basePhotos.filter { it is GalleryItem.LocalOnly }
+        }
+    }
 
     // Pop back to the album once the add succeeds.
     androidx.compose.runtime.LaunchedEffect(addState) {
-        if (addState is PickerAddState.Done) {
+        val done = addState
+        if (done is PickerAddState.Done) {
+            // Local picks upload first and only then join the album, so closing the picker with
+            // nothing yet visible would read as "nothing happened" — tell the user it is coming.
+            if (done.queued > 0) {
+                Toast.makeText(
+                    context,
+                    context.getString(R.string.gallery_add_to_album_queued),
+                    Toast.LENGTH_LONG,
+                ).show()
+            }
             viewModel.resetAddState()
             onAdded()
         }
@@ -326,6 +353,36 @@ fun AlbumPhotoPickerScreen(
             )
         }
 
+        // Type filter — a centered segmented control: All / Cloud / Device inside one pill, each
+        // its own segment, so a big mixed library can be narrowed to one source. Sits just below the
+        // back-pill row; the grid content inset clears both.
+        Row(
+            modifier = Modifier
+                .statusBarsPadding()
+                .fillMaxWidth()
+                .padding(top = 56.dp),
+            horizontalArrangement = Arrangement.Center,
+        ) {
+            Row(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(PillBg, RoundedCornerShape(20.dp))
+                    .border(0.5.dp, PillBorder, RoundedCornerShape(20.dp))
+                    .padding(3.dp),
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                PickerFilterSegment(stringResource(R.string.picker_filter_all), pickerFilter == PickerFilter.All) {
+                    pickerFilter = PickerFilter.All
+                }
+                PickerFilterSegment(stringResource(R.string.picker_filter_cloud), pickerFilter == PickerFilter.Cloud) {
+                    pickerFilter = PickerFilter.Cloud
+                }
+                PickerFilterSegment(stringResource(R.string.picker_filter_device), pickerFilter == PickerFilter.Device) {
+                    pickerFilter = PickerFilter.Device
+                }
+            }
+        }
+
         // Confirm bar — "Add (N)". Disabled until at least one photo is picked.
         val isWorking = addState is PickerAddState.Working
         val canAdd = selected.isNotEmpty() && !isWorking
@@ -417,4 +474,22 @@ private fun PickerSectionHeader(label: String, count: Int) {
             fontSize = 12.sp,
         )
     }
+}
+
+/** One All / Cloud / Device segment inside the album picker's type-filter pill. The outer pill draws
+ *  the container; a selected segment fills with the accent, an unselected one stays transparent. */
+@Composable
+private fun PickerFilterSegment(label: String, selected: Boolean, onClick: () -> Unit) {
+    val colors = AppColors.current
+    Text(
+        label,
+        color = if (selected) Color.White else colors.fgPrimary,
+        fontSize = 13.sp,
+        fontWeight = FontWeight.Medium,
+        modifier = Modifier
+            .clip(RoundedCornerShape(17.dp))
+            .background(if (selected) Accent else Color.Transparent, RoundedCornerShape(17.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 7.dp),
+    )
 }

@@ -85,7 +85,7 @@ internal fun rememberTimelineDateFormat(grouping: TimelineGrouping): SimpleDateF
         when (grouping) {
             TimelineGrouping.None  -> SimpleDateFormat("MMMM yyyy", Locale.getDefault())
             TimelineGrouping.Day   -> SimpleDateFormat("d MMMM yyyy", Locale.getDefault())
-            TimelineGrouping.Month -> SimpleDateFormat("MMMM yyyy", Locale.getDefault())
+            TimelineGrouping.Month -> SimpleDateFormat("d MMMM yyyy", Locale.getDefault())
             TimelineGrouping.Year  -> SimpleDateFormat("yyyy", Locale.getDefault())
         }
     }

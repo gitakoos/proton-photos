@@ -41,7 +41,7 @@
     <string name="onboarding_photos_subtitle">Potrebujemo dostop za branje vaših fotografij in videoposnetkov, da jih lahko šifriramo in varnostno kopiramo v Drive.</string>
 
     <string name="onboarding_manage_media_title">Upravljanje predstavnosti</string>
-    <string name="onboarding_manage_media_subtitle">Močno priporočeno. Aplikaciji omogoča urejanje, brisanje in preimenovanje fotografij in videoposnetkov v napravi brez sistemskega potrditvenega okna vsakič znova — uporablja se za urejanje v aplikaciji, shranjevanje nazaj v napravo, postopek koša in brisanje po varnostnem kopiranju. Tapnite, da odprete sistemske nastavitve.</string>
+    <string name="onboarding_manage_media_subtitle">Močno priporočeno. Aplikaciji omogoča urejanje, brisanje in preimenovanje fotografij in videoposnetkov v napravi brez sistemskega potrditvenega okna vsakič znova. Uporablja se za urejanje v aplikaciji, shranjevanje nazaj v napravo, postopek koša in brisanje po varnostnem kopiranju. Tapnite, da odprete sistemske nastavitve.</string>
     <string name="onboarding_folders_include_title">Mape za varnostno kopiranje</string>
     <string name="onboarding_folders_include_subtitle">Izberite, katere mape naj se naložijo v Drive. Vsebina drugih map ostane samo v tej napravi.</string>
     <string name="onboarding_folders_exclude_title">Mape, ki naj se preskočijo</string>
@@ -143,7 +143,7 @@
     <string name="editor_save_sheet_synced_video">Izberite, kako shraniti urejeni videoposnetek. Varnostno kopirani izvirniki ostanejo v Drive.</string>
     <string name="editor_save_sheet_device_video">Izberite, kako shraniti urejeni videoposnetek v napravo.</string>
     <string name="editor_save_copy_subtitle_cloud">Naloži se kot nova fotografija. Izvirnik ostane v Drive.</string>
-    <string name="editor_save_copy_subtitle_cloud_video">Naloži se kot nova datoteka v Proton Drive — izvirnik ostane.</string>
+    <string name="editor_save_copy_subtitle_cloud_video">Naloži se kot nova datoteka v Proton Drive. Izvirnik ostane.</string>
     <string name="editor_save_copy_subtitle_synced">Ustvari novo datoteko v vaši galeriji IN naloži povezano kopijo v Drive.</string>
     <string name="editor_save_copy_subtitle_device">Ustvari novo datoteko v vaši galeriji.</string>
     <string name="editor_saving">Shranjevanje…</string>
@@ -161,10 +161,10 @@
     <string name="hidden_photos_auth_prompt">Potrdite istovetnost za ogled skritih fotografij</string>
     <string name="hidden_photos_unlock">Odkleni</string>
     <string name="app_lock_authenticate_prompt">Za nadaljevanje potrdite istovetnost</string>
-    <string name="hidden_no_device_lock_notice">Zaklep naprave ni nastavljen — trezor ni zaščiten.</string>
+    <string name="hidden_no_device_lock_notice">Zaklep naprave ni nastavljen. Trezor ni zaščiten.</string>
     <string name="hidden_auth_title">Skrite fotografije</string>
     <string name="hidden_auth_description">Potrdite istovetnost za ogled skritih fotografij</string>
-    <string name="hide_cloud_copy_notice">Varnostno kopirane fotografije ostanejo v vašem Proton Drive — skrivanje jih le odstrani iz galerije te naprave.</string>
+    <string name="hide_cloud_copy_notice">Varnostno kopirane fotografije ostanejo v vašem Proton Drive. Skrivanje jih le odstrani iz galerije te naprave.</string>
     <string name="hidden_empty_title">Ni skritih fotografij</string>
     <string name="hidden_empty_subtitle">Pridržite fotografijo v galeriji in izberite »Skrij«</string>
     <string name="gallery_cancel_selection">Prekliči izbor</string>
@@ -206,6 +206,14 @@
     <string name="gallery_share_cloud_warning_body">Nekatere od teh so shranjene samo v oblaku. Aplikacija pridobi začasno zasebno kopijo in jo izroči le aplikaciji, ki jo izberete. V galerijo se ne doda nič in ni vidno drugim aplikacijam.</string>
     <string name="gallery_share_cloud_warning_continue">Deli</string>
     <string name="gallery_add_to_album">Dodaj v album</string>
+    <string name="offline_make_available">Omogoči brez povezave</string>
+    <string name="offline_available">Na voljo brez povezave</string>
+    <string name="offline_removed">Odstranjeno iz načina brez povezave</string>
+    <string name="offline_failed">Shranjevanje brez povezave ni uspelo</string>
+    <string name="offline_screen_title">Fotografije brez povezave</string>
+    <string name="offline_screen_empty">Fotografije, ki jih daste na voljo brez povezave, se prikažejo tukaj</string>
+    <string name="settings_offline_photos">Fotografije brez povezave</string>
+    <string name="filter_offline">Brez povezave</string>
     <string name="gallery_add_to_album_local_note">Te fotografije se najprej varnostno kopirajo, nato pa dodajo v album.</string>
     <string name="gallery_no_albums_yet">Še ni albumov. Ustvarite enega zgoraj.</string>
     <string name="gallery_add_to_album_mixed_hint">Mešanega izbora samo iz naprave in oblaka ni mogoče čisto dodati v album. Izberite eno vrsto.</string>
@@ -249,6 +257,12 @@
     </plurals>
     <string name="gallery_copy_to_hidden_failed">Kopiranje med skrite ni uspelo</string>
     <string name="gallery_move_to_hidden_failed">Premikanje med skrite ni uspelo</string>
+    <plurals name="gallery_hide_partial_failed">
+        <item quantity="one">Skrito, vendar %d fotografije ni bilo mogoče skriti</item>
+        <item quantity="two">Skrito, vendar %d fotografij ni bilo mogoče skriti</item>
+        <item quantity="few">Skrito, vendar %d fotografij ni bilo mogoče skriti</item>
+        <item quantity="other">Skrito, vendar %d fotografij ni bilo mogoče skriti</item>
+    </plurals>
     <string name="gallery_add_to_cloud_album_failed">Dodajanje v album v oblaku ni uspelo</string>
     <string name="gallery_add_to_album_failed">Dodajanje v album ni uspelo</string>
     <string name="gallery_select_photos_first">Najprej izberite fotografije</string>
@@ -369,7 +383,7 @@
     <string name="settings_excluded_folders_select_all">Izključi vse</string>
     <string name="settings_excluded_folders_deselect_all">Vključi vse</string>
     <!-- Album mirror -->
-    <string name="settings_album_mirror_folders">Zrcali mape naprave kot albume Drive</string>
+    <string name="settings_album_mirror_folders">Mape kot albumi</string>
     <string name="settings_album_mirror_folders_desc">Izberite, katere mape naprave se ob nalaganju fotografij prikažejo tudi kot albumi Drive</string>
     <string name="album_mirror_folders_title">Zrcali mape kot albume Drive</string>
     <string name="album_mirror_folders_subtitle">Fotografije v označenih mapah se prikažejo tudi v ustreznih albumih Drive. Fotografije se tako ali tako naložijo v vaš tok.</string>
@@ -391,7 +405,7 @@
     <string name="trash_cloud_empty_confirm_action">Izprazni</string>
     <string name="trash_cloud_restore_done">Obnovljenih %1$d fotografij</string>
     <string name="trash_cloud_restore_partial">Obnovljeno %1$d, %2$d ni bilo mogoče obnoviti</string>
-    <string name="trash_cloud_restore_refresh_failed">Obnovljeno — za osvežitev povlecite navzdol v galeriji</string>
+    <string name="trash_cloud_restore_refresh_failed">Obnovljeno. Za osvežitev povlecite navzdol v galeriji</string>
     <string name="trash_cloud_restore_failed">Obnovitev ni uspela</string>
     <string name="trash_cloud_emptied">Koš v oblaku izpraznjen</string>
     <string name="trash_cloud_empty_partial">Odstranjeno %1$d, %2$d ni bilo mogoče odstraniti</string>
@@ -437,6 +451,10 @@
     <string name="settings_storage_clear_cache">Počisti predpomnilnik</string>
     <string name="settings_storage_clear_cache_dialog_title">Počistiti predpomnilnik aplikacije?</string>
     <string name="settings_storage_clear_cache_dialog_message">S tem se izbriše %s predpomnjenih datotek. Po potrebi se znova prenesejo.</string>
+    <string name="settings_offline_storage_title">Fotografije brez povezave</string>
+    <string name="settings_offline_storage_subtitle">Shranjeno zasebno v tej aplikaciji, ne v galeriji</string>
+    <string name="settings_offline_storage_clear_dialog_title">Izbrišem fotografije brez povezave?</string>
+    <string name="settings_offline_storage_clear_dialog_message">S tem se iz te naprave izbriše %s fotografij brez povezave. V Proton Drive ostanejo.</string>
     <string name="settings_storage_refresh">Osveži shrambo</string>
     <string name="settings_section_settings">Nastavitve</string>
     <string name="settings_privacy_metadata">Zasebnost in metapodatki</string>
@@ -455,7 +473,7 @@
     <string name="settings_rename_on_upload">Preimenuj v datum zajema ob nalaganju</string>
     <string name="settings_rename_on_upload_desc">Uporabi metapodatke fotografije ali videoposnetka, da pred nalaganjem nastavi ime datoteke na datum in čas zajema. Izvirna datoteka v napravi ostane nedotaknjena.</string>
     <string name="settings_delete_after_backup">Po varnostnem kopiranju izbriši datoteko v napravi</string>
-    <string name="settings_delete_after_backup_desc">Odstrani lokalno kopijo iz naprave, ko ima Drive naloženo datoteko — datoteka ostane le v vašem šifriranem Proton Drive.</string>
+    <string name="settings_delete_after_backup_desc">Odstrani lokalno kopijo iz naprave, ko ima Drive naloženo datoteko. Datoteka ostane le v vašem šifriranem Proton Drive.</string>
     <string name="settings_strip_gps">Odstrani lokacijo GPS</string>
     <string name="settings_strip_gps_desc">Odstrani koordinate GPS in podatke o lokaciji</string>
     <string name="settings_strip_camera">Odstrani podatke o fotoaparatu</string>
@@ -548,6 +566,10 @@
     <string name="palette_sea">Morje</string>
     <string name="palette_sepia">Sepija</string>
     <string name="palette_mono">Mono</string>
+
+    <!-- AMOLED pure-black dark theme -->
+    <string name="settings_amoled_black">Čisto črna (AMOLED)</string>
+    <string name="settings_amoled_black_summary">V temnem načinu uporabi pravo črno ozadje za varčevanje z energijo na zaslonih OLED.</string>
 
     <!-- Language -->
     <string name="language_en">English</string>
@@ -655,7 +677,7 @@
     <string name="album_leave_missing_details">Tega albuma trenutno ni mogoče zapustiti</string>
     <string name="album_delete_photos_failed">Fotografij ni bilo mogoče izbrisati</string>
     <string name="album_remove_photos_failed">Fotografij ni bilo mogoče odstraniti</string>
-    <string name="album_remove_partial">Odstranjeno %1$d od %2$d — nekaterih ni bilo mogoče odstraniti</string>
+    <string name="album_remove_partial">Odstranjeno %1$d od %2$d, nekaterih ni bilo mogoče odstraniti</string>
     <string name="album_rename_failed">Albuma ni bilo mogoče preimenovati</string>
     <string name="album_set_cover_failed">Naslovnice albuma ni bilo mogoče nastaviti</string>
     <string name="shared_save_failed">Albuma ni bilo mogoče shraniti v vašo knjižnico</string>
@@ -770,6 +792,12 @@
         <item quantity="two">%d fotografiji</item>
         <item quantity="few">%d fotografije</item>
         <item quantity="other">%d fotografij</item>
+    </plurals>
+    <plurals name="offline_batch_result">
+        <item quantity="one">%d fotografija na voljo brez povezave</item>
+        <item quantity="two">%d fotografiji na voljo brez povezave</item>
+        <item quantity="few">%d fotografije na voljo brez povezave</item>
+        <item quantity="other">%d fotografij na voljo brez povezave</item>
     </plurals>
     <plurals name="map_card_subtitle_count">
         <item quantity="one">%1$d fotografija na zemljevidu</item>
@@ -959,7 +987,7 @@
     <string name="device_folder_backup_timeline">Varnostno kopiraj samo fotografije</string>
     <string name="device_folder_backup_timeline_sub">Enkratno nalaganje fotografij od tu v vašo časovnico.</string>
     <string name="device_folder_backup_mirror">Ustvari tudi album</string>
-    <string name="device_folder_backup_mirror_sub">Ostane sinhronizirano — nove fotografije v tej mapi se dodajo tudi v album.</string>
+    <string name="device_folder_backup_mirror_sub">Ostane sinhronizirano. Nove fotografije v tej mapi se dodajo tudi v album.</string>
     <string name="sync_folders_add_dialog_title">Dodaj mapo</string>
     <string name="sync_folders_add_row_title">Dodaj mapo po imenu</string>
     <string name="sync_folders_add_dialog_name_hint">Ime mape</string>
@@ -974,7 +1002,7 @@
     <string name="sync_folders_selected_cd">Izbrano</string>
     <!-- Mirror device folders as albums screen -->
     <string name="mirror_opted_in_cd">Vključeno</string>
-    <string name="mirror_custom_pending">V čakanju — uporabi se, ko se pojavi mapa s tem imenom</string>
+    <string name="mirror_custom_pending">V čakanju. Uporabi se, ko se pojavi mapa s tem imenom</string>
     <string name="mirror_remove_cd">Odstrani</string>
     <string name="mirror_name_empty">Ime mape ne sme biti prazno</string>
     <string name="mirror_name_invalid_chars">Ime ne sme vsebovati \'/\' ali \'=\'</string>
@@ -1004,7 +1032,7 @@
     <string name="rename_sheet_option_local_subtitle">Posodobi datoteko na mestu v vaši napravi.</string>
     <string name="rename_sheet_option_copy_title">Shrani kot kopijo</string>
     <string name="rename_sheet_option_copy_subtitle_cloud">Naloži se kot nova fotografija. Izvirnik ostane v Drive.</string>
-    <string name="rename_sheet_option_copy_subtitle_local">Ustvari novo datoteko v Pictures/Proton Photos.</string>
+    <string name="rename_sheet_option_copy_subtitle_local">Ustvari novo datoteko v Pictures.</string>
     <string name="save_to_library_confirm_title">Shrani v mojo knjižnico</string>
     <string name="save_to_library_confirm_body_fmt">Kopirali bomo %1$d elementov v vašo knjižnico. V vaših Fotografijah se prikažejo, takoj ko se kopiranje konča.</string>
     <string name="save_to_library_action_cancel">Prekliči shranjevanje</string>
@@ -1170,4 +1198,124 @@
     <string name="settings_copy_diagnostics">Kopiraj diagnostični dnevnik</string>
     <string name="settings_copy_diagnostics_desc">Za odpravljanje težav s sinhronizacijo. Ne vključuje podatkov računa.</string>
     <string name="settings_diagnostics_copied">Diagnostični dnevnik kopiran</string>
+    <!-- Duplicate finder -->
+    <string name="settings_find_duplicates">Poišči dvojnike</string>
+    <string name="settings_find_duplicates_desc">Preglej in odstrani enake kopije</string>
+    <string name="duplicates_title">Poišči dvojnike</string>
+    <string name="duplicates_section_device">V tej napravi</string>
+    <string name="duplicates_section_cloud">V oblaku</string>
+    <string name="duplicates_empty">Ni najdenih podvojenih fotografij</string>
+    <string name="duplicates_copies">%1$d enakih kopij</string>
+    <string name="duplicates_pick_keep">Tapnite kopijo, ki jo želite obdržati, nato izbrišite ostale</string>
+    <string name="duplicates_keep">Obdrži</string>
+    <string name="duplicates_delete_others">Izbriši ostale</string>
+    <string name="duplicates_confirm_title">Izbrišem dvojnike?</string>
+    <string name="duplicates_confirm_message">Kopija, ki jo obdržite, ostane. Ostale kopije so odstranjene.</string>
+    <string name="duplicates_confirm_delete">Izbriši</string>
+    <string name="duplicates_delete_failed">Brisanje iz Drive ni uspelo. Poskusite znova.</string>
+    <string name="duplicates_section_similar">Podobne fotografije</string>
+    <string name="duplicates_scanning">Iskanje podobnih fotografij…</string>
+    <string name="duplicates_similar_hint">Videti so podobne, a se datoteka ali metapodatki lahko razlikujejo</string>
+    <string name="duplicates_similar_count">%1$d podobnih fotografij</string>
+    <string name="duplicates_view_large">Prikaži večje</string>
+    <string name="offline_remove">Odstrani iz offline</string>
+    <string name="whats_new_title">Novosti</string>
+    <string name="whats_new_done">Razumem</string>
+    <string name="whats_new_open">Odpri</string>
+    <string name="whats_new_dup_title">Poišči podvojene fotografije</string>
+    <string name="whats_new_dup_body">Zazna natančne kopije in vizualno podobne posnetke, nato eno varno obdržiš in ostale odstraniš.</string>
+    <string name="whats_new_offline_title">Na voljo brez povezave</string>
+    <string name="whats_new_offline_body">Pripni fotografije iz oblaka, da njihova polna kakovost ostane v napravi in se odprejo brez povezave.</string>
+    <string name="whats_new_activity_title">Pogled dejavnosti</string>
+    <string name="whats_new_activity_body">Nalaganja, prenosi in shranjevanja brez povezave na enem mestu, skupaj z zgodovino dogajanja.</string>
+    <string name="whats_new_motion_title">Fotografije v gibanju</string>
+    <string name="whats_new_motion_body">Fotografije v gibanju se znova predvajajo, tudi tiste od Googla in v HDR.</string>
+    <string name="whats_new_more">Poleg tega urejene Nastavitve, osvežene albume in popravki v ozadju.</string>
+    <string name="offline_card_subtitle">Fotografije, shranjene za ogled brez povezave</string>
+    <string name="duplicates_filter_identical">Enake</string>
+    <string name="duplicates_filter_similar">Podobne</string>
+
+    <!-- Duplicate badges (single-word source-of-copy chips) -->
+    <string name="duplicates_badge_cloud">Oblak</string>
+    <string name="duplicates_badge_device">Naprava</string>
+    <string name="duplicates_badge_synced">Sinhronizirano</string>
+
+    <!-- Onboarding + Settings: all-files access, install permission -->
+    <string name="onboarding_all_files_subtitle">Priporočeno. Aplikaciji omogoča, da obnovljene skrite fotografije vrne v njihovo izvirno mapo (na primer mapo s predstavnostjo klepetalne aplikacije, ne le Slike) in spremembe zapiše neposredno v vaše lokalne datoteke. Tapnite, da odprete sistemske nastavitve.</string>
+    <string name="onboarding_all_files_title">Dostop do vseh datotek</string>
+
+    <!-- Permissions screen -->
+    <string name="permissions_action_allow">Dovoli</string>
+    <string name="permissions_allfiles_title">Dostop do vseh datotek</string>
+    <string name="permissions_allfiles_why">Za obnovitev skritih in prenesenih fotografij v njihovo izvirno mapo (na primer WhatsApp) in dostop do fotografij zunaj standardnih map s predstavnostjo.</string>
+    <string name="permissions_install_title">Namesti posodobitve</string>
+    <string name="permissions_install_why">Za namestitev posodobitev aplikacije, ki jih prenesete znotraj nje.</string>
+    <string name="permissions_intro">Upravljajte, do česa lahko dostopa Photos for Proton. Vsak element pojasni, čemu je namenjen.</string>
+    <string name="permissions_location_title">Lokacija fotografije</string>
+    <string name="permissions_location_why">Za prikaz, kje so bile fotografije posnete, na zemljevidu in za ohranitev njihove lokacije ob varnostnem kopiranju.</string>
+    <string name="permissions_managemedia_title">Upravljanje predstavnosti</string>
+    <string name="permissions_managemedia_why">Za nemoteno premikanje in brisanje fotografij brez sistemske potrditve za vsako posamezno datoteko.</string>
+    <string name="permissions_network_note">Dostop do omrežja je vedno vklopljen in se uporablja le za komunikacijo s Proton Drive.</string>
+    <string name="permissions_notifications_title">Obvestila</string>
+    <string name="permissions_notifications_why">Za prikaz poteka varnostnega kopiranja in nalaganja.</string>
+    <string name="permissions_photos_title">Fotografije in videoposnetki</string>
+    <string name="permissions_photos_why">Za prikaz vaše galerije ter varnostno kopiranje fotografij in videoposnetkov.</string>
+    <string name="permissions_state_granted">Dovoljeno</string>
+    <string name="permissions_title">Dovoljenja</string>
+    <string name="settings_all_files_desc">Omogoča, da se obnovljene skrite fotografije vrnejo v izvirno mapo in se lokalne datoteke posodobijo na mestu. Tapnite za dodelitev v sistemskih nastavitvah.</string>
+    <string name="settings_all_files_title">Dostop do vseh datotek</string>
+    <string name="settings_storage_clear">Počisti</string>
+    <string name="settings_storage_free_up">Sprosti</string>
+    <string name="settings_storage_used_of">%1$s od %2$s</string>
+
+    <!-- Dejanja albuma + deljenje -->
+    <string name="album_download_all_confirm_title">Prenesti cel album?</string>
+    <string name="album_download_all_confirm_body">Vsaka fotografija v tem albumu bo shranjena v vašo napravo.</string>
+    <string name="album_set_cover_confirm_title">Nastaviti kot naslovnico albuma?</string>
+    <string name="album_set_cover_confirm_body">Ta fotografija postane naslovnica albuma.</string>
+    <string name="album_remove_confirm_title">Odstraniti iz tega albuma?</string>
+    <string name="album_remove_confirm_body">To odstrani iz albuma samo izbor. Vaše fotografije ostanejo na časovnici.</string>
+    <string name="action_remove">Odstrani</string>
+    <string name="gallery_add_to_album_queued">Fotografije bodo dodane, ko se nalaganje konča</string>
+    <string name="share_role_can_view_desc">Lahko si ogleda album in njegove fotografije.</string>
+    <string name="share_role_can_edit_desc">Lahko dodaja in odstranjuje fotografije ter spremeni naslovnico.</string>
+    <string name="settings_show_selection_labels">Oznake gumbov</string>
+    <string name="settings_show_selection_labels_desc">Pri izbiranju fotografij pod vsakim gumbom prikaže kratko oznako, da je jasno, kaj kateri počne.</string>
+    <string name="sel_label_download">Prenesi</string>
+    <string name="sel_label_delete">Izbriši</string>
+    <string name="sel_label_cover">Naslovnica</string>
+    <string name="sel_label_offline">Brez povezave</string>
+    <string name="sel_label_album">Album</string>
+    <string name="sel_label_upload">Naloži</string>
+    <string name="op_offline_fmt">Shranjevanje brez povezave %1$d / %2$d</string>
+    <string name="picker_filter_all">Vse</string>
+    <string name="picker_filter_cloud">Oblak</string>
+    <string name="picker_filter_device">Naprava</string>
+    <string name="sync_open_settings">Nastavitve varnostnega kopiranja</string>
+    <string name="sync_open_settings_desc">Izberite, kaj in kako varnostno kopirati ter katero omrežje uporabiti.</string>
+    <string name="settings_privacy">Zasebnost</string>
+    <string name="settings_privacy_desc">Predpomnilnik, fotografije brez povezave in telemetrija</string>
+    <string name="settings_metadata">Metapodatki</string>
+    <string name="settings_metadata_desc">Preimenovanje kopij in odstranjevanje EXIF (GPS, fotoaparat, časovni žig)</string>
+    <string name="about_support_title">Kupi mi kavo</string>
+    <string name="about_support_subtitle">Podprite aplikacijo in njen razvoj</string>
+    <string name="sync_folder_backup_label">Kopiraj</string>
+    <string name="sync_folder_album_label">Album</string>
+    <string name="sync_view_activity">Podrobnosti</string>
+    <string name="activity_title">Dejavnost</string>
+    <string name="activity_uploading">Nalaganje</string>
+    <string name="activity_pending">Čaka na nalaganje (%1$d)</string>
+    <string name="activity_empty">Trenutno se nič ne prenaša</string>
+    <string name="activity_row_desc">Oglejte si prenose v teku in fotografije, ki čakajo na nalaganje</string>
+    <string name="activity_offline">Brez povezave</string>
+    <string name="activity_photos">Fotografije</string>
+    <string name="activity_tab_active">Aktivno</string>
+    <string name="activity_tab_history">Zgodovina</string>
+    <string name="activity_history_empty">Zaenkrat ni dokončanih prenosov</string>
+    <string name="activity_history_clear">Počisti zgodovino</string>
+    <string name="activity_hist_upload">Varnostno kopiranih %1$d fotografij</string>
+    <string name="activity_hist_download">Prenesenih %1$d fotografij</string>
+    <string name="activity_hist_download_named">Prenesenih %1$d iz albuma \"%2$s\"</string>
+    <string name="activity_hist_offline">Shranjenih %1$d fotografij brez povezave</string>
+    <string name="activity_downloading">Prenašanje</string>
 </resources>

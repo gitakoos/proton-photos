@@ -40,7 +40,7 @@ import javax.inject.Singleton
 /**
  * Hits the GitHub Releases API, compares the latest stable tag to [BuildConfig.VERSION_NAME],
  * and picks the ABI-matched APK asset. Cache windows are tracked in DataStore so the
- * background check throttles to once per 24h.
+ * background check throttles to once per 4h.
  *
  * Failure handling: every exception path (network, parse, missing asset, unknown ABI)
  * resolves to [UpdateStatus.UpToDate]. The repository never throws — by design. Loud
@@ -176,7 +176,7 @@ class UpdateCheckerRepositoryImpl @Inject constructor(
     }
 
     private companion object {
-        private const val CACHE_TTL_MS = 24L * 60L * 60L * 1000L
+        private const val CACHE_TTL_MS = 4L * 60L * 60L * 1000L
         /** Matches the `base { archivesName }` setting in app/build.gradle.kts. */
         private const val APK_BASE_NAME = "photosforproton"
     }

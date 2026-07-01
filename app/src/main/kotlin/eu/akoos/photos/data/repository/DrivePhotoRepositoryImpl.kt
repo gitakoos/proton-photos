@@ -32,9 +32,12 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import me.proton.core.domain.entity.UserId
 import eu.akoos.photos.data.crypto.DriveCryptoHelper
+import eu.akoos.photos.data.db.dao.PerceptualHashDao
 import eu.akoos.photos.data.db.dao.PhotoListingDao
 import eu.akoos.photos.data.db.dao.SyncStateDao
 import eu.akoos.photos.data.db.dao.DayMetaDao
+import eu.akoos.photos.data.hidden.HiddenStorageManager
+import eu.akoos.photos.data.offline.OfflineStorageManager
 import eu.akoos.photos.data.repository.drive.AlbumService
 import eu.akoos.photos.data.repository.drive.AlbumSharingService
 import eu.akoos.photos.data.repository.drive.CloudTrashService
@@ -82,6 +85,10 @@ class DrivePhotoRepositoryImpl @Inject constructor(
     private val photoListingDao: PhotoListingDao,
     private val syncStateDao: SyncStateDao,
     private val dayMetaDao: DayMetaDao,
+    private val perceptualHashDao: PerceptualHashDao,
+    private val offlineStore: OfflineStorageManager,
+    private val hiddenStore: HiddenStorageManager,
+    private val transferCenter: eu.akoos.photos.data.transfer.TransferCenter,
 ) : DrivePhotoRepository {
 
     // Long-lived scope for fire-and-forget DAO lookups in the thumbnail request path.
@@ -406,6 +413,23 @@ class DrivePhotoRepositoryImpl @Inject constructor(
         // account's albums. Awaited now (the method is suspend) so the wipe completes before the
         // account is disabled.
         runCatching { albumService.clearAlbumCache() }
+        // Wipe the offline-pinned full-res blobs. They are decrypted photo content in the app
+        // sandbox, so a revoked or force-logged-out session must leave none resident. Blobs are
+        // keyed by volume-unique linkId (not user-partitioned), so this clears every pin's bytes;
+        // a still-signed-in account simply re-downloads its pins on demand.
+        runCatching { offlineStore.clearAllAndUnpin() }
+        // Wipe the decrypted Hidden vault blobs as well. The hidden index pref is cleared on the
+        // explicit sign-out, but the converged force-logout / 2FA-fail path only runs this method,
+        // so the vault must be emptied here for every sign-out route to leave no decrypted photos.
+        runCatching { hiddenStore.clearVault() }
+        // Drop the cached perceptual fingerprints so one account's near-duplicate prints don't
+        // linger for the next signed-in user. Keyed by linkId / uri (not user-partitioned), so
+        // this clears every row; the background scheduler refills on demand for whoever is next.
+        runCatching { perceptualHashDao.clearAll() }
+        // Wipe the background-transfer history. It holds album names, timestamps and device-URI
+        // thumbnails of the previous session's uploads and downloads, kept in its own store that the
+        // settings-key wipe does not reach, so the next signed-in user must not inherit it.
+        runCatching { transferCenter.clearHistory() }
     }
 
     override fun requestThumbnailDecrypt(userId: UserId, linkId: String) {

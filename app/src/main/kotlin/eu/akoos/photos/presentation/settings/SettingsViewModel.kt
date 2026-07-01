@@ -54,8 +54,10 @@ import me.proton.core.accountmanager.domain.AccountManager
 import me.proton.core.user.domain.usecase.GetUser
 import me.proton.core.user.domain.usecase.ObserveUser
 import eu.akoos.photos.R
+import eu.akoos.photos.data.offline.OfflineStorageManager
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.data.preferences.syncEffectivelyEnabled
 import eu.akoos.photos.presentation.lock.AppLockManager
 import eu.akoos.photos.domain.entity.SyncStatus
 import kotlinx.coroutines.flow.combine
@@ -85,6 +87,7 @@ class SettingsViewModel @Inject constructor(
     private val localMediaRepo: LocalMediaRepository,
     private val cloudRepo: DrivePhotoRepository,
     private val cloudTrashService: eu.akoos.photos.data.repository.drive.CloudTrashService,
+    private val offlineStore: OfflineStorageManager,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SettingsUiState())
@@ -135,13 +138,15 @@ class SettingsViewModel @Inject constructor(
                 val total = statFs.totalBytes
                 val free  = statFs.availableBytes
                 val cacheBytes = computeCacheBytes(context.cacheDir)
-                Triple(total, free, cacheBytes)
+                val offlineBytes = offlineStore.computeSizeBytes()
+                LocalStorage(total, free, cacheBytes, offlineBytes)
             }
             _uiState.update {
                 it.copy(
-                    deviceTotalBytes = measured.first,
-                    deviceFreeBytes  = measured.second,
-                    appCacheBytes    = measured.third,
+                    deviceTotalBytes = measured.total,
+                    deviceFreeBytes  = measured.free,
+                    appCacheBytes    = measured.cacheBytes,
+                    offlineBytes     = measured.offlineBytes,
                 )
             }
         }
@@ -189,6 +194,22 @@ class SettingsViewModel @Inject constructor(
                 // null those paths so visible cells re-request a decrypt off the persisted
                 // crypto material instead of staying blank until a full library refresh.
                 cloudRepo.clearCachedThumbnailUrls()
+            }
+            refreshLocalStorage()
+        }
+    }
+
+    /**
+     * Wipes the offline-pinned full-res blobs ([OfflineStorageManager.clearAll]) AND drops the
+     * pin set ([SettingsKeys.OFFLINE_PIN_IDS]) so the two stay consistent — deleting blobs while
+     * leaving the set would leave "pinned" photos with no blob backing them. Recomputes
+     * `offlineBytes` afterwards so the row reflects the cleared figure.
+     */
+    fun clearOfflineStorage() {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                offlineStore.clearAll()
+                context.settingsDataStore.edit { it.remove(SettingsKeys.OFFLINE_PIN_IDS) }
             }
             refreshLocalStorage()
         }
@@ -519,6 +540,7 @@ class SettingsViewModel @Inject constructor(
                     freeUpWifiOnly = migratedPrefs[SettingsKeys.FREE_UP_WIFI_ONLY] ?: true,
                     themeMode = ThemeMode.fromKey(migratedPrefs[SettingsKeys.THEME_MODE]),
                     palette = ThemePalette.fromKey(migratedPrefs[SettingsKeys.THEME_PALETTE]),
+                    amoledBlack = migratedPrefs[SettingsKeys.AMOLED_BLACK] ?: false,
                     landingTab = LandingTab.fromIndex(migratedPrefs[SettingsKeys.LANDING_TAB]),
                     lastSyncMs = migratedPrefs[SettingsKeys.LAST_SYNC_MS],
                     language = migratedPrefs[SettingsKeys.LANGUAGE] ?: "system",
@@ -535,6 +557,7 @@ class SettingsViewModel @Inject constructor(
                     clearCacheOnAppClose = migratedPrefs[SettingsKeys.CLEAR_CACHE_ON_APP_CLOSE] ?: false,
                     hidePhotosInAlbums = migratedPrefs[SettingsKeys.HIDE_PHOTOS_IN_ALBUMS] ?: false,
                     showScrollDate = migratedPrefs[SettingsKeys.SHOW_SCROLL_DATE] ?: false,
+                    showSelectionLabels = migratedPrefs[SettingsKeys.SHOW_SELECTION_LABELS] ?: true,
                     reverseTimelineOrder = migratedPrefs[SettingsKeys.REVERSE_TIMELINE_ORDER] ?: false,
                     mosaicGrid = migratedPrefs[SettingsKeys.MOSAIC_GRID] ?: false,
                     gridRememberLast = migratedPrefs[SettingsKeys.GRID_REMEMBER_LAST] ?: false,
@@ -548,26 +571,11 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             context.settingsDataStore.edit { it[SettingsKeys.AUTO_SYNC] = enabled }
             _uiState.update { it.copy(autoSync = enabled) }
-            if (enabled) {
-                // Hardcoded 15-min floor — the OS content URI trigger covers fresh photos
-                // within seconds; periodic is just the Doze/OEM-throttle safety net.
-                SyncWorker.schedule(workManager, _uiState.value.syncWifiOnly, SyncWorker.MIN_INTERVAL_MINUTES)
-                // The persistent keep-alive service (the in-process MediaStore observer that catches
-                // fresh photos within seconds) is opt-in and off by default — the content trigger +
-                // periodic worker keep backups flowing without a standing notification. Only bring it
-                // back when the user has explicitly turned its notification on.
-                if (context.settingsDataStore.data.first()[SettingsKeys.NOTIFY_BACKUP_STATUS] == true) {
-                    eu.akoos.photos.service.BackgroundSyncService.start(context)
-                }
-            } else {
-                SyncWorker.cancel(workManager)
-                // Stop the persistent foreground service so the LOW "Watching for new
-                // photos" notification disappears immediately. Leaving it running would
-                // ALSO keep the ContentObserver firing SyncWorker.runNow on every photo
-                // write — that worker would early-return (LOCAL_ONLY empty when autoSync
-                // is off), but the wasted wake-ups burn battery and confuse users.
-                eu.akoos.photos.service.BackgroundSyncService.stop(context)
-            }
+            // One place arms or tears down ALL background triggers (periodic worker, content
+            // observer, opt-in keep-alive service) from the just-written prefs. On disable it also
+            // cancels the content observer — leaving it armed would keep firing SyncWorker on every
+            // photo write and burn wake-ups even though nothing uploads.
+            SyncWorker.reconcileBackgroundWork(context)
         }
     }
 
@@ -579,9 +587,13 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             context.settingsDataStore.edit { it[SettingsKeys.BACKUP_EVERYTHING] = enabled }
             _uiState.update { it.copy(backupEverything = enabled) }
+            // Turning this on can make backup effectively-on with no folders selected (arm the
+            // triggers); turning it off with no folders selected makes it effectively-off (tear
+            // them down). reconcile covers both.
+            SyncWorker.reconcileBackgroundWork(context)
             // Kick a sync run so the new mode takes effect immediately instead of waiting
             // for the next periodic SyncWorker tick.
-            if (_uiState.value.autoSync) SyncWorker.runNow(context, _uiState.value.syncWifiOnly)
+            if (syncEffectivelyEnabled(context)) SyncWorker.runNow(context, _uiState.value.syncWifiOnly)
         }
     }
 
@@ -768,6 +780,18 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Persist the AMOLED pure-black switch. Like the palette, this is a pure in-Compose surface
+     * swap: MainActivity re-collects the key and re-themes live, so no boot mirror and no
+     * AppCompatDelegate recreate are needed.
+     */
+    fun setAmoledBlack(enabled: Boolean) {
+        viewModelScope.launch {
+            context.settingsDataStore.edit { it[SettingsKeys.AMOLED_BLACK] = enabled }
+            _uiState.update { it.copy(amoledBlack = enabled) }
+        }
+    }
+
     /** Persist which top-level tab the gallery opens on at app start. The gallery reads the key
      *  once on first composition; this setter is for immediate UI feedback in Settings. */
     fun setLandingTab(tab: LandingTab) {
@@ -916,6 +940,13 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    fun setShowSelectionLabels(enabled: Boolean) {
+        viewModelScope.launch {
+            context.settingsDataStore.edit { it[SettingsKeys.SHOW_SELECTION_LABELS] = enabled }
+            _uiState.update { it.copy(showSelectionLabels = enabled) }
+        }
+    }
+
     /** Persist the "reverse timeline order" toggle. The Photos grid observes the key directly;
      *  this setter is for immediate UI feedback in Settings. */
     fun setReverseTimelineOrder(enabled: Boolean) {
@@ -952,8 +983,10 @@ class SettingsViewModel @Inject constructor(
                 //    fetch instead of replaying stale rows that showed up with black thumbnails).
                 cloudRepo.clearCacheForSignOut(userId)
                 // 3. Delete the decrypted on-disk caches + Coil's caches so no decrypted photo or
-                //    thumbnail of the signed-out user stays readable. MediaStore originals, the
-                //    encrypted in-flight upload spill, and the local hidden vault are left alone.
+                //    thumbnail of the signed-out user stays readable. The offline blobs, the hidden
+                //    vault and the key material are wiped inside clearCacheForSignOut above so EVERY
+                //    sign-out route (including a server-side force-logout) covers them; MediaStore
+                //    originals and the encrypted in-flight upload spill are left alone.
                 runCatching {
                     kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                         listOf("thumbnails", "fullres", "fullres-session", "editor", "video_editor", "motion")
@@ -976,10 +1009,12 @@ class SettingsViewModel @Inject constructor(
                             SettingsKeys.BACKUP_EVERYTHING,
                             SettingsKeys.EXCLUDED_FOLDER_NAMES,
                             SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP,
+                            SettingsKeys.HIDDEN_URI_ORIGINAL_NAME_MAP,
                             SettingsKeys.MANUAL_LOCAL_FOLDER_NAMES,
                             SettingsKeys.ALBUM_BUCKET_MAP,
                             SettingsKeys.PENDING_DELETE_URIS,
                             SettingsKeys.HIDDEN_PHOTO_URIS,
+                            SettingsKeys.OFFLINE_PIN_IDS,
                             SettingsKeys.FAVORITE_IDS,
                             SettingsKeys.RECENT_UPLOAD_IDS,
                             // Hide-photos-in-albums is a per-user view preference. Without
@@ -988,6 +1023,7 @@ class SettingsViewModel @Inject constructor(
                             SettingsKeys.HIDE_PHOTOS_IN_ALBUMS,
                             SettingsKeys.HIDE_DEVICE_FOLDERS_IN_ALBUMS,
                             SettingsKeys.SHOW_SCROLL_DATE,
+                            SettingsKeys.SHOW_SELECTION_LABELS,
                             SettingsKeys.REVERSE_TIMELINE_ORDER,
                             SettingsKeys.MOSAIC_GRID,
                             // Timeline folder filter is likewise a per-user view preference.
@@ -1032,6 +1068,17 @@ private data class BackedUpSnapshot(
     val videos: Int,
     val bytes: Long,
     val pending: Int,
+)
+
+/**
+ * Off-thread measurement bundle for [SettingsViewModel.refreshLocalStorage] — folds the four
+ * storage figures into one strongly-typed value instead of a Tuple.
+ */
+private data class LocalStorage(
+    val total: Long,
+    val free: Long,
+    val cacheBytes: Long,
+    val offlineBytes: Long,
 )
 
 private const val CLOUD_TRASH_TTL_MS = 5L * 60L * 1000L

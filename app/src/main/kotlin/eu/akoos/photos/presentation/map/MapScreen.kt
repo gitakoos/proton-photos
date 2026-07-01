@@ -178,12 +178,21 @@ fun MapScreen(
         }
     }
 
-    // osmdroid drives tile threads + the location engine off the view's lifecycle hooks. Compose
-    // has no built-in equivalent, so forward onResume/onPause and detach (which stops those
-    // threads and releases tile handles) when the composable leaves.
-    DisposableEffect(mapView) {
-        mapView.onResume()
+    // osmdroid drives tile threads + the location engine off the view's lifecycle hooks. Bridge them
+    // to the SCREEN's lifecycle (not just composition) so the tile threads pause when the app is
+    // backgrounded while this screen is still on the back stack, and detach when the composable leaves.
+    val mapLifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    DisposableEffect(mapView, mapLifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            when (event) {
+                androidx.lifecycle.Lifecycle.Event.ON_RESUME -> mapView.onResume()
+                androidx.lifecycle.Lifecycle.Event.ON_PAUSE -> mapView.onPause()
+                else -> Unit
+            }
+        }
+        mapLifecycleOwner.lifecycle.addObserver(observer)
         onDispose {
+            mapLifecycleOwner.lifecycle.removeObserver(observer)
             mapView.onPause()
             mapView.onDetach()
         }

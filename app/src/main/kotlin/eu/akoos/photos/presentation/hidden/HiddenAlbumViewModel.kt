@@ -148,8 +148,15 @@ class HiddenAlbumViewModel @Inject constructor(
                     )
                 }
                 .collectLatest { (hiddenUris, backedUpUris) ->
+                    // The vault file lives under a private UUID name, so queryByUri reports that
+                    // code as the display name. Surface the original filename recorded at hide
+                    // time instead, when one is present.
+                    val nameMap = context.settingsDataStore.data.first()[SettingsKeys.HIDDEN_URI_ORIGINAL_NAME_MAP] ?: emptySet()
                     val items = hiddenUris.mapNotNull { uri ->
-                        localMediaRepo.queryByUri(uri)
+                        localMediaRepo.queryByUri(uri)?.let { item ->
+                            val original = nameMap.firstOrNull { it.startsWith("$uri|") }?.substringAfter('|')
+                            if (!original.isNullOrBlank()) item.copy(displayName = original) else item
+                        }
                     }
                     _uiState.value = _uiState.value.copy(
                         items = items,
@@ -182,18 +189,42 @@ class HiddenAlbumViewModel @Inject constructor(
                 val tokens = prefs[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] ?: emptySet()
                 tokens.firstOrNull { it.startsWith("$uri|") }?.substringAfter('|')
             }
+            // Source folder recorded at hide time so the file returns to where it came from
+            // instead of the Pictures/Movies root. Absent for items hidden before this map
+            // existed — restore then keeps its root default.
+            // Original filename recorded at hide time so the restored entry keeps its name.
+            // Absent for items hidden before this map existed — restore then generates a name.
+            val sourceFolder: String?
+            val storedName: String?
+            run {
+                val prefs = context.settingsDataStore.data.first()
+                sourceFolder = prefs[SettingsKeys.HIDDEN_URI_SOURCE_FOLDER_MAP]
+                    ?.firstOrNull { it.startsWith("$uri|") }
+                    ?.substringAfter('|')
+                storedName = prefs[SettingsKeys.HIDDEN_URI_ORIGINAL_NAME_MAP]
+                    ?.firstOrNull { it.startsWith("$uri|") }
+                    ?.substringAfter('|')
+            }
             // If [uri] is an app-private hidden file, restore it to MediaStore so other gallery
             // apps can see it again, then drop it from the hidden set.
             var restoredUri: String? = null
             if (hiddenStorage.isHiddenUri(uri)) {
-                val displayName = _uiState.value.items.firstOrNull { it.uri == uri }?.displayName
-                restoredUri = withContext(Dispatchers.IO) { hiddenStorage.restore(uri, displayName) }
+                // Prefer the name persisted at hide time — the in-memory item's displayName is
+                // derived from the private UUID file, so it would otherwise restore as a code.
+                val displayName = storedName ?: _uiState.value.items.firstOrNull { it.uri == uri }?.displayName
+                restoredUri = withContext(Dispatchers.IO) {
+                    hiddenStorage.restore(uri, displayName, albumFolderName = sourceFolder)
+                }
             }
             context.settingsDataStore.edit { prefs ->
                 val current = prefs[SettingsKeys.HIDDEN_PHOTO_URIS] ?: emptySet()
                 prefs[SettingsKeys.HIDDEN_PHOTO_URIS] = current - uri
                 val mapping = prefs[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] ?: emptySet()
                 prefs[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] = mapping.filterNot { it.startsWith("$uri|") }.toSet()
+                val folders = prefs[SettingsKeys.HIDDEN_URI_SOURCE_FOLDER_MAP] ?: emptySet()
+                prefs[SettingsKeys.HIDDEN_URI_SOURCE_FOLDER_MAP] = folders.filterNot { it.startsWith("$uri|") }.toSet()
+                val names = prefs[SettingsKeys.HIDDEN_URI_ORIGINAL_NAME_MAP] ?: emptySet()
+                prefs[SettingsKeys.HIDDEN_URI_ORIGINAL_NAME_MAP] = names.filterNot { it.startsWith("$uri|") }.toSet()
             }
             // Synced-photo round-trip: pull the OLD HIDDEN SyncState row (keyed on the
             // pre-hide URI) forward onto the new MediaStore URI, status=SYNCED. Without

@@ -47,6 +47,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -64,6 +67,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.PhotoAlbum
+import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
@@ -73,6 +77,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -94,7 +99,17 @@ import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.presentation.common.ConfirmSheet
 import eu.akoos.photos.presentation.common.IconBubble
+import eu.akoos.photos.presentation.common.SelectionBottomDock
+import eu.akoos.photos.presentation.common.SelectionDockItem
+import eu.akoos.photos.presentation.common.SelectionTopBar
+import eu.akoos.photos.presentation.common.SelectionTopButton
 import eu.akoos.photos.presentation.gallery.PhotoCell
+import eu.akoos.photos.presentation.gallery.ScrollDateLabel
+import eu.akoos.photos.presentation.gallery.TimelineGrouping
+import eu.akoos.photos.presentation.gallery.TimelineScrubber
+import eu.akoos.photos.data.preferences.SettingsKeys
+import eu.akoos.photos.data.preferences.settingsDataStore
+import kotlinx.coroutines.flow.map
 import eu.akoos.photos.presentation.viewer.ManagePublicLinkSheet
 import eu.akoos.photos.presentation.viewer.PhotoShareSheet
 import eu.akoos.photos.presentation.gallery.photoCellInputsFor
@@ -125,11 +140,24 @@ fun DeviceFolderDetailScreen(
 
     val items by viewModel.items.collectAsStateWithLifecycle()
     val selectedUris by viewModel.selectedUris.collectAsStateWithLifecycle()
+    val offlinePinIds by viewModel.offlinePinIds.collectAsStateWithLifecycle()
     val backupProgress by viewModel.backupProgress.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val gridState = rememberLazyGridState()
     val showScrollTop by remember { derivedStateOf { gridState.firstVisibleItemIndex > 4 } }
+    val folderCtx = androidx.compose.ui.platform.LocalContext.current
+    // Opt-in floating day pill while the grid scrolls; default off. Shares the scrubber's date mapping.
+    val showScrollDate by remember {
+        folderCtx.settingsDataStore.data.map { it[SettingsKeys.SHOW_SCROLL_DATE] ?: false }
+    }.collectAsState(initial = false)
+    // Text labels under the selection-mode action buttons; on by default, toggled in Settings.
+    val showSelectionLabels by remember {
+        folderCtx.settingsDataStore.data.map { it[SettingsKeys.SHOW_SELECTION_LABELS] ?: true }
+    }.collectAsState(initial = true)
+    // Yields the pill while the scrubber bubble is being dragged so the two don't overlap.
+    var scrubberDragging by remember { mutableStateOf(false) }
+    val scrubberTopInset = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 56.dp
 
     val isSelectionMode = selectedUris.isNotEmpty()
     // In selection mode the back button cancels the selection instead of leaving the screen —
@@ -368,7 +396,7 @@ fun DeviceFolderDetailScreen(
                         // The old per-cell Select / Share / Back-up menu is gone; in selection mode the
                         // toolbar carries Share + Back up, so a long-press + the toolbar covers the same
                         // actions without the extra "Select" tap.
-                        val inputs = remember(item) { photoCellInputsFor(item) }
+                        val inputs = remember(item, offlinePinIds) { photoCellInputsFor(item, offlinePinIds = offlinePinIds) }
                         PhotoCell(
                             imageData = inputs.imageData,
                             stableKey = inputs.stableKey,
@@ -379,6 +407,7 @@ fun DeviceFolderDetailScreen(
                             showCloudBadge = inputs.showCloudBadge,
                             showSyncedBadge = inputs.showSyncedBadge,
                             isFavorite = inputs.isFavorite,
+                            isOffline = inputs.isOffline,
                             typeBadgeRes = inputs.typeBadgeRes,
                             typeBadgeCdRes = inputs.typeBadgeCdRes,
                             onClick = {
@@ -397,6 +426,38 @@ fun DeviceFolderDetailScreen(
                     }
                 }
             }
+        }
+
+        // Fast-scroll scrubber over the photo grid — the same handle as the timeline. The scrubber
+        // groups by day, so the drag tooltip reads "d MMMM yyyy" even though the section headers are month.
+        if (items.isNotEmpty()) {
+            TimelineScrubber(
+                gridState = gridState,
+                items = items,
+                grouping = TimelineGrouping.Day,
+                topPadding = scrubberTopInset,
+                bottomPadding = 24.dp,
+                keyOf = {
+                    when (it) {
+                        is GalleryItem.LocalOnly -> it.local.uri
+                        is GalleryItem.Synced -> it.local.uri
+                        is GalleryItem.CloudOnly -> it.cloud.linkId
+                    }
+                },
+                onDraggingChange = { scrubberDragging = it },
+            )
+        }
+
+        // Opt-in floating day pill, top-centre while the grid scrolls, yielding while the scrubber drags.
+        if (showScrollDate) {
+            ScrollDateLabel(
+                gridState = gridState,
+                items = items,
+                grouping = TimelineGrouping.Day,
+                topPadding = scrubberTopInset,
+                suppressed = scrubberDragging,
+                modifier = Modifier.align(Alignment.TopCenter),
+            )
         }
 
         // Fixed back button — floats over the grid. Cancels selection while selecting.
@@ -446,136 +507,80 @@ fun DeviceFolderDetailScreen(
             }
             // Top selection bar — cancel + count + share + delete, matching the gallery and
             // album selection headers.
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .statusBarsPadding()
-                    .padding(horizontal = 12.dp)
-                    .padding(top = 8.dp)
-                    .clip(RoundedCornerShape(28.dp))
-                    .background(Bg0.copy(alpha = 0.95f))
-                    .border(0.5.dp, PillBorder, RoundedCornerShape(28.dp))
-                    .padding(horizontal = 8.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
+            SelectionTopBar(
+                onCancel = { viewModel.clearSelection() },
+                countText = selectionLabel,
             ) {
-                IconBubble(
-                    icon = Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = stringResource(R.string.gallery_cancel_selection),
-                    onClick = { viewModel.clearSelection() },
-                    diameter = 40.dp,
-                    iconSize = 18.dp,
-                    background = PillBg,
-                    borderColor = PillBorder,
-                    tint = FgPrimary,
+                // Toggles every selectable photo in the folder (cloud-only entries have no uri and
+                // stay excluded): select all, or clear once everything selectable is selected.
+                val selectableUris = items.mapNotNull { item ->
+                    when (item) {
+                        is GalleryItem.LocalOnly -> item.local.uri
+                        is GalleryItem.Synced -> item.local.uri
+                        is GalleryItem.CloudOnly -> null
+                    }
+                }
+                val allFolderSelected = selectableUris.isNotEmpty() &&
+                    selectedUris.size == selectableUris.size
+                SelectionTopButton(
+                    icon = Icons.Default.SelectAll,
+                    contentDescription = stringResource(
+                        if (allFolderSelected) R.string.gallery_deselect_all else R.string.select_all,
+                    ),
+                    active = allFolderSelected,
+                    onClick = {
+                        viewModel.setSelectedUris(if (allFolderSelected) emptySet() else selectableUris.toSet())
+                    },
                 )
-                Text(
-                    selectionLabel,
-                    color = FgPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.padding(start = 12.dp).weight(1f),
-                )
+                Spacer(Modifier.size(4.dp))
                 // Share selected to other apps — device files share their URI directly, no download.
-                Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        .background(PillBg, CircleShape)
-                        .border(0.5.dp, PillBorder, CircleShape)
-                        .clickable { showPhotoShareSheet = true },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        Icons.Default.Share,
-                        contentDescription = stringResource(R.string.share_action),
-                        tint = Accent,
-                        modifier = Modifier.size(18.dp),
+                SelectionTopButton(
+                    icon = Icons.Default.Share,
+                    contentDescription = stringResource(R.string.share_action),
+                    onClick = { showPhotoShareSheet = true },
+                )
+                // Hide selected — move on-device-only photos into the app's Hidden vault. Offered only
+                // when the selection has a LocalOnly photo (a Synced one keeps its Drive copy so it is
+                // never hideable). Mirrors the timeline's hide action.
+                val anyLocalOnlySelected = selectedItems.any { it is GalleryItem.LocalOnly }
+                if (anyLocalOnlySelected) {
+                    Spacer(Modifier.size(4.dp))
+                    SelectionTopButton(
+                        icon = Icons.Default.VisibilityOff,
+                        contentDescription = stringResource(R.string.gallery_hide_selected),
+                        enabled = !isDeleting,
+                        onClick = { viewModel.hideSelected() },
                     )
                 }
                 Spacer(Modifier.size(4.dp))
-                // Hide selected — move on-device-only photos into the app's Hidden vault. Offered only
-                // when something in the selection is LocalOnly (not yet backed up); a Synced photo keeps
-                // its Drive copy so it is never hideable. Mirrors the timeline's hide action.
-                val anyLocalOnlySelected = selectedItems.any { it is GalleryItem.LocalOnly }
-                if (anyLocalOnlySelected) {
-                    Box(
-                        modifier = Modifier
-                            .size(40.dp)
-                            .background(PillBg, CircleShape)
-                            .border(0.5.dp, PillBorder, CircleShape)
-                            .clickable(enabled = !isDeleting) { viewModel.hideSelected() },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(
-                            Icons.Default.VisibilityOff,
-                            contentDescription = stringResource(R.string.gallery_hide_selected),
-                            tint = Accent,
-                            modifier = Modifier.size(18.dp),
-                        )
-                    }
-                    Spacer(Modifier.size(4.dp))
-                }
-                // Delete selected — same sheet + system trash dialog as the gallery, with the
-                // option to also remove the Drive copy of any backed-up photos.
-                Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        .background(PillBg, CircleShape)
-                        .border(0.5.dp, PillBorder, CircleShape)
-                        .clickable { showDeleteSheet = true },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        Icons.Default.DeleteOutline,
-                        contentDescription = stringResource(R.string.gallery_delete_selected),
-                        tint = ErrorColor,
-                        modifier = Modifier.size(18.dp),
-                    )
-                }
+                // Delete selected — same sheet + system trash dialog as the gallery, with the option
+                // to also remove the Drive copy of any backed-up photos.
+                SelectionTopButton(
+                    icon = Icons.Default.DeleteOutline,
+                    contentDescription = stringResource(R.string.gallery_delete_selected),
+                    tint = ErrorColor,
+                    onClick = { showDeleteSheet = true },
+                )
             }
 
             // Bottom action dock — secondary actions (add to album, back up), the same floating
             // PillBgOpaque pill as the gallery and album selection docks.
-            val ctx = androidx.compose.ui.platform.LocalContext.current
-            Row(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .navigationBarsPadding()
-                    .padding(bottom = 24.dp)
-                    .background(PillBgOpaque, RoundedCornerShape(999.dp))
-                    .border(0.5.dp, PillBorder, RoundedCornerShape(999.dp))
-                    .padding(4.dp),
-                horizontalArrangement = Arrangement.spacedBy(2.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
+            SelectionBottomDock {
                 // Add selected to a cloud album — opens the gallery's picker sheet.
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(999.dp))
-                        .clickable { showAddToAlbumSheet = true }
-                        .padding(horizontal = 14.dp, vertical = 10.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        Icons.Default.PhotoAlbum,
-                        contentDescription = stringResource(R.string.gallery_add_to_album),
-                        tint = Accent,
-                        modifier = Modifier.size(20.dp),
-                    )
-                }
-                // Back up selected to Drive. Confirm with a snackbar either way (a back-up started,
-                // or the selection was already synced) since the progress pill alone is easy to miss.
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(999.dp))
-                        .clickable { showUploadConfirm = true }
-                        .padding(horizontal = 14.dp, vertical = 10.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        Icons.Default.CloudUpload,
-                        contentDescription = stringResource(R.string.device_folder_upload_action),
-                        tint = Accent,
-                        modifier = Modifier.size(20.dp),
-                    )
-                }
+                SelectionDockItem(
+                    icon = Icons.Default.PhotoAlbum,
+                    label = stringResource(R.string.sel_label_album),
+                    showLabel = showSelectionLabels,
+                    onClick = { showAddToAlbumSheet = true },
+                )
+                // Back up selected to Drive. A snackbar confirms either way since the progress
+                // pill alone is easy to miss.
+                SelectionDockItem(
+                    icon = Icons.Default.CloudUpload,
+                    label = stringResource(R.string.sel_label_upload),
+                    showLabel = showSelectionLabels,
+                    onClick = { showUploadConfirm = true },
+                )
             }
         }
 

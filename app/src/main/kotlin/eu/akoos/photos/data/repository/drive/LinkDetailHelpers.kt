@@ -161,6 +161,11 @@ class LinkDetailHelpers @Inject constructor(
                 }
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
+                // Propagate a transient (429 / 5xx / network) error instead of silently omitting the
+                // chunk, mirroring batchFetchLinkDetails: the caller's retry / failure accounting then
+                // runs rather than building a short map that looks like success and truncates the
+                // album. loadAlbumPhotos catches this in its runCatching and keeps the cached snapshot.
+                if (isTransientApiError(e)) throw e
                 Log.w(TAG, "batchFetchLinkDetailsViaShare failed: ${e.message}")
             }
         }

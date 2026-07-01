@@ -193,13 +193,15 @@ object ExifHelper {
     @Suppress("DEPRECATION") // TAG_ISO_SPEED_RATINGS kept to wipe the legacy tag too.
     fun stripToTempFile(context: Context, uri: String, config: MetadataStripConfig): File? {
         if (config.isNoOp) return null
+        val parsed = Uri.parse(uri)
+        val inputStream = context.contentResolver.openInputStream(parsed) ?: return null
+        // The temp must keep the source container's extension. A hardcoded ".jpg" mislabels
+        // HEIC / RAW / motion-photo bytes, which then upload (and decode) under the wrong type.
+        val suffix = tempSuffixFor(context, parsed)
+        val tmpFile = File.createTempFile("stripped_", suffix, context.cacheDir)
+        // Once the temp exists, any later failure (copy / EXIF write) must delete it so a thrown
+        // strip never orphans a cache file. The success path returns it for the caller to use+delete.
         return try {
-            val parsed = Uri.parse(uri)
-            val inputStream = context.contentResolver.openInputStream(parsed) ?: return null
-            // The temp must keep the source container's extension. A hardcoded ".jpg" mislabels
-            // HEIC / RAW / motion-photo bytes, which then upload (and decode) under the wrong type.
-            val suffix = tempSuffixFor(context, parsed)
-            val tmpFile = File.createTempFile("stripped_", suffix, context.cacheDir)
             FileOutputStream(tmpFile).use { out -> inputStream.use { it.copyTo(out) } }
             val exif = ExifInterface(tmpFile)
             if (config.stripGps) {
@@ -247,6 +249,7 @@ object ExifHelper {
             exif.saveAttributes()
             tmpFile
         } catch (_: Exception) {
+            runCatching { tmpFile.delete() }
             null
         }
     }

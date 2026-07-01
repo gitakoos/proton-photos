@@ -195,5 +195,13 @@ object Migrations {
         }
     }
 
-    val ALL: Array<Migration> = arrayOf(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13)
+    /** v13 → v14: new `perceptual_hash` table — one cached dHash per photo, the near-duplicate
+     *  finder's source so it need not re-decode the whole library on every open. */
+    val MIGRATION_13_14 = object : Migration(13, 14) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("CREATE TABLE IF NOT EXISTS `perceptual_hash` (`key` TEXT NOT NULL, `hash` INTEGER NOT NULL, `isCloud` INTEGER NOT NULL, `freshness` TEXT NOT NULL, `algoVersion` INTEGER NOT NULL, `computedAt` INTEGER NOT NULL, PRIMARY KEY(`key`))")
+        }
+    }
+
+    val ALL: Array<Migration> = arrayOf(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14)
 }

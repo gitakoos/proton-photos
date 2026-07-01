@@ -94,6 +94,7 @@ import eu.akoos.photos.presentation.onboarding.steps.BackupModeStep
 import eu.akoos.photos.presentation.onboarding.steps.DoneStep
 import eu.akoos.photos.presentation.onboarding.steps.FaqStep
 import eu.akoos.photos.presentation.onboarding.steps.FolderPickerStep
+import eu.akoos.photos.presentation.onboarding.steps.AllFilesAccessStep
 import eu.akoos.photos.presentation.onboarding.steps.ManageMediaStep
 import eu.akoos.photos.presentation.onboarding.steps.MirrorOptInStep
 import eu.akoos.photos.presentation.onboarding.steps.NotificationsStep
@@ -387,6 +388,9 @@ fun OnboardingScreen(
         add(OnboardingStep.Faq)
         add(OnboardingStep.Appearance)
         add(OnboardingStep.PhotosAccess)
+        // All-files access right after the media grant — the app asks for it by default (not only
+        // behind the mirror opt-in) so restored hidden photos can return to their real folders.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) add(OnboardingStep.AllFilesAccess)
         add(OnboardingStep.BackupMode)
         if (backupMode != BackupMode.NothingForNow) {
             add(OnboardingStep.FolderPicker)
@@ -559,6 +563,17 @@ fun OnboardingScreen(
                             granted = notificationGranted,
                             onAllow = { notificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) },
                         )
+                        OnboardingStep.AllFilesAccess -> AllFilesAccessStep(
+                            granted = allFilesGranted,
+                            onAllow = {
+                                allFilesLauncher.launch(
+                                    Intent(
+                                        Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                                        android.net.Uri.fromParts("package", context.packageName, null),
+                                    )
+                                )
+                            },
+                        )
                         OnboardingStep.ManageMedia -> ManageMediaStep(
                             granted = manageMediaGranted,
                             onAllow = {
@@ -579,6 +594,7 @@ fun OnboardingScreen(
             val isLastStep = currentStep == OnboardingStep.Done
             val isPermissionStep = currentStep == OnboardingStep.Notifications ||
                 currentStep == OnboardingStep.PhotosAccess ||
+                currentStep == OnboardingStep.AllFilesAccess ||
                 currentStep == OnboardingStep.ManageMedia
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -599,6 +615,7 @@ fun OnboardingScreen(
                 val currentStepGranted = when (currentStep) {
                     OnboardingStep.Notifications -> notificationGranted
                     OnboardingStep.PhotosAccess  -> mediaGranted
+                    OnboardingStep.AllFilesAccess -> allFilesGranted
                     OnboardingStep.ManageMedia   -> manageMediaGranted
                     else -> false
                 }
@@ -658,7 +675,7 @@ fun OnboardingScreen(
 }
 
 private enum class OnboardingStep {
-    About, Welcome, Faq, Appearance, PhotosAccess, BackupMode, FolderPicker,
+    About, Welcome, Faq, Appearance, PhotosAccess, AllFilesAccess, BackupMode, FolderPicker,
     AlbumMirrorOptIn, Privacy, MirrorOptIn, AppLock, Notifications, ManageMedia, Done,
 }
 

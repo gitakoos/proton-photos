@@ -53,6 +53,7 @@ import eu.akoos.photos.data.db.dao.AlbumPhotoMembershipDao
 import eu.akoos.photos.data.db.dao.CloudAlbumDao
 import eu.akoos.photos.data.db.dao.DayMetaDao
 import eu.akoos.photos.data.db.dao.LocalTagDao
+import eu.akoos.photos.data.db.dao.PerceptualHashDao
 import eu.akoos.photos.data.db.dao.PhotoListingDao
 import eu.akoos.photos.data.db.dao.PhotoLocationDao
 import eu.akoos.photos.data.db.dao.SyncStateDao
@@ -150,5 +151,9 @@ abstract class DatabaseModule {
         @Provides
         @Singleton
         fun providePhotoLocationDao(db: AppDatabase): PhotoLocationDao = db.photoLocationDao()
+
+        @Provides
+        @Singleton
+        fun providePerceptualHashDao(db: AppDatabase): PerceptualHashDao = db.perceptualHashDao()
     }
 }

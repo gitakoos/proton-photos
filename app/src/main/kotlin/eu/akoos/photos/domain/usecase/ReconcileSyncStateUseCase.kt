@@ -105,13 +105,13 @@ class ReconcileSyncStateUseCase @Inject constructor(
             // Key absent → first run, user hasn't selected any folders yet; backup nothing.
             Log.d(TAG, "No backup folders configured (first-run default) — nothing to upload")
             emptyList()
-        } else if (selectedFolders!!.isEmpty()) {
+        } else if (selectedFolders.isEmpty()) {
             // Explicit empty set → user disabled backup for all folders
             Log.d(TAG, "No folders selected for backup — nothing to upload")
             emptyList()
         } else {
             // Keep items whose bucket is in the selected set (or has no bucket name)
-            allLocalItems.filter { it.bucketName == null || it.bucketName in selectedFolders!! }
+            allLocalItems.filter { it.bucketName == null || it.bucketName in selectedFolders }
                 .also { Log.d(TAG, "Folder filter applied: ${it.size}/${allLocalItems.size} items") }
         }
 

@@ -158,7 +158,12 @@ interface DrivePhotoRepository {
         val succeededLinkIds: List<String>,
         val failedLinkIds: List<String>,
     )
-    suspend fun deleteFiles(userId: UserId, linkIds: List<String>)
+    /** Moves photos to the server-side trash. Returns the per-link outcome so callers can tell
+     *  whether some links stayed on the cloud (and avoid reporting a full success). */
+    suspend fun deleteFiles(
+        userId: UserId,
+        linkIds: List<String>,
+    ): eu.akoos.photos.data.repository.drive.CloudTrashOutcome
 
     /**
      * Renames a cloud photo. Since the Drive Photos API does not expose a server-side rename

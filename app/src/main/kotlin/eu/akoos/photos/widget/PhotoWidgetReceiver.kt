@@ -42,10 +42,12 @@ class PhotoWidgetReceiver : GlanceAppWidgetReceiver() {
         appWidgetIds: IntArray,
     ) {
         super.onUpdate(context, appWidgetManager, appWidgetIds)
-        // Trigger an immediate update for each (re-)added widget
+        // Refresh each (re-)added widget now. The periodic refresh is registered at the user's
+        // chosen interval by the config screen's save() and persists across reboot via WorkManager,
+        // so we must NOT re-register it here: calling enqueueOrReplace on every system onUpdate
+        // (e.g. after a reboot or host refresh) would reset the user's interval back to the default.
         appWidgetIds.forEach { id ->
             PhotoWidgetUpdateWorker.enqueueImmediate(context, id)
-            PhotoWidgetUpdateWorker.enqueueOrReplace(context, id)
         }
     }
 

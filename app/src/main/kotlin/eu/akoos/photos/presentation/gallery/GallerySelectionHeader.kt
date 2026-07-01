@@ -43,10 +43,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.OfflinePin
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PhotoAlbum
 import androidx.compose.material.icons.filled.PrivacyTip
+import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.CircularProgressIndicator
@@ -75,6 +77,7 @@ import eu.akoos.photos.presentation.common.allLocalOnly
 import eu.akoos.photos.presentation.common.anyLocalOnly
 import eu.akoos.photos.presentation.common.hasDownloadable
 import eu.akoos.photos.presentation.common.selectionMimeCounts
+import eu.akoos.photos.presentation.common.SelectionDockItem
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.AppColors
@@ -96,7 +99,9 @@ fun GallerySelectionHeader(
     selectedCount: Int,
     multiShareState: MultiShareState,
     multiDeleteState: MultiDeleteState,
+    allSelected: Boolean,
     onCancel: () -> Unit,
+    onSelectAll: () -> Unit,
     onShare: () -> Unit,
     onRequestDelete: () -> Unit,
     onHeaderHeightChanged: (Int) -> Unit,
@@ -154,6 +159,22 @@ fun GallerySelectionHeader(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            // Toggles the whole visible list: select all, or clear once everything is selected.
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .background(if (allSelected) appColors.accent else PillBg, CircleShape)
+                    .border(0.5.dp, PillBorder, CircleShape)
+                    .clickable { onSelectAll() },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Default.SelectAll,
+                    stringResource(if (allSelected) R.string.gallery_deselect_all else R.string.select_all),
+                    tint = if (allSelected) Color.White else appColors.fgPrimary,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
             // Cloud-only items decrypt to a temp file first; the ring tracks that resolution.
             val isSharing = multiShareState is MultiShareState.Working
             Box(
@@ -211,18 +232,21 @@ fun GallerySelectionHeader(
 
 /**
  * Bottom action dock for multi-select, alongside [GallerySelectionHeader]: Add to album, Back up
- * (device-only photos present), Download (cloud-only present), and a More menu (Strip / Hide) for
- * an all-device-only selection.
+ * (device-only photos present), Download (cloud-only present), Make available offline (cloud-only
+ * present), and a More menu (Strip / Hide) for an all-device-only selection.
  */
 @Composable
 fun GallerySelectionBottomBar(
     selectedItems: Set<GalleryItem>,
+    offlinePinIds: Set<String>,
     multiDownloadState: MultiDownloadState,
     multiHideState: MultiDeleteState,
     multiStripState: MultiStripState,
     addToAlbumState: AddToAlbumState,
     anyLocalOnly: Boolean,
+    showLabels: Boolean,
     onDownload: () -> Unit,
+    onMakeAvailableOffline: () -> Unit,
     onRequestAddToAlbum: () -> Unit,
     onBackUp: () -> Unit,
     onStripMetadata: () -> Unit,
@@ -236,49 +260,60 @@ fun GallerySelectionBottomBar(
     val hasLocalOnly = anyLocalOnly(selectedItems)
     val hasDownloadable = hasDownloadable(selectedItems)
     val allDeviceOnly = allLocalOnly(selectedItems)
+    // Offline pin only fetches bytes that aren't already on the device — gate to cloud-only items.
+    val hasCloudOnly = selectedItems.any { it is GalleryItem.CloudOnly }
 
     Row(
         modifier = Modifier
             .background(PillBgOpaque, RoundedCornerShape(999.dp))
             .border(0.5.dp, PillBorder, RoundedCornerShape(999.dp))
-            .padding(4.dp),
+            .padding(horizontal = 6.dp, vertical = 4.dp),
         horizontalArrangement = Arrangement.spacedBy(2.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        SelectionAction(
+        SelectionDockItem(
             icon = Icons.Default.PhotoAlbum,
-            label = stringResource(R.string.gallery_add_to_album),
-            tint = appColors.accent,
-            loading = isAddingToAlbum,
+            label = stringResource(R.string.sel_label_album),
+            showLabel = showLabels,
+            working = isAddingToAlbum,
             enabled = !isAddingToAlbum,
             onClick = onRequestAddToAlbum,
         )
         if (hasLocalOnly) {
-            SelectionAction(
+            SelectionDockItem(
                 icon = Icons.Default.CloudUpload,
-                label = stringResource(R.string.device_folder_upload_action),
-                tint = appColors.accent,
+                label = stringResource(R.string.sel_label_upload),
+                showLabel = showLabels,
                 onClick = onBackUp,
             )
         }
         if (hasDownloadable) {
-            SelectionAction(
+            SelectionDockItem(
                 icon = Icons.Default.FileDownload,
-                label = stringResource(R.string.gallery_download_selected),
-                tint = appColors.accent,
-                loading = isDownloading,
+                label = stringResource(R.string.sel_label_download),
+                showLabel = showLabels,
+                working = isDownloading,
                 enabled = !isDownloading,
                 onClick = onDownload,
+            )
+        }
+        if (hasCloudOnly) {
+            SelectionDockItem(
+                icon = Icons.Default.OfflinePin,
+                label = stringResource(R.string.sel_label_offline),
+                showLabel = showLabels,
+                onClick = onMakeAvailableOffline,
             )
         }
         if (allDeviceOnly) {
             Box {
                 var moreExpanded by remember { mutableStateOf(false) }
-                SelectionAction(
+                SelectionDockItem(
                     icon = Icons.Default.MoreVert,
                     label = stringResource(R.string.more_label),
+                    showLabel = showLabels,
                     tint = appColors.fgPrimary,
-                    loading = isStripping || isHiding,
+                    working = isStripping || isHiding,
                     onClick = { moreExpanded = true },
                 )
                 DropdownMenu(
@@ -336,32 +371,4 @@ fun GallerySelectionBottomBar(
     }
 }
 
-/** Icon-only action in the [GallerySelectionBottomBar]. No caption — labels run long in some
- *  locales and would push the pill off-screen; [label] is kept as the content description. */
-@Composable
-private fun SelectionAction(
-    icon: ImageVector,
-    label: String,
-    tint: Color,
-    loading: Boolean = false,
-    enabled: Boolean = true,
-    onClick: () -> Unit,
-) {
-    Box(
-        modifier = Modifier
-            .clip(RoundedCornerShape(999.dp))
-            .clickable(enabled = enabled, onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 10.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        if (loading) {
-            CircularProgressIndicator(
-                color = tint,
-                strokeWidth = 2.dp,
-                modifier = Modifier.size(18.dp),
-            )
-        } else {
-            Icon(icon, contentDescription = label, tint = tint, modifier = Modifier.size(20.dp))
-        }
-    }
-}
+// Bottom-dock items are the shared SelectionDockItem from SelectionBars.kt (icon + optional caption).

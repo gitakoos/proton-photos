@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.presentation.lock
 
+import android.app.KeyguardManager
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.compose.foundation.background
@@ -136,7 +137,13 @@ internal fun showBiometricPrompt(
             BiometricManager.Authenticators.DEVICE_CREDENTIAL,
     )
     if (canAuth != BiometricManager.BIOMETRIC_SUCCESS) {
-        onSuccess()
+        // No usable authenticator right now. Only auto-open when the device has NO secure lock at
+        // all (there is nothing to authenticate against, and refusing would lock the user out of
+        // their own app permanently). If the device IS secured but biometrics/credential are merely
+        // unavailable or unenrolled at the moment, stay locked so the gate can't be bypassed; the
+        // user retries with the Unlock button.
+        val keyguard = activity.getSystemService(KeyguardManager::class.java)
+        if (keyguard?.isDeviceSecure != true) onSuccess()
         return
     }
     val prompt = BiometricPrompt(

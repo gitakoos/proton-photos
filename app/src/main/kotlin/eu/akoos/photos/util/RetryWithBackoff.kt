@@ -65,6 +65,16 @@ suspend fun <T> retryWithBackoff(
             val serverWait = e.retryAfterMsOrNull()?.coerceAtMost(maxBackoffMs)
             val wait = serverWait ?: (expBackoff + jitter)
             Log.w(TAG, "attempt ${attempt + 1}/$maxAttempts failed (${e.javaClass.simpleName}: $msg), retrying in ${wait}ms")
+            // Survives the release log strip so a rate-limited / flaky upload shows the real cause
+            // (error type + any server Retry-After) and the backoff cost in the in-app diagnostics.
+            val httpCode = ((e as? ApiException)?.error as? ApiResult.Error.Http)?.httpCode
+            SyncDiagnostics.log(
+                "retry ${attempt + 1}/$maxAttempts ${e.javaClass.simpleName}" +
+                    (httpCode?.let { " http=$it" } ?: "") +
+                    (serverWait?.let { " (server Retry-After ${it}ms)" } ?: "") +
+                    " -> backoff ${wait}ms" +
+                    (msg.take(70).let { if (it.isNotBlank()) " [$it]" else "" })
+            )
             delay(wait)
         }
     }

@@ -22,6 +22,8 @@
 
 package eu.akoos.photos.presentation.gallery
 
+import eu.akoos.photos.presentation.common.UndoAction
+
 import eu.akoos.photos.domain.entity.GalleryItem
 
 data class GalleryUiState(
@@ -37,6 +39,8 @@ data class GalleryUiState(
     val onThisDayGroups: List<Pair<Int, List<GalleryItem>>> = emptyList(),
     val selectedFilter: GalleryFilter = GalleryFilter.All,
     val favoriteIds: Set<String> = emptySet(),
+    /** Cloud linkIds pinned for offline; the grid draws a download badge on each matching cell. */
+    val offlinePinIds: Set<String> = emptySet(),
     val isRefreshing: Boolean = false,
     val permissionState: PermissionState = PermissionState.NotRequested,
     val error: String? = null,
@@ -52,6 +56,9 @@ data class GalleryUiState(
     val multiHideState: MultiDeleteState = MultiDeleteState.Idle,
     /** Last hide batch included backed-up photos — the snackbar then notes the Drive copies stay. */
     val hideCloudNoticePending: Boolean = false,
+    /** Count of items in the last hide batch that couldn't be copied into the vault. Surfaced as a
+     *  partial-result snackbar when the batch finishes; 0 means every selected item hid cleanly. */
+    val hideFailureCount: Int = 0,
     /** Set after a reversible hide / cloud-trash delete just succeeded, so the terminal snackbar
      *  can offer Undo and restore exactly those items. Null = nothing to undo (e.g. a local-only
      *  delete, which is not app-reversible). Cleared once the snackbar is consumed. */
@@ -101,20 +108,6 @@ sealed class MultiDeleteState {
     data class  Failed(val message: String) : MultiDeleteState()
 }
 
-/** A just-completed action that can be reversed via the snackbar's Undo. [count] drives the
- *  message; the payload is whatever the matching restore path needs. */
-sealed class UndoAction {
-    abstract val count: Int
-    /** Undo a Hide: restore each private-vault URI back to MediaStore. */
-    data class Hide(val hiddenUris: List<String>) : UndoAction() {
-        override val count: Int get() = hiddenUris.size
-    }
-    /** Undo a cloud-trash delete: move each Drive linkId back out of Proton trash. */
-    data class CloudTrash(val linkIds: List<String>) : UndoAction() {
-        override val count: Int get() = linkIds.size
-    }
-}
-
 sealed class MultiDownloadState {
     data object Idle : MultiDownloadState()
     data class  Working(val done: Int, val total: Int) : MultiDownloadState()
@@ -162,6 +155,9 @@ enum class GalleryFilter(val tagId: Int? = null) {
     Bursts(tagId = 7),
     Panoramas(tagId = 8),
     Raw(tagId = 9),
+    // Not a Drive tag — locally computed from OFFLINE_PIN_IDS, like Favorites. Filters to the
+    // cloud photos pinned for offline.
+    Offline,
 }
 
 enum class PermissionState {

@@ -53,6 +53,9 @@ data class SettingsUiState(
     val deviceFreeBytes: Long = 0L,
     /** Sum of all files under context.cacheDir (computed off-thread, refreshed on entry). */
     val appCacheBytes: Long = 0L,
+    /** Sum of all offline-pinned full-res blobs under filesDir/offline (computed off-thread,
+     *  refreshed on entry). App-private — kept out of the device gallery and outside cacheDir. */
+    val offlineBytes: Long = 0L,
     val backedUpBytes: Long = 0L,
     val syncedCount: Int = 0,
     val notSyncedCount: Int = 0,
@@ -61,6 +64,9 @@ data class SettingsUiState(
     val syncedVideoCount: Int = 0,
     val themeMode: ThemeMode = ThemeMode.System,
     val palette: ThemePalette = ThemePalette.Default,
+    /** When true, dark mode forces base surfaces to true black for OLED panels. Off by default;
+     *  has no effect in light mode. */
+    val amoledBlack: Boolean = false,
     /** Which top-level tab the gallery opens on at app start. Default Photos. */
     val landingTab: LandingTab = LandingTab.Photos,
     /** Grid-layout settings (Appearance → Grid layout). [gridRememberLast] on = the timeline
@@ -79,14 +85,15 @@ data class SettingsUiState(
      *  count values so a cold start shows a skeleton instead of "None" / 0. */
     val countsLoading: Boolean = true,
     val language: String = "system",
-    // Metadata stripping
-    val stripOnUpload: Boolean = true,
+    // Metadata stripping. Defaults match the engine readers (which use `?: false`) so the toggles
+    // never render ON for a frame while the upload pipeline actually treats them as OFF.
+    val stripOnUpload: Boolean = false,
     val mirrorStripToLocal: Boolean = false,
     val renameToCaptureDate: Boolean = false,
     /** When true, the upload pipeline removes the local MediaStore copy once Drive has
      *  the upload. Off by default — opting in delegates "long-term storage" to Proton Drive. */
     val deleteLocalAfterBackup: Boolean = false,
-    val stripGps: Boolean = true,
+    val stripGps: Boolean = false,
     val stripCameraInfo: Boolean = false,
     val stripTimestamp: Boolean = false,
     val stripSoftwareInfo: Boolean = false,
@@ -103,6 +110,8 @@ data class SettingsUiState(
     /** When true, the Photos timeline shows a floating month/year label while scrolling.
      *  Off by default. */
     val showScrollDate: Boolean = false,
+    /** When true, selection-mode action buttons show a text label beneath the icon. On by default. */
+    val showSelectionLabels: Boolean = true,
     /** When true, the Photos timeline runs oldest-first (newest at the bottom). Off by default. */
     val reverseTimelineOrder: Boolean = false,
     /** When true, the Photos timeline uses a staggered (masonry) grid that keeps each photo's

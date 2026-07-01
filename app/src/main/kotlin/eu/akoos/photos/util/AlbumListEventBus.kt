@@ -52,4 +52,18 @@ class AlbumListEventBus @Inject constructor() {
     fun notifyChanged() {
         _changes.tryEmit(Unit)
     }
+
+    // Targeted cover update. Lets the album detail flip its own cover WITHOUT firing the generic
+    // [changes] signal (which makes the detail refresh and reload + flash the whole album), and lets
+    // the album grid patch a single card's thumbnail in place. Pair = (albumLinkId, coverUrl).
+    private val _coverChanges = MutableSharedFlow<Pair<String, String?>>(
+        replay = 0,
+        extraBufferCapacity = 1,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
+    val coverChanges: SharedFlow<Pair<String, String?>> = _coverChanges.asSharedFlow()
+
+    fun notifyCoverChanged(albumLinkId: String, coverThumbnailUrl: String?) {
+        _coverChanges.tryEmit(albumLinkId to coverThumbnailUrl)
+    }
 }

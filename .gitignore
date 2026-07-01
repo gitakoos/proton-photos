@@ -17,6 +17,7 @@ keystore.properties
 *.har
 *.log
 /test_out*.txt
+.release_notes_v*.md
 
 # Gradle wrapper except the jar
 !gradle/wrapper/gradle-wrapper.jar

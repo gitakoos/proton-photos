@@ -39,14 +39,15 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
@@ -55,7 +56,6 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CloudQueue
 import androidx.compose.material.icons.filled.DeleteForever
@@ -92,7 +92,8 @@ import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.CloudTrashItem
 import eu.akoos.photos.presentation.common.ConfirmDialog
 import eu.akoos.photos.presentation.common.EmptyState
-import eu.akoos.photos.presentation.common.IconBubble
+import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
+import eu.akoos.photos.presentation.settings.components.SettingsPillHeader
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.AppColorsTokens
 import eu.akoos.photos.presentation.theme.FgDim
@@ -111,6 +112,7 @@ enum class TrashTab { Device, Cloud }
 @Composable
 fun TrashScreen(
     onBack: () -> Unit,
+    initialTab: TrashTab = TrashTab.Device,
     viewModel: TrashViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -120,7 +122,7 @@ fun TrashScreen(
     var showDeviceRestoreDialog by remember { mutableStateOf(false) }
     var showCloudEmptyDialog    by remember { mutableStateOf(false) }
     var showCloudRestoreDialog  by remember { mutableStateOf(false) }
-    var selectedTab by remember { mutableStateOf(TrashTab.Device) }
+    var selectedTab by remember { mutableStateOf(initialTab) }
     val context = LocalContext.current
 
     LaunchedEffect(Unit) { viewModel.loadCloudTrash() }
@@ -153,261 +155,243 @@ fun TrashScreen(
         deviceDeleteLauncher.launch(IntentSenderRequest.Builder(pi.intentSender).build())
     }
 
-    Column(
+    Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(colors.pageBg)
-            .statusBarsPadding()
-            .navigationBarsPadding(),
+            .background(colors.pageBg),
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            IconBubble(
-                icon = Icons.AutoMirrored.Filled.ArrowBack,
-                contentDescription = stringResource(R.string.onboarding_back),
-                onClick = onBack,
-                diameter = 40.dp,
-                iconSize = 18.dp,
-                background = colors.surfaceWeak,
-                borderColor = PillBorder,
-                tint = FgDim,
-            )
-            Spacer(Modifier.weight(1f))
-            Text(
-                stringResource(R.string.trash_title),
-                color = FgPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
-            )
-            Spacer(Modifier.weight(1f))
-            Box(Modifier.size(36.dp))
-        }
+        val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+        val contentTopPad = floatingHeaderContentTopPadding()
 
-        // ── Pill rail: tab toggle + action pills ──────────────────────────────────
-        val activeIsDevice = selectedTab == TrashTab.Device
-        val activeHasItems = if (activeIsDevice) {
-            !state.device.apiUnsupported && state.device.items.isNotEmpty()
-        } else {
-            state.cloud.items.isNotEmpty()
-        }
-        val activeSelectionMode = if (activeIsDevice) state.device.isSelectionMode else state.cloud.isSelectionMode
-        val activeSelectedCount = if (activeIsDevice) state.device.selectedCount else state.cloud.selectedCount
+        Column(modifier = Modifier.fillMaxSize()) {
+            Spacer(Modifier.height(contentTopPad))
 
-        // ── Pill rail — same padding/spacing as the Photos + Shared rails ─────
-        LazyRow(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp)
-                .padding(top = 10.dp, bottom = 14.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            contentPadding = PaddingValues(end = 8.dp),
-        ) {
-            // Toggle pill — flips between Device and Cloud, mirroring the Shared albums pattern.
-            // Fixed-width inner row so swapping labels (Device ↔ Cloud) doesn't reflow the
-            // siblings to the right.
-            item(key = "trash_tab_toggle") {
-                Row(
-                    modifier = Modifier
-                        .height(38.dp)
-                        .background(colors.chipSelectedBg, pillShape)
-                        .clickable {
-                            selectedTab = if (activeIsDevice) TrashTab.Cloud else TrashTab.Device
-                        }
-                        .padding(horizontal = 14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    Icon(
-                        if (activeIsDevice) Icons.Default.PhoneAndroid else Icons.Default.CloudQueue,
-                        contentDescription = null,
-                        tint = colors.accent,
-                        modifier = Modifier.size(14.dp),
-                    )
-                    Text(
-                        stringResource(
-                            if (activeIsDevice) R.string.trash_section_device else R.string.trash_section_cloud,
-                        ),
-                        color = FgPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium,
-                    )
-                    Icon(
-                        Icons.Default.SwapHoriz, contentDescription = null,
-                        tint = FgDim, modifier = Modifier.size(14.dp),
-                    )
+            // ── Pill rail: tab toggle + action pills ──────────────────────────────────
+            val activeIsDevice = selectedTab == TrashTab.Device
+            val activeHasItems = if (activeIsDevice) {
+                !state.device.apiUnsupported && state.device.items.isNotEmpty()
+            } else {
+                state.cloud.items.isNotEmpty()
+            }
+            val activeSelectionMode = if (activeIsDevice) state.device.isSelectionMode else state.cloud.isSelectionMode
+            val activeSelectedCount = if (activeIsDevice) state.device.selectedCount else state.cloud.selectedCount
+
+            // ── Pill rail — same padding/spacing as the Photos + Shared rails ─────
+            LazyRow(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp)
+                    .padding(top = 10.dp, bottom = 14.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                contentPadding = PaddingValues(end = 8.dp),
+            ) {
+                // Toggle pill — flips between Device and Cloud, mirroring the Shared albums pattern.
+                // Fixed-width inner row so swapping labels (Device ↔ Cloud) doesn't reflow the
+                // siblings to the right.
+                item(key = "trash_tab_toggle") {
+                    Row(
+                        modifier = Modifier
+                            .height(38.dp)
+                            .background(colors.chipSelectedBg, pillShape)
+                            .clickable {
+                                selectedTab = if (activeIsDevice) TrashTab.Cloud else TrashTab.Device
+                            }
+                            .padding(horizontal = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Icon(
+                            if (activeIsDevice) Icons.Default.PhoneAndroid else Icons.Default.CloudQueue,
+                            contentDescription = null,
+                            tint = colors.accent,
+                            modifier = Modifier.size(14.dp),
+                        )
+                        Text(
+                            stringResource(
+                                if (activeIsDevice) R.string.trash_section_device else R.string.trash_section_cloud,
+                            ),
+                            color = FgPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium,
+                        )
+                        Icon(
+                            Icons.Default.SwapHoriz, contentDescription = null,
+                            tint = FgDim, modifier = Modifier.size(14.dp),
+                        )
+                    }
                 }
-            }
-            // Restore pill — icon-only, confirmation dialog gates the action for both tabs.
-            item(key = "trash_restore") {
-                TrashPillButton(
-                    icon = Icons.Default.Restore,
-                    contentDescription = stringResource(R.string.trash_restore),
-                    enabled = activeHasItems,
-                    accent = colors.accent,
-                    onClick = {
-                        if (activeIsDevice) showDeviceRestoreDialog = true
-                        else showCloudRestoreDialog = true
-                    },
-                )
-            }
-            // Empty trash pill — icon-only, destructive red variant.
-            item(key = "trash_empty") {
-                TrashPillButton(
-                    icon = Icons.Default.DeleteForever,
-                    contentDescription = stringResource(R.string.trash_empty),
-                    enabled = activeHasItems,
-                    accent = colors.errorColor,
-                    onClick = {
-                        if (activeIsDevice) showDeviceEmptyDialog = true
-                        else showCloudEmptyDialog = true
-                    },
-                )
-            }
-            // Select-all toggle pill — only present in selection mode, appended to the end
-            // of the rail so the grid below never shifts when selection toggles on/off.
-            if (activeHasItems && activeSelectionMode) {
-                item(key = "trash_select_all") {
-                    val allSel = if (activeIsDevice) state.device.allSelected else state.cloud.allSelected
+                // Restore pill — icon-only, confirmation dialog gates the action for both tabs.
+                item(key = "trash_restore") {
                     TrashPillButton(
-                        icon = if (allSel) Icons.Default.Deselect else Icons.Default.SelectAll,
-                        contentDescription = if (allSel) stringResource(R.string.gallery_deselect_all) else stringResource(R.string.select_all),
-                        enabled = true,
+                        icon = Icons.Default.Restore,
+                        contentDescription = stringResource(R.string.trash_restore),
+                        enabled = activeHasItems,
                         accent = colors.accent,
                         onClick = {
-                            if (activeIsDevice) {
-                                if (allSel) viewModel.clearDeviceSelection() else viewModel.selectAllDevice()
-                            } else {
-                                if (allSel) viewModel.clearCloudSelection() else viewModel.selectAllCloud()
-                            }
+                            if (activeIsDevice) showDeviceRestoreDialog = true
+                            else showCloudRestoreDialog = true
                         },
                     )
                 }
+                // Empty trash pill — icon-only, destructive red variant.
+                item(key = "trash_empty") {
+                    TrashPillButton(
+                        icon = Icons.Default.DeleteForever,
+                        contentDescription = stringResource(R.string.trash_empty),
+                        enabled = activeHasItems,
+                        accent = colors.errorColor,
+                        onClick = {
+                            if (activeIsDevice) showDeviceEmptyDialog = true
+                            else showCloudEmptyDialog = true
+                        },
+                    )
+                }
+                // Select-all toggle pill — only present in selection mode, appended to the end
+                // of the rail so the grid below never shifts when selection toggles on/off.
+                if (activeHasItems && activeSelectionMode) {
+                    item(key = "trash_select_all") {
+                        val allSel = if (activeIsDevice) state.device.allSelected else state.cloud.allSelected
+                        TrashPillButton(
+                            icon = if (allSel) Icons.Default.Deselect else Icons.Default.SelectAll,
+                            contentDescription = if (allSel) stringResource(R.string.gallery_deselect_all) else stringResource(R.string.select_all),
+                            enabled = true,
+                            accent = colors.accent,
+                            onClick = {
+                                if (activeIsDevice) {
+                                    if (allSel) viewModel.clearDeviceSelection() else viewModel.selectAllDevice()
+                                } else {
+                                    if (allSel) viewModel.clearCloudSelection() else viewModel.selectAllCloud()
+                                }
+                            },
+                        )
+                    }
+                }
             }
-        }
 
-        LazyVerticalGrid(
-            columns = GridCells.Fixed(3),
-            contentPadding = PaddingValues(bottom = 24.dp),
-            horizontalArrangement = Arrangement.spacedBy(5.dp),
-            verticalArrangement = Arrangement.spacedBy(5.dp),
-            modifier = Modifier.fillMaxSize(),
-        ) {
-            if (activeIsDevice) {
-                // ── Device tab content ────────────────────────────────────────
-                when {
-                    state.device.isLoading -> {
-                        items(6) {
-                            eu.akoos.photos.presentation.common.ShimmerSquare(
-                                modifier = Modifier.fillMaxWidth(),
-                                cornerRadius = 4.dp,
-                            )
-                        }
-                    }
-                    state.device.apiUnsupported -> {
-                        item(span = { GridItemSpan(3) }) {
-                            TrashInfoRow(stringResource(R.string.trash_device_unsupported), FgMute)
-                        }
-                    }
-                    state.device.items.isEmpty() -> {
-                        item(span = { GridItemSpan(3) }) {
-                            EmptyState(
-                                title = stringResource(R.string.trash_device_empty_title),
-                                subtitle = stringResource(R.string.trash_device_empty_subtitle),
-                                icon = Icons.Outlined.Delete,
-                                modifier = Modifier.fillMaxWidth().padding(horizontal = 32.dp, vertical = 48.dp),
-                            )
-                        }
-                    }
-                    else -> {
-                        items(state.device.items, key = { "dev_${it.uri}" }) { item ->
-                            val selected = item.uri in state.device.selectedUris
-                            TrashPhotoCell(
-                                colors          = colors,
-                                selected        = selected,
-                                inSelectionMode = state.device.isSelectionMode,
-                                onClick         = { if (state.device.isSelectionMode) viewModel.toggleDeviceSelection(item.uri) },
-                                onLongClick     = { viewModel.toggleDeviceSelection(item.uri) },
-                            ) {
-                                AsyncImage(
-                                    model = Uri.parse(item.uri),
-                                    contentDescription = item.displayName,
-                                    contentScale = ContentScale.Crop,
-                                    modifier = Modifier.fillMaxSize(),
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(3),
+                contentPadding = PaddingValues(bottom = 24.dp + navBottom),
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
+                verticalArrangement = Arrangement.spacedBy(5.dp),
+                modifier = Modifier.fillMaxSize(),
+            ) {
+                if (activeIsDevice) {
+                    // ── Device tab content ────────────────────────────────────────
+                    when {
+                        state.device.isLoading -> {
+                            items(6) {
+                                eu.akoos.photos.presentation.common.ShimmerSquare(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    cornerRadius = 4.dp,
                                 )
                             }
                         }
-                    }
-                }
-            } else {
-                // ── Cloud tab content ─────────────────────────────────────────
-                when {
-                    state.cloud.isLoading && state.cloud.items.isEmpty() -> {
-                        items(6, key = { idx -> "cloud_shimmer_$idx" }) {
-                            eu.akoos.photos.presentation.common.ShimmerSquare(
-                                modifier = Modifier.fillMaxWidth(),
-                                cornerRadius = 4.dp,
-                            )
+                        state.device.apiUnsupported -> {
+                            item(span = { GridItemSpan(3) }) {
+                                TrashInfoRow(stringResource(R.string.trash_device_unsupported), FgMute)
+                            }
                         }
-                    }
-                    state.cloud.errorMessage != null && state.cloud.items.isEmpty() -> {
-                        item(span = { GridItemSpan(3) }) {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 32.dp, vertical = 24.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                            ) {
-                                Text(
-                                    stringResource(R.string.trash_cloud_error),
-                                    color = colors.fgMute, fontSize = 13.sp,
+                        state.device.items.isEmpty() -> {
+                            item(span = { GridItemSpan(3) }) {
+                                EmptyState(
+                                    title = stringResource(R.string.trash_device_empty_title),
+                                    subtitle = stringResource(R.string.trash_device_empty_subtitle),
+                                    icon = Icons.Outlined.Delete,
+                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 32.dp, vertical = 48.dp),
                                 )
-                                Spacer(Modifier.height(10.dp))
-                                Box(
-                                    modifier = Modifier
-                                        .background(colors.cardBg, RoundedCornerShape(10.dp))
-                                        .border(0.5.dp, colors.cardBorder, RoundedCornerShape(10.dp))
-                                        .clickable { viewModel.loadCloudTrash(forceRefresh = true) }
-                                        .padding(horizontal = 20.dp, vertical = 10.dp),
+                            }
+                        }
+                        else -> {
+                            items(state.device.items, key = { "dev_${it.uri}" }) { item ->
+                                val selected = item.uri in state.device.selectedUris
+                                TrashPhotoCell(
+                                    colors          = colors,
+                                    selected        = selected,
+                                    inSelectionMode = state.device.isSelectionMode,
+                                    onClick         = { if (state.device.isSelectionMode) viewModel.toggleDeviceSelection(item.uri) },
+                                    onLongClick     = { viewModel.toggleDeviceSelection(item.uri) },
                                 ) {
-                                    Text(
-                                        stringResource(R.string.trash_cloud_retry),
-                                        color = colors.accent, fontSize = 13.sp, fontWeight = FontWeight.Medium,
+                                    AsyncImage(
+                                        model = Uri.parse(item.uri),
+                                        contentDescription = item.displayName,
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier.fillMaxSize(),
                                     )
                                 }
                             }
                         }
                     }
-                    state.cloud.items.isEmpty() -> {
-                        item(span = { GridItemSpan(3) }) {
-                            EmptyState(
-                                title = stringResource(R.string.trash_cloud_empty),
-                                icon = Icons.Outlined.Delete,
-                                modifier = Modifier.fillMaxWidth().padding(horizontal = 32.dp, vertical = 48.dp),
-                            )
-                        }
-                    }
-                    else -> {
-                        items(state.cloud.items, key = { "cloud_${it.linkId}" }) { item ->
-                            val selected = item.linkId in state.cloud.selectedLinkIds
-                            val decryptedUri = state.cloud.decryptedThumbnails[item.linkId]
-                            TrashPhotoCell(
-                                colors          = colors,
-                                selected        = selected,
-                                inSelectionMode = state.cloud.isSelectionMode,
-                                onClick         = { if (state.cloud.isSelectionMode) viewModel.toggleCloudSelection(item.linkId) },
-                                onLongClick     = { viewModel.toggleCloudSelection(item.linkId) },
-                            ) {
-                                CloudTrashThumbnail(
-                                    item = item,
-                                    decryptedUri = decryptedUri,
-                                    onRequestDecrypt = { viewModel.requestCloudThumbnail(item) },
+                } else {
+                    // ── Cloud tab content ─────────────────────────────────────────
+                    when {
+                        state.cloud.isLoading && state.cloud.items.isEmpty() -> {
+                            items(6, key = { idx -> "cloud_shimmer_$idx" }) {
+                                eu.akoos.photos.presentation.common.ShimmerSquare(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    cornerRadius = 4.dp,
                                 )
+                            }
+                        }
+                        state.cloud.errorMessage != null && state.cloud.items.isEmpty() -> {
+                            item(span = { GridItemSpan(3) }) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 32.dp, vertical = 24.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                ) {
+                                    Text(
+                                        stringResource(R.string.trash_cloud_error),
+                                        color = colors.fgMute, fontSize = 13.sp,
+                                    )
+                                    Spacer(Modifier.height(10.dp))
+                                    Box(
+                                        modifier = Modifier
+                                            .background(colors.cardBg, RoundedCornerShape(10.dp))
+                                            .border(0.5.dp, colors.cardBorder, RoundedCornerShape(10.dp))
+                                            .clickable { viewModel.loadCloudTrash(forceRefresh = true) }
+                                            .padding(horizontal = 20.dp, vertical = 10.dp),
+                                    ) {
+                                        Text(
+                                            stringResource(R.string.trash_cloud_retry),
+                                            color = colors.accent, fontSize = 13.sp, fontWeight = FontWeight.Medium,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        state.cloud.items.isEmpty() -> {
+                            item(span = { GridItemSpan(3) }) {
+                                EmptyState(
+                                    title = stringResource(R.string.trash_cloud_empty),
+                                    icon = Icons.Outlined.Delete,
+                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 32.dp, vertical = 48.dp),
+                                )
+                            }
+                        }
+                        else -> {
+                            items(state.cloud.items, key = { "cloud_${it.linkId}" }) { item ->
+                                val selected = item.linkId in state.cloud.selectedLinkIds
+                                val decryptedUri = state.cloud.decryptedThumbnails[item.linkId]
+                                TrashPhotoCell(
+                                    colors          = colors,
+                                    selected        = selected,
+                                    inSelectionMode = state.cloud.isSelectionMode,
+                                    onClick         = { if (state.cloud.isSelectionMode) viewModel.toggleCloudSelection(item.linkId) },
+                                    onLongClick     = { viewModel.toggleCloudSelection(item.linkId) },
+                                ) {
+                                    CloudTrashThumbnail(
+                                        item = item,
+                                        decryptedUri = decryptedUri,
+                                        onRequestDecrypt = { viewModel.requestCloudThumbnail(item) },
+                                    )
+                                }
                             }
                         }
                     }
                 }
             }
         }
+
+        SettingsPillHeader(title = stringResource(R.string.trash_title), onBack = onBack)
     }
 
     if (showDeviceRestoreDialog) {

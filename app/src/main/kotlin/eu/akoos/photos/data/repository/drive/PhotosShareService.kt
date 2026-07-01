@@ -191,7 +191,7 @@ class PhotosShareService @Inject constructor(
             cachedPhotosSharePassphrase = response.share.passphrase
 
             // If the Photos share didn't return a LinkID, get it from the standard share endpoint.
-            var fallbackFailures = mutableListOf<String>()
+            val fallbackFailures = mutableListOf<String>()
             if (cachedPhotosRootLinkId == null) {
                 // The /v2/shares/{id} detail endpoint 404s for Photos shares on accounts whose
                 // storage comes from another account (organisation / custom-domain members). The

@@ -141,11 +141,13 @@ import kotlinx.coroutines.launch
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.CloudUpload
+import androidx.compose.material.icons.filled.OfflinePin
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.LibraryAdd
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.outlined.OfflinePin
 import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.presentation.theme.Accent
@@ -291,6 +293,7 @@ fun PhotoViewerScreen(
     val photoTags by viewModel.currentPhotoTags.collectAsStateWithLifecycle()
     val isHidden by viewModel.isHidden.collectAsStateWithLifecycle()
     val isFavorite by viewModel.isFavorite.collectAsStateWithLifecycle()
+    val isOffline by viewModel.isOffline.collectAsStateWithLifecycle()
     val isMotionPhoto by viewModel.isMotionPhoto.collectAsStateWithLifecycle()
     val motionVideoFile by viewModel.motionVideoFile.collectAsStateWithLifecycle()
     val isExtractingMotion by viewModel.isExtractingMotion.collectAsStateWithLifecycle()
@@ -342,6 +345,11 @@ fun PhotoViewerScreen(
             launch {
                 viewModel.setCoverDone.collect {
                     snackbarHostState.showSnackbar(coverUpdatedMessage)
+                }
+            }
+            launch {
+                viewModel.offlineMessage.collect { msg ->
+                    snackbarHostState.showSnackbar(msg)
                 }
             }
             // In the STARTED block so a backgrounded viewer doesn't pop the chooser over another screen.
@@ -464,7 +472,11 @@ fun PhotoViewerScreen(
     }
     LaunchedEffect(state, pagerState.settledPage) {
         if (state is PhotoViewerViewModel.ViewerState.ShowImage) {
-            pageImageCache[pagerState.settledPage] = (state as PhotoViewerViewModel.ViewerState.ShowImage).model
+            val page = pagerState.settledPage
+            pageImageCache[page] = (state as PhotoViewerViewModel.ViewerState.ShowImage).model
+            // Bound the cache to a small window around the current page so paging a large album
+            // doesn't retain one full-res model per visited page for the whole viewer session.
+            pageImageCache.keys.retainAll { it in (page - 2)..(page + 2) }
         }
     }
 
@@ -599,6 +611,9 @@ fun PhotoViewerScreen(
     var showDeleteSheet by remember { mutableStateOf(false) }
     var showAddToAlbumSheet by remember { mutableStateOf(false) }
     val addToAlbumSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    // Set when "New album" is tapped in the add-to-album sheet: holds the photo to drop into the
+    // album the create dialog makes.
+    var newAlbumForPhoto by remember { mutableStateOf<GalleryItem?>(null) }
     val deleteState by viewModel.deleteState.collectAsStateWithLifecycle()
 
     // Unified single-photo share drawer (Send to app / Share with people / Public link).
@@ -933,6 +948,9 @@ fun PhotoViewerScreen(
                                     // fresh prepare() against the freshly-written bytes.
                                     reloadKey = editedAt,
                                     onPlayerReady = { currentPlayer = it },
+                                    // Keep the screen awake while the clip actually plays; the
+                                    // polled flag drops to false on pause/stop/close so it clears.
+                                    keepOn = isVideoPlaying,
                                     // Same pinch-zoom transform the still uses: the shared per-page
                                     // scale/offset (reset on settledPage change) with edge-paging,
                                     // panning only once zoomed in. The TextureView surface scales
@@ -1121,6 +1139,19 @@ fun PhotoViewerScreen(
                                     else R.string.cd_favorite_add,
                                 ),
                                 tint = if (isFavorite) Color(0xFFFF3B30) else FgDim,
+                                modifier = Modifier.size(18.dp),
+                            )
+                        }
+                    }
+
+                    // Make available offline — cloud-only photos only. A Synced/LocalOnly item
+                    // already has its bytes on the device, so there's nothing to pin.
+                    if (settledItem is GalleryItem.CloudOnly && !isReadOnlyAlbum) {
+                        ViewerBubble(onClick = { viewModel.toggleOfflinePin(settledItem) }) {
+                            Icon(
+                                if (isOffline) Icons.Filled.OfflinePin else Icons.Outlined.OfflinePin,
+                                stringResource(R.string.offline_make_available),
+                                tint = if (isOffline) Accent else FgDim,
                                 modifier = Modifier.size(18.dp),
                             )
                         }
@@ -1657,6 +1688,10 @@ fun PhotoViewerScreen(
             cloudAlbums = albums,
             currentPhotoAlbumIds = currentPhotoAlbumIds,
             onDismiss = { showAddToAlbumSheet = false },
+            onCreateNew = {
+                newAlbumForPhoto = settledItem
+                showAddToAlbumSheet = false
+            },
             onCloudAlbumPicked = { albumLinkId ->
                 if (settledItem != null) {
                     // Tap-to-remove when the photo is already in this album, otherwise add.
@@ -1667,6 +1702,18 @@ fun PhotoViewerScreen(
                     }
                 }
                 showAddToAlbumSheet = false
+            },
+        )
+    }
+
+    // New album from the add-to-album sheet: create it and drop the photo in (same dialog the
+    // gallery uses).
+    newAlbumForPhoto?.let { photo ->
+        eu.akoos.photos.presentation.gallery.GalleryNewAlbumDialog(
+            onDismiss = { newAlbumForPhoto = null },
+            onCreate = { name ->
+                viewModel.createCloudAlbumAndAdd(name, photo)
+                newAlbumForPhoto = null
             },
         )
     }

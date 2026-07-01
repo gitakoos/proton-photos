@@ -28,6 +28,7 @@ import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
 import androidx.datastore.preferences.core.edit
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.channels.BufferOverflow
@@ -41,6 +42,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.withContext
 import me.proton.core.domain.entity.UserId
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
@@ -121,6 +123,7 @@ class UploadPendingUseCase @Inject constructor(
     private val cloudRepo: DrivePhotoRepository,
     private val pendingDeleteNotif: PendingDeleteNotificationUseCase,
     private val networkObserver: eu.akoos.photos.util.NetworkObserver,
+    private val transferCenter: eu.akoos.photos.data.transfer.TransferCenter,
     @ApplicationContext private val context: Context,
 ) {
     private val mutex = Mutex()
@@ -254,8 +257,43 @@ class UploadPendingUseCase @Inject constructor(
             return@withLock Result(attempted = 0, successCount = 0)
         }
 
-        var pending = syncStateRepo.observeAll(userId).first()
-            .filter { it.status == SyncStatus.LOCAL_ONLY }
+        val allStates = syncStateRepo.observeAll(userId).first()
+
+        // Recovery for force-queued album-adds. A photo the user added to an album carries a
+        // PENDING_ALBUM_ADDS marker, so it is in forcedUploadUris. An interrupted prior pass can leave
+        // its row stranded in a non-LOCAL_ONLY status while it still has no cloud copy — that row is
+        // invisible to BOTH the LOCAL_ONLY filter below and the cloudFileId-keyed album drain above, so
+        // the photo shows "uploading" forever and redoing the album-add never re-queues it. Reset such
+        // rows to a clean LOCAL_ONLY so this pass uploads them and then joins the album. HIDDEN is left
+        // untouched (the user moved it out of backup on purpose), matching ForceUploadLocalUrisUseCase.
+        val strandedForced = allStates.filter {
+            it.localUri in forcedUploadUris &&
+                it.cloudFileId == null &&
+                it.status != SyncStatus.LOCAL_ONLY &&
+                it.status != SyncStatus.HIDDEN
+        }
+        if (strandedForced.isNotEmpty()) {
+            strandedForced.forEach {
+                syncStateRepo.upsert(
+                    it.copy(status = SyncStatus.LOCAL_ONLY, backedUpAtMs = null, lastSyncSuccessMs = null),
+                    userId,
+                )
+            }
+            eu.akoos.photos.util.SyncDiagnostics.log(
+                "re-queued ${strandedForced.size} album-add upload(s) stranded by an interrupted pass",
+            )
+        }
+        val strandedForcedUris = strandedForced.map { it.localUri }.toSet()
+
+        var pending = allStates.filter {
+            it.status == SyncStatus.LOCAL_ONLY || it.localUri in strandedForcedUris
+        }.map {
+            if (it.localUri in strandedForcedUris) {
+                it.copy(status = SyncStatus.LOCAL_ONLY, backedUpAtMs = null, lastSyncSuccessMs = null)
+            } else {
+                it
+            }
+        }
 
         // Apply the backup-everything exclusion at upload-time as well as reconcile-time.
         // Reconcile already filters BEFORE creating LOCAL_ONLY rows, but a toggle between
@@ -353,6 +391,10 @@ class UploadPendingUseCase @Inject constructor(
         // gives us safe cross-coroutine writes.
         val storageFullHit = AtomicBoolean(false)
 
+        // Source URIs of the photos that upload cleanly, for the History thumbnails. Thread-safe
+        // because the parallel tasks add to it concurrently.
+        val successUris = java.util.concurrent.ConcurrentLinkedQueue<String>()
+
         try {
             coroutineScope {
                 val jobs = pending.map { state ->
@@ -384,6 +426,7 @@ class UploadPendingUseCase @Inject constructor(
                                 albumCache = albumCache,
                                 albumCacheMutex = albumCacheMutex,
                                 successCount = successCount,
+                                successUris = successUris,
                                 finishedCount = finishedCount,
                                 onStorageFull = { storageFullHit.set(true) },
                             )
@@ -403,6 +446,10 @@ class UploadPendingUseCase @Inject constructor(
 
         val finalSuccess = successCount.get()
         Log.d(UPLOAD_TAG, "Upload complete: $finalSuccess/${pending.size} succeeded")
+        transferCenter.log(
+            eu.akoos.photos.data.transfer.TransferCenter.Kind.UPLOAD, finalSuccess,
+            uris = successUris.toList(),
+        )
         // Refresh the consent notification with the latest pending queue. Same
         // call MainActivity.onResume fires so an externally deleted file (file
         // manager, OS trash flush) gets reconciled the moment the user opens the
@@ -439,6 +486,7 @@ class UploadPendingUseCase @Inject constructor(
         albumCache: MutableMap<String, String>,
         albumCacheMutex: Mutex,
         successCount: AtomicInteger,
+        successUris: MutableCollection<String>,
         finishedCount: AtomicInteger,
         onStorageFull: () -> Unit,
     ) {
@@ -579,7 +627,22 @@ class UploadPendingUseCase @Inject constructor(
                 state.localUri
             }
 
+            val sha1StartMs = System.currentTimeMillis()
             val hash = computeSha1(uploadUri)
+            // Privacy: never log the file name (mirror PhotoUploadService.logRef) — a non-reversible
+            // URI-derived ref keeps the per-file lines correlatable without revealing the file.
+            val logRef = localItem.uri.hashCode().toUInt().toString(16).padStart(8, '0').take(6)
+            eu.akoos.photos.util.SyncDiagnostics.log(
+                "upload $logRef: sha1 in ${System.currentTimeMillis() - sha1StartMs}ms"
+            )
+            // Persist the content hash BEFORE the upload. If the process is killed between
+            // uploadFile() returning (the file is already on Drive) and the SYNCED upsert below,
+            // the row stays LOCAL_ONLY with a null cloudFileId — but now it carries this hash, so
+            // the next run's reconcile pairs it BY CONTENT HASH to the file already on Drive instead
+            // of re-uploading a duplicate. Cheap: the SYNCED upsert rewrites the same hash on success.
+            if (state.localHash != hash) {
+                syncStateRepo.upsert(state.copy(localHash = hash), userId)
+            }
             val uploadItem = if (strippedFile != null)
                 localItem.copy(sizeBytes = strippedFile.length())
             else
@@ -641,16 +704,22 @@ class UploadPendingUseCase @Inject constructor(
             strippedFile?.delete()
             strippedFile = null
 
-            syncStateRepo.upsert(
-                state.copy(
-                    cloudFileId = cloudId,
-                    localHash = hash,
-                    status = SyncStatus.SYNCED,
-                    lastSyncSuccessMs = System.currentTimeMillis(),
-                    backedUpAtMs = System.currentTimeMillis(),
-                ),
-                userId,
-            )
+            // The file is on Drive once uploadFile returns a real cloudId. Record that fact
+            // non-cancellably so an interrupt in this window can't leave the row LOCAL_ONLY with
+            // a null cloudFileId — which would re-select and re-upload the same file (a Drive
+            // duplicate) on the next pass.
+            withContext(NonCancellable) {
+                syncStateRepo.upsert(
+                    state.copy(
+                        cloudFileId = cloudId,
+                        localHash = hash,
+                        status = SyncStatus.SYNCED,
+                        lastSyncSuccessMs = System.currentTimeMillis(),
+                        backedUpAtMs = System.currentTimeMillis(),
+                    ),
+                    userId,
+                )
+            }
 
             // Mirror the cloud rename onto the on-device file now that the upload is committed (and
             // never before — a failed upload must not rename a file with no Drive copy). Silent with
@@ -692,6 +761,7 @@ class UploadPendingUseCase @Inject constructor(
             }
 
             successCount.incrementAndGet()
+            successUris.add(state.localUri)
             val doneNow = finishedCount.incrementAndGet()
             Log.d(UPLOAD_TAG, "Upload OK: ${localItem.displayName} → cloudId=$cloudId")
             _progress.tryEmit(

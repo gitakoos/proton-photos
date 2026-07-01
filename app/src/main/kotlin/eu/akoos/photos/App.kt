@@ -39,7 +39,6 @@ import androidx.work.WorkManager
 import coil.ImageLoader
 import coil.ImageLoaderFactory
 import coil.decode.VideoFrameDecoder
-import coil.disk.DiskCache
 import coil.memory.MemoryCache
 import coil.request.CachePolicy
 import dagger.hilt.android.HiltAndroidApp
@@ -54,6 +53,7 @@ import eu.akoos.photos.data.preferences.LanguagePrefsBoot
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.ThemePrefsBoot
 import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.data.preferences.syncEffectivelyEnabled
 import eu.akoos.photos.worker.AlbumDownloadWorker
 import eu.akoos.photos.worker.CachePruneWorker
 import eu.akoos.photos.worker.SyncWorker
@@ -197,8 +197,9 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
                 if (intent.action != Intent.ACTION_USER_PRESENT) return
                 appScope.launch {
                     val prefs = runCatching { settingsDataStore.data.first() }.getOrNull() ?: return@launch
-                    val autoSync = prefs[SettingsKeys.AUTO_SYNC] != false
-                    if (!autoSync) return@launch
+                    // Only kick when backup is effectively on — auto-sync ON with no folder selected
+                    // would just wake + flash the "Checking…" notification with nothing to upload.
+                    if (!syncEffectivelyEnabled(this@App)) return@launch
                     val wifiOnly = prefs[SettingsKeys.SYNC_WIFI_ONLY] != false
                     Log.d("App", "ACTION_USER_PRESENT — kicking SyncWorker.runNow")
                     SyncWorker.runNow(this@App, wifiOnly)
@@ -333,13 +334,11 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
                 .maxSizePercent(0.18)
                 .build()
         }
-        .diskCache {
-            DiskCache.Builder()
-                .directory(cacheDir.resolve("coil_cache"))
-                .maxSizeBytes(256L * 1024 * 1024)
-                .build()
-        }
+        // No Coil disk cache. Cloud thumbnails and full-res previews are decrypted plaintext, and
+        // the app already keeps its own managed on-disk caches for them (with TTL pruning). A second
+        // Coil-owned copy would persist decrypted previews on disk with no lifecycle, only cleared
+        // on full sign-out, so keep Coil's disk layer off and let the memory cache serve warm reads.
         .memoryCachePolicy(CachePolicy.ENABLED)
-        .diskCachePolicy(CachePolicy.ENABLED)
+        .diskCachePolicy(CachePolicy.DISABLED)
         .build()
 }

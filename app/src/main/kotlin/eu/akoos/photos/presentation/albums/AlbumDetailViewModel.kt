@@ -136,12 +136,21 @@ data class AlbumDetailUiState(
     val shareState: AlbumShareState = AlbumShareState.Idle,
     /** linkId → local MediaStore URI for photos that have been downloaded to this device. */
     val localUriByLinkId: Map<String, String> = emptyMap(),
+    /** Cloud linkIds pinned for offline; the grid draws a download badge on each matching photo. */
+    val offlinePinIds: Set<String> = emptySet(),
+    /** Live progress of a "make available offline" batch: [offlinePinningDone] of [offlinePinningTotal]
+     *  full-res blobs fetched. [offlinePinningTotal] is 0 when no pin batch is running. */
+    val offlinePinningDone: Int = 0,
+    val offlinePinningTotal: Int = 0,
     /** True while the multi-email Share-popup batch is in flight; gates the "Share" button + chip removals. */
     val isInvitingBatch: Boolean = false,
     /** Set after a [AlbumDetailViewModel.inviteUsers] batch completes; consumed once by the UI snackbar. */
     val inviteBatchResult: InviteBatchResult? = null,
     /** Monotonic tick (not a Boolean) bumped on cover-set success so two sets in a row each snackbar. */
     val coverUpdatedTick: Int = 0,
+    /** Cover chosen in this session via [AlbumDetailViewModel.runSetCover]; null until a set succeeds.
+     *  The hero header prefers this so it flips immediately instead of waiting for a re-open. */
+    val coverThumbnailUrl: String? = null,
     /** True while the shared-album "Save to my library" round-trip is in flight. */
     val isSavingToLibrary: Boolean = false,
     /** Per-photo "N of M" save progress; both reset to 0 when the singleton-backed flow returns to Idle. */
@@ -180,6 +189,8 @@ class AlbumDetailViewModel @Inject constructor(
     private val deletePhotoUseCase: eu.akoos.photos.domain.usecase.DeletePhotoUseCase,
     private val hiddenStorage: HiddenStorageManager,
     private val publicLink: eu.akoos.photos.presentation.common.PublicLinkController,
+    private val offlineStore: eu.akoos.photos.data.offline.OfflineStorageManager,
+    private val transferCenter: eu.akoos.photos.data.transfer.TransferCenter,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(AlbumDetailUiState())
@@ -188,6 +199,10 @@ class AlbumDetailViewModel @Inject constructor(
     /** One-shot system-share intents emitted to the screen, which launches the chooser. */
     private val _shareIntent = MutableSharedFlow<Intent>(replay = 0, extraBufferCapacity = 1)
     val shareIntent: SharedFlow<Intent> = _shareIntent.asSharedFlow()
+
+    /** One-shot offline pin/un-pin outcome: a positive count was pinned, a negative count removed. */
+    private val _offlineResult = MutableSharedFlow<Int>(replay = 0, extraBufferCapacity = 1)
+    val offlineResult: SharedFlow<Int> = _offlineResult.asSharedFlow()
 
     /** Cached primary userId — same rationale as GalleryViewModel.primaryUserId. */
     @Volatile private var primaryUserId: me.proton.core.domain.entity.UserId? = null
@@ -218,6 +233,13 @@ class AlbumDetailViewModel @Inject constructor(
                     .associate { it.cloudFileId!! to it.localUri }
                 _uiState.update { it.copy(localUriByLinkId = map) }
             }
+        }
+        // Offline-pinned linkIds → per-cell offline badge. Same OFFLINE_PIN_IDS pref the timeline reads.
+        viewModelScope.launch {
+            context.settingsDataStore.data
+                .map { it[SettingsKeys.OFFLINE_PIN_IDS] ?: emptySet() }
+                .distinctUntilChanged()
+                .collect { ids -> _uiState.update { it.copy(offlinePinIds = ids) } }
         }
         // Resolve the owner email once for the share-sheet "owner" row; failures are silent.
         viewModelScope.launch {
@@ -460,6 +482,88 @@ class AlbumDetailViewModel @Inject constructor(
 
     /** Replace the whole selection — used by the drag-select sweep, which sets the swept range each frame. */
     fun setSelectedPhotos(linkIds: Set<String>) = _uiState.update { it.copy(selectedPhotos = linkIds) }
+
+    /**
+     * Pin or un-pin the selected album photos for offline viewing, mirroring the timeline's batch
+     * toggle. If every selected photo is already offline it removes them (drops the pins + blobs, no
+     * network); otherwise it downloads the full-res blob for the ones not yet pinned. The pin set is
+     * updated optimistically so the per-cell badge reflects at once, a failed download is reverted,
+     * and the outcome (+N pinned / -N removed) is emitted on [offlineResult].
+     */
+    fun toggleSelectedOffline() {
+        val selected = _uiState.value.photos.filter { it.linkId in _uiState.value.selectedPhotos }
+        if (selected.isEmpty()) return
+        val pinned = _uiState.value.offlinePinIds
+        val allOffline = selected.all { it.linkId in pinned }
+
+        if (allOffline) {
+            // Remove from offline — instant, no network: drop the pins and their blobs.
+            val linkIds = selected.map { it.linkId }
+            viewModelScope.launch {
+                context.settingsDataStore.edit { prefs ->
+                    val current = prefs[SettingsKeys.OFFLINE_PIN_IDS] ?: emptySet()
+                    prefs[SettingsKeys.OFFLINE_PIN_IDS] = current - linkIds.toSet()
+                }
+                linkIds.forEach { offlineStore.delete(it) }
+                _uiState.update { it.copy(selectedPhotos = emptySet()) }
+                _offlineResult.emit(-linkIds.size)
+            }
+            return
+        }
+
+        // Pin only the ones not already offline.
+        val toPin = selected.filter { it.linkId !in pinned }
+        val linkIds = toPin.map { it.linkId }
+        viewModelScope.launch {
+            context.settingsDataStore.edit { prefs ->
+                val current = prefs[SettingsKeys.OFFLINE_PIN_IDS] ?: emptySet()
+                prefs[SettingsKeys.OFFLINE_PIN_IDS] = current + linkIds
+            }
+            _uiState.update {
+                it.copy(selectedPhotos = emptySet(), offlinePinningTotal = toPin.size, offlinePinningDone = 0)
+            }
+            val userId = primaryUserId ?: accountManager.getPrimaryUserId().first()
+            var succeeded = 0
+            val failedLinkIds = mutableListOf<String>()
+            val savedPaths = mutableListOf<String>()
+            val transferId = transferCenter.start(
+                eu.akoos.photos.data.transfer.TransferCenter.Kind.OFFLINE, toPin.size,
+            )
+            try {
+                for (photo in toPin) {
+                    try {
+                        val uid = userId ?: error("Not signed in")
+                        val file = driveRepo.downloadFullResPhoto(uid, photo)
+                        val stored = offlineStore.store(photo.linkId, file)
+                        savedPaths += "file://${stored.absolutePath}"
+                        succeeded++
+                    } catch (e: Exception) {
+                        if (e is kotlinx.coroutines.CancellationException) throw e
+                        Log.w("AlbumDetailVM", "offline pin failed: ${e.message}")
+                        failedLinkIds += photo.linkId
+                    }
+                    // Advance the progress pill once per attempt so it fills to the total either way.
+                    _uiState.update { it.copy(offlinePinningDone = it.offlinePinningDone + 1) }
+                    transferCenter.progress(transferId, succeeded + failedLinkIds.size)
+                }
+            } finally {
+                transferCenter.finish(transferId)
+            }
+            // Revert the optimistic pin for anything that didn't download.
+            if (failedLinkIds.isNotEmpty()) {
+                context.settingsDataStore.edit { prefs ->
+                    val current = prefs[SettingsKeys.OFFLINE_PIN_IDS] ?: emptySet()
+                    prefs[SettingsKeys.OFFLINE_PIN_IDS] = current - failedLinkIds.toSet()
+                }
+                failedLinkIds.forEach { offlineStore.delete(it) }
+            }
+            _uiState.update { it.copy(offlinePinningTotal = 0, offlinePinningDone = 0) }
+            transferCenter.log(
+                eu.akoos.photos.data.transfer.TransferCenter.Kind.OFFLINE, succeeded, uris = savedPaths,
+            )
+            _offlineResult.emit(succeeded)
+        }
+    }
 
     /** Deferred cloud-delete work + context, held while the system trash dialog is up. */
     private var pendingPermissionResult: eu.akoos.photos.domain.usecase.DeletePhotoUseCase.Result.NeedsMediaWritePermission? = null
@@ -707,15 +811,28 @@ class AlbumDetailViewModel @Inject constructor(
             runCatching { driveRepo.setAlbumCover(userId, albumLinkId, coverLinkId) }
                 .fold(
                     onSuccess = {
+                        // Resolve the chosen cover's thumbnail the same way the album grid does:
+                        // the in-memory photo's URL first, then the on-disk thumbnail cache file.
+                        // The path is keyed by linkId, so a different cover yields a different model
+                        // and Coil paints the new image without a cache bust.
+                        val resolvedCover = _uiState.value.photos
+                            .firstOrNull { it.linkId == coverLinkId }?.thumbnailUrl
+                            ?: java.io.File(java.io.File(context.cacheDir, "thumbnails"), "thumb_$coverLinkId.jpg")
+                                .takeIf { it.exists() && it.length() > 0 }
+                                ?.let { "file://${it.absolutePath}" }
                         _uiState.update {
                             it.copy(
                                 selectedPhotos = if (clearSelection) emptySet() else it.selectedPhotos,
                                 error = null,
                                 coverUpdatedTick = it.coverUpdatedTick + 1,
+                                coverThumbnailUrl = resolvedCover ?: it.coverThumbnailUrl,
                             )
                         }
-                        // Re-fetch the albums grid so its card flips to the new cover on pop-back.
-                        albumListEvents.notifyChanged()
+                        // Patch only this album's grid card (targeted) instead of a generic change.
+                        // A generic change would fire this screen's own [changes] collector and
+                        // reload + flash the whole album; the header already flipped via
+                        // coverThumbnailUrl above, so no reload is needed here.
+                        albumListEvents.notifyCoverChanged(albumLinkId, resolvedCover)
                     },
                     onFailure = { e ->
                         Log.e("AlbumDetailVM", "setAlbumCover failed", e)

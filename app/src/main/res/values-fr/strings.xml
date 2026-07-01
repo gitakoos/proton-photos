@@ -41,7 +41,7 @@
     <string name="onboarding_photos_subtitle">Nous avons besoin d\'un accès en lecture à vos photos et vidéos pour les chiffrer et les sauvegarder sur Drive.</string>
 
     <string name="onboarding_manage_media_title">Gérer les médias</string>
-    <string name="onboarding_manage_media_subtitle">Fortement recommandé. Permet à l\'app de modifier, supprimer et renommer photos et vidéos sans dialogue système à chaque fois — utilisé pour la retouche dans l\'app, l\'enregistrement sur l\'appareil, la corbeille et Retirer après sauvegarde. Touchez pour ouvrir les paramètres système.</string>
+    <string name="onboarding_manage_media_subtitle">Fortement recommandé. Permet à l\'app de modifier, supprimer et renommer photos et vidéos sans dialogue système à chaque fois. Utilisé pour la retouche dans l\'app, l\'enregistrement sur l\'appareil, la corbeille et Retirer après sauvegarde. Touchez pour ouvrir les paramètres système.</string>
     <string name="onboarding_folders_include_title">Dossiers à sauvegarder</string>
     <string name="onboarding_folders_include_subtitle">Choisissez quels dossiers téléverser sur Drive. Les autres restent uniquement sur cet appareil.</string>
     <string name="onboarding_folders_exclude_title">Dossiers à exclure</string>
@@ -121,6 +121,14 @@
     <string name="gallery_share_cloud_warning_body">Certaines sont stockées uniquement dans le cloud. L\'app récupère une copie privée temporaire et la remet uniquement à l\'app que vous choisissez. Rien n\'est ajouté à votre galerie ni visible par d\'autres apps.</string>
     <string name="gallery_share_cloud_warning_continue">Partager</string>
     <string name="gallery_add_to_album">Ajouter à l\'album</string>
+    <string name="offline_make_available">Rendre disponible hors ligne</string>
+    <string name="offline_available">Disponible hors ligne</string>
+    <string name="offline_removed">Retiré du mode hors ligne</string>
+    <string name="offline_failed">Échec de l\'enregistrement hors ligne</string>
+    <string name="offline_screen_title">Photos hors ligne</string>
+    <string name="offline_screen_empty">Les photos que vous rendez disponibles hors ligne apparaissent ici</string>
+    <string name="settings_offline_photos">Photos hors ligne</string>
+    <string name="filter_offline">Hors ligne</string>
     <string name="gallery_add_to_album_local_note">Ces photos seront d\'abord sauvegardées, puis ajoutées à l\'album.</string>
     <string name="gallery_no_albums_yet">Pas encore d\'album. Créez-en un ci-dessus.</string>
     <string name="gallery_add_to_album_mixed_hint">Une sélection mêlant éléments locaux et cloud ne peut pas former un album. Choisissez un seul type.</string>
@@ -195,7 +203,7 @@
     <string name="settings_free_up_confirm_title">Libérer de l\'espace sur l\'appareil ?</string>
     <string name="settings_free_up_confirm_message">Toutes les photos et vidéos déjà sauvegardées sur Proton Drive seront supprimées de cet appareil. Les copies dans Drive restent intactes et pourront être téléchargées à nouveau plus tard.</string>
     <string name="settings_delete_after_backup">Supprimer le fichier de l\'appareil après la sauvegarde</string>
-    <string name="settings_delete_after_backup_desc">Retire la copie locale dès que Drive a reçu le fichier — il ne reste alors que dans votre Proton Drive chiffré.</string>
+    <string name="settings_delete_after_backup_desc">Retire la copie locale dès que Drive a reçu le fichier. Il ne reste alors que dans votre Proton Drive chiffré.</string>
     <string name="settings_account_section">Compte</string>
     <string name="settings_sign_out">Se déconnecter</string>
     <string name="settings_sign_out_desc">Terminer la session sur cet appareil.</string>
@@ -238,7 +246,7 @@
     <string name="settings_excluded_folders_select_all">Tout exclure</string>
     <string name="settings_excluded_folders_deselect_all">Tout inclure</string>
     <!-- Album mirror -->
-    <string name="settings_album_mirror_folders">Refléter les dossiers de l\'appareil comme albums Drive</string>
+    <string name="settings_album_mirror_folders">Dossiers en albums</string>
     <string name="settings_album_mirror_folders_desc">Choisissez quels dossiers de l\'appareil apparaissent aussi comme albums Drive lors de l\'envoi</string>
     <string name="album_mirror_folders_title">Refléter les dossiers comme albums Drive</string>
     <string name="album_mirror_folders_subtitle">Les photos des dossiers cochés apparaissent aussi dans les albums Drive correspondants. Les photos sont envoyées dans votre flux dans tous les cas.</string>
@@ -260,7 +268,7 @@
     <string name="trash_cloud_empty_confirm_action">Vider</string>
     <string name="trash_cloud_restore_done">%1$d photo(s) restaurée(s)</string>
     <string name="trash_cloud_restore_partial">%1$d restaurée(s), %2$d n\'ont pas pu l\'être</string>
-    <string name="trash_cloud_restore_refresh_failed">Restaurées — tirez vers le bas dans votre galerie pour actualiser</string>
+    <string name="trash_cloud_restore_refresh_failed">Restaurées. Tirez vers le bas dans votre galerie pour actualiser</string>
     <string name="trash_cloud_restore_failed">Échec de la restauration</string>
     <string name="trash_cloud_emptied">Corbeille cloud vidée</string>
     <string name="trash_cloud_empty_partial">%1$d supprimées, %2$d n\'ont pas pu l\'être</string>
@@ -278,6 +286,10 @@
     <string name="settings_storage_clear_cache">Vider le cache</string>
     <string name="settings_storage_clear_cache_dialog_title">Vider le cache de l\'app ?</string>
     <string name="settings_storage_clear_cache_dialog_message">%s de fichiers en cache seront supprimés. Ils seront re-téléchargés au besoin.</string>
+    <string name="settings_offline_storage_title">Photos hors ligne</string>
+    <string name="settings_offline_storage_subtitle">Conservées de façon privée dans cette app, pas dans votre galerie</string>
+    <string name="settings_offline_storage_clear_dialog_title">Supprimer les photos hors ligne ?</string>
+    <string name="settings_offline_storage_clear_dialog_message">%s de photos hors ligne seront supprimés de cet appareil. Elles restent dans Proton Drive.</string>
     <string name="settings_storage_refresh">Actualiser le stockage</string>
     <string name="settings_section_settings">Paramètres</string>
     <string name="settings_privacy_metadata">Confidentialité &amp; métadonnées</string>
@@ -384,10 +396,10 @@
     <string name="hidden_photos_auth_prompt">Authentifiez-vous pour voir vos photos masquées</string>
     <string name="hidden_photos_unlock">Déverrouiller</string>
     <string name="app_lock_authenticate_prompt">Authentifiez-vous pour continuer</string>
-    <string name="hidden_no_device_lock_notice">Aucun verrouillage d\'écran — le dossier masqué n\'est pas protégé.</string>
+    <string name="hidden_no_device_lock_notice">Aucun verrouillage d\'écran. Le dossier masqué n\'est pas protégé.</string>
     <string name="hidden_auth_title">Photos masquées</string>
     <string name="hidden_auth_description">Authentifiez-vous pour voir vos photos masquées</string>
-    <string name="hide_cloud_copy_notice">Les photos sauvegardées restent dans votre Proton Drive — les masquer les retire seulement de la galerie de cet appareil.</string>
+    <string name="hide_cloud_copy_notice">Les photos sauvegardées restent dans votre Proton Drive. Les masquer les retire seulement de la galerie de cet appareil.</string>
     <string name="album_rename">Renommer l\'album</string>
     <string name="album_rename_confirm">Renommer</string>
     <string name="album_remove_from_album">Retirer de l\'album</string>
@@ -417,6 +429,10 @@
     <string name="palette_sea">Mer</string>
     <string name="palette_sepia">Sépia</string>
     <string name="palette_mono">Mono</string>
+
+    <!-- AMOLED pure-black dark theme -->
+    <string name="settings_amoled_black">Noir pur (AMOLED)</string>
+    <string name="settings_amoled_black_summary">Utiliser des arrière-plans noir pur en mode sombre pour économiser la batterie sur les écrans OLED.</string>
 
     <!-- Language -->
     <string name="language_en">Anglais, English</string>
@@ -528,7 +544,7 @@
     <string name="album_leave_missing_details">Impossible de quitter cet album pour l\'instant</string>
     <string name="album_delete_photos_failed">Impossible de supprimer les photos</string>
     <string name="album_remove_photos_failed">Impossible de retirer les photos</string>
-    <string name="album_remove_partial">%1$d sur %2$d retirées — certaines n\'ont pas pu l\'être</string>
+    <string name="album_remove_partial">%1$d sur %2$d retirées, certaines n\'ont pas pu l\'être</string>
     <string name="album_rename_failed">Impossible de renommer l\'album</string>
     <string name="album_set_cover_failed">Impossible de définir la couverture de l\'album</string>
     <string name="shared_save_failed">Impossible d\'enregistrer l\'album dans votre bibliothèque</string>
@@ -613,6 +629,10 @@
     <plurals name="count_photos_plural">
         <item quantity="one">%d photo</item>
         <item quantity="other">%d photos</item>
+    </plurals>
+    <plurals name="offline_batch_result">
+        <item quantity="one">%d photo disponible hors ligne</item>
+        <item quantity="other">%d photos disponibles hors ligne</item>
     </plurals>
     <plurals name="map_card_subtitle_count">
         <item quantity="one">%1$d photo sur la carte</item>
@@ -718,7 +738,7 @@
     <string name="editor_save_sheet_synced_video">Choisissez comment enregistrer la vidéo modifiée. Les originaux sauvegardés restent dans Drive.</string>
     <string name="editor_save_sheet_device_video">Choisissez comment enregistrer la vidéo modifiée sur votre appareil.</string>
     <string name="editor_save_copy_subtitle_cloud">Téléversée comme nouvelle photo. L\'original reste dans Drive.</string>
-    <string name="editor_save_copy_subtitle_cloud_video">Téléversée comme nouveau fichier dans Proton Drive — l\'original est conservé.</string>
+    <string name="editor_save_copy_subtitle_cloud_video">Téléversée comme nouveau fichier dans Proton Drive. L\'original est conservé.</string>
     <string name="editor_save_copy_subtitle_synced">Crée un nouveau fichier dans votre galerie ET téléverse une copie associée dans Drive.</string>
     <string name="editor_save_copy_subtitle_device">Crée un nouveau fichier dans votre galerie.</string>
     <string name="editor_saving">Enregistrement…</string>
@@ -840,7 +860,7 @@
     <string name="device_folder_backup_timeline">Sauvegarder seulement les photos</string>
     <string name="device_folder_backup_timeline_sub">Envoi unique des photos d\'ici vers votre galerie.</string>
     <string name="device_folder_backup_mirror">Créer aussi un album</string>
-    <string name="device_folder_backup_mirror_sub">Reste synchronisé — les nouvelles photos de ce dossier rejoignent aussi l\'album.</string>
+    <string name="device_folder_backup_mirror_sub">Reste synchronisé. Les nouvelles photos de ce dossier rejoignent aussi l\'album.</string>
     <string name="sync_folders_add_dialog_title">Ajouter un dossier</string>
     <string name="sync_folders_add_row_title">Ajouter un dossier par nom</string>
     <string name="sync_folders_add_dialog_name_hint">Nom du dossier</string>
@@ -854,7 +874,7 @@
     <string name="rename_sheet_option_local_subtitle">Met à jour le fichier directement sur votre appareil.</string>
     <string name="rename_sheet_option_copy_title">Enregistrer comme copie</string>
     <string name="rename_sheet_option_copy_subtitle_cloud">Téléverse comme nouvelle photo. L\'original reste dans Drive.</string>
-    <string name="rename_sheet_option_copy_subtitle_local">Crée un nouveau fichier dans Pictures/Proton Photos.</string>
+    <string name="rename_sheet_option_copy_subtitle_local">Crée un nouveau fichier dans Pictures.</string>
     <string name="save_to_library_confirm_title">Enregistrer dans ma bibliothèque</string>
     <string name="save_to_library_confirm_body_fmt">Nous copierons %1$d éléments dans votre bibliothèque. Ils apparaîtront dans vos Photos dès que la copie sera terminée.</string>
     <string name="save_to_library_action_cancel">Annuler l\'enregistrement</string>
@@ -1003,6 +1023,10 @@
     </plurals>
     <string name="gallery_copy_to_hidden_failed">Impossible de copier vers Masqués</string>
     <string name="gallery_move_to_hidden_failed">Impossible de déplacer vers Masqués</string>
+    <plurals name="gallery_hide_partial_failed">
+        <item quantity="one">Masquée, mais %1$d photo n\'a pas pu être masquée</item>
+        <item quantity="other">Masquées, mais %1$d photos n\'ont pas pu être masquées</item>
+    </plurals>
     <string name="gallery_add_to_cloud_album_failed">Impossible d\'ajouter à l\'album cloud</string>
     <string name="gallery_add_to_album_failed">Impossible d\'ajouter à l\'album</string>
     <string name="gallery_select_photos_first">Sélectionnez d\'abord des photos</string>
@@ -1061,7 +1085,7 @@
 
     <!-- Mirror device folders as albums screen -->
     <string name="mirror_opted_in_cd">Activé</string>
-    <string name="mirror_custom_pending">En attente — s\'applique lorsqu\'un dossier portant ce nom apparaît</string>
+    <string name="mirror_custom_pending">En attente. S\'applique lorsqu\'un dossier portant ce nom apparaît</string>
     <string name="mirror_remove_cd">Supprimer</string>
     <string name="mirror_name_empty">Le nom du dossier ne peut pas être vide</string>
     <string name="mirror_name_invalid_chars">Le nom ne peut pas contenir \'/\' ni \'=\'</string>
@@ -1125,4 +1149,119 @@
     <string name="settings_copy_diagnostics">Copier le journal de diagnostic</string>
     <string name="settings_copy_diagnostics_desc">Pour le dépannage de la synchronisation. Aucune donnée de compte n\'est incluse.</string>
     <string name="settings_diagnostics_copied">Journal de diagnostic copié</string>
+    <!-- Duplicate finder -->
+    <string name="settings_find_duplicates">Trouver les doublons</string>
+    <string name="settings_find_duplicates_desc">Vérifier et supprimer les copies identiques</string>
+    <string name="duplicates_title">Trouver les doublons</string>
+    <string name="duplicates_section_device">Sur cet appareil</string>
+    <string name="duplicates_section_cloud">Dans votre cloud</string>
+    <string name="duplicates_empty">Aucune photo en double trouvée</string>
+    <string name="duplicates_copies">%1$d copies identiques</string>
+    <string name="duplicates_pick_keep">Touchez la copie à conserver, puis supprimez les autres</string>
+    <string name="duplicates_keep">Conserver</string>
+    <string name="duplicates_delete_others">Supprimer les autres</string>
+    <string name="duplicates_confirm_title">Supprimer les doublons ?</string>
+    <string name="duplicates_confirm_message">La copie conservée reste. Les autres copies sont supprimées.</string>
+    <string name="duplicates_confirm_delete">Supprimer</string>
+    <string name="duplicates_delete_failed">Échec de la suppression depuis Drive. Veuillez réessayer.</string>
+    <string name="duplicates_section_similar">Photos similaires</string>
+    <string name="duplicates_scanning">Recherche de photos similaires…</string>
+    <string name="duplicates_similar_hint">Elles se ressemblent, mais le fichier ou les métadonnées peuvent différer</string>
+    <string name="duplicates_similar_count">%1$d photos similaires</string>
+    <string name="duplicates_view_large">Voir en grand</string>
+    <string name="offline_remove">Retirer de hors ligne</string>
+    <string name="whats_new_title">Nouveautés</string>
+    <string name="whats_new_done">Compris</string>
+    <string name="whats_new_open">Ouvrir</string>
+    <string name="whats_new_dup_title">Trouver les photos en double</string>
+    <string name="whats_new_dup_body">Repère les copies exactes et les photos visuellement similaires, puis gardez-en une en toute sécurité et supprimez le reste.</string>
+    <string name="whats_new_offline_title">Disponible hors ligne</string>
+    <string name="whats_new_offline_body">Épinglez des photos du cloud pour garder leur pleine qualité sur votre appareil et les ouvrir sans connexion.</string>
+    <string name="whats_new_activity_title">Vue d\'activité</string>
+    <string name="whats_new_activity_body">Les téléversements, téléchargements et sauvegardes hors ligne au même endroit, avec un historique de ce qui s\'est passé.</string>
+    <string name="whats_new_motion_title">Photos animées</string>
+    <string name="whats_new_motion_body">Les photos animées se lisent à nouveau, y compris celles de Google et en HDR.</string>
+    <string name="whats_new_more">Avec aussi des Paramètres plus nets, des albums rafraîchis et des correctifs en arrière-plan.</string>
+    <string name="offline_card_subtitle">Photos enregistrées pour la consultation hors ligne</string>
+    <string name="duplicates_filter_identical">Identiques</string>
+    <string name="duplicates_filter_similar">Similaires</string>
+    <string name="duplicates_badge_cloud">Cloud</string>
+    <string name="duplicates_badge_device">Appareil</string>
+    <string name="duplicates_badge_synced">Synchronisé</string>
+    <string name="map_osm_attribution" translatable="false">© OpenStreetMap contributors</string>
+    <string name="onboarding_all_files_subtitle">Recommandé. Permet à l\'app de remettre les photos masquées restaurées dans leur dossier d\'origine (par exemple le dossier multimédia d\'une app de messagerie, pas seulement Images) et d\'écrire les changements directement dans vos fichiers locaux. Touchez pour ouvrir les paramètres système.</string>
+    <string name="onboarding_all_files_title">Accès à tous les fichiers</string>
+    <string name="permissions_action_allow">Autoriser</string>
+    <string name="permissions_allfiles_title">Accès à tous les fichiers</string>
+    <string name="permissions_allfiles_why">Pour restaurer les photos masquées et téléchargées dans leur dossier d\'origine (comme WhatsApp), et atteindre les photos conservées hors des dossiers multimédias standard.</string>
+    <string name="permissions_install_title">Installer les mises à jour</string>
+    <string name="permissions_install_why">Pour installer les mises à jour de l\'app que vous téléchargez dans l\'app.</string>
+    <string name="permissions_intro">Gérez ce à quoi Photos for Proton peut accéder. Chaque élément explique pourquoi il est utilisé.</string>
+    <string name="permissions_location_title">Lieu de la photo</string>
+    <string name="permissions_location_why">Pour montrer où les photos ont été prises sur la carte, et conserver leur lieu lors de la sauvegarde.</string>
+    <string name="permissions_managemedia_title">Gérer les médias</string>
+    <string name="permissions_managemedia_why">Pour déplacer et supprimer les photos en douceur, sans confirmation système pour chaque fichier.</string>
+    <string name="permissions_network_note">L\'accès réseau est toujours actif, et utilisé uniquement pour communiquer avec Proton Drive.</string>
+    <string name="permissions_notifications_title">Notifications</string>
+    <string name="permissions_notifications_why">Pour afficher la progression de la sauvegarde et de l\'envoi.</string>
+    <string name="permissions_photos_title">Photos &amp; vidéos</string>
+    <string name="permissions_photos_why">Pour afficher votre galerie et sauvegarder vos photos et vidéos.</string>
+    <string name="permissions_state_granted">Accordé</string>
+    <string name="permissions_title">Autorisations</string>
+    <string name="settings_all_files_desc">Permet aux photos masquées restaurées de revenir dans leur dossier d\'origine et aux fichiers locaux d\'être mis à jour sur place. Touchez pour accorder dans les paramètres système.</string>
+    <string name="settings_all_files_title">Accès à tous les fichiers</string>
+    <string name="settings_storage_clear">Vider</string>
+    <string name="settings_storage_free_up">Libérer</string>
+    <string name="settings_storage_used_of">%1$s sur %2$s</string>
+
+    <!-- Actions album + partage -->
+    <string name="album_download_all_confirm_title">Télécharger tout l\'album ?</string>
+    <string name="album_download_all_confirm_body">Chaque photo de cet album sera enregistrée sur votre appareil.</string>
+    <string name="album_set_cover_confirm_title">Définir comme couverture de l\'album ?</string>
+    <string name="album_set_cover_confirm_body">Cette photo devient la couverture de l\'album.</string>
+    <string name="album_remove_confirm_title">Retirer de cet album ?</string>
+    <string name="album_remove_confirm_body">Cela retire uniquement la sélection de l\'album. Vos photos restent dans votre chronologie.</string>
+    <string name="action_remove">Retirer</string>
+    <string name="gallery_add_to_album_queued">Les photos seront ajoutées une fois leur envoi terminé</string>
+    <string name="share_role_can_view_desc">Peut consulter l\'album et ses photos.</string>
+    <string name="share_role_can_edit_desc">Peut ajouter et retirer des photos et changer la couverture.</string>
+    <string name="settings_show_selection_labels">Libellés des boutons</string>
+    <string name="settings_show_selection_labels_desc">Affiche un court libellé sous chaque bouton lors de la sélection de photos, pour indiquer clairement ce que fait chacun.</string>
+    <string name="sel_label_download">Télécharger</string>
+    <string name="sel_label_delete">Supprimer</string>
+    <string name="sel_label_cover">Couverture</string>
+    <string name="sel_label_offline">Hors ligne</string>
+    <string name="sel_label_album">Album</string>
+    <string name="sel_label_upload">Envoyer</string>
+    <string name="op_offline_fmt">Enregistrement hors ligne %1$d / %2$d</string>
+    <string name="picker_filter_all">Tout</string>
+    <string name="picker_filter_cloud">Cloud</string>
+    <string name="picker_filter_device">Appareil</string>
+    <string name="sync_open_settings">Paramètres de sauvegarde</string>
+    <string name="sync_open_settings_desc">Choisissez quoi et comment sauvegarder, et le réseau à utiliser.</string>
+    <string name="settings_privacy">Confidentialité</string>
+    <string name="settings_privacy_desc">Cache, photos hors ligne et télémétrie</string>
+    <string name="settings_metadata">Métadonnées</string>
+    <string name="settings_metadata_desc">Renommer les sauvegardes et supprimer l\'EXIF (GPS, appareil photo, horodatage)</string>
+    <string name="about_support_title">Offrez-moi un café</string>
+    <string name="about_support_subtitle">Soutenez l\'application et son développement</string>
+    <string name="sync_folder_backup_label">Sauvegarder</string>
+    <string name="sync_folder_album_label">Album</string>
+    <string name="sync_view_activity">Détails</string>
+    <string name="activity_title">Activité</string>
+    <string name="activity_uploading">Envoi en cours</string>
+    <string name="activity_pending">En attente d\'envoi (%1$d)</string>
+    <string name="activity_empty">Aucun transfert en cours pour le moment</string>
+    <string name="activity_row_desc">Voir les transferts en cours et les photos en attente d\'envoi</string>
+    <string name="activity_offline">Hors ligne</string>
+    <string name="activity_photos">Photos</string>
+    <string name="activity_tab_active">Actifs</string>
+    <string name="activity_tab_history">Historique</string>
+    <string name="activity_history_empty">Aucun transfert terminé pour le moment</string>
+    <string name="activity_history_clear">Effacer l\'historique</string>
+    <string name="activity_hist_upload">%1$d photos sauvegardées</string>
+    <string name="activity_hist_download">%1$d photos téléchargées</string>
+    <string name="activity_hist_download_named">%1$d téléchargées depuis \"%2$s\"</string>
+    <string name="activity_hist_offline">%1$d photos enregistrées hors ligne</string>
+    <string name="activity_downloading">Téléchargement</string>
 </resources>

@@ -28,6 +28,7 @@ import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
 import android.util.Log
+import androidx.exifinterface.media.ExifInterface
 import dagger.hilt.android.qualifiers.ApplicationContext
 import me.proton.core.domain.entity.UserId
 import eu.akoos.photos.domain.entity.CloudPhoto
@@ -40,6 +41,9 @@ import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.SyncStateRepository
 import java.io.File
 import java.io.IOException
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -56,7 +60,11 @@ private const val TAG = "DownloadPhotos"
  *  the rate-limit-sensitive metadata calls stay bounded by the shared network semaphore, and
  *  the CDN block fetches carry their own retry/backoff, so a handful of photos in flight stays
  *  well within Drive's limits. This is the dominant limiter for large-album downloads. */
-private const val DOWNLOAD_PARALLELISM = 4
+private const val DOWNLOAD_PARALLELISM = 6
+
+/** Image MIME types ExifInterface can reliably WRITE via saveAttributes. Other formats (HEIC,
+ *  video) keep only the MediaStore column date. */
+private val EXIF_WRITABLE_MIMES = setOf("image/jpeg", "image/png", "image/webp")
 
 @Singleton
 class DownloadPhotosUseCase @Inject constructor(
@@ -123,6 +131,7 @@ class DownloadPhotosUseCase @Inject constructor(
         photos: List<CloudPhoto>,
         folderName: String,
         folderByLinkId: Map<String, String> = emptyMap(),
+        onSaved: (String) -> Unit = {},
         onProgress: suspend (Progress) -> Unit = {},
     ): Progress = coroutineScope {
         val done = AtomicInteger(0); val failed = AtomicInteger(0); val skipped = AtomicInteger(0)
@@ -139,9 +148,9 @@ class DownloadPhotosUseCase @Inject constructor(
                     try {
                         // Reliable skip first: a photo already SYNCED to a still-present local file
                         // is on the device, so don't re-download it. This catches album photos whose
-                        // cloud DTO carries size 0 — those can't match the MediaStore name+size
-                        // heuristic below, yet they show the green "synced" badge, so re-downloading
-                        // them surprised users.
+                        // cloud DTO carries size 0. Those can't match the MediaStore name+size
+                        // heuristic below, yet they show the green "synced" badge, so skipping them
+                        // here avoids a needless re-download.
                         val syncedUri = syncStateRepo.getByCloudId(photo.linkId)
                             ?.takeIf { it.status == SyncStatus.SYNCED }
                             ?.localUri?.takeIf { it.isNotBlank() && localUriExists(it) }
@@ -162,7 +171,10 @@ class DownloadPhotosUseCase @Inject constructor(
                                 captureTimeSeconds = photo.captureTime,
                             )
                             file.delete()
-                            if (savedUri != null) linkSyncState(userId, savedUri, photo)
+                            if (savedUri != null) {
+                                linkSyncState(userId, savedUri, photo)
+                                onSaved(savedUri.toString())
+                            }
                             done.incrementAndGet()
                             Log.d(TAG, "Downloaded ${photo.displayName} → ${folder.ifEmpty { "<root>" }}")
                         }
@@ -193,6 +205,7 @@ class DownloadPhotosUseCase @Inject constructor(
         items: List<GalleryItem>,
         folderName: String = "",
         folderByLinkId: Map<String, String> = emptyMap(),
+        onSaved: (String) -> Unit = {},
         onProgress: suspend (Progress) -> Unit = {},
     ): Progress = coroutineScope {
         val cloudItems = items.filterIsInstance<GalleryItem.CloudOnly>().map { it.cloud }
@@ -230,7 +243,10 @@ class DownloadPhotosUseCase @Inject constructor(
                                 captureTimeSeconds = photo.captureTime,
                             )
                             file.delete()
-                            if (savedUri != null) linkSyncState(userId, savedUri, photo)
+                            if (savedUri != null) {
+                                linkSyncState(userId, savedUri, photo)
+                                onSaved(savedUri.toString())
+                            }
                             done.incrementAndGet()
                         }
                     } catch (e: Exception) {
@@ -362,12 +378,37 @@ class DownloadPhotosUseCase @Inject constructor(
         captureTimeSeconds: Long = 0L,
     ): Uri? {
         val isVideo = mimeType.startsWith("video/")
-        // Empty folder = save into Pictures/ (or Movies/) root with no subfolder, so
-        // the device gallery doesn't surface a redundant "Proton Photos" album for
-        // non-album-bound downloads. Album-bound photos get folder = "<AlbumName>" and
-        // land in Pictures/<AlbumName>/.
+
+        // Stamp the original capture date into the file's EXIF BEFORE handing it to MediaStore.
+        // Android's media scanner derives DATE_TAKEN from EXIF when the row is published; a file
+        // with no EXIF date (a screenshot, or a photo uploaded with metadata stripping on) ends up
+        // with DATE_TAKEN = scan time (~now) on some OS builds, and the column write below can't
+        // reliably override that after publish. Fill ONLY when the tag is missing, so a real camera
+        // date is never overwritten and unchanged bytes keep hashing to their cloud twin. Best-effort:
+        // limited to formats ExifInterface can write; any failure leaves the column write as the
+        // fallback. Changing the bytes is dedup-safe because the download pairs by cloud id
+        // (linkSyncState -> reconcile byId), not by content hash.
+        if (!isVideo && captureTimeSeconds > 0L && mimeType.lowercase() in EXIF_WRITABLE_MIMES) {
+            runCatching {
+                val exif = ExifInterface(file.absolutePath)
+                if (exif.getAttribute(ExifInterface.TAG_DATETIME_ORIGINAL).isNullOrBlank()) {
+                    val stamp = SimpleDateFormat("yyyy:MM:dd HH:mm:ss", Locale.US)
+                        .format(Date(captureTimeSeconds * 1000L))
+                    exif.setAttribute(ExifInterface.TAG_DATETIME_ORIGINAL, stamp)
+                    if (exif.getAttribute(ExifInterface.TAG_DATETIME).isNullOrBlank()) {
+                        exif.setAttribute(ExifInterface.TAG_DATETIME, stamp)
+                    }
+                    exif.saveAttributes()
+                }
+            }.onFailure { Log.w(TAG, "EXIF date stamp skipped for $displayName: ${it.message}") }
+        }
+
+        // A photo that belongs to an album downloads into a folder named after that album (the
+        // caller passes it as [folder], already sanitised) so the album's photos stay grouped on
+        // the device — no matter whether the download starts from the album or from the timeline.
+        // A photo in no album lands in the Pictures/ (or Movies/) root.
         val base = if (isVideo) "Movies" else "Pictures"
-        val relPath = if (folder.isEmpty()) base else "$base/$folder"
+        val relPath = if (folder.isNotBlank()) "$base/$folder" else base
 
         // Second-chance global dedupe: callers already pre-skipped via alreadyExistsInMediaStore,
         // but a concurrent write between the check and the save can sneak in. Size = file.length()
@@ -426,11 +467,11 @@ class DownloadPhotosUseCase @Inject constructor(
                 file.inputStream().use { it.copyTo(out) }
             } ?: throw IOException("openOutputStream returned null for $uri")
 
-            // EXIF write removed by request — modifying the file's EXIF block changes its
-            // byte content and would break hash-based cloud↔local matching (the cloud's
-            // contentHash was computed over the original bytes). We rely on MediaStore's
-            // DATE_TAKEN column instead; the split-update below makes that write reliable
-            // on the Android 13+ versions that were dropping single-update timestamps.
+            // The EXIF block is left untouched on purpose: modifying it changes the file's
+            // byte content and would break hash-based cloud/local matching (the cloud's
+            // contentHash was computed over the original bytes). MediaStore's DATE_TAKEN
+            // column carries the capture date instead; the split-update below makes that write
+            // reliable on the Android 13+ versions that were dropping single-update timestamps.
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 // Flip IS_PENDING in a FIRST update — committing the row makes it visible

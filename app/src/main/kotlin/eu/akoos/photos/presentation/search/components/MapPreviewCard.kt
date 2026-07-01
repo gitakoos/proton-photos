@@ -124,11 +124,21 @@ fun MapPreviewCard(
         }
     }
 
-    // osmdroid drives its tile threads off the view lifecycle; Compose has no equivalent, so
-    // forward resume/pause and detach (releasing tile handles) when the card leaves composition.
-    DisposableEffect(mapView) {
-        mapView.onResume()
+    // osmdroid drives its tile threads off the view lifecycle. Bridge them to the SCREEN's lifecycle
+    // (not just composition) so the tiles pause when the app is backgrounded while the Search screen
+    // is still on the back stack, and detach (releasing tile handles) when the card leaves.
+    val mapLifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    DisposableEffect(mapView, mapLifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            when (event) {
+                androidx.lifecycle.Lifecycle.Event.ON_RESUME -> mapView.onResume()
+                androidx.lifecycle.Lifecycle.Event.ON_PAUSE -> mapView.onPause()
+                else -> Unit
+            }
+        }
+        mapLifecycleOwner.lifecycle.addObserver(observer)
         onDispose {
+            mapLifecycleOwner.lifecycle.removeObserver(observer)
             mapView.onPause()
             mapView.onDetach()
         }

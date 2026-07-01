@@ -64,6 +64,8 @@ class FreeUpSpaceUseCase @Inject constructor(
                     // delete() returned 0 — likely needs permission on API 30+
                     needsDialog += state.localUri to contentUri
                 }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: Exception) {
                 // SecurityException / RecoverableSecurityException on Android 11+
                 needsDialog += state.localUri to contentUri

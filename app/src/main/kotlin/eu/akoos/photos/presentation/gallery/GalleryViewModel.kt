@@ -24,6 +24,7 @@
 
 package eu.akoos.photos.presentation.gallery
 
+import eu.akoos.photos.presentation.common.UndoAction
 import android.content.Context
 import android.net.Uri
 import android.os.Build
@@ -63,6 +64,8 @@ import me.proton.core.accountmanager.domain.AccountManager
 import me.proton.core.user.domain.usecase.ObserveUser
 import eu.akoos.photos.R
 import eu.akoos.photos.data.hidden.HiddenStorageManager
+import eu.akoos.photos.data.offline.OfflineStorageManager
+import eu.akoos.photos.data.transfer.TransferCenter
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.entity.GalleryItem
@@ -142,6 +145,8 @@ class GalleryViewModel @Inject constructor(
     private val upload: UploadPendingUseCase,
     private val forceUploadLocalUris: ForceUploadLocalUrisUseCase,
     private val hiddenStorage: HiddenStorageManager,
+    private val offlineStore: OfflineStorageManager,
+    private val transferCenter: TransferCenter,
     private val syncStateRepo: SyncStateRepository,
     private val networkObserver: eu.akoos.photos.util.NetworkObserver,
     private val albumPhotoMembershipDao: eu.akoos.photos.data.db.dao.AlbumPhotoMembershipDao,
@@ -161,6 +166,12 @@ class GalleryViewModel @Inject constructor(
      */
     private val _shareIntent = MutableSharedFlow<android.content.Intent>(replay = 0, extraBufferCapacity = 1)
     val shareIntent: SharedFlow<android.content.Intent> = _shareIntent.asSharedFlow()
+
+    /** One-shot count of photos successfully pinned by a "Make available offline" batch, so
+     *  [GalleryScreen] can show a result snackbar. replay=0 + single-buffer mirrors [shareIntent];
+     *  the optimistic pins drive the per-cell offline badge live, this only reports the outcome. */
+    private val _offlineBatchResult = MutableSharedFlow<Int>(replay = 0, extraBufferCapacity = 1)
+    val offlineBatchResult: SharedFlow<Int> = _offlineBatchResult.asSharedFlow()
 
     /** True when the device has a validated internet connection. Drives the avatar
      *  offline badge in [GalleryScreen] and gates every cloud-side refresh below. */
@@ -207,6 +218,7 @@ class GalleryViewModel @Inject constructor(
         observeFolderSettings()
         observeGridPreferences()
         observeFavorites()
+        observeOfflinePins()
         observeBackgroundUploadProgress()
         observePrimaryUserId()
         observeHideInAlbums()
@@ -323,9 +335,38 @@ class GalleryViewModel @Inject constructor(
                         state.selectedFilter,
                         favIds,
                         state.albumHideCloudIds,
+                        state.offlinePinIds,
                     )
                     _uiState.update { it.copy(favoriteIds = favIds, filteredItems = filtered) }
                     recomputeMonthGroups(filtered)
+                }
+        }
+    }
+
+    /** Offline-pinned cloud linkIds drive the per-cell offline badge everywhere and the Offline
+     *  filter's membership. The badge tracks [GalleryUiState.offlinePinIds] directly, so a pin/un-pin
+     *  reflects live without re-filtering; applyFilter only needs re-running while the Offline tab
+     *  itself is showing (otherwise its list would go stale on an un-pin). */
+    private fun observeOfflinePins() {
+        viewModelScope.launch {
+            context.settingsDataStore.data
+                .map { it[SettingsKeys.OFFLINE_PIN_IDS] ?: emptySet() }
+                .distinctUntilChanged()
+                .collect { ids ->
+                    val state = _uiState.value
+                    if (state.selectedFilter == GalleryFilter.Offline) {
+                        val filtered = applyFilter(
+                            applyContentFilter(state.items, state.contentFilter),
+                            state.selectedFilter,
+                            state.favoriteIds,
+                            state.albumHideCloudIds,
+                            ids,
+                        )
+                        _uiState.update { it.copy(offlinePinIds = ids, filteredItems = filtered) }
+                        recomputeMonthGroups(filtered)
+                    } else {
+                        _uiState.update { it.copy(offlinePinIds = ids) }
+                    }
                 }
         }
     }
@@ -565,6 +606,7 @@ class GalleryViewModel @Inject constructor(
                             snapshot.selectedFilter,
                             snapshot.favoriteIds,
                             sources.cloudInAlbum,
+                            snapshot.offlinePinIds,
                         )
                         val pending = items.count { it is GalleryItem.LocalOnly }
                         // Month-bucket the filtered list and compute "On this day" here, off the
@@ -721,6 +763,7 @@ class GalleryViewModel @Inject constructor(
             filter,
             state.favoriteIds,
             state.albumHideCloudIds,
+            state.offlinePinIds,
         )
         _uiState.update { it.copy(selectedFilter = filter, filteredItems = filtered) }
         recomputeMonthGroups(filtered)
@@ -755,6 +798,7 @@ class GalleryViewModel @Inject constructor(
             state.selectedFilter,
             state.favoriteIds,
             state.albumHideCloudIds,
+            state.offlinePinIds,
         )
         _uiState.update { it.copy(contentFilter = filter, filteredItems = filtered) }
         recomputeMonthGroups(filtered)
@@ -986,11 +1030,21 @@ class GalleryViewModel @Inject constructor(
     }
 
     fun resetMultiDeleteState() {
-        _uiState.update { it.copy(multiDeleteState = MultiDeleteState.Idle) }
+        _uiState.update { it.copy(multiDeleteState = MultiDeleteState.Idle, hideFailureCount = 0) }
     }
 
     /** Private URIs collected during a multi-select hide, committed once the system delete OK's. */
     private var pendingHidePrivateUris: List<String> = emptyList()
+
+    /** "privateUri|sourceFolder" entries aligned with [pendingHidePrivateUris], persisted into
+     *  [SettingsKeys.HIDDEN_URI_SOURCE_FOLDER_MAP] on commit so unhide can return each file to
+     *  its original folder. Only items whose source folder resolved get an entry. */
+    private var pendingHideSourceFolders: List<String> = emptyList()
+
+    /** "privateUri|originalName" entries aligned with [pendingHidePrivateUris], persisted into
+     *  [SettingsKeys.HIDDEN_URI_ORIGINAL_NAME_MAP] on commit so unhide can restore the original
+     *  filename. */
+    private var pendingHideOriginalNames: List<String> = emptyList()
 
     /**
      * Batch-hide every currently-selected gallery item. Copies each local file to app-private
@@ -1017,18 +1071,34 @@ class GalleryViewModel @Inject constructor(
             }
             // Step 1: copy every local file into app-private hidden storage.
             val collected = mutableListOf<String>()
+            val folderEntries = mutableListOf<String>()
+            val nameEntries = mutableListOf<String>()
+            var hideFailures = 0
             for (item in hideables) {
                 val local = item.local
+                val sourceFolder = hiddenStorage.sourceFolderFor(local.uri, local.bucketName)
                 val privateUri = hiddenStorage.store(
                     local.uri, local.displayName, local.mimeType, captureTimeMs = local.dateTaken,
                 )
-                if (privateUri != null) collected += privateUri
+                if (privateUri != null) {
+                    collected += privateUri
+                    if (!sourceFolder.isNullOrBlank()) folderEntries += "$privateUri|$sourceFolder"
+                    if (local.displayName.isNotBlank()) nameEntries += "$privateUri|${local.displayName}"
+                } else {
+                    // store() already logged the reason (privacy-safe, no file name).
+                    hideFailures++
+                }
             }
             if (collected.isEmpty()) {
                 _uiState.update { it.copy(multiHideState = MultiDeleteState.Failed(context.getString(R.string.gallery_copy_to_hidden_failed))) }
                 return@launch
             }
             pendingHidePrivateUris = collected
+            pendingHideSourceFolders = folderEntries
+            pendingHideOriginalNames = nameEntries
+            // Carry the failure count into state so the terminal snackbar can report it, whether
+            // the hide commits synchronously (pre-Q) or after the system-permission dialog.
+            _uiState.update { it.copy(hideFailureCount = hideFailures) }
 
             // Step 2: delete the MediaStore originals (one system-trash dialog on Android 11+).
             val userId = accountManager.getPrimaryUserId().first() ?: run {
@@ -1074,7 +1144,7 @@ class GalleryViewModel @Inject constructor(
     }
 
     fun resetMultiHideState() {
-        _uiState.update { it.copy(multiHideState = MultiDeleteState.Idle, hideCloudNoticePending = false) }
+        _uiState.update { it.copy(multiHideState = MultiDeleteState.Idle, hideCloudNoticePending = false, hideFailureCount = 0) }
     }
 
     /** The cloud linkIds a delete with deleteFromCloud=true sends to Proton trash — the same set
@@ -1107,8 +1177,15 @@ class GalleryViewModel @Inject constructor(
                 when (action) {
                     is UndoAction.Hide -> {
                         withContext(Dispatchers.IO) {
+                            // Restore each file to the folder it was hidden from (recorded at hide
+                            // time), falling back to the Pictures/Movies root when none was captured.
+                            val prefsSnapshot = context.settingsDataStore.data.first()
+                            val folderMap = prefsSnapshot[SettingsKeys.HIDDEN_URI_SOURCE_FOLDER_MAP] ?: emptySet()
+                            val nameMap = prefsSnapshot[SettingsKeys.HIDDEN_URI_ORIGINAL_NAME_MAP] ?: emptySet()
                             for (hiddenUri in action.hiddenUris) {
-                                hiddenStorage.restore(hiddenUri)
+                                val sourceFolder = folderMap.firstOrNull { it.startsWith("$hiddenUri|") }?.substringAfter('|')
+                                val originalName = nameMap.firstOrNull { it.startsWith("$hiddenUri|") }?.substringAfter('|')
+                                hiddenStorage.restore(hiddenUri, originalDisplayName = originalName, albumFolderName = sourceFolder)
                             }
                             context.settingsDataStore.edit { prefs ->
                                 val current = prefs[SettingsKeys.HIDDEN_PHOTO_URIS] ?: emptySet()
@@ -1116,6 +1193,12 @@ class GalleryViewModel @Inject constructor(
                                 val mapping = prefs[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] ?: emptySet()
                                 prefs[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] =
                                     mapping.filterNot { entry -> action.hiddenUris.any { entry.startsWith("$it|") } }.toSet()
+                                val folders = prefs[SettingsKeys.HIDDEN_URI_SOURCE_FOLDER_MAP] ?: emptySet()
+                                prefs[SettingsKeys.HIDDEN_URI_SOURCE_FOLDER_MAP] =
+                                    folders.filterNot { entry -> action.hiddenUris.any { entry.startsWith("$it|") } }.toSet()
+                                val names = prefs[SettingsKeys.HIDDEN_URI_ORIGINAL_NAME_MAP] ?: emptySet()
+                                prefs[SettingsKeys.HIDDEN_URI_ORIGINAL_NAME_MAP] =
+                                    names.filterNot { entry -> action.hiddenUris.any { entry.startsWith("$it|") } }.toSet()
                             }
                         }
                         refresh(force = false)
@@ -1136,12 +1219,24 @@ class GalleryViewModel @Inject constructor(
     /** Persist the pending hide-URIs into HIDDEN_PHOTO_URIS and clear the pending state. */
     private fun commitPendingHide() {
         val uris = pendingHidePrivateUris
+        val folderEntries = pendingHideSourceFolders
+        val nameEntries = pendingHideOriginalNames
         pendingHidePrivateUris = emptyList()
+        pendingHideSourceFolders = emptyList()
+        pendingHideOriginalNames = emptyList()
         if (uris.isEmpty()) return
         viewModelScope.launch {
             context.settingsDataStore.edit { prefs ->
                 val current = prefs[SettingsKeys.HIDDEN_PHOTO_URIS] ?: emptySet()
                 prefs[SettingsKeys.HIDDEN_PHOTO_URIS] = current + uris
+                if (folderEntries.isNotEmpty()) {
+                    val folders = prefs[SettingsKeys.HIDDEN_URI_SOURCE_FOLDER_MAP] ?: emptySet()
+                    prefs[SettingsKeys.HIDDEN_URI_SOURCE_FOLDER_MAP] = folders + folderEntries
+                }
+                if (nameEntries.isNotEmpty()) {
+                    val names = prefs[SettingsKeys.HIDDEN_URI_ORIGINAL_NAME_MAP] ?: emptySet()
+                    prefs[SettingsKeys.HIDDEN_URI_ORIGINAL_NAME_MAP] = names + nameEntries
+                }
             }
         }
     }
@@ -1150,6 +1245,8 @@ class GalleryViewModel @Inject constructor(
     private fun rollbackPendingHide() {
         val uris = pendingHidePrivateUris
         pendingHidePrivateUris = emptyList()
+        pendingHideSourceFolders = emptyList()
+        pendingHideOriginalNames = emptyList()
         for (u in uris) hiddenStorage.delete(u)
     }
 
@@ -1159,6 +1256,7 @@ class GalleryViewModel @Inject constructor(
         viewModelScope.launch {
             val userId = accountManager.getPrimaryUserId().first() ?: return@launch
             _uiState.update { it.copy(multiDownloadState = MultiDownloadState.Working(0, items.size)) }
+            val transferId = transferCenter.start(TransferCenter.Kind.DOWNLOAD, items.size)
             // Resolve per-photo album folder so cloud-album photos go to Pictures/<AlbumName>/
             // instead of bunching in a generic Proton Photos folder. AlbumService caches the
             // membership map for 5 min so repeated downloads don't re-fetch.
@@ -1168,13 +1266,23 @@ class GalleryViewModel @Inject constructor(
                     emptyMap()
                 }
                 .mapValues { (_, name) -> eu.akoos.photos.util.ProtonPhotosStorage.sanitize(name) }
-            val result = downloadPhotos.downloadGalleryItems(
-                userId, items,
-                folderName = "", // empty = save non-album photos directly into Pictures/ root
-                folderByLinkId = memberships,
-            ) { progress ->
-                _uiState.update { it.copy(multiDownloadState = MultiDownloadState.Working(progress.done, progress.total)) }
+            val savedUris = java.util.concurrent.ConcurrentLinkedQueue<String>()
+            val result = try {
+                downloadPhotos.downloadGalleryItems(
+                    userId, items,
+                    folderName = "", // empty = save non-album photos directly into Pictures/ root
+                    folderByLinkId = memberships,
+                    onSaved = { savedUris.add(it) },
+                ) { progress ->
+                    _uiState.update { it.copy(multiDownloadState = MultiDownloadState.Working(progress.done, progress.total)) }
+                    transferCenter.progress(transferId, progress.done)
+                }
+            } finally {
+                transferCenter.finish(transferId)
             }
+            transferCenter.log(
+                TransferCenter.Kind.DOWNLOAD, result.done - result.failed, uris = savedUris.toList(),
+            )
             _uiState.update { it.copy(
                 multiDownloadState = MultiDownloadState.Done(result.done - result.failed, result.failed),
                 selectedItems = emptySet(),
@@ -1184,6 +1292,100 @@ class GalleryViewModel @Inject constructor(
 
     fun resetMultiDownloadState() {
         _uiState.update { it.copy(multiDownloadState = MultiDownloadState.Idle) }
+    }
+
+    /**
+     * Pin every cloud-only photo in the current selection for offline viewing — downloads each
+     * full-res blob into app-private offline storage. Offered only when the selection holds at
+     * least one [GalleryItem.CloudOnly]; Synced/LocalOnly items already have their bytes on the
+     * device and are skipped. The pin set in [SettingsKeys.OFFLINE_PIN_IDS] is added optimistically
+     * (one edit, mirroring [PhotoViewerViewModel.toggleOfflinePin]) so the per-cell badge reflects
+     * immediately; each download runs sequentially and is wrapped so one failure doesn't abort the
+     * rest, and any item that fails to download has its pin and blob reverted so it can't show as
+     * pinned with no bytes. Clears the selection and reports the success count via
+     * [offlineBatchResult].
+     */
+    /**
+     * Toggles the offline state of the selected cloud-only photos, mirroring the viewer's per-photo
+     * toggle. If EVERY selected cloud photo is already offline it removes them (un-pins + drops the
+     * blobs, no network); otherwise it pins the ones that aren't offline yet (downloading each
+     * full-res blob). The result event is the pin count, or a negative count for a removal.
+     */
+    fun toggleSelectedOffline() {
+        val cloudItems = _uiState.value.selectedItems.filterIsInstance<GalleryItem.CloudOnly>()
+        if (cloudItems.isEmpty()) return
+        val pinned = _uiState.value.offlinePinIds
+        val allOffline = cloudItems.all { it.cloud.linkId in pinned }
+
+        if (allOffline) {
+            // Remove from offline — instant, no network: drop the pins and their blobs.
+            val linkIds = cloudItems.map { it.cloud.linkId }
+            viewModelScope.launch {
+                context.settingsDataStore.edit { prefs ->
+                    val current = prefs[SettingsKeys.OFFLINE_PIN_IDS] ?: emptySet()
+                    prefs[SettingsKeys.OFFLINE_PIN_IDS] = current - linkIds.toSet()
+                }
+                linkIds.forEach { offlineStore.delete(it) }
+                _uiState.update { it.copy(selectedItems = emptySet()) }
+                // Negative = "removed" so the screen shows the un-pin message, not a pin count.
+                _offlineBatchResult.emit(-linkIds.size)
+            }
+            return
+        }
+
+        // Pin only the ones not already offline.
+        val toPin = cloudItems.filter { it.cloud.linkId !in pinned }
+        val linkIds = toPin.map { it.cloud.linkId }
+        viewModelScope.launch {
+            // Optimistic pin: add every linkId in one edit so the badges light up before any byte is
+            // fetched; failures below remove the ones that didn't land.
+            context.settingsDataStore.edit { prefs ->
+                val current = prefs[SettingsKeys.OFFLINE_PIN_IDS] ?: emptySet()
+                prefs[SettingsKeys.OFFLINE_PIN_IDS] = current + linkIds
+            }
+            _uiState.update { it.copy(selectedItems = emptySet()) }
+            val userId = accountManager.getPrimaryUserId().first()
+            var succeeded = 0
+            val failedLinkIds = mutableListOf<String>()
+            val savedPaths = mutableListOf<String>()
+            val transferId = transferCenter.start(TransferCenter.Kind.OFFLINE, toPin.size)
+            try {
+                for (item in toPin) {
+                    val linkId = item.cloud.linkId
+                    try {
+                        val uid = userId ?: error("Not signed in")
+                        val file = cloudRepo.downloadFullResPhoto(uid, item.cloud)
+                        val stored = offlineStore.store(linkId, file)
+                        savedPaths += "file://${stored.absolutePath}"
+                        succeeded++
+                    } catch (e: Exception) {
+                        if (e is kotlinx.coroutines.CancellationException) throw e
+                        android.util.Log.w("GalleryVM", "offline pin failed: ${e.message}")
+                        failedLinkIds += linkId
+                    }
+                    transferCenter.progress(transferId, succeeded + failedLinkIds.size)
+                }
+            } finally {
+                transferCenter.finish(transferId)
+            }
+            // Revert the optimistic pin for anything that didn't download, so a failed item never
+            // looks pinned with no blob behind it.
+            if (failedLinkIds.isNotEmpty()) {
+                context.settingsDataStore.edit { prefs ->
+                    val current = prefs[SettingsKeys.OFFLINE_PIN_IDS] ?: emptySet()
+                    prefs[SettingsKeys.OFFLINE_PIN_IDS] = current - failedLinkIds.toSet()
+                }
+                failedLinkIds.forEach { offlineStore.delete(it) }
+            }
+            // Drop any blob whose pin was removed (un-pinned, or a sign-out) while its download was
+            // in flight, so a blob never outlives its pin.
+            val finalPins = context.settingsDataStore.data.first()[SettingsKeys.OFFLINE_PIN_IDS] ?: emptySet()
+            (linkIds - failedLinkIds.toSet()).forEach { id ->
+                if (id !in finalPins) offlineStore.delete(id)
+            }
+            transferCenter.log(TransferCenter.Kind.OFFLINE, succeeded, uris = savedPaths)
+            _offlineBatchResult.emit(succeeded)
+        }
     }
 
     /**
@@ -1619,6 +1821,7 @@ class GalleryViewModel @Inject constructor(
         filter: GalleryFilter,
         favoriteIds: Set<String> = emptySet(),
         albumHideCloudIds: Set<String> = emptySet(),
+        offlinePinIds: Set<String> = emptySet(),
     ): List<GalleryItem> {
         // Album-membership filter only applies on the [GalleryFilter.All] view. Non-All tabs
         // (Favorites, Screenshots, Videos, …) bypass it — when the user explicitly picks a
@@ -1657,6 +1860,11 @@ class GalleryViewModel @Inject constructor(
             // both tags.
             GalleryFilter.LivePhotos, GalleryFilter.MotionPhotos -> baseItems.filter {
                 CategorizeItem.belongsTo(it, tagId = 3) || CategorizeItem.belongsTo(it, tagId = 4)
+            }
+            // Offline = the cloud photos pinned for offline (their linkId is in OFFLINE_PIN_IDS).
+            // Not a server tag, so it filters on the pinned set rather than CategorizeItem.
+            GalleryFilter.Offline -> baseItems.filter { item ->
+                (item as? GalleryItem.CloudOnly)?.cloud?.linkId?.let { id -> id in offlinePinIds } == true
             }
             else -> {
                 val tagId = filter.tagId ?: return baseItems

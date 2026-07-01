@@ -51,9 +51,6 @@ import eu.akoos.photos.data.api.dto.CommitRevisionRequest
 import eu.akoos.photos.data.api.dto.CommitRevisionV2Request
 import eu.akoos.photos.data.api.dto.CommitThumbnailDto
 import eu.akoos.photos.data.api.dto.CreateFileRequest
-import eu.akoos.photos.data.api.dto.CreatePhotoLinkData
-import eu.akoos.photos.data.api.dto.CreatePhotoMetadata
-import eu.akoos.photos.data.api.dto.CreatePhotoRequest
 import eu.akoos.photos.data.api.dto.PhotoMetaDto
 import eu.akoos.photos.data.api.dto.ThumbnailUploadInfoDto
 import eu.akoos.photos.data.api.dto.UploadBlockRequest
@@ -251,6 +248,14 @@ class PhotoUploadService @Inject constructor(
     ): String =
         withContext(Dispatchers.IO) {
             val hash = sha1HexContentDigest
+            // Setup timing (in-app log): the gap from here to the encrypt loop is the create-photo /
+            // create-revision / verification-code API round-trips (and any rate-limit backoff inside
+            // them) — the suspected real cost behind a "slow encryption".
+            val setupT0 = System.currentTimeMillis()
+            // Privacy: the diagnostics log must never contain a file name. A short, non-reversible
+            // ref derived from the source URI lets the per-file log lines (sha1 / setup / CDN) be
+            // correlated without revealing what the file is.
+            val logRef = item.uri.hashCode().toUInt().toString(16).padStart(8, '0').take(6)
             // Per-file slot pools so every concurrent upload makes progress on its own budget.
             val cdnUploadSlots = Semaphore(2)
             val encryptSlots = Semaphore(ENCRYPT_PARALLELISM)
@@ -364,7 +369,7 @@ class PhotoUploadService @Inject constructor(
                 // "Signed digest did not match".
                 contentKeyPacketSignature = cryptoHelper.signData(sessionKey.key, signingKey.unlockedKeyBytes)
 
-                // Try the Photos-stream endpoint first; fall back to the volume-based v2 path.
+                // Create the upload file via the volume files endpoint (see the create call below).
                 val fileRequest = CreateFileRequest(
                     name = encryptedName,
                     hash = nameHashForCreate,
@@ -377,64 +382,21 @@ class PhotoUploadService @Inject constructor(
                     contentKeyPacket = contentKeyPacketBase64,
                     contentKeyPacketSignature = contentKeyPacketSignature,
                 )
-                val photoRequest = CreatePhotoRequest(
-                    photo = CreatePhotoMetadata(
-                        captureTime = item.dateTaken / 1000L,
-                        tags = photoTags,
-                        // The web client reads the CKP from Photo.ContentKeyPacket.
-                        contentKeyPacket = contentKeyPacketBase64,
-                        contentKeyPacketSignature = contentKeyPacketSignature,
-                    ),
-                    link = CreatePhotoLinkData(
-                        name = encryptedName,
-                        hash = nameHashForCreate,
-                        parentLinkId = rootLinkId,
-                        mimeType = item.mimeType,
-                        nodeKey = nodeKey.armoredPrivateKey,
-                        nodePassphrase = nodePassphraseEncrypted,
-                        nodePassphraseSignature = nodePassphraseSignature,
-                        signatureEmail = signingKey.email,
-                        // CKP at link level too so the server populates FileProperties.ContentKeyPacket.
-                        contentKeyPacket = contentKeyPacketBase64,
-                        contentKeyPacketSignature = contentKeyPacketSignature,
-                    ),
-                )
 
-                // Photos stream endpoint first, fall back to v2/volumes (useVolumeEndpoints=true
-                // then routes the upload/commit paths to the volume variants too). Both create
-                // paths retry so a single DNS hiccup at upload start isn't a hard failure.
-                useVolumeEndpoints = false
-                val streamResult = runCatching {
-                    val resp = retryUploadCall { _ ->
-                        semaphore.withPermit {
-                            manager.invoke { createPhoto(volumeId, photoRequest) }.valueOrThrow
-                        }
+                // Create the upload file via the volume files endpoint (drive/v2/volumes/{id}/files),
+                // the path the official client uses. The old photos-stream endpoint
+                // (drive/photos/volumes/{id}/photos) is not a real Drive route — it returns 404, and
+                // that non-retryable 404 was still being retried, burning ~25s of backoff per file
+                // before the fallback ran. Going straight here removes that waste.
+                useVolumeEndpoints = true
+                val createResp = retryUploadCall { _ ->
+                    semaphore.withPermit {
+                        manager.invoke { createFileByVolume(volumeId, fileRequest) }.valueOrThrow
                     }
-                    val linkId = resp.photo.link.linkId
-                    val revId = resp.photo.link.revisionId
-                        ?: retryUploadCall { _ ->
-                            semaphore.withPermit {
-                                manager.invoke { createRevision(shareId, linkId) }.valueOrThrow
-                            }
-                        }.revision.id
-                    Log.d(TAG, "uploadFile: created via Photos stream endpoint fileId=$linkId")
-                    linkId to revId
                 }
-                val createdIds = if (streamResult.isSuccess) {
-                    streamResult.getOrThrow()
-                } else {
-                    Log.w(TAG, "uploadFile: stream endpoint failed (${streamResult.exceptionOrNull()?.message}), trying v2/volumes fallback")
-                    val resp = retryUploadCall { _ ->
-                        semaphore.withPermit {
-                            manager.invoke { createFileByVolume(volumeId, fileRequest) }.valueOrThrow
-                        }
-                    }
-                    useVolumeEndpoints = true
-                    Log.d(TAG, "uploadFile: created via v2/volumes fileId=${resp.file.id}")
-                    resp.file.id to resp.file.revisionId
-                }
-                fileId = createdIds.first
-                revisionId = createdIds.second
+                Log.d(TAG, "uploadFile: created via v2/volumes fileId=${createResp.file.id}")
+                fileId = createResp.file.id
+                revisionId = createResp.file.revisionId
 
                 // Fetch the verification code before the stream loop so per-block verifier tokens
                 // (= base64(verificationCodeBytes XOR encBlock)) compute inline, no second pass.
@@ -545,6 +507,13 @@ class PhotoUploadService @Inject constructor(
             // Open the source PFD once, shared across the parallel encrypt tasks. Skipped when
             // every block is already encrypted (only a later step failed last attempt).
             val remainingIndices = (0 until numBlocks).filter { blockArr[it] == null }
+            // Upload timing diagnostics (in-app log): split the encrypt phase — and within it the
+            // serial PGP encrypt vs per-block sign — from the CDN upload, so a slow upload can be
+            // pinned to crypto vs network. Only the freshly-encrypted blocks count toward the crypto
+            // timers, so a resumed upload shows ~0 here (confirming blocks aren't re-encrypted).
+            val encStartMs = System.currentTimeMillis()
+            val encryptOnlyMs = AtomicLong(0L)
+            val signOnlyMs = AtomicLong(0L)
             if (remainingIndices.isNotEmpty()) {
                 val sourcePfd: ParcelFileDescriptor = context.contentResolver
                     .openFileDescriptor(Uri.parse(uploadUri), "r")
@@ -583,10 +552,14 @@ class PhotoUploadService @Inject constructor(
                                         // PGP encrypt + sign serialize through the global cryptoLock;
                                         // pread/sha256/verifier/spill stay parallel.
                                         val (encBlock, encSig) = cryptoHelper.withCryptoLock {
+                                            val ls = System.currentTimeMillis()
                                             val eb = cryptoHelper.encryptBlock(chunk, sessionKey)
+                                            val em = System.currentTimeMillis()
                                             val es = cryptoHelper.signBlockEncrypted(
                                                 chunk, signingKey.unlockedKeyBytes, nodePublicKeyArmored,
                                             )
+                                            encryptOnlyMs.addAndGet(em - ls)
+                                            signOnlyMs.addAndGet(System.currentTimeMillis() - em)
                                             eb to es
                                         }
                                         val hashBytes = cryptoHelper.sha256(encBlock)
@@ -639,6 +612,12 @@ class PhotoUploadService @Inject constructor(
             }
             val blockInfos: List<BlockSpill> = blockArr.filterNotNull()
             Log.d(TAG, "uploadFile: spilled ${blockInfos.size} block(s) to ${tempDir.absolutePath}")
+            eu.akoos.photos.util.SyncDiagnostics.log(
+                "upload $logRef ${totalBytes / 1024}KB: ${blockInfos.size} blocks, " +
+                    "setup ${encStartMs - setupT0}ms, " +
+                    "encrypt-phase ${System.currentTimeMillis() - encStartMs}ms " +
+                    "(encrypt ${encryptOnlyMs.get()}ms, sign ${signOnlyMs.get()}ms)"
+            )
 
             // Generate + encrypt the JPEG thumbnails. Drive uses two types: DEFAULT (type=1, ≤512px,
             // the grid preview) and PHOTO (type=2, ≤1920px, the viewer preview). Both encrypt with
@@ -731,6 +710,7 @@ class PhotoUploadService @Inject constructor(
             // Authorization + x-pm-appversion headers the CDN requires). sortedUploadLinks is
             // index-ordered so idx aligns with blockInfos. Bounded to 2 in flight; any failure
             // cancels the rest via coroutineScope.
+            val cdnStartMs = System.currentTimeMillis()
             val sortedUploadLinks = uploadLinksResp.uploadLinks.sortedBy { it.index }
             val doneUploadedBytes = AtomicLong(0L)
             val lastUploadEmitMs = AtomicLong(0L)
@@ -778,6 +758,9 @@ class PhotoUploadService @Inject constructor(
                 val denom = if (totalBytes > 0L) totalBytes else finalDone
                 onProgress(UploadPhase.Uploading, denom, denom)
             }
+            eu.akoos.photos.util.SyncDiagnostics.log(
+                "upload $logRef: CDN ${blockInfos.size} blocks in ${System.currentTimeMillis() - cdnStartMs}ms"
+            )
 
             // Upload each generated thumbnail to its matching CDN link. ThumbnailLinks entries
             // identify the slot via ThumbnailType (1 = DEFAULT, 2 = PHOTO), not Index. A link whose

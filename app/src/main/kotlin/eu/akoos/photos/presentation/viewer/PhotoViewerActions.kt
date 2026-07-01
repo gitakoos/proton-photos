@@ -43,7 +43,11 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -430,6 +434,7 @@ internal fun AddToAlbumSheet(
     cloudAlbums: List<Album>,
     currentPhotoAlbumIds: Set<String> = emptySet(),
     onDismiss: () -> Unit,
+    onCreateNew: () -> Unit,
     onCloudAlbumPicked: (String) -> Unit,
 ) {
     ModalBottomSheet(
@@ -451,6 +456,34 @@ internal fun AddToAlbumSheet(
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 14.dp),
             )
+
+            // + New album — create one and drop this photo into it (matches the gallery sheet).
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onCreateNew() }
+                    .padding(horizontal = 20.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(44.dp)
+                        .background(Accent.copy(alpha = 0.15f), RoundedCornerShape(10.dp)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Default.Add, null, tint = Accent, modifier = Modifier.size(22.dp))
+                }
+                Text(
+                    stringResource(R.string.albums_new_album),
+                    color = Accent,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+            HorizontalDivider(color = Line2, thickness = 0.5.dp,
+                modifier = Modifier.padding(horizontal = 20.dp))
+
             if (cloudAlbums.isEmpty()) {
                 Text(
                     stringResource(R.string.viewer_add_to_album_empty),
@@ -458,9 +491,7 @@ internal fun AddToAlbumSheet(
                     fontSize = 14.sp,
                     modifier = Modifier.padding(horizontal = 20.dp, vertical = 24.dp),
                 )
-            }
-
-            if (cloudAlbums.isNotEmpty()) {
+            } else {
                 Text(
                     stringResource(R.string.viewer_drive_albums_header),
                     color = FgMute,
@@ -468,85 +499,69 @@ internal fun AddToAlbumSheet(
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
                 )
-                cloudAlbums.forEach { album ->
-                    val isMember = album.linkId in currentPhotoAlbumIds
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onCloudAlbumPicked(album.linkId) }
-                            .padding(horizontal = 20.dp, vertical = 14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        if (album.coverThumbnailUrl != null) {
-                            AsyncImage(
-                                model = album.coverThumbnailUrl,
-                                contentDescription = null,
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier
-                                    .size(44.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(Bg0),
-                            )
-                        } else {
-                            Box(
-                                modifier = Modifier
-                                    .size(44.dp)
-                                    .background(Bg0, RoundedCornerShape(8.dp)),
-                            )
-                        }
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(album.name, color = FgPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium)
-                            val subtitle = if (isMember)
-                                stringResource(R.string.viewer_tap_to_remove_from_album)
-                            else
-                                pluralStringResource(R.plurals.count_photos_plural, album.photoCount, album.photoCount)
-                            Text(
-                                subtitle,
-                                color = if (isMember) Accent else FgMute,
-                                fontSize = 12.sp,
-                            )
-                        }
-                        // Check tile marks membership; the row's onClick toggles add/remove.
-                        if (isMember) {
-                            Box(
-                                modifier = Modifier
-                                    .size(28.dp)
-                                    .background(Accent, RoundedCornerShape(14.dp)),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Icon(
-                                    Icons.Default.Check,
-                                    contentDescription = stringResource(R.string.cd_status_in_album),
-                                    tint = Color.White,
-                                    modifier = Modifier.size(18.dp),
+                // Scroll the rows within a bounded height so a long album list stays reachable and
+                // the sheet doesn't grow past the screen.
+                LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 360.dp)) {
+                    items(cloudAlbums) { album ->
+                        val isMember = album.linkId in currentPhotoAlbumIds
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onCloudAlbumPicked(album.linkId) }
+                                .padding(horizontal = 20.dp, vertical = 14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            if (album.coverThumbnailUrl != null) {
+                                AsyncImage(
+                                    model = album.coverThumbnailUrl,
+                                    contentDescription = null,
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier
+                                        .size(44.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(Bg0),
+                                )
+                            } else {
+                                Box(
+                                    modifier = Modifier
+                                        .size(44.dp)
+                                        .background(Bg0, RoundedCornerShape(8.dp)),
                                 )
                             }
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(album.name, color = FgPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                                val subtitle = if (isMember)
+                                    stringResource(R.string.viewer_tap_to_remove_from_album)
+                                else
+                                    pluralStringResource(R.plurals.count_photos_plural, album.photoCount, album.photoCount)
+                                Text(
+                                    subtitle,
+                                    color = if (isMember) Accent else FgMute,
+                                    fontSize = 12.sp,
+                                )
+                            }
+                            // Check tile marks membership; the row's onClick toggles add/remove.
+                            if (isMember) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(28.dp)
+                                        .background(Accent, RoundedCornerShape(14.dp)),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Icon(
+                                        Icons.Default.Check,
+                                        contentDescription = stringResource(R.string.cd_status_in_album),
+                                        tint = Color.White,
+                                        modifier = Modifier.size(18.dp),
+                                    )
+                                }
+                            }
                         }
+                        HorizontalDivider(color = Line2, thickness = 0.5.dp,
+                            modifier = Modifier.padding(horizontal = 20.dp))
                     }
-                    HorizontalDivider(color = Line2, thickness = 0.5.dp,
-                        modifier = Modifier.padding(horizontal = 20.dp))
                 }
-            }
-
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 8.dp)
-                    .background(
-                        CardBg,
-                        androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
-                    )
-                    .border(
-                        0.5.dp,
-                        CardBorder,
-                        androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
-                    )
-                    .clickable(onClick = onDismiss)
-                    .padding(vertical = 14.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(stringResource(R.string.cancel), color = FgPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium)
             }
         }
     }

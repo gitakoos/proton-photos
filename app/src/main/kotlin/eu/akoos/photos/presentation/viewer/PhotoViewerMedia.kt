@@ -121,6 +121,8 @@ internal fun VideoPlayer(
     autoPlay: Boolean = true,
     /** Non-null = play once and call this on natural end (inline motion-photo); null = loop. */
     onEnded: (() -> Unit)? = null,
+    /** Holds the screen awake only while a video is actually playing; clears on pause/stop/close. */
+    keepOn: Boolean = false,
 ) {
     val context = LocalContext.current
     val loop = onEnded == null
@@ -183,6 +185,8 @@ internal fun VideoPlayer(
         },
         update = { view ->
             view.player = exoPlayer
+            // Drives FLAG_KEEP_SCREEN_ON on the host window; auto-clears when keepOn goes false.
+            view.keepScreenOn = keepOn
         },
         modifier = modifier,
     )

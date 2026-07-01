@@ -187,6 +187,7 @@ import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.usecase.CategorizeItem
 import eu.akoos.photos.presentation.common.ConfirmDialog
+import eu.akoos.photos.presentation.common.UndoAction
 import eu.akoos.photos.presentation.common.anyLocalOnly
 import eu.akoos.photos.presentation.common.ConfirmSheet
 import eu.akoos.photos.presentation.common.DenseGridWarningDialog
@@ -306,6 +307,10 @@ fun GalleryScreen(
     val mosaicGrid by remember {
         context.settingsDataStore.data.map { it[SettingsKeys.MOSAIC_GRID] ?: false }
     }.collectAsState(initial = false)
+    // Text labels under the selection-mode dock buttons; on by default, toggled in Settings.
+    val showSelectionLabels by remember {
+        context.settingsDataStore.data.map { it[SettingsKeys.SHOW_SELECTION_LABELS] ?: true }
+    }.collectAsState(initial = true)
     // The scroll state the visible Photos grid is driven by; everything below observes this so the
     // mosaic path is no longer inert.
     val activeFirstVisibleItemIndex: () -> Int = {
@@ -535,35 +540,40 @@ fun GalleryScreen(
     val headerHeightDp = with(LocalDensity.current) { headerHeightPx.toDp() }
 
     // ── Scroll direction detection ────────────────────────────────────────────
-    var previousIndex by remember { mutableIntStateOf(0) }
-    var previousOffset by remember { mutableIntStateOf(0) }
-    // Reads the ACTIVE grid's first-visible position (staggered when mosaic is on) so overlay
-    // auto-hide-on-scroll works in both layouts. derivedStateOf keeps the live read off the
-    // composable body so it only recomposes when the direction flips, not on every scrolled pixel.
-    val isPhotosScrollingDown by remember(mosaicGrid) {
-        derivedStateOf {
-            val currentIndex = activeFirstVisibleItemIndex()
-            val currentOffset = activeFirstVisibleItemScrollOffset()
-            (currentIndex > previousIndex || (currentIndex == previousIndex && currentOffset > previousOffset))
-                .also { previousIndex = currentIndex; previousOffset = currentOffset }
-        }
+    // Tracked via snapshotFlow rather than a side-effecting derivedStateOf: the previous position
+    // lives in the collector's local vars (not snapshot state written from inside a derivation),
+    // and the flow re-baselines whenever the active grid (mosaic toggle) or the current tab changes.
+    // The first emission equals the starting position, so "scrolling down" resets to false on
+    // arrival at a tab, and only flips true once that tab is actually scrolled down.
+    var isPhotosScrollingDown by remember { mutableStateOf(false) }
+    LaunchedEffect(mosaicGrid, pagerState.currentPage) {
+        var prevIndex = activeFirstVisibleItemIndex()
+        var prevOffset = activeFirstVisibleItemScrollOffset()
+        isPhotosScrollingDown = false
+        snapshotFlow { activeFirstVisibleItemIndex() to activeFirstVisibleItemScrollOffset() }
+            .collect { (idx, off) ->
+                isPhotosScrollingDown = idx > prevIndex || (idx == prevIndex && off > prevOffset)
+                prevIndex = idx
+                prevOffset = off
+            }
     }
 
-    var previousAlbumsIndex by remember { mutableIntStateOf(0) }
-    var previousAlbumsOffset by remember { mutableIntStateOf(0) }
-    val isAlbumsScrollingDown by remember {
-        derivedStateOf {
-            val currentIndex = albumsGridState.firstVisibleItemIndex
-            val currentOffset = albumsGridState.firstVisibleItemScrollOffset
-            (currentIndex > previousAlbumsIndex || (currentIndex == previousAlbumsIndex && currentOffset > previousAlbumsOffset))
-                .also { previousAlbumsIndex = currentIndex; previousAlbumsOffset = currentOffset }
-        }
+    var isAlbumsScrollingDown by remember { mutableStateOf(false) }
+    LaunchedEffect(pagerState.currentPage) {
+        var prevIndex = albumsGridState.firstVisibleItemIndex
+        var prevOffset = albumsGridState.firstVisibleItemScrollOffset
+        isAlbumsScrollingDown = false
+        snapshotFlow { albumsGridState.firstVisibleItemIndex to albumsGridState.firstVisibleItemScrollOffset }
+            .collect { (idx, off) ->
+                isAlbumsScrollingDown = idx > prevIndex || (idx == prevIndex && off > prevOffset)
+                prevIndex = idx
+                prevOffset = off
+            }
     }
 
     // The single shared header above the pager auto-hides on the active tab's scroll. It follows the
     // pager's currentPage (which crosses the midpoint mid-swipe), so the header tracks the tab being
-    // swiped to rather than waiting for the swipe to settle. derivedStateOf keeps the live scroll read
-    // off the composable body so it only recomposes when the boolean flips, not on every scrolled pixel.
+    // swiped to rather than waiting for the swipe to settle. This derivedStateOf is now a pure read.
     val showOverlays by remember(mosaicGrid) {
         derivedStateOf {
             when (pagerState.currentPage) {
@@ -577,16 +587,6 @@ fun GalleryScreen(
                 else -> true // Shared tab has no scroll hiding yet
             }
         }
-    }
-    // A tab change (swipe or dock tap) must never land on a page whose header is still in its
-    // scrolled-down hidden state. Re-baselining the scroll trackers to the landed grid's current
-    // position resets "scrolling down" to false, so the header is shown on arrival; the user re-hides
-    // it only by scrolling that page down again.
-    LaunchedEffect(pagerState.currentPage) {
-        previousIndex = activeFirstVisibleItemIndex()
-        previousOffset = activeFirstVisibleItemScrollOffset()
-        previousAlbumsIndex = albumsGridState.firstVisibleItemIndex
-        previousAlbumsOffset = albumsGridState.firstVisibleItemScrollOffset
     }
 
     // ── Filter bottom sheet state ─────────────────────────────────────────────
@@ -628,6 +628,15 @@ fun GalleryScreen(
 
     LaunchedEffect(multiDeleteState) {
         if (multiDeleteState is MultiDeleteState.Done) {
+            // A hide committed via the system-permission dialog signals through this channel;
+            // surface any items that couldn't be copied into the vault.
+            if (state.hideFailureCount > 0) {
+                snackbarHostState.showSnackbar(
+                    context.resources.getQuantityString(
+                        R.plurals.gallery_hide_partial_failed, state.hideFailureCount, state.hideFailureCount,
+                    ),
+                )
+            }
             viewModel.resetMultiDeleteState()
         }
         if (multiDeleteState is MultiDeleteState.Failed) {
@@ -642,7 +651,13 @@ fun GalleryScreen(
     val multiHideState = state.multiHideState
     LaunchedEffect(multiHideState) {
         if (multiHideState is MultiDeleteState.Done) {
-            if (state.hideCloudNoticePending) {
+            if (state.hideFailureCount > 0) {
+                snackbarHostState.showSnackbar(
+                    context.resources.getQuantityString(
+                        R.plurals.gallery_hide_partial_failed, state.hideFailureCount, state.hideFailureCount,
+                    ),
+                )
+            } else if (state.hideCloudNoticePending) {
                 snackbarHostState.showSnackbar(context.getString(R.string.hide_cloud_copy_notice))
             }
             viewModel.resetMultiHideState()
@@ -665,11 +680,15 @@ fun GalleryScreen(
             is UndoAction.CloudTrash -> context.resources.getQuantityString(
                 R.plurals.gallery_moved_to_trash_snackbar, undoAction.count, undoAction.count)
         }
-        val result = snackbarHostState.showSnackbar(
-            message     = message,
-            actionLabel = context.getString(R.string.gallery_undo),
-            duration    = androidx.compose.material3.SnackbarDuration.Long,
-        )
+        // ~5s instead of the old 10s Long snackbar, which lingered too long after every
+        // hide/delete. Indefinite + a timeout gives a custom, self-dismissing window.
+        val result = kotlinx.coroutines.withTimeoutOrNull(5000L) {
+            snackbarHostState.showSnackbar(
+                message     = message,
+                actionLabel = context.getString(R.string.gallery_undo),
+                duration    = androidx.compose.material3.SnackbarDuration.Indefinite,
+            )
+        }
         if (result == androidx.compose.material3.SnackbarResult.ActionPerformed) {
             viewModel.undoLastAction()
         } else {
@@ -704,6 +723,20 @@ fun GalleryScreen(
         viewModel.shareIntent.collect { intent ->
             runCatching {
                 context.startActivity(Intent.createChooser(intent, shareChooserTitle))
+            }
+        }
+    }
+
+    // Result snackbar for a "Make available offline" batch — the pins themselves apply
+    // optimistically, this only reports how many blobs landed. One-shot collect.
+    val offlineRemovedMsg = stringResource(R.string.offline_removed)
+    LaunchedEffect(Unit) {
+        viewModel.offlineBatchResult.collect { count ->
+            when {
+                count > 0 -> snackbarHostState.showSnackbar(
+                    context.resources.getQuantityString(R.plurals.offline_batch_result, count, count),
+                )
+                count < 0 -> snackbarHostState.showSnackbar(offlineRemovedMsg)
             }
         }
     }
@@ -764,14 +797,9 @@ fun GalleryScreen(
                         R.string.gallery_add_to_album_partial,
                         cloudAdded, addToAlbumState.albumName, addToAlbumState.skipped,
                     )
-                    // Some joined now, the rest follow after they back up.
-                    cloudAdded > 0 && queued > 0 -> context.getString(
-                        R.string.gallery_add_to_album_added_and_queued, cloudAdded, queued,
-                    )
-                    // Selection was all local-only — nothing joined yet, all will after backup.
-                    queued > 0 -> context.getString(
-                        R.string.gallery_add_to_album_queued_only, queued, addToAlbumState.albumName,
-                    )
+                    // Anything queued to upload-then-join now drives the live progress sheet, so the
+                    // thin "queued" snackbar would be redundant — suppress it for those cases.
+                    queued > 0 -> null
                     // Clean success — the drawer was enough, no extra message.
                     cloudAdded > 0 -> null
                     // Edge case: nothing added and nothing queued but the op still "succeeded"
@@ -891,6 +919,9 @@ fun GalleryScreen(
                                 onPhotoClick       = { items, idx -> onPhotoClick(items, idx, state.hiddenCloudLinkIds) },
                                 selectedItems      = state.selectedItems,
                                 isSelectionMode    = state.isSelectionMode,
+                                // Freeze drag-to-select while a bulk delete is running so a new sweep
+                                // can't mutate the selection the in-flight delete is operating on.
+                                dragSelectEnabled  = multiDeleteState !is MultiDeleteState.Working,
                                 onToggleSelect     = viewModel::toggleSelection,
                                 onToggleGroup      = viewModel::toggleGroup,
                                 onSelectionChange  = viewModel::setSelection,
@@ -901,6 +932,7 @@ fun GalleryScreen(
                                 hiddenCloudLinkIds = state.hiddenCloudLinkIds,
                                 downloadedCloudLinkIds = downloadedCloudLinkIds,
                                 favoriteIds = state.favoriteIds,
+                                offlinePinIds = state.offlinePinIds,
                                 onRequestThumbnail = viewModel::requestThumbnailDecrypt,
                                 onCancelThumbnail  = viewModel::cancelThumbnailDecrypt,
                                 denseGridWarningDismissed = state.denseGridWarningDismissed,
@@ -987,7 +1019,13 @@ fun GalleryScreen(
                 selectedCount = state.selectedCount,
                 multiShareState = multiShareState,
                 multiDeleteState = multiDeleteState,
+                allSelected = state.filteredItems.isNotEmpty() &&
+                    state.selectedItems.size == state.filteredItems.size,
                 onCancel = viewModel::clearSelection,
+                onSelectAll = {
+                    val all = state.filteredItems.toSet()
+                    viewModel.setSelection(if (state.selectedItems.size == all.size) emptySet() else all)
+                },
                 onShare = {
                     // Open the unified share drawer (Send to app / Share with people / Public
                     // link) instead of sharing straight to the OS chooser.
@@ -1014,12 +1052,15 @@ fun GalleryScreen(
         ) {
             GallerySelectionBottomBar(
                 selectedItems = state.selectedItems,
+                offlinePinIds = state.offlinePinIds,
                 multiDownloadState = multiDownloadState,
                 multiHideState = state.multiHideState,
                 multiStripState = multiStripState,
                 addToAlbumState = addToAlbumState,
                 anyLocalOnly = anyLocalOnly(state.selectedItems),
+                showLabels = showSelectionLabels,
                 onDownload = viewModel::downloadSelected,
+                onMakeAvailableOffline = viewModel::toggleSelectedOffline,
                 onRequestAddToAlbum = { showAddToAlbumSheet = true },
                 onBackUp = { showBackUpConfirm = true },
                 onStripMetadata = viewModel::stripMetadataSelected,

@@ -173,11 +173,15 @@ interface DriveApiService : BaseRetrofitApi {
     ): BaseResponse
 
     // Moves cloud photos to server-side trash (recoverable from recently deleted).
+    // Returns the same per-link Responses array as restore_multiple / delete_multiple (same
+    // /drive/v2/.../*_multiple family): the top-level Code only means the batch was processed,
+    // so each entry's own code is the truth for what actually moved to trash. Responses defaults
+    // to empty, so a server that omits it degrades to "top-level success = all trashed".
     @POST("drive/v2/volumes/{volumeId}/trash_multiple")
     suspend fun trashPhotos(
         @Path("volumeId") volumeId: String,
         @Body request: DeleteLinksRequest,
-    ): BaseResponse
+    ): eu.akoos.photos.data.api.dto.TrashActionResponse
 
     // Marks a photo as Favorite. PhotoData may be null (server re-encrypts to the automatic
     // Favorites collection); when set it carries the re-encrypted passphrase/name/hash.

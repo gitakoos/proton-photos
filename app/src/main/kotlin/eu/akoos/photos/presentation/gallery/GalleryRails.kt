@@ -444,6 +444,7 @@ private val DEFAULT_CATEGORY_ORDER = listOf(
     GalleryFilter.Favorites, GalleryFilter.Screenshots, GalleryFilter.Videos,
     GalleryFilter.LivePhotos, GalleryFilter.Selfies, GalleryFilter.Portraits,
     GalleryFilter.Bursts, GalleryFilter.Panoramas, GalleryFilter.Raw,
+    GalleryFilter.Offline,
 )
 
 /** Resolve the saved CSV into a category list: saved entries first (in their stored order), then
@@ -467,6 +468,7 @@ private fun categoryLabel(filter: GalleryFilter): String = when (filter) {
     GalleryFilter.Bursts      -> stringResource(R.string.gallery_filter_bursts)
     GalleryFilter.Panoramas   -> stringResource(R.string.gallery_filter_panoramas)
     GalleryFilter.Raw         -> stringResource(R.string.gallery_filter_raw)
+    GalleryFilter.Offline     -> stringResource(R.string.filter_offline)
     else -> filter.name
 }
 

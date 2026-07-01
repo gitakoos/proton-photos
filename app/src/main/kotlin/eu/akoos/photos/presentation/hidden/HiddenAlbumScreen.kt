@@ -26,6 +26,9 @@ import android.app.KeyguardManager
 import androidx.activity.compose.BackHandler
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -35,10 +38,13 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -51,7 +57,6 @@ import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Cloud
@@ -66,6 +71,7 @@ import androidx.compose.ui.res.stringResource
 import eu.akoos.photos.R
 import eu.akoos.photos.presentation.common.IconBubble
 import eu.akoos.photos.presentation.common.SecureScreenEffect
+import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -79,7 +85,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -99,6 +104,7 @@ import eu.akoos.photos.presentation.theme.FgDim
 import eu.akoos.photos.presentation.theme.FgMute
 import eu.akoos.photos.presentation.theme.FgPrimary
 import eu.akoos.photos.presentation.theme.PillBg
+import eu.akoos.photos.presentation.theme.PillBgOpaque
 import eu.akoos.photos.presentation.theme.PillBorder
 
 @Composable
@@ -138,26 +144,22 @@ fun HiddenAlbumScreen(
     // either stack or fail one after the other.
     var promptShown by remember { mutableStateOf(false) }
 
-    // Re-lock whenever the screen leaves the foreground. The authenticated flag lives in
-    // the ViewModel (so list state survives configuration changes), which means without
-    // this it would also survive backgrounding the app or navigating away — leaving the
-    // vault unlocked. Resetting on ON_STOP forces a fresh biometric/credential check on
-    // the next return, and clears promptShown so the entry prompt re-arms.
-    // ON_STOP also fires during a configuration change (rotation recreates the
-    // activity) — skip those, otherwise every rotation forces a re-auth.
-    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner) {
+    // Re-lock only when the whole app goes to the background — NOT when navigating to the
+    // in-app photo viewer (which stops THIS screen but keeps the process foregrounded) or on a
+    // configuration change. The authenticated flag lives in the ViewModel so the list survives;
+    // the app-level ON_STOP forces a fresh biometric/credential check on the next return and
+    // re-arms the entry prompt. Using the screen lifecycle here would re-lock on every photo
+    // the user opens from the vault.
+    val processLifecycle = androidx.lifecycle.ProcessLifecycleOwner.get()
+    DisposableEffect(processLifecycle) {
         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
             if (event == androidx.lifecycle.Lifecycle.Event.ON_STOP) {
-                val changingConfig = context.findFragmentActivity()?.isChangingConfigurations == true
-                if (!changingConfig) {
-                    viewModel.lock()
-                    promptShown = false
-                }
+                viewModel.lock()
+                promptShown = false
             }
         }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+        processLifecycle.lifecycle.addObserver(observer)
+        onDispose { processLifecycle.lifecycle.removeObserver(observer) }
     }
 
     // Keyed on the authenticated flag so that when the screen re-locks on returning from
@@ -253,176 +255,160 @@ fun HiddenAlbumScreen(
                 }
             }
         } else {
-            // Content — authenticated
-            Column(modifier = Modifier.fillMaxSize()) {
-                if (state.isSelectionMode) {
-                    // Selection top-bar — cancel, a typed count and an Unhide action, matching the
-                    // gallery and album selection headers. The bulk action here is unhide only.
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .statusBarsPadding()
-                            .padding(horizontal = 16.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        IconBubble(
-                            icon = Icons.Default.Close,
-                            contentDescription = stringResource(R.string.gallery_cancel_selection),
-                            onClick = { viewModel.clearSelection() },
-                            diameter = 40.dp,
-                            iconSize = 20.dp,
-                            background = PillBg,
-                            borderColor = PillBorder,
-                            tint = FgPrimary,
-                        )
-                        Text(
-                            pluralStringResource(R.plurals.count_photos_plural, state.selectedCount, state.selectedCount),
-                            color = FgPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.weight(1f),
-                        )
-                        // Unhide selected — restores every selected photo, then drops the selection.
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(999.dp))
-                                .background(PillBg)
-                                .border(0.5.dp, PillBorder, RoundedCornerShape(999.dp))
-                                .clickable { viewModel.unhideSelected() }
-                                .padding(horizontal = 14.dp, vertical = 8.dp),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            ) {
-                                Icon(
-                                    Icons.Default.Visibility,
-                                    contentDescription = null,
-                                    tint = Accent,
-                                    modifier = Modifier.size(18.dp),
-                                )
-                                Text(
-                                    stringResource(R.string.viewer_menu_unhide),
-                                    color = Accent, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
-                                )
-                            }
-                        }
-                    }
-                } else {
-                    // Header
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .statusBarsPadding()
-                            .padding(horizontal = 16.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        IconBubble(
-                            icon = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = stringResource(R.string.onboarding_back),
-                            onClick = onBack,
-                            diameter = 40.dp,
-                            iconSize = 20.dp,
-                            background = PillBg,
-                            borderColor = PillBorder,
-                            tint = FgPrimary,
-                        )
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                stringResource(R.string.hidden_photos_title),
-                                color = FgPrimary, fontSize = 20.sp, fontWeight = FontWeight.SemiBold,
-                            )
-                            Text(
-                                pluralStringResource(R.plurals.count_photos_plural, state.items.size, state.items.size),
-                                color = FgMute, fontSize = 12.sp,
-                            )
-                        }
-                        Icon(
-                            Icons.Default.VisibilityOff, null,
-                            tint = FgDim, modifier = Modifier.size(20.dp),
+            // Content — authenticated. Overlay layout, matching the Offline screen and the
+            // duplicate finder: the grid fills and scrolls under a floating pill header, and the
+            // bulk action sits in a bottom dock. The grid's top content padding clears the header.
+            val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+            val contentTopPad = floatingHeaderContentTopPadding()
+            val cols = eu.akoos.photos.presentation.gallery.rememberDefaultGridColumns()
+            when {
+                state.isLoading -> LazyVerticalGrid(
+                    columns = GridCells.Fixed(cols),
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(8.dp, contentTopPad, 8.dp, 100.dp + navBottom),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    items(15) {
+                        eu.akoos.photos.presentation.common.ShimmerSquare(
+                            modifier = Modifier.fillMaxWidth(),
+                            cornerRadius = 4.dp,
                         )
                     }
                 }
-
-                val cols = eu.akoos.photos.presentation.gallery.rememberDefaultGridColumns()
-                when {
-                    state.isLoading -> LazyVerticalGrid(
-                        columns = GridCells.Fixed(cols),
-                        modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(2.dp),
-                        horizontalArrangement = Arrangement.spacedBy(2.dp),
-                        verticalArrangement = Arrangement.spacedBy(2.dp),
-                    ) {
-                        items(15) {
-                            eu.akoos.photos.presentation.common.ShimmerSquare(
-                                modifier = Modifier.fillMaxWidth(),
-                                cornerRadius = 4.dp,
-                            )
-                        }
-                    }
-                    state.items.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Icon(
-                                Icons.Default.VisibilityOff, null,
-                                tint = FgMute, modifier = Modifier.size(40.dp),
-                            )
-                            Spacer(Modifier.height(16.dp))
-                            Text(stringResource(R.string.hidden_empty_title), color = FgPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
-                            Spacer(Modifier.height(8.dp))
-                            Text(
-                                stringResource(R.string.hidden_empty_subtitle),
-                                color = FgDim, fontSize = 14.sp,
-                            )
-                        }
-                    }
-                    else -> {
-                        val gridState = rememberLazyGridState()
-                        // Drag-to-select: long-press a cell then sweep a range (shares the timeline
-                        // gesture). Cells are keyed by uri; the swept keys map straight to selected uris.
-                        // This is the only grid with a non-zero top content padding (4.dp), so the
-                        // drag hit-test is told that exact band or it would offset by a row.
-                        val selectableKeys = remember(state.items) { state.items.map { it.uri } }
-                        val keyToIndex = remember(selectableKeys) {
-                            selectableKeys.mapIndexed { i, k -> k to i }.toMap()
-                        }
-                        // Armed at the long-press anchor so the cell's release-tap skips toggling the
-                        // just-selected cell back off (otherwise a stationary long-press would select
-                        // then immediately deselect).
-                        val tapGuard = remember { mutableStateOf(false) }
-                        val dragMod = eu.akoos.photos.presentation.gallery.rememberDragMultiSelectModifier(
-                            gridState = gridState,
-                            items = selectableKeys,
-                            indexByKey = keyToIndex,
-                            selected = state.selectedUris,
-                            onSelectionChange = viewModel::setSelectedUris,
-                            tapGuard = tapGuard,
+                state.items.isEmpty() -> Box(
+                    Modifier.fillMaxSize().padding(top = contentTopPad),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            Icons.Default.VisibilityOff, null,
+                            tint = FgMute, modifier = Modifier.size(40.dp),
                         )
-                        LazyVerticalGrid(
-                            columns = GridCells.Fixed(cols),
-                            state = gridState,
-                            contentPadding = PaddingValues(8.dp, 4.dp, 8.dp, 100.dp),
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
-                            verticalArrangement = Arrangement.spacedBy(4.dp),
-                            modifier = Modifier.fillMaxSize().then(dragMod),
-                        ) {
-                            itemsIndexed(state.items, key = { _, item -> item.uri }) { index, item ->
-                                HiddenPhotoCell(
-                                    item = item,
-                                    hasCloudCounterpart = item.uri in state.backedUpUris,
-                                    isSelectionMode = state.isSelectionMode,
-                                    isSelected = item.uri in state.selectedUris,
-                                    onClick = {
-                                        // Skip the release-tap that follows a long-press select; it
-                                        // would otherwise toggle the just-anchored cell back off.
-                                        if (tapGuard.value) tapGuard.value = false
-                                        else if (state.isSelectionMode) viewModel.toggleSelection(item.uri)
-                                        else onPhotoClick(state.items, index)
-                                    },
-                                )
-                            }
+                        Spacer(Modifier.height(16.dp))
+                        Text(stringResource(R.string.hidden_empty_title), color = FgPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            stringResource(R.string.hidden_empty_subtitle),
+                            color = FgDim, fontSize = 14.sp,
+                        )
+                    }
+                }
+                else -> {
+                    val gridState = rememberLazyGridState()
+                    // Drag-to-select: long-press a cell then sweep a range (shares the timeline
+                    // gesture). Cells are keyed by uri; the swept keys map straight to selected uris.
+                    // The hit-test reads the grid's own viewportStartOffset, so the large top content
+                    // padding under the floating header is handled without a manual offset.
+                    val selectableKeys = remember(state.items) { state.items.map { it.uri } }
+                    val keyToIndex = remember(selectableKeys) {
+                        selectableKeys.mapIndexed { i, k -> k to i }.toMap()
+                    }
+                    // Armed at the long-press anchor so the cell's release-tap skips toggling the
+                    // just-selected cell back off (otherwise a stationary long-press would select
+                    // then immediately deselect).
+                    val tapGuard = remember { mutableStateOf(false) }
+                    val dragMod = eu.akoos.photos.presentation.gallery.rememberDragMultiSelectModifier(
+                        gridState = gridState,
+                        items = selectableKeys,
+                        indexByKey = keyToIndex,
+                        selected = state.selectedUris,
+                        onSelectionChange = viewModel::setSelectedUris,
+                        tapGuard = tapGuard,
+                    )
+                    LazyVerticalGrid(
+                        columns = GridCells.Fixed(cols),
+                        state = gridState,
+                        contentPadding = PaddingValues(8.dp, contentTopPad, 8.dp, 100.dp + navBottom),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                        modifier = Modifier.fillMaxSize().then(dragMod),
+                    ) {
+                        itemsIndexed(state.items, key = { _, item -> item.uri }) { index, item ->
+                            HiddenPhotoCell(
+                                item = item,
+                                hasCloudCounterpart = item.uri in state.backedUpUris,
+                                isSelectionMode = state.isSelectionMode,
+                                isSelected = item.uri in state.selectedUris,
+                                onClick = {
+                                    // Skip the release-tap that follows a long-press select; it
+                                    // would otherwise toggle the just-anchored cell back off.
+                                    if (tapGuard.value) tapGuard.value = false
+                                    else if (state.isSelectionMode) viewModel.toggleSelection(item.uri)
+                                    else onPhotoClick(state.items, index)
+                                },
+                            )
                         }
                     }
+                }
+            }
+
+            // Top header — a cancel + count pill while selecting, else the floating pill title.
+            if (state.isSelectionMode) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .statusBarsPadding()
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    IconBubble(
+                        icon = Icons.Default.Close,
+                        contentDescription = stringResource(R.string.gallery_cancel_selection),
+                        onClick = { viewModel.clearSelection() },
+                        diameter = 40.dp,
+                        iconSize = 20.dp,
+                        background = PillBg,
+                        borderColor = PillBorder,
+                        tint = FgPrimary,
+                    )
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(PillBg)
+                            .border(0.5.dp, PillBorder, RoundedCornerShape(999.dp))
+                            .padding(horizontal = 14.dp, vertical = 8.dp),
+                    ) {
+                        Text(
+                            pluralStringResource(R.plurals.count_photos_plural, state.selectedCount, state.selectedCount),
+                            color = FgPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+                        )
+                    }
+                }
+            } else {
+                // Floating pill header (matches Search / Map / the duplicate finder).
+                eu.akoos.photos.presentation.memories.FloatingMemoriesHeader(
+                    title = stringResource(R.string.hidden_photos_title),
+                    onBack = onBack,
+                )
+            }
+
+            // Bottom action dock — the one bulk action here is unhide, shown with its label.
+            AnimatedVisibility(
+                visible = state.isSelectionMode && state.selectedCount > 0,
+                enter = fadeIn(),
+                exit = fadeOut(),
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .navigationBarsPadding()
+                    .padding(bottom = 24.dp),
+            ) {
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(PillBgOpaque)
+                        .border(0.5.dp, PillBorder, RoundedCornerShape(999.dp))
+                        .clickable { viewModel.unhideSelected() }
+                        .padding(horizontal = 18.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Default.Visibility, null, tint = Accent, modifier = Modifier.size(20.dp))
+                    Text(
+                        stringResource(R.string.viewer_menu_unhide),
+                        color = Accent, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+                    )
                 }
             }
         }

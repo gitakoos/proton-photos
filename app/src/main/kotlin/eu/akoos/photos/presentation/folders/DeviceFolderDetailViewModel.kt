@@ -51,6 +51,7 @@ import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.usecase.DeletePhotoUseCase
 import eu.akoos.photos.domain.usecase.ForceUploadLocalUrisUseCase
 import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
+import eu.akoos.photos.presentation.common.SelectionState
 import eu.akoos.photos.presentation.viewer.PublicLinkState
 import eu.akoos.photos.R
 import javax.inject.Inject
@@ -80,8 +81,14 @@ class DeviceFolderDetailViewModel @Inject constructor(
     val albums: StateFlow<List<Album>> = _albums.asStateFlow()
 
     /** URIs the user has selected. Selection mode is active whenever this is non-empty. */
-    private val _selectedUris = MutableStateFlow<Set<String>>(emptySet())
-    val selectedUris: StateFlow<Set<String>> = _selectedUris.asStateFlow()
+    private val selection = SelectionState<String>()
+    val selectedUris: StateFlow<Set<String>> = selection.flow
+
+    /** Cloud linkIds pinned for offline; drives the per-cell offline badge (a Synced folder item
+     *  whose cloud twin is pinned). Backed by the same OFFLINE_PIN_IDS pref the timeline reads. */
+    val offlinePinIds: StateFlow<Set<String>> = context.settingsDataStore.data
+        .map { it[SettingsKeys.OFFLINE_PIN_IDS] ?: emptySet() }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
 
     private var primaryUserId: UserId? = null
     private var bucketName: String = ""
@@ -148,18 +155,14 @@ class DeviceFolderDetailViewModel @Inject constructor(
         }
     }
 
-    fun toggleSelection(uri: String) {
-        _selectedUris.update { if (uri in it) it - uri else it + uri }
-    }
+    fun toggleSelection(uri: String) = selection.toggle(uri)
 
     fun clearSelection() {
-        _selectedUris.value = emptySet()
+        selection.clear()
     }
 
     /** Replace the whole selection — used by the drag-select sweep, which sets the swept range each frame. */
-    fun setSelectedUris(uris: Set<String>) {
-        _selectedUris.value = uris
-    }
+    fun setSelectedUris(uris: Set<String>) = selection.set(uris)
 
     /** Seed [albums] from the local album cache so the "Add to album" picker has options. */
     private fun loadAlbums() {
@@ -195,7 +198,7 @@ class DeviceFolderDetailViewModel @Inject constructor(
                 forceUploadLocalUris.queueForAlbum(userId, albumLinkId, localUris)
             } else 0
 
-            _selectedUris.value = emptySet()
+            selection.clear()
             onResult(joined, queued)
         }
     }
@@ -206,7 +209,7 @@ class DeviceFolderDetailViewModel @Inject constructor(
     /** Back up every selected LocalOnly photo; already-synced selections are skipped (reported as alreadyBackedUp). */
     fun uploadSelected(onResult: (UploadOutcome) -> Unit) {
         val userId = primaryUserId ?: return
-        val selected = _selectedUris.value
+        val selected = selection.value
         if (selected.isEmpty()) return
         viewModelScope.launch {
             // Only LocalOnly items upload; Synced selections are counted as already-backed-up.
@@ -222,7 +225,7 @@ class DeviceFolderDetailViewModel @Inject constructor(
                 forceUploadLocalUris.forceUpload(userId, toUpload)
             } else 0
 
-            _selectedUris.value = emptySet()
+            selection.clear()
             onResult(UploadOutcome(queued = queued, alreadyBackedUp = alreadyBackedUp))
         }
     }
@@ -235,10 +238,10 @@ class DeviceFolderDetailViewModel @Inject constructor(
 
     /** Share the selection to other apps. Device-folder items are local files, so no download step. */
     fun shareSelected() {
-        val sel = _selectedUris.value
+        val sel = selection.value
         if (sel.isEmpty()) return
         shareUris(sel.toList())
-        _selectedUris.value = emptySet()
+        selection.clear()
     }
 
     /** Share specific device photos (by local uri) to other apps — used by the per-cell long-press menu. */
@@ -257,7 +260,7 @@ class DeviceFolderDetailViewModel @Inject constructor(
     // the "upload & create" step. ──────────────────────────────────────────────────────────────────
     val publicLinkState: StateFlow<PublicLinkState> = publicLink.state
 
-    fun singleSelectedLocalUri(): String? = _selectedUris.value.takeIf { it.size == 1 }?.first()
+    fun singleSelectedLocalUri(): String? = selection.value.takeIf { it.size == 1 }?.first()
 
     fun resetPublicLinkState() = publicLink.reset()
 
@@ -328,8 +331,16 @@ class DeviceFolderDetailViewModel @Inject constructor(
      *  HIDDEN_PHOTO_URIS once the delete confirms, rolled back if it is cancelled. */
     private var pendingHidePrivateUris: List<String> = emptyList()
 
+    /** "privateUri|sourceFolder" entries aligned with [pendingHidePrivateUris], persisted into
+     *  HIDDEN_URI_SOURCE_FOLDER_MAP on commit so unhide can return each file to its origin folder. */
+    private var pendingHideSourceFolders: List<String> = emptyList()
+
+    /** "privateUri|originalName" entries aligned with [pendingHidePrivateUris], persisted into
+     *  HIDDEN_URI_ORIGINAL_NAME_MAP on commit so unhide can restore the original filename. */
+    private var pendingHideOriginalNames: List<String> = emptyList()
+
     private fun selectedGalleryItems(): List<GalleryItem> {
-        val sel = _selectedUris.value
+        val sel = selection.value
         return _items.value.filter { localUriOf(it) in sel }
     }
 
@@ -345,7 +356,7 @@ class DeviceFolderDetailViewModel @Inject constructor(
             _isDeleting.value = true
             try {
                 when (val result = deletePhotoUseCase(userId, items, freeUpSpace, deleteFromCloud)) {
-                    is DeletePhotoUseCase.Result.Success -> _selectedUris.value = emptySet()
+                    is DeletePhotoUseCase.Result.Success -> selection.clear()
                     is DeletePhotoUseCase.Result.NeedsMediaWritePermission -> {
                         pendingPermissionResult = result
                         _pendingDeleteIntent.value = result.pendingIntent
@@ -373,15 +384,25 @@ class DeviceFolderDetailViewModel @Inject constructor(
             try {
                 // Step 1: copy each on-device file into app-private hidden storage.
                 val collected = mutableListOf<String>()
+                val folderEntries = mutableListOf<String>()
+                val nameEntries = mutableListOf<String>()
                 for (item in hideables) {
                     val local = item.local
+                    val sourceFolder = hiddenStorage.sourceFolderFor(local.uri, local.bucketName)
                     val privateUri = hiddenStorage.store(
                         local.uri, local.displayName, local.mimeType, captureTimeMs = local.dateTaken,
                     )
-                    if (privateUri != null) collected += privateUri
+                    // A null privateUri means store() failed; it already logged a privacy-safe reason.
+                    if (privateUri != null) {
+                        collected += privateUri
+                        if (!sourceFolder.isNullOrBlank()) folderEntries += "$privateUri|$sourceFolder"
+                        if (local.displayName.isNotBlank()) nameEntries += "$privateUri|${local.displayName}"
+                    }
                 }
                 if (collected.isEmpty()) return@launch
                 pendingHidePrivateUris = collected
+                pendingHideSourceFolders = folderEntries
+                pendingHideOriginalNames = nameEntries
 
                 // Step 2: delete the MediaStore originals (one system-delete dialog on Android 11+).
                 val userId = accountManager.getPrimaryUserId().first() ?: run {
@@ -391,7 +412,7 @@ class DeviceFolderDetailViewModel @Inject constructor(
                 when (val result = deletePhotoUseCase(userId, hideables, freeUpSpace = true, deleteFromCloud = false, hide = true)) {
                     is DeletePhotoUseCase.Result.Success -> {
                         commitPendingHide()
-                        _selectedUris.value = emptySet()
+                        selection.clear()
                     }
                     is DeletePhotoUseCase.Result.NeedsMediaWritePermission -> {
                         pendingPermissionResult = result
@@ -409,11 +430,23 @@ class DeviceFolderDetailViewModel @Inject constructor(
      *  filter keeps them out of the folder. */
     private suspend fun commitPendingHide() {
         val uris = pendingHidePrivateUris
+        val folderEntries = pendingHideSourceFolders
+        val nameEntries = pendingHideOriginalNames
         pendingHidePrivateUris = emptyList()
+        pendingHideSourceFolders = emptyList()
+        pendingHideOriginalNames = emptyList()
         if (uris.isEmpty()) return
         context.settingsDataStore.edit { prefs ->
             val current = prefs[SettingsKeys.HIDDEN_PHOTO_URIS] ?: emptySet()
             prefs[SettingsKeys.HIDDEN_PHOTO_URIS] = current + uris
+            if (folderEntries.isNotEmpty()) {
+                val folders = prefs[SettingsKeys.HIDDEN_URI_SOURCE_FOLDER_MAP] ?: emptySet()
+                prefs[SettingsKeys.HIDDEN_URI_SOURCE_FOLDER_MAP] = folders + folderEntries
+            }
+            if (nameEntries.isNotEmpty()) {
+                val names = prefs[SettingsKeys.HIDDEN_URI_ORIGINAL_NAME_MAP] ?: emptySet()
+                prefs[SettingsKeys.HIDDEN_URI_ORIGINAL_NAME_MAP] = names + nameEntries
+            }
         }
     }
 
@@ -421,6 +454,8 @@ class DeviceFolderDetailViewModel @Inject constructor(
     private fun rollbackPendingHide() {
         val uris = pendingHidePrivateUris
         pendingHidePrivateUris = emptyList()
+        pendingHideSourceFolders = emptyList()
+        pendingHideOriginalNames = emptyList()
         for (u in uris) hiddenStorage.delete(u)
     }
 
@@ -444,7 +479,7 @@ class DeviceFolderDetailViewModel @Inject constructor(
                     if (pending.hide) commitPendingHide()
                 }
             }
-            _selectedUris.value = emptySet()
+            selection.clear()
         }
     }
 

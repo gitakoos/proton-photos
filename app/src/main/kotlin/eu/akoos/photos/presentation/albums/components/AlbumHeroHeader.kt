@@ -46,13 +46,19 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalContext
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import eu.akoos.photos.R
 import eu.akoos.photos.presentation.common.fullBleedHorizontal
 import eu.akoos.photos.presentation.theme.AppColors
@@ -69,6 +75,9 @@ internal fun AlbumHeroHeader(
     coverModel: Any?,
     title: String,
     photoCountText: String,
+    /** Live scroll offset (px) of the header, read inside graphicsLayer so the cover can parallax
+     *  behind the scrolling content without recomposing. */
+    coverParallax: () -> Float = { 0f },
     canRename: Boolean = true,
     onRenameClick: () -> Unit = {},
     titleActions: @Composable (RowScope.() -> Unit)? = null,
@@ -81,16 +90,42 @@ internal fun AlbumHeroHeader(
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(4f / 3f)
+                .clipToBounds()
                 .background(Bg2),
         ) {
             if (coverModel != null) {
+                // Crossfade to the new cover when it changes. The request is keyed on the model so
+                // it isn't rebuilt on every recomposition (which would reload and flicker).
+                val context = LocalContext.current
+                val coverRequest = remember(coverModel) {
+                    ImageRequest.Builder(context).data(coverModel).crossfade(400).build()
+                }
                 AsyncImage(
-                    model = coverModel,
+                    model = coverRequest,
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize(),
+                    // Parallax: the cover drifts at a fraction of the scroll speed and is slightly
+                    // overscanned (scale > 1) so the slower drift never opens a gap at the top edge.
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            translationY = coverParallax() * 0.4f
+                            scaleX = 1.1f
+                            scaleY = 1.1f
+                        },
                 )
             }
+
+            // A rounded "sheet" lip so the content below meets the cover with rounded top corners,
+            // like the top of a bottom sheet (without the handle).
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .height(20.dp)
+                    .clip(RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp))
+                    .background(AppColors.current.bg0),
+            )
         }
 
         Column(
