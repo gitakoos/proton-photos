@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -77,6 +77,9 @@ class TimelineFilterViewModel @Inject constructor(
         val itemCount: Int,
         /** True = this album's photos are hidden from the timeline. */
         val isExcluded: Boolean,
+        /** True = the album is hidden client-side everywhere, managed in the hidden area, so its
+         *  timeline row is fixed and cannot be toggled here. */
+        val isHidden: Boolean = false,
     )
 
     data class UiState(
@@ -93,6 +96,7 @@ class TimelineFilterViewModel @Inject constructor(
 
     private var excludedNames: Set<String> = emptySet()
     private var excludedAlbumIds: Set<String> = emptySet()
+    private var hiddenAlbumIds: Set<String> = emptySet()
     private var hideAlbumPhotos: Boolean = false
 
     private val _uiState = MutableStateFlow(UiState())
@@ -106,6 +110,7 @@ class TimelineFilterViewModel @Inject constructor(
             excludedNames = seedPrefs[SettingsKeys.TIMELINE_EXCLUDED_FOLDER_NAMES] ?: emptySet()
             hideAlbumPhotos = seedPrefs[SettingsKeys.HIDE_PHOTOS_IN_ALBUMS] ?: false
             excludedAlbumIds = seedPrefs[SettingsKeys.TIMELINE_EXCLUDED_ALBUM_IDS] ?: emptySet()
+            hiddenAlbumIds = seedPrefs[SettingsKeys.HIDDEN_ALBUM_IDS] ?: emptySet()
 
             // Cloud album list for the per-album filter — DB-only cached read, offline-safe.
             val albumRows = runCatching { driveRepo.loadAlbumsCached() }.getOrDefault(emptyList())
@@ -116,6 +121,7 @@ class TimelineFilterViewModel @Inject constructor(
                         coverUrl = a.coverThumbnailUrl,
                         itemCount = a.photoCount,
                         isExcluded = a.linkId in excludedAlbumIds,
+                        isHidden = a.linkId in hiddenAlbumIds,
                     )
                 }
                 .sortedBy { it.name.lowercase() }
@@ -193,6 +199,9 @@ class TimelineFilterViewModel @Inject constructor(
 
     /** Per-album toggle — flip whether this album's photos are hidden from the timeline. */
     fun toggleAlbum(albumLinkId: String) {
+        // A client-side hidden album is already excluded everywhere and is managed in the hidden
+        // area, so its row is fixed here and must not mutate the timeline exclude set.
+        if (albumLinkId in hiddenAlbumIds) return
         val newSet = if (albumLinkId in excludedAlbumIds)
             excludedAlbumIds - albumLinkId
         else

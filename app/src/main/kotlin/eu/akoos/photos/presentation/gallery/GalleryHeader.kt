@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -38,8 +38,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.unit.dp
-import eu.akoos.photos.presentation.common.OfflineBanner
-import eu.akoos.photos.presentation.common.UpdateBanner
 import eu.akoos.photos.presentation.albums.AlbumsUiState
 
 /**
@@ -62,26 +60,24 @@ internal fun GalleryHeader(
     onCalendarClick: () -> Unit,
     onClearContentFilter: () -> Unit,
     onHiddenAlbumClick: () -> Unit,
-    /** Opens the Timeline filter screen from the Albums tab. */
+    /** Opens the Timeline filter screen from the Photos-tab filter pill. */
     onShowAlbumsFilterSheet: () -> Unit,
     /** Opens the create-album dialog from the Albums-tab "New album" pill. */
     onNewAlbumClick: () -> Unit = {},
     albumFilter: AlbumDisplayFilter = AlbumDisplayFilter.All,
+    /** Cycles the Albums-tab narrowing (All to Cloud to Local) from the pill label. */
     onAlbumFilterSelected: (AlbumDisplayFilter) -> Unit = {},
+    /** Opens the Albums-tab view-filter sheet from its filter icon. */
+    onOpenAlbumsFilterSheet: () -> Unit = {},
     onSharedFilterSelected: (SharedFilter) -> Unit,
     onShowSharedEmailSheet: () -> Unit,
     onSettingsClick: () -> Unit,
     onHeaderMeasured: (Int) -> Unit,
-    updateBannerVersion: String? = null,
-    onUpdateBannerOpen: () -> Unit = {},
-    onUpdateBannerDismiss: () -> Unit = {},
+    updateAvailable: Boolean = false,
+    onUpdateClick: () -> Unit = {},
+    onOpenUploads: () -> Unit = {},
+    onOpenDownloads: () -> Unit = {},
 ) {
-    // Per-offline-session dismissal: reset on reconnect so the next disconnect re-surfaces it.
-    // rememberSaveable so a config change doesn't re-pop the banner the user just hid.
-    var offlineBannerDismissed by rememberSaveable { mutableStateOf(false) }
-    LaunchedEffect(isOnlineNow) {
-        if (isOnlineNow) offlineBannerDismissed = false
-    }
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -114,6 +110,7 @@ internal fun GalleryHeader(
                         onNewAlbumClick = onNewAlbumClick,
                         selectedFilter = albumFilter,
                         onFilterSelected = onAlbumFilterSelected,
+                        onOpenSheet = onOpenAlbumsFilterSheet,
                         modifier = Modifier.weight(1f),
                     )
                 }
@@ -130,9 +127,18 @@ internal fun GalleryHeader(
             AvatarButton(
                 initial         = galleryState.userInitial,
                 storageFraction = galleryState.storageFraction,
+                // The avatar ring means real backup work is running. A plain cloud-listing refresh
+                // (fired on every foreground and on pull-to-refresh) is not backup, so isRefreshing is
+                // deliberately left out here, it kept the ring spinning for a long check with no upload.
                 isSyncing       = galleryState.isSyncing || albumsState.isLoading,
+                hasActiveUpload   = galleryState.hasActiveUpload,
+                hasActiveDownload = galleryState.hasActiveDownload,
                 isOffline       = !isOnlineNow,
+                updateAvailable = updateAvailable,
                 onClick         = onSettingsClick,
+                onUpdateClick   = onUpdateClick,
+                onUploadClick   = onOpenUploads,
+                onDownloadClick = onOpenDownloads,
             )
         }
         // Category rail (Photos tab only). No expand/shrink animation so a tab swipe or entering
@@ -142,16 +148,6 @@ internal fun GalleryHeader(
                 selectedFilter = galleryState.selectedFilter,
                 onFilterSelected = onFilterSelected,
                 modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
-            )
-        }
-        if (!isOnlineNow && !offlineBannerDismissed) {
-            OfflineBanner(onDismiss = { offlineBannerDismissed = true })
-        }
-        updateBannerVersion?.let { version ->
-            UpdateBanner(
-                versionName = version,
-                onOpen = onUpdateBannerOpen,
-                onDismiss = onUpdateBannerDismiss,
             )
         }
     }

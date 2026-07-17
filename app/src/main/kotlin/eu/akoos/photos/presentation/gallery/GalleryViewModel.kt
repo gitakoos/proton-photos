@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -25,6 +25,8 @@
 package eu.akoos.photos.presentation.gallery
 
 import eu.akoos.photos.presentation.common.UndoAction
+import eu.akoos.photos.presentation.common.buildDeleteUndoAction
+import eu.akoos.photos.presentation.common.buildHideUndoAction
 import android.content.Context
 import android.net.Uri
 import android.os.Build
@@ -88,6 +90,8 @@ import eu.akoos.photos.util.MetadataStripConfig
 import eu.akoos.photos.util.looksLikeNetworkError
 import eu.akoos.photos.util.sanitizeErrorMessage
 import eu.akoos.photos.util.computeOnThisDay
+import eu.akoos.photos.util.isBatteryLow
+import eu.akoos.photos.util.retryOnDbTear
 import eu.akoos.photos.worker.SyncWorker
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -119,14 +123,27 @@ private fun groupByMonth(items: List<GalleryItem>): List<Pair<String, List<Galle
         .entries.map { it.key to it.value }
 }
 
+/**
+ * Bucket [items] into ("d MMMM yyyy", items) pairs in first-seen order. Same one-format, one-Date
+ * shape as [groupByMonth]; the "d MMMM yyyy" label matches the grid's prior inline Day format, so
+ * the 3-column default headers are unchanged. groupBy yields a LinkedHashMap, preserving order.
+ */
+private fun groupByDay(items: List<GalleryItem>): List<Pair<String, List<GalleryItem>>> {
+    val fmt = SimpleDateFormat("d MMMM yyyy", Locale.getDefault())
+    val scratch = Date()
+    return items
+        .groupBy { item -> scratch.time = item.captureTimeMs; fmt.format(scratch) }
+        .entries.map { it.key to it.value }
+}
+
 /** Output of the off-main gallery computation: the hidden/bucket-filtered list (→ items), the
- *  tab/content-filtered list (→ filteredItems), the local-only pending count, and the month +
+ *  tab/content-filtered list (→ filteredItems), the local-only pending count, and the month + day +
  *  "On this day" groupings now produced here instead of inside Compose composition. */
 private data class GalleryComputed(
     val items: List<GalleryItem>,
     val filtered: List<GalleryItem>,
-    val pending: Int,
     val monthGroups: List<Pair<String, List<GalleryItem>>>,
+    val dayGroups: List<Pair<String, List<GalleryItem>>>,
     val onThisDay: List<Pair<Int, List<GalleryItem>>>,
 )
 
@@ -136,6 +153,7 @@ class GalleryViewModel @Inject constructor(
     private val getGalleryItems: GetGalleryItemsUseCase,
     private val cloudRepo: DrivePhotoRepository,
     private val photoStreamService: PhotoStreamService,
+    private val thumbnailUrlStore: eu.akoos.photos.data.repository.drive.ThumbnailUrlStore,
     private val localRepo: LocalMediaRepository,
     private val accountManager: AccountManager,
     private val observeUser: ObserveUser,
@@ -147,12 +165,15 @@ class GalleryViewModel @Inject constructor(
     private val hiddenStorage: HiddenStorageManager,
     private val offlineStore: OfflineStorageManager,
     private val transferCenter: TransferCenter,
+    private val undoController: eu.akoos.photos.presentation.common.UndoController,
     private val syncStateRepo: SyncStateRepository,
     private val networkObserver: eu.akoos.photos.util.NetworkObserver,
     private val albumPhotoMembershipDao: eu.akoos.photos.data.db.dao.AlbumPhotoMembershipDao,
+    private val photoListingDao: eu.akoos.photos.data.db.dao.PhotoListingDao,
     private val albumListEvents: eu.akoos.photos.util.AlbumListEventBus,
     private val updateOrchestrator: eu.akoos.photos.presentation.updater.UpdateOrchestrator,
     private val publicLink: eu.akoos.photos.presentation.common.PublicLinkController,
+    private val cryptoServiceClient: eu.akoos.photos.crypto.CryptoServiceClient,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(GalleryUiState())
@@ -177,16 +198,43 @@ class GalleryViewModel @Inject constructor(
      *  offline badge in [GalleryScreen] and gates every cloud-side refresh below. */
     val isOnline: StateFlow<Boolean> = networkObserver.isOnline
 
-    /** Version of an available update the user pushed aside with "Not now", surfaced as the
-     *  gallery update banner (null = no banner). Lives in the singleton [UpdateOrchestrator] so it
-     *  survives screen recreation; the dialog re-open / hard-dismiss route back through it. */
-    val updateBannerVersion: StateFlow<String?> = updateOrchestrator.banner
+    /** linkId → freshly-decrypted thumbnail `file://` URL, fed straight from the singleton
+     *  [eu.akoos.photos.data.repository.drive.ThumbnailUrlStore]. The timeline projection no longer
+     *  carries thumbnailUrl (a per-row write would re-emit the whole 50k list on every decrypt during
+     *  a sustained scroll, the large-library OOM), so a cloud cell reads its URL from this map and
+     *  repaints just itself when its own entry lands. Threaded into the grid alongside the other live
+     *  per-cell sets. */
+    val thumbnailUrls: StateFlow<Map<String, String>> = thumbnailUrlStore.urls
 
-    /** Banner tap → re-open the update dialog (the Activity's UpdaterHost renders it). */
-    fun openUpdateFromBanner() = updateOrchestrator.reopenFromBanner()
+    /** DEBUG-only "usedMB / maxMB" Java-heap readout, sampled ~1/s, so a tester can watch memory while
+     *  scrolling a large library and confirm the sustained-scroll heap stays flat. Empty (and never
+     *  collected) in release; the overlay that reads it is BuildConfig.DEBUG-guarded too. */
+    val debugHeapStat: StateFlow<String> =
+        if (eu.akoos.photos.BuildConfig.DEBUG) {
+            flow {
+                while (true) {
+                    val rt = Runtime.getRuntime()
+                    val usedMb = (rt.totalMemory() - rt.freeMemory()) / 1_048_576L
+                    val maxMb = rt.maxMemory() / 1_048_576L
+                    emit("${usedMb}/${maxMb} MB")
+                    delay(1_000)
+                }
+            }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(0), "")
+        } else {
+            MutableStateFlow("").asStateFlow()
+        }
 
-    /** Banner X → dismiss this version so the silent check stops re-offering it. */
-    fun dismissUpdateBanner() = updateOrchestrator.hardDismissBanner(viewModelScope)
+    /** Persistent "an update is available" signal driving the avatar update dot. Stays lit across
+     *  dialog dismissal and relaunch (see [UpdateOrchestrator.updateAvailable]); clears only when a
+     *  check confirms the app is up to date. */
+    val updateAvailable: StateFlow<Boolean> = updateOrchestrator.updateAvailable
+
+    /** Avatar dot tap → re-run a check, which re-opens the update dialog if an update is still
+     *  available (the Activity's UpdaterHost renders it). Works after a relaunch where the in-memory
+     *  pending update was lost but the dot is lit from the persisted marker. */
+    fun openUpdateFromDot() {
+        viewModelScope.launch { runCatching { updateOrchestrator.runManualCheck() } }
+    }
 
     /** Cloud linkIds that also have a SYNCED local copy on this device. A photo classified as
      *  [GalleryItem.CloudOnly] in the static item snapshot can become locally available after the
@@ -204,7 +252,9 @@ class GalleryViewModel @Inject constructor(
                     .toSet()
             },
         )
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
+    }
+        .retryOnDbTear("GalleryDownloadedIds")
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
 
     /** Atomic guard against re-entry into [doSync]. Read+write on [_uiState.value.isSyncing] is
      *  not race-safe — two coroutines (init's syncOnLaunch and observeFolderSettings) could both
@@ -213,15 +263,19 @@ class GalleryViewModel @Inject constructor(
 
     init {
         observeGallery()
+        observePendingUploadCount()
         observeUserInitial()
         syncOnLaunch()
         observeFolderSettings()
         observeGridPreferences()
         observeFavorites()
         observeOfflinePins()
+        observeUndoRestores()
         observeBackgroundUploadProgress()
+        observeActiveTransfers()
         observePrimaryUserId()
         observeHideInAlbums()
+        observeHiddenAlbumIds()
     }
 
     /**
@@ -290,6 +344,28 @@ class GalleryViewModel @Inject constructor(
      *
      * Idle frames clear the flag; per-file Uploading/Queued frames set it.
      */
+    // The avatar's UP arrow has two independent sources: the backup pipeline (upload.progress) and
+    // any TransferCenter UPLOAD transfer (an editor edit-upload). Each is tracked separately and the
+    // two are ORed into hasActiveUpload, so a frame from one source never clears what the other set.
+    private var backupUploading = false
+    private var transferUploading = false
+
+    /** Drives the avatar's DOWN arrow from the TransferCenter (downloads + offline pins), and folds a
+     *  TransferCenter UPLOAD transfer into the UP arrow alongside the backup pipeline. */
+    private fun observeActiveTransfers() {
+        viewModelScope.launch {
+            transferCenter.active.collect { active ->
+                val down = active.any {
+                    it.kind == TransferCenter.Kind.DOWNLOAD || it.kind == TransferCenter.Kind.OFFLINE
+                }
+                transferUploading = active.any { it.kind == TransferCenter.Kind.UPLOAD }
+                _uiState.update {
+                    it.copy(hasActiveDownload = down, hasActiveUpload = backupUploading || transferUploading)
+                }
+            }
+        }
+    }
+
     private fun observeBackgroundUploadProgress() {
         viewModelScope.launch {
             upload.progress.collect { evt ->
@@ -308,9 +384,13 @@ class GalleryViewModel @Inject constructor(
                     eu.akoos.photos.domain.usecase.UploadStatus.WaitingForWifi -> false
                     eu.akoos.photos.domain.usecase.UploadStatus.PreparingBackup -> false
                 }
+                backupUploading = syncing
                 _uiState.update {
                     it.copy(
                         isSyncing = syncing,
+                        // The up arrow ORs the backup pipeline with any TransferCenter UPLOAD (an
+                        // editor edit-upload); downloads/offline come from observeActiveTransfers.
+                        hasActiveUpload = backupUploading || transferUploading,
                         uploadDoneIdx = if (syncing) evt.doneIdx else 0,
                         uploadTotalCount = if (syncing) evt.totalCount else 0,
                     )
@@ -460,9 +540,45 @@ class GalleryViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Repair the thumbnail store after an OS-level "Clear cache" wiped cacheDir/thumbnails/ with no
+     * in-app hook running: the DB rows still carry stale file:// paths, so seeding them straight would
+     * leave every previously-decrypted cell blank forever (the scheduler skips a re-decrypt while a
+     * row's thumbnailUrl is non-null). Detect that one case cheaply: the thumbnails dir is
+     * missing/holds no thumb_*.jpg AND the DB still has seed rows, and null the stale URLs once in
+     * bulk (indexed SQL, no per-row File walk), clear the store, and skip the seed (nothing valid to
+     * seed). Every stale cell then falls back to null and re-decrypts lazily on scroll. A normal launch
+     * with a populated cache takes neither branch, so seeding runs as before.
+     */
+    private suspend fun reconcileThumbnailCacheThenSeed(userId: me.proton.core.domain.entity.UserId) {
+        val thumbsDir = java.io.File(context.cacheDir, "thumbnails")
+        val cacheEmpty = thumbsDir.listFiles { f ->
+            f.name.startsWith("thumb_") && f.name.endsWith(".jpg")
+        }?.isEmpty() ?: true // null = dir missing/unreadable, treat as empty
+        if (cacheEmpty) {
+            val hasSeedRows = runCatching { photoListingDao.getThumbnailUrlSeed(userId.id).isNotEmpty() }
+                .getOrDefault(false)
+            if (hasSeedRows) {
+                runCatching { photoListingDao.clearCachedThumbnailUrls() }
+                thumbnailUrlStore.clear()
+                // The forced re-decrypt of the whole visible set is a cold-open storm; damp it 1-wide.
+                cryptoServiceClient.armColdOpenDamping()
+                return
+            }
+        }
+        thumbnailUrlStore.seed(userId)
+    }
+
     private fun observeGallery() {
         viewModelScope.launch {
             val userId = accountManager.getPrimaryUserId().first() ?: return@launch
+
+            // Prime the thumbnail-URL store from the DB once, off the Main thread, so cells decrypted in
+            // a previous session paint immediately (the timeline projection no longer carries the URL).
+            // Detached so it never delays the item stream below; the DAO read is off-Main already.
+            launch(Dispatchers.Default) {
+                runCatching { reconcileThumbnailCacheThenSeed(userId) }
+            }
 
             val hiddenUrisFlow = context.settingsDataStore.data.map {
                 it[SettingsKeys.HIDDEN_PHOTO_URIS] ?: emptySet()
@@ -608,32 +724,67 @@ class GalleryViewModel @Inject constructor(
                             sources.cloudInAlbum,
                             snapshot.offlinePinIds,
                         )
-                        val pending = items.count { it is GalleryItem.LocalOnly }
-                        // Month-bucket the filtered list and compute "On this day" here, off the
-                        // Main thread, rather than inside Compose composition on every list
+                        // Month- and day-bucket the filtered list and compute "On this day" here, off
+                        // the Main thread, rather than inside Compose composition on every list
                         // re-emission (which costs a ~680 ms hitch from a thumbnail-decrypt burst at
-                        // 8500+ photos). The label format/locale, item field and encounter order are
-                        // kept identical to the grid's expected grouping, so the rendered timeline is
-                        // unchanged. groupBy yields a LinkedHashMap, preserving first-seen month
-                        // order. "On this day" reads the unfiltered [items] to match the carousel's
+                        // 8500+ photos). Day feeds the 3-column default zoom; month feeds the 4-col
+                        // level. The label format/locale, item field and encounter order are kept
+                        // identical to the grid's expected grouping, so the rendered timeline is
+                        // unchanged. groupBy yields a LinkedHashMap, preserving first-seen order.
+                        // "On this day" reads the unfiltered [items] to match the carousel's
                         // filter-independent source (the grid binds allItems = state.items).
                         val monthGroups = groupByMonth(filtered)
+                        val dayGroups = groupByDay(filtered)
                         val onThisDay = computeOnThisDay(items)
-                        GalleryComputed(items, filtered, pending, monthGroups, onThisDay)
+                        GalleryComputed(items, filtered, monthGroups, dayGroups, onThisDay)
                     }
+                    // Feed the library size into the perf diagnostics buffer (count only, no content)
+                    // so a tester's copied diagnostics show the heap against the library it walked.
+                    eu.akoos.photos.util.PerfDiagnostics.libraryPhotoCount = computed.items.size
                     _uiState.update { state ->
                         state.copy(
                             isLoading = false,
                             items = computed.items,
                             filteredItems = computed.filtered,
-                            pendingUploadCount = computed.pending,
                             monthGroups = computed.monthGroups,
+                            dayGroups = computed.dayGroups,
                             onThisDayGroups = computed.onThisDay,
                             hiddenCloudLinkIds = sources.hiddenCloudLinkIds,
                             albumHideCloudIds = sources.cloudInAlbum,
                         )
                     }
                 }
+        }
+    }
+
+    /**
+     * Live pending-upload badge, counted straight from sync_state: the photos that are LOCAL_ONLY
+     * AND carry a queued upload intent. Sourced from the DB (not from a `count { it is LocalOnly }`
+     * over the merged gallery list) so it means exactly the same set as the upload processor's
+     * selector and the Activity screen's pending list. A cancelled manual "back up now" that was
+     * de-queued drops out of all three at once, and a LOCAL_ONLY row with no intent never inflates
+     * the badge. Counting in SQL also keeps it off the gallery merge/sort hot path.
+     */
+    private fun observePendingUploadCount() {
+        viewModelScope.launch {
+            val userId = accountManager.getPrimaryUserId().first() ?: return@launch
+            syncStateRepo.countPendingUploads(userId).collect { count ->
+                _uiState.update { it.copy(pendingUploadCount = count) }
+            }
+        }
+    }
+
+    /**
+     * Surface the client-side hidden cloud album ids to the UI. A hidden album stays a valid
+     * add-to-album target, so the picker still lists it; it reads this set to mark the hidden
+     * rows with a lock. Mirrors the TIMELINE_EXCLUDED_ALBUM_IDS DataStore read in [observeGallery].
+     */
+    private fun observeHiddenAlbumIds() {
+        viewModelScope.launch {
+            context.settingsDataStore.data
+                .map { it[SettingsKeys.HIDDEN_ALBUM_IDS] ?: emptySet() }
+                .distinctUntilChanged()
+                .collect { ids -> _uiState.update { state -> state.copy(hiddenAlbumIds = ids) } }
         }
     }
 
@@ -696,19 +847,20 @@ class GalleryViewModel @Inject constructor(
             // from the local DB before reconcile reads cloudItems.
             cloudRepo.refreshCloudPhotosIncremental(userId)
             reconcile(userId).collect {}
-            // If reconcile found any LOCAL_ONLY items, enqueue a foreground OneTime worker so
+            // If reconcile queued any LOCAL_ONLY items, enqueue a foreground OneTime worker so
             // the upload runs with a visible progress notification — even if the user backgrounds
-            // the app mid-upload. The KEEP unique-work policy means this coalesces with any
-            // already-running SyncWorker (periodic or oneshot), and the use case's internal
-            // mutex prevents double-uploads if the inline upload below also starts.
+            // the app mid-upload. The worker is the SOLE upload owner: uploading inline here (in
+            // viewModelScope) would run a second batch WorkManager cannot cancel, so the cancel
+            // button would be a no-op against it. Routing every trigger through the worker keeps
+            // cancellation working (mirrors the download worker design). Count only queued rows: an
+            // out-of-scope LOCAL_ONLY row is not upload work, so it must not keep waking the worker.
             val pending = syncStateRepo.observeAll(userId).first()
-                .count { it.status == SyncStatus.LOCAL_ONLY }
+                .count { it.status == SyncStatus.LOCAL_ONLY && it.queued }
             if (pending > 0) {
                 val wifiOnly = context.settingsDataStore.data
                     .map { it[SettingsKeys.SYNC_WIFI_ONLY] != false }.first()
                 SyncWorker.runNow(context, wifiOnly)
             }
-            upload(userId)
         } catch (e: Exception) {
             // Rethrow cancellation so the parent coroutine's structured concurrency stays
             // intact — swallowing it would leave the parent thinking the child completed
@@ -738,21 +890,23 @@ class GalleryViewModel @Inject constructor(
         }
     }
 
-    /** The in-flight off-main month re-bucket from a filter toggle; cancelled when a newer toggle
-     *  supersedes it so the last filter always wins. */
+    /** The in-flight off-main month + day re-bucket from a filter toggle; cancelled when a newer
+     *  toggle supersedes it so the last filter always wins. */
     private var monthGroupsJob: kotlinx.coroutines.Job? = null
 
-    /** Re-bucket the Month-grouped zoom levels off the main thread after a filter toggle updates
-     *  [GalleryUiState.filteredItems]. The streaming combine keeps month groups in lockstep with the
-     *  list as it loads; the explicit filter handlers update filteredItems synchronously for instant
-     *  feedback, so they re-bucket here too — without this the Month-grouped zoom levels keep
-     *  rendering the pre-toggle buckets while the flatter levels (which read filteredItems directly)
-     *  update correctly. */
+    /** Re-bucket the date-grouped zoom levels off the main thread after a filter toggle updates
+     *  [GalleryUiState.filteredItems]. The streaming combine keeps month + day groups in lockstep
+     *  with the list as it loads; the explicit filter handlers update filteredItems synchronously for
+     *  instant feedback, so they re-bucket here too — without this the Month- and Day-grouped zoom
+     *  levels keep rendering the pre-toggle buckets while the flat level (which reads filteredItems
+     *  directly) updates correctly. Both are computed in one Default pass and set in one state copy. */
     private fun recomputeMonthGroups(filtered: List<GalleryItem>) {
         monthGroupsJob?.cancel()
         monthGroupsJob = viewModelScope.launch {
-            val groups = withContext(Dispatchers.Default) { groupByMonth(filtered) }
-            _uiState.update { it.copy(monthGroups = groups) }
+            val (months, days) = withContext(Dispatchers.Default) {
+                groupByMonth(filtered) to groupByDay(filtered)
+            }
+            _uiState.update { it.copy(monthGroups = months, dayGroups = days) }
         }
     }
 
@@ -841,12 +995,29 @@ class GalleryViewModel @Inject constructor(
             _uiState.update { it.copy(isRefreshing = true) }
             runCatching {
                 cloudRepo.refreshCloudPhotos(userId, force = force)
-                // Whole listing is fresh — warm the rest of the library's thumbnails in the
-                // background (lowest priority) so a large account fills in without the user
-                // scrolling past every photo. Idempotent + idle-only, so it never blocks scroll.
-                cloudRepo.backfillThumbnails(userId)
+                // Battery gate covers ONLY the two whole-library walks below: they run on
+                // process-lifetime scopes, so unlike the sync workers they carry no
+                // setRequiresBatteryNotLow and would keep decrypting the whole account long after
+                // the user leaves the screen. The visible and prefetch thumbnail bands stay ungated
+                // on purpose — gating those would leave blank tiles on a screen the user is looking at.
+                if (!context.isBatteryLow()) {
+                    // Whole listing is fresh — warm the rest of the library's thumbnails in the
+                    // background (lowest priority) so a large account fills in without the user
+                    // scrolling past every photo. Idempotent + idle-only, so it never blocks scroll.
+                    cloudRepo.backfillThumbnails(userId)
+                    // Recover cloud video durations off the read path so the grid can show a duration
+                    // pill. Bounded + self-collapsing; launched detached so it never delays reconcile
+                    // or the upload kick-off below.
+                    viewModelScope.launch(Dispatchers.IO) {
+                        runCatching { cloudRepo.backfillVideoDurations(userId) }
+                    }
+                }
                 reconcile(userId).collect {}
-                upload(userId)
+                // Enqueue the upload on the worker rather than running it inline in viewModelScope:
+                // the worker is the sole upload owner so the in-app cancel can actually stop it.
+                val wifiOnly = context.settingsDataStore.data
+                    .map { it[SettingsKeys.SYNC_WIFI_ONLY] != false }.first()
+                SyncWorker.runNow(context, wifiOnly)
             }.onFailure { e ->
                 // Silent-swallow for network-shaped failures — the avatar offline dot
                 // and the dismissible offline banner already tell the user what's wrong;
@@ -866,10 +1037,12 @@ class GalleryViewModel @Inject constructor(
         _uiState.update { it.copy(error = null) }
     }
 
-    /** Cancel the in-flight background back-up from the in-app progress pill — same effect as
-     *  the upload notification's cancel (cancels the unique SyncWorker). */
+    /** Stop the in-flight background back-up from the in-app progress pill. Cooperative: the photo
+     *  currently in transit finishes and backs up, remaining queued items are not started and stay
+     *  pending for a later trigger. Never cancels the worker, so the in-flight native crypto is never
+     *  interrupted. Scheduled backups stay armed. */
     fun cancelUpload() {
-        SyncWorker.cancel(androidx.work.WorkManager.getInstance(context))
+        upload.requestStop()
     }
 
     // ── Multi-select ──────────────────────────────────────────────────────────
@@ -948,13 +1121,14 @@ class GalleryViewModel @Inject constructor(
             )
             when (result) {
                 is DeletePhotoUseCase.Result.Success -> {
-                    // Cloud-trash is the only reversible part of a delete: a local-only removal
-                    // (system trash / pre-R) is not app-restorable, so it carries no undo.
-                    val undoLinkIds = if (deleteFromCloud) cloudLinkIdsOf(items) else emptyList()
+                    // No system-trash dialog was needed, so any device copies were either untouched or
+                    // removed permanently (pre-R). Only a cloud trash is reversible, so the undo carries
+                    // no local URIs: localRecoverable = false.
+                    buildDeleteUndoAction(items, freeUpSpace, deleteFromCloud, hide = false, localRecoverable = false)
+                        ?.let { undoController.offer(it) }
                     _uiState.update { it.copy(
                         selectedItems    = emptySet(),
                         multiDeleteState = MultiDeleteState.Done,
-                        undoAction       = if (undoLinkIds.isNotEmpty()) UndoAction.CloudTrash(undoLinkIds) else null,
                     ) }
                 }
                 is DeletePhotoUseCase.Result.CloudDeleteFailed ->
@@ -1015,16 +1189,24 @@ class GalleryViewModel @Inject constructor(
             // vault URIs) or a cloud-trash delete (restore the Drive linkIds). A plain local
             // free-up-space delete carries no undo. A cancelled dialog never reaches here.
             val undo: UndoAction? = when {
-                hideUris.isNotEmpty()                  -> UndoAction.Hide(hideUris)
-                pending != null && pending.cloudLinkIds.isNotEmpty() && !pending.hide ->
-                    UndoAction.CloudTrash(pending.cloudLinkIds)
-                else                                   -> null
+                hideUris.isNotEmpty() -> buildHideUndoAction(hideUris)
+                pending != null && !pending.hide ->
+                    // The system trash keeps the local files for ~30 days, so a confirmed delete (cloud
+                    // and/or device) is reversible: localRecoverable = true.
+                    buildDeleteUndoAction(
+                        pending.itemsBeingDeleted,
+                        pending.freeUpSpace,
+                        deleteFromCloud = pending.cloudLinkIds.isNotEmpty(),
+                        hide = false,
+                        localRecoverable = true,
+                    )
+                else -> null
             }
+            if (undo != null) undoController.offer(undo)
             _uiState.update { it.copy(
                 selectedItems       = emptySet(),
                 multiDeleteState    = MultiDeleteState.Done,
                 pendingDeleteIntent = null,
-                undoAction          = undo,
             ) }
         }
     }
@@ -1046,12 +1228,17 @@ class GalleryViewModel @Inject constructor(
      *  filename. */
     private var pendingHideOriginalNames: List<String> = emptyList()
 
+    /** "privateUri|cloudLinkId" entries for the synced photos in the batch, persisted into
+     *  [SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] on commit so unhide can transplant the existing
+     *  SyncState row onto the restored URI instead of re-uploading a duplicate Drive entry. */
+    private var pendingHideCloudIds: List<String> = emptyList()
+
     /**
-     * Batch-hide every currently-selected gallery item. Copies each local file to app-private
-     * hidden storage, then routes through [DeletePhotoUseCase] with `freeUpSpace=true,
+     * Batch-hide every currently-selected gallery item. Device-only photos copy to app-private
+     * hidden storage, then route through [DeletePhotoUseCase] with `freeUpSpace=true,
      * deleteFromCloud=false` so the MediaStore originals get removed (one system-trash dialog
-     * on Android 11+, all URIs in a single request). Cloud-only items in the selection are
-     * skipped — they have no local file to hide.
+     * on Android 11+, all URIs in a single request). Synced (green) and cloud-only items hide
+     * client-side by cloud linkId instead, so their device file (if any) is left in place.
      */
     fun hideSelected() {
         val items = _uiState.value.selectedItems.toList()
@@ -1062,20 +1249,48 @@ class GalleryViewModel @Inject constructor(
             // The two operations end with a destructive step but the bar surface
             // should reflect "the action the user just tapped".
             _uiState.update { it.copy(multiHideState = MultiDeleteState.Working) }
-            // Only on-device-only photos are vaultable: a cloud-backed copy can't truly be
-            // hidden because its Drive entry stays, so Synced/CloudOnly are skipped here.
-            val hideables = items.filterIsInstance<GalleryItem.LocalOnly>()
-            if (hideables.isEmpty()) {
-                _uiState.update { it.copy(multiHideState = MultiDeleteState.Failed(context.getString(R.string.gallery_no_local_to_hide))) }
+            // Only device-only photos move into the vault. A synced (green) photo keeps its device
+            // file in place and hides client-side by its cloud linkId, exactly like a cloud-only
+            // photo, so the shared merge filter drops it from every surface and unhide is a pure
+            // toggle with no re-pairing of the device copy.
+            val vaultable = items.filterIsInstance<GalleryItem.LocalOnly>()
+            val cloudFilterIds = items.mapNotNull {
+                when (it) {
+                    is GalleryItem.Synced    -> it.cloud.linkId
+                    is GalleryItem.CloudOnly -> it.cloud.linkId
+                    is GalleryItem.LocalOnly -> null
+                }
+            }
+            // Client-side hide for the synced + cloud-only members: add their linkIds to the hidden
+            // set so they drop from every listing. Nothing on Drive changes.
+            if (cloudFilterIds.isNotEmpty()) {
+                context.settingsDataStore.edit { prefs ->
+                    val existing = prefs[SettingsKeys.HIDDEN_CLOUD_PHOTO_IDS] ?: emptySet()
+                    prefs[SettingsKeys.HIDDEN_CLOUD_PHOTO_IDS] = existing + cloudFilterIds
+                }
+            }
+            if (vaultable.isEmpty()) {
+                // Pure cloud-only selection: the client-side hide above is the whole operation.
+                _uiState.update { it.copy(
+                    selectedItems  = emptySet(),
+                    multiHideState = MultiDeleteState.Done,
+                ) }
                 return@launch
             }
-            // Step 1: copy every local file into app-private hidden storage.
+            // Step 1: copy every device file into app-private hidden storage. A synced photo also
+            // stashes its cloud linkId so unhide can re-pair by id instead of re-uploading.
             val collected = mutableListOf<String>()
             val folderEntries = mutableListOf<String>()
             val nameEntries = mutableListOf<String>()
+            val cloudIdEntries = mutableListOf<String>()
             var hideFailures = 0
-            for (item in hideables) {
-                val local = item.local
+            for (item in vaultable) {
+                val local = when (item) {
+                    is GalleryItem.LocalOnly -> item.local
+                    is GalleryItem.Synced    -> item.local
+                    else                     -> continue
+                }
+                val cloudLinkId = (item as? GalleryItem.Synced)?.cloud?.linkId
                 val sourceFolder = hiddenStorage.sourceFolderFor(local.uri, local.bucketName)
                 val privateUri = hiddenStorage.store(
                     local.uri, local.displayName, local.mimeType, captureTimeMs = local.dateTaken,
@@ -1084,6 +1299,7 @@ class GalleryViewModel @Inject constructor(
                     collected += privateUri
                     if (!sourceFolder.isNullOrBlank()) folderEntries += "$privateUri|$sourceFolder"
                     if (local.displayName.isNotBlank()) nameEntries += "$privateUri|${local.displayName}"
+                    if (cloudLinkId != null) cloudIdEntries += "$privateUri|$cloudLinkId"
                 } else {
                     // store() already logged the reason (privacy-safe, no file name).
                     hideFailures++
@@ -1096,6 +1312,7 @@ class GalleryViewModel @Inject constructor(
             pendingHidePrivateUris = collected
             pendingHideSourceFolders = folderEntries
             pendingHideOriginalNames = nameEntries
+            pendingHideCloudIds = cloudIdEntries
             // Carry the failure count into state so the terminal snackbar can report it, whether
             // the hide commits synchronously (pre-Q) or after the system-permission dialog.
             _uiState.update { it.copy(hideFailureCount = hideFailures) }
@@ -1108,7 +1325,7 @@ class GalleryViewModel @Inject constructor(
             }
             val result = deletePhotoUseCase(
                 userId          = userId,
-                items           = hideables,
+                items           = vaultable,
                 freeUpSpace     = true,
                 deleteFromCloud = false,
                 hide            = true,
@@ -1119,10 +1336,10 @@ class GalleryViewModel @Inject constructor(
                     // can restore exactly the URIs that were just moved into the vault.
                     val hideUris = pendingHidePrivateUris
                     commitPendingHide()
+                    buildHideUndoAction(hideUris)?.let { undoController.offer(it) }
                     _uiState.update { it.copy(
                         selectedItems          = emptySet(),
                         multiHideState         = MultiDeleteState.Done,
-                        undoAction             = if (hideUris.isNotEmpty()) UndoAction.Hide(hideUris) else null,
                     ) }
                 }
                 is DeletePhotoUseCase.Result.NeedsMediaWritePermission -> {
@@ -1147,71 +1364,12 @@ class GalleryViewModel @Inject constructor(
         _uiState.update { it.copy(multiHideState = MultiDeleteState.Idle, hideCloudNoticePending = false, hideFailureCount = 0) }
     }
 
-    /** The cloud linkIds a delete with deleteFromCloud=true sends to Proton trash — the same set
-     *  [DeletePhotoUseCase] computes, mirrored here so Undo can restore exactly those links. */
-    private fun cloudLinkIdsOf(items: List<GalleryItem>): List<String> =
-        items.mapNotNull { item ->
-            when (item) {
-                is GalleryItem.Synced    -> item.cloud.linkId
-                is GalleryItem.CloudOnly -> item.cloud.linkId
-                else                     -> null
-            }
-        }
-
-    /** Drop the pending undo target (snackbar dismissed or timed out) without restoring anything. */
-    fun clearUndoAction() {
-        _uiState.update { it.copy(undoAction = null) }
-    }
-
-    /**
-     * Reverse the action the last terminal snackbar offered to undo: a Hide restores each vault
-     * URI back to MediaStore (mirrors the viewer's unhide); a CloudTrash delete moves the Drive
-     * linkIds back out of Proton trash. Either way the affected view is refreshed so the items
-     * reappear. No-op if nothing is pending.
-     */
-    fun undoLastAction() {
-        val action = _uiState.value.undoAction ?: return
-        _uiState.update { it.copy(undoAction = null) }
+    /** A Hide restore lands its files back in MediaStore off-screen, so repaint the feed when the
+     *  shared [UndoController] reports one finished (a cloud-trash restore refreshes its own stream). */
+    private fun observeUndoRestores() {
         viewModelScope.launch {
-            try {
-                when (action) {
-                    is UndoAction.Hide -> {
-                        withContext(Dispatchers.IO) {
-                            // Restore each file to the folder it was hidden from (recorded at hide
-                            // time), falling back to the Pictures/Movies root when none was captured.
-                            val prefsSnapshot = context.settingsDataStore.data.first()
-                            val folderMap = prefsSnapshot[SettingsKeys.HIDDEN_URI_SOURCE_FOLDER_MAP] ?: emptySet()
-                            val nameMap = prefsSnapshot[SettingsKeys.HIDDEN_URI_ORIGINAL_NAME_MAP] ?: emptySet()
-                            for (hiddenUri in action.hiddenUris) {
-                                val sourceFolder = folderMap.firstOrNull { it.startsWith("$hiddenUri|") }?.substringAfter('|')
-                                val originalName = nameMap.firstOrNull { it.startsWith("$hiddenUri|") }?.substringAfter('|')
-                                hiddenStorage.restore(hiddenUri, originalDisplayName = originalName, albumFolderName = sourceFolder)
-                            }
-                            context.settingsDataStore.edit { prefs ->
-                                val current = prefs[SettingsKeys.HIDDEN_PHOTO_URIS] ?: emptySet()
-                                prefs[SettingsKeys.HIDDEN_PHOTO_URIS] = current - action.hiddenUris.toSet()
-                                val mapping = prefs[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] ?: emptySet()
-                                prefs[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] =
-                                    mapping.filterNot { entry -> action.hiddenUris.any { entry.startsWith("$it|") } }.toSet()
-                                val folders = prefs[SettingsKeys.HIDDEN_URI_SOURCE_FOLDER_MAP] ?: emptySet()
-                                prefs[SettingsKeys.HIDDEN_URI_SOURCE_FOLDER_MAP] =
-                                    folders.filterNot { entry -> action.hiddenUris.any { entry.startsWith("$it|") } }.toSet()
-                                val names = prefs[SettingsKeys.HIDDEN_URI_ORIGINAL_NAME_MAP] ?: emptySet()
-                                prefs[SettingsKeys.HIDDEN_URI_ORIGINAL_NAME_MAP] =
-                                    names.filterNot { entry -> action.hiddenUris.any { entry.startsWith("$it|") } }.toSet()
-                            }
-                        }
-                        refresh(force = false)
-                    }
-                    is UndoAction.CloudTrash -> {
-                        val userId = accountManager.getPrimaryUserId().first() ?: return@launch
-                        // restoreFromCloudTrash refreshes the cloud stream internally on success.
-                        cloudRepo.restoreFromCloudTrash(userId, action.linkIds)
-                    }
-                }
-            } catch (e: Exception) {
-                if (e is kotlinx.coroutines.CancellationException) throw e
-                android.util.Log.w("GalleryVM", "undoLastAction failed: ${e.message}")
+            undoController.restored.collect { action ->
+                if (action is UndoAction.Hide || action is UndoAction.Delete) refresh(force = false)
             }
         }
     }
@@ -1221,9 +1379,11 @@ class GalleryViewModel @Inject constructor(
         val uris = pendingHidePrivateUris
         val folderEntries = pendingHideSourceFolders
         val nameEntries = pendingHideOriginalNames
+        val cloudIdEntries = pendingHideCloudIds
         pendingHidePrivateUris = emptyList()
         pendingHideSourceFolders = emptyList()
         pendingHideOriginalNames = emptyList()
+        pendingHideCloudIds = emptyList()
         if (uris.isEmpty()) return
         viewModelScope.launch {
             context.settingsDataStore.edit { prefs ->
@@ -1237,6 +1397,10 @@ class GalleryViewModel @Inject constructor(
                     val names = prefs[SettingsKeys.HIDDEN_URI_ORIGINAL_NAME_MAP] ?: emptySet()
                     prefs[SettingsKeys.HIDDEN_URI_ORIGINAL_NAME_MAP] = names + nameEntries
                 }
+                if (cloudIdEntries.isNotEmpty()) {
+                    val cloudIds = prefs[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] ?: emptySet()
+                    prefs[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] = cloudIds + cloudIdEntries
+                }
             }
         }
     }
@@ -1247,16 +1411,23 @@ class GalleryViewModel @Inject constructor(
         pendingHidePrivateUris = emptyList()
         pendingHideSourceFolders = emptyList()
         pendingHideOriginalNames = emptyList()
+        pendingHideCloudIds = emptyList()
         for (u in uris) hiddenStorage.delete(u)
     }
 
     fun downloadSelected() {
         val items = _uiState.value.selectedItems.toList()
         if (items.isEmpty()) return
-        viewModelScope.launch {
+        var job: kotlinx.coroutines.Job? = null
+        job = viewModelScope.launch {
             val userId = accountManager.getPrimaryUserId().first() ?: return@launch
             _uiState.update { it.copy(multiDownloadState = MultiDownloadState.Working(0, items.size)) }
-            val transferId = transferCenter.start(TransferCenter.Kind.DOWNLOAD, items.size)
+            // One thumbnail URI per selected photo so the Activity screen lists them individually.
+            val thumbUris = items.map { thumbUriFor(it) }
+            val transferId = transferCenter.start(
+                TransferCenter.Kind.DOWNLOAD, items.size, items = thumbUris,
+                onCancel = { job?.cancel() },
+            )
             // Resolve per-photo album folder so cloud-album photos go to Pictures/<AlbumName>/
             // instead of bunching in a generic Proton Photos folder. AlbumService caches the
             // membership map for 5 min so repeated downloads don't re-fetch.
@@ -1288,6 +1459,22 @@ class GalleryViewModel @Inject constructor(
                 selectedItems = emptySet(),
             ) }
         }
+        // Stopping the batch from the Activity screen cancels this job; clear the gallery's
+        // in-progress download indicator so it does not stay spinning.
+        job?.invokeOnCompletion { cause ->
+            if (cause is kotlinx.coroutines.CancellationException) {
+                _uiState.update { it.copy(multiDownloadState = MultiDownloadState.Idle, selectedItems = emptySet()) }
+            }
+        }
+    }
+
+    /** Thumbnail URI for one gallery item: the on-device file for local/synced photos, the cached
+     *  cloud thumbnail (which may not exist yet) for cloud-only ones. */
+    private fun thumbUriFor(item: GalleryItem): String = when (item) {
+        is GalleryItem.LocalOnly -> item.local.uri
+        is GalleryItem.Synced -> item.local.uri
+        is GalleryItem.CloudOnly ->
+            "file://" + java.io.File(context.cacheDir, "thumbnails/thumb_${item.cloud.linkId}.jpg").absolutePath
     }
 
     fun resetMultiDownloadState() {
@@ -1498,11 +1685,12 @@ class GalleryViewModel @Inject constructor(
     // ── Add-to-album multi-action ──────────────────────────────────────────────
     //
     // Routes a multi-select to a cloud album. Synced and CloudOnly items carry a Drive linkId and
-    // join the album immediately. LocalOnly items have no linkId yet, so they are queued: a
-    // "localUri=albumLinkId" entry is written to PENDING_ALBUM_ADDS and a LOCAL_ONLY SyncState row
-    // is forced so the upload pipeline backs the file up (even from a non-backup folder) and joins
-    // it to the album once the cloud id is known. Albums are references-not-copies on Drive (the
-    // photo stays in the Photos root), so there is no file movement and no MediaStore consent dialog.
+    // join the album immediately. LocalOnly items have no linkId yet, so they are queued: the
+    // upload intent is stamped on the sync_state row (queued / ALBUM_ADD) and the target album is
+    // recorded in the upload_album_target table, so the upload pipeline backs the file up (even from
+    // a non-backup folder) and joins it to the album once the cloud id is known. Albums are
+    // references-not-copies on Drive (the photo stays in the Photos root), so there is no file
+    // movement and no MediaStore consent dialog.
 
     /**
      * Begin adding the current selection to a cloud album.
@@ -1594,11 +1782,11 @@ class GalleryViewModel @Inject constructor(
 
     /**
      * Queue [localUris] (local-only photos) to join [albumLinkId] after they back up. Delegates
-     * to [ForceUploadLocalUrisUseCase], which writes a "localUri=albumLinkId" entry into
-     * PENDING_ALBUM_ADDS, forces a LOCAL_ONLY SyncState row so the upload pipeline backs the file
-     * up regardless of the backup folder selection, and kicks an upload pass. The upload pipeline
-     * joins the freshly uploaded file to the album once its cloud id is known. Returns the number
-     * queued.
+     * to [ForceUploadLocalUrisUseCase], which stamps the upload intent on the sync_state row
+     * (queued / ALBUM_ADD) and records the target album in the upload_album_target table, forces a
+     * LOCAL_ONLY SyncState row so the upload pipeline backs the file up regardless of the backup
+     * folder selection, and kicks an upload pass. The upload pipeline joins the freshly uploaded
+     * file to the album once its cloud id is known. Returns the number queued.
      */
     private suspend fun queueLocalAddsToAlbum(
         userId: me.proton.core.domain.entity.UserId,

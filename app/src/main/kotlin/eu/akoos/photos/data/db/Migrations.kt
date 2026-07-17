@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -203,5 +203,35 @@ object Migrations {
         }
     }
 
-    val ALL: Array<Migration> = arrayOf(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14)
+    /**
+     * v14 → v15: explicit upload-intent on sync_state plus a new `upload_album_target` table.
+     * These back the queue redesign, and the upload selector now reads `queued` to pick what to
+     * back up. The conservative backfill marks every existing LOCAL_ONLY row queued with
+     * AUTO_FOLDER so an upgraded install keeps the same pending set the old derived selector had;
+     * queuedAt stays NULL for backfilled rows (a deterministic value, no clock is called in SQL).
+     */
+    val MIGRATION_14_15 = object : Migration(14, 15) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE sync_state ADD COLUMN queued INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("ALTER TABLE sync_state ADD COLUMN queueSource TEXT DEFAULT NULL")
+            db.execSQL("ALTER TABLE sync_state ADD COLUMN queuedAt INTEGER DEFAULT NULL")
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `upload_album_target` (" +
+                    "`localUri` TEXT NOT NULL, `albumLinkId` TEXT NOT NULL, " +
+                    "PRIMARY KEY(`localUri`, `albumLinkId`))"
+            )
+            db.execSQL("UPDATE sync_state SET queued = 1, queueSource = 'AUTO_FOLDER' WHERE status = 'LOCAL_ONLY'")
+        }
+    }
+
+    /** v15 → v16: photo_listing gains a nullable video duration (milliseconds), recovered from the
+     *  xAttr Media.Duration block. Additive + nullable: existing rows stay NULL and are filled in by
+     *  the bounded duration backfill, so a v15 DB opens at v16 with no data loss. */
+    val MIGRATION_15_16 = object : Migration(15, 16) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE photo_listing ADD COLUMN durationMs INTEGER DEFAULT NULL")
+        }
+    }
+
+    val ALL: Array<Migration> = arrayOf(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16)
 }

@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -57,6 +57,7 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.GalleryItem
+import eu.akoos.photos.presentation.gallery.LocalThumbnailUrls
 import eu.akoos.photos.presentation.theme.AppColors
 import java.util.Calendar
 
@@ -146,7 +147,8 @@ private fun OnThisDayCard(
     val imageModel: Any? = when (coverItem) {
         is GalleryItem.LocalOnly -> android.net.Uri.parse(coverItem.local.uri)
         is GalleryItem.Synced    -> android.net.Uri.parse(coverItem.local.uri)
-        is GalleryItem.CloudOnly -> coverItem.cloud.thumbnailUrl
+        is GalleryItem.CloudOnly ->
+            LocalThumbnailUrls.current.value[coverItem.cloud.linkId] ?: coverItem.cloud.thumbnailUrl
     }
     val isVideo = when (coverItem) {
         is GalleryItem.LocalOnly -> coverItem.local.mimeType

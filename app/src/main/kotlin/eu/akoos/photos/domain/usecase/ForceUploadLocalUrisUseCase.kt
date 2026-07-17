@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -23,12 +23,13 @@
 package eu.akoos.photos.domain.usecase
 
 import android.content.Context
-import androidx.datastore.preferences.core.edit
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.first
 import me.proton.core.domain.entity.UserId
+import eu.akoos.photos.data.db.dao.UploadAlbumTargetDao
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.domain.entity.QueueSource
 import eu.akoos.photos.domain.entity.SyncState
 import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
@@ -38,23 +39,24 @@ import javax.inject.Singleton
 
 /**
  * Forces a set of local-only photo URIs to back up, even when their source folder is outside the
- * backup selection. For each URI it writes a "localUri=albumLinkId" entry into
- * [SettingsKeys.PENDING_ALBUM_ADDS] (the marker the upload pipeline treats as "force this URI to
- * upload"), seeds a [SyncStatus.LOCAL_ONLY] row when reconcile hasn't created one yet, and kicks
- * an upload pass.
+ * backup selection. For each URI it stamps an explicit upload intent on the sync_state row
+ * (queued / queueSource / queuedAt), seeds a [SyncStatus.LOCAL_ONLY] row when reconcile hasn't
+ * created one yet, and kicks an upload pass. The DB queue is the single source of truth: the
+ * upload selector picks the row up because it is queued, no DataStore side-marker involved.
  *
  * Two entry points share this core:
- *   - [forceUpload] for a plain backup with no album to join — uses the
- *     [SettingsKeys.PENDING_ALBUM_ADD_NO_ALBUM] sentinel so the pipeline forces the upload but
- *     skips the album-join step.
- *   - [queueForAlbum] for adding a not-yet-backed-up photo to a cloud album — the freshly
- *     uploaded file joins [albumLinkId] once its cloud id is known.
+ *   - [forceUpload] for a plain backup with no album to join: stamps [QueueSource.MANUAL] and
+ *     seeds a LOCAL_ONLY row; there is no album target, so the upload just backs the file up.
+ *   - [queueForAlbum] for adding a not-yet-backed-up photo to a cloud album: stamps
+ *     [QueueSource.ALBUM_ADD] and records the target album in [uploadAlbumTargetDao], so the
+ *     freshly uploaded file joins [albumLinkId] once its cloud id is known.
  */
 @Singleton
 class ForceUploadLocalUrisUseCase @Inject constructor(
     @ApplicationContext private val context: Context,
     private val syncStateRepo: SyncStateRepository,
     private val cloudRepo: DrivePhotoRepository,
+    private val uploadAlbumTargetDao: UploadAlbumTargetDao,
 ) {
 
     /** Force [uris] to back up with no album to join. Returns the number of URIs queued. */
@@ -67,10 +69,12 @@ class ForceUploadLocalUrisUseCase @Inject constructor(
 
     private suspend fun run(userId: UserId, albumLinkId: String, uris: List<String>): Int {
         if (uris.isEmpty()) return 0
-        context.settingsDataStore.edit { prefs ->
-            val existing = prefs[SettingsKeys.PENDING_ALBUM_ADDS] ?: emptySet()
-            prefs[SettingsKeys.PENDING_ALBUM_ADDS] = existing + uris.map { "$it=$albumLinkId" }
-        }
+        // The no-album sentinel means a plain "back up now" (MANUAL); a real linkId means the photo
+        // must join that album once uploaded (ALBUM_ADD). A single timestamp for the whole request
+        // keeps every queued row's queuedAt aligned.
+        val isAlbumAdd = albumLinkId != SettingsKeys.PENDING_ALBUM_ADD_NO_ALBUM
+        val queueSource = if (isAlbumAdd) QueueSource.ALBUM_ADD else QueueSource.MANUAL
+        val now = System.currentTimeMillis()
         for (uri in uris) {
             val existingRow = syncStateRepo.getByUri(uri)
             // Skip seeding only when the URI is genuinely on Drive (the album-add drain joins it
@@ -80,14 +84,14 @@ class ForceUploadLocalUrisUseCase @Inject constructor(
             // uploads and then joins, instead of getting stuck.
             val cloudFileId = existingRow?.cloudFileId
             if (cloudFileId != null) {
-                // Already on Drive, so the upload pipeline never re-runs for it. If the album-join
-                // didn't complete on a prior pass (its marker is still queued) a retry must drain
-                // the join here, otherwise redoing the album-add does nothing. Best-effort: a
-                // failure leaves the marker for the next pass. A single linkId per request keeps
-                // the server's per-request link cap satisfied.
-                if (albumLinkId != SettingsKeys.PENDING_ALBUM_ADD_NO_ALBUM) {
+                // Already on Drive, so the upload pipeline never re-runs for it. Record the target
+                // and drain the join here directly: on success drop the pair, on failure leave the
+                // target row so the upload pass's target-table drain retries it. A single linkId per
+                // request keeps the server's per-request link cap satisfied.
+                if (isAlbumAdd) {
+                    uploadAlbumTargetDao.insertIgnore(uri, albumLinkId)
                     runCatching { cloudRepo.addPhotosToAlbum(userId, albumLinkId, listOf(cloudFileId)) }
-                        .onSuccess { removePendingAlbumAdd(uri, albumLinkId) }
+                        .onSuccess { uploadAlbumTargetDao.deleteTarget(uri, albumLinkId) }
                 }
                 continue
             }
@@ -108,6 +112,12 @@ class ForceUploadLocalUrisUseCase @Inject constructor(
                 ),
                 userId,
             )
+            // Record the explicit upload intent on the row (queued/queueSource/queuedAt): this is what
+            // the upload selector picks up, so no DataStore side-marker is needed. An album-add also
+            // records the target album so the upload pass can join it once the cloud id is known; a
+            // manual "back up now" has no target row, so its upload just backs the file up.
+            if (isAlbumAdd) uploadAlbumTargetDao.insertIgnore(uri, albumLinkId)
+            syncStateRepo.markQueued(uri, queueSource, now)
         }
         // Kick the DURABLE background worker rather than uploading inline in the caller's scope:
         // an inline pass dies the moment the user leaves the screen, and never surfaces in the
@@ -117,13 +127,5 @@ class ForceUploadLocalUrisUseCase @Inject constructor(
         val wifiOnly = context.settingsDataStore.data.first()[SettingsKeys.SYNC_WIFI_ONLY] != false
         eu.akoos.photos.worker.SyncWorker.runNow(context, wifiOnly = wifiOnly, allowLowBattery = true)
         return uris.size
-    }
-
-    /** Removes a single "localUri=albumLinkId" entry from PENDING_ALBUM_ADDS after its add lands. */
-    private suspend fun removePendingAlbumAdd(localUri: String, albumLinkId: String) {
-        context.settingsDataStore.edit { p ->
-            val existing = p[SettingsKeys.PENDING_ALBUM_ADDS] ?: emptySet()
-            p[SettingsKeys.PENDING_ALBUM_ADDS] = existing - "$localUri=$albumLinkId"
-        }
     }
 }

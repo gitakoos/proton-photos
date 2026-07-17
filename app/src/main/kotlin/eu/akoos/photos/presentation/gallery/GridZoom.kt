@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -35,9 +35,12 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import eu.akoos.photos.data.preferences.SeamlessGridPrefsBoot
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onEach
 import kotlin.math.hypot
 import kotlin.math.max
 
@@ -52,12 +55,12 @@ object GridZoom {
     val LEVELS: List<Pair<Int, TimelineGrouping>> = listOf(
         5 to TimelineGrouping.Year,
         4 to TimelineGrouping.Month,
-        3 to TimelineGrouping.Month,
+        3 to TimelineGrouping.Day,
         2 to TimelineGrouping.Day,
         1 to TimelineGrouping.Day,
     )
 
-    /** Columns per row on first launch — the 3-col month baseline. */
+    /** Columns per row on first launch — the 3-col day baseline. */
     const val DEFAULT_COLUMNS = 3
 
     /** Column counts offered as a fixed default. 1-col is an extreme zoom, not a sensible default. */
@@ -70,7 +73,7 @@ object GridZoom {
     /** Index of the level whose column count is [cols]; falls back to [DEFAULT_LEVEL]. */
     fun levelForColumns(cols: Int): Int = LEVELS.indexOfFirst { it.first == cols }.takeIf { it >= 0 } ?: DEFAULT_LEVEL
 
-    /** Level index that yields [DEFAULT_COLUMNS] (3-col month). */
+    /** Level index that yields [DEFAULT_COLUMNS] (3-col day). */
     val DEFAULT_LEVEL: Int get() = LEVELS.indexOfFirst { it.first == DEFAULT_COLUMNS }.takeIf { it >= 0 } ?: 2
 }
 
@@ -85,6 +88,30 @@ fun rememberDefaultGridColumns(): Int {
         context.settingsDataStore.data.map { it[SettingsKeys.GRID_DEFAULT_COLUMNS] ?: GridZoom.DEFAULT_COLUMNS }
     }.collectAsStateWithLifecycle(initialValue = GridZoom.DEFAULT_COLUMNS)
     return cols
+}
+
+/**
+ * Live edge-to-edge (seamless) grid preference. Every photo grid that follows the user's layout
+ * default (timeline, albums, device folders, offline, location, hidden, day detail, search) reads
+ * this so the choice applies everywhere, not only the main timeline. False keeps the padded, rounded
+ * tiles.
+ *
+ * The initial value comes from [SeamlessGridPrefsBoot], a synchronous SharedPreferences mirror, so a
+ * freshly opened grid renders with the correct layout on the first frame instead of flashing from the
+ * padded default to edge-to-edge. DataStore stays canonical; the collector refreshes the mirror as the
+ * value changes.
+ */
+@Composable
+fun rememberSeamlessGrid(): Boolean {
+    val context = LocalContext.current
+    val initial = remember { SeamlessGridPrefsBoot.read(context) }
+    val seamless by remember {
+        context.settingsDataStore.data
+            .map { it[SettingsKeys.SEAMLESS_GRID] ?: false }
+            .distinctUntilChanged()
+            .onEach { SeamlessGridPrefsBoot.write(context, it) }
+    }.collectAsStateWithLifecycle(initialValue = initial)
+    return seamless
 }
 
 /**

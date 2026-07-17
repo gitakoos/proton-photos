@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -22,10 +22,12 @@
 
 package eu.akoos.photos.di
 
+import android.util.Log
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -64,7 +66,10 @@ object CoreModule {
     @Provides
     @Singleton
     @AppScope
-    fun provideAppScope(): CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    // Defensive backstop: an uncaught throwable in a background appScope flow is logged, not fatal,
+    // so a torn DB read on a shared long-lived flow can't take the whole app down.
+    fun provideAppScope(): CoroutineScope =
+        CoroutineScope(SupervisorJob() + Dispatchers.Default + CoroutineExceptionHandler { _, e -> Log.e("AppScope", "uncaught in appScope", e) })
 
     @Provides
     @Singleton

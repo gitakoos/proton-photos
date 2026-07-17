@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -36,11 +36,14 @@ import android.provider.MediaStore
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import eu.akoos.photos.R
+import eu.akoos.photos.data.preferences.SettingsKeys
+import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.entity.SyncState
 import eu.akoos.photos.domain.entity.SyncStatus
 import coil.imageLoader
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -51,6 +54,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import me.proton.core.accountmanager.domain.AccountManager
+import eu.akoos.photos.data.transfer.TransferCenter
 import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.LocalMediaItem
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
@@ -137,6 +141,12 @@ class VideoEditorViewModel @Inject constructor(
     private val accountManager: AccountManager,
     private val cloudRepo: DrivePhotoRepository,
     private val syncStateRepo: eu.akoos.photos.domain.repository.SyncStateRepository,
+    // Reports the background edit-upload to the Activity monitor + avatar ring, the same surface the
+    // photo editor's edit-upload uses. The upload itself is unchanged; this only tracks it.
+    private val transferCenter: eu.akoos.photos.data.transfer.TransferCenter,
+    // Application-lifetime scope for the cloud re-upload that outlives the editor: it must keep
+    // running after save() returns and the screen navigates away (viewModelScope is cancelled then).
+    @eu.akoos.photos.di.AppScope private val appScope: CoroutineScope,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(VideoEditorUiState())
@@ -665,16 +675,98 @@ class VideoEditorViewModel @Inject constructor(
             // Computing System.currentTimeMillis() independently per save path would drift
             // by a few ms — different filenames, different captureTime seconds, no match.
             val editTimestampMs = System.currentTimeMillis()
+            // The ORIGINAL capture time to stamp into the edited file's mvhd (read from the stable
+            // [counterpart] snapshot), so a synced edit keeps the cloud sibling's date on both the
+            // device copy and the cloud upload and the two pair by name+date after a reinstall. New
+            // or cloud-only edits have no counterpart and fall back to the edit time.
+            val captureTimestampMs = counterpart?.captureTime?.times(1000L) ?: editTimestampMs
             val syncedTempFile: File? = if (isSynced) createTempMuxFile() else null
+            // Set when the cloud upload is handed to [appScope], which then owns the temp file's
+            // cleanup. The viewModelScope finally must NOT delete a handed-off file, else the
+            // background upload reads a file that was pulled out from under it.
+            var syncedTempHandedOff = false
             val saveResult: VideoSaveResult = try {
+                // Cloud video edit: mux the .mp4 in cache HERE (viewModelScope, so the local
+                // re-encode finishes before returning), then run the network upload in appScope
+                // and return an optimistic Success so the editor closes immediately. A background
+                // upload failure surfaces through the normal sync status, not here.
+                if (cloudPhoto != null) {
+                    val cloudTempFile = muxCloudEditToTemp(s, finalRotation, needsReencode)
+                    // Stamp the cloud copy's mvhd with the same capture time uploadCloudEdit sends, so
+                    // a later download (which reads DATE_TAKEN from the mvhd) restores the original
+                    // date instead of the mux time.
+                    eu.akoos.photos.util.Mp4CreationTime.stamp(
+                        cloudTempFile,
+                        if (mode == VideoSaveMode.Overwrite) cloudPhoto.captureTime * 1000L else editTimestampMs,
+                    )
+                    val userId = accountManager.getPrimaryUserId().first()
+                    if (userId == null) {
+                        cloudTempFile.delete()
+                        _state.update {
+                            it.copy(
+                                isSaving = false,
+                                saveResult = VideoSaveResult.Failed(context.getString(R.string.viewer_not_signed_in)),
+                                saveProgress = null,
+                                saveStage = VideoSaveStage.Idle,
+                            )
+                        }
+                        return@launch
+                    }
+                    _state.update { it.copy(saveStage = VideoSaveStage.Uploading, saveProgress = null) }
+                    appScope.launch {
+                        // Track the edit-upload on the Activity monitor + avatar ring for its duration;
+                        // the muxed temp file's URI is the row's video-frame thumbnail. finish() runs in
+                        // the finally so the ring clears whether the upload succeeds, fails, or cancels.
+                        val uploadUri = Uri.fromFile(cloudTempFile).toString()
+                        val tid = transferCenter.start(TransferCenter.Kind.UPLOAD, total = 1, items = listOf(uploadUri))
+                        try {
+                            uploadCloudEdit(s, mode, cloudPhoto, editTimestampMs, cloudTempFile, userId)
+                            transferCenter.progress(tid, 1)
+                            transferCenter.log(
+                                TransferCenter.Kind.UPLOAD, count = 1,
+                                name = context.getString(R.string.activity_hist_edited), uris = listOf(uploadUri),
+                            )
+                        } catch (t: Throwable) {
+                            // appScope is long-lived; a cancellation here is scope teardown, not a
+                            // save failure, so re-throw it rather than swallowing.
+                            if (t is kotlinx.coroutines.CancellationException) throw t
+                        } finally {
+                            transferCenter.finish(tid)
+                            cloudTempFile.delete()
+                        }
+                    }
+                    // Optimistic: the editor closes now; the linkId create, album re-attach and
+                    // (for Overwrite) the original's removal all run in the appScope block above.
+                    _state.update {
+                        it.copy(
+                            isSaving = false,
+                            saveResult = VideoSaveResult.Success(null),
+                            saveProgress = null,
+                            saveStage = VideoSaveStage.Idle,
+                        )
+                    }
+                    return@launch
+                }
                 if (syncedTempFile != null) {
                     produceEditedTempFile(s, syncedTempFile, finalRotation, needsReencode)
+                    // Stamp the cloud sibling's ORIGINAL capture time into the edited file's mvhd
+                    // BEFORE it is written to MediaStore or uploaded. MediaStore derives DATE_TAKEN
+                    // from the mvhd on scan (a post-insert DATE_TAKEN write is ignored), so without
+                    // this the device copy shows today; the mux otherwise stamps the edit time.
+                    // Done before the sha1 below so the device copy and the cloud upload share it.
+                    eu.akoos.photos.util.Mp4CreationTime.stamp(syncedTempFile, captureTimestampMs)
+                    // Honour "mirror strip to local": when the user asked to strip metadata AND mirror
+                    // it onto the device file, strip the on-device edited copy in place too, so the
+                    // local file carries no more than the cloud copy. No-op otherwise.
+                    mirrorStripVideoLocal(syncedTempFile, captureTimestampMs)
                 }
+                // Bare sha1 of the finished edited bytes, computed ONCE. The device MediaStore
+                // copy and the cloud upload are the SAME syncedTempFile, so this single digest
+                // seeds the device sync_state row AND drives the cloud upload's ContentHash.
+                // Reconcile later maps this bare sha1 to the cloud HMAC to re-pair the two as
+                // Synced; a blank localHash here would strand the edit as a split device/cloud pair.
+                val syncedLocalHash: String? = syncedTempFile?.let { sha1(it) }
                 val result = when {
-                    // Cloud video edit: produce the muxed .mp4 in cache, then upload as a
-                    // new linkId. Mirrors PhotoEditor.saveCloud — Overwrite trashes the
-                    // original after the new linkId is committed, Copy keeps both.
-                    cloudPhoto != null -> saveCloud(s, mode, finalRotation, cloudPhoto, needsReencode, editTimestampMs)
                     syncedTempFile != null -> saveLocalFromExistingFile(
                         s, mode, editTimestampMs, allowWriteRequestRecovery, syncedTempFile,
                     )
@@ -687,12 +779,13 @@ class VideoEditorViewModel @Inject constructor(
                     is VideoSaveResult.Failed -> null
                 }
                 // Synced video path: push the SAME bytes that just landed locally up to
-                // the cloud counterpart. The MediaStore insert above fired the OS-level
-                // content observer that BackgroundSyncService listens on — without the
-                // UPLOADING placeholder row below, SyncWorker would race this fanout and
-                // upload the same edited bytes a second time (duplicate Drive entry).
-                // Reconcile and SyncWorker both skip rows in UPLOADING state so the
-                // editor owns the row until the fanout completes (or fails and demotes).
+                // the cloud counterpart, but do NOT await the network upload here (that is the
+                // freeze). Seed the UPLOADING placeholder inline (the MediaStore insert above
+                // fired the OS-level content observer BackgroundSyncService listens on; without
+                // this row SyncWorker would race the fanout and upload the same edited bytes a
+                // second time), then run the upload in appScope so the editor returns immediately.
+                // On success the row goes SYNCED; on ANY failure it drops to LOCAL_ONLY (never
+                // left stuck at UPLOADING) so the normal SyncWorker retries it, no lost edit.
                 if (syncedTempFile != null && counterpart != null && savedUri != null &&
                     result !is VideoSaveResult.Failed) {
                     val userId = accountManager.getPrimaryUserId().first()
@@ -701,7 +794,7 @@ class VideoEditorViewModel @Inject constructor(
                         val placeholderState = SyncState(
                             localUri = savedUriStr,
                             cloudFileId = null,
-                            localHash = "",
+                            localHash = syncedLocalHash.orEmpty(),
                             cloudHash = null,
                             status = SyncStatus.UPLOADING,
                             lastSyncAttemptMs = System.currentTimeMillis(),
@@ -710,35 +803,50 @@ class VideoEditorViewModel @Inject constructor(
                             sizeBytes = syncedTempFile.length(),
                         )
                         runCatching { syncStateRepo.upsert(placeholderState, userId) }
-                        // Sheet label transitions from "Encoding…" to "Uploading…" so the
-                        // user knows we've moved past the local re-encode into the cloud
-                        // leg (which has no progress bar). Without this flip the sheet
-                        // sat at 100 % silently for the upload duration and users thought
-                        // the save had stalled.
-                        _state.update { it.copy(saveStage = VideoSaveStage.Uploading, saveProgress = null) }
-                        val fanoutResult = runCatching {
-                            uploadExistingFileToCloud(s, mode, counterpart, editTimestampMs, syncedTempFile, userId)
-                        }
-                        val newLinkId = fanoutResult.getOrNull()
-                        if (fanoutResult.isSuccess && newLinkId != null) {
-                            runCatching {
-                                syncStateRepo.upsert(
-                                    placeholderState.copy(
-                                        cloudFileId = newLinkId,
-                                        status = SyncStatus.SYNCED,
-                                        lastSyncSuccessMs = System.currentTimeMillis(),
-                                        backedUpAtMs = System.currentTimeMillis(),
-                                    ),
-                                    userId,
+                        // appScope owns the temp file from here; clear the viewModelScope finally's
+                        // claim so the background upload can still read it after save() returns.
+                        syncedTempHandedOff = true
+                        appScope.launch {
+                            // Track the replacement upload on the Activity monitor + avatar ring for its
+                            // duration; the saved device copy's URI is the row's video-frame thumbnail.
+                            // finish() runs in the finally so the ring clears on success, failure, or cancel.
+                            val tid = transferCenter.start(TransferCenter.Kind.UPLOAD, total = 1, items = listOf(savedUriStr))
+                            try {
+                                val newLinkId = uploadExistingFileToCloud(
+                                    s, mode, counterpart, editTimestampMs, syncedTempFile,
+                                    syncedLocalHash.orEmpty(), userId,
                                 )
-                            }
-                        } else {
-                            // Upload failed — demote so SyncWorker eventually retries.
-                            runCatching {
-                                syncStateRepo.upsert(
-                                    placeholderState.copy(status = SyncStatus.LOCAL_ONLY),
-                                    userId,
+                                transferCenter.progress(tid, 1)
+                                transferCenter.log(
+                                    TransferCenter.Kind.UPLOAD, count = 1,
+                                    name = context.getString(R.string.activity_hist_edited), uris = listOf(savedUriStr),
                                 )
+                                runCatching {
+                                    syncStateRepo.upsert(
+                                        placeholderState.copy(
+                                            cloudFileId = newLinkId,
+                                            localHash = syncedLocalHash.orEmpty(),
+                                            status = SyncStatus.SYNCED,
+                                            lastSyncSuccessMs = System.currentTimeMillis(),
+                                            backedUpAtMs = System.currentTimeMillis(),
+                                        ),
+                                        userId,
+                                    )
+                                }
+                            } catch (t: Throwable) {
+                                // Demote to LOCAL_ONLY so the background SyncWorker retries instead
+                                // of leaving a stuck UPLOADING row. Re-throw cancellation so scope
+                                // teardown is not swallowed.
+                                if (t is kotlinx.coroutines.CancellationException) throw t
+                                runCatching {
+                                    syncStateRepo.upsert(
+                                        placeholderState.copy(status = SyncStatus.LOCAL_ONLY),
+                                        userId,
+                                    )
+                                }
+                            } finally {
+                                transferCenter.finish(tid)
+                                syncedTempFile.delete()
                             }
                         }
                     }
@@ -746,8 +854,9 @@ class VideoEditorViewModel @Inject constructor(
                 // Defensive Coil invalidation — the saved URI may not actually be in the
                 // image cache for videos (thumbnails live under MediaStore URIs that may
                 // or may not match), but the call is a safe no-op when the key is absent
-                // and unifies the post-save state with the photo path.
-                if (savedUri != null && cloudPhoto == null) {
+                // and unifies the post-save state with the photo path. Cloud-only edits
+                // returned above, so anything here is a device-backed save with a real URI.
+                if (savedUri != null) {
                     invalidateImageCache(savedUri)
                 }
                 result
@@ -755,7 +864,7 @@ class VideoEditorViewModel @Inject constructor(
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 VideoSaveResult.Failed(eu.akoos.photos.util.sanitizeErrorMessage(e.message ?: context.getString(R.string.editor_save_failed)))
             } finally {
-                syncedTempFile?.delete()
+                if (!syncedTempHandedOff) syncedTempFile?.delete()
             }
             // pendingWriteIntent suspended the save until the user reacts to the consent
             // dialog — leave isSaving on the state from that branch alone.
@@ -906,6 +1015,8 @@ class VideoEditorViewModel @Inject constructor(
         cloud: CloudPhoto,
         editTimestampMs: Long,
         tempFile: File,
+        // Bare sha1 of [tempFile], computed once by the caller and reused for the device row too.
+        contentSha1: String,
         userId: me.proton.core.domain.entity.UserId,
     ): String = withContext(Dispatchers.IO) {
         val displayName = when (mode) {
@@ -913,29 +1024,40 @@ class VideoEditorViewModel @Inject constructor(
             VideoSaveMode.Copy -> stamp(cloud.displayName, editTimestampMs)
         }
         val outMime = if (s.mimeType.startsWith("video/")) s.mimeType else "video/mp4"
-        val uploadUri = Uri.fromFile(tempFile).toString()
+        // Honour strip-on-upload for the cloud copy only: this may produce a separate stripped file
+        // (GPS atom gone, timestamp floored to now) while [tempFile] stays intact for the device copy.
+        val (uploadFile, captureMs) = stripCopyForCloudUpload(tempFile, cloud.captureTime * 1000L)
+        val uploadUri = Uri.fromFile(uploadFile).toString()
         val item = LocalMediaItem(
             uri = uploadUri,
-            dateTaken = if (mode == VideoSaveMode.Overwrite) cloud.captureTime * 1000L else editTimestampMs,
+            // Keep the ORIGINAL capture time on the edited cloud copy so it matches the device copy's
+            // DATE_TAKEN and the mvhd the mux preserves. When the timestamp is stripped, [captureMs] is
+            // floored to now to match the stripped bytes.
+            dateTaken = captureMs,
             displayName = displayName,
             mimeType = outMime,
-            sizeBytes = tempFile.length(),
+            sizeBytes = uploadFile.length(),
             bucketName = null,
             width = s.sourceWidth,
             height = s.sourceHeight,
             duration = (s.trimEndMs - s.trimStartMs).coerceAtLeast(0L),
         )
-        val hash = sha1(tempFile)
-        val newLinkId = cloudRepo.uploadFile(userId, item, hash, uploadUri) { phase, doneBytes, totalBytes ->
-            // Distinguish the encrypt and CDN-PUT phases on the sheet so the user sees
-            // two distinct progress bars (Encrypting → Uploading) instead of a single
-            // mystery "0% sit then 100% race" cycle that happened to share a label.
-            val frac = (doneBytes.toFloat() / totalBytes.coerceAtLeast(1L).toFloat()).coerceIn(0f, 1f)
-            val newStage = when (phase) {
-                eu.akoos.photos.data.repository.drive.UploadPhase.Encrypting -> VideoSaveStage.Encrypting
-                eu.akoos.photos.data.repository.drive.UploadPhase.Uploading -> VideoSaveStage.Uploading
+        val hash = sha1(uploadFile)
+        val newLinkId = try {
+            cloudRepo.uploadFile(userId, item, hash, uploadUri) { phase, doneBytes, totalBytes ->
+                // Distinguish the encrypt and CDN-PUT phases on the sheet so the user sees
+                // two distinct progress bars (Encrypting to Uploading) instead of a single
+                // mystery "0% sit then 100% race" cycle that happened to share a label.
+                val frac = (doneBytes.toFloat() / totalBytes.coerceAtLeast(1L).toFloat()).coerceIn(0f, 1f)
+                val newStage = when (phase) {
+                    eu.akoos.photos.data.repository.drive.UploadPhase.Encrypting -> VideoSaveStage.Encrypting
+                    eu.akoos.photos.data.repository.drive.UploadPhase.Uploading -> VideoSaveStage.Uploading
+                }
+                _state.update { it.copy(saveProgress = frac, saveStage = newStage) }
             }
-            _state.update { it.copy(saveProgress = frac, saveStage = newStage) }
+        } finally {
+            // The stripped copy is throwaway; the caller-owned [tempFile] must survive for the device row.
+            if (uploadFile !== tempFile) uploadFile.delete()
         }
         sourceCloudAlbumLinkId?.let { albumId ->
             runCatching { cloudRepo.addPhotosToAlbum(userId, albumId, listOf(newLinkId)) }
@@ -1002,97 +1124,107 @@ class VideoEditorViewModel @Inject constructor(
     }
 
     /**
-     * Cloud video save: mux the edit into a temp .mp4 (re-encode or stream-copy), upload
-     * as a new Drive linkId, and on [VideoSaveMode.Overwrite] trash the original. The
-     * album re-attach is best-effort.
+     * Cloud video save, local leg: mux the edit into a fresh temp .mp4 (re-encode or
+     * stream-copy) and return it. Runs in viewModelScope so the local re-encode finishes
+     * before [save] returns; the caller hands the file to [uploadCloudEdit] on appScope and
+     * owns its cleanup.
      */
-    private suspend fun saveCloud(
+    private suspend fun muxCloudEditToTemp(
         s: VideoEditorUiState,
-        mode: VideoSaveMode,
         finalRotation: Int,
-        cloudPhoto: CloudPhoto,
         needsReencode: Boolean,
-        editTimestampMs: Long,
-    ): VideoSaveResult = withContext(Dispatchers.IO) {
+    ): File = withContext(Dispatchers.IO) {
         val sourceUriStr = s.sourceUri ?: error("No cached video URI")
         val sourceUri = Uri.parse(sourceUriStr)
         val tempFile = createTempMuxFile()
-        try {
-            if (needsReencode) {
-                val crop = cropInSourcePixels(s)
-                VideoReencoder(context).transcode(
-                    sourceUri = sourceUri,
-                    outputFile = tempFile,
-                    trimStartUs = s.trimStartMs * 1000L,
-                    trimEndUs = s.trimEndMs * 1000L,
-                    cropLeft = crop.left,
-                    cropTop = crop.top,
-                    cropWidth = crop.width(),
-                    cropHeight = crop.height(),
-                    rotationDegrees = finalRotation,
-                    audioOverlayUri = s.audioOverlayUri?.let { Uri.parse(it) },
-                    audioTrimStartUs = s.audioTrimStartMs * 1000L,
-                    audioTrimEndUs = s.audioTrimEndMs * 1000L,
-                    originalAudioGain = s.originalAudioGain,
+        if (needsReencode) {
+            val crop = cropInSourcePixels(s)
+            VideoReencoder(context).transcode(
+                sourceUri = sourceUri,
+                outputFile = tempFile,
+                trimStartUs = s.trimStartMs * 1000L,
+                trimEndUs = s.trimEndMs * 1000L,
+                cropLeft = crop.left,
+                cropTop = crop.top,
+                cropWidth = crop.width(),
+                cropHeight = crop.height(),
+                rotationDegrees = finalRotation,
+                audioOverlayUri = s.audioOverlayUri?.let { Uri.parse(it) },
+                audioTrimStartUs = s.audioTrimStartMs * 1000L,
+                audioTrimEndUs = s.audioTrimEndMs * 1000L,
+                originalAudioGain = s.originalAudioGain,
                 musicAudioGain = s.musicAudioGain,
-                    onProgress = { p -> _state.update { it.copy(saveProgress = p) } },
-                    isActive = { isActive },
-                )
-            } else {
-                muxTrimmed(
-                    sourceUri = sourceUri,
-                    outputFile = tempFile,
-                    trimStartMs = s.trimStartMs,
-                    trimEndMs = s.trimEndMs,
-                    orientationDegrees = finalRotation,
-                    // Stream-copy strips source audio entirely when the gain slider is at 0
+                onProgress = { p -> _state.update { it.copy(saveProgress = p) } },
+                isActive = { isActive },
+            )
+        } else {
+            muxTrimmed(
+                sourceUri = sourceUri,
+                outputFile = tempFile,
+                trimStartMs = s.trimStartMs,
+                trimEndMs = s.trimEndMs,
+                orientationDegrees = finalRotation,
+                // Stream-copy strips source audio entirely when the gain slider is at 0
                 // and there's no overlay to bring in. Partial gain / overlay cases force
                 // re-encode (handled by needsReencode) so they never reach this branch.
                 stripAudio = s.originalAudioGain <= 0.001f,
-                )
-            }
-            val userId = accountManager.getPrimaryUserId().first()
-                ?: error("Not signed in")
-            val displayName = when (mode) {
-                VideoSaveMode.Overwrite -> cloudPhoto.displayName
-                VideoSaveMode.Copy -> stamp(cloudPhoto.displayName, editTimestampMs)
-            }
-            val outMime = if (s.mimeType.startsWith("video/")) s.mimeType else "video/mp4"
-            val uploadUri = Uri.fromFile(tempFile).toString()
-            val item = LocalMediaItem(
-                uri = uploadUri,
-                dateTaken = if (mode == VideoSaveMode.Overwrite) cloudPhoto.captureTime * 1000L else editTimestampMs,
-                displayName = displayName,
-                mimeType = outMime,
-                sizeBytes = tempFile.length(),
-                bucketName = null,
-                width = s.sourceWidth,
-                height = s.sourceHeight,
-                duration = (s.trimEndMs - s.trimStartMs).coerceAtLeast(0L),
             )
-            val hash = sha1(tempFile)
-            // Flip to Uploading just before the upload starts so the sheet stops sitting
-            // at 100 % silently while the cloud leg runs.
-            _state.update { it.copy(saveStage = VideoSaveStage.Encrypting, saveProgress = 0f) }
-            val newLinkId = cloudRepo.uploadFile(userId, item, hash, uploadUri) { phase, doneBytes, totalBytes ->
-                val frac = (doneBytes.toFloat() / totalBytes.coerceAtLeast(1L).toFloat()).coerceIn(0f, 1f)
-                val newStage = when (phase) {
-                    eu.akoos.photos.data.repository.drive.UploadPhase.Encrypting -> VideoSaveStage.Encrypting
-                    eu.akoos.photos.data.repository.drive.UploadPhase.Uploading -> VideoSaveStage.Uploading
-                }
-                _state.update { it.copy(saveProgress = frac, saveStage = newStage) }
-            }
-
-            sourceCloudAlbumLinkId?.let { albumId ->
-                runCatching { cloudRepo.addPhotosToAlbum(userId, albumId, listOf(newLinkId)) }
-            }
-            if (mode == VideoSaveMode.Overwrite) {
-                runCatching { cloudRepo.deleteFiles(userId, listOf(cloudPhoto.linkId)) }
-            }
-            VideoSaveResult.Success(Uri.parse("proton://drive/$newLinkId"))
-        } finally {
-            tempFile.delete()
         }
+        tempFile
+    }
+
+    /**
+     * Cloud video save, network leg: upload the pre-muxed [tempFile] as a new Drive linkId,
+     * re-attach it to the source album (best-effort), and on [VideoSaveMode.Overwrite] trash
+     * the original. Runs in appScope so it survives the editor closing. The caller owns the
+     * temp file's cleanup.
+     */
+    private suspend fun uploadCloudEdit(
+        s: VideoEditorUiState,
+        mode: VideoSaveMode,
+        cloudPhoto: CloudPhoto,
+        editTimestampMs: Long,
+        tempFile: File,
+        userId: me.proton.core.domain.entity.UserId,
+    ): String = withContext(Dispatchers.IO) {
+        val displayName = when (mode) {
+            VideoSaveMode.Overwrite -> cloudPhoto.displayName
+            VideoSaveMode.Copy -> stamp(cloudPhoto.displayName, editTimestampMs)
+        }
+        val outMime = if (s.mimeType.startsWith("video/")) s.mimeType else "video/mp4"
+        // Honour strip-on-upload for the cloud copy only: may produce a separate stripped file while
+        // [tempFile] stays intact (the caller owns its cleanup).
+        val (uploadFile, captureMs) = stripCopyForCloudUpload(
+            tempFile, if (mode == VideoSaveMode.Overwrite) cloudPhoto.captureTime * 1000L else editTimestampMs,
+        )
+        val uploadUri = Uri.fromFile(uploadFile).toString()
+        val item = LocalMediaItem(
+            uri = uploadUri,
+            dateTaken = captureMs,
+            displayName = displayName,
+            mimeType = outMime,
+            sizeBytes = uploadFile.length(),
+            bucketName = null,
+            width = s.sourceWidth,
+            height = s.sourceHeight,
+            duration = (s.trimEndMs - s.trimStartMs).coerceAtLeast(0L),
+        )
+        val hash = sha1(uploadFile)
+        val newLinkId = try {
+            cloudRepo.uploadFile(userId, item, hash, uploadUri) { _, _, _ ->
+                // Runs in the background after the editor closed, so there is no sheet to drive.
+            }
+        } finally {
+            // The stripped copy is throwaway; the caller-owned [tempFile] must survive for its own cleanup.
+            if (uploadFile !== tempFile) uploadFile.delete()
+        }
+        sourceCloudAlbumLinkId?.let { albumId ->
+            runCatching { cloudRepo.addPhotosToAlbum(userId, albumId, listOf(newLinkId)) }
+        }
+        if (mode == VideoSaveMode.Overwrite) {
+            runCatching { cloudRepo.deleteFiles(userId, listOf(cloudPhoto.linkId)) }
+        }
+        newLinkId
     }
 
     /**
@@ -1298,9 +1430,10 @@ class VideoEditorViewModel @Inject constructor(
         val values = ContentValues().apply {
             put(MediaStore.Video.Media.DISPLAY_NAME, outName)
             put(MediaStore.Video.Media.MIME_TYPE, outMime)
-            // Explicit DATE_TAKEN so reconcile.byNameAndDate finds the cloud sibling —
-            // see the editTimestampMs doc-comment in [save]. DATE_MODIFIED is in seconds
-            // (the MediaStore legacy unit); DATE_TAKEN is in milliseconds.
+            // DATE_TAKEN is a seed only: the media scanner overrides it from the file's mvhd, which
+            // the mux stamps with the original capture time for a synced edit (see [save]), so the
+            // device copy keeps the original date. DATE_MODIFIED is in seconds (the MediaStore legacy
+            // unit); DATE_TAKEN is in milliseconds.
             put(MediaStore.Video.Media.DATE_TAKEN, editTimestampMs)
             put(MediaStore.Video.Media.DATE_MODIFIED, editTimestampMs / 1000L)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -1546,6 +1679,69 @@ class VideoEditorViewModel @Inject constructor(
         // identifies the temp correctly until it's copied over.
         return File.createTempFile("vmux_", ".mp4", dir)
     }
+
+    /**
+     * When strip-on-upload is enabled, produce a separate cloud-upload copy of a muxed video with the
+     * user's privacy settings applied: the GPS location atom removed (stripGps) and, for stripTimestamp,
+     * the mvhd stamped with "now" so the bytes carry no real capture time. The input [tempFile] is left
+     * intact (the device copy keeps full metadata, mirroring the image editor). Returns the file to
+     * upload and the capture time to send as the cloud photo.captureTime (floored to now when stripping
+     * the timestamp). When stripping is off, returns [tempFile] and [originalCaptureMs] unchanged.
+     */
+    private suspend fun stripCopyForCloudUpload(tempFile: File, originalCaptureMs: Long): Pair<File, Long> =
+        withContext(Dispatchers.IO) {
+            val prefs = runCatching { context.settingsDataStore.data.first() }.getOrNull()
+            val stripOnUpload = prefs?.get(SettingsKeys.STRIP_ON_UPLOAD) ?: false
+            val stripGps = stripOnUpload && (prefs?.get(SettingsKeys.STRIP_GPS) ?: false)
+            val stripTimestamp = stripOnUpload && (prefs?.get(SettingsKeys.STRIP_TIMESTAMP) ?: false)
+            if (!stripGps && !stripTimestamp) return@withContext tempFile to originalCaptureMs
+            val captureMs = if (stripTimestamp) System.currentTimeMillis() else originalCaptureMs
+            val out = createTempMuxFile()
+            val remuxed = stripGps && VideoMetadataStripper.remuxWithoutLocation(
+                context, Uri.fromFile(tempFile).toString(), out,
+            )
+            if (!remuxed) {
+                // No GPS strip requested, or the remux failed: copy the bytes so we can stamp without
+                // touching the device copy.
+                tempFile.inputStream().use { input -> out.outputStream().use { input.copyTo(it) } }
+            }
+            // Stamp the mvhd AFTER any remux (MediaMuxer resets the creation time): the ORIGINAL when only
+            // GPS was stripped, or "now" when the timestamp is stripped.
+            eu.akoos.photos.util.Mp4CreationTime.stamp(out, captureMs)
+            out to captureMs
+        }
+
+    /**
+     * When the user enabled strip-on-upload AND "mirror to local", strip the on-device edited copy in
+     * place so it carries no more metadata than the cloud copy: remove the GPS location atom for
+     * stripGps and re-stamp the mvhd (floored to now for stripTimestamp, else [originalCaptureMs],
+     * since a GPS remux resets the mvhd). Mirrors the backup path's mirror-strip. No-op unless both
+     * strip-on-upload and mirror-to-local are on with at least one strip flag.
+     */
+    private suspend fun mirrorStripVideoLocal(file: File, originalCaptureMs: Long) =
+        withContext(Dispatchers.IO) {
+            val prefs = runCatching { context.settingsDataStore.data.first() }.getOrNull()
+                ?: return@withContext
+            val stripOnUpload = prefs[SettingsKeys.STRIP_ON_UPLOAD] ?: false
+            val mirror = prefs[SettingsKeys.MIRROR_STRIP_TO_LOCAL] ?: false
+            if (!stripOnUpload || !mirror) return@withContext
+            val stripGps = prefs[SettingsKeys.STRIP_GPS] ?: false
+            val stripTimestamp = prefs[SettingsKeys.STRIP_TIMESTAMP] ?: false
+            if (!stripGps && !stripTimestamp) return@withContext
+            if (stripGps) {
+                val tmp = createTempMuxFile()
+                val ok = runCatching {
+                    VideoMetadataStripper.remuxWithoutLocation(context, Uri.fromFile(file).toString(), tmp)
+                }.getOrDefault(false)
+                if (ok) {
+                    runCatching { tmp.inputStream().use { i -> file.outputStream().use { o -> i.copyTo(o) } } }
+                }
+                tmp.delete()
+            }
+            eu.akoos.photos.util.Mp4CreationTime.stamp(
+                file, if (stripTimestamp) System.currentTimeMillis() else originalCaptureMs,
+            )
+        }
 
     /**
      * Synced-video helper. After a successful local save, ALSO write the muxed file up to

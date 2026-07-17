@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -72,9 +72,7 @@ fun AppearanceSettingsScreen(
     onBack: () -> Unit,
     onThemeClick: () -> Unit = {},
     onLanguageClick: () -> Unit = {},
-    onLayoutClick: () -> Unit = {},
     onTimelineFilterClick: () -> Unit = {},
-    onLandingTabClick: () -> Unit = {},
 ) {
     SettingsSubPageScaffold(title = stringResource(R.string.settings_appearance), onBack = onBack) {
         SettingsCard {
@@ -88,25 +86,11 @@ fun AppearanceSettingsScreen(
                 onClick = onLanguageClick,
             )
             RowDivider()
-            // Layout + display — grid columns, mosaic, and the button-label toggle. These are
-            // app-wide display choices (they also affect album/folder selection), so they sit at
-            // the appearance level rather than nested inside the timeline page.
-            NavRow(
-                label = stringResource(R.string.settings_timeline_section_layout),
-                onClick = onLayoutClick,
-            )
-            RowDivider()
-            // Photos timeline page — what shows on the Photos tab and its display filters.
+            // Photos timeline page: the single home for the timeline display settings
+            // (layout, category bar, albums, device folders, and the landing tab).
             NavRow(
                 label = stringResource(R.string.settings_timeline),
                 onClick = onTimelineFilterClick,
-            )
-            RowDivider()
-            // Landing tab — which top-level tab the gallery opens on at start. A startup
-            // display choice, so it sits with the other appearance rows.
-            NavRow(
-                label = stringResource(R.string.settings_landing_tab),
-                onClick = onLandingTabClick,
             )
         }
     }

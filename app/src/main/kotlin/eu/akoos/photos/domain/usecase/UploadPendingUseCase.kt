@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -22,8 +22,11 @@
 
 package eu.akoos.photos.domain.usecase
 
+import android.content.ContentValues
 import android.content.Context
 import android.net.Uri
+import android.os.Build
+import android.provider.MediaStore
 import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
 import androidx.datastore.preferences.core.edit
@@ -38,6 +41,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
@@ -46,15 +50,18 @@ import kotlinx.coroutines.withContext
 import me.proton.core.domain.entity.UserId
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.data.upload.MirrorOverwriteJournal
 import eu.akoos.photos.domain.entity.StorageFullException
 import eu.akoos.photos.domain.entity.SyncState
 import eu.akoos.photos.domain.entity.SyncStatus
+import eu.akoos.photos.domain.entity.UploadCompressionTier
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.LocalMediaRepository
 import eu.akoos.photos.domain.repository.SyncStateRepository
 import eu.akoos.photos.util.ExifHelper
 import eu.akoos.photos.util.MetadataStripConfig
 import eu.akoos.photos.util.MotionPhotoUtil
+import eu.akoos.photos.util.Mp4CreationTime
 import java.io.File
 import java.io.RandomAccessFile
 import java.security.MessageDigest
@@ -69,6 +76,28 @@ import javax.inject.Singleton
 import kotlin.coroutines.coroutineContext
 
 private const val UPLOAD_TAG = "UploadUseCase"
+
+/** cacheDir entries with one of these name prefixes are upload-path temps. Age-swept once per pass
+ *  so a permanently-failing file's temp (or one stranded by a process death) can't linger forever.
+ *  `upload_` resume dirs are covered here too, backstopping the periodic CachePruneWorker sweep. */
+private val UPLOAD_TEMP_PREFIXES = listOf(
+    // `mirror_bak_` sweeps any legacy mirror-overwrite backup left in cacheDir by an older build. The
+    // crash-consistent backups now live in filesDir/<MirrorOverwriteJournal.DIR_NAME>, outside cacheDir,
+    // so this cacheDir sweep never reaches the journal and can never delete the only intact copy.
+    "upload_", "videocompress_", "revision_", "stripped_", "compressed_", "mirror_bak_",
+)
+
+/** Only upload temps older than this are swept, so an in-flight upload or a recently-preserved
+ *  resume dir (both freshly created) is never removed; the age gate is the whole safety. */
+private val STALE_UPLOAD_TEMP_MS = java.util.concurrent.TimeUnit.DAYS.toMillis(3)
+
+/**
+ * Process-wide gate serialising video transcodes to one at a time. A device has a single
+ * hardware video encoder, so two concurrent transcodes (possible with [UPLOAD_PARALLELISM]
+ * in-flight uploads) would fail or thrash. File-level so the limit holds across every upload
+ * coroutine and batch regardless of how many use-case instances exist.
+ */
+private val videoTranscodeGate = Semaphore(1)
 
 /**
  * Per-batch upload parallelism. Three concurrent uploads matches the inner CDN-block
@@ -124,13 +153,71 @@ class UploadPendingUseCase @Inject constructor(
     private val pendingDeleteNotif: PendingDeleteNotificationUseCase,
     private val networkObserver: eu.akoos.photos.util.NetworkObserver,
     private val transferCenter: eu.akoos.photos.data.transfer.TransferCenter,
+    private val uploadAlbumTargetDao: eu.akoos.photos.data.db.dao.UploadAlbumTargetDao,
     @ApplicationContext private val context: Context,
+    @eu.akoos.photos.di.AppScope private val appScope: kotlinx.coroutines.CoroutineScope,
 ) {
     private val mutex = Mutex()
 
-    /** Serialises read-modify-write on the PENDING_ALBUM_ADDS set so two concurrent uploads
-     *  removing different entries don't clobber each other's removals. */
-    private val pendingAddMutex = Mutex()
+    /** Crash-consistent backup of the bytes a mirror overwrite is about to replace. Lives in
+     *  filesDir (never cacheDir), so a process killed mid-truncate is recovered on the next launch
+     *  by [eu.akoos.photos.data.upload.MirrorOverwriteJournal]. Lazy so nothing reads filesDir until
+     *  a mirror overwrite actually runs. */
+    private val mirrorOverwriteJournal by lazy {
+        eu.akoos.photos.data.upload.MirrorOverwriteJournal(
+            File(context.filesDir, eu.akoos.photos.data.upload.MirrorOverwriteJournal.DIR_NAME),
+        )
+    }
+
+    /**
+     * Guards the one-time stale-claim recovery. A row left UPLOADING by a killed process is
+     * invisible to both the LOCAL_ONLY selector and reconcile, so it would never retry. On the
+     * first upload pass of this process (inside [mutex] and before any row is selected or claimed),
+     * every UPLOADING row with no cloud copy is reset to LOCAL_ONLY, since nothing is genuinely
+     * in flight in a fresh process. Running once and before the first claim means a live claim made
+     * later in the same process is never clobbered.
+     */
+    private val staleClaimsRecovered = AtomicBoolean(false)
+
+    /**
+     * Cooperative "stop" flag for the current in-flight batch. Set by [requestStop] when the user
+     * taps a cancel button (Activity monitor / avatar pill / device-folder back-up). The batch loop
+     * in [invoke] checks it at the item boundary, BEFORE claiming/starting the next pending row,
+     * and breaks, so remaining queued items are never started. Deliberately NOT wired into any
+     * cancellation: an already-running [uploadOne] runs its encrypt + CDN work to completion, because
+     * interrupting an in-flight native PGP call (libgojni) crashes the process with a native SIGSEGV.
+     * Cleared at the start and end of every [invoke] so a stop affects only the batch that was
+     * running when the user tapped stop, never a later auto-backup trigger.
+     */
+    private val stopRequested = AtomicBoolean(false)
+
+    /**
+     * Request a graceful stop of the current upload batch. Prevents any not-yet-started queued item
+     * from beginning; the item currently in transit finishes and is backed up. Safe to call when no
+     * batch is running (the flag is cleared at the start of the next [invoke]).
+     *
+     * This is the single user-cancel chokepoint (every cancel button and the notification Stop route
+     * here), so it is also where a cancelled manual "back up now" is de-queued: the not-yet-started
+     * MANUAL rows have their queued intent cleared so they do NOT resurface on the next natural
+     * trigger. ALBUM_ADD rows stay queued (an album-add must still upload to join its album) and
+     * AUTO_FOLDER rows stay queued (continuous folder backup resumes on the next pass, so cancel is a
+     * pause for auto but a removal for manual). The clear is guarded to never touch an UPLOADING claim
+     * or a SYNCED row, so the in-flight item (which finishes) is untouched. Fired on [appScope] because
+     * this entry point is a plain synchronous call from receivers / view models; a de-queue failure is
+     * logged, not propagated (a lingering MANUAL flag at worst re-uploads a file the user cancelled).
+     */
+    fun requestStop() {
+        stopRequested.set(true)
+        appScope.launch {
+            runCatching { syncStateRepo.clearManualQueue() }
+                .onSuccess { cleared ->
+                    if (cleared > 0) {
+                        Log.d(UPLOAD_TAG, "User cancel: de-queued $cleared not-yet-started manual upload(s)")
+                    }
+                }
+                .onFailure { e -> Log.w(UPLOAD_TAG, "clearManualQueue on cancel failed: ${e.message}") }
+        }
+    }
 
     /**
      * Hot stream of per-file upload events. Buffered so a slow collector never throttles the
@@ -158,15 +245,43 @@ class UploadPendingUseCase @Inject constructor(
      * [UPLOAD_PARALLELISM]; the [mutex] still serialises concurrent batch *invocations* so
      * we never queue the same SyncState row twice.
      *
-     * [isStoppedSignal] lets the caller (typically [eu.akoos.photos.worker.SyncWorker]) signal
-     * "the OS pulled the foreground budget — abort". When it returns `true`, in-flight tasks
-     * are cancelled and the function returns whatever succeeded so far. Default `{ false }`
-     * keeps the existing UI callers (SettingsViewModel / GalleryViewModel) source-compatible.
+     * A cooperative stop (see [requestStop]) can prevent not-yet-started items from beginning, but
+     * never interrupts an item already in flight; its encrypt/CDN work always runs to completion so
+     * a mid-encrypt cancel can't tear down the native PGP runtime. The stop flag is cleared here at
+     * the start of every run so a stop requested during an earlier batch does not carry over.
      */
     suspend operator fun invoke(
         userId: UserId,
-        isStoppedSignal: () -> Boolean = { false },
     ): Result = mutex.withLock {
+        // Fresh batch: clear any stop left over from a previous run so a later natural trigger
+        // (new photo / periodic / app-open) resumes normally. The flag only affects the batch that
+        // was in flight when the user tapped stop.
+        stopRequested.set(false)
+        // Recover claims stranded by a process death before selecting anything. Runs once per
+        // process, inside the lock and ahead of every row claim below, so it resets only rows a
+        // prior (now-dead) process left UPLOADING with no cloud copy, never a live claim this
+        // process makes later. Fresh process = nothing is genuinely uploading, so such a row is
+        // safe to return to LOCAL_ONLY for a retry. An editor upload sets UPLOADING via a separate
+        // path and only after the user actively saves, which cannot precede this first pass.
+        if (staleClaimsRecovered.compareAndSet(false, true)) {
+            runCatching { syncStateRepo.resetStaleUploadingClaims() }
+                .onFailure { e -> Log.w(UPLOAD_TAG, "Stale-claim recovery failed: ${e.message}") }
+        }
+
+        // Retry any uncommitted-node cleanup deletes stranded by an earlier upload failure whose
+        // own delete also failed. Runs before the Wi-Fi / listing / folder early-returns below so a
+        // queued orphan is swept even when there is nothing to upload; it is a cheap no-op when the
+        // queue is empty (one DataStore read, no network) and never blocks the actual upload work.
+        runCatching { cloudRepo.retryPendingOrphanDeletes(userId) }
+            .onFailure { e -> Log.w(UPLOAD_TAG, "Pending orphan-delete sweep failed: ${e.message}") }
+
+        // Age-sweep abandoned upload temps. A retryable failure deliberately preserves its resume
+        // dir, and a process death can strand any other upload temp; none are otherwise age-swept, so
+        // a permanently-failing file's temp would linger until the OS clears the cache. Only entries
+        // older than STALE_UPLOAD_TEMP_MS are removed, so a live in-flight upload (or a recent
+        // preserved resume dir) is never touched. Cheap listFiles() no-op when nothing is stale.
+        sweepStaleUploadTemps()
+
         // Read folder filter — same source of truth as ReconcileSyncStateUseCase.
         // null = first-run (backup nothing); empty set = all disabled; non-empty = selected folders.
         // BACKUP_EVERYTHING bypasses the folder filter entirely (mirrors reconcile).
@@ -184,7 +299,12 @@ class UploadPendingUseCase @Inject constructor(
         val albumOptInFolders: Set<String> = prefs[SettingsKeys.ALBUM_OPT_IN_FOLDER_NAMES] ?: emptySet()
 
         val stripOnUpload = prefs[SettingsKeys.STRIP_ON_UPLOAD] ?: false
+        val compressOnUpload = prefs[SettingsKeys.COMPRESS_ON_UPLOAD] ?: false
+        val compressTier = UploadCompressionTier
+            .fromOrdinalOrDefault(prefs[SettingsKeys.COMPRESS_UPLOAD_TIER] ?: -1)
         val mirrorStripToLocal = prefs[SettingsKeys.MIRROR_STRIP_TO_LOCAL] ?: false
+        val mirrorCompressToLocal = prefs[SettingsKeys.MIRROR_COMPRESS_TO_LOCAL] ?: false
+        val compressVideosOnUpload = prefs[SettingsKeys.COMPRESS_VIDEO_ON_UPLOAD] ?: false
         val renameToCaptureDate = prefs[SettingsKeys.RENAME_TO_CAPTURE_DATE] ?: false
         val deleteLocalAfterBackup = prefs[SettingsKeys.DELETE_LOCAL_AFTER_BACKUP] ?: false
         val stripConfig = MetadataStripConfig(
@@ -194,30 +314,43 @@ class UploadPendingUseCase @Inject constructor(
             stripSoftwareInfo = prefs[SettingsKeys.STRIP_SOFTWARE_INFO] ?: false,
         )
 
-        // Drain pending album-adds for photos that already finished uploading (their row is
+        // Drain queued album targets for photos that already finished uploading (their row is
         // SYNCED, so uploadOne below won't run for them). This covers the gap where a photo
         // backed up before its album-add succeeded — or a prior add failed — and guarantees the
-        // add is eventually applied across restarts and partial failures. Runs BEFORE the
-        // no-folders early-out so a queued add still lands even when backup is otherwise idle.
-        val pendingAdds = decodePendingAlbumAdds(prefs[SettingsKeys.PENDING_ALBUM_ADDS] ?: emptySet())
-        for ((localUri, albumLinkId) in pendingAdds) {
-            val cloudId = syncStateRepo.getByUri(localUri)?.cloudFileId ?: continue
-            // No-album sentinel: the entry only forced the upload, there is no album to join.
-            // Drop it now that the photo is backed up.
-            if (albumLinkId == SettingsKeys.PENDING_ALBUM_ADD_NO_ALBUM) {
-                removePendingAlbumAdd(localUri, albumLinkId)
-                continue
-            }
-            runCatching { cloudRepo.addPhotosToAlbum(userId, albumLinkId, listOf(cloudId)) }
+        // add is eventually applied across restarts and partial failures. The target table is the
+        // single source of truth: one row per (localUri, albumLinkId). A row with no cloudFileId yet
+        // is skipped (uploadOne joins it once uploaded); a successful join drops just that pair, a
+        // failed one leaves it for the next pass. Runs BEFORE the no-folders early-out so a queued
+        // add still lands even when backup is otherwise idle.
+        for (target in uploadAlbumTargetDao.getAll()) {
+            val cloudId = syncStateRepo.getByUri(target.localUri)?.cloudFileId ?: continue
+            runCatching { cloudRepo.addPhotosToAlbum(userId, target.albumLinkId, listOf(cloudId)) }
                 .onSuccess {
-                    removePendingAlbumAdd(localUri, albumLinkId)
-                    Log.d(UPLOAD_TAG, "Drained pending add: $cloudId → album $albumLinkId")
+                    uploadAlbumTargetDao.deleteTarget(target.localUri, target.albumLinkId)
+                    Log.d(UPLOAD_TAG, "Drained pending add: $cloudId → album ${target.albumLinkId}")
                 }
-                .onFailure { e -> Log.w(UPLOAD_TAG, "Pending-add drain failed for $localUri: ${e.message}") }
+                .onFailure { e -> Log.w(UPLOAD_TAG, "Pending-add drain failed for ${target.localUri}: ${e.message}") }
         }
-        // URIs that still have a queued album-add need their upload forced even when their folder
-        // is not in the backup selection — bypass the folder guards below for these.
-        val forcedUploadUris: Set<String> = pendingAdds.keys
+
+        // One snapshot of every SyncState row, read once up front so the explicit-action bypass
+        // below and the pending selection further down share it (no second Flow.first()).
+        val allStates = syncStateRepo.observeAll(userId).first()
+
+        // Explicit user-action bypass. A row queued as MANUAL ("back up now") or ALBUM_ADD (added to
+        // a cloud album) is something the user asked for regardless of network or folder selection, so
+        // its presence bypasses the Wi-Fi-only / listing / no-folders early-returns below. A queued
+        // AUTO_FOLDER row does NOT bypass (it is an ordinary folder backup, subject to the guards).
+        // The DB queue is the single source of truth here: the row's queueSource is what marks it.
+        val explicitBypassUris: Set<String> = allStates.asSequence()
+            .filter {
+                it.queued && (
+                    it.queueSource == eu.akoos.photos.domain.entity.QueueSource.MANUAL ||
+                        it.queueSource == eu.akoos.photos.domain.entity.QueueSource.ALBUM_ADD
+                    )
+            }
+            .map { it.localUri }
+            .toSet()
+        val hasExplicitBypass = explicitBypassUris.isNotEmpty()
 
         // Wi-Fi-only enforcement for the auto-sync drain (absent key = ON, matching the rest of the
         // app). ANY-Wi-Fi semantics: a metered Wi-Fi (hotspot, some routers) is still allowed, but
@@ -225,7 +358,7 @@ class UploadPendingUseCase @Inject constructor(
         // editor) get the same guard the worker relies on. An explicit forced upload (a queued
         // album-add / "back up now") bypasses it — the user asked for that one regardless of network.
         val wifiOnly = prefs[SettingsKeys.SYNC_WIFI_ONLY] != false
-        if (wifiOnly && forcedUploadUris.isEmpty() && !networkObserver.currentlyOnWifi()) {
+        if (wifiOnly && !hasExplicitBypass && !networkObserver.currentlyOnWifi()) {
             Log.d(UPLOAD_TAG, "Wi-Fi-only on and not on Wi-Fi — skipping auto-sync upload")
             _progress.tryEmit(UploadProgress("", "", UploadStatus.WaitingForWifi, 0, 0))
             return@withLock Result(attempted = 0, successCount = 0)
@@ -245,29 +378,30 @@ class UploadPendingUseCase @Inject constructor(
         // re-upload as duplicates. The sync worker runs reconcile (which sets this flag) before the
         // upload, so it settles within the same pass — no infinite defer.
         val pairingSettled = prefs[SettingsKeys.pairingSettledKey(userId.id)] ?: false
-        if ((!initialListingComplete || !pairingSettled) && forcedUploadUris.isEmpty()) {
+        if ((!initialListingComplete || !pairingSettled) && !hasExplicitBypass) {
             Log.d(UPLOAD_TAG, "Cloud listing/pairing not settled yet — deferring bulk upload to avoid duplicates")
             _progress.tryEmit(UploadProgress("", "", UploadStatus.PreparingBackup, 0, 0))
             return@withLock Result(attempted = 0, successCount = 0)
         }
 
-        if (!backupEverything && (selectedFolders == null || selectedFolders.isEmpty()) && forcedUploadUris.isEmpty()) {
+        if (!backupEverything && (selectedFolders == null || selectedFolders.isEmpty()) && !hasExplicitBypass) {
             Log.d(UPLOAD_TAG, "No backup folders configured — skipping upload")
             _progress.tryEmit(UploadProgress("", "", UploadStatus.Idle, 0, 0))
             return@withLock Result(attempted = 0, successCount = 0)
         }
 
-        val allStates = syncStateRepo.observeAll(userId).first()
-
-        // Recovery for force-queued album-adds. A photo the user added to an album carries a
-        // PENDING_ALBUM_ADDS marker, so it is in forcedUploadUris. An interrupted prior pass can leave
-        // its row stranded in a non-LOCAL_ONLY status while it still has no cloud copy — that row is
-        // invisible to BOTH the LOCAL_ONLY filter below and the cloudFileId-keyed album drain above, so
-        // the photo shows "uploading" forever and redoing the album-add never re-queues it. Reset such
-        // rows to a clean LOCAL_ONLY so this pass uploads them and then joins the album. HIDDEN is left
-        // untouched (the user moved it out of backup on purpose), matching ForceUploadLocalUrisUseCase.
+        // Recovery for force-queued album-adds. A photo the user added to an album has a row in the
+        // upload_album_target table. An interrupted prior pass can leave its sync_state row stranded in
+        // a non-LOCAL_ONLY status while it still has no cloud copy: that row is invisible to BOTH the
+        // LOCAL_ONLY filter below and the cloudFileId-keyed album drain above, so the photo shows
+        // "uploading" forever and redoing the album-add never re-queues it. Reset such rows to a clean
+        // LOCAL_ONLY so this pass uploads them and then joins the album. HIDDEN is left untouched (the
+        // user moved it out of backup on purpose), matching ForceUploadLocalUrisUseCase. Manual/stuck
+        // UPLOADING rows are covered by resetStaleUploadingClaims + the stranded-intent recovery, so no
+        // separate manual set is needed here.
+        val albumTargetUris: Set<String> = uploadAlbumTargetDao.getAll().map { it.localUri }.toSet()
         val strandedForced = allStates.filter {
-            it.localUri in forcedUploadUris &&
+            it.localUri in albumTargetUris &&
                 it.cloudFileId == null &&
                 it.status != SyncStatus.LOCAL_ONLY &&
                 it.status != SyncStatus.HIDDEN
@@ -285,8 +419,16 @@ class UploadPendingUseCase @Inject constructor(
         }
         val strandedForcedUris = strandedForced.map { it.localUri }.toSet()
 
+        // Queue-gated selection: a LOCAL_ONLY row is uploaded only when it also carries an explicit
+        // queued intent (manual / album / auto-folder / editor; reconcile stamps AUTO_FOLDER for a
+        // folder-selected backup, so an ordinary auto-backup is queued too). This replaces the old
+        // "every LOCAL_ONLY (+ forced) row" rule; the previous forcedUploadUris / strandedForced
+        // inclusion is now subsumed because manual and album rows are queued. The stranded-forced
+        // recovery is still ORed in explicitly: those rows were just reset to LOCAL_ONLY from the
+        // stale pre-upsert snapshot and must upload to join their album regardless of the snapshot's
+        // queue view.
         var pending = allStates.filter {
-            it.status == SyncStatus.LOCAL_ONLY || it.localUri in strandedForcedUris
+            (it.status == SyncStatus.LOCAL_ONLY && it.queued) || it.localUri in strandedForcedUris
         }.map {
             if (it.localUri in strandedForcedUris) {
                 it.copy(status = SyncStatus.LOCAL_ONLY, backedUpAtMs = null, lastSyncSuccessMs = null)
@@ -311,8 +453,11 @@ class UploadPendingUseCase @Inject constructor(
                 .associate { it.uri to it.bucketName }
             val before = pending.size
             pending = pending.filter { state ->
-                // A photo explicitly queued for an album always uploads — it must back up to join it.
-                if (state.localUri in forcedUploadUris) return@filter true
+                // A photo queued by an explicit user action (manual "back up now" or album-add) always
+                // uploads regardless of the folder selection: it must back up to satisfy that action /
+                // join its album. An AUTO_FOLDER row is still folder-filtered. albumTargetUris covers a
+                // stranded album row whose snapshot queueSource may not read ALBUM_ADD yet.
+                if (isExplicitAction(state.queueSource) || state.localUri in albumTargetUris) return@filter true
                 val bucket = bucketByUri[state.localUri]
                 if (backupEverything) {
                     // Everything except the buckets the user carved out.
@@ -399,26 +544,33 @@ class UploadPendingUseCase @Inject constructor(
             coroutineScope {
                 val jobs = pending.map { state ->
                     async {
-                        // Cheapest possible early-out: cooperative cancellation, OS stop-signal,
-                        // and storage-full flag. Done BEFORE acquiring the permit so a stopped
-                        // worker doesn't tie up a slot while it spins down.
+                        // Item boundary. Check the cooperative stop flag and the storage-full flag
+                        // BEFORE claiming/starting this item, so a stop keeps the remaining queued
+                        // items from ever beginning while an already-running upload finishes. This is
+                        // a plain boolean, never a cancellation; an in-flight uploadOne is untouched.
+                        // ensureActive() only guards genuine scope teardown (process death); a normal
+                        // stop leaves the scope alive so it never fires here.
                         coroutineContext.ensureActive()
-                        if (isStoppedSignal() || storageFullHit.get()) return@async
+                        if (stopRequested.get() || storageFullHit.get()) return@async
 
                         uploadSemaphore.withPermit {
                             // Re-check after acquiring the permit — earlier tasks may have set
-                            // storageFullHit / isStoppedSignal while we were queued.
+                            // storageFullHit / stopRequested while we were queued.
                             coroutineContext.ensureActive()
-                            if (isStoppedSignal() || storageFullHit.get()) return@withPermit
+                            if (stopRequested.get() || storageFullHit.get()) return@withPermit
 
                             uploadOne(
                                 userId = userId,
                                 state = state,
                                 totalCount = totalCount,
-                                forcedUploadUris = forcedUploadUris,
+                                albumTargetUris = albumTargetUris,
                                 albumOptInFolders = albumOptInFolders,
                                 stripOnUpload = stripOnUpload,
+                                compressOnUpload = compressOnUpload,
+                                compressTier = compressTier,
                                 mirrorStripToLocal = mirrorStripToLocal,
+                                mirrorCompressToLocal = mirrorCompressToLocal,
+                                compressVideosOnUpload = compressVideosOnUpload,
                                 renameToCaptureDate = renameToCaptureDate,
                                 deleteLocalAfterBackup = deleteLocalAfterBackup,
                                 stripConfig = stripConfig,
@@ -442,6 +594,13 @@ class UploadPendingUseCase @Inject constructor(
             Log.d(UPLOAD_TAG, "Upload batch cancelled — ${successCount.get()}/$totalCount succeeded before stop")
             // Propagate cancellation so structured concurrency tears down the caller properly.
             throw e
+        }
+
+        // Clear the cooperative stop so it only affected this batch. A later natural trigger
+        // (new photo / periodic / app-open) then resumes the still-pending items normally.
+        val wasStopped = stopRequested.getAndSet(false)
+        if (wasStopped) {
+            Log.d(UPLOAD_TAG, "Upload batch stopped by user; remaining queued items left pending for a later trigger")
         }
 
         val finalSuccess = successCount.get()
@@ -475,10 +634,14 @@ class UploadPendingUseCase @Inject constructor(
         userId: UserId,
         state: SyncState,
         totalCount: Int,
-        forcedUploadUris: Set<String>,
+        albumTargetUris: Set<String>,
         albumOptInFolders: Set<String>,
         stripOnUpload: Boolean,
+        compressOnUpload: Boolean,
+        compressTier: UploadCompressionTier,
         mirrorStripToLocal: Boolean,
+        mirrorCompressToLocal: Boolean,
+        compressVideosOnUpload: Boolean,
         renameToCaptureDate: Boolean,
         deleteLocalAfterBackup: Boolean,
         stripConfig: MetadataStripConfig,
@@ -491,6 +654,10 @@ class UploadPendingUseCase @Inject constructor(
         onStorageFull: () -> Unit,
     ) {
         var strippedFile: File? = null
+        var compressedFile: File? = null
+        // A temp holding a timestamp-floored copy of an uncompressed video (Fix: backup video mvhd
+        // floor). Tracked alongside the other temps so it is cleaned up on both success and failure.
+        var tsFloorFile: File? = null
         try {
             val rawLocalItem = localRepo.queryByUri(state.localUri)
             if (rawLocalItem == null) {
@@ -500,8 +667,11 @@ class UploadPendingUseCase @Inject constructor(
             // Skip items whose folder is no longer in the backup selection. Read the selection LIVE
             // (not the snapshot captured when the batch began) so unchecking a folder mid-sync stops
             // its not-yet-started uploads, not just the next batch. Items already past this point
-            // finish; an album-forced upload (forcedUploadUris) always proceeds so it can join its album.
-            if (state.localUri !in forcedUploadUris) {
+            // finish; an explicit user action (queueSource MANUAL / ALBUM_ADD, or a photo with a queued
+            // album target) always proceeds so a "back up now" runs and an album-add can join its
+            // album. An AUTO_FOLDER row is still folder-filtered here as a backstop against a mid-batch
+            // toggle.
+            if (!isExplicitAction(state.queueSource) && state.localUri !in albumTargetUris) {
                 val livePrefs = context.settingsDataStore.data.first()
                 val liveBackupEverything = livePrefs[SettingsKeys.BACKUP_EVERYTHING] ?: false
                 val liveSelected = livePrefs[SettingsKeys.SYNC_FOLDER_NAMES]
@@ -517,6 +687,23 @@ class UploadPendingUseCase @Inject constructor(
                     return
                 }
             }
+            // Atomically claim this row before any hashing or network work. Two upload passes (the
+            // one-shot and the content-observer WorkManager names) run in parallel, guarded only by
+            // an in-process mutex that a process restart loses, so both could otherwise select and
+            // upload the same LOCAL_ONLY row, producing a real Drive duplicate. The claim flips it to
+            // UPLOADING only while it is still LOCAL_ONLY: exactly one pass gets the 1, the other gets
+            // 0 and skips. A claimed (UPLOADING) row is invisible to both the selector and reconcile.
+            // On upload failure the catch below resets it to LOCAL_ONLY so it retries; on success the
+            // SYNCED upsert transitions it.
+            if (syncStateRepo.claimForUpload(state.localUri) != 1) {
+                Log.d(UPLOAD_TAG, "Skipping ${rawLocalItem.displayName}: already claimed by another pass or no longer local-only")
+                return
+            }
+            // Once claimed, this item runs to completion. No stop/cancel check is placed between the
+            // claim and the encrypt/upload below: interrupting an in-flight upload would tear down a
+            // native PGP call and crash the process. A user stop is honoured only at the item boundary
+            // in invoke() (before the claim), so a claimed item is never abandoned mid-pipeline. A row
+            // stranded UPLOADING by a genuine process death is recovered on the next pass.
             // Optional rename: derive cloud displayName from the source's capture timestamp
             // (MediaStore DATE_TAKEN). The on-device file keeps its own name unless "mirror to
             // local" is on, which renames it to match — deferred until AFTER the upload succeeds
@@ -536,10 +723,43 @@ class UploadPendingUseCase @Inject constructor(
             }
             // Strip-timestamp promises capture-time removal, but dateTaken also feeds the
             // Drive captureTime and the xAttr ModificationTime (PhotoUploadService). Floor
-            // it to upload time here so the cloud metadata can't reconstruct when the shot
-            // was actually taken. The on-device MediaStore row is untouched.
-            val localItem = if (stripOnUpload && stripConfig.stripTimestamp) {
-                renamedItem.copy(dateTaken = System.currentTimeMillis())
+            // it to upload time so the cloud metadata can't reconstruct when the shot was
+            // actually taken. The on-device MediaStore row is untouched.
+            val stripCaptureTime = stripOnUpload && stripConfig.stripTimestamp
+            // Read the file's own EXIF DateTimeOriginal only when it can actually change the choice:
+            // a non-stripped image whose MediaStore DATE_TAKEN was absent (0), so dateTaken fell back
+            // to the import time (DATE_ADDED). For an image received from another app the file's own
+            // EXIF often still carries the real capture date. Best-effort: any read/parse failure
+            // yields 0 and the existing fallback date is kept. This I/O stays here; the choice below
+            // is a pure function.
+            val exifDateTimeOriginalMs: Long? = if (
+                !stripCaptureTime &&
+                renamedItem.mimeType.startsWith("image/") &&
+                !renamedItem.dateTakenIsExplicit
+            ) {
+                runCatching {
+                    val raw = ExifHelper.readMetadata(context, state.localUri).dateTimeOriginal
+                    if (raw != null) {
+                        SimpleDateFormat("yyyy:MM:dd HH:mm:ss", Locale.US).parse(raw)?.time ?: 0L
+                    } else {
+                        0L
+                    }
+                }.getOrDefault(0L)
+            } else {
+                null
+            }
+            val resolvedCaptureTime = resolveUploadCaptureTimeMs(
+                mediaStoreDateTakenMs = renamedItem.dateTaken,
+                dateTakenIsExplicit = renamedItem.dateTakenIsExplicit,
+                exifDateTimeOriginalMs = exifDateTimeOriginalMs,
+                stripTimestamp = stripCaptureTime,
+                nowMs = System.currentTimeMillis(),
+            )
+            if (exifDateTimeOriginalMs != null && exifDateTimeOriginalMs > 0L) {
+                Log.d(UPLOAD_TAG, "Corrected capture date from EXIF for ${renamedItem.displayName}")
+            }
+            val localItem = if (resolvedCaptureTime != renamedItem.dateTaken) {
+                renamedItem.copy(dateTaken = resolvedCaptureTime)
             } else {
                 renamedItem
             }
@@ -564,7 +784,7 @@ class UploadPendingUseCase @Inject constructor(
             // location atom (EXIF wiping can't reach an MP4/MOV moov/udta). Both paths
             // fall back to the original URI when the temp couldn't be produced — a strip
             // failure must never block the backup of the file itself.
-            val uploadUri: String = if (stripOnUpload && localItem.mimeType.startsWith("image/")) {
+            val strippedUploadUri: String = if (stripOnUpload && localItem.mimeType.startsWith("image/")) {
                 // Motion Photos carry an MP4 appended after the primary still. A plain ExifInterface
                 // rewrite-strip drops that trailer (and the motion is lost), so detect first and, for
                 // a motion photo, strip only the primary's EXIF into a temp while re-attaching the
@@ -600,6 +820,29 @@ class UploadPendingUseCase @Inject constructor(
                     if (strippedFile != null) {
                         Log.d(UPLOAD_TAG, "Metadata stripped for ${localItem.displayName}")
                         android.net.Uri.fromFile(strippedFile).toString()
+                    } else if (eu.akoos.photos.data.upload.UploadImageCompressor
+                            .needsStripTranscode(
+                                localItem.mimeType,
+                                stripOnUpload,
+                                compressOnUpload,
+                                isMotionPhoto = { isMotionPhotoUpload(state.localUri) },
+                            )
+                    ) {
+                        // The container cannot be EXIF-rewritten in place (HEIC / HEIF / AVIF) and no
+                        // compression pass will run to rebuild a gated JPEG, so stripToTempFile no-oped
+                        // and the untouched original would ship carrying the very GPS / camera EXIF the
+                        // user asked to strip. Transcode a stripped JPEG and upload that instead. A
+                        // motion photo is excluded by the probe: re-encoding its primary frame would
+                        // drop the appended clip, so its motion outweighs the unwritable container.
+                        val transcoded = eu.akoos.photos.data.upload.UploadImageCompressor
+                            .transcodeStrippedJpeg(context, state.localUri, stripConfig)
+                        if (transcoded != null) {
+                            strippedFile = transcoded
+                            Log.d(UPLOAD_TAG, "Stripped JPEG transcoded for ${localItem.displayName} (unwritable container)")
+                            android.net.Uri.fromFile(transcoded).toString()
+                        } else {
+                            state.localUri
+                        }
                     } else {
                         state.localUri
                     }
@@ -627,24 +870,149 @@ class UploadPendingUseCase @Inject constructor(
                 state.localUri
             }
 
+            // Opt-in image compression. Runs AFTER the strip fork so it composes: it recompresses
+            // whatever [strippedUploadUri] resolved to (the stripped temp when stripping, else the
+            // original), so a stripped + compressed photo keeps the strip and ends up as the lighter
+            // JPEG. This branch is images only; video is handled by the video-compress branch below,
+            // not uploaded here. On any failure (or when the
+            // recompressed copy would not be smaller) the recompressor returns null and the upload
+            // proceeds with the pre-compression bytes, so a compression failure never blocks a backup.
+            // The bytes sent, hashed, and sized are the compressed copy, mirroring the strip handling.
+            // A Motion Photo is a still with an MP4 appended after it; the image compressor decodes
+            // only the primary frame and re-encodes a plain JPEG, which would silently drop the motion
+            // trailer. Skip compression for one (the stripped/original bytes upload as-is, keeping the
+            // motion). Detection reuses MotionPhotoUtil against the exact bytes about to be compressed.
+            val compressIsMotionPhoto = compressOnUpload &&
+                localItem.mimeType.startsWith("image/") &&
+                isMotionPhotoUpload(strippedUploadUri)
+            if (compressIsMotionPhoto) {
+                Log.d(UPLOAD_TAG, "Skipping image compression for motion photo ${localItem.displayName}; motion preserved")
+            }
+            val uploadUri: String = if (compressOnUpload && !compressIsMotionPhoto && localItem.mimeType.startsWith("image/")) {
+                // The compressor rebuilds the output JPEG's EXIF from the source it recompresses, so it
+                // must honour the strip directly: when the source is a format the strip step could not
+                // rewrite (HEIC), strippedUploadUri fell back to the untouched original and copying its
+                // EXIF unfiltered would re-inject the GPS / camera tags the user asked to remove. Pass
+                // the effective config so those groups are dropped; a no-op when strip-on-upload is off,
+                // so a non-stripping upload still carries the full EXIF byte-for-byte as before.
+                val compressStripConfig = if (stripOnUpload) stripConfig else MetadataStripConfig()
+                val compressed = eu.akoos.photos.data.upload.UploadImageCompressor
+                    .compressToTemp(context, strippedUploadUri, compressTier, compressStripConfig)
+                if (compressed != null) {
+                    compressedFile = compressed
+                    // The stripped temp (if any) is now superseded by the compressed copy, so delete
+                    // it so a strip+compress pass doesn't leak the intermediate. The compressed file is
+                    // the only temp we still need, tracked for cleanup in the finally below.
+                    strippedFile?.delete()
+                    strippedFile = null
+                    Log.d(UPLOAD_TAG, "Compressed ${localItem.displayName} for upload (tier=${compressTier.name})")
+                    android.net.Uri.fromFile(compressed).toString()
+                } else {
+                    strippedUploadUri
+                }
+            } else if (compressVideosOnUpload && localItem.mimeType.startsWith("video/")) {
+                // Transcode behind the process-wide gate so only one hardware encode runs at a time.
+                // The transcode is a suspend call inside this upload coroutine, so a stopped worker
+                // cancels it. On ANY failure / unsupported / not-smaller / over-ceiling the
+                // compressor returns null and the upload proceeds with the original bytes.
+                val compressed = videoTranscodeGate.withPermit {
+                    eu.akoos.photos.data.upload.VideoUploadCompressor.compressToTemp(
+                        context,
+                        android.net.Uri.parse(strippedUploadUri),
+                        eu.akoos.photos.data.upload.VideoUploadCompressor.VideoCompressionParams(
+                            compressTier.videoMaxShortEdgePx,
+                            compressTier.videoBitrateBps,
+                        ),
+                        localItem.dateTaken,
+                    )
+                }
+                if (compressed != null) {
+                    compressedFile = compressed
+                    strippedFile?.delete()
+                    strippedFile = null
+                    Log.d(UPLOAD_TAG, "Compressed video ${localItem.displayName} for upload (tier=${compressTier.name})")
+                    android.net.Uri.fromFile(compressed).toString()
+                } else {
+                    strippedUploadUri
+                }
+            } else {
+                strippedUploadUri
+            }
+
+            // Strip-timestamp floors the cloud DISPLAY date (localItem.dateTaken is now), and the
+            // compress path already stamps that floored time into the transcoded mvhd. The gap is an
+            // UNCOMPRESSED video: its container's own mvhd creation time can still reveal the real
+            // capture moment. When the bytes about to be uploaded are the original video (no compress),
+            // floor the mvhd to localItem.dateTaken too so the file itself can't reconstruct it. When a
+            // GPS-strip temp already exists, stamp that in place; otherwise copy the original URI's
+            // bytes to a fresh temp, stamp that, and upload the temp. Best-effort: any failure falls
+            // back to uploading the original bytes.
+            var finalUploadUri = uploadUri
+            if (localItem.mimeType.startsWith("video/") &&
+                stripOnUpload && stripConfig.stripTimestamp && compressedFile == null
+            ) {
+                if (strippedFile != null) {
+                    Mp4CreationTime.stamp(strippedFile!!, localItem.dateTaken)
+                } else {
+                    runCatching {
+                        val tmp = File(context.cacheDir, "upl_ts_" + System.nanoTime() + ".mp4")
+                        context.contentResolver.openInputStream(Uri.parse(uploadUri))!!.use { input ->
+                            tmp.outputStream().use { output -> input.copyTo(output) }
+                        }
+                        Mp4CreationTime.stamp(tmp, localItem.dateTaken)
+                        tsFloorFile = tmp
+                        finalUploadUri = Uri.fromFile(tmp).toString()
+                    }.onFailure {
+                        Log.w(UPLOAD_TAG, "Video mvhd floor copy failed for ${localItem.displayName}; uploading original")
+                    }
+                }
+            }
+
             val sha1StartMs = System.currentTimeMillis()
-            val hash = computeSha1(uploadUri)
+            val hash = computeSha1(finalUploadUri)
             // Privacy: never log the file name (mirror PhotoUploadService.logRef) — a non-reversible
             // URI-derived ref keeps the per-file lines correlatable without revealing the file.
-            val logRef = localItem.uri.hashCode().toUInt().toString(16).padStart(8, '0').take(6)
+            val logRef = eu.akoos.photos.util.uploadLogRef(localItem.uri)
             eu.akoos.photos.util.SyncDiagnostics.log(
                 "upload $logRef: sha1 in ${System.currentTimeMillis() - sha1StartMs}ms"
             )
-            // Persist the content hash BEFORE the upload. If the process is killed between
-            // uploadFile() returning (the file is already on Drive) and the SYNCED upsert below,
-            // the row stays LOCAL_ONLY with a null cloudFileId — but now it carries this hash, so
-            // the next run's reconcile pairs it BY CONTENT HASH to the file already on Drive instead
-            // of re-uploading a duplicate. Cheap: the SYNCED upsert rewrites the same hash on success.
-            if (state.localHash != hash) {
-                syncStateRepo.upsert(state.copy(localHash = hash), userId)
+            if (hash == null) {
+                // The content could not be read this pass. Never upload with a bogus/empty hash (it
+                // would land a Drive duplicate that never content-pairs on reconcile): release the
+                // claim back to LOCAL_ONLY so the row stays claimable and retries next pass, and skip
+                // uploadFile + the hash upsert entirely. NonCancellable so the reset still lands if the
+                // batch is torn down around this. A plain return here bypasses the catch blocks below,
+                // so the claim release is done explicitly.
+                Log.w(UPLOAD_TAG, "Skipping ${localItem.displayName}: content hash unavailable (unreadable source), will retry")
+                withContext(NonCancellable) { releaseUploadClaim(state.localUri, userId) }
+                _progress.tryEmit(
+                    UploadProgress(
+                        uri = state.localUri,
+                        displayName = localItem.displayName,
+                        status = UploadStatus.Failed,
+                        doneIdx = finishedCount.get(),
+                        totalCount = totalCount,
+                    )
+                )
+                return
             }
-            val uploadItem = if (strippedFile != null)
-                localItem.copy(sizeBytes = strippedFile.length())
+            // Persist the content hash BEFORE the upload, keeping the UPLOADING claim intact (the
+            // in-memory `state` still reads LOCAL_ONLY from selection time, so it must NOT be written
+            // back verbatim or it would clear the claim mid-upload and let a second pass re-grab the
+            // row). If the process is killed between uploadFile() returning (the file is already on
+            // Drive) and the SYNCED upsert below, the row stays UPLOADING with a null cloudFileId
+            // carrying this hash; the next process's one-time stale recovery demotes it to LOCAL_ONLY
+            // and reconcile then pairs it BY CONTENT HASH to the file already on Drive instead of
+            // re-uploading a duplicate. Cheap: the SYNCED upsert rewrites the same hash on success.
+            if (state.localHash != hash) {
+                syncStateRepo.upsert(state.copy(localHash = hash, status = SyncStatus.UPLOADING), userId)
+            }
+            // Size the item from whatever temp holds the bytes we actually send: the compressed copy
+            // when compression produced one (strippedFile was cleared to it above), the stripped temp
+            // otherwise, else the original. Keeps sizeBytes / progress / xAttr aligned with the wire.
+            val uploadTempFile = compressedFile ?: strippedFile
+            val uploadItem = if (uploadTempFile != null)
+                localItem.copy(sizeBytes = uploadTempFile.length())
             else
                 localItem
 
@@ -690,6 +1058,16 @@ class UploadPendingUseCase @Inject constructor(
                     )
                 }
             }
+            // A downscaled video must report the OUTPUT dimensions in the xAttr, not the original
+            // source's. Probe the compressed temp once (a video compressedFile is set only on the
+            // video-compress path) so a 4K source transcoded to 1080p carries 1920x1080, matching the
+            // bytes actually uploaded. Rotation is unchanged (Drive reads it from the container).
+            val videoDimsOverride: Pair<Int, Int>? =
+                if (compressedFile != null && localItem.mimeType.startsWith("video/")) {
+                    probeVideoDimensions(compressedFile!!)
+                } else {
+                    null
+                }
             // Resolve Camera/Location + rotation-corrected dimensions from the ORIGINAL source
             // (pre-strip), gated against the strip config so the xAttr never re-leaks a field the
             // file had erased. uploadItem.dateTaken is already floored when timestamps are stripped.
@@ -698,27 +1076,100 @@ class UploadPendingUseCase @Inject constructor(
                 item = uploadItem,
                 stripOnUpload = stripOnUpload,
                 stripConfig = stripConfig,
+                videoDimsOverride = videoDimsOverride,
             )
-            val cloudId = cloudRepo.uploadFile(userId, uploadItem, hash, uploadUri, xAttrMetadata, onProgressForFile)
+            val cloudId = cloudRepo.uploadFile(
+                userId, uploadItem, hash, finalUploadUri, xAttrMetadata, onProgressForFile,
+            )
+
+            // Mirror-compress the on-device original, now that the upload is committed and never
+            // before: like the rename below, a failed upload must not leave the local shrunk with no
+            // Drive copy. Reuses the compressed temp before it is deleted just below; the overwrite is
+            // crash-safe (stage a backup, truncate-write, restore on failure), so the original is never
+            // left partial. Independent of the strip mirror: the local ends up COMPRESSED, and stripped
+            // only when mirrorStripToLocal is also on.
+            val mirrorCompressImage = compressOnUpload && mirrorCompressToLocal &&
+                localItem.mimeType.startsWith("image/")
+            if (
+                mirrorCompressImage &&
+                !eu.akoos.photos.data.upload.UploadImageCompressor
+                    .canOverwriteLocalWithCompressedJpeg(localItem.mimeType)
+            ) {
+                // The compressor only ever encodes JPEG, so replacing a PNG / WebP / HEIC original with
+                // its output would leave a file whose bytes contradict its name and its MediaStore mime.
+                // Leave the on-device file untouched; the uploaded copy is compressed either way.
+                Log.d(
+                    UPLOAD_TAG,
+                    "Mirror compress skipped for ${localItem.displayName}: ${localItem.mimeType} cannot hold a JPEG",
+                )
+            } else if (mirrorCompressImage) {
+                if (mirrorStripToLocal || !stripOnUpload) {
+                    // compressedFile already holds the right local content: compressed from the stripped
+                    // temp when strip is mirrored, or from the original when strip-upload is off. A null
+                    // (compression failed or not smaller) skips silently.
+                    compressedFile?.let { local ->
+                        if (overwriteLocalInPlace(state.localUri, local)) {
+                            Log.d(UPLOAD_TAG, "Mirror compress: on-device original compressed for ${localItem.displayName}")
+                        }
+                    }
+                } else if (!compressIsMotionPhoto) {
+                    // stripOnUpload && !mirrorStripToLocal: the upload's compressed temp is stripped, but
+                    // the user did not opt to strip the local. Compress a FRESH strip-free copy from the
+                    // untouched original and overwrite with that, then delete the fresh temp. Skipped for
+                    // a motion photo so the on-device motion is never re-encoded away.
+                    // A no-op strip config keeps this local copy's EXIF intact: the user opted to
+                    // compress the on-device original but not to strip it, so it must retain the full
+                    // metadata the untouched original carries.
+                    val localCompressed = eu.akoos.photos.data.upload.UploadImageCompressor
+                        .compressToTemp(context, state.localUri, compressTier, MetadataStripConfig())
+                    if (localCompressed != null) {
+                        if (overwriteLocalInPlace(state.localUri, localCompressed)) {
+                            Log.d(UPLOAD_TAG, "Mirror compress: on-device original compressed (strip-free) for ${localItem.displayName}")
+                        }
+                        localCompressed.delete()
+                    }
+                }
+            }
+            // Mirror-compress the on-device video: reuse the already-transcoded temp, never re-transcode.
+            // Safe to mirror when the local content matches that temp: strip mirrored (both stripped) or
+            // strip-upload off (neither stripped).
+            if (compressVideosOnUpload && mirrorCompressToLocal && localItem.mimeType.startsWith("video/")) {
+                if (mirrorStripToLocal || !stripOnUpload) {
+                    compressedFile?.let { local ->
+                        if (overwriteLocalInPlace(state.localUri, local)) {
+                            Log.d(UPLOAD_TAG, "Mirror compress: on-device video compressed for ${localItem.displayName}")
+                        }
+                    }
+                }
+                // else (stripOnUpload && !mirrorStripToLocal): skip; a strip-free re-transcode is too costly.
+            }
 
             strippedFile?.delete()
             strippedFile = null
+            compressedFile?.delete()
+            compressedFile = null
+            tsFloorFile?.delete()
+            tsFloorFile = null
 
             // The file is on Drive once uploadFile returns a real cloudId. Record that fact
             // non-cancellably so an interrupt in this window can't leave the row LOCAL_ONLY with
             // a null cloudFileId — which would re-select and re-upload the same file (a Drive
             // duplicate) on the next pass.
+            val syncedState = state.copy(
+                cloudFileId = cloudId,
+                localHash = hash,
+                status = SyncStatus.SYNCED,
+                lastSyncSuccessMs = System.currentTimeMillis(),
+                backedUpAtMs = System.currentTimeMillis(),
+            )
             withContext(NonCancellable) {
-                syncStateRepo.upsert(
-                    state.copy(
-                        cloudFileId = cloudId,
-                        localHash = hash,
-                        status = SyncStatus.SYNCED,
-                        lastSyncSuccessMs = System.currentTimeMillis(),
-                        backedUpAtMs = System.currentTimeMillis(),
-                    ),
-                    userId,
-                )
+                syncStateRepo.upsert(syncedState, userId)
+                // RULE 1: clear the queued flag now the row is SYNCED, so a later grace-window demotion
+                // can't leave it flagged and re-queued for a duplicate. Unguarded because the row is
+                // known backed up. Same non-cancellable window as the SYNCED upsert so an interrupt
+                // can't split the two. The upsert round-trips a domain SyncState, which never carries
+                // the queue columns, so this separate DAO write is what actually clears them.
+                syncStateRepo.clearQueuedForSynced(state.localUri)
             }
 
             // Mirror the cloud rename onto the on-device file now that the upload is committed (and
@@ -732,30 +1183,57 @@ class UploadPendingUseCase @Inject constructor(
             // Delete-after-backup: only the ORIGINAL MediaStore URI, never the strip
             // temp. Runs AFTER the SYNCED upsert so a crash here cannot leave the
             // user with a deleted local file and no Drive record. The direct call
-            // throws RecoverableSecurityException on Samsung Gallery owned items
-            // even with Manage Media granted — the OS still wants an explicit
-            // consent gesture. We queue refused URIs into PENDING_DELETE_URIS and
-            // the batched foreground sweep at the end of the upload run sends a
-            // single createDeleteRequest IntentSender that lets the user accept N
-            // files at once instead of one dialog per file.
-            if (deleteLocalAfterBackup) {
-                val uri = runCatching { Uri.parse(state.localUri) }.getOrNull()
-                if (uri == null) {
-                    Log.w(UPLOAD_TAG, "Delete after backup: invalid URI ${state.localUri}")
-                } else {
-                    val rows = runCatching { context.contentResolver.delete(uri, null, null) }
-                        .getOrElse { e ->
+            // is refused on Samsung Gallery owned items even with Manage Media
+            // granted — the OS still wants an explicit consent gesture. We queue
+            // refused URIs into PENDING_DELETE_URIS and the batched foreground sweep
+            // at the end of the upload run sends a single IntentSender that lets the
+            // user accept N files at once instead of one dialog per file.
+            // The removal and the CLOUD_ONLY flip share one non-cancellable window so
+            // an interrupt between them cannot leave the row claiming a device copy
+            // that is already gone.
+            val removal = resolveDeleteAfterBackupRemoval(
+                sdkInt = Build.VERSION.SDK_INT,
+                deleteLocalAfterBackup = deleteLocalAfterBackup,
+                uploadSucceeded = cloudId.isNotBlank(),
+            )
+            if (removal != Removal.NONE) {
+                withContext(NonCancellable) {
+                    val uri = runCatching { Uri.parse(state.localUri) }.getOrNull()
+                    if (uri == null) {
+                        Log.w(UPLOAD_TAG, "Delete after backup: invalid URI ${state.localUri}")
+                    } else {
+                        val rows = runCatching {
+                            if (removal == Removal.TRASH) {
+                                context.contentResolver.update(
+                                    uri,
+                                    ContentValues().apply { put(MediaStore.MediaColumns.IS_TRASHED, 1) },
+                                    null,
+                                    null,
+                                )
+                            } else {
+                                // No system trash exists before R, so the device copy can only be
+                                // removed outright; the recoverable window starts at R.
+                                context.contentResolver.delete(uri, null, null)
+                            }
+                        }.getOrElse { e ->
+                            if (e is CancellationException) throw e
                             Log.w(UPLOAD_TAG, "Delete after backup threw for ${localItem.displayName}: ${e::class.simpleName} ${e.message}")
                             0
                         }
-                    if (rows > 0) {
-                        Log.d(UPLOAD_TAG, "Delete after backup: removed ${localItem.displayName} from MediaStore")
-                    } else {
-                        context.settingsDataStore.edit { p ->
-                            val existing = p[SettingsKeys.PENDING_DELETE_URIS] ?: emptySet()
-                            p[SettingsKeys.PENDING_DELETE_URIS] = existing + state.localUri
+                        if (rows > 0) {
+                            // The device copy is gone, so the row must stop claiming one: a SYNCED
+                            // row here would let a later free-up-space pass re-select the same photo
+                            // and raise a consent dialog for a file that is no longer on the device.
+                            syncStateRepo.upsert(syncedState.copy(status = SyncStatus.CLOUD_ONLY), userId)
+                            val verb = if (removal == Removal.TRASH) "trashed" else "removed"
+                            Log.d(UPLOAD_TAG, "Delete after backup: $verb ${localItem.displayName}")
+                        } else {
+                            context.settingsDataStore.edit { p ->
+                                val existing = p[SettingsKeys.PENDING_DELETE_URIS] ?: emptySet()
+                                p[SettingsKeys.PENDING_DELETE_URIS] = existing + state.localUri
+                            }
+                            Log.d(UPLOAD_TAG, "Delete after backup: queued ${localItem.displayName} for batched consent dialog")
                         }
-                        Log.d(UPLOAD_TAG, "Delete after backup: queued ${localItem.displayName} for batched consent dialog")
                     }
                 }
             }
@@ -821,33 +1299,38 @@ class UploadPendingUseCase @Inject constructor(
                 }
             }
 
-            // User-queued album-adds for this freshly-uploaded photo. These are album linkIds
-            // directly (the user picked an existing album for a local-only photo), so skip the
-            // bucket-name resolve/create the mirror loop above does. Best-effort like the mirror:
-            // on failure the photo stays uploaded and the entry stays for the next-pass drain.
-            val queuedAlbumLinkIds = decodePendingAlbumAdds(
-                context.settingsDataStore.data.first()[SettingsKeys.PENDING_ALBUM_ADDS] ?: emptySet()
-            ).filterKeys { it == state.localUri }.values.toSet()
-            for (albumLinkId in queuedAlbumLinkIds) {
-                // No-album sentinel: this URI was forced to upload with no album to join. The
-                // upload just succeeded, so drop the marker without an album call.
-                if (albumLinkId == SettingsKeys.PENDING_ALBUM_ADD_NO_ALBUM) {
-                    removePendingAlbumAdd(state.localUri, albumLinkId)
-                    continue
-                }
+            // User-queued album-adds for this freshly-uploaded photo, read from the target table (the
+            // single source of truth). These are album linkIds directly (the user picked an existing
+            // album for a local-only photo), so skip the bucket-name resolve/create the mirror loop
+            // above does. Best-effort like the mirror: each pair is dropped only on a successful add,
+            // and a failure leaves that pair for the next-pass drain so an album membership is never
+            // lost. A manual "back up now" has no target rows, so this loop is simply empty for it.
+            for (albumLinkId in uploadAlbumTargetDao.getTargetsFor(state.localUri)) {
                 runCatching { cloudRepo.addPhotosToAlbum(userId, albumLinkId, listOf(cloudId)) }
                     .onSuccess {
-                        removePendingAlbumAdd(state.localUri, albumLinkId)
+                        uploadAlbumTargetDao.deleteTarget(state.localUri, albumLinkId)
                         Log.d(UPLOAD_TAG, "Added $cloudId to queued album $albumLinkId")
                     }
                     .onFailure { e -> Log.w(UPLOAD_TAG, "Queued album-add failed for $albumLinkId: ${e.message}") }
             }
         } catch (e: CancellationException) {
-            // Structured cancellation — re-throw so awaitAll() tears down siblings cleanly.
+            // A user cancel (or an OS stop) can land mid-upload while this row is claimed UPLOADING
+            // by the #69 fix. Release the claim back to LOCAL_ONLY first, otherwise the row stays
+            // stranded at UPLOADING until the next process restart's stale-claim recovery, so a
+            // cancelled upload could never retry on the next genuine trigger. NonCancellable so the
+            // reset still lands while the batch is being torn down around this cancellation. Only a
+            // row still UPLOADING with no cloud copy is reset (see releaseUploadClaim), so a
+            // concurrently-committed success is never trampled. Then re-throw so awaitAll() tears
+            // down siblings cleanly and structured concurrency stays intact.
+            withContext(NonCancellable) { releaseUploadClaim(state.localUri, userId) }
             throw e
         } catch (e: StorageFullException) {
             Log.w(UPLOAD_TAG, "Storage full — flagging batch abort after current task")
             onStorageFull()
+            // Release the claim so a later pass retries this row once space frees up. The upload
+            // never committed, so it must not stay stuck at UPLOADING. NonCancellable so the reset
+            // still lands even if the batch is being torn down around this failure.
+            withContext(NonCancellable) { releaseUploadClaim(state.localUri, userId) }
             _progress.tryEmit(
                 UploadProgress(
                     uri = state.localUri,
@@ -859,6 +1342,18 @@ class UploadPendingUseCase @Inject constructor(
             )
         } catch (e: Exception) {
             Log.e(UPLOAD_TAG, "Upload failed for ${state.localUri}: ${e.message}", e)
+            // Release builds minify every android.util.Log call away, so the line above vanishes from
+            // exactly the builds a tester runs and an upload failure leaves no trace anywhere. Record
+            // the reason in the diagnostics buffer instead: the exception types plus a message run
+            // through the sanitizer, which strips names, paths, urls and ids.
+            eu.akoos.photos.util.SyncDiagnostics.log(
+                "upload ${eu.akoos.photos.util.uploadLogRef(state.localUri)} FAILED: " +
+                    eu.akoos.photos.util.describeUploadFailure(e)
+            )
+            // Reset the claim: the upload failed before the SYNCED upsert, so return the row to
+            // LOCAL_ONLY for the next pass instead of leaving it stranded at UPLOADING (which the
+            // selector and reconcile both skip). NonCancellable so it lands during a batch teardown.
+            withContext(NonCancellable) { releaseUploadClaim(state.localUri, userId) }
             _progress.tryEmit(
                 UploadProgress(
                     uri = state.localUri,
@@ -873,34 +1368,71 @@ class UploadPendingUseCase @Inject constructor(
             // swallowed — caller batch continues with siblings
         } finally {
             strippedFile?.delete()
+            compressedFile?.delete()
+            tsFloorFile?.delete()
         }
     }
 
     /**
-     * Hex-encodes the SHA-1 of the file's plaintext content. Drive's `ContentHash`
-     * wire field is `HMAC-SHA256(rootNodeHashKey, sha1Hex.utf8Bytes())` and Drive
-     * web's `photosTransferPayloadBuilder` rejects any payload whose photo content
-     * hash was derived from a SHA-256 input with the misleading error
-     * "Cannot build photo payload without a content hash". Drive Android picks SHA-1
-     * via `ConfigurationProvider.contentDigestAlgorithm = "SHA1"` (tempandroid-drive
-     * `drive/base/domain/.../ConfigurationProvider.kt:73`). The xAttr Common.Digests
-     * map carries the same SHA-1 hex so a later cross-client xAttr verify lines up.
+     * True when a row's [queueSource] marks it as an explicit user action: a manual "back up now"
+     * ([QueueSource.MANUAL]) or an album-add ([QueueSource.ALBUM_ADD]), which the user asked for
+     * regardless of the current Wi-Fi / folder state. Such a row bypasses the folder re-filters and
+     * the network/listing early-returns; an [QueueSource.AUTO_FOLDER] (or [QueueSource.EDITOR]) row
+     * does not, so it stays subject to the folder guards. Replaces the old forcedUploadUris check.
      */
+    private fun isExplicitAction(queueSource: String?): Boolean =
+        queueSource == eu.akoos.photos.domain.entity.QueueSource.MANUAL ||
+            queueSource == eu.akoos.photos.domain.entity.QueueSource.ALBUM_ADD
+
     /**
-     * Decodes the PENDING_ALBUM_ADDS set ("localUri=albumLinkId" entries) into a localUri→linkId
-     * map. The split is on the FIRST '=': the localUri is a canonical content:// MediaStore URI
-     * (no '='), while a Drive album linkId is base64 and ends in '=' padding — so the first '=' is
-     * the separator. Splitting on the last '=' mis-parsed any linkId ending in '=' and dropped the
-     * entry outright when its final char was the padding '=', so the forced upload never ran.
-     * A localUri with multiple queued albums keeps only the last one in the map, but every raw
-     * entry is still removed individually on success.
+     * Returns a failed upload's claimed row from UPLOADING to LOCAL_ONLY so the next pass retries
+     * it. Only a row this pass left UPLOADING with no cloud copy is reset, so a concurrent success
+     * (which would have flipped it to SYNCED with a cloudFileId) is never trampled. Preserves the
+     * row's other fields (notably the localHash persisted before the upload) so reconcile can
+     * still content-hash-pair it if the file did reach Drive.
      */
-    private fun decodePendingAlbumAdds(raw: Set<String>): Map<String, String> =
-        raw.mapNotNull { entry ->
-            val idx = entry.indexOf('=')
-            if (idx <= 0 || idx == entry.length - 1) null
-            else entry.substring(0, idx) to entry.substring(idx + 1)
-        }.toMap()
+    private suspend fun releaseUploadClaim(localUri: String, userId: UserId) {
+        runCatching {
+            val current = syncStateRepo.getByUri(localUri)
+            if (current?.status == SyncStatus.UPLOADING && current.cloudFileId == null) {
+                // RULE 2: re-queue the demoted row so it stays eligible under the future queue selector,
+                // otherwise a failed upload / edit would silently drop off the queue. Read the original
+                // source (why it was up for backup) BEFORE the upsert below: upsert round-trips a domain
+                // SyncState, whose mapper drops the queue columns and so clears them, so reading after
+                // would always see null. Default AUTO_FOLDER when the row carried no source.
+                val source = syncStateRepo.getQueueSource(localUri)
+                    ?: eu.akoos.photos.domain.entity.QueueSource.AUTO_FOLDER
+                syncStateRepo.upsert(current.copy(status = SyncStatus.LOCAL_ONLY), userId)
+                // markQueued is a per-row UPDATE, so it re-stamps the queue columns the upsert just
+                // cleared; running it after the upsert lands the flag on the now-LOCAL_ONLY row.
+                syncStateRepo.markQueued(localUri, source, System.currentTimeMillis())
+            }
+        }.onFailure { e -> Log.w(UPLOAD_TAG, "Failed to release upload claim for $localUri: ${e.message}") }
+    }
+
+    /**
+     * Deletes upload-path temps in cacheDir whose name starts with a known prefix and whose
+     * lastModified is older than [STALE_UPLOAD_TEMP_MS]. Dirs (e.g. an `upload_` resume dir) are
+     * removed recursively. The age gate is the safety: an in-flight upload only reads freshly
+     * created temps, and a retryable failure's preserved resume dir is only ever >3 days old once
+     * abandoned, so a recent one is never swept and a resume can still find it. Best-effort and
+     * cheap: one listFiles() with nothing to do when no temp is stale; never blocks upload work.
+     */
+    private fun sweepStaleUploadTemps() {
+        runCatching {
+            val cutoff = System.currentTimeMillis() - STALE_UPLOAD_TEMP_MS
+            var removed = 0
+            context.cacheDir.listFiles()?.forEach { entry ->
+                if (UPLOAD_TEMP_PREFIXES.none { entry.name.startsWith(it) }) return@forEach
+                val mtime = entry.lastModified()
+                if (mtime in 1..cutoff) {
+                    val ok = if (entry.isDirectory) entry.deleteRecursively() else entry.delete()
+                    if (ok) removed++
+                }
+            }
+            if (removed > 0) Log.d(UPLOAD_TAG, "Swept $removed stale upload temp(s) from cache")
+        }.onFailure { e -> Log.w(UPLOAD_TAG, "Stale upload-temp sweep failed: ${e.message}") }
+    }
 
     /** Renames the on-device MediaStore file in place (silent with MANAGE_MEDIA), so a mirrored
      *  upload's local copy shares the cloud name. A write the OS refuses is logged and skipped. */
@@ -918,62 +1450,60 @@ class UploadPendingUseCase @Inject constructor(
     }
 
     /** Overwrites the on-device MediaStore file with [src]'s bytes (silent with MANAGE_MEDIA /
-     *  all-files). Used to mirror a strip onto the original — a motion photo's in-place EXIF rewrite
+     *  all-files). Used to mirror a strip onto the original: a motion photo's in-place EXIF rewrite
      *  would drop the trailer, and a video can't be EXIF-edited at all, so the whole stripped file is
-     *  written instead. "wt" truncates the file up front, so the current bytes are staged to a backup
-     *  and rolled back if the copy fails or is cancelled — the original is never left partial. A write
-     *  the OS refuses is logged and skipped (the original stays intact). */
+     *  written instead. The current bytes are first staged into [mirrorOverwriteJournal], then "wt"
+     *  truncates and rewrites the file. A copy that throws (I/O error, eject) is rolled back in place
+     *  from the staged backup, and a process killed mid-truncate is rolled back from the same backup
+     *  on the next launch, so the original is never left partial. A write the OS refuses is logged and
+     *  skipped (the original stays intact); a staging failure returns false without touching the file. */
     private fun overwriteLocalInPlace(uri: String, src: File): Boolean {
         val parsed = Uri.parse(uri)
-        // Stage the current bytes so a copy that throws partway (I/O error, eject, kill) can be rolled
-        // back — the same restore-on-failure guard ExifInterface.saveAttributes uses internally.
-        val backup: File = try {
-            val bak = File.createTempFile("mirror_bak_", ".tmp", context.cacheDir)
-            val copied = context.contentResolver.openInputStream(parsed)?.use { input ->
-                bak.outputStream().use { input.copyTo(it) }
-                true
-            } ?: false
-            if (!copied) { bak.delete(); return false }
-            bak
-        } catch (e: Exception) {
-            if (e is kotlinx.coroutines.CancellationException) throw e
-            Log.w(UPLOAD_TAG, "Mirror overwrite skipped (backup failed) for $uri: ${e.message}")
-            return false
-        }
-        return try {
-            val out = context.contentResolver.openOutputStream(parsed, "wt")
-                ?: run { backup.delete(); return false }
-            out.use { o -> src.inputStream().use { it.copyTo(o) } }
-            backup.delete()
-            true
-        } catch (e: Exception) {
-            // Restore the original from the backup before propagating, so a failed OR cancelled
-            // overwrite leaves the file exactly as it was. copyTo is blocking, so the restore still
-            // runs under cancellation; rethrow afterwards. Keep the backup only if the restore fails.
-            val restored = runCatching {
-                context.contentResolver.openOutputStream(parsed, "wt")?.use { o ->
-                    backup.inputStream().use { it.copyTo(o) }
+        var backup: File? = null
+        val outcome = eu.akoos.photos.data.upload.MirrorOverwriteJournal.guardedOverwrite(
+            stage = {
+                // Staging publishes its marker only once the backup copy is complete, so a kill during
+                // the truncate-write below always leaves a journal pair the next launch can replay.
+                mirrorOverwriteJournal.stage(uri) { file ->
+                    context.contentResolver.openInputStream(parsed)?.use { input ->
+                        file.outputStream().use { input.copyTo(it) }
+                        true
+                    } ?: false
+                }?.also { backup = it.backup }
+            },
+            openAndWrite = {
+                // A null stream means the OS refused the write, so nothing was truncated. Once the
+                // stream opens, "wt" has already emptied the file and any failure must be rolled back.
+                val out = context.contentResolver.openOutputStream(parsed, "wt")
+                if (out == null) {
+                    false
+                } else {
+                    out.use { o -> src.inputStream().use { it.copyTo(o) } }
+                    true
+                }
+            },
+            restore = {
+                val bak = backup
+                bak != null && context.contentResolver.openOutputStream(parsed, "wt")?.use { o ->
+                    bak.inputStream().use { it.copyTo(o) }
                 } != null
-            }.getOrDefault(false)
-            if (restored) {
-                backup.delete()
-                Log.w(UPLOAD_TAG, "Mirror overwrite failed for $uri; original restored: ${e.message}")
-            } else {
-                Log.e(UPLOAD_TAG, "Mirror overwrite + restore failed for $uri; backup kept at ${backup.absolutePath}")
-            }
-            if (e is kotlinx.coroutines.CancellationException) throw e
-            false
+            },
+            commit = { entry -> mirrorOverwriteJournal.commit(entry) },
+        )
+        when (outcome) {
+            MirrorOverwriteJournal.Outcome.WRITTEN -> return true
+            MirrorOverwriteJournal.Outcome.SKIPPED ->
+                Log.w(UPLOAD_TAG, "Mirror overwrite skipped for $uri (backup or write refused)")
+            MirrorOverwriteJournal.Outcome.ROLLED_BACK ->
+                Log.w(UPLOAD_TAG, "Mirror overwrite failed for $uri; original restored")
+            MirrorOverwriteJournal.Outcome.STRANDED ->
+                Log.e(
+                    UPLOAD_TAG,
+                    "Mirror overwrite failed for $uri and the in-place restore also failed; the original " +
+                        "stays staged in the journal and is replayed on the next launch",
+                )
         }
-    }
-
-    /** Removes a single "localUri=albumLinkId" entry from PENDING_ALBUM_ADDS after its add lands. */
-    private suspend fun removePendingAlbumAdd(localUri: String, albumLinkId: String) {
-        pendingAddMutex.withLock {
-            context.settingsDataStore.edit { p ->
-                val existing = p[SettingsKeys.PENDING_ALBUM_ADDS] ?: emptySet()
-                p[SettingsKeys.PENDING_ALBUM_ADDS] = existing - "$localUri=$albumLinkId"
-            }
-        }
+        return false
     }
 
     /**
@@ -1066,6 +1596,37 @@ class UploadPendingUseCase @Inject constructor(
     }
 
     /**
+     * True when [uploadUri] points at an Android Motion Photo (a still with an appended MP4 trailer),
+     * so the caller can skip image compression that would re-encode only the primary and lose the
+     * motion. Reuses [MotionPhotoUtil.detect], which needs a [File]: a file:// URI (a strip temp that
+     * already preserved the motion) is read in place; a content:// original is materialized to a temp
+     * first, then deleted. Defensive: any failure returns false so an unreadable file just compresses
+     * as an ordinary still.
+     */
+    private fun isMotionPhotoUpload(uploadUri: String): Boolean {
+        val uri = runCatching { Uri.parse(uploadUri) }.getOrNull() ?: return false
+        if (uri.scheme == "file") {
+            val path = uri.path ?: return false
+            return runCatching { MotionPhotoUtil.detect(File(path)) != null }.getOrDefault(false)
+        }
+        var temp: File? = null
+        return try {
+            temp = File.createTempFile("motion_check_", ".bin", context.cacheDir)
+            val copied = context.contentResolver.openInputStream(uri)?.use { input ->
+                temp!!.outputStream().use { input.copyTo(it) }
+                true
+            } ?: false
+            copied && MotionPhotoUtil.detect(temp!!) != null
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            Log.w(UPLOAD_TAG, "Motion-photo check failed for $uploadUri: ${e.message}")
+            false
+        } finally {
+            temp?.delete()
+        }
+    }
+
+    /**
      * Builds the photo xAttr Camera/Location + display-dimension metadata for [item] from its
      * ORIGINAL [sourceUri] (read before any strip pass). Every field is gated against the strip
      * config so the encrypted xAttr can never carry data the on-file strip removed:
@@ -1096,6 +1657,7 @@ class UploadPendingUseCase @Inject constructor(
         item: eu.akoos.photos.domain.entity.LocalMediaItem,
         stripOnUpload: Boolean,
         stripConfig: MetadataStripConfig,
+        videoDimsOverride: Pair<Int, Int>? = null,
     ): eu.akoos.photos.data.repository.drive.UploadXAttrMetadata {
         val stripGps = stripOnUpload && stripConfig.stripGps
         val stripCamera = stripOnUpload && stripConfig.stripCameraInfo
@@ -1124,8 +1686,10 @@ class UploadPendingUseCase @Inject constructor(
                 // double-count the rotation and show the video sideways. The capture date still reaches
                 // Drive through the separate photo.captureTime field (PhotoMetaDto), so the video keeps
                 // its timeline position without an xAttr Camera block.
-                val baseW = rawW.takeIf { it > 0 } ?: item.width
-                val baseH = rawH.takeIf { it > 0 } ?: item.height
+                // A compressed (downscaled) upload overrides the source dimensions with the OUTPUT
+                // stream's, so the xAttr matches the bytes on the wire; rotation stays with the container.
+                val baseW = videoDimsOverride?.first ?: rawW.takeIf { it > 0 } ?: item.width
+                val baseH = videoDimsOverride?.second ?: rawH.takeIf { it > 0 } ?: item.height
                 eu.akoos.photos.data.repository.drive.UploadXAttrMetadata(
                     displayWidth = baseW.takeIf { it > 0 },
                     displayHeight = baseH.takeIf { it > 0 },
@@ -1162,6 +1726,22 @@ class UploadPendingUseCase @Inject constructor(
         }
     }
 
+    /** Probes a transcoded video temp for its OUTPUT width/height (same retriever keys the video
+     *  xAttr branch reads for the source), so a downscaled upload reports the real stream size.
+     *  Returns null on any failure or a non-positive dimension, so the caller keeps the source dims. */
+    private fun probeVideoDimensions(file: File): Pair<Int, Int>? = runCatching {
+        android.media.MediaMetadataRetriever().use { r ->
+            r.setDataSource(file.absolutePath)
+            val w = r.extractMetadata(
+                android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH
+            )?.toIntOrNull() ?: 0
+            val h = r.extractMetadata(
+                android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT
+            )?.toIntOrNull() ?: 0
+            if (w > 0 && h > 0) w to h else null
+        }
+    }.getOrNull()
+
     /** Reads EXIF SubjectArea (3 or 4 comma-separated ints) and converts it to the
      *  [Top,Left,Bottom,Right] rectangle Drive's xAttr SubjectCoordinates expects, matching
      *  Drive Android's Rectangle.fromCenter. Returns null when absent or malformed. */
@@ -1180,20 +1760,98 @@ class UploadPendingUseCase @Inject constructor(
         intArrayOf(cy - h / 2, cx - w / 2, cy + h / 2, cx + w / 2)
     }.getOrNull()
 
-    private fun computeSha1(uri: String): String {
+    /**
+     * Hex-encodes the SHA-1 of the file's plaintext content. Drive's `ContentHash`
+     * wire field is `HMAC-SHA256(rootNodeHashKey, sha1Hex.utf8Bytes())` and Drive
+     * web's `photosTransferPayloadBuilder` rejects any payload whose photo content
+     * hash was derived from a SHA-256 input with the misleading error
+     * "Cannot build photo payload without a content hash". Drive Android picks SHA-1
+     * via `ConfigurationProvider.contentDigestAlgorithm = "SHA1"` (Drive Android's
+     * `ConfigurationProvider`). The xAttr Common.Digests
+     * map carries the same SHA-1 hex so a later cross-client xAttr verify lines up.
+     */
+    private fun computeSha1(uri: String): String? {
         val digest = MessageDigest.getInstance("SHA-1")
         try {
-            context.contentResolver.openInputStream(Uri.parse(uri))?.use { stream ->
+            // A null stream (or a read error below) means the content is unreadable this pass. Return
+            // null rather than the SHA-1 of empty/partial input: a bogus hash persisted as localHash
+            // and sent as the content hash never content-pairs on reconcile, so the file uploads as a
+            // silent Drive duplicate (and multiple failures would even share one hash). The caller
+            // treats null as a hard per-file failure and retries the row next pass.
+            val stream = context.contentResolver.openInputStream(Uri.parse(uri)) ?: return null
+            stream.use { s ->
                 val buffer = ByteArray(8192)
                 var read: Int
-                while (stream.read(buffer).also { read = it } != -1) {
+                while (s.read(buffer).also { read = it } != -1) {
                     digest.update(buffer, 0, read)
                 }
             }
         } catch (e: Exception) {
             if (e is kotlinx.coroutines.CancellationException) throw e
-            return ""
+            return null
         }
         return digest.digest().joinToString("") { "%02x".format(it) }
+    }
+
+    /** What the delete-after-backup step does with the device copy, decided by [resolveDeleteAfterBackupRemoval]. */
+    enum class Removal {
+        /** Move the device copy to the system trash, recoverable for the OS retention window. */
+        TRASH,
+        /** Remove the device copy outright, with no recovery. */
+        PERMANENT,
+        /** Leave the device copy alone. */
+        NONE,
+    }
+
+    companion object {
+        /**
+         * Whether an upload's device copy is trashed, permanently removed, or kept, the single
+         * safety decision of the delete-after-backup path. Pure and side-effect-free so it can be
+         * pinned by a plain JVM test.
+         *
+         * The device copy is touched only when the user opted into [deleteLocalAfterBackup] AND the
+         * Drive copy is committed ([uploadSucceeded]) — a failed upload must never cost the user the
+         * only copy of a photo. From R the removal goes through the system trash so it stays
+         * recoverable; below R no system trash exists, so the copy can only be removed outright.
+         *
+         * Free-up-space and Hide deliberately do NOT trash and do not route through here:
+         * free-up-space would reclaim zero bytes until the trash retention expires, and a hidden
+         * photo is already preserved in the app-private Hidden vault, so trashing it would surface
+         * it in the device gallery's Recently Deleted.
+         */
+        fun resolveDeleteAfterBackupRemoval(
+            sdkInt: Int,
+            deleteLocalAfterBackup: Boolean,
+            uploadSucceeded: Boolean,
+        ): Removal = when {
+            !deleteLocalAfterBackup || !uploadSucceeded -> Removal.NONE
+            sdkInt >= Build.VERSION_CODES.R -> Removal.TRASH
+            else -> Removal.PERMANENT
+        }
+
+        /**
+         * The capture time an upload stamps onto its Drive copy (PhotoMetaDto.captureTime and the
+         * xAttr ModificationTime), chosen from the sources the caller already holds. Pure and
+         * side-effect-free so the choice can be pinned by a plain JVM test; the EXIF read that
+         * produces [exifDateTimeOriginalMs] stays in the caller because it is I/O.
+         *
+         * Precedence: strip-timestamp floors the time to [nowMs] so the cloud metadata cannot
+         * reconstruct when the shot was taken; otherwise an explicit MediaStore DATE_TAKEN
+         * ([dateTakenIsExplicit]) wins; otherwise a non-explicit MediaStore date falls back to a
+         * positive [exifDateTimeOriginalMs]; with none of those the MediaStore date is kept.
+         */
+        fun resolveUploadCaptureTimeMs(
+            mediaStoreDateTakenMs: Long,
+            dateTakenIsExplicit: Boolean,
+            exifDateTimeOriginalMs: Long?,
+            stripTimestamp: Boolean,
+            nowMs: Long,
+        ): Long {
+            if (stripTimestamp) return nowMs
+            if (!dateTakenIsExplicit && exifDateTimeOriginalMs != null && exifDateTimeOriginalMs > 0L) {
+                return exifDateTimeOriginalMs
+            }
+            return mediaStoreDateTakenMs
+        }
     }
 }

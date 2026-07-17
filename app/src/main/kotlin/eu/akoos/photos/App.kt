@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -39,6 +39,7 @@ import androidx.work.WorkManager
 import coil.ImageLoader
 import coil.ImageLoaderFactory
 import coil.decode.VideoFrameDecoder
+import coil.imageLoader
 import coil.memory.MemoryCache
 import coil.request.CachePolicy
 import dagger.hilt.android.HiltAndroidApp
@@ -48,6 +49,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import eu.akoos.photos.data.preferences.LanguagePrefsBoot
 import eu.akoos.photos.data.preferences.SettingsKeys
@@ -71,6 +73,12 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
     @Inject
     lateinit var photoListingDao: eu.akoos.photos.data.db.dao.PhotoListingDao
 
+    @Inject
+    lateinit var thumbnailUrlStore: eu.akoos.photos.data.repository.drive.ThumbnailUrlStore
+
+    @Inject
+    lateinit var pendingAlbumAddsImporter: eu.akoos.photos.data.upload.PendingAlbumAddsImporter
+
     // Set up in constructor so getWorkManagerConfiguration() works before Hilt injects workerFactory.
     private val delegatingFactory = DelegatingWorkerFactory()
 
@@ -92,6 +100,7 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
 
     override fun onCreate() {
         super.onCreate() // Hilt injects workerFactory here
+        installCrashLogHandler()
         // The :crypto process shares this Application but must skip the main-process init below
         // (WorkManager schedules, lifecycle observer, receivers, Coil) to avoid duplicate workers.
         if (!isMainProcess()) return
@@ -129,7 +138,79 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
         // prune above can't reach.
         CachePruneWorker.schedule(WorkManager.getInstance(this))
         seedAlbumOptInFromBucketMap()
+        importPendingAlbumAdds()
+        recoverMirrorOverwrites()
         registerCacheCleanupOnBackground()
+        registerForegroundHeapSampler()
+    }
+
+    // OS memory-pressure moments: record a perf sample so a tester's diagnostics capture how close
+    // the heap ran to the cap when the system asked the app to trim. Numbers only (see PerfDiagnostics).
+    // From RUNNING_LOW upward (and every background COMPLETE level) also drop the Coil decoded-bitmap
+    // cache: re-decoded from disk on next paint, never a bitmap Compose is currently drawing.
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        eu.akoos.photos.util.PerfDiagnostics.sample("trim:$level")
+        @Suppress("DEPRECATION")
+        val shedFrom = android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW
+        if (level >= shedFrom) {
+            imageLoader.memoryCache?.clear()
+        }
+    }
+
+    override fun onLowMemory() {
+        super.onLowMemory()
+        eu.akoos.photos.util.PerfDiagnostics.sample("lowMemory")
+    }
+
+    /** Append every uncaught exception to a small diagnostics file, then hand off to the platform's
+     *  default handler so the process still dies normally. Release builds strip logcat, so this file
+     *  is the only record of a crash; it is surfaced (with the sync log) by the Settings "Copy
+     *  diagnostics" action. Installed before the main-process guard so the :crypto process is covered
+     *  too. */
+    private fun installCrashLogHandler() {
+        val previous = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            runCatching { writeCrashLog(throwable) }
+            previous?.uncaughtException(thread, throwable)
+        }
+    }
+
+    /** Privacy-safe crash record: the exception TYPES and code stack frames only. Never the exception
+     *  message and never a full framework dump, so a URI, file path, display name, or email can't leak
+     *  into a shared log (mirrors the SyncDiagnostics rule). No device/app header here; the Settings
+     *  copy adds the model and version. */
+    private fun writeCrashLog(throwable: Throwable) {
+        val dir = java.io.File(filesDir, "diagnostics").apply { mkdirs() }
+        val file = java.io.File(dir, "last_crash.txt")
+        if (file.length() > 128L * 1024) file.writeText("")
+        val text = buildString {
+            append("---- crash v").append(BuildConfig.VERSION_CODE).append(" ----\n")
+            var t: Throwable? = throwable
+            var depth = 0
+            while (t != null && depth < 8) {
+                if (depth > 0) append("caused by ")
+                append(t.javaClass.name).append('\n')
+                for (frame in t.stackTrace.take(12)) append("    at ").append(frame.toString()).append('\n')
+                t = t.cause
+                depth++
+            }
+            // Preserve how high memory got so an OOM crash's diagnostics keep the peak. Numbers only,
+            // read from the in-memory perf buffer; never a name / id / path (mirrors the rule above).
+            runCatching {
+                val rt = Runtime.getRuntime()
+                val usedMb = (rt.totalMemory() - rt.freeMemory()) / (1024L * 1024L)
+                val maxMb = rt.maxMemory() / (1024L * 1024L)
+                val nativeMb = android.os.Debug.getNativeHeapAllocatedSize() / (1024L * 1024L)
+                append("perf peakHeap=").append(eu.akoos.photos.util.PerfDiagnostics.peakHeapUsedMb)
+                    .append("MB atCrash=").append(usedMb).append('/').append(maxMb)
+                    .append("MB nativeMB=").append(nativeMb)
+                    .append(" libraryPhotos=").append(eu.akoos.photos.util.PerfDiagnostics.libraryPhotoCount)
+                    .append('\n')
+            }
+            append('\n')
+        }
+        file.appendText(text)
     }
 
     /** True only in the main app process (the :crypto process runs as "$packageName:crypto"). */
@@ -165,6 +246,45 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
                     p[SettingsKeys.ALBUM_OPT_IN_MIGRATED] = true
                 }
                 Log.d("AlbumOptInMigration", "Seeded album opt-in list with ${existingBucketNames.size} folders from ALBUM_BUCKET_MAP")
+            }
+        }
+    }
+
+    /**
+     * One-shot DataStore → DB import of the legacy PENDING_ALBUM_ADDS side-queue into the explicit
+     * upload queue. Idempotent and self-guarding (see [eu.akoos.photos.data.upload.PendingAlbumAddsImporter]),
+     * so it is safe to launch every start; it no-ops once already migrated.
+     */
+    private fun importPendingAlbumAdds() {
+        appScope.launch {
+            pendingAlbumAddsImporter.runOnce()
+        }
+    }
+
+    /**
+     * Replays any mirror overwrite an earlier process was killed in the middle of. A mirror-strip or
+     * mirror-compress rewrites the user's original on-device file in place; a kill mid-write throws no
+     * exception, so the in-place rollback never fires and the file is left truncated. The original
+     * bytes are staged to a durable journal before that write (see
+     * [eu.akoos.photos.data.upload.MirrorOverwriteJournal]); here they are copied back onto the
+     * device, once per launch and off the main thread. Wrapped so a failure can never block startup.
+     */
+    private fun recoverMirrorOverwrites() {
+        // appScope runs on Dispatchers.Default; the restore is a blocking file copy, so move it to IO
+        // rather than parking a CPU worker on disk latency.
+        appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching {
+                val journal = eu.akoos.photos.data.upload.MirrorOverwriteJournal(
+                    java.io.File(filesDir, eu.akoos.photos.data.upload.MirrorOverwriteJournal.DIR_NAME),
+                )
+                val restored = journal.recover { targetUri, backup ->
+                    contentResolver.openOutputStream(android.net.Uri.parse(targetUri), "wt")?.use { out ->
+                        backup.inputStream().use { it.copyTo(out) }
+                    } != null
+                }
+                if (restored > 0) {
+                    Log.d("App", "Restored $restored original(s) after an interrupted mirror overwrite")
+                }
             }
         }
     }
@@ -307,10 +427,56 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
                                 java.io.File(cacheDir, sub).deleteRecursively()
                             }
                             // Null the DB thumbnail paths too, else the scheduler skips the now-missing
-                            // files as "done" instead of re-requesting a decrypt next launch.
+                            // files as "done" instead of re-requesting a decrypt next launch. Clear the
+                            // in-memory store as well so it stops handing out the just-deleted paths.
                             photoListingDao.clearCachedThumbnailUrls()
+                            thumbnailUrlStore.clear()
                         }
                     }
+                }
+            }
+        )
+    }
+
+    /**
+     * Foreground-only heap sampler + heap-relief watchdog: while any Activity is started, loop a cheap
+     * [Runtime] read into [PerfDiagnostics] every 4 s (the buffer dedupes steady-state periodic lines,
+     * keeping only peaks / pressure / a ~60 s heartbeat), a short interval so a fast video-decode heap
+     * spike is caught before the cap. After each read, if used heap is at [HEAP_RELIEF_HIGH_RATIO]+ of
+     * the cap the Coil decoded-bitmap cache is dropped (re-decoded from disk on next paint, never a
+     * live-drawn bitmap) to pull the process back from the OOM point. A low/high hysteresis stops it
+     * re-clearing every tick while still high: after a clear it stays armed-off until the heap first
+     * falls below [HEAP_RELIEF_LOW_RATIO]. Cancelled on ON_STOP so nothing samples while backgrounded.
+     * Runs in RELEASE too, since testers run release builds and this is how their copied diagnostics
+     * capture the sustained-scroll heap; the reads are trivial.
+     */
+    private fun registerForegroundHeapSampler() {
+        androidx.lifecycle.ProcessLifecycleOwner.get().lifecycle.addObserver(
+            object : androidx.lifecycle.DefaultLifecycleObserver {
+                private var samplerJob: kotlinx.coroutines.Job? = null
+
+                override fun onStart(owner: androidx.lifecycle.LifecycleOwner) {
+                    if (samplerJob?.isActive == true) return
+                    samplerJob = appScope.launch {
+                        var relievedWhileHigh = false
+                        while (isActive) {
+                            eu.akoos.photos.util.PerfDiagnostics.sample("periodic")
+                            val ratio = eu.akoos.photos.util.PerfDiagnostics.heapUsedRatio()
+                            if (ratio >= HEAP_RELIEF_HIGH_RATIO && !relievedWhileHigh) {
+                                imageLoader.memoryCache?.clear()
+                                eu.akoos.photos.util.PerfDiagnostics.recordHeapRelief()
+                                relievedWhileHigh = true
+                            } else if (ratio < HEAP_RELIEF_LOW_RATIO) {
+                                relievedWhileHigh = false
+                            }
+                            delay(HEAP_SAMPLE_INTERVAL_MS)
+                        }
+                    }
+                }
+
+                override fun onStop(owner: androidx.lifecycle.LifecycleOwner) {
+                    samplerJob?.cancel()
+                    samplerJob = null
                 }
             }
         )
@@ -341,4 +507,13 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
         .memoryCachePolicy(CachePolicy.ENABLED)
         .diskCachePolicy(CachePolicy.DISABLED)
         .build()
+
+    private companion object {
+        // Foreground heap sampler cadence: short so a video-decode spike is caught before the cap.
+        private const val HEAP_SAMPLE_INTERVAL_MS = 4_000L
+        // Shed the image cache once used heap reaches this fraction of the cap (near the OOM point).
+        private const val HEAP_RELIEF_HIGH_RATIO = 0.85
+        // Re-arm the valve only after the heap first falls back below this (low/high hysteresis).
+        private const val HEAP_RELIEF_LOW_RATIO = 0.70
+    }
 }

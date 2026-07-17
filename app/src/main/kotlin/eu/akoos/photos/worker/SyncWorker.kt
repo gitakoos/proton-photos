@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -24,7 +24,9 @@ package eu.akoos.photos.worker
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Context
+import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import androidx.core.app.NotificationCompat
@@ -188,7 +190,7 @@ class SyncWorker @AssistedInject constructor(
             var uploadFailed = false
             var attempted = 0
             try {
-                val uploadResult = upload(userId) { isStopped }
+                val uploadResult = upload(userId)
                 attempted = uploadResult.attempted
                 // Stale-success guard: UploadPendingUseCase catches per-item exceptions and
                 // keeps looping, so an "all N items threw" run reaches us with no exception.
@@ -233,14 +235,31 @@ class SyncWorker @AssistedInject constructor(
     private fun buildForegroundInfo(done: Int, total: Int): ForegroundInfo {
         ensureChannel(context)
 
-        val cancelIntent = WorkManager.getInstance(context).createCancelPendingIntent(id)
-        val title = context.getString(R.string.sync_worker_notification_title)
-        // total = 0 means we don't know the batch size yet (worker just started, reconcile
-        // hasn't run). Show a "Checking…" line instead of "0 of 0 uploaded" — the latter
-        // makes the notification flicker between real progress and a confusing zero-state
-        // whenever a follow-up worker fires right after a finished batch.
-        val content = if (total <= 0) {
+        // Route the notification's "Stop" to a COOPERATIVE stop, not a WorkManager cancel of this
+        // worker. WorkManager-cancelling would cancel the upload coroutine mid-encrypt and crash the
+        // process on the in-flight native PGP call; the broadcast instead flips the use case's stop
+        // flag so the in-transit photo finishes and only the queued items are prevented from starting.
+        val stopBroadcast = Intent(context, StopUploadReceiver::class.java).apply {
+            action = StopUploadReceiver.ACTION_STOP_UPLOAD
+        }
+        val cancelIntent = PendingIntent.getBroadcast(
+            context,
+            0,
+            stopBroadcast,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        // total <= 0 means either the batch size isn't known yet (worker just started, reconcile
+        // hasn't run) or there is genuinely nothing to upload. Title it "Checking…" rather than
+        // "Backing up photos" so a plain cloud-listing refresh with no upload work does not read to
+        // the user as an active backup; the "0 of 0" body is dropped for the same reason.
+        val checking = total <= 0
+        val title = if (checking) {
             context.getString(R.string.sync_worker_notification_checking)
+        } else {
+            context.getString(R.string.sync_worker_notification_title)
+        }
+        val content = if (checking) {
+            ""
         } else {
             context.getString(R.string.sync_worker_notification_progress, done, total)
         }
@@ -294,13 +313,10 @@ class SyncWorker @AssistedInject constructor(
             val nm = context.getSystemService(NotificationManager::class.java) ?: return
             if (nm.getNotificationChannel(CHANNEL_ID) != null) return
             // IMPORTANCE_LOW keeps the upload notification visible in the status bar but
-            // suppresses the heads-up popup banner. A privacy-focused user base expects
-            // background sync to be present-but-quiet; the earlier DEFAULT importance was
-            // intrusive on every automatic upload — and our own manual "Sync now" path
-            // already gives an immediate toast, so we don't need the heads-up for that
-            // either. Existing installs migrate when the channel is recreated post-uninstall;
-            // a user who wants the louder behaviour can flip it in system Settings → App
-            // notifications, which is the canonical Android pattern.
+            // suppresses the heads-up popup banner, so background sync stays present-but-quiet
+            // instead of interrupting on every automatic upload. Existing installs migrate when
+            // the channel is recreated post-uninstall; a user who wants the louder behaviour can
+            // flip it in system Settings → App notifications, the canonical Android pattern.
             val channel = NotificationChannel(
                 CHANNEL_ID,
                 context.getString(R.string.sync_worker_channel_name),
@@ -345,6 +361,32 @@ class SyncWorker @AssistedInject constructor(
         }
 
         fun cancel(workManager: WorkManager) = workManager.cancelUniqueWork(TAG)
+
+        /**
+         * Stop an in-flight upload the user can see (the "sync now" burst, a content-observer
+         * auto-backup pass, or a periodic tick that is currently uploading) without disabling
+         * scheduled backups.
+         *
+         * This is a COOPERATIVE stop: it flips [UploadPendingUseCase]'s stop flag so the batch loop
+         * stops STARTING new queued items, while the item currently in transit finishes and is
+         * backed up. It deliberately does NOT WorkManager-cancel the running worker; cancelling the
+         * worker cancels the upload coroutine mid-encrypt, tearing down an in-flight native PGP call
+         * (libgojni) and crashing the process with a native SIGSEGV. The worker drains gracefully and
+         * returns normally, which dismisses its own foreground notification; the still-pending items
+         * stay LOCAL_ONLY and resume on the next natural trigger (new photo / periodic / app-open).
+         *
+         * The three in-app cancel buttons call [UploadPendingUseCase.requestStop] directly; this
+         * static helper (reached from the notification path and any non-injected caller) routes to the
+         * same use case via a Hilt EntryPoint. Download cancel is unaffected.
+         */
+        fun cancelActiveUpload(context: Context) {
+            runCatching {
+                dagger.hilt.android.EntryPointAccessors.fromApplication(
+                    context.applicationContext,
+                    StopUploadReceiver.StopUploadEntryPoint::class.java,
+                ).uploadPendingUseCase().requestStop()
+            }.onFailure { Log.w(TAG, "cancelActiveUpload: cooperative stop failed: ${it.message}") }
+        }
 
         /**
          * OS-level MediaStore content-URI trigger via WorkManager. The system itself watches

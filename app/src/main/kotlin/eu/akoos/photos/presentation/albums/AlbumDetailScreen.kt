@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -96,6 +96,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.RemoveCircleOutline
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import eu.akoos.photos.presentation.common.ConfirmDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -382,6 +383,7 @@ fun AlbumDetailScreen(
             modifier = Modifier.fillMaxSize(),
         ) {
         val cols = eu.akoos.photos.presentation.gallery.rememberDefaultGridColumns()
+        val seamless = eu.akoos.photos.presentation.gallery.rememberSeamlessGrid()
         // Drag-to-select: long-press a photo then drag to sweep a range (shares the timeline gesture).
         // Cells are keyed by linkId, so the swept indices map back to the selected linkIds.
         val selectableLinkIds = remember(state.photos) { state.photos.map { it.linkId } }
@@ -402,9 +404,14 @@ fun AlbumDetailScreen(
             state = gridState,
             // Match the main timeline grid (GalleryGrid): same default columns, 20.dp side inset and
             // 6.dp gap, so album photos render at the same size and spacing as the Photos page.
-            contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 24.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
+            // Edge-to-edge drops the side inset and rounding and tightens the gap.
+            contentPadding = PaddingValues(
+                start = if (seamless) 0.dp else 20.dp,
+                end = if (seamless) 0.dp else 20.dp,
+                bottom = 24.dp,
+            ),
+            horizontalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 6.dp),
+            verticalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 6.dp),
             modifier = Modifier.fillMaxSize().then(dragSelectModifier),
         ) {
             item(span = { GridItemSpan(maxLineSpan) }) {
@@ -423,6 +430,8 @@ fun AlbumDetailScreen(
                     headerVideoCount > 0 -> videosTextRes
                     else -> photosTextRes
                 }
+                // Photo tiles bleed to the edge in seamless mode; this cover header keeps the 20.dp inset.
+                Box(modifier = Modifier.padding(horizontal = if (seamless) 20.dp else 0.dp)) {
                 eu.akoos.photos.presentation.albums.components.AlbumHeroHeader(
                     coverModel = coverUrl,
                     title = state.albumName.ifBlank { albumName },
@@ -637,6 +646,7 @@ fun AlbumDetailScreen(
                             }
                     },
                 )
+                }
             }
 
             when {
@@ -649,14 +659,21 @@ fun AlbumDetailScreen(
                     }
                 }
                 state.photos.isEmpty() -> item(span = { GridItemSpan(maxLineSpan) }) {
-                    Box(Modifier.fillMaxWidth().height(200.dp), contentAlignment = Alignment.Center) {
+                    Box(Modifier.padding(horizontal = if (seamless) 20.dp else 0.dp).fillMaxWidth().height(200.dp), contentAlignment = Alignment.Center) {
                         Text(stringResource(R.string.albums_no_photos), color = FgMute, fontSize = 14.sp)
                     }
                 }
                 else -> photoGroups.forEach { (label, entries) ->
                     item(span = { GridItemSpan(maxLineSpan) }, key = "hdr_$label") {
                         Row(
-                            modifier = Modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp, top = 24.dp, bottom = 10.dp),
+                            // Keep the label clear of the screen edge in seamless mode, where the
+                            // tiles below bleed to 0.
+                            modifier = Modifier.fillMaxWidth().padding(
+                                start = if (seamless) 20.dp else 4.dp,
+                                end = if (seamless) 20.dp else 4.dp,
+                                top = 24.dp,
+                                bottom = 10.dp,
+                            ),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             // Tri-state group selector (selecting only) — toggles every photo in the day.
@@ -710,6 +727,8 @@ fun AlbumDetailScreen(
                             isSelected = photo.linkId in state.selectedPhotos,
                             isSelectionMode = state.isSelectionMode,
                             isOffline = photo.linkId in state.offlinePinIds,
+                            columns = cols,
+                            seamless = seamless,
                             // Long-press enters multi-select directly; cover/remove live in the selection dock.
                             showLongPressMenu = false,
                             onTap = {
@@ -847,10 +866,19 @@ fun AlbumDetailScreen(
                     },
                     onClick = { showPhotoShareSheet = true },
                 )
-                // Hide the destructive delete affordance on shared-with-me albums. Even an editor
-                // recipient can't delete someone else's photo from someone else's album through this
-                // surface — the backend rejects it.
+                // Hide the destructive hide + delete affordances on shared-with-me albums. Even an
+                // editor recipient can't hide or delete someone else's photo from someone else's album
+                // through this surface, the backend rejects it.
                 if (!state.isSharedWithMe) {
+                    // Hide selected: a backed-up member moves into the app's Hidden vault, a cloud-only
+                    // member hides client-side by linkId. Mirrors the timeline / search / folder hide.
+                    Spacer(modifier = Modifier.size(4.dp))
+                    SelectionTopButton(
+                        icon = Icons.Default.VisibilityOff,
+                        contentDescription = stringResource(R.string.gallery_hide_selected),
+                        enabled = !state.isDeletingPhotos,
+                        onClick = { viewModel.hideSelected() },
+                    )
                     Spacer(modifier = Modifier.size(4.dp))
                     SelectionTopButton(
                         icon = Icons.Default.DeleteOutline,
@@ -892,31 +920,39 @@ fun AlbumDetailScreen(
         // stays cancel + count + share + delete. Matches the gallery's new split layout.
         if (state.isSelectionMode) {
             val isDownloadingSel = state.downloadState is AlbumDownloadState.Working
+            // Download and offline only apply to cloud-only photos; Synced ones already live on the
+            // device, so gate both like the gallery does. Keep Download visible while a download is
+            // mid-flight so its cancel control stays reachable.
+            val anyCloudOnlySelected = state.selectedPhotos.any { it !in state.localUriByLinkId }
             SelectionBottomDock {
                 // Download selected. While the worker runs this item becomes the cancel control:
                 // a determinate ring tracks progress and the caption reads "Cancel".
                 val dl = state.downloadState as? AlbumDownloadState.Working
-                SelectionDockItem(
-                    icon = Icons.Default.FileDownload,
-                    label = stringResource(R.string.sel_label_download),
-                    showLabel = showSelectionLabels,
-                    working = isDownloadingSel,
-                    progress = dl?.let { if (it.total > 0) it.done.toFloat() / it.total else 0f },
-                    workingIcon = Icons.Default.Close,
-                    workingLabel = stringResource(R.string.cancel),
-                    onClick = {
-                        if (isDownloadingSel) viewModel.cancelDownload()
-                        else viewModel.downloadSelectedPhotos()
-                    },
-                )
+                if (anyCloudOnlySelected || isDownloadingSel) {
+                    SelectionDockItem(
+                        icon = Icons.Default.FileDownload,
+                        label = stringResource(R.string.sel_label_download),
+                        showLabel = showSelectionLabels,
+                        working = isDownloadingSel,
+                        progress = dl?.let { if (it.total > 0) it.done.toFloat() / it.total else 0f },
+                        workingIcon = Icons.Default.Close,
+                        workingLabel = stringResource(R.string.cancel),
+                        onClick = {
+                            if (isDownloadingSel) viewModel.cancelDownload()
+                            else viewModel.downloadSelectedPhotos()
+                        },
+                    )
+                }
                 // Make available offline — pins the full-res copy into the app so album photos open
                 // with no connection. A tap toggles: pins the selection, or removes it if all pinned.
-                SelectionDockItem(
-                    icon = Icons.Default.OfflinePin,
-                    label = stringResource(R.string.sel_label_offline),
-                    showLabel = showSelectionLabels,
-                    onClick = { viewModel.toggleSelectedOffline() },
-                )
+                if (anyCloudOnlySelected) {
+                    SelectionDockItem(
+                        icon = Icons.Default.OfflinePin,
+                        label = stringResource(R.string.sel_label_offline),
+                        showLabel = showSelectionLabels,
+                        onClick = { viewModel.toggleSelectedOffline() },
+                    )
+                }
                 if (!state.isSharedWithMe && state.selectedCount == 1) {
                     SelectionDockItem(
                         icon = Icons.Default.PhotoLibrary,
@@ -979,9 +1015,11 @@ fun AlbumDetailScreen(
         // into a half-finished bulk action; the pill above stays for background downloads/shares.
         val opDeletingLabel = stringResource(R.string.op_deleting)
         val opRemovingLabel = stringResource(R.string.op_removing_from_album)
+        val opHidingLabel = stringResource(R.string.op_hiding)
         val albumBusyProgress = if (state.isDeletingPhotos) {
             val label = when (state.busyOp) {
                 AlbumBusyOp.Removing -> opRemovingLabel
+                AlbumBusyOp.Hiding -> opHidingLabel
                 else -> opDeletingLabel
             }
             eu.akoos.photos.presentation.common.OperationProgress(0, 0, label, indeterminate = true)

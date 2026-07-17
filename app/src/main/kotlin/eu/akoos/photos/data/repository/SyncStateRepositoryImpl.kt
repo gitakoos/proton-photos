@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -41,6 +41,9 @@ class SyncStateRepositoryImpl @Inject constructor(
     override fun observeAll(userId: UserId): Flow<List<SyncState>> =
         dao.observeAll(userId.id).map { list -> list.map { it.toDomain() } }
 
+    override fun countPendingUploads(userId: UserId): Flow<Int> =
+        dao.countPendingUploads(userId.id)
+
     override suspend fun upsert(state: SyncState, userId: UserId) {
         dao.upsert(state.toEntity(userId.id))
     }
@@ -61,11 +64,37 @@ class SyncStateRepositoryImpl @Inject constructor(
     override suspend fun getByCloudId(cloudFileId: String): SyncState? =
         dao.getByCloudId(cloudFileId)?.toDomain()
 
-    override suspend fun getSyncedBefore(timestampMs: Long): List<SyncState> =
-        dao.getSyncedBefore(timestampMs).map { it.toDomain() }
+    // status is persisted as the enum's .name (see the generated __SyncStatus_enumToString), so the
+    // claim/reset queries take those exact string forms.
+    override suspend fun claimForUpload(localUri: String): Int =
+        dao.claimForUpload(
+            localUri = localUri,
+            uploading = SyncStatus.UPLOADING.name,
+            localOnly = SyncStatus.LOCAL_ONLY.name,
+        )
+
+    override suspend fun resetStaleUploadingClaims() =
+        dao.resetStaleUploadingClaims(
+            uploading = SyncStatus.UPLOADING.name,
+            localOnly = SyncStatus.LOCAL_ONLY.name,
+        )
+
+    override suspend fun getSyncedBefore(userId: UserId, timestampMs: Long): List<SyncState> =
+        dao.getSyncedBefore(userId.id, timestampMs).map { it.toDomain() }
 
     override suspend fun deleteLocalOnlyByUris(localUris: List<String>) {
         if (localUris.isEmpty()) return
         localUris.chunked(500).forEach { chunk -> dao.deleteLocalOnlyByUris(chunk) }
     }
+
+    override suspend fun markQueued(localUri: String, source: String, at: Long) =
+        dao.markQueued(localUri, source, at)
+
+    override suspend fun clearQueued(localUri: String) = dao.clearQueued(localUri)
+
+    override suspend fun clearQueuedForSynced(localUri: String) = dao.clearQueuedForSynced(localUri)
+
+    override suspend fun getQueueSource(localUri: String): String? = dao.getQueueSource(localUri)
+
+    override suspend fun clearManualQueue(): Int = dao.clearManualQueue()
 }

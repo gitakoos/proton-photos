@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -57,7 +57,11 @@ import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Photo
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.ArrowDownward
+import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.NewReleases
+import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material3.HorizontalDivider
@@ -74,6 +78,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
@@ -82,6 +87,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
@@ -117,17 +123,30 @@ internal fun AlbumsFilterRail(
     onNewAlbumClick: () -> Unit = {},
     selectedFilter: AlbumDisplayFilter = AlbumDisplayFilter.All,
     onFilterSelected: (AlbumDisplayFilter) -> Unit = {},
+    onOpenSheet: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
+    val context = LocalContext.current
+    // The configured default narrowing. The pill highlights only when the current filter differs
+    // from this default, so leaving the filter at its default reads as "unfiltered".
+    val defaultFilterOrdinal by remember {
+        context.settingsDataStore.data.map { it[SettingsKeys.ALBUMS_DEFAULT_FILTER] ?: 0 }
+    }.collectAsState(initial = 0)
+    val defaultFilter = AlbumDisplayFilter.entries[
+        defaultFilterOrdinal.coerceIn(0, AlbumDisplayFilter.entries.lastIndex)
+    ]
+    val hiddenLabel = stringResource(R.string.gallery_filter_hidden)
+    val newAlbumLabel = stringResource(R.string.albums_new_album)
     LazyRow(
         modifier = modifier,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         contentPadding = PaddingValues(end = 8.dp),
     ) {
-        // All / Cloud / Local toggle — tap cycles All → Cloud → Local → All. Highlighted when
-        // narrowed; the common (All) stream is the default, so no separate category headers.
+        // All / Cloud / Local view filter. Tapping the label cycles All to Cloud to Local; the
+        // filter icon after the separator opens the sheet (default + remember-last). Highlighted
+        // when off the configured default, so a filter sitting at its default reads as unfiltered.
         item(key = "album_filter") {
-            val active = selectedFilter != AlbumDisplayFilter.All
+            val active = selectedFilter != defaultFilter
             val label = when (selectedFilter) {
                 AlbumDisplayFilter.All -> stringResource(R.string.albums_filter_all)
                 AlbumDisplayFilter.Cloud -> stringResource(R.string.albums_filter_cloud)
@@ -138,55 +157,73 @@ internal fun AlbumsFilterRail(
                     .height(38.dp)
                     .background(if (active) AppColors.current.chipSelectedBg else PillBg, pillShape)
                     .border(0.5.dp, if (active) Accent else PillBorder, pillShape)
-                    .clickable {
-                        onFilterSelected(
-                            when (selectedFilter) {
-                                AlbumDisplayFilter.All -> AlbumDisplayFilter.Cloud
-                                AlbumDisplayFilter.Cloud -> AlbumDisplayFilter.Local
-                                AlbumDisplayFilter.Local -> AlbumDisplayFilter.All
-                            }
-                        )
-                    }
-                    .padding(horizontal = 14.dp),
+                    .padding(start = 14.dp, end = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(5.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                Icon(Icons.Default.SwapHoriz, null, tint = if (active) Accent else FgDim, modifier = Modifier.size(14.dp))
-                Text(label, color = if (active) FgPrimary else FgDim, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                // Label part cycles to the next narrowing on tap.
+                Row(
+                    modifier = Modifier
+                        .clickable {
+                            val next = AlbumDisplayFilter.entries[
+                                (selectedFilter.ordinal + 1) % AlbumDisplayFilter.entries.size
+                            ]
+                            onFilterSelected(next)
+                        }
+                        .padding(vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                ) {
+                    Text(label, color = if (active) FgPrimary else FgDim, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                }
+                // Hairline separator + filter button, mirroring the timeline All pill. Opens the
+                // sheet where the default filter and the remember-last toggle are set.
+                Box(
+                    modifier = Modifier
+                        .height(18.dp)
+                        .width(0.5.dp)
+                        .background(if (active) Accent.copy(alpha = 0.4f) else PillBorder),
+                )
+                Box(
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .clickable { onOpenSheet() }
+                        .padding(6.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.Default.FilterList,
+                        stringResource(R.string.albums_filter_sheet_title),
+                        tint = if (active) Accent else FgDim,
+                        modifier = Modifier.size(16.dp),
+                    )
+                }
             }
         }
-        // Hidden chip
+        // Hidden albums: compact icon button, matching the other icon pills.
         item(key = "hidden") {
-            Row(
+            Box(
                 modifier = Modifier
-                    .height(38.dp)
+                    .size(38.dp)
                     .background(PillBg, pillShape)
                     .border(0.5.dp, PillBorder, pillShape)
-                    .clickable { onHiddenAlbumClick() }
-                    .padding(horizontal = 14.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(5.dp),
+                    .clickable { onHiddenAlbumClick() },
+                contentAlignment = Alignment.Center,
             ) {
-                Icon(Icons.Default.Lock, null, tint = FgDim, modifier = Modifier.size(13.dp))
-                Text(stringResource(R.string.gallery_filter_hidden), color = FgDim, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                Icon(Icons.Default.Lock, hiddenLabel, tint = FgDim, modifier = Modifier.size(15.dp))
             }
         }
-        // New album pill — opens the create-album dialog. Replaces the old timeline-filter
-        // button up here; the timeline filter now lives in Settings.
+        // New album: compact icon button that opens the create-album dialog.
         item(key = "new_album") {
-            Row(
+            Box(
                 modifier = Modifier
-                    .height(38.dp)
+                    .size(38.dp)
                     .background(PillBg, pillShape)
                     .border(0.5.dp, PillBorder, pillShape)
-                    .clickable { onNewAlbumClick() }
-                    .padding(horizontal = 14.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(5.dp),
+                    .clickable { onNewAlbumClick() },
+                contentAlignment = Alignment.Center,
             ) {
-                Icon(Icons.Default.Add, null, tint = FgDim, modifier = Modifier.size(15.dp))
-                Text(stringResource(R.string.albums_new_album), color = FgDim,
-                    fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                Icon(Icons.Default.Add, newAlbumLabel, tint = FgDim, modifier = Modifier.size(17.dp))
             }
         }
     }
@@ -204,7 +241,19 @@ private fun storageArcColor(fraction: Float): Color = when {
 // ── Avatar button ─────────────────────────────────────────────────────────────
 
 @Composable
-internal fun AvatarButton(initial: String, storageFraction: Float, isSyncing: Boolean, isOffline: Boolean = false, onClick: () -> Unit) {
+internal fun AvatarButton(
+    initial: String,
+    storageFraction: Float,
+    isSyncing: Boolean,
+    hasActiveUpload: Boolean = false,
+    hasActiveDownload: Boolean = false,
+    isOffline: Boolean = false,
+    updateAvailable: Boolean = false,
+    onClick: () -> Unit,
+    onUpdateClick: () -> Unit = onClick,
+    onUploadClick: () -> Unit = onClick,
+    onDownloadClick: () -> Unit = onClick,
+) {
     // Animate the arc smoothly when storage data first loads
     val animatedFraction by animateFloatAsState(
         targetValue = storageFraction,
@@ -215,7 +264,26 @@ internal fun AvatarButton(initial: String, storageFraction: Float, isSyncing: Bo
     val trackColor = ArcTrack
     val pillBgColor = PillBg
 
-    // Spinning sync arc — rotates continuously while isSyncing is true
+    val transferActive = hasActiveUpload || hasActiveDownload
+    val ringActive = isSyncing || transferActive
+    // Status glyphs (update / offline) surface only when no upload/download/sync runs: an active
+    // process always wins the pill, matching the requested precedence.
+    val showStatus = !transferActive && !isSyncing && (updateAvailable || isOffline)
+    // Green while photos actually move (issue #57); a plain sync keeps the existing blue.
+    val ringColor = if (transferActive) Color(0xFF34D399) else Color(0xFF60AFFF)
+    // The pill grows left to fit however many glyphs sit beside the avatar.
+    val leftGlyphs = when {
+        transferActive -> (if (hasActiveUpload) 1 else 0) + (if (hasActiveDownload) 1 else 0)
+        showStatus -> (if (updateAvailable) 1 else 0) + (if (isOffline) 1 else 0)
+        else -> 0
+    }
+    val pillWidth by animateDpAsState(
+        targetValue = 46.dp + (leftGlyphs * 28).dp,
+        animationSpec = tween(durationMillis = 320),
+        label = "avatar_pill_width",
+    )
+
+    // Spinning ring: rotates continuously while syncing or transferring
     val infiniteTransition = rememberInfiniteTransition(label = "sync_spin")
     val spinAngle by infiniteTransition.animateFloat(
         initialValue = 0f,
@@ -228,101 +296,163 @@ internal fun AvatarButton(initial: String, storageFraction: Float, isSyncing: Bo
 
     Box(
         modifier = Modifier
-            .size(46.dp)
+            .height(46.dp)
+            .width(pillWidth)
             .drawBehind {
                 val strokePx = 2.6.dp.toPx()
-                val half     = strokePx / 2f
-                val arcRect  = Size(size.width - strokePx, size.height - strokePx)
-
-                // Full-circle track
-                drawArc(
-                    color      = trackColor,
-                    startAngle = -90f,
-                    sweepAngle = 360f,
-                    useCenter  = false,
-                    topLeft    = androidx.compose.ui.geometry.Offset(half, half),
-                    size       = arcRect,
-                    style      = Stroke(width = strokePx, cap = StrokeCap.Round),
+                val h = size.height
+                val radius = h / 2f
+                // Pill fill + border track around the whole rounded rectangle.
+                drawRoundRect(color = pillBgColor, cornerRadius = CornerRadius(radius, radius))
+                drawRoundRect(
+                    color = trackColor,
+                    topLeft = androidx.compose.ui.geometry.Offset(strokePx / 2f, strokePx / 2f),
+                    size = Size(size.width - strokePx, h - strokePx),
+                    cornerRadius = CornerRadius(radius, radius),
+                    style = Stroke(width = strokePx),
                 )
-                if (isSyncing) {
-                    // Spinning arc overlay — replaces the static storage arc during sync
-                    drawArc(
-                        color      = Color(0xFF60AFFF),
-                        startAngle = spinAngle - 90f,
-                        sweepAngle = 270f,
-                        useCenter  = false,
-                        topLeft    = androidx.compose.ui.geometry.Offset(half, half),
-                        size       = arcRect,
-                        style      = Stroke(width = strokePx, cap = StrokeCap.Round),
-                    )
+                // Idle storage arc lives on the avatar-end circle; the active ring is a comet that
+                // travels the whole pill outline, so the spin follows the widened shape.
+                val arcRect = Size(h - strokePx, h - strokePx)
+                val arcTopLeft = androidx.compose.ui.geometry.Offset(size.width - h + strokePx / 2f, strokePx / 2f)
+                if (ringActive) {
+                    val inset = strokePx / 2f
+                    val outline = androidx.compose.ui.graphics.Path().apply {
+                        addRoundRect(
+                            androidx.compose.ui.geometry.RoundRect(
+                                left = inset, top = inset,
+                                right = size.width - inset, bottom = h - inset,
+                                radiusX = radius, radiusY = radius,
+                            ),
+                        )
+                    }
+                    val measure = androidx.compose.ui.graphics.PathMeasure().apply { setPath(outline, true) }
+                    val len = measure.length
+                    val cometLen = len * 0.32f
+                    val startD = (spinAngle / 360f) * len
+                    val comet = androidx.compose.ui.graphics.Path()
+                    measure.getSegment(startD, minOf(startD + cometLen, len), comet, true)
+                    if (startD + cometLen > len) {
+                        measure.getSegment(0f, startD + cometLen - len, comet, true)
+                    }
+                    drawPath(comet, color = ringColor, style = Stroke(width = strokePx, cap = StrokeCap.Round))
                 } else if (animatedFraction > 0f) {
-                    // Static storage progress arc
                     drawArc(
-                        color      = arcColor,
+                        color = arcColor,
                         startAngle = -90f,
                         sweepAngle = 360f * animatedFraction,
-                        useCenter  = false,
-                        topLeft    = androidx.compose.ui.geometry.Offset(half, half),
-                        size       = arcRect,
-                        style      = Stroke(width = strokePx, cap = StrokeCap.Round),
+                        useCenter = false,
+                        topLeft = arcTopLeft,
+                        size = arcRect,
+                        style = Stroke(width = strokePx, cap = StrokeCap.Round),
                     )
                 }
-                // Inner fill (PillBg)
-                drawCircle(
-                    color  = pillBgColor,
-                    radius = size.minDimension / 2f - strokePx,
-                )
             }
+            // Tapping the avatar itself always opens Settings; the status glyphs below carry their
+            // own smaller tap targets (update / uploads / downloads) that consume the tap first.
             .clickable(onClick = onClick),
-        contentAlignment = Alignment.Center,
     ) {
-        // Avatar gradient circle
+        // Left area: transfer arrows always win; otherwise the status glyphs (update / offline).
+        if (transferActive) {
+            Row(
+                modifier = Modifier
+                    .align(Alignment.CenterStart)
+                    .padding(start = 15.dp),
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (hasActiveUpload) {
+                    Icon(
+                        Icons.Default.ArrowUpward,
+                        contentDescription = stringResource(R.string.activity_tab_uploads),
+                        tint = ringColor,
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .clickable(onClick = onUploadClick)
+                            .size(13.dp),
+                    )
+                }
+                if (hasActiveDownload) {
+                    Icon(
+                        Icons.Default.ArrowDownward,
+                        contentDescription = stringResource(R.string.activity_tab_downloads),
+                        tint = ringColor,
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .clickable(onClick = onDownloadClick)
+                            .size(13.dp),
+                    )
+                }
+            }
+        } else if (showStatus) {
+            Row(
+                modifier = Modifier
+                    .align(Alignment.CenterStart)
+                    .padding(start = 15.dp),
+                horizontalArrangement = Arrangement.spacedBy(3.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (updateAvailable) {
+                    Icon(
+                        Icons.Default.NewReleases,
+                        contentDescription = null,
+                        tint = Accent2,
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .clickable(onClick = onUpdateClick)
+                            .size(15.dp),
+                    )
+                }
+                if (isOffline) {
+                    // Soft red so "no connection" reads at a glance without shouting.
+                    Icon(Icons.Default.WifiOff, contentDescription = null, tint = Color(0xFFE57373), modifier = Modifier.size(14.dp))
+                }
+            }
+        }
+        // Avatar cluster at the right end: a 46 dp circle region, same layout as before.
         Box(
             modifier = Modifier
-                .size(32.dp)
-                .background(
-                    Brush.linearGradient(
-                        listOf(Accent, Accent2),
-                        start = Offset(0f, 0f),
-                        end   = Offset(80f, 80f),
-                    ),
-                    CircleShape,
-                ),
+                .align(Alignment.CenterEnd)
+                .size(46.dp),
             contentAlignment = Alignment.Center,
         ) {
-            Text(
-                text       = initial.ifEmpty { "?" },
-                color      = Color.White,
-                fontSize   = 14.sp,
-                fontWeight = FontWeight.SemiBold,
-            )
-        }
-        // Gear badge
-        Box(
-            modifier = Modifier
-                .size(14.dp)
-                .align(Alignment.BottomEnd)
-                .background(Bg2, CircleShape)
-                .border(1.dp, PillBorder, CircleShape),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                Icons.Default.Settings,
-                contentDescription = null,
-                tint = FgDim,
-                modifier = Modifier.size(8.dp),
-            )
-        }
-        // Offline badge — small red dot at the TopEnd corner. Kept distinct from
-        // the gear badge at BottomEnd so the two don't visually collide.
-        if (isOffline) {
+            // Avatar gradient circle
             Box(
                 modifier = Modifier
-                    .size(10.dp)
-                    .align(Alignment.TopEnd)
-                    .background(ErrorColor, CircleShape)
-                    .border(1.5.dp, Color.White, CircleShape),
-            )
+                    .size(32.dp)
+                    .background(
+                        Brush.linearGradient(
+                            listOf(Accent, Accent2),
+                            start = Offset(0f, 0f),
+                            end   = Offset(80f, 80f),
+                        ),
+                        CircleShape,
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text       = initial.ifEmpty { "?" },
+                    color      = Color.White,
+                    fontSize   = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+            // Gear badge
+            Box(
+                modifier = Modifier
+                    .size(14.dp)
+                    .align(Alignment.BottomEnd)
+                    .background(Bg2, CircleShape)
+                    .border(1.dp, PillBorder, CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Default.Settings,
+                    contentDescription = null,
+                    tint = FgDim,
+                    modifier = Modifier.size(8.dp),
+                )
+            }
         }
     }
 }
@@ -703,7 +833,7 @@ private fun DockTab(
 enum class SharedFilter { SharedWithMe, SharedByMe }
 
 /** Albums-tab view filter. All shows cloud albums + device folders in one common stream; Cloud
- *  and Local narrow to one kind. Cycled by the toggle pill in [AlbumsFilterRail]. */
+ *  and Local narrow to one kind. Picked from the filter sheet opened by [AlbumsFilterRail]. */
 enum class AlbumDisplayFilter { All, Cloud, Local }
 
 @Composable

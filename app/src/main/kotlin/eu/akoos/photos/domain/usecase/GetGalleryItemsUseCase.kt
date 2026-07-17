@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -36,10 +36,12 @@ import kotlinx.coroutines.flow.sample
 import kotlinx.coroutines.flow.shareIn
 import me.proton.core.domain.entity.UserId
 import eu.akoos.photos.di.AppScope
+import eu.akoos.photos.util.retryOnDbTear
 import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.entity.LocalMediaItem
 import eu.akoos.photos.domain.entity.SyncState
+import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.LocalMediaRepository
 import eu.akoos.photos.domain.repository.SyncStateRepository
@@ -73,8 +75,13 @@ class GetGalleryItemsUseCase @Inject constructor(
                 localRepo.observeLocalMedia().distinctUntilChanged(),
                 cloudRepo.observeCloudPhotos(userId).distinctUntilChanged(),
                 syncStateRepo.observeAll(userId).distinctUntilChanged(),
-            ) { local, cloud, syncStates ->
-                Triple(local, cloud, syncStates)
+                // Client-side hidden albums: the member linkIds to drop from EVERY listing. This is
+                // the single choke point all surfaces share (they all collect this flow), so one
+                // filter here hides a hidden album's photos from timeline, search, map, calendar,
+                // memories, folders and pickers at once. Empty + query-free when nothing is hidden.
+                cloudRepo.observeHiddenAlbumMemberLinkIds().distinctUntilChanged(),
+            ) { local, cloud, syncStates, hidden ->
+                MergeInput(local, cloud, syncStates, hidden)
             }
                 // Throttle the EXPENSIVE recompute. On a large library the cold listing writes the
                 // DB thousands of times; without this gate the merge+sort would re-run on the full,
@@ -85,13 +92,27 @@ class GetGalleryItemsUseCase @Inject constructor(
                 // period), then cached by shareIn(replay=1) for any late collector. `distinctUntilChanged`
                 // above already suppressed no-op re-emits, so a quiet library samples its one real value.
                 .sample(RECOMPUTE_THROTTLE_MS)
-                .map { (local, cloud, syncStates) -> merge(local, cloud, syncStates) }
+                .map { merge(it.local, it.cloud, it.syncStates, it.hiddenLinkIds) }
                 // The merge/sort over the full library is CPU work that must not run on the
                 // collector's Main dispatcher — a decrypt burst re-emits this per write.
                 .flowOn(Dispatchers.Default)
                 .distinctUntilChanged()
+                // Survive a torn cursor read on any source: a concurrent delete/upsert can fault a
+                // cursor window mid-read on a large library. Without this the fault would fail this
+                // shared flow's sharing coroutine in appScope (which has no exception handler) and
+                // crash the whole app, every collector at once (timeline, duplicate finder, search).
+                // Re-subscribing rebuilds the stream and the next emission refills each screen.
+                .retryOnDbTear("GetGalleryItems")
                 .shareIn(appScope, SharingStarted.WhileSubscribed(5_000), replay = 1)
         }
+
+    /** Bundles the four merge inputs so the sample+map pipeline carries them without a tuple type. */
+    private data class MergeInput(
+        val local: List<LocalMediaItem>,
+        val cloud: List<CloudPhoto>,
+        val syncStates: List<SyncState>,
+        val hiddenLinkIds: Set<String>,
+    )
 
     // internal (not private) so the unit test exercises this pure merge / classification / sort
     // logic directly, instead of driving it through the shared flow + Dispatchers.Default pipeline
@@ -100,6 +121,7 @@ class GetGalleryItemsUseCase @Inject constructor(
         local: List<LocalMediaItem>,
         cloud: List<CloudPhoto>,
         syncStates: List<SyncState>,
+        hiddenLinkIds: Set<String> = emptySet(),
     ): List<GalleryItem> {
         val syncByUri = syncStates.associateBy { it.localUri }
         // Fast lookup of cloud entries by both linkId AND contentHash so we can pair a local
@@ -107,20 +129,45 @@ class GetGalleryItemsUseCase @Inject constructor(
         // downloaded the album from a fresh install — no SyncState row exists yet but the
         // contentHash matches).
         val cloudByLinkId = cloud.associateBy { it.linkId }
-        val cloudByHash = cloud.filter { !it.contentHash.isNullOrEmpty() }
-            .associateBy { it.contentHash!! }
+        // Read only when a local item's SyncState carries no cloudFileId, so a steady-state library
+        // (every device photo already paired by cloudFileId) never builds it.
+        val cloudByHash: Map<String, CloudPhoto> by lazy(LazyThreadSafetyMode.NONE) {
+            cloud.filter { !it.contentHash.isNullOrEmpty() }.associateBy { it.contentHash!! }
+        }
+        // The three name-keyed maps below are read ONLY for a local item whose cloudFileId AND
+        // contentHash pairing both missed, so a cloud-heavy library (many cloud rows, few device
+        // photos) never reads one — building them up front costs tens of MB on a large library for
+        // entries nothing looks at. Deferring them keeps that off the merge's allocation peak.
+        // Each delegate is function-local and never published, so no two threads share one.
+        // Lower-cased names positionally aligned with [cloud]: all three key off this single pass
+        // rather than folding every row's name once per map.
+        val cloudLowerNames: List<String> by lazy(LazyThreadSafetyMode.NONE) {
+            cloud.map { it.displayName.lowercase() }
+        }
         // Content-based pairing fallback for cloud photos THIS app never uploaded — e.g. a library
         // backed up by Proton Drive's own app. With no SyncState row, neither cloudFileId nor
         // localHash resolves, so a device photo that also lives on Drive would otherwise render
         // twice (LocalOnly + CloudOnly). Group by (lower-case name, capture second); a local item
         // with exactly ONE unclaimed match there pairs as Synced. Grouping (not associateBy) lets
         // the loop REFUSE to guess when two cloud photos share the key, rather than merge a wrong pair.
-        val cloudByNameAndDate: Map<Pair<String, Long>, List<CloudPhoto>> =
-            cloud.groupBy { it.displayName.lowercase() to it.captureTime }
+        val cloudByNameAndDate: Map<Pair<String, Long>, List<CloudPhoto>> by lazy(LazyThreadSafetyMode.NONE) {
+            cloud.indices.groupBy({ cloudLowerNames[it] to cloud[it].captureTime }, { cloud[it] })
+        }
         // Name + exact byte size, videos only (see [cloudFromVideoSize] below). Grouped, not
         // associateBy, so an ambiguous (name,size) refuses to guess just like name+date.
-        val cloudByNameSize: Map<Pair<String, Long>, List<CloudPhoto>> =
-            cloud.groupBy { it.displayName.lowercase() to it.sizeBytes }
+        val cloudByNameSize: Map<Pair<String, Long>, List<CloudPhoto>> by lazy(LazyThreadSafetyMode.NONE) {
+            cloud.indices.groupBy({ cloudLowerNames[it] to cloud[it].sizeBytes }, { cloud[it] })
+        }
+        // Name only, any type (see [cloudFromName] below). An edited clip keeps the ORIGINAL
+        // capture time on its cloud copy but the device copy carries the EDIT time, so name+second
+        // misses by an unbounded gap (a today-edit of a year-old clip drifts by a year); a re-downloaded
+        // PNG can carry no reliable date at all. Cloud Size is 0 for the whole photo volume, so name+size
+        // is dead too. The stamped edit filename is highly
+        // distinctive, so the ONE unclaimed cloud video with the same name is the twin. Grouped so
+        // singleOrNull still refuses an ambiguous same-name burst.
+        val cloudByName: Map<String, List<CloudPhoto>> by lazy(LazyThreadSafetyMode.NONE) {
+            cloud.indices.groupBy({ cloudLowerNames[it] }, { cloud[it] })
+        }
 
         val result = mutableListOf<GalleryItem>()
         val usedCloudIds = mutableSetOf<String>()
@@ -168,8 +215,25 @@ class GetGalleryItemsUseCase @Inject constructor(
                     ?.filter { it.linkId !in usedCloudIds && it.sizeBytes > 0 }
                     ?.singleOrNull()
             else null
+            // Last resort for ANY type: name + capture-second misses whenever the device copy's date
+            // drifts off the cloud original: an edit shifts it by an unbounded gap, a motion photo can
+            // land a second off, and a re-downloaded PNG can carry no reliable DATE_TAKEN at all (the OS
+            // refuses the column for PNG, so it reads as the download day). Cloud Size is 0 for the whole
+            // photo volume, so name+size is dead too. After a reinstall (no SyncState / stored hash yet)
+            // that leaves the exact name as the only signal. Pair the ONE unclaimed cloud item that
+            // shares it; singleOrNull leaves an ambiguous same-name burst (recurring camera names) as
+            // LocalOnly rather than guessing. Display-only: a wrong guess would show a bad thumbnail, it
+            // can never delete or re-upload. A paired photo then reads its date from the cloud copy, so
+            // this also rescues the PNG's shown date.
+            val cloudFromName = if (cloudFromSync == null && cloudFromHash == null &&
+                    cloudFromContent == null && cloudFromVideoSize == null)
+                cloudByName[localItem.displayName.lowercase()]
+                    ?.filter { it.linkId !in usedCloudIds }
+                    ?.singleOrNull()
+            else null
 
-            val cloudPhoto = cloudFromSync ?: cloudFromHash ?: cloudFromContent ?: cloudFromVideoSize
+            val cloudPhoto = cloudFromSync ?: cloudFromHash ?: cloudFromContent
+                ?: cloudFromVideoSize ?: cloudFromName
 
             if (cloudPhoto != null) {
                 usedCloudIds += cloudPhoto.linkId
@@ -194,17 +258,50 @@ class GetGalleryItemsUseCase @Inject constructor(
         // index array against precomputed primitive key arrays (no per-item Triple, no Long
         // boxing, no double .map over the whole library), then materialise the ordered list in a
         // single pass. Ordering is identical to compareByDescending(captureTimeMs).thenBy(stableId).
-        val n = result.size
+        // Drop photos in a client-side hidden album just before the sort, so pairing above is
+        // unaffected (a hidden Synced pair still claims its cloud id) and every downstream surface
+        // sharing this flow sees the photo gone. Nothing is deleted; unhiding re-includes it.
+        // Fold the vaulted-photo signal into the same drop set. A photo moved into the Hidden vault
+        // keeps its Drive copy but leaves MediaStore, so the pairing above renders its twin as
+        // CloudOnly; a HIDDEN row's cloudFileId is exactly that twin's cloud.linkId (the key
+        // cloudByLinkId is built on), so unioning it here drops the twin from every surface instead
+        // of leaving it visible. HIDDEN is a tiny subset and the union allocates only when non-empty.
+        val hiddenSyncedLinkIds = syncStates.asSequence()
+            .filter { it.status == SyncStatus.HIDDEN }
+            .mapNotNull { it.cloudFileId }
+            .toSet()
+        val effectiveHiddenLinkIds = when {
+            hiddenSyncedLinkIds.isEmpty() -> hiddenLinkIds
+            hiddenLinkIds.isEmpty() -> hiddenSyncedLinkIds
+            else -> hiddenLinkIds + hiddenSyncedLinkIds
+        }
+        val visible = if (effectiveHiddenLinkIds.isEmpty()) result
+            else result.filterNot { isInHiddenAlbum(it, effectiveHiddenLinkIds) }
+
+        val n = visible.size
         val times = LongArray(n)
         val ids = arrayOfNulls<String>(n)
         for (i in 0 until n) {
-            times[i] = result[i].captureTimeMs
-            ids[i] = result[i].stableId
+            times[i] = visible[i].captureTimeMs
+            ids[i] = visible[i].stableId
         }
         val order = (0 until n).sortedWith(Comparator { a, b ->
             val byTime = times[b].compareTo(times[a]) // descending captureTime
             if (byTime != 0) byTime else ids[a]!!.compareTo(ids[b]!!) // ascending stableId tiebreak
         })
-        return order.map { result[it] }
+        return order.map { visible[it] }
+    }
+
+    /** A gallery item belongs to a hidden album when its cloud copy's linkId is a hidden-album
+     *  member. A LocalOnly item has no cloud linkId, so an album hide never removes a device-only
+     *  photo (those use the separate hidden vault). */
+    internal fun isInHiddenAlbum(item: GalleryItem, hiddenLinkIds: Set<String>): Boolean {
+        if (hiddenLinkIds.isEmpty()) return false
+        val linkId = when (item) {
+            is GalleryItem.Synced -> item.cloud.linkId
+            is GalleryItem.CloudOnly -> item.cloud.linkId
+            is GalleryItem.LocalOnly -> null
+        }
+        return linkId != null && linkId in hiddenLinkIds
     }
 }

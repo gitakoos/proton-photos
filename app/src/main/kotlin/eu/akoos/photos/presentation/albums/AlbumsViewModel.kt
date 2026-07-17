@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -34,6 +34,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
@@ -69,11 +70,13 @@ data class AlbumsUiState(
     val deviceFolders: List<DeviceFolder> = emptyList(),
     val hideDeviceFolders: Boolean = false,
     val hideCloudAlbums: Boolean = false,
+    val hiddenAlbumIds: Set<String> = emptySet(),
     val error: String? = null,
     val isCreatingAlbum: Boolean = false,
     val createAlbumError: String? = null,
 ) {
-    val visibleCloudAlbums: List<Album> get() = albums
+    /** Cloud albums hidden client-side drop off the Albums grid. */
+    val visibleCloudAlbums: List<Album> get() = albums.filter { it.linkId !in hiddenAlbumIds }
 }
 
 @HiltViewModel
@@ -149,6 +152,31 @@ class AlbumsViewModel @Inject constructor(
                 .map { it[SettingsKeys.HIDE_CLOUD_ALBUMS_IN_ALBUMS] ?: false }
                 .catch { emit(false) }
                 .collect { hidden -> _uiState.update { it.copy(hideCloudAlbums = hidden) } }
+        }
+        // Client-side hidden cloud albums, filtered out of the grid via [AlbumsUiState.visibleCloudAlbums].
+        viewModelScope.launch {
+            context.settingsDataStore.data
+                .map { it[SettingsKeys.HIDDEN_ALBUM_IDS] ?: emptySet() }
+                .catch { emit(emptySet()) }
+                .collect { ids -> _uiState.update { it.copy(hiddenAlbumIds = ids) } }
+        }
+        // When the hidden-photo set changes, re-resolve album covers from cache so an album whose
+        // cover is now a hidden photo switches to a non-hidden one (and back on unhide), live and
+        // without a full network reload. The initial covers are already resolved by the load above.
+        viewModelScope.launch {
+            driveRepo.observeHiddenAlbumMemberLinkIds()
+                .drop(1)
+                .catch { emit(emptySet()) }
+                .collect {
+                    val recached = runCatching { driveRepo.loadAlbumsCached() }.getOrNull().orEmpty()
+                    if (recached.isEmpty()) return@collect
+                    val coverById = recached.associate { a -> a.linkId to a.coverThumbnailUrl }
+                    _uiState.update { st ->
+                        st.copy(albums = st.albums.map { a ->
+                            if (a.linkId in coverById) a.copy(coverThumbnailUrl = coverById[a.linkId]) else a
+                        })
+                    }
+                }
         }
     }
 
@@ -303,6 +331,20 @@ class AlbumsViewModel @Inject constructor(
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 _uiState.update { it.copy(error = context.getString(R.string.albums_delete_failed, e.message ?: "")) }
+            }
+        }
+    }
+
+    /**
+     * Hide a cloud album client-side by adding its linkId to [SettingsKeys.HIDDEN_ALBUM_IDS]. The
+     * card leaves the Albums grid and the album's photos drop from every other list. Nothing on
+     * Drive changes, so the album stays intact and returns on unhide.
+     */
+    fun hideAlbum(albumLinkId: String) {
+        viewModelScope.launch {
+            context.settingsDataStore.edit { prefs ->
+                val current = prefs[SettingsKeys.HIDDEN_ALBUM_IDS] ?: emptySet()
+                prefs[SettingsKeys.HIDDEN_ALBUM_IDS] = current + albumLinkId
             }
         }
     }

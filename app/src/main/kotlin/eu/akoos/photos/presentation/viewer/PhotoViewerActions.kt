@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -80,6 +80,7 @@ import coil.compose.AsyncImage
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.entity.GalleryItem
+import eu.akoos.photos.presentation.gallery.LocalThumbnailUrls
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.Bg0
 import eu.akoos.photos.presentation.theme.Bg2
@@ -99,10 +100,15 @@ import eu.akoos.photos.presentation.theme.PillBorder
 internal fun Filmstrip(
     items: List<GalleryItem>,
     currentPage: Int,
+    player: androidx.media3.exoplayer.ExoPlayer?,
+    videoUri: android.net.Uri?,
+    onScrubbingChange: (Boolean) -> Unit = {},
     onThumbnailClick: (Int) -> Unit,
 ) {
     val listState = rememberLazyListState()
     val density   = LocalDensity.current
+    // The active item widens into a frame scrubber in place when it is a video with a ready player.
+    val currentIsVideo = videoUri != null && player != null
 
     // True while the user is physically dragging the strip — suppresses the auto-recentre
     // below so a manual scroll back through the thumbnails isn't yanked away from them.
@@ -111,14 +117,17 @@ internal fun Filmstrip(
     BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
         val viewportPx = constraints.maxWidth
         val itemPx     = with(density) { 54.dp.roundToPx() }
+        val wideItemPx = with(density) { 216.dp.roundToPx() }
 
         // Pager → filmstrip: keep the active thumb centred. Suppressed while the
-        // user is dragging the strip so we don't yank it out from under them.
-        LaunchedEffect(currentPage) {
+        // user is dragging the strip so we don't yank it out from under them. The wide
+        // video slot centres on its own width so the whole scrubber stays reachable.
+        LaunchedEffect(currentPage, currentIsVideo) {
             if (!isDragged) {
+                val activePx = if (currentIsVideo) wideItemPx else itemPx
                 listState.animateScrollToItem(
                     index        = currentPage,
-                    scrollOffset = -(viewportPx / 2 - itemPx / 2),
+                    scrollOffset = -(viewportPx / 2 - activePx / 2),
                 )
             }
         }
@@ -141,31 +150,44 @@ internal fun Filmstrip(
                 },
             ) { index, item ->
                 val isCurrent = index == currentPage
-                val thumbModel: Any? = when (item) {
-                    is GalleryItem.LocalOnly -> Uri.parse(item.local.uri)
-                    is GalleryItem.Synced    -> Uri.parse(item.local.uri)
-                    is GalleryItem.CloudOnly -> item.cloud.thumbnailUrl
-                }
-                Box(
-                    modifier = Modifier
-                        .size(54.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(Bg2)
-                        .then(
-                            if (isCurrent)
-                                Modifier.border(2.dp, Color.White, RoundedCornerShape(8.dp))
-                            else
-                                Modifier.alpha(0.45f)
-                        )
-                        .clickable { onThumbnailClick(index) },
-                ) {
-                    if (thumbModel != null) {
-                        AsyncImage(
-                            model = thumbModel,
-                            contentDescription = null,
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier.fillMaxSize(),
-                        )
+                if (isCurrent && videoUri != null && player != null) {
+                    // The active video widens into the frame scrubber right here in the reel.
+                    VideoFilmstrip(
+                        player = player,
+                        videoUri = videoUri,
+                        modifier = Modifier
+                            .size(216.dp, 54.dp)
+                            .border(2.dp, Color.White, RoundedCornerShape(8.dp)),
+                        onScrubbingChange = onScrubbingChange,
+                    )
+                } else {
+                    val thumbModel: Any? = when (item) {
+                        is GalleryItem.LocalOnly -> Uri.parse(item.local.uri)
+                        is GalleryItem.Synced    -> Uri.parse(item.local.uri)
+                        is GalleryItem.CloudOnly ->
+                            LocalThumbnailUrls.current.value[item.cloud.linkId] ?: item.cloud.thumbnailUrl
+                    }
+                    Box(
+                        modifier = Modifier
+                            .size(54.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Bg2)
+                            .then(
+                                if (isCurrent)
+                                    Modifier.border(2.dp, Color.White, RoundedCornerShape(8.dp))
+                                else
+                                    Modifier.alpha(0.45f)
+                            )
+                            .clickable { onThumbnailClick(index) },
+                    ) {
+                        if (thumbModel != null) {
+                            AsyncImage(
+                                model = thumbModel,
+                                contentDescription = null,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                        }
                     }
                 }
             }

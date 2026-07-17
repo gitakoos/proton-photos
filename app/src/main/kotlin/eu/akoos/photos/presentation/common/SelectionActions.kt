@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -78,4 +78,83 @@ private fun GalleryItem.effectiveMimeType(): String = when (this) {
 fun selectionMimeCounts(items: Collection<GalleryItem>): SelectionMimeCounts {
     val videos = items.count { it.effectiveMimeType().startsWith("video/") }
     return SelectionMimeCounts(photos = items.size - videos, videos = videos)
+}
+
+/**
+ * Where the unified hide action routes a single [GalleryItem].
+ *
+ * - [VAULT]: a device-backed photo (device-only or synced) moves into the app-private Hidden vault;
+ *   its file leaves MediaStore, and for a synced photo the cloud twin is dropped from every listing.
+ * - [CLIENT_SIDE]: a cloud-only photo has no device file to vault, so it is hidden client-side by
+ *   linkId (the HIDDEN_CLOUD_PHOTO_IDS set); nothing on Drive is changed.
+ */
+enum class HideTarget { VAULT, CLIENT_SIDE }
+
+/** The hide route for [item]: a device-backed photo (device-only or synced) goes to the
+ *  [HideTarget.VAULT]; a cloud-only photo is hidden [HideTarget.CLIENT_SIDE]. */
+fun hideTargetFor(item: GalleryItem): HideTarget = when (item) {
+    is GalleryItem.LocalOnly, is GalleryItem.Synced -> HideTarget.VAULT
+    is GalleryItem.CloudOnly -> HideTarget.CLIENT_SIDE
+}
+
+/** Any non-empty selection can be hidden, regardless of the per-item [HideTarget]. Gates whether the
+ *  Hide action is offered at all. */
+fun anyHideable(items: Collection<GalleryItem>): Boolean = items.isNotEmpty()
+
+/** Drive linkIds of the selection. A device-only photo has no cloud copy, so it contributes no id
+ *  and drops out of every album-membership question. */
+fun selectionCloudLinkIds(items: Collection<GalleryItem>): Set<String> =
+    items.mapNotNullTo(mutableSetOf()) { item ->
+        when (item) {
+            is GalleryItem.Synced    -> item.cloud.linkId
+            is GalleryItem.CloudOnly -> item.cloud.linkId
+            is GalleryItem.LocalOnly -> null
+        }
+    }
+
+/**
+ * How much of a selection an album already holds, as the add-to-album picker reports it.
+ *
+ * - [All]: every cloud-backed selected photo is already in the album.
+ * - [Some]: [inAlbum] of [total] are, so the picker shows the fraction.
+ * - [None]: the album holds nothing in the selection, and the picker stays blank.
+ */
+sealed interface AlbumMembership {
+    data object None : AlbumMembership
+    data object All : AlbumMembership
+    data class Some(val inAlbum: Int, val total: Int) : AlbumMembership
+}
+
+/**
+ * Membership of [selectedPhotoLinkIds] (a selection's Drive linkIds, per [selectionCloudLinkIds])
+ * against one album's [albumMemberIds].
+ *
+ * The denominator counts only cloud-backed photos: a device-only photo cannot be in a Drive album,
+ * so counting it would read as a permanent shortfall no action could clear. A selection with no
+ * cloud copy at all therefore resolves to [AlbumMembership.None] rather than a zero fraction.
+ */
+fun albumMembershipState(
+    selectedPhotoLinkIds: Set<String>,
+    albumMemberIds: Set<String>,
+): AlbumMembership {
+    if (selectedPhotoLinkIds.isEmpty()) return AlbumMembership.None
+    val inAlbum = selectedPhotoLinkIds.count { it in albumMemberIds }
+    return when (inAlbum) {
+        0 -> AlbumMembership.None
+        selectedPhotoLinkIds.size -> AlbumMembership.All
+        else -> AlbumMembership.Some(inAlbum, selectedPhotoLinkIds.size)
+    }
+}
+
+/**
+ * Whether [item] sits in no album at all, against [inAnyAlbumLinkIds] — every photo linkId held by
+ * any album. Backs the album picker's unfiled-only filter.
+ *
+ * A device-only photo has no cloud copy for an album to hold, so it is unfiled by construction and
+ * counts as unfiled rather than dropping out of the filter.
+ */
+fun isUnfiled(item: GalleryItem, inAnyAlbumLinkIds: Set<String>): Boolean = when (item) {
+    is GalleryItem.LocalOnly -> true
+    is GalleryItem.Synced    -> item.cloud.linkId !in inAnyAlbumLinkIds
+    is GalleryItem.CloudOnly -> item.cloud.linkId !in inAnyAlbumLinkIds
 }

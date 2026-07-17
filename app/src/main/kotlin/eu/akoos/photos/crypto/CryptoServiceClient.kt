@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -34,9 +34,12 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.data.crypto.DriveCryptoHelper
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withTimeout
 import me.proton.core.crypto.common.pgp.SessionKey
 import java.io.File
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -67,7 +70,25 @@ class CryptoServiceClient @Inject constructor(
     private val rebindAttempts = AtomicInteger(0)
 
     /** Latched once we give up on `:crypto` for the session — calls go straight to fallback. */
-    @Volatile private var permanentFallback = false
+    private val permanentFallback = AtomicBoolean(false)
+
+    /** Caps the total decrypts in flight across every caller (thumbnails, XAttr, download blocks,
+     *  key unwraps). They all funnel through [withService], so one permit here bounds the whole
+     *  fan-in onto libgojni, whose native runtime races when too many decrypts hit it at once. That
+     *  race is the source of the fresh-install "not responding" on big libraries. */
+    private val decryptGate = Semaphore(GLOBAL_DECRYPT_PARALLELISM)
+
+    /** Extra 1-wide gate that serializes decrypts only during a cold-open warm-up window, on top of
+     *  [decryptGate]. The libgojni race is worst when a whole screenful decrypts at once against a
+     *  cold parent-key cache (fresh launch, or an OS cache-clear that nulls every URL so the visible
+     *  set re-decrypts in a burst). Forcing effective parallelism to 1 for the first
+     *  [COLD_OPEN_DECRYPTS] leaves lowers the crash probability; steady-state scroll stays 3-wide. */
+    private val coldOpenGate = Semaphore(1)
+
+    /** Decrypts still to serialize through [coldOpenGate]. Counts down once per decrypt (success OR
+     *  failure, so a burst of failures still warms out and can never wedge the gate). At 0 the warm-up
+     *  is over and [coldOpenGate] is bypassed. Reset to [COLD_OPEN_DECRYPTS] by [armColdOpenDamping]. */
+    private val coldOpenRemaining = AtomicInteger(COLD_OPEN_DECRYPTS)
 
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
@@ -87,9 +108,19 @@ class CryptoServiceClient @Inject constructor(
             if (rebindAttempts.incrementAndGet() <= MAX_REBINDS) {
                 bind()
             } else {
-                permanentFallback = true
+                latchPermanentFallback("rebinds-exhausted")
                 Log.w(TAG, "rebind budget exhausted — staying in-process for this session")
             }
+        }
+    }
+
+    /** Gives up on `:crypto` for the session and leaves one breadcrumb the first time: release builds
+     *  strip [Log], so this is the only trace that the app is running the very in-process
+     *  configuration the separate process exists to avoid. The CAS bounds it to one line per session
+     *  even if a flapping `:crypto` re-enters this path. [reason] is a fixed non-identifying label. */
+    private fun latchPermanentFallback(reason: String) {
+        if (permanentFallback.compareAndSet(false, true)) {
+            eu.akoos.photos.util.SyncDiagnostics.log("crypto: in-process fallback latched ($reason)")
         }
     }
 
@@ -103,14 +134,14 @@ class CryptoServiceClient @Inject constructor(
             )
         }.getOrDefault(false)
         if (!ok) {
-            permanentFallback = true
+            latchPermanentFallback("bind-refused")
             Log.w(TAG, "bindService returned false — staying in-process for this session")
         }
     }
 
     /** Returns the live binder, binding (and awaiting) on first use; null when unreachable in time. */
     private suspend fun awaitBinding(): ICryptoService? {
-        if (permanentFallback) return null
+        if (permanentFallback.get()) return null
         binder?.let { return it }
         if (connection.isCompleted && !connection.isCancelled) {
             binder?.let { return it } // prior connect won; the first volatile read lost the race
@@ -137,20 +168,56 @@ class CryptoServiceClient @Inject constructor(
         remote: (ICryptoService) -> T,
         local: suspend () -> T,
     ): T {
-        val svc = awaitBinding() ?: return local()
-        return try {
-            remote(svc)
-        } catch (e: DeadObjectException) {
-            binder = null
-            Log.w(TAG, "remote call hit a dead :crypto — falling back in-process")
-            local()
-        } catch (e: RemoteException) {
-            Log.w(TAG, "remote call failed (${e.message}) — falling back in-process")
-            local()
-        } catch (e: Exception) {
-            Log.w(TAG, "remote call errored (${e.message}) — falling back in-process")
-            local()
+        val svc = awaitBinding()
+        // One global permit per decrypt, so the sum across all callers cannot storm libgojni. Taken
+        // AFTER the bind wait (so a slow bind never holds a permit); the in-process fallback is gated
+        // too, since it hits the same native library.
+        val gated: suspend () -> T = {
+            decryptGate.withPermit {
+                if (svc == null) {
+                    local()
+                } else {
+                    try {
+                        remote(svc)
+                    } catch (e: DeadObjectException) {
+                        binder = null
+                        Log.w(TAG, "remote call hit a dead :crypto — falling back in-process")
+                        local()
+                    } catch (e: RemoteException) {
+                        Log.w(TAG, "remote call failed (${e.message}) — falling back in-process")
+                        local()
+                    } catch (e: Exception) {
+                        Log.w(TAG, "remote call errored (${e.message}) — falling back in-process")
+                        local()
+                    }
+                }
+            }
         }
+        // During the cold-open warm-up, take the 1-wide coldOpenGate OUTSIDE decryptGate so effective
+        // parallelism is 1. This deliberately serializes the WHOLE fetch+decrypt 1-wide for the first
+        // few requests (gated() runs remote()/local(), which fetch and decrypt while the gate is held)
+        // to keep the JNI/GC burst small on a cold open. That is safe from deadlock on its own: this
+        // gate is only ever acquired here and is always released before returning, so nothing can be
+        // waiting on it while it is held. The counter decrements once per decrypt in a finally, so a
+        // failed decrypt still warms out and can never wedge the gate. Once drained, decrypts skip it.
+        return if (coldOpenRemaining.get() > 0) {
+            coldOpenGate.withPermit {
+                try {
+                    gated()
+                } finally {
+                    coldOpenRemaining.getAndUpdate { if (it > 0) it - 1 else 0 }
+                }
+            }
+        } else {
+            gated()
+        }
+    }
+
+    /** Re-arms the cold-open damping so the next [COLD_OPEN_DECRYPTS] decrypts serialize 1-wide again.
+     *  Called after an OS cache-clear forces the whole visible set to re-decrypt in one burst. Armed
+     *  by default at construction via [coldOpenRemaining]'s initial value. */
+    fun armColdOpenDamping() {
+        coldOpenRemaining.set(COLD_OPEN_DECRYPTS)
     }
 
     // ─── Suspend mirrors of the DriveCryptoHelper leaf decrypts ────────────────
@@ -220,5 +287,14 @@ class CryptoServiceClient @Inject constructor(
         /** Upper bound on how long a caller waits for the first bind before falling
          *  back in-process. Short so a stuck `:crypto` never stalls the gallery. */
         const val BIND_TIMEOUT_MS = 4_000L
+
+        /** Max concurrent decrypts across all callers, gating the fan-in onto the single libgojni
+         *  runtime. Low on purpose: the native library races under heavier parallel load. */
+        const val GLOBAL_DECRYPT_PARALLELISM = 3
+
+        /** Decrypts to serialize 1-wide at cold open before returning to [GLOBAL_DECRYPT_PARALLELISM].
+         *  A few screenfuls: enough to cover the initial burst against a cold parent-key cache without
+         *  slowing steady-state scroll. */
+        const val COLD_OPEN_DECRYPTS = 32
     }
 }

@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -50,9 +50,11 @@ import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.LabelOff
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -75,17 +77,20 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.presentation.common.IconBubble
+import eu.akoos.photos.presentation.common.isUnfiled
 import eu.akoos.photos.presentation.gallery.GridZoom
 import eu.akoos.photos.presentation.gallery.PhotoCell
 import eu.akoos.photos.presentation.gallery.TimelineGrouping
 import eu.akoos.photos.presentation.gallery.TimelineScrubber
 import eu.akoos.photos.presentation.gallery.photoCellInputsFor
 import eu.akoos.photos.presentation.gallery.rememberDefaultGridColumns
+import eu.akoos.photos.presentation.gallery.rememberSeamlessGrid
 import eu.akoos.photos.presentation.gallery.rememberDragMultiSelectModifier
 import eu.akoos.photos.presentation.gallery.rememberGridPinchZoomModifier
 import java.text.SimpleDateFormat
@@ -123,6 +128,7 @@ fun AlbumPhotoPickerScreen(
     val appColors = AppColors.current
     val allItems by viewModel.items.collectAsStateWithLifecycle()
     val hiddenCloudLinkIds by viewModel.hiddenCloudLinkIds.collectAsStateWithLifecycle()
+    val inAnyAlbumLinkIds by viewModel.inAnyAlbumLinkIds.collectAsStateWithLifecycle()
     val selected by viewModel.selected.collectAsStateWithLifecycle()
     val addState by viewModel.addState.collectAsStateWithLifecycle()
     val gridState = rememberLazyGridState()
@@ -130,6 +136,7 @@ fun AlbumPhotoPickerScreen(
     val context = LocalContext.current
     val showScrollTop by remember { derivedStateOf { gridState.firstVisibleItemIndex > 4 } }
     var pickerFilter by remember { mutableStateOf(PickerFilter.All) }
+    var unfiledOnly by remember { mutableStateOf(false) }
     // Status bar + the floating back-pill + the type-filter row, so the grid's first row and the
     // scrubber track start cleanly below both.
     val headerTopInset = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 100.dp
@@ -148,13 +155,15 @@ fun AlbumPhotoPickerScreen(
         }
     }
     // Type filter (#40): narrow the mixed library to cloud-backed photos (CloudOnly + Synced) or
-    // on-device-only photos (LocalOnly), so it is clear which source a photo comes from.
-    val photos = remember(basePhotos, pickerFilter) {
-        when (pickerFilter) {
+    // on-device-only photos (LocalOnly), so it is clear which source a photo comes from. The
+    // unfiled-only filter (#73) then composes on top, so a pick like "cloud AND unfiled" holds.
+    val photos = remember(basePhotos, pickerFilter, unfiledOnly, inAnyAlbumLinkIds) {
+        val bySource = when (pickerFilter) {
             PickerFilter.All -> basePhotos
             PickerFilter.Cloud -> basePhotos.filter { it is GalleryItem.CloudOnly || it is GalleryItem.Synced }
             PickerFilter.Device -> basePhotos.filter { it is GalleryItem.LocalOnly }
         }
+        if (unfiledOnly) bySource.filter { isUnfiled(it, inAnyAlbumLinkIds) } else bySource
     }
 
     // Pop back to the album once the add succeeds.
@@ -208,6 +217,7 @@ fun AlbumPhotoPickerScreen(
         // Pinch-zoom level: opening at the grid-layout default, then driven by the pinch gesture.
         // The level fixes both the column count and the date grouping for the headers below.
         val defaultCols = rememberDefaultGridColumns()
+        val seamless = rememberSeamlessGrid()
         var levelIndex by rememberSaveable { mutableIntStateOf(GridZoom.levelForColumns(defaultCols)) }
         val (columnCount, grouping) = GridZoom.LEVELS[levelIndex.coerceIn(0, GridZoom.LEVELS.lastIndex)]
 
@@ -246,24 +256,35 @@ fun AlbumPhotoPickerScreen(
             state = gridState,
             // Match the timeline grid so tiles render at the same size/spacing. Top inset clears the
             // floating back-pill so the first row starts below it (content only slides under once scrolled).
-            contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = headerTopInset, bottom = 96.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
+            // Edge-to-edge drops the side inset and tightens the gap.
+            contentPadding = PaddingValues(
+                start = if (seamless) 0.dp else 20.dp,
+                end = if (seamless) 0.dp else 20.dp,
+                top = headerTopInset,
+                bottom = 96.dp,
+            ),
+            horizontalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 6.dp),
+            verticalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 6.dp),
             // Drag-select first (claims the gesture only after a long-press time-out), then pinch
             // (two-finger). Plain single-finger drags fall through to the grid's own scroll.
             modifier = Modifier.fillMaxSize().then(dragSelectModifier).then(pinchModifier),
         ) {
             if (photos.isEmpty()) {
                 item(span = { GridItemSpan(maxLineSpan) }) {
-                    Box(Modifier.fillMaxWidth().height(220.dp), contentAlignment = Alignment.Center) {
+                    Box(Modifier.padding(horizontal = if (seamless) 20.dp else 0.dp).fillMaxWidth().height(220.dp), contentAlignment = Alignment.Center) {
                         Text(stringResource(R.string.album_picker_empty), color = FgMute, fontSize = 14.sp)
                     }
                 }
             } else {
                 for ((label, groupItems) in grouped) {
-                    // Full-span date header — no photo key, so drag hit-testing skips it.
+                    // Full-span date header: no photo key, so drag hit-testing skips it. Keeps a
+                    // side inset in seamless mode so the label never hits the screen edge.
                     item(span = { GridItemSpan(maxLineSpan) }, contentType = "header") {
-                        PickerSectionHeader(label = label, count = groupItems.size)
+                        PickerSectionHeader(
+                            label = label,
+                            count = groupItems.size,
+                            modifier = Modifier.padding(horizontal = if (seamless) 20.dp else 0.dp),
+                        )
                     }
                     items(groupItems, key = { AlbumPhotoPickerViewModel.stableKeyOf(it) }, contentType = { "photo" }) { item ->
                         val key = AlbumPhotoPickerViewModel.stableKeyOf(item)
@@ -272,6 +293,8 @@ fun AlbumPhotoPickerScreen(
                             imageData = inputs.imageData,
                             stableKey = inputs.stableKey,
                             isVideo = inputs.isVideo,
+                            isLocalVideo = inputs.isLocalVideo,
+                            durationMs = inputs.durationMs,
                             isPlaceholder = inputs.isPlaceholder,
                             selected = key in selected,
                             isSelectionMode = true,
@@ -280,6 +303,8 @@ fun AlbumPhotoPickerScreen(
                             isFavorite = inputs.isFavorite,
                             typeBadgeRes = inputs.typeBadgeRes,
                             typeBadgeCdRes = inputs.typeBadgeCdRes,
+                            columns = columnCount,
+                            cornerRadius = if (seamless) 0.dp else 10.dp,
                             onClick = {
                                 // Skip the release-tap that follows a long-press select; it would
                                 // otherwise toggle the just-anchored cell back off.
@@ -361,7 +386,8 @@ fun AlbumPhotoPickerScreen(
                 .statusBarsPadding()
                 .fillMaxWidth()
                 .padding(top = 56.dp),
-            horizontalArrangement = Arrangement.Center,
+            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
             Row(
                 modifier = Modifier
@@ -381,6 +407,10 @@ fun AlbumPhotoPickerScreen(
                     pickerFilter = PickerFilter.Device
                 }
             }
+            // Its own pill rather than a fourth segment: the control beside it picks a SOURCE, while
+            // this picks a filed status. They are independent axes, so folding them into one
+            // one-of-N control would make a combination like "cloud AND unfiled" unexpressible.
+            PickerUnfiledToggle(unfiledOnly) { unfiledOnly = !unfiledOnly }
         }
 
         // Confirm bar — "Add (N)". Disabled until at least one photo is picked.
@@ -455,9 +485,9 @@ fun AlbumPhotoPickerScreen(
  * title plus a trailing item count — without the group-select circle (the picker has no group select).
  */
 @Composable
-private fun PickerSectionHeader(label: String, count: Int) {
+private fun PickerSectionHeader(label: String, count: Int, modifier: Modifier = Modifier) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(top = 24.dp, bottom = 10.dp),
+        modifier = modifier.fillMaxWidth().padding(top = 24.dp, bottom = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
@@ -492,4 +522,31 @@ private fun PickerFilterSegment(label: String, selected: Boolean, onClick: () ->
             .clickable(onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 7.dp),
     )
+}
+
+/** The unfiled-only toggle beside the type-filter pill: keeps only photos no album holds. Repeats
+ *  the segmented control's container and accent fill so the two read as one row, and carries the
+ *  toggle role so its on/off state is announced. */
+@Composable
+private fun PickerUnfiledToggle(selected: Boolean, onToggle: () -> Unit) {
+    val colors = AppColors.current
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(20.dp))
+            .background(PillBg, RoundedCornerShape(20.dp))
+            .border(0.5.dp, PillBorder, RoundedCornerShape(20.dp))
+            .toggleable(value = selected, role = Role.Switch, onValueChange = { onToggle() })
+            .padding(3.dp),
+    ) {
+        Icon(
+            Icons.AutoMirrored.Filled.LabelOff,
+            contentDescription = stringResource(R.string.picker_filter_unfiled),
+            tint = if (selected) Color.White else colors.fgPrimary,
+            modifier = Modifier
+                .clip(RoundedCornerShape(17.dp))
+                .background(if (selected) Accent else Color.Transparent, RoundedCornerShape(17.dp))
+                .padding(7.dp)
+                .size(16.dp),
+        )
+    }
 }

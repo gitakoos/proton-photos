@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -55,6 +55,7 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.GalleryItem
+import eu.akoos.photos.presentation.gallery.LocalThumbnailUrls
 import eu.akoos.photos.presentation.theme.Bg2
 import eu.akoos.photos.presentation.theme.AppColors
 import java.util.Calendar
@@ -108,7 +109,11 @@ internal fun OnThisDayCard(
     val imageModel: Any? = when (coverItem) {
         is GalleryItem.LocalOnly -> android.net.Uri.parse(coverItem.local.uri)
         is GalleryItem.Synced    -> android.net.Uri.parse(coverItem.local.uri)
-        is GalleryItem.CloudOnly -> coverItem.cloud.thumbnailUrl
+        // The gallery timeline's On-this-day carousel passes non-overlaid feed items whose
+        // thumbnailUrl is null, so resolve from the shared store first (the Memories screen's own
+        // overlay still wins via the item URL when present).
+        is GalleryItem.CloudOnly ->
+            LocalThumbnailUrls.current.value[coverItem.cloud.linkId] ?: coverItem.cloud.thumbnailUrl
     }
     val isVideo = when (coverItem) {
         is GalleryItem.LocalOnly -> coverItem.local.mimeType
@@ -199,7 +204,11 @@ internal fun SeasonCard(
     val imageModel: Any? = when (coverItem) {
         is GalleryItem.LocalOnly -> android.net.Uri.parse(coverItem.local.uri)
         is GalleryItem.Synced    -> android.net.Uri.parse(coverItem.local.uri)
-        is GalleryItem.CloudOnly -> coverItem.cloud.thumbnailUrl
+        // The gallery timeline's On-this-day carousel passes non-overlaid feed items whose
+        // thumbnailUrl is null, so resolve from the shared store first (the Memories screen's own
+        // overlay still wins via the item URL when present).
+        is GalleryItem.CloudOnly ->
+            LocalThumbnailUrls.current.value[coverItem.cloud.linkId] ?: coverItem.cloud.thumbnailUrl
     }
     val isVideo = when (coverItem) {
         is GalleryItem.LocalOnly -> coverItem.local.mimeType

@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -43,15 +43,20 @@ class ProtonPhotosStorageTest {
     // ─── default destinations ─────────────────────────────────────────────────
 
     @Test
-    fun `DEFAULT_PICTURES is the flat Pictures directory`() {
-        assertEquals(Environment.DIRECTORY_PICTURES, ProtonPhotosStorage.DEFAULT_PICTURES)
-        assertEquals("Pictures", ProtonPhotosStorage.DEFAULT_PICTURES)
+    fun `DEFAULT_PICTURES is the camera folder`() {
+        assertEquals("${Environment.DIRECTORY_DCIM}/Camera", ProtonPhotosStorage.DEFAULT_PICTURES)
+        assertEquals("DCIM/Camera", ProtonPhotosStorage.DEFAULT_PICTURES)
     }
 
     @Test
-    fun `DEFAULT_MOVIES is the flat Movies directory`() {
-        assertEquals(Environment.DIRECTORY_MOVIES, ProtonPhotosStorage.DEFAULT_MOVIES)
-        assertEquals("Movies", ProtonPhotosStorage.DEFAULT_MOVIES)
+    fun `DEFAULT_MOVIES shares the camera folder`() {
+        assertEquals("DCIM/Camera", ProtonPhotosStorage.DEFAULT_MOVIES)
+    }
+
+    @Test
+    fun `albumFolder nests a sanitized album name under DCIM`() {
+        assertEquals("DCIM/Budapest", ProtonPhotosStorage.albumFolder("Budapest"))
+        assertEquals("DCIM/Summer_2026", ProtonPhotosStorage.albumFolder("Summer/2026"))
     }
 
     @Test

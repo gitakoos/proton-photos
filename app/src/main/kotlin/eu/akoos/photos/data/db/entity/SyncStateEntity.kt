@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -43,6 +43,16 @@ data class SyncStateEntity(
     val lastSyncSuccessMs: Long?,
     val backedUpAtMs: Long?,
     val sizeBytes: Long,
+    // Explicit upload-intent, set/cleared only through the SyncStateDao queue methods. queued/
+    // queueSource are surfaced onto the domain SyncState (read-only) so the upload processor can
+    // select on "LOCAL_ONLY AND queued"; queuedAt stays entity-only. Writing a SyncState back is
+    // still safe: the partial upsert's updateDomainColumns OMITS every queue column, so a round-trip
+    // never overwrites a live row's intent (a brand-new row inserts with these defaults then gets
+    // markQueued). queued = the row is meant to be backed up; queueSource = why (a QueueSource
+    // constant); queuedAt = when.
+    val queued: Boolean = false,
+    val queueSource: String? = null,
+    val queuedAt: Long? = null,
 ) {
     fun toDomain() = SyncState(
         localUri = localUri,
@@ -54,9 +64,15 @@ data class SyncStateEntity(
         lastSyncSuccessMs = lastSyncSuccessMs,
         backedUpAtMs = backedUpAtMs,
         sizeBytes = sizeBytes,
+        queued = queued,
+        queueSource = queueSource,
     )
 }
 
+// Maps the read-only queued/queueSource through as well, but note the DAO upsert's
+// updateDomainColumns never writes them, so an existing row's queue state is untouched on a
+// round-trip; only insertIgnore's brand-new row uses the value (default false/null), which the
+// enqueue paths then set via markQueued.
 fun SyncState.toEntity(userId: String) = SyncStateEntity(
     localUri = localUri,
     userId = userId,
@@ -68,4 +84,6 @@ fun SyncState.toEntity(userId: String) = SyncStateEntity(
     lastSyncSuccessMs = lastSyncSuccessMs,
     backedUpAtMs = backedUpAtMs,
     sizeBytes = sizeBytes,
+    queued = queued,
+    queueSource = queueSource,
 )

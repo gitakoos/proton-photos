@@ -25,6 +25,13 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <!--
+        Opt-in screenshot quick-actions overlay (ScreenshotOverlayService), enabled from Settings.
+        SYSTEM_ALERT_WINDOW backs the floating action bar drawn over other apps; the SPECIAL_USE
+        foreground type keeps the MediaStore-observer process alive while the feature is on.
+    -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <!--
         POST_NOTIFICATIONS is required on Android 13+ to show the download-progress
         notification. Already requested at runtime alongside media permissions.
     -->
@@ -152,6 +159,21 @@
             </intent-filter>
         </receiver>
 
+        <!--
+            Backs the backup notification's "Stop" action. Requests a cooperative stop of the
+            current upload batch (the in-transit photo finishes, queued items are not started)
+            instead of WorkManager-cancelling the running worker, which would cancel an in-flight
+            native PGP call and crash the process. Not exported: only our own PendingIntent fires it.
+        -->
+        <receiver
+            android:name=".worker.StopUploadReceiver"
+            android:exported="false"
+            android:enabled="true">
+            <intent-filter>
+                <action android:name="eu.akoos.photos.action.STOP_UPLOAD" />
+            </intent-filter>
+        </receiver>
+
         <!-- ── Photo Widget ──────────────────────────────────────────────── -->
         <receiver
             android:name=".widget.PhotoWidgetReceiver"
@@ -231,6 +253,17 @@
             android:name=".service.BackgroundSyncService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <!-- Opt-in screenshot quick-actions overlay, enabled from Settings. The specialUse foreground
+             type needs a declared subtype on Android 14+; the property is harmless on older releases. -->
+        <service
+            android:name=".service.ScreenshotOverlayService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="screenshot_overlay" />
+        </service>
 
         <!-- Drive thumbnail decryption isolated into its own process. The native
              OpenPGP runtime can abort its host process under Android-16 GC when

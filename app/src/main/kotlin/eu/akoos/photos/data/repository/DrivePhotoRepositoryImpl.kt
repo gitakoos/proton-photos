@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -22,6 +22,8 @@
 
 package eu.akoos.photos.data.repository
 
+import android.util.Log
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -47,6 +49,7 @@ import eu.akoos.photos.data.repository.drive.PhotoUploadService
 import eu.akoos.photos.data.repository.drive.PhotosShareService
 import eu.akoos.photos.data.repository.drive.RecentUploadsTracker
 import eu.akoos.photos.data.repository.drive.ThumbnailDecryptScheduler
+import eu.akoos.photos.data.repository.drive.ThumbnailUrlStore
 import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.entity.AlbumChild
 import eu.akoos.photos.domain.entity.CloudPhoto
@@ -81,7 +84,9 @@ class DrivePhotoRepositoryImpl @Inject constructor(
     private val cloudTrashService: CloudTrashService,
     private val albumSharingService: AlbumSharingService,
     private val thumbnailScheduler: ThumbnailDecryptScheduler,
+    private val thumbnailUrlStore: ThumbnailUrlStore,
     private val cloudGpsBackfillScheduler: CloudGpsBackfillScheduler,
+    private val videoDurationBackfillScheduler: VideoDurationBackfillScheduler,
     private val photoListingDao: PhotoListingDao,
     private val syncStateDao: SyncStateDao,
     private val dayMetaDao: DayMetaDao,
@@ -95,7 +100,13 @@ class DrivePhotoRepositoryImpl @Inject constructor(
     // Cells call requestThumbnailDecrypt as a non-suspend bridge from Compose, but the
     // actual entity fetch is a DAO suspend call — launching it on an IO supervisor scope
     // keeps the Compose call site cheap and isolates DB failures from leaking out.
-    private val thumbnailRequestScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val thumbnailRequestScope = CoroutineScope(
+        SupervisorJob() + Dispatchers.IO +
+            // A transient SQLite CursorWindow read error (a row/window that will not read while a
+            // sync writes concurrently) must never escape this fire-and-forget scope and crash the
+            // app; log and drop it, the cell re-requests on the next scroll.
+            CoroutineExceptionHandler { _, e -> Log.w("DrivePhotoRepo", "thumbnail request failed: ${e.message}") },
+    )
 
     // App-lifetime scope for repository-owned StateFlows (this repo is a @Singleton). Replaces
     // GlobalScope for the shared-album save mirror so the flow is owned/cancellable and stops
@@ -112,6 +123,9 @@ class DrivePhotoRepositoryImpl @Inject constructor(
 
     override fun observeCloudPhotos(userId: UserId): Flow<List<CloudPhoto>> =
         streamService.observeCloudPhotos(userId)
+
+    override fun observeHiddenAlbumMemberLinkIds(): Flow<Set<String>> =
+        albumService.observeHiddenAlbumMemberLinkIds()
 
     override fun observePhotosByLinkIds(linkIds: List<String>): Flow<List<CloudPhoto>> =
         streamService.observePhotosByLinkIds(linkIds)
@@ -198,6 +212,9 @@ class DrivePhotoRepositoryImpl @Inject constructor(
             totalBytes: Long,
         ) -> Unit)?,
     ): String = uploadService.uploadFile(userId, item, sha1HexContentDigest, uploadUri, xAttrMetadata, onProgress)
+
+    override suspend fun retryPendingOrphanDeletes(userId: UserId) =
+        uploadService.retryPendingOrphanDeletes(userId)
 
     override suspend fun renameOrCopyCloudPhoto(
         userId: UserId,
@@ -436,7 +453,7 @@ class DrivePhotoRepositoryImpl @Inject constructor(
         // Look up the persisted encrypted material; the scheduler dedup's so it's safe to
         // fire this from a LaunchedEffect that may re-run on recomposition.
         thumbnailRequestScope.launch {
-            val entity = photoListingDao.getByLinkId(linkId) ?: return@launch
+            val entity = runCatching { photoListingDao.getByLinkId(linkId) }.getOrNull() ?: return@launch
             thumbnailScheduler.request(userId, entity)
         }
     }
@@ -447,12 +464,15 @@ class DrivePhotoRepositoryImpl @Inject constructor(
 
     override suspend fun clearCachedThumbnailUrls() {
         photoListingDao.clearCachedThumbnailUrls()
+        // Also drop the in-memory store, else it keeps dead file:// entries pointing at just-deleted
+        // thumbnails until process death, and cells stay blank instead of re-decrypting.
+        thumbnailUrlStore.clear()
     }
 
     override fun prefetchThumbnailDecrypt(userId: UserId, linkIds: List<String>) {
         if (linkIds.isEmpty()) return
         thumbnailRequestScope.launch {
-            val entities = photoListingDao.getByLinkIds(linkIds)
+            val entities = runCatching { photoListingDao.getByLinkIds(linkIds) }.getOrElse { emptyList() }
             if (entities.isNotEmpty()) thumbnailScheduler.prefetch(userId, entities)
         }
     }
@@ -460,7 +480,7 @@ class DrivePhotoRepositoryImpl @Inject constructor(
     override fun requestThumbnailDecrypt(userId: UserId, linkIds: List<String>) {
         if (linkIds.isEmpty()) return
         thumbnailRequestScope.launch {
-            val entities = photoListingDao.getByLinkIds(linkIds)
+            val entities = runCatching { photoListingDao.getByLinkIds(linkIds) }.getOrElse { emptyList() }
             entities.forEach { thumbnailScheduler.request(userId, it) }
         }
     }
@@ -471,5 +491,9 @@ class DrivePhotoRepositoryImpl @Inject constructor(
 
     override suspend fun backfillCloudGps(userId: UserId) {
         cloudGpsBackfillScheduler.backfillAll(userId)
+    }
+
+    override suspend fun backfillVideoDurations(userId: UserId) {
+        videoDurationBackfillScheduler.backfillAll(userId)
     }
 }

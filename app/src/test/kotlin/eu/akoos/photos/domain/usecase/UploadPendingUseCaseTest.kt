@@ -1,3 +1,25 @@
+/*
+ * Photos for Proton
+ * Copyright (C) 2026 Akoos <https://akoos.eu>
+ *
+ * Source:  https://github.com/gitakoos/proton-photos
+ * Website: https://www.photosforproton.eu
+ *
+ * This file is part of Photos for Proton.
+ *
+ * Photos for Proton is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 3 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 package eu.akoos.photos.domain.usecase
 
 import android.content.Context
@@ -9,11 +31,13 @@ import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.mockkObject
 import io.mockk.mockkStatic
 import io.mockk.slot
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import me.proton.core.domain.entity.UserId
+import eu.akoos.photos.data.db.dao.UploadAlbumTargetDao
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.entity.LocalMediaItem
@@ -23,7 +47,10 @@ import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.LocalMediaRepository
 import eu.akoos.photos.domain.repository.SyncStateRepository
+import eu.akoos.photos.util.ExifHelper
+import eu.akoos.photos.util.MetadataStripConfig
 import eu.akoos.photos.util.NetworkObserver
+import eu.akoos.photos.util.StripResult
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
@@ -36,6 +63,7 @@ class UploadPendingUseCaseTest {
     private lateinit var localRepo: LocalMediaRepository
     private lateinit var cloudRepo: DrivePhotoRepository
     private lateinit var networkObserver: NetworkObserver
+    private lateinit var uploadAlbumTargetDao: UploadAlbumTargetDao
     private lateinit var context: Context
     private lateinit var useCase: UploadPendingUseCase
     // Hoisted so individual tests can flip a single pref (e.g. the strip-timestamp flags) after setUp.
@@ -45,9 +73,20 @@ class UploadPendingUseCaseTest {
     @Before
     fun setUp() {
         syncStateRepo = mockk(relaxed = true)
+        // The upload claim succeeds by default so the base fixture uploads as before. uploadOne
+        // atomically claims each LOCAL_ONLY row (flip to UPLOADING) before hashing/uploading and
+        // skips on a 0 (another pass got it first); the relaxed mock would otherwise return 0 and
+        // skip every item. A test modelling a lost claim can override this per URI.
+        coEvery { syncStateRepo.claimForUpload(any()) } returns 1
         localRepo = mockk()
         cloudRepo = mockk(relaxed = true)
         networkObserver = mockk(relaxed = true)
+        // No queued album targets in the base fixture: the drain and the per-upload album-add loop
+        // both read from this DAO, so an empty result keeps those steps as no-ops. A test exercising
+        // an album-add would stub getAll / getTargetsFor per URI.
+        uploadAlbumTargetDao = mockk(relaxed = true)
+        coEvery { uploadAlbumTargetDao.getAll() } returns emptyList()
+        coEvery { uploadAlbumTargetDao.getTargetsFor(any()) } returns emptyList()
         context = mockk()
 
         // Upload-time folder filter maps pending URIs to bucket names via this flow. An empty
@@ -57,8 +96,13 @@ class UploadPendingUseCaseTest {
 
         val contentResolver = mockk<ContentResolver>()
         every { context.contentResolver } returns contentResolver
-        // Return empty stream so SHA-256 produces empty string
-        every { contentResolver.openInputStream(any()) } returns null
+        // Hand back a readable stream so computeSha1 produces a real, non-null content hash and the
+        // upload proceeds. A fresh stream per call because a single upload pass can hash more than one
+        // item (and computeSha1 consumes the stream). A test that specifically models an unreadable
+        // source can override this to return null per URI.
+        every { contentResolver.openInputStream(any()) } answers {
+            java.io.ByteArrayInputStream(byteArrayOf(1, 2, 3, 4))
+        }
 
         // Mock DataStore extension so settingsDataStore.data.first() and .edit{} work.
         val mockPrefs = mockk<Preferences>()
@@ -83,6 +127,12 @@ class UploadPendingUseCaseTest {
         every { mockPrefs[SettingsKeys.STRIP_SOFTWARE_INFO] } returns false
         every { mockPrefs[SettingsKeys.ALBUM_BUCKET_MAP] } returns emptySet()
         every { mockPrefs[SettingsKeys.MIRROR_STRIP_TO_LOCAL] } returns false
+        // Upload compression off by default in the base fixture; the compress path is exercised
+        // on-device by UploadImageCompressorTest.
+        every { mockPrefs[SettingsKeys.COMPRESS_ON_UPLOAD] } returns false
+        every { mockPrefs[SettingsKeys.COMPRESS_VIDEO_ON_UPLOAD] } returns false
+        every { mockPrefs[SettingsKeys.COMPRESS_UPLOAD_TIER] } returns null
+        every { mockPrefs[SettingsKeys.MIRROR_COMPRESS_TO_LOCAL] } returns false
         every { mockPrefs[SettingsKeys.PENDING_ALBUM_ADDS] } returns emptySet()
         every { mockPrefs[SettingsKeys.PENDING_DELETE_URIS] } returns emptySet()
         // Wi-Fi-only off so the network guard never short-circuits the upload loop.
@@ -94,10 +144,23 @@ class UploadPendingUseCaseTest {
         )
         every { mockPrefs[SettingsKeys.pairingSettledKey(userId.id)] } returns true
 
-        useCase = UploadPendingUseCase(syncStateRepo, localRepo, cloudRepo, mockk(relaxed = true), networkObserver, context)
+        useCase = UploadPendingUseCase(
+            syncStateRepo, localRepo, cloudRepo, mockk(relaxed = true), networkObserver,
+            mockk(relaxed = true), uploadAlbumTargetDao, context,
+            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Unconfined + kotlinx.coroutines.CoroutineExceptionHandler { _, _ -> }),
+        )
     }
 
-    private fun syncState(uri: String, status: SyncStatus) = SyncState(
+    // Default a LOCAL_ONLY fixture row to queued=AUTO_FOLDER so it survives the queue-gated selector
+    // (status==LOCAL_ONLY && queued). AUTO_FOLDER, not an explicit source, so these rows still respect
+    // the Wi-Fi / folder guards; the base fixture just disables those guards via prefs. A test that
+    // needs an explicit-action bypass overrides queueSource per row.
+    private fun syncState(
+        uri: String,
+        status: SyncStatus,
+        queued: Boolean = true,
+        queueSource: String? = eu.akoos.photos.domain.entity.QueueSource.AUTO_FOLDER,
+    ) = SyncState(
         localUri = uri,
         cloudFileId = null,
         localHash = "",
@@ -107,6 +170,8 @@ class UploadPendingUseCaseTest {
         lastSyncSuccessMs = null,
         backedUpAtMs = null,
         sizeBytes = 1024L,
+        queued = queued,
+        queueSource = queueSource,
     )
 
     private fun localItem(uri: String) = LocalMediaItem(
@@ -143,6 +208,44 @@ class UploadPendingUseCaseTest {
 
         coVerify(exactly = 2) { cloudRepo.uploadFile(userId, any(), any(), any(), any(), any()) }
         coVerify(exactly = 0) { localRepo.queryByUri("uri://2") }
+    }
+
+    @Test
+    fun `a LOCAL_ONLY row that is not queued is not uploaded`() = runTest {
+        // The queue switch: only LOCAL_ONLY rows carrying an explicit queued intent are selected.
+        // uri://2 is LOCAL_ONLY but queued=false, so it must be skipped even though it is local-only.
+        val states = listOf(
+            syncState("uri://1", SyncStatus.LOCAL_ONLY),
+            syncState("uri://2", SyncStatus.LOCAL_ONLY, queued = false, queueSource = null),
+        )
+        every { syncStateRepo.observeAll(userId) } returns flowOf(states)
+        coEvery { localRepo.queryByUri("uri://1") } returns localItem("uri://1")
+        coEvery { cloudRepo.uploadFile(userId, any(), any(), any(), any(), any()) } returns "cloud-id"
+
+        useCase(userId)
+
+        coVerify(exactly = 1) { cloudRepo.uploadFile(userId, any(), any(), any(), any(), any()) }
+        coVerify(exactly = 0) { localRepo.queryByUri("uri://2") }
+    }
+
+    @Test
+    fun `an explicit MANUAL row uploads even with no backup folders selected`() = runTest {
+        // A manual "back up now" row (queued=MANUAL) must bypass the no-folders early-return: the user
+        // asked for this one regardless of folder selection. With no folders configured, a plain
+        // AUTO_FOLDER row would be skipped, but the MANUAL row still uploads.
+        every { mockPrefsRef[SettingsKeys.SYNC_FOLDER_NAMES] } returns emptySet()
+        val state = syncState(
+            "uri://manual",
+            SyncStatus.LOCAL_ONLY,
+            queueSource = eu.akoos.photos.domain.entity.QueueSource.MANUAL,
+        )
+        every { syncStateRepo.observeAll(userId) } returns flowOf(listOf(state))
+        coEvery { localRepo.queryByUri("uri://manual") } returns localItem("uri://manual")
+        coEvery { cloudRepo.uploadFile(userId, any(), any(), any(), any(), any()) } returns "cloud-id"
+
+        useCase(userId)
+
+        coVerify(exactly = 1) { cloudRepo.uploadFile(userId, any(), any(), any(), any(), any()) }
     }
 
     @Test
@@ -255,7 +358,11 @@ class UploadPendingUseCaseTest {
         } returns "cloud-id"
 
         val before = System.currentTimeMillis()
-        useCase(userId)
+        // Neutralise the strip helpers (real Android file I/O this JVM fixture can't run) only for the
+        // duration of this call; the block unmocks synchronously on exit so no object mock leaks to
+        // another test. A null strip result routes the upload to the original bytes, which computeSha1
+        // still hashes, so the capture-time flooring under test is exercised end-to-end.
+        withStrippingNeutralised { useCase(userId) }
         val after = System.currentTimeMillis()
 
         val sent = itemSlot.captured.dateTaken
@@ -282,8 +389,24 @@ class UploadPendingUseCaseTest {
             cloudRepo.uploadFile(userId, capture(itemSlot), any(), any(), any(), any())
         } returns "cloud-id"
 
-        useCase(userId)
+        withStrippingNeutralised { useCase(userId) }
 
         assertEquals(originalMs, itemSlot.captured.dateTaken)
+    }
+
+    /**
+     * Runs [block] with [ExifHelper]'s strip entry points stubbed to a clean no-op, unmocking on exit
+     * (the scoped [mockkObject] form). The strip helpers do real Android temp-file / EXIF / MIME work
+     * that a plain JVM fixture can't run; the capture-time tests only need the flooring branch (which
+     * runs before the strip fork), so a null / Failed strip result simply uploads the original bytes.
+     */
+    private inline fun withStrippingNeutralised(block: () -> Unit) {
+        mockkObject(ExifHelper) {
+            every { ExifHelper.stripToTempFile(any(), any(), any<MetadataStripConfig>()) } returns null
+            every {
+                ExifHelper.stripFieldsInPlace(any(), any(), any<MetadataStripConfig>())
+            } returns StripResult.Failed
+            block()
+        }
     }
 }

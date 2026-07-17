@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -32,6 +32,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
@@ -41,12 +42,14 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import me.proton.core.accountmanager.domain.AccountManager
 import eu.akoos.photos.R
+import eu.akoos.photos.data.db.dao.AlbumPhotoMembershipDao
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.SyncStateRepository
 import eu.akoos.photos.domain.usecase.ForceUploadLocalUrisUseCase
 import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
+import eu.akoos.photos.util.retryOnDbTear
 import javax.inject.Inject
 
 /** One-shot result of an "add to album" run, consumed once by the screen. */
@@ -73,6 +76,7 @@ class AlbumPhotoPickerViewModel @Inject constructor(
     private val syncStateRepo: SyncStateRepository,
     private val driveRepo: DrivePhotoRepository,
     private val forceUploadLocalUris: ForceUploadLocalUrisUseCase,
+    private val albumPhotoMembershipDao: AlbumPhotoMembershipDao,
     private val albumListEvents: eu.akoos.photos.util.AlbumListEventBus,
 ) : ViewModel() {
 
@@ -101,6 +105,19 @@ class AlbumPhotoPickerViewModel @Inject constructor(
                     .mapNotNull { it.cloudFileId }
                     .toSet()
             }
+        }
+        .retryOnDbTear("PickerHiddenIds")
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
+
+    /** Cloud linkIds held by ANY album — backs the picker's unfiled-only filter. The membership
+     *  cross-table is written in bursts when the Albums tab prefetches; a read landing mid-burst
+     *  degrades to "nothing is filed" rather than tearing the picker down. */
+    val inAnyAlbumLinkIds: StateFlow<Set<String>> = albumPhotoMembershipDao
+        .observeAllAssociatedPhotoLinkIds()
+        .map { it.toSet() }
+        .catch {
+            Log.w("AlbumPickerVM", "album membership source failed: ${it.message}")
+            emit(emptySet())
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
 

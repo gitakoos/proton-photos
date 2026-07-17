@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -60,9 +60,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.entity.GalleryItem
+import eu.akoos.photos.presentation.common.selectionCloudLinkIds
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.Bg2
@@ -209,6 +212,7 @@ internal fun GalleryAddToAlbumDialog(
     onCreateNew: () -> Unit,
     onCloudAlbumSelected: (Album) -> Unit,
     onDismiss: () -> Unit,
+    hiddenAlbumIds: Set<String> = emptySet(),
 ) {
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -220,12 +224,24 @@ internal fun GalleryAddToAlbumDialog(
         val anyCloudBacked = selectedItems.any {
             it is GalleryItem.Synced || it is GalleryItem.CloudOnly
         }
+        // The "already in this album" marks follow from the selection alone, so the drawer resolves
+        // them itself and every caller gets the indicator without wiring one up. Scoped to the open
+        // sheet: the read starts with the picker and stops with it, and re-keys if the selection
+        // changes underneath.
+        val membershipViewModel: AddToAlbumMembershipViewModel = hiltViewModel()
+        val selectionLinkIds = selectionCloudLinkIds(selectedItems)
+        val albumMemberIds by remember(selectionLinkIds) {
+            membershipViewModel.observeSelectionAlbumMembership(selectionLinkIds)
+        }.collectAsStateWithLifecycle(initialValue = emptyMap())
         GalleryAddToAlbumPickerSheet(
             cloudAlbums = cloudAlbums,
             selectionHasCloud = anyCloudBacked,
             onCreateNew = onCreateNew,
             onCloudAlbumSelected = onCloudAlbumSelected,
             onDismiss = onDismiss,
+            hiddenAlbumIds = hiddenAlbumIds,
+            selectionCloudLinkIds = selectionLinkIds,
+            albumMemberIds = albumMemberIds,
         )
     }
 }

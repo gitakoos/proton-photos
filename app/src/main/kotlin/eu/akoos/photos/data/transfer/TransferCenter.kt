@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -65,13 +65,18 @@ class TransferCenter @Inject constructor(
 ) {
     enum class Kind { UPLOAD, DOWNLOAD, OFFLINE }
 
-    /** A transfer running right now that isn't a WorkManager job (gallery download / offline pin). */
+    /** A transfer running right now that isn't a WorkManager job (gallery download / offline pin).
+     *  [items] holds one thumbnail URI per photo in the batch, in the same order the batch reports
+     *  progress, so the Activity screen can list the photos still in flight as individual rows. */
     data class Active(
         val id: Long,
         val kind: Kind,
         val done: Int,
         val total: Int,
         val name: String? = null,
+        val items: List<String> = emptyList(),
+        /** Whether the Activity screen may show a cancel button that stops this whole batch. */
+        val cancelable: Boolean = false,
     )
 
     /** One finished transfer, persisted for the History tab. [at] is epoch millis, newest first.
@@ -90,10 +95,24 @@ class TransferCenter @Inject constructor(
     private val _active = MutableStateFlow<List<Active>>(emptyList())
     val active: StateFlow<List<Active>> = _active.asStateFlow()
 
-    /** Begin tracking a live transfer; returns its id for [progress] and [finish]. */
-    fun start(kind: Kind, total: Int, name: String? = null): Long {
+    /** Stop actions for the cancelable batches, keyed by transfer id. Kept out of [Active] so the
+     *  state stays a plain data class; the action stops the batch's coroutine when the user taps X. */
+    private val cancels = java.util.concurrent.ConcurrentHashMap<Long, () -> Unit>()
+
+    /** Begin tracking a live transfer; returns its id for [progress] and [finish]. Pass [onCancel]
+     *  to let the Activity screen stop the whole batch from its row. */
+    fun start(
+        kind: Kind,
+        total: Int,
+        name: String? = null,
+        items: List<String> = emptyList(),
+        onCancel: (() -> Unit)? = null,
+    ): Long {
         val id = ids.incrementAndGet()
-        _active.update { it + Active(id, kind, done = 0, total = total, name = name) }
+        if (onCancel != null) cancels[id] = onCancel
+        _active.update {
+            it + Active(id, kind, done = 0, total = total, name = name, items = items, cancelable = onCancel != null)
+        }
         return id
     }
 
@@ -104,6 +123,14 @@ class TransferCenter @Inject constructor(
 
     /** Drop a live transfer once it ends (success or failure). */
     fun finish(id: Long) {
+        cancels.remove(id)
+        _active.update { list -> list.filterNot { it.id == id } }
+    }
+
+    /** Stop a running batch from its Activity-screen row: run its cancel action, then drop it. The
+     *  batch's own finally still calls [finish], which is a harmless second removal. */
+    fun cancel(id: Long) {
+        cancels.remove(id)?.invoke()
         _active.update { list -> list.filterNot { it.id == id } }
     }
 

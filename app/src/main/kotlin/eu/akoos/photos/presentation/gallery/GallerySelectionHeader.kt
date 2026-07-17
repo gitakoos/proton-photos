@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -74,7 +74,11 @@ import androidx.compose.ui.unit.sp
 import eu.akoos.photos.R
 import eu.akoos.photos.presentation.common.IconBubble
 import eu.akoos.photos.presentation.common.allLocalOnly
+import eu.akoos.photos.presentation.common.anyHideable
 import eu.akoos.photos.presentation.common.anyLocalOnly
+import eu.akoos.photos.presentation.common.SelectionTopBar
+import eu.akoos.photos.presentation.common.SelectionTopButton
+import androidx.compose.foundation.layout.Spacer
 import eu.akoos.photos.presentation.common.hasDownloadable
 import eu.akoos.photos.presentation.common.selectionMimeCounts
 import eu.akoos.photos.presentation.common.SelectionDockItem
@@ -103,130 +107,70 @@ fun GallerySelectionHeader(
     onCancel: () -> Unit,
     onSelectAll: () -> Unit,
     onShare: () -> Unit,
+    onHide: () -> Unit,
     onRequestDelete: () -> Unit,
     onHeaderHeightChanged: (Int) -> Unit,
 ) {
     val appColors = AppColors.current
 
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .onGloballyPositioned { onHeaderHeightChanged(it.size.height) }
-            .statusBarsPadding()
-            .padding(horizontal = 12.dp)
-            .padding(top = 8.dp, bottom = 10.dp)
-            .clip(RoundedCornerShape(28.dp))
-            .background(appColors.bg0.copy(alpha = 0.95f))
-            .border(0.5.dp, PillBorder, RoundedCornerShape(28.dp))
-            .padding(horizontal = 8.dp, vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
+    val mimeCounts = selectionMimeCounts(selectedItems)
+    val selectedPhotosCount = mimeCounts.photos
+    val selectedVideosCount = mimeCounts.videos
+    val selPhotosText = pluralStringResource(
+        R.plurals.count_photos_plural, selectedPhotosCount, selectedPhotosCount,
+    )
+    val selVideosText = pluralStringResource(
+        R.plurals.count_videos_plural, selectedVideosCount, selectedVideosCount,
+    )
+    val selectionLabel = when {
+        selectedPhotosCount > 0 && selectedVideosCount > 0 -> "$selPhotosText, $selVideosText"
+        selectedVideosCount > 0 -> selVideosText
+        else -> selPhotosText
+    }
+    val sharing = multiShareState as? MultiShareState.Working
+    SelectionTopBar(
+        onCancel = onCancel,
+        countText = selectionLabel,
+        modifier = Modifier.onGloballyPositioned { onHeaderHeightChanged(it.size.height) },
     ) {
-        IconBubble(
-            icon = Icons.AutoMirrored.Filled.ArrowBack,
-            contentDescription = stringResource(R.string.gallery_cancel_selection),
-            onClick = onCancel,
-            diameter = 40.dp,
-            iconSize = 20.dp,
-            background = PillBg,
-            borderColor = PillBorder,
-            tint = appColors.fgPrimary,
+        SelectionTopButton(
+            icon = Icons.Default.SelectAll,
+            contentDescription = stringResource(
+                if (allSelected) R.string.gallery_deselect_all else R.string.select_all,
+            ),
+            active = allSelected,
+            onClick = onSelectAll,
         )
-        val mimeCounts = selectionMimeCounts(selectedItems)
-        val selectedPhotosCount = mimeCounts.photos
-        val selectedVideosCount = mimeCounts.videos
-        val selPhotosText = pluralStringResource(
-            R.plurals.count_photos_plural, selectedPhotosCount, selectedPhotosCount,
+        Spacer(Modifier.size(4.dp))
+        SelectionTopButton(
+            icon = Icons.Default.Share,
+            contentDescription = stringResource(R.string.share_action),
+            working = sharing != null,
+            progress = sharing?.let { if (it.total > 0) it.done.toFloat() / it.total else 0f },
+            enabled = sharing == null,
+            onClick = onShare,
         )
-        val selVideosText = pluralStringResource(
-            R.plurals.count_videos_plural, selectedVideosCount, selectedVideosCount,
-        )
-        val selectionLabel = when {
-            selectedPhotosCount > 0 && selectedVideosCount > 0 -> "$selPhotosText, $selVideosText"
-            selectedVideosCount > 0 -> selVideosText
-            else -> selPhotosText
+        // Hide sits at the top level (matching Search and the folder view). Offered for any
+        // non-empty selection: device-backed photos move into the vault, cloud-only photos hide
+        // client-side by linkId.
+        if (anyHideable(selectedItems)) {
+            Spacer(Modifier.size(4.dp))
+            SelectionTopButton(
+                icon = Icons.Default.VisibilityOff,
+                contentDescription = stringResource(R.string.gallery_hide_selected),
+                enabled = multiDeleteState !is MultiDeleteState.Working,
+                onClick = onHide,
+            )
         }
-        Text(
-            selectionLabel,
-            color = appColors.fgPrimary,
-            fontSize = 16.sp,
-            fontWeight = FontWeight.SemiBold,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f, fill = false),
+        Spacer(Modifier.size(4.dp))
+        SelectionTopButton(
+            icon = Icons.Default.DeleteOutline,
+            contentDescription = stringResource(R.string.gallery_delete_selected),
+            tint = appColors.errorColor,
+            working = multiDeleteState is MultiDeleteState.Working,
+            enabled = multiDeleteState !is MultiDeleteState.Working,
+            onClick = onRequestDelete,
         )
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            // Toggles the whole visible list: select all, or clear once everything is selected.
-            Box(
-                modifier = Modifier
-                    .size(40.dp)
-                    .background(if (allSelected) appColors.accent else PillBg, CircleShape)
-                    .border(0.5.dp, PillBorder, CircleShape)
-                    .clickable { onSelectAll() },
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    Icons.Default.SelectAll,
-                    stringResource(if (allSelected) R.string.gallery_deselect_all else R.string.select_all),
-                    tint = if (allSelected) Color.White else appColors.fgPrimary,
-                    modifier = Modifier.size(20.dp),
-                )
-            }
-            // Cloud-only items decrypt to a temp file first; the ring tracks that resolution.
-            val isSharing = multiShareState is MultiShareState.Working
-            Box(
-                modifier = Modifier
-                    .size(40.dp)
-                    .background(PillBg, CircleShape)
-                    .border(0.5.dp, PillBorder, CircleShape)
-                    .clickable(enabled = !isSharing) { onShare() },
-                contentAlignment = Alignment.Center,
-            ) {
-                if (isSharing) {
-                    val progress = multiShareState as MultiShareState.Working
-                    CircularProgressIndicator(
-                        progress = { if (progress.total > 0) progress.done.toFloat() / progress.total else 0f },
-                        color = Accent,
-                        strokeWidth = 2.dp,
-                        modifier = Modifier.size(16.dp),
-                    )
-                } else {
-                    Icon(
-                        Icons.Default.Share,
-                        stringResource(R.string.share_action),
-                        tint = appColors.accent,
-                        modifier = Modifier.size(20.dp),
-                    )
-                }
-            }
-            val isWorking = multiDeleteState is MultiDeleteState.Working
-            Box(
-                modifier = Modifier
-                    .size(40.dp)
-                    .background(PillBg, CircleShape)
-                    .border(0.5.dp, PillBorder, CircleShape)
-                    .clickable(enabled = !isWorking) { onRequestDelete() },
-                contentAlignment = Alignment.Center,
-            ) {
-                if (isWorking) {
-                    CircularProgressIndicator(
-                        color = ErrorColor,
-                        strokeWidth = 2.dp,
-                        modifier = Modifier.size(16.dp),
-                    )
-                } else {
-                    Icon(
-                        Icons.Default.DeleteOutline,
-                        stringResource(R.string.gallery_delete_selected),
-                        tint = appColors.errorColor,
-                        modifier = Modifier.size(20.dp),
-                    )
-                }
-            }
-        }
     }
 }
 
@@ -240,23 +184,19 @@ fun GallerySelectionBottomBar(
     selectedItems: Set<GalleryItem>,
     offlinePinIds: Set<String>,
     multiDownloadState: MultiDownloadState,
-    multiHideState: MultiDeleteState,
     multiStripState: MultiStripState,
     addToAlbumState: AddToAlbumState,
-    anyLocalOnly: Boolean,
     showLabels: Boolean,
     onDownload: () -> Unit,
     onMakeAvailableOffline: () -> Unit,
     onRequestAddToAlbum: () -> Unit,
     onBackUp: () -> Unit,
     onStripMetadata: () -> Unit,
-    onHideSelected: () -> Unit,
 ) {
     val appColors = AppColors.current
     val isAddingToAlbum = addToAlbumState is AddToAlbumState.Working
     val isDownloading = multiDownloadState is MultiDownloadState.Working
     val isStripping = multiStripState is MultiStripState.Working
-    val isHiding = multiHideState is MultiDeleteState.Working
     val hasLocalOnly = anyLocalOnly(selectedItems)
     val hasDownloadable = hasDownloadable(selectedItems)
     val allDeviceOnly = allLocalOnly(selectedItems)
@@ -312,8 +252,7 @@ fun GallerySelectionBottomBar(
                     icon = Icons.Default.MoreVert,
                     label = stringResource(R.string.more_label),
                     showLabel = showLabels,
-                    tint = appColors.fgPrimary,
-                    working = isStripping || isHiding,
+                    working = isStripping,
                     onClick = { moreExpanded = true },
                 )
                 DropdownMenu(
@@ -342,29 +281,6 @@ fun GallerySelectionBottomBar(
                             onStripMetadata()
                         },
                     )
-                    // Vault-hide is only meaningful for on-device-only photos — a cloud
-                    // copy stays on Drive, so it can't truly be hidden.
-                    if (anyLocalOnly) {
-                        DropdownMenuItem(
-                            text = {
-                                Text(
-                                    stringResource(R.string.gallery_hide_selected),
-                                    color = appColors.fgPrimary,
-                                )
-                            },
-                            leadingIcon = {
-                                Icon(
-                                    Icons.Default.VisibilityOff, null,
-                                    tint = appColors.fgPrimary, modifier = Modifier.size(20.dp),
-                                )
-                            },
-                            enabled = !isHiding,
-                            onClick = {
-                                moreExpanded = false
-                                onHideSelected()
-                            },
-                        )
-                    }
                 }
             }
         }

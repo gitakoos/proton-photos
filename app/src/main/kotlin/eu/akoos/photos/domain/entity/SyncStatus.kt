@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -51,4 +51,22 @@ enum class SyncStatus {
      * LOCAL_ONLY if the upload fails so SyncWorker eventually retries.
      */
     UPLOADING,
+}
+
+/**
+ * Why a sync_state row was queued for upload. Recorded on the row's queueSource column so a
+ * later pass (and diagnostics) can tell an auto-folder backup apart from an explicit user
+ * action. Plain string constants rather than an enum so the value stores verbatim and a future
+ * source can be added without a schema migration.
+ *
+ * - [MANUAL]: the user explicitly asked to back this photo up (a "back up now" with no album).
+ * - [AUTO_FOLDER]: reconcile queued it because its folder is in the backup selection.
+ * - [ALBUM_ADD]: the user added a not-yet-backed-up photo to a cloud album, forcing its upload.
+ * - [EDITOR]: an editor save produced the local file and needs it backed up.
+ */
+object QueueSource {
+    const val MANUAL = "MANUAL"
+    const val AUTO_FOLDER = "AUTO_FOLDER"
+    const val ALBUM_ADD = "ALBUM_ADD"
+    const val EDITOR = "EDITOR"
 }

@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -120,6 +120,7 @@ internal fun PhotoGrid(
     items: List<GalleryItem>,
     allItems: List<GalleryItem>,
     monthGroups: List<Pair<String, List<GalleryItem>>>,
+    dayGroups: List<Pair<String, List<GalleryItem>>>,
     onThisDayGroups: List<Pair<Int, List<GalleryItem>>>,
     gridState: LazyGridState,
     staggeredState: LazyStaggeredGridState,
@@ -141,6 +142,9 @@ internal fun PhotoGrid(
     downloadedCloudLinkIds: Set<String> = emptySet(),
     favoriteIds: Set<String> = emptySet(),
     offlinePinIds: Set<String> = emptySet(),
+    // linkId → freshly-decrypted thumbnail URL from ThumbnailUrlStore. A cloud cell reads its own entry
+    // so a decrypt landing mid-scroll repaints only that tile (the timeline model no longer re-emits).
+    thumbnailUrls: Map<String, String> = emptyMap(),
     onRequestThumbnail: (linkId: String) -> Unit = {},
     onCancelThumbnail: (linkId: String) -> Unit = {},
     denseGridWarningDismissed: Boolean = false,
@@ -170,11 +174,16 @@ internal fun PhotoGrid(
     val mosaicGrid by remember {
         context.settingsDataStore.data.map { it[SettingsKeys.MOSAIC_GRID] ?: false }
     }.collectAsState(initial = false)
+    // Opt-in edge-to-edge (seamless) layout; default off. When off, the padded, rounded tiles below
+    // are rendered exactly as before. Drives the outer side padding, corner rounding, and gap on both
+    // the fixed and mosaic grids. Read through the shared helper so the value is warm on first frame
+    // (no padded-to-edge flash) and every grid across the app stays in sync.
+    val seamless = rememberSeamlessGrid()
 
     // Reversed views used only when the toggle is on. Reversing the flat list flips the within-group
     // item order AND, because groupBy preserves encounter order, the group order for the inline
-    // None/Day/Year levels below. The Month groups arrive pre-bucketed from the ViewModel, so they
-    // are reversed here too — group order and each group's items. When off, both pass straight
+    // None/Year levels below. The Month and Day groups arrive pre-bucketed from the ViewModel, so
+    // they are reversed here too — group order and each group's items. When off, all pass straight
     // through, so behaviour is byte-identical to newest-first. The scrubber + scroll-date label
     // receive [orderedItems], so their position→date mapping needs no separate reversal flag.
     val orderedItems = remember(items, reverseOrder) {
@@ -183,6 +192,10 @@ internal fun PhotoGrid(
     val orderedMonthGroups = remember(monthGroups, reverseOrder) {
         if (reverseOrder) monthGroups.asReversed().map { (label, groupItems) -> label to groupItems.asReversed() }
         else monthGroups
+    }
+    val orderedDayGroups = remember(dayGroups, reverseOrder) {
+        if (reverseOrder) dayGroups.asReversed().map { (label, groupItems) -> label to groupItems.asReversed() }
+        else dayGroups
     }
 
     // The staggered scroll state for the mosaic layout is hoisted to GalleryScreen and passed in, so
@@ -217,13 +230,16 @@ internal fun PhotoGrid(
             orderedItems.forEachIndexed { idx, gi -> put(keyOf(gi), idx) }
         }
     }
-    // Pending-decrypt linkId for a cloud row whose thumbnail isn't cached yet (matches the old
-    // per-cell gate: a Synced/CloudOnly row with thumbnailUrl == null). Cached rows return null
-    // so the driver below neither requests nor cancels them.
+    // Pending-decrypt linkId for a cloud row whose thumbnail isn't in the store yet. The timeline
+    // projection no longer carries thumbnailUrl on the row, so "needs decrypt" is now "the store has no
+    // URL for this linkId (and the item carries none)". Rows already in the store return null so the
+    // driver below neither requests nor cancels them; the scheduler also short-circuits warm rows.
     val pendingCloudLinkIdOf: (GalleryItem) -> String? = { item ->
         when (item) {
-            is GalleryItem.CloudOnly -> item.cloud.linkId.takeIf { item.cloud.thumbnailUrl == null }
-            is GalleryItem.Synced    -> item.cloud.linkId.takeIf { item.cloud.thumbnailUrl == null }
+            is GalleryItem.CloudOnly -> item.cloud.linkId
+                .takeIf { thumbnailUrls[it] == null && item.cloud.thumbnailUrl == null }
+            is GalleryItem.Synced    -> item.cloud.linkId
+                .takeIf { thumbnailUrls[it] == null && item.cloud.thumbnailUrl == null }
             is GalleryItem.LocalOnly -> null
         }
     }
@@ -295,33 +311,35 @@ internal fun PhotoGrid(
         )
     }
 
-    // Month (the default browsing level) is bucketed in the ViewModel off the Main thread and
-    // arrives via [monthGroups] — at 8500+ photos, running SimpleDateFormat per item inside
-    // composition on every thumbnail-decrypt re-emission was a ~680 ms hitch. The other pinch
-    // levels (None flat / Day / Year) are off-default and grouped inline here as before; their
-    // label format and encounter order are unchanged.
-    val grouped: List<Pair<String, List<GalleryItem>>> = if (effectiveGrouping == TimelineGrouping.Month) {
-        orderedMonthGroups
-    } else {
-        val dateFormat = remember(effectiveGrouping) {
-            val pattern = when (effectiveGrouping) {
-                TimelineGrouping.None -> "yyyy"
-                TimelineGrouping.Day -> "d MMMM yyyy"
-                TimelineGrouping.Month -> "MMMM yyyy"
-                TimelineGrouping.Year -> "yyyy"
+    // Day (the 3-column default) and Month (the 4-column level) are bucketed in the ViewModel off
+    // the Main thread and arrive via [dayGroups] / [monthGroups] — at 8500+ photos, running
+    // SimpleDateFormat per item inside composition on every thumbnail-decrypt re-emission was a
+    // ~680 ms hitch. The remaining pinch levels (None flat / Year) are off-default and grouped
+    // inline here as before; their label format and encounter order are unchanged.
+    val grouped: List<Pair<String, List<GalleryItem>>> = when (effectiveGrouping) {
+        TimelineGrouping.Month -> orderedMonthGroups
+        TimelineGrouping.Day -> orderedDayGroups
+        else -> {
+            val dateFormat = remember(effectiveGrouping) {
+                val pattern = when (effectiveGrouping) {
+                    TimelineGrouping.None -> "yyyy"
+                    TimelineGrouping.Day -> "d MMMM yyyy"
+                    TimelineGrouping.Month -> "MMMM yyyy"
+                    TimelineGrouping.Year -> "yyyy"
+                }
+                SimpleDateFormat(pattern, Locale.getDefault())
             }
-            SimpleDateFormat(pattern, Locale.getDefault())
-        }
-        // [orderedItems] is already reversed when the toggle is on, so grouping it yields reversed
-        // group order and reversed within-group items with no extra handling here.
-        remember(orderedItems, effectiveGrouping) {
-            if (effectiveGrouping == TimelineGrouping.None) {
-                // Single flat bucket — no header row is emitted for it (the header loop below
-                // skips MonthHeader entirely in None mode).
-                listOf("" to orderedItems)
-            } else {
-                orderedItems.groupBy { item -> dateFormat.format(Date(item.captureTimeMs)) }
-                    .entries.map { it.key to it.value }
+            // [orderedItems] is already reversed when the toggle is on, so grouping it yields reversed
+            // group order and reversed within-group items with no extra handling here.
+            remember(orderedItems, effectiveGrouping) {
+                if (effectiveGrouping == TimelineGrouping.None) {
+                    // Single flat bucket — no header row is emitted for it (the header loop below
+                    // skips MonthHeader entirely in None mode).
+                    listOf("" to orderedItems)
+                } else {
+                    orderedItems.groupBy { item -> dateFormat.format(Date(item.captureTimeMs)) }
+                        .entries.map { it.key to it.value }
+                }
             }
         }
     }
@@ -437,6 +455,7 @@ internal fun PhotoGrid(
             showOnThisDay = showOnThisDay,
             showScrollDate = showScrollDate,
             columnCount = columnCount,
+            seamless = seamless,
             effectiveGrouping = effectiveGrouping,
             topContentPadding = topContentPadding,
             permissionState = permissionState,
@@ -450,6 +469,7 @@ internal fun PhotoGrid(
             downloadedCloudLinkIds = downloadedCloudLinkIds,
             favoriteIds = favoriteIds,
             offlinePinIds = offlinePinIds,
+            thumbnailUrls = thumbnailUrls,
             keyOf = keyOf,
             indexByKey = indexByKey,
             dragSelectModifier = staggeredDragSelectModifier,
@@ -466,11 +486,11 @@ internal fun PhotoGrid(
         contentPadding = PaddingValues(
             top = topContentPadding + 8.dp,
             bottom = 120.dp,
-            start = 20.dp,
-            end = 20.dp,
+            start = if (seamless) 0.dp else 20.dp,
+            end = if (seamless) 0.dp else 20.dp,
         ),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+        horizontalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 6.dp),
+        verticalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 6.dp),
         modifier = Modifier
             .fillMaxSize()
             // Drag-select first (it only claims the gesture after a long-press time-out), then pinch
@@ -482,21 +502,25 @@ internal fun PhotoGrid(
             permissionState == PermissionState.PermanentlyDenied
         ) {
             item(span = { GridItemSpan(columnCount) }, contentType = "header") {
-                PermissionBanner(
-                    permanent = permissionState == PermissionState.PermanentlyDenied,
-                    onAction = {
-                        if (permissionState == PermissionState.PermanentlyDenied) {
-                            val intent = android.content.Intent(
-                                android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS
-                            ).apply {
-                                data = android.net.Uri.fromParts("package", context.packageName, null)
+                // Full-span rows keep the side inset even in seamless mode, where only the
+                // photo tiles below bleed to the screen edge.
+                Box(modifier = Modifier.padding(horizontal = if (seamless) 20.dp else 0.dp)) {
+                    PermissionBanner(
+                        permanent = permissionState == PermissionState.PermanentlyDenied,
+                        onAction = {
+                            if (permissionState == PermissionState.PermanentlyDenied) {
+                                val intent = android.content.Intent(
+                                    android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS
+                                ).apply {
+                                    data = android.net.Uri.fromParts("package", context.packageName, null)
+                                }
+                                context.startActivity(intent)
+                            } else {
+                                onPermissionGrant()
                             }
-                            context.startActivity(intent)
-                        } else {
-                            onPermissionGrant()
-                        }
-                    },
-                )
+                        },
+                    )
+                }
             }
         }
 
@@ -505,10 +529,12 @@ internal fun PhotoGrid(
         // historical photos on today's date never see an empty placeholder.
         if (showOnThisDay && onThisDayByYear.isNotEmpty()) {
             item(span = { GridItemSpan(columnCount) }, key = "on_this_day", contentType = "header") {
-                OnThisDayCarousel(
-                    yearGroups = onThisDayByYear,
-                    onPhotoClick = onPhotoClick,
-                )
+                Box(modifier = Modifier.padding(horizontal = if (seamless) 20.dp else 0.dp)) {
+                    OnThisDayCarousel(
+                        yearGroups = onThisDayByYear,
+                        onPhotoClick = onPhotoClick,
+                    )
+                }
             }
         }
 
@@ -538,6 +564,7 @@ internal fun PhotoGrid(
                         selectedInGroup = selectedInGroup,
                         groupSize = monthItems.size,
                         onToggleGroup = { onToggleGroup(monthItems) },
+                        modifier = Modifier.padding(horizontal = if (seamless) 20.dp else 0.dp),
                     )
                 }
             }
@@ -547,16 +574,22 @@ internal fun PhotoGrid(
                 contentType = { "photo" },
             ) { item ->
                 val cloudId = cloudLinkIdOf(item)
+                // The freshly-decrypted URL for this cell's cloud row, read from the store map. Reading
+                // it per-cell (rather than passing the whole map to PhotoCell) keeps the cell skippable:
+                // only cells whose own URL changed re-run this remember and rebind.
+                val cellThumbUrl = cloudId?.let { thumbnailUrls[it] }
                 // PhotoCell's inputs are resolved to primitives here in item scope so the cell stays
                 // skippable: an unstable Set/GalleryItem param would force EVERY visible cell to
                 // recompose on any selection toggle or thumbnail-decrypt re-emission.
-                val inputs = remember(item, favoriteIds, downloadedCloudLinkIds, offlinePinIds) {
-                    photoCellInputsFor(item, favoriteIds, downloadedCloudLinkIds, offlinePinIds)
+                val inputs = remember(item, favoriteIds, downloadedCloudLinkIds, offlinePinIds, cellThumbUrl) {
+                    photoCellInputsFor(item, favoriteIds, downloadedCloudLinkIds, offlinePinIds, cellThumbUrl)
                 }
                 PhotoCell(
                     imageData         = inputs.imageData,
                     stableKey         = inputs.stableKey,
                     isVideo           = inputs.isVideo,
+                    isLocalVideo      = inputs.isLocalVideo,
+                    durationMs        = inputs.durationMs,
                     isPlaceholder     = inputs.isPlaceholder,
                     selected          = item in selectedItems,
                     isSelectionMode   = isSelectionMode,
@@ -567,7 +600,8 @@ internal fun PhotoGrid(
                     isOffline         = inputs.isOffline,
                     typeBadgeRes      = inputs.typeBadgeRes,
                     typeBadgeCdRes    = inputs.typeBadgeCdRes,
-                    showTypeBadges    = columnCount < 5,
+                    columns           = columnCount,
+                    cornerRadius      = if (seamless) 0.dp else 10.dp,
                     onClick           = {
                         // Skip the release-tap that follows a long-press select; it would otherwise
                         // toggle the just-anchored cell back off.
@@ -682,6 +716,7 @@ private fun MosaicPhotoGrid(
     showOnThisDay: Boolean,
     showScrollDate: Boolean,
     columnCount: Int,
+    seamless: Boolean,
     effectiveGrouping: TimelineGrouping,
     topContentPadding: Dp,
     permissionState: PermissionState,
@@ -695,6 +730,7 @@ private fun MosaicPhotoGrid(
     downloadedCloudLinkIds: Set<String>,
     favoriteIds: Set<String>,
     offlinePinIds: Set<String>,
+    thumbnailUrls: Map<String, String>,
     keyOf: (GalleryItem) -> String,
     indexByKey: Map<String, Int>,
     dragSelectModifier: Modifier,
@@ -709,11 +745,11 @@ private fun MosaicPhotoGrid(
             contentPadding = PaddingValues(
                 top = topContentPadding + 8.dp,
                 bottom = 120.dp,
-                start = 20.dp,
-                end = 20.dp,
+                start = if (seamless) 0.dp else 20.dp,
+                end = if (seamless) 0.dp else 20.dp,
             ),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalItemSpacing = 6.dp,
+            horizontalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 6.dp),
+            verticalItemSpacing = if (seamless) 2.dp else 6.dp,
             modifier = Modifier
                 .fillMaxSize()
                 .then(dragSelectModifier)
@@ -723,30 +759,36 @@ private fun MosaicPhotoGrid(
                 permissionState == PermissionState.PermanentlyDenied
             ) {
                 item(span = StaggeredGridItemSpan.FullLine, contentType = "header") {
-                    PermissionBanner(
-                        permanent = permissionState == PermissionState.PermanentlyDenied,
-                        onAction = {
-                            if (permissionState == PermissionState.PermanentlyDenied) {
-                                val intent = android.content.Intent(
-                                    android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS
-                                ).apply {
-                                    data = android.net.Uri.fromParts("package", context.packageName, null)
+                    // Full-span rows keep the side inset even in seamless mode, where only the
+                    // photo tiles below bleed to the screen edge.
+                    Box(modifier = Modifier.padding(horizontal = if (seamless) 20.dp else 0.dp)) {
+                        PermissionBanner(
+                            permanent = permissionState == PermissionState.PermanentlyDenied,
+                            onAction = {
+                                if (permissionState == PermissionState.PermanentlyDenied) {
+                                    val intent = android.content.Intent(
+                                        android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS
+                                    ).apply {
+                                        data = android.net.Uri.fromParts("package", context.packageName, null)
+                                    }
+                                    context.startActivity(intent)
+                                } else {
+                                    onPermissionGrant()
                                 }
-                                context.startActivity(intent)
-                            } else {
-                                onPermissionGrant()
-                            }
-                        },
-                    )
+                            },
+                        )
+                    }
                 }
             }
 
             if (showOnThisDay && onThisDayByYear.isNotEmpty()) {
                 item(span = StaggeredGridItemSpan.FullLine, key = "on_this_day", contentType = "header") {
-                    OnThisDayCarousel(
-                        yearGroups = onThisDayByYear,
-                        onPhotoClick = onPhotoClick,
-                    )
+                    Box(modifier = Modifier.padding(horizontal = if (seamless) 20.dp else 0.dp)) {
+                        OnThisDayCarousel(
+                            yearGroups = onThisDayByYear,
+                            onPhotoClick = onPhotoClick,
+                        )
+                    }
                 }
             }
 
@@ -771,6 +813,7 @@ private fun MosaicPhotoGrid(
                             selectedInGroup = selectedInGroup,
                             groupSize = monthItems.size,
                             onToggleGroup = { onToggleGroup(monthItems) },
+                            modifier = Modifier.padding(horizontal = if (seamless) 20.dp else 0.dp),
                         )
                     }
                 }
@@ -780,8 +823,9 @@ private fun MosaicPhotoGrid(
                     contentType = { "photo" },
                 ) { item ->
                     val cloudId = cloudLinkIdOfMosaic(item)
-                    val inputs = remember(item, favoriteIds, downloadedCloudLinkIds, offlinePinIds) {
-                        photoCellInputsFor(item, favoriteIds, downloadedCloudLinkIds, offlinePinIds)
+                    val cellThumbUrl = cloudId?.let { thumbnailUrls[it] }
+                    val inputs = remember(item, favoriteIds, downloadedCloudLinkIds, offlinePinIds, cellThumbUrl) {
+                        photoCellInputsFor(item, favoriteIds, downloadedCloudLinkIds, offlinePinIds, cellThumbUrl)
                     }
                     // Prefer the stored MediaStore aspect (local-backed items) so they lay out with
                     // no relayout. A cloud-only cell has none, so it starts square and adopts the
@@ -792,6 +836,8 @@ private fun MosaicPhotoGrid(
                         imageData         = inputs.imageData,
                         stableKey         = inputs.stableKey,
                         isVideo           = inputs.isVideo,
+                        isLocalVideo      = inputs.isLocalVideo,
+                        durationMs        = inputs.durationMs,
                         isPlaceholder     = inputs.isPlaceholder,
                         selected          = item in selectedItems,
                         isSelectionMode   = isSelectionMode,
@@ -802,7 +848,8 @@ private fun MosaicPhotoGrid(
                         isOffline         = inputs.isOffline,
                         typeBadgeRes      = inputs.typeBadgeRes,
                         typeBadgeCdRes    = inputs.typeBadgeCdRes,
-                        showTypeBadges    = columnCount < 5,
+                        columns           = columnCount,
+                        cornerRadius      = if (seamless) 0.dp else 10.dp,
                         aspectRatioOverride = storedAspect ?: thumbAspect,
                         onIntrinsicAspect = if (storedAspect == null) {
                             { aspect -> thumbAspect = aspect.coerceIn(MOSAIC_ASPECT_MIN, MOSAIC_ASPECT_MAX) }
@@ -1034,9 +1081,10 @@ private fun MonthHeader(
     selectedInGroup: Int = 0,
     groupSize: Int = 0,
     onToggleGroup: () -> Unit = {},
+    modifier: Modifier = Modifier,
 ) {
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .padding(top = 24.dp, bottom = 10.dp),
         verticalAlignment = Alignment.CenterVertically,

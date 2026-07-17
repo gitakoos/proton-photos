@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -45,6 +45,7 @@ import eu.akoos.photos.data.db.dao.DayMetaDao
 import eu.akoos.photos.data.db.entity.DayMetaEntity
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.data.repository.drive.ThumbnailUrlStore
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
 import java.text.SimpleDateFormat
@@ -75,6 +76,7 @@ class CalendarViewModel @Inject constructor(
     private val getGalleryItems: GetGalleryItemsUseCase,
     private val accountManager: AccountManager,
     private val dayMetaDao: DayMetaDao,
+    private val thumbnailUrlStore: ThumbnailUrlStore,
     @ApplicationContext private val context: Context,
 ) : ViewModel() {
 
@@ -102,25 +104,34 @@ class CalendarViewModel @Inject constructor(
                     .flatMapLatest { userId ->
                         primaryUserId = userId?.id
                         if (userId == null) {
-                            flowOf(Triple(emptyList<GalleryItem>(), emptyList<DayMetaEntity>(), emptySet<String>()))
+                            flowOf(emptyList<MonthBucket>())
                         } else {
+                            // Build the month grid from the data sources only, so a thumbnail-decrypt
+                            // (store change) does not re-run the heavier buildMonths walk.
                             combine(
                                 getGalleryItems.invoke(userId),
                                 dayMetaDao.observeAll(userId.id),
                                 hiddenUrisFlow,
-                            ) { items, metas, hidden -> Triple(items, metas, hidden) }
+                            ) { items, metas, hiddenUris ->
+                                val visible = items.filter { item ->
+                                    val uri = when (item) {
+                                        is GalleryItem.LocalOnly -> item.local.uri
+                                        is GalleryItem.Synced -> item.local.uri
+                                        is GalleryItem.CloudOnly -> null
+                                    }
+                                    uri == null || uri !in hiddenUris
+                                }
+                                buildMonths(visible, metas)
+                            }
                         }
                     }
-                    .collect { (items, metas, hiddenUris) ->
-                        val visible = items.filter { item ->
-                            val uri = when (item) {
-                                is GalleryItem.LocalOnly -> item.local.uri
-                                is GalleryItem.Synced -> item.local.uri
-                                is GalleryItem.CloudOnly -> null
-                            }
-                            uri == null || uri !in hiddenUris
-                        }
-                        val months = buildMonths(visible, metas)
+                    // The day tile draws its cover imperatively (a bitmap built outside any Compose
+                    // cell), so the LocalThumbnailUrls CompositionLocal can't reach it. Overlay the
+                    // store's freshly-decrypted URL onto every cloud-only day cover, live, so a
+                    // decrypt that lands after the grid built fills the tile. This is a cheap copy
+                    // per day, not a rebuild of the grid.
+                    .combine(thumbnailUrlStore.urls) { months, urls -> overlayCovers(months, urls) }
+                    .collect { months ->
                         _uiState.update { it.copy(
                             isLoading = false,
                             months = months,
@@ -134,6 +145,32 @@ class CalendarViewModel @Inject constructor(
             }
         }
     }
+
+    /** Stamp the store's freshly-decrypted URL onto every cloud-only day cover across the grid, so
+     *  the search overlay + calendar tiles render cloud-only covers (the lite feed no longer carries
+     *  the URL). A day whose cover is Local/Synced paints from its local uri and is left untouched;
+     *  months with no cloud covers are returned as is. */
+    private fun overlayCovers(months: List<MonthBucket>, urls: Map<String, String>): List<MonthBucket> {
+        if (urls.isEmpty()) return months
+        return months.map { month ->
+            var changed = false
+            val days = month.days.mapValues { (_, day) ->
+                val resolved = resolveThumbnail(day.coverItem, urls)
+                if (resolved !== day.coverItem) { changed = true; day.copy(coverItem = resolved) } else day
+            }
+            if (changed) month.copy(days = days) else month
+        }
+    }
+
+    /** Overlay the store URL onto a cloud-only cover; a Local/Synced cover is returned untouched. */
+    private fun resolveThumbnail(item: GalleryItem, urls: Map<String, String>): GalleryItem =
+        if (item is GalleryItem.CloudOnly) {
+            val url = urls[item.cloud.linkId] ?: item.cloud.thumbnailUrl
+            if (url == item.cloud.thumbnailUrl) item
+            else GalleryItem.CloudOnly(item.cloud.copy(thumbnailUrl = url))
+        } else {
+            item
+        }
 
     /**
      * Re-runs the search whenever the query changes (debounced) OR when the underlying

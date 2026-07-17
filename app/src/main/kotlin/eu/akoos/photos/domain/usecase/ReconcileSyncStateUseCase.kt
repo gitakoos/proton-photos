@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -77,11 +77,13 @@ class ReconcileSyncStateUseCase @Inject constructor(
         val initialListingComplete = prefs.asMap().any { (k, v) ->
             k.name.startsWith("photo_listing_ever_complete_${userId.id}_") && v == true
         }
-        // Strip-on-upload rewrites a photo's bytes, so its cloud copy can't content-hash-match the
-        // local original. When it's on, the name/date match stays the fallback for those; when off,
-        // the bytes are identical and a content-hash match is REQUIRED before pairing — so a
-        // different file that merely shares a name (Drive allows that) can't be taken for a backup.
+        // Strip-on-upload and compress-on-upload both rewrite a photo's bytes before it reaches
+        // Drive, so its cloud copy can't content-hash-match the untouched local original. When
+        // either is on, the name/date match stays the fallback for those; when both are off, the
+        // bytes are identical and a content-hash match is REQUIRED before pairing, so a different
+        // file that merely shares a name (Drive allows that) can't be taken for a backup.
         val stripOnUpload = prefs[SettingsKeys.STRIP_ON_UPLOAD] ?: false
+        val compressOnUpload = prefs[SettingsKeys.COMPRESS_ON_UPLOAD] ?: false
 
         val allLocalItems = localRepo.observeLocalMedia().first()
 
@@ -147,6 +149,15 @@ class ReconcileSyncStateUseCase @Inject constructor(
             "(${cloudByHash.size} with hash, ${cloudByNameAndDate.size} with captureTime)")
 
         val newStates = mutableListOf<SyncState>()
+        // In-scope local URIs that need an AUTO_FOLDER queue stamp this pass. Covers TWO cases: a
+        // freshly-created LOCAL_ONLY row (unmatched, no row before), AND an already-LOCAL_ONLY row that
+        // is not yet queued (or is queued AUTO_FOLDER), the latter re-queuing a row after its folder is
+        // re-selected. A row carrying an explicit MANUAL / ALBUM_ADD source is deliberately left out so
+        // that intent is never relabelled AUTO_FOLDER. Stamped via markQueued after the bulk upsert.
+        val freshAutoFolderUris = mutableListOf<String>()
+        // Local URIs paired to a cloud copy this pass (status SYNCED). Their queued flag is cleared
+        // after the bulk upsert (RULE 1) so a just-paired row can't be re-queued for a duplicate.
+        val pairedSyncedUris = mutableListOf<String>()
 
         // One snapshot of every SyncState row, indexed by local URI, instead of a per-item
         // getByUri() DAO round-trip inside the loop below (an N+1 that, at tens of thousands of
@@ -154,6 +165,14 @@ class ReconcileSyncStateUseCase @Inject constructor(
         // the SYNCED-demotion pass further down — that loop reads rows reconcile hasn't written
         // yet, so the pre-loop view is exactly what it needs.
         val existingByUri = syncStateRepo.observeAll(userId).first().associateBy { it.localUri }
+        // Cloud twins already paired to a local file this install. The name+date re-pair below rescues
+        // only an UNCLAIMED twin, so it can never steal a cloud copy that already belongs to another
+        // local. After a reinstall this set is empty (the rows were wiped), which is exactly when a
+        // downloaded file needs to re-pair instead of re-uploading a duplicate.
+        val claimedCloudIds: Set<String> = existingByUri.values.asSequence()
+            .filter { it.status == SyncStatus.SYNCED }
+            .mapNotNull { it.cloudFileId }
+            .toSet()
 
         for (local in localItems) {
             val existingSync = existingByUri[local.uri]
@@ -193,19 +212,33 @@ class ReconcileSyncStateUseCase @Inject constructor(
 
             // captureTime in CloudPhoto is Unix seconds; LocalMediaItem.dateTaken is ms.
             val localCaptureTimeSec = local.dateTaken / 1000L
-            val nameCandidate = cloudByNameAndDate[local.displayName to localCaptureTimeSec]
+            val nameDateTwin = cloudByNameAndDate[local.displayName to localCaptureTimeSec]
+            val nameCandidate = nameDateTwin
                 ?: cloudByNameSize[local.displayName to local.sizeBytes]?.takeIf { it.sizeBytes > 0 }
             // Trust a name+date / name+size match ONLY when a content hash can't settle it: the cloud
-            // photo carries no ContentHash to check, or strip-on-upload changed the bytes so the same
-            // photo can't hash-match its stripped cloud copy. When the cloud photo HAS a hash and
-            // nothing was stripped, byContentHash above is the only thing that may pair it — trusting
-            // the name alone could mark a different same-named file as backed up, and Free-up-space
-            // could then delete a local that was never really uploaded. (No name-only fallback either:
-            // a recurring camera name like IMG_0001.jpg must never pair on its own.)
+            // photo carries no ContentHash to check, or strip-on-upload / compress-on-upload changed
+            // the bytes so the same photo can't hash-match its rewritten cloud copy. When the cloud
+            // photo HAS a hash and neither strip nor compress was on, byContentHash above is the only
+            // thing that may pair it; trusting the name alone could mark a different same-named file
+            // as backed up, and Free-up-space could then delete a local that was never really
+            // uploaded. (No name-only fallback either: a recurring camera name like IMG_0001.jpg must
+            // never pair on its own.)
             val byNameUnverifiable = nameCandidate?.takeIf {
-                it.contentHash.isNullOrEmpty() || stripOnUpload
+                it.contentHash.isNullOrEmpty() || stripOnUpload || compressOnUpload
             }
-            val matchedCloud = byId ?: byContentHash ?: byNameUnverifiable
+            // Last resort, downloads-only: re-pair to a still-present cloud twin by name + EXACT capture
+            // second even when that twin HAS a hash. A download stamps the twin's own capture time into
+            // the file and rewrites the bytes for date/GPS, so the hash no longer matches yet the second
+            // is identical. Restricted to an UNCLAIMED twin, and it deliberately stays out of
+            // [contentCertain] below, so it suppresses a duplicate re-upload after a reinstall WITHOUT
+            // ever letting free-up-space delete the local on this looser proof.
+            val byNameDateRepair = repairTwinLinkId(
+                strong = byId != null || byContentHash != null,
+                hasLegacyNameMatch = byNameUnverifiable != null,
+                nameDateTwinLinkId = nameDateTwin?.linkId,
+                claimedTwinLinkIds = claimedCloudIds,
+            )?.let { cloudByLinkId[it] }
+            val matchedCloud = byId ?: byContentHash ?: byNameUnverifiable ?: byNameDateRepair
             if (matchedCloud == null) {
                 Log.d(TAG, "LOCAL_ONLY: ${local.displayName} (size=${local.sizeBytes}, " +
                     "captureSec=$localCaptureTimeSec, existingCloudId=${existingSync?.cloudFileId})")
@@ -229,6 +262,20 @@ class ReconcileSyncStateUseCase @Inject constructor(
                 backedUpAtMs = existingSync?.backedUpAtMs ?: (if (contentCertain) System.currentTimeMillis() else null),
                 sizeBytes = local.sizeBytes,
             )
+            // An in-scope local that needs backing up gets an AUTO_FOLDER queue stamp (after the upsert
+            // below). This fires for a brand-new LOCAL_ONLY row AND for an existing LOCAL_ONLY row whose
+            // source is null or already AUTO_FOLDER, re-queuing a folder-backup row once its folder is
+            // re-selected. Any other source (MANUAL / ALBUM_ADD / EDITOR) is left untouched so
+            // an explicit or editor intent is never relabelled AUTO_FOLDER (those rows are already
+            // queued, so the selector still picks them up).
+            if (status == SyncStatus.LOCAL_ONLY) {
+                val src = existingSync?.queueSource
+                val stampable = src == null || src == eu.akoos.photos.domain.entity.QueueSource.AUTO_FOLDER
+                if (stampable) freshAutoFolderUris += local.uri
+            }
+            // RULE 1: every row that lands SYNCED has its queued flag cleared (after the upsert below),
+            // so a photo paired here can't be re-queued for a duplicate by a later grace-window demotion.
+            if (status == SyncStatus.SYNCED) pairedSyncedUris += local.uri
             done++
             if (done % 50 == 0) emit(SyncProgress(total, done, true))
         }
@@ -266,6 +313,11 @@ class ReconcileSyncStateUseCase @Inject constructor(
                             state.copy(status = SyncStatus.LOCAL_ONLY, cloudFileId = null),
                             userId,
                         )
+                        // The cloud copy is genuinely gone (past the grace window). This row's prior
+                        // upload intent is spent, so clear it: without this the stranded-intent
+                        // recovery below would re-queue a photo the user deleted from the cloud and
+                        // upload it straight back, on every pass.
+                        syncStateRepo.clearQueuedForSynced(state.localUri)
                     }
                 // Local file removed from MediaStore → demote to CLOUD_ONLY so we stop telling the
                 // user the photo is "on this device" when it actually isn't.
@@ -280,32 +332,77 @@ class ReconcileSyncStateUseCase @Inject constructor(
         val syncedCount    = newStates.count { it.status == SyncStatus.SYNCED }
         Log.d(TAG, "reconcile done: $syncedCount SYNCED, $localOnlyCount LOCAL_ONLY (will upload)")
         syncStateRepo.upsertAll(newStates, userId)
+        // Now that the fresh rows are durable, stamp each newly-unmatched in-scope local as
+        // queued=AUTO_FOLDER (why it is up for backup + when). markQueued is a per-row UPDATE, so it
+        // must run AFTER the upsert that created the row. The processor selects on LOCAL_ONLY AND
+        // queued, so this stamp is what makes a folder-selected backup upload.
+        val autoFolderNow = System.currentTimeMillis()
+        for (uri in freshAutoFolderUris) {
+            syncStateRepo.markQueued(uri, eu.akoos.photos.domain.entity.QueueSource.AUTO_FOLDER, autoFolderNow)
+        }
+        // RULE 1: clear the queued flag on every row paired to a cloud copy this pass. Unguarded
+        // (clearQueuedForSynced) because these rows are known backed up; a still-pending upload's
+        // intent is never touched here (those rows are LOCAL_ONLY, not in this set).
+        for (uri in pairedSyncedUris) {
+            syncStateRepo.clearQueuedForSynced(uri)
+        }
 
-        // Clean up stale LOCAL_ONLY entries for items that are no longer in scope
-        // (e.g. the user unchecked their folder/album from the backup selection).
-        // Without this, removed-folder items stay LOCAL_ONLY forever and keep being uploaded.
-        // HIDDEN rows are excluded by the status filter — they never have a corresponding
-        // MediaStore file anyway, so they look "out of scope" by every other heuristic.
-        // Force-marked uploads (PENDING_ALBUM_ADDS) must survive this cleanup. A photo or video the
-        // user explicitly chose to back up — or to add to an album — from an unselected folder is
-        // out of the normal scope by design; deleting its LOCAL_ONLY row here would make the very
-        // next upload pass skip it, so the forced upload would silently never run.
-        val forcedUris = (prefs[SettingsKeys.PENDING_ALBUM_ADDS] ?: emptySet())
-            // Split at the FIRST '=': the localUri (content:// URI) has none, but the albumLinkId is
-            // base64 and ends in '=' padding, so substringBeforeLast would yield a wrong key and fail
-            // to spare the forced row from the cleanup below.
-            .map { it.substringBefore('=') }
-            .toSet()
+        // De-queue stale LOCAL_ONLY entries for items no longer in scope (e.g. the user unchecked
+        // their folder/album from the backup selection). Previously these rows were DELETED; now the
+        // queue is the source of truth, so clearing their queued flag is enough to drop them from the
+        // pending set while the row survives. It is still a real local-not-backed-up file, so a later
+        // re-select can re-queue it (case (a) above) instead of having to rediscover a deleted row.
+        // clearQueued carries an AND status='LOCAL_ONLY' guard, so it can never touch a row that a
+        // concurrent upload has already flipped to UPLOADING (a live claim) or SYNCED.
+        // HIDDEN rows are excluded by the status filter: they never have a corresponding MediaStore
+        // file anyway, so they look "out of scope" by every other heuristic.
+        // Only an ordinary folder backup is de-queued by scope cleanup: a row whose queueSource is
+        // AUTO_FOLDER (reconcile put it there because its folder was selected) or null (a legacy row
+        // with no recorded source). An explicit intent is NEVER de-queued here: a MANUAL "back up
+        // now", an ALBUM_ADD (the photo must upload to join its album), or an EDITOR save is out of
+        // the normal folder scope by design, and clearing its queued flag would make the very next
+        // upload pass skip it so the explicit upload would silently never run.
         val inScopeUris = newStates.map { it.localUri }.toSet()
         val staleLocalOnly = syncStateRepo.observeAll(userId).first()
             .filter {
                 it.status == SyncStatus.LOCAL_ONLY &&
+                    it.queued &&
                     it.localUri !in inScopeUris &&
-                    it.localUri !in forcedUris
+                    (it.queueSource == null ||
+                        it.queueSource == eu.akoos.photos.domain.entity.QueueSource.AUTO_FOLDER)
             }
         if (staleLocalOnly.isNotEmpty()) {
-            syncStateRepo.deleteLocalOnlyByUris(staleLocalOnly.map { it.localUri })
-            Log.d(TAG, "reconcile: cleaned up ${staleLocalOnly.size} LOCAL_ONLY entries for excluded folders")
+            for (state in staleLocalOnly) syncStateRepo.clearQueued(state.localUri)
+            Log.d(TAG, "reconcile: de-queued ${staleLocalOnly.size} out-of-scope LOCAL_ONLY entries")
+        }
+
+        // Stranded-intent recovery. An explicit intent (MANUAL / ALBUM_ADD / EDITOR) can lose its
+        // queued flag yet keep its source and never get picked up again, seen on-device as a manual
+        // "back up now" row stuck at LOCAL_ONLY, queued=0, queueSource=MANUAL with no cloud copy.
+        // Re-queue any such row under its ORIGINAL source so it retries. A null source is deliberately
+        // left alone: it means either a plain out-of-scope local that was never queued, or a MANUAL
+        // upload the user cancelled via clearManualQueue (which nulls the source on purpose), both
+        // must stay un-queued. Reads only LOCAL_ONLY rows, so it never touches an UPLOADING claim; a
+        // row that flips to UPLOADING between this snapshot and markQueued is harmless (claimForUpload
+        // guards on status, and a queued flag on an UPLOADING row is cleared when it reaches SYNCED).
+        val recoverNow = System.currentTimeMillis()
+        val strandedIntent = syncStateRepo.observeAll(userId).first()
+            .filter {
+                it.status == SyncStatus.LOCAL_ONLY &&
+                    !it.queued &&
+                    // A stranded upload has no cloud copy by definition. Requiring cloudFileId == null
+                    // stops a backed-up photo whose cloud copy was later removed (it demotes to
+                    // LOCAL_ONLY) from being re-queued into an endless re-upload of a deletion.
+                    it.cloudFileId == null &&
+                    (it.queueSource == eu.akoos.photos.domain.entity.QueueSource.MANUAL ||
+                        it.queueSource == eu.akoos.photos.domain.entity.QueueSource.ALBUM_ADD ||
+                        it.queueSource == eu.akoos.photos.domain.entity.QueueSource.EDITOR)
+            }
+        if (strandedIntent.isNotEmpty()) {
+            for (state in strandedIntent) {
+                syncStateRepo.markQueued(state.localUri, state.queueSource!!, recoverNow)
+            }
+            Log.d(TAG, "reconcile: re-queued ${strandedIntent.size} stranded explicit-intent LOCAL_ONLY entries")
         }
 
         // This pass paired against a complete cloud listing, so any still-LOCAL_ONLY row is genuinely
@@ -321,3 +418,22 @@ class ReconcileSyncStateUseCase @Inject constructor(
         emit(SyncProgress(total, total, false))
     }
 }
+
+/**
+ * Pure gate for reconcile's downloads-only name+date re-pair. Returns the cloud twin's linkId to
+ * suppress a duplicate re-upload, or null to leave the file LOCAL_ONLY.
+ *
+ * Refuses in three cases so it can only ever RESCUE a downloaded file, never mislabel a real local:
+ *  - [strong]: a direct cloud-id or content-hash match already settled it (authoritative), or
+ *  - [hasLegacyNameMatch]: the existing name matcher already applied (no-hash / strip / compress), or
+ *  - the name+exact-second twin is already [claimedTwinLinkIds] by another local this install.
+ * The caller keeps the result out of its content-certain set, so a match here never makes the row
+ * free-up-space deletable; it only stops the re-upload.
+ */
+internal fun repairTwinLinkId(
+    strong: Boolean,
+    hasLegacyNameMatch: Boolean,
+    nameDateTwinLinkId: String?,
+    claimedTwinLinkIds: Set<String>,
+): String? = if (strong || hasLegacyNameMatch) null
+    else nameDateTwinLinkId?.takeUnless { it in claimedTwinLinkIds }

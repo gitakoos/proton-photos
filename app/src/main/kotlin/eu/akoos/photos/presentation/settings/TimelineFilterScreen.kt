@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -40,6 +40,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Block
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PhotoAlbum
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material3.HorizontalDivider
@@ -95,17 +96,27 @@ import eu.akoos.photos.presentation.theme.StatusError
 @Composable
 fun TimelineFilterScreen(
     onBack: () -> Unit,
+    onOpenLayout: () -> Unit = {},
     onOpenCategories: () -> Unit = {},
     onOpenAlbums: () -> Unit = {},
     onOpenDeviceFolders: () -> Unit = {},
+    onOpenLandingTab: () -> Unit = {},
 ) {
     SettingsSubPageScaffold(title = stringResource(R.string.settings_timeline), onBack = onBack) {
         SettingsCard {
+            NavRow(
+                label = stringResource(R.string.settings_timeline_section_layout),
+                description = stringResource(R.string.timeline_filter_layout_desc),
+                onClick = onOpenLayout,
+            )
+            RowDivider()
             NavRow(label = stringResource(R.string.timeline_filter_categories_header), onClick = onOpenCategories)
             RowDivider()
             NavRow(label = stringResource(R.string.timeline_filter_albums_header), onClick = onOpenAlbums)
             RowDivider()
             NavRow(label = stringResource(R.string.device_folders_section), onClick = onOpenDeviceFolders)
+            RowDivider()
+            NavRow(label = stringResource(R.string.settings_landing_tab), onClick = onOpenLandingTab)
         }
     }
 }
@@ -179,6 +190,13 @@ fun TimelineLayoutScreen(
                 description = stringResource(R.string.settings_mosaic_grid_desc),
                 checked = settings.mosaicGrid,
                 onCheckedChange = settingsViewModel::setMosaicGrid,
+            )
+            RowDivider()
+            ToggleRow(
+                label = stringResource(R.string.settings_seamless_grid),
+                description = stringResource(R.string.settings_seamless_grid_desc),
+                checked = settings.seamlessGrid,
+                onCheckedChange = settingsViewModel::setSeamlessGrid,
             )
             RowDivider()
             ToggleRow(
@@ -448,15 +466,17 @@ private fun AlbumFilterRow(
     onToggle: () -> Unit,
 ) {
     val colors = AppColors.current
+    // A client-side hidden album is fixed here: shown as excluded, locked, and non-interactive.
+    val shownExcluded = album.isExcluded || album.isHidden
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onToggle)
+            .then(if (album.isHidden) Modifier else Modifier.clickable(onClick = onToggle))
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        val tileAlpha = if (album.isExcluded) 0.55f else 1f
+        val tileAlpha = if (shownExcluded) 0.55f else 1f
         Box(
             modifier = Modifier
                 .size(56.dp)
@@ -485,7 +505,7 @@ private fun AlbumFilterRow(
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 album.name,
-                color      = if (album.isExcluded) FgMute else FgPrimary,
+                color      = if (shownExcluded) FgMute else FgPrimary,
                 fontSize   = 14.sp,
                 fontWeight = FontWeight.Medium,
             )
@@ -496,14 +516,19 @@ private fun AlbumFilterRow(
             )
         }
 
-        if (album.isExcluded) {
-            Icon(
+        when {
+            // Locked, greyed indicator. The album is hidden and cannot be toggled here.
+            album.isHidden -> Icon(
+                Icons.Default.Lock, stringResource(R.string.timeline_filter_hidden_album),
+                tint     = FgDim,
+                modifier = Modifier.size(22.dp),
+            )
+            album.isExcluded -> Icon(
                 Icons.Default.Block, stringResource(R.string.cd_status_excluded),
                 tint     = StatusError,
                 modifier = Modifier.size(22.dp),
             )
-        } else {
-            Box(
+            else -> Box(
                 modifier = Modifier
                     .size(22.dp)
                     .border(1.5.dp, colors.pillBorder, CircleShape),

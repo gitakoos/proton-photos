@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -26,6 +26,7 @@ import android.os.Build
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -58,6 +59,7 @@ import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import eu.akoos.photos.R
+import eu.akoos.photos.presentation.gallery.LocalThumbnailUrls
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.Bg2
 import eu.akoos.photos.presentation.theme.FgDim
@@ -93,7 +95,9 @@ fun CloudPhotoCell(
     isHiddenOnDevice: Boolean = false,
     // Callbacks
     onClick: () -> Unit,
-    onLongClick: () -> Unit,
+    /** Null makes the tile tap-only (a plain clickable), so an enclosing grid-level drag-select owns
+     *  the long-press. Non-null routes the long-press to this handler via combinedClickable. */
+    onLongClick: (() -> Unit)? = null,
     onRequestThumbnail: (String) -> Unit,
     onCancelThumbnail: (String) -> Unit,
     // Style overrides (defaults are Gallery's)
@@ -101,10 +105,16 @@ fun CloudPhotoCell(
     placeholderIconSizeDp: Dp = 28.dp,
     modifier: Modifier = Modifier,
 ) {
+    // The freshly-decrypted URL for this cell's cloud row, from the shared store. Used only when the
+    // caller passes no explicit [cloudThumbnailUrl] (the Shared tab keeps its own URL and wins). A
+    // cell keyed on a linkId not in the map just misses and stays on the caller's value.
+    val storeThumbnailUrl = cloudLinkId?.let { LocalThumbnailUrls.current.value[it] }
+    val effectiveCloudUrl = cloudThumbnailUrl ?: storeThumbnailUrl
+
     // Coil model: prefer local Uri (faster, no network), otherwise the CDN URL.
     val imageModel: Any? = when {
         localUri != null -> android.net.Uri.parse(localUri)
-        else             -> cloudThumbnailUrl
+        else             -> effectiveCloudUrl
     }
 
     // ── Lazy thumbnail wiring ────────────────────────────────────────────────
@@ -119,7 +129,7 @@ fun CloudPhotoCell(
     // Synced cells already render the local file URI, so a missing thumbnailUrl
     // is invisible to the user — we still queue the decrypt though, so the
     // cloud-only view (or another device viewing the same row) gets it ready.
-    val pendingLinkId: String? = cloudLinkId.takeIf { it != null && cloudThumbnailUrl == null }
+    val pendingLinkId: String? = cloudLinkId.takeIf { it != null && effectiveCloudUrl == null }
     if (pendingLinkId != null) {
         // 120 ms debounce: during fast flings hundreds of cells fly in and out per second.
         // Without the gate every one of them launched a DAO lookup + scheduler request, then
@@ -145,7 +155,10 @@ fun CloudPhotoCell(
             .aspectRatio(1f)
             .clip(RoundedCornerShape(cornerRadiusDp))
             .background(Bg2)
-            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+            .then(
+                if (onLongClick != null) Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick)
+                else Modifier.clickable(onClick = onClick)
+            )
             .then(
                 if (isSelected) Modifier.border(2.5.dp, Accent, RoundedCornerShape(cornerRadiusDp))
                 else Modifier

@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -28,7 +28,7 @@ import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
 import android.util.Log
-import androidx.exifinterface.media.ExifInterface
+import androidx.datastore.preferences.core.edit
 import dagger.hilt.android.qualifiers.ApplicationContext
 import me.proton.core.domain.entity.UserId
 import eu.akoos.photos.domain.entity.CloudPhoto
@@ -36,13 +36,17 @@ import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.entity.SyncState
 import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.data.api.dto.BatchLinkDto
+import eu.akoos.photos.data.preferences.SettingsKeys
+import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.data.repository.PhotoLocationResolver
 import eu.akoos.photos.data.repository.drive.LinkDetailHelpers
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.SyncStateRepository
+import eu.akoos.photos.util.DownloadDateOverride
+import eu.akoos.photos.util.ExifHelper
+import eu.akoos.photos.util.Mp4CreationTime
 import java.io.File
 import java.io.IOException
-import java.text.SimpleDateFormat
-import java.util.Date
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.async
@@ -72,6 +76,7 @@ class DownloadPhotosUseCase @Inject constructor(
     private val cloudRepo: DrivePhotoRepository,
     private val syncStateRepo: SyncStateRepository,
     private val linkDetailHelpers: LinkDetailHelpers,
+    private val locationResolver: PhotoLocationResolver,
 ) {
     data class Progress(val done: Int, val total: Int, val failed: Int, val skipped: Int = 0)
 
@@ -169,6 +174,7 @@ class DownloadPhotosUseCase @Inject constructor(
                             val savedUri = saveFileToMediaStore(
                                 file, photo.displayName, photo.mimeType, folder,
                                 captureTimeSeconds = photo.captureTime,
+                                gps = resolveGpsForExif(userId, photo),
                             )
                             file.delete()
                             if (savedUri != null) {
@@ -241,6 +247,7 @@ class DownloadPhotosUseCase @Inject constructor(
                             val savedUri = saveFileToMediaStore(
                                 file, photo.displayName, photo.mimeType, folder,
                                 captureTimeSeconds = photo.captureTime,
+                                gps = resolveGpsForExif(userId, photo),
                             )
                             file.delete()
                             if (savedUri != null) {
@@ -278,7 +285,11 @@ class DownloadPhotosUseCase @Inject constructor(
                     status            = SyncStatus.SYNCED,
                     lastSyncAttemptMs = System.currentTimeMillis(),
                     lastSyncSuccessMs = System.currentTimeMillis(),
-                    backedUpAtMs      = null,
+                    // A downloaded photo is provably on Drive (we hold its linkId and just fetched it
+                    // from there), so its device copy is reclaimable by free-up-space right away, the
+                    // same as an uploaded photo. Without this stamp a downloaded-then-freed green photo
+                    // could never be freed, since only content-certain rows carry it.
+                    backedUpAtMs      = System.currentTimeMillis(),
                     sizeBytes         = photo.sizeBytes,
                 ),
                 userId,
@@ -361,6 +372,24 @@ class DownloadPhotosUseCase @Inject constructor(
     }
 
     /**
+     * The (latitude, longitude) to stamp into a downloaded image's GPS EXIF, or null to write nothing.
+     * Gated to the EXIF-writable image formats first, so no crypto / network runs for a video or a
+     * container ExifInterface can't write, then resolved cache-first by [PhotoLocationResolver]: a photo
+     * whose Location was gated off at upload yields null, so nothing is invented. Best-effort: a resolve
+     * failure logs and returns null rather than failing the download.
+     */
+    private suspend fun resolveGpsForExif(userId: UserId, photo: CloudPhoto): Pair<Double, Double>? {
+        if (!isExifWritableImageMime(photo.mimeType)) return null
+        val located = runCatching { locationResolver.resolve(userId, photo.linkId) }
+            .getOrElse { e ->
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                Log.w(TAG, "GPS resolve for ${photo.displayName} failed: ${e.message}")
+                null
+            } ?: return null
+        return located.latitude to located.longitude
+    }
+
+    /**
      * Saves [file] into MediaStore and returns the content URI of the saved entry.
      * If the file already exists in the target folder, returns the existing URI (no duplicate).
      * Returns null on failure.
@@ -369,13 +398,18 @@ class DownloadPhotosUseCase @Inject constructor(
      *   and DATE_MODIFIED so the device gallery sorts the downloaded photo by its real-world
      *   capture moment instead of by download time. Pass 0 to skip and let MediaStore default
      *   to current time (only for local copies whose origin time isn't known).
+     * @param gps (latitude, longitude) written into the file's GPS EXIF for the writable image
+     *   formats, so the exported file keeps the location the app holds for its cloud twin. Null
+     *   when no coordinates are known (a photo uploaded with GPS stripped has none), and then
+     *   nothing is written; coordinates are never invented.
      */
-    private fun saveFileToMediaStore(
+    private suspend fun saveFileToMediaStore(
         file: File,
         displayName: String,
         mimeType: String,
         folder: String,
         captureTimeSeconds: Long = 0L,
+        gps: Pair<Double, Double>? = null,
     ): Uri? {
         val isVideo = mimeType.startsWith("video/")
 
@@ -388,27 +422,34 @@ class DownloadPhotosUseCase @Inject constructor(
         // limited to formats ExifInterface can write; any failure leaves the column write as the
         // fallback. Changing the bytes is dedup-safe because the download pairs by cloud id
         // (linkSyncState -> reconcile byId), not by content hash.
-        if (!isVideo && captureTimeSeconds > 0L && mimeType.lowercase() in EXIF_WRITABLE_MIMES) {
-            runCatching {
-                val exif = ExifInterface(file.absolutePath)
-                if (exif.getAttribute(ExifInterface.TAG_DATETIME_ORIGINAL).isNullOrBlank()) {
-                    val stamp = SimpleDateFormat("yyyy:MM:dd HH:mm:ss", Locale.US)
-                        .format(Date(captureTimeSeconds * 1000L))
-                    exif.setAttribute(ExifInterface.TAG_DATETIME_ORIGINAL, stamp)
-                    if (exif.getAttribute(ExifInterface.TAG_DATETIME).isNullOrBlank()) {
-                        exif.setAttribute(ExifInterface.TAG_DATETIME, stamp)
-                    }
-                    exif.saveAttributes()
-                }
-            }.onFailure { Log.w(TAG, "EXIF date stamp skipped for $displayName: ${it.message}") }
+        if (shouldStampExifDate(mimeType, captureTimeSeconds)) {
+            ExifHelper.stampDateTakenIfMissing(file, captureTimeSeconds * 1000L)
+        }
+        // Carry the photo's known location onto the exported file, alongside the date stamp and BEFORE
+        // MediaStore publishes it, for the same writable image formats. [gps] is null whenever the app
+        // holds no coordinates for this photo (a photo uploaded with GPS stripped has none), so a
+        // location is never invented; best-effort, so a failed write still leaves a valid file.
+        if (shouldWriteExifGps(mimeType, gps != null)) {
+            gps?.let { ExifHelper.writeGpsLocation(file, it.first, it.second) }
+        }
+        // Same problem for videos: MediaStore derives DATE_TAKEN from the mp4 mvhd on scan, and a
+        // downloaded video otherwise carries the upload/mux time (or none), so it lands at "today" on
+        // strict scanners. Stamp the original capture time into the mvhd before publishing. The bytes
+        // change, but a download pairs by cloud id (SyncState) on this install and by name+date after a
+        // reinstall, not by content hash, so this does not orphan the file from its cloud twin.
+        if (isVideo && captureTimeSeconds > 0L) {
+            Mp4CreationTime.stamp(file, captureTimeSeconds * 1000L)
         }
 
-        // A photo that belongs to an album downloads into a folder named after that album (the
-        // caller passes it as [folder], already sanitised) so the album's photos stay grouped on
-        // the device — no matter whether the download starts from the album or from the timeline.
-        // A photo in no album lands in the Pictures/ (or Movies/) root.
-        val base = if (isVideo) "Movies" else "Pictures"
-        val relPath = if (folder.isNotBlank()) "$base/$folder" else base
+        // A photo that belongs to an album downloads into DCIM/<AlbumName> (the caller passes the
+        // album as [folder], already sanitised) so the album's photos stay grouped on the device, no
+        // matter whether the download starts from the album or from the timeline. A photo in no album
+        // lands in DCIM/Camera with the rest of the camera roll.
+        val relPath = if (folder.isNotBlank()) {
+            eu.akoos.photos.util.ProtonPhotosStorage.albumFolder(folder)
+        } else {
+            eu.akoos.photos.util.ProtonPhotosStorage.DEFAULT_PICTURES
+        }
 
         // Second-chance global dedupe: callers already pre-skipped via alreadyExistsInMediaStore,
         // but a concurrent write between the check and the save can sneak in. Size = file.length()
@@ -419,19 +460,40 @@ class DownloadPhotosUseCase @Inject constructor(
             return existingUri
         }
 
-        // Resolve the timestamp once so the insert + post-publish UPDATE use the same
-        // value. Always write something — leaving DATE_TAKEN unset lets MediaStore drop
-        // the photo at "now" which the user perceives as "the gallery shows my Drive
-        // photo as taken today". When the cloud row has no captureTime we deliberately
-        // fall back to the file's last-modified time on disk (the download time stamped
-        // at decrypt) — still better than the insert-time MediaStore would pick, which
-        // is the same instant but minus the few-second decrypt window, so the photo
-        // wouldn't even sort alongside other recent downloads.
-        val timestampMs = when {
-            captureTimeSeconds > 0L -> captureTimeSeconds * 1000L
-            file.lastModified() > 0L -> file.lastModified()
-            else -> System.currentTimeMillis()
+        // DATE_TAKEN is written ONLY when the capture date is known. When it is not, the column is
+        // omitted so the media scanner derives DATE_TAKEN from the file's embedded EXIF / mvhd date
+        // (stamped above for the formats that allow it). Forcing the column to the download time as a
+        // fallback overrides that embedded date on scanners that treat the column as authoritative
+        // (stock AOSP, e.g. Pixel / GrapheneOS), which is what made a downloaded photo land at "today"
+        // there while it looked correct on OEM builds that re-read the file. DATE_MODIFIED stays set:
+        // the on-device write time is a truthful value for it and does not fight the capture date. #34.
+        // When Drive carries no capture time, fall back to the file's own embedded date (an image's
+        // EXIF DateTimeOriginal) so DATE_TAKEN is set and the gallery sorts + dates it correctly,
+        // instead of leaving the column null and letting it read as the download moment. Some cloud
+        // photos (e.g. imported from other apps) have a 0 capture time on Drive but a real date in
+        // the file bytes.
+        val effectiveCaptureSeconds = if (captureTimeSeconds > 0L) {
+            captureTimeSeconds
+        } else if (!isVideo) {
+            runCatching {
+                androidx.exifinterface.media.ExifInterface(file.absolutePath)
+                    .let { it.getDateTimeOriginal() ?: it.getDateTime() }
+            }.getOrNull()?.let { it / 1000L } ?: 0L
+        } else {
+            0L
         }
+        val dateTakenMs: Long? = dateTakenColumnMs(effectiveCaptureSeconds)
+        val dateModifiedMs = downloadTimestampMs(captureTimeSeconds, file.lastModified())
+            .takeIf { it > 0L } ?: System.currentTimeMillis()
+
+        // Privacy-safe breadcrumb (no name, path, or actual date) so a shared diagnostics log shows why
+        // a downloaded photo did or did not keep its date on a given device.
+        eu.akoos.photos.util.SyncDiagnostics.log(
+            "download save mime=${mimeType.substringBefore(';')} " +
+                "capture=${if (captureTimeSeconds > 0L) "known" else "none"} video=$isVideo " +
+                "exifStampable=${isExifWritableImageMime(mimeType)} " +
+                "dateTakenCol=${if (dateTakenMs != null) "set" else "omitted"}"
+        )
 
         val cv = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
@@ -440,10 +502,10 @@ class DownloadPhotosUseCase @Inject constructor(
                 put(MediaStore.MediaColumns.RELATIVE_PATH, relPath)
                 put(MediaStore.MediaColumns.IS_PENDING, 1)
             }
-            // DATE_TAKEN is MILLISECONDS, DATE_MODIFIED is SECONDS — keep them in sync so
-            // galleries that read either column sort the photo to the right place.
-            put(MediaStore.MediaColumns.DATE_TAKEN, timestampMs)
-            put(MediaStore.MediaColumns.DATE_MODIFIED, timestampMs / 1000L)
+            // DATE_TAKEN is MILLISECONDS, DATE_MODIFIED is SECONDS. DATE_TAKEN only when known (above);
+            // DATE_MODIFIED always, so galleries that sort by it still place the file sensibly.
+            dateTakenMs?.let { put(MediaStore.MediaColumns.DATE_TAKEN, it) }
+            put(MediaStore.MediaColumns.DATE_MODIFIED, dateModifiedMs / 1000L)
             // Don't set DATE_ADDED — MediaStore manages it as "when was this row inserted"
             // and overriding can break some gallery apps' "Recently added" sort.
         }
@@ -485,10 +547,31 @@ class DownloadPhotosUseCase @Inject constructor(
                 // pending flip. Some Android 13+ versions drop timestamp updates when
                 // combined with the IS_PENDING flip, so split this into two updates.
                 val dates = ContentValues().apply {
-                    put(MediaStore.MediaColumns.DATE_TAKEN, timestampMs)
-                    put(MediaStore.MediaColumns.DATE_MODIFIED, timestampMs / 1000L)
+                    dateTakenMs?.let { put(MediaStore.MediaColumns.DATE_TAKEN, it) }
+                    put(MediaStore.MediaColumns.DATE_MODIFIED, dateModifiedMs / 1000L)
                 }
                 context.contentResolver.update(uri, dates, null, null)
+            }
+            // MediaStore only derives DATE_TAKEN from the embedded date for JPEG/HEIF images (and the
+            // video mvhd); for a PNG/WebP/GIF download it refuses the DATE_TAKEN column write entirely,
+            // leaving it 0. Such a file then reads as its download date once its cloud twin is gone (the
+            // local scan falls back to DATE_ADDED). When we know the capture date but the read-back shows
+            // the column did not stick, remember it against this uri so the scan can still date the file
+            // correctly (see SettingsKeys.DOWNLOAD_DATE_OVERRIDES + LocalMediaRepositoryImpl). Reading the
+            // column back to decide keeps JPEGs (where it sticks) from ever bloating the map.
+            if (dateTakenMs != null && dateTakenMs > 0L) {
+                val storedDateTaken = runCatching {
+                    context.contentResolver.query(
+                        uri, arrayOf(MediaStore.MediaColumns.DATE_TAKEN), null, null, null,
+                    )?.use { c -> if (c.moveToFirst()) c.getLong(0) else 0L }
+                }.getOrNull() ?: 0L
+                if (DownloadDateOverride.shouldRecord(dateTakenMs, storedDateTaken)) {
+                    context.settingsDataStore.edit { prefs ->
+                        val current = prefs[SettingsKeys.DOWNLOAD_DATE_OVERRIDES] ?: emptySet()
+                        prefs[SettingsKeys.DOWNLOAD_DATE_OVERRIDES] =
+                            current + DownloadDateOverride.encode(uri.toString(), dateTakenMs)
+                    }
+                }
             }
             uri
         } catch (e: Exception) {
@@ -498,5 +581,42 @@ class DownloadPhotosUseCase @Inject constructor(
             Log.w(TAG, "saveFileToMediaStore failed for $displayName: ${e.message}")
             null
         }
+    }
+
+    companion object {
+        /**
+         * The DATE_TAKEN / DATE_MODIFIED timestamp (ms) a download stamps: the real capture time when
+         * known ([captureTimeSeconds] > 0, promoted from seconds), else the file's last-modified time
+         * ([fileLastModifiedMs], the decrypt-time stamp on disk). Returns a non-positive value only when
+         * both inputs are non-positive, which the caller maps to "now". Pure, so a plain JVM test pins it.
+         */
+        internal fun downloadTimestampMs(captureTimeSeconds: Long, fileLastModifiedMs: Long): Long =
+            if (captureTimeSeconds > 0L) captureTimeSeconds * 1000L else fileLastModifiedMs
+
+        /**
+         * The value to put in the DATE_TAKEN column, or null to leave the column UNSET. Only a known
+         * capture time (> 0) is written; when it is unknown the column is omitted so the media scanner
+         * derives DATE_TAKEN from the file's embedded EXIF / mvhd date instead. Forcing the column to the
+         * download moment (as a fallback) overrides that embedded date on scanners that treat the column
+         * as authoritative (stock AOSP, e.g. Pixel / GrapheneOS), which is what lands a downloaded photo
+         * at "today" there while it looks correct on OEM builds that re-read the file. Pure, JVM-testable.
+         */
+        internal fun dateTakenColumnMs(captureTimeSeconds: Long): Long? =
+            if (captureTimeSeconds > 0L) captureTimeSeconds * 1000L else null
+
+        /** True when the capture-date EXIF stamp applies: a real capture time on a writable image mime.
+         *  A non-image / unwritable container keeps only the MediaStore column date. Pure. */
+        internal fun shouldStampExifDate(mimeType: String, captureTimeSeconds: Long): Boolean =
+            captureTimeSeconds > 0L && isExifWritableImageMime(mimeType)
+
+        /** True when GPS EXIF should be written: real coordinates exist AND the container is a writable
+         *  image mime. Never true without coordinates, so a location is never invented. Pure. */
+        internal fun shouldWriteExifGps(mimeType: String, hasCoordinates: Boolean): Boolean =
+            hasCoordinates && isExifWritableImageMime(mimeType)
+
+        /** A container whose EXIF ExifInterface can WRITE (see [EXIF_WRITABLE_MIMES]). Case- and
+         *  parameter-insensitive, so `image/JPEG` and `image/jpeg; codecs=…` normalise to the base type. */
+        private fun isExifWritableImageMime(mimeType: String): Boolean =
+            mimeType.substringBefore(';').trim().lowercase(Locale.ROOT) in EXIF_WRITABLE_MIMES
     }
 }

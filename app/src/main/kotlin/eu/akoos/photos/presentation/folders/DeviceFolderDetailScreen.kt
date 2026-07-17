@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -97,12 +97,14 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.GalleryItem
+import eu.akoos.photos.presentation.common.anyHideable
 import eu.akoos.photos.presentation.common.ConfirmSheet
 import eu.akoos.photos.presentation.common.IconBubble
 import eu.akoos.photos.presentation.common.SelectionBottomDock
 import eu.akoos.photos.presentation.common.SelectionDockItem
 import eu.akoos.photos.presentation.common.SelectionTopBar
 import eu.akoos.photos.presentation.common.SelectionTopButton
+import eu.akoos.photos.presentation.gallery.LocalThumbnailUrls
 import eu.akoos.photos.presentation.gallery.PhotoCell
 import eu.akoos.photos.presentation.gallery.ScrollDateLabel
 import eu.akoos.photos.presentation.gallery.TimelineGrouping
@@ -114,6 +116,13 @@ import eu.akoos.photos.presentation.viewer.ManagePublicLinkSheet
 import eu.akoos.photos.presentation.viewer.PhotoShareSheet
 import eu.akoos.photos.presentation.gallery.photoCellInputsFor
 import eu.akoos.photos.presentation.theme.Accent
+import eu.akoos.photos.presentation.theme.AppColors
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.PrivacyTip
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.foundation.BorderStroke
+import eu.akoos.photos.presentation.common.MultiStripState
 import eu.akoos.photos.presentation.theme.Bg0
 import eu.akoos.photos.presentation.theme.ErrorColor
 import eu.akoos.photos.presentation.theme.FgMute
@@ -194,6 +203,9 @@ fun DeviceFolderDetailScreen(
     var showDeleteSheet by remember { mutableStateOf(false) }
     val pendingDeleteIntent by viewModel.pendingDeleteIntent.collectAsStateWithLifecycle()
     val isDeleting by viewModel.isDeleting.collectAsStateWithLifecycle()
+    val pendingStripIntent by viewModel.pendingStripIntent.collectAsStateWithLifecycle()
+    val multiStripState by viewModel.multiStripState.collectAsStateWithLifecycle()
+    val moreColors = AppColors.current
     val deletePermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartIntentSenderForResult(),
     ) { result ->
@@ -202,7 +214,39 @@ fun DeviceFolderDetailScreen(
     }
     LaunchedEffect(pendingDeleteIntent) {
         val pi = pendingDeleteIntent ?: return@LaunchedEffect
-        deletePermissionLauncher.launch(IntentSenderRequest.Builder(pi.intentSender).build())
+        // Guard the launch so a stale or already-consumed sender can't force-close the screen.
+        runCatching {
+            deletePermissionLauncher.launch(IntentSenderRequest.Builder(pi.intentSender).build())
+        }.onFailure { viewModel.clearPendingDeleteIntent() }
+    }
+    // Metadata-strip write-permission launcher (foreign files on Android 11+) + result snackbar.
+    val stripPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult(),
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) viewModel.onStripPermissionGranted()
+        else viewModel.clearPendingStripIntent()
+    }
+    LaunchedEffect(pendingStripIntent) {
+        val pi = pendingStripIntent ?: return@LaunchedEffect
+        runCatching {
+            stripPermissionLauncher.launch(IntentSenderRequest.Builder(pi.intentSender).build())
+        }.onFailure { viewModel.clearPendingStripIntent() }
+    }
+    LaunchedEffect(multiStripState) {
+        when (val s = multiStripState) {
+            is MultiStripState.Done -> {
+                val msg = if (s.skipped > 0)
+                    folderCtx.getString(R.string.gallery_stripped_with_skipped, s.stripped, s.skipped)
+                else folderCtx.getString(R.string.gallery_stripped_metadata, s.stripped)
+                snackbarHostState.showSnackbar(msg)
+                viewModel.resetMultiStripState()
+            }
+            is MultiStripState.Failed -> {
+                snackbarHostState.showSnackbar(s.message)
+                viewModel.resetMultiStripState()
+            }
+            else -> Unit
+        }
     }
 
     // A multi-select delete blocks the screen behind a progress drawer so a second tap can't fire
@@ -213,13 +257,16 @@ fun DeviceFolderDetailScreen(
     )
 
     // Cover = the newest item's image (the list is sorted newest-first). Device folders only
-    // ever hold local items, so the cover comes from the local URI.
-    val coverModel: Any? = remember(items) {
+    // ever hold local items, so the cover comes from the local URI; the cloud branch resolves the
+    // shared store URL for parity with the other detail heroes.
+    val thumbUrls = LocalThumbnailUrls.current.value
+    val coverModel: Any? = remember(items, thumbUrls) {
         items.firstOrNull()?.let { item ->
             when (item) {
                 is GalleryItem.LocalOnly -> Uri.parse(item.local.uri)
                 is GalleryItem.Synced -> Uri.parse(item.local.uri)
-                is GalleryItem.CloudOnly -> item.cloud.thumbnailUrl?.let { Uri.parse(it) }
+                is GalleryItem.CloudOnly ->
+                    (thumbUrls[item.cloud.linkId] ?: item.cloud.thumbnailUrl)?.let { Uri.parse(it) }
             }
         }
     }
@@ -248,6 +295,7 @@ fun DeviceFolderDetailScreen(
             .background(Bg0),
     ) {
         val cols = eu.akoos.photos.presentation.gallery.rememberDefaultGridColumns()
+        val seamless = eu.akoos.photos.presentation.gallery.rememberSeamlessGrid()
         // Drag-to-select: long-press a photo then drag to sweep a range (shares the timeline gesture).
         // Cells are keyed by local uri (cloud-only by linkId); the swept keys map to selected uris.
         val selectableKeys = remember(items) {
@@ -281,14 +329,21 @@ fun DeviceFolderDetailScreen(
             columns = GridCells.Fixed(cols),
             state = gridState,
             // Match the main timeline grid (GalleryGrid): same default columns, 20.dp side inset and
-            // 6.dp gap, so device-folder photos render at the same size as the Photos page.
-            contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 24.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
+            // 6.dp gap, so device-folder photos render at the same size as the Photos page. Edge-to-edge
+            // drops the side inset and rounding and tightens the gap.
+            contentPadding = PaddingValues(
+                start = if (seamless) 0.dp else 20.dp,
+                end = if (seamless) 0.dp else 20.dp,
+                bottom = 24.dp,
+            ),
+            horizontalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 6.dp),
+            verticalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 6.dp),
             modifier = Modifier.fillMaxSize().then(dragSelectModifier),
         ) {
             // Hero header — cover, folder name and count, like the cloud-album detail page.
             item(span = { GridItemSpan(maxLineSpan) }) {
+                // Photo tiles bleed to the edge in seamless mode; this header keeps the 20.dp inset.
+                Box(modifier = Modifier.padding(horizontal = if (seamless) 20.dp else 0.dp)) {
                 eu.akoos.photos.presentation.albums.components.AlbumHeroHeader(
                     coverModel = coverModel,
                     title = bucketName,
@@ -346,11 +401,12 @@ fun DeviceFolderDetailScreen(
                         }
                     } else null,
                 )
+                }
             }
             if (items.isEmpty()) {
                 item(span = { GridItemSpan(maxLineSpan) }) {
                     Box(
-                        Modifier.fillMaxWidth().height(200.dp),
+                        Modifier.padding(horizontal = if (seamless) 20.dp else 0.dp).fillMaxWidth().height(200.dp),
                         contentAlignment = Alignment.Center,
                     ) {
                         Text(stringResource(R.string.albums_no_photos), color = FgMute, fontSize = 14.sp)
@@ -361,7 +417,14 @@ fun DeviceFolderDetailScreen(
                     // Month section header — same styling as the cloud-album detail grid.
                     item(span = { GridItemSpan(maxLineSpan) }, key = "hdr_$label") {
                         Row(
-                            modifier = Modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp, top = 24.dp, bottom = 10.dp),
+                            // Keep the label clear of the screen edge in seamless mode, where the
+                            // tiles below bleed to 0.
+                            modifier = Modifier.fillMaxWidth().padding(
+                                start = if (seamless) 20.dp else 4.dp,
+                                end = if (seamless) 20.dp else 4.dp,
+                                top = 24.dp,
+                                bottom = 10.dp,
+                            ),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Text(
@@ -401,6 +464,8 @@ fun DeviceFolderDetailScreen(
                             imageData = inputs.imageData,
                             stableKey = inputs.stableKey,
                             isVideo = inputs.isVideo,
+                            isLocalVideo = inputs.isLocalVideo,
+                            durationMs = inputs.durationMs,
                             isPlaceholder = inputs.isPlaceholder,
                             selected = isSelected,
                             isSelectionMode = isSelectionMode,
@@ -410,6 +475,8 @@ fun DeviceFolderDetailScreen(
                             isOffline = inputs.isOffline,
                             typeBadgeRes = inputs.typeBadgeRes,
                             typeBadgeCdRes = inputs.typeBadgeCdRes,
+                            columns = cols,
+                            cornerRadius = if (seamless) 0.dp else 10.dp,
                             onClick = {
                                 // Skip the release-tap that follows a long-press select; it would
                                 // otherwise toggle the just-anchored cell back off.
@@ -539,11 +606,11 @@ fun DeviceFolderDetailScreen(
                     contentDescription = stringResource(R.string.share_action),
                     onClick = { showPhotoShareSheet = true },
                 )
-                // Hide selected — move on-device-only photos into the app's Hidden vault. Offered only
-                // when the selection has a LocalOnly photo (a Synced one keeps its Drive copy so it is
-                // never hideable). Mirrors the timeline's hide action.
-                val anyLocalOnlySelected = selectedItems.any { it is GalleryItem.LocalOnly }
-                if (anyLocalOnlySelected) {
+                // Hide selected: device-backed photos move into the app's Hidden vault, cloud-only
+                // photos hide client-side by linkId. Offered for any non-empty selection, mirroring
+                // the timeline's hide action.
+                val anyHideableSelected = anyHideable(selectedItems)
+                if (anyHideableSelected) {
                     Spacer(Modifier.size(4.dp))
                     SelectionTopButton(
                         icon = Icons.Default.VisibilityOff,
@@ -573,14 +640,55 @@ fun DeviceFolderDetailScreen(
                     showLabel = showSelectionLabels,
                     onClick = { showAddToAlbumSheet = true },
                 )
-                // Back up selected to Drive. A snackbar confirms either way since the progress
+                // Back up selected to Drive. Shown only when the selection holds a device-only photo
+                // that still needs backing up; an all-Synced selection is already on Drive, so the
+                // action would upload nothing. A snackbar confirms either way since the progress
                 // pill alone is easy to miss.
-                SelectionDockItem(
-                    icon = Icons.Default.CloudUpload,
-                    label = stringResource(R.string.sel_label_upload),
-                    showLabel = showSelectionLabels,
-                    onClick = { showUploadConfirm = true },
-                )
+                if (selectedItems.any { it is GalleryItem.LocalOnly }) {
+                    SelectionDockItem(
+                        icon = Icons.Default.CloudUpload,
+                        label = stringResource(R.string.sel_label_upload),
+                        showLabel = showSelectionLabels,
+                        onClick = { showUploadConfirm = true },
+                    )
+                }
+                // Overflow with the metadata strip, shown only when every selected item is a
+                // device-only photo. A Synced photo keeps its Drive copy's EXIF, so stripping just
+                // the local file is a misleading half-strip; the timeline hides it the same way.
+                if (selectedItems.all { it is GalleryItem.LocalOnly }) {
+                    Box {
+                        var moreExpanded by remember { mutableStateOf(false) }
+                        SelectionDockItem(
+                            icon = Icons.Default.MoreVert,
+                            label = stringResource(R.string.more_label),
+                            showLabel = showSelectionLabels,
+                            onClick = { moreExpanded = true },
+                        )
+                        DropdownMenu(
+                            expanded = moreExpanded,
+                            onDismissRequest = { moreExpanded = false },
+                            shape = RoundedCornerShape(18.dp),
+                            containerColor = moreColors.cardBg,
+                            border = BorderStroke(0.5.dp, moreColors.pillBorder),
+                        ) {
+                            DropdownMenuItem(
+                                text = {
+                                    Text(stringResource(R.string.gallery_strip_metadata), color = moreColors.fgPrimary)
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        Icons.Default.PrivacyTip, null,
+                                        tint = moreColors.fgPrimary, modifier = Modifier.size(20.dp),
+                                    )
+                                },
+                                onClick = {
+                                    moreExpanded = false
+                                    viewModel.stripMetadataSelected()
+                                },
+                            )
+                        }
+                    }
+                }
             }
         }
 

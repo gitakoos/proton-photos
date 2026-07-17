@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Debug-only: registers the CLIP magic-search spike trigger. Never part of a release build. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <receiver
+            android:name="eu.akoos.photos.mlspike.ClipSpikeReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="eu.akoos.photos.CLIP_SPIKE" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>

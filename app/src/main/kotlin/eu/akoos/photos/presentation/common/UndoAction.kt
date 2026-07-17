@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -35,8 +35,28 @@ sealed class UndoAction {
         override val count: Int get() = hiddenUris.size
     }
 
-    /** Undo a cloud-trash delete: move each Drive linkId back out of Proton trash. */
-    data class CloudTrash(val linkIds: List<String>) : UndoAction() {
-        override val count: Int get() = linkIds.size
+    /**
+     * Undo a delete: move each Drive linkId back out of Proton trash AND move each local file back
+     * out of the device trash. Either list may be empty (a cloud-only or a device-only delete), so
+     * one undo path restores whichever copies the delete actually removed.
+     */
+    data class Delete(
+        val cloudLinkIds: List<String> = emptyList(),
+        val localTrashedUris: List<String> = emptyList(),
+        /**
+         * For a synced photo (both copies deleted): the local-to-cloud pairing plus size, so the
+         * undo can re-mark its SyncState SYNCED right away. Without this the local file reappears as
+         * "not backed up" while the server is still moving the cloud copy out of trash, and the
+         * backup would upload a fresh cloud duplicate.
+         */
+        val syncedRelinks: List<Relink> = emptyList(),
+    ) : UndoAction() {
+        data class Relink(val localUri: String, val cloudLinkId: String, val sizeBytes: Long)
+        override val count: Int get() = maxOf(cloudLinkIds.size, localTrashedUris.size)
+    }
+
+    /** Undo an album removal: re-add each photo linkId to the album it was taken out of. */
+    data class AlbumRemove(val albumLinkId: String, val photoLinkIds: List<String>) : UndoAction() {
+        override val count: Int get() = photoLinkIds.size
     }
 }

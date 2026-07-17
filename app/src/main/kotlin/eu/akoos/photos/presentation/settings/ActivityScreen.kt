@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -92,23 +92,28 @@ import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.FgMute
 import eu.akoos.photos.presentation.theme.FgPrimary
 import eu.akoos.photos.presentation.theme.PillBg
+import eu.akoos.photos.BuildConfig
 import eu.akoos.photos.presentation.theme.PillBorder
 
-private enum class ActivityTab { Active, History }
+enum class ActivityTab { Uploads, Downloads, History }
 
 /**
- * View of the background transfers, reached from the Sync status card. Two tabs: Active shows what is
- * running right now (backup upload, album/gallery downloads, offline pinning) plus the photos still
- * waiting to upload; History shows the recent finished transfers from [TransferCenter].
+ * View of the background transfers, reached from the Sync status card. Three tabs: Uploads shows the
+ * backup upload in flight plus the photos still waiting to upload; Downloads shows the album/gallery
+ * downloads and offline pinning; History shows the recent finished transfers from [TransferCenter].
+ *
+ * [initialTab] selects which tab is shown on open, so the avatar's upload / download indicators can
+ * land the user straight on the matching tab. Defaults to Uploads for the plain Settings entry.
  */
 @Composable
 fun ActivityScreen(
     onBack: () -> Unit,
+    initialTab: ActivityTab = ActivityTab.Uploads,
     viewModel: ActivityViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val colors = AppColors.current
-    var tab by rememberSaveable { mutableStateOf(ActivityTab.Active) }
+    var tab by rememberSaveable { mutableStateOf(initialTab) }
 
     // The photos in flight right now, so the queue grid below the progress panel doesn't repeat
     // a photo that the panel is already showing as uploading.
@@ -116,7 +121,11 @@ fun ActivityScreen(
         .filter { it.status == UploadEventStatus.Uploading || it.status == UploadEventStatus.Encrypting }
         .map { it.uri }
         .toSet()
-    val queuedUris = state.pendingUris.filterNot { it in activeUploadUris }
+    // After a user stop the still-pending photos are suppressed from the active-transfer card (they
+    // stay pending in the DB for a later auto-backup); the item in transit keeps showing via
+    // uploadEvents until it finishes. Cleared automatically when a new batch starts uploading.
+    val queuedUris = if (state.uploadStopped) emptyList()
+        else state.pendingUris.filterNot { it in activeUploadUris }
 
     Box(
         modifier = Modifier
@@ -133,52 +142,144 @@ fun ActivityScreen(
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            // ── Active / History switch ──────────────────────────────────────────
+            // ── Uploads / Downloads / History switch ─────────────────────────────
             item(span = { GridItemSpan(maxLineSpan) }) {
                 Column {
                     ActivityTabSwitch(tab = tab, onTab = { tab = it })
+                    // Debug-only preview: fills all three tabs with sample transfers so the cards can
+                    // be inspected without a real upload/download (which finishes before this opens).
+                    if (BuildConfig.DEBUG) {
+                        val testOn by viewModel.testMode.collectAsStateWithLifecycle()
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            text = if (testOn) "Test mode: ON" else "Test mode",
+                            color = if (testOn) colors.accent else colors.fgMute,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            modifier = Modifier
+                                .align(Alignment.CenterHorizontally)
+                                .clip(RoundedCornerShape(999.dp))
+                                .clickable { viewModel.toggleTestMode() }
+                                .padding(horizontal = 14.dp, vertical = 6.dp),
+                        )
+                    }
                     Spacer(Modifier.height(16.dp))
                 }
             }
 
-            if (tab == ActivityTab.Active) {
-                // Upload progress (only while a batch runs). The file list is expanded up front on
-                // this dedicated screen, and the queue grid that follows sits close so the two read
-                // as one upload story rather than two separate blocks.
-                if (state.isUploading) {
+            if (tab == ActivityTab.Uploads) {
+                // One row per photo: thumbnail on the left, a status pill saying what is happening to
+                // the file, and a live bar, all in this screen's card style. The ones encrypting or
+                // uploading come first, then the ones still waiting; each drops out as it finishes.
+                val activeUploads = state.uploadEvents.filter {
+                    it.status == UploadEventStatus.Uploading || it.status == UploadEventStatus.Encrypting
+                }
+                if (activeUploads.isNotEmpty() || queuedUris.isNotEmpty() || state.uploadTransfers.isNotEmpty()) {
                     item(span = { GridItemSpan(maxLineSpan) }) {
                         Column {
                             SectionLabel(stringResource(R.string.activity_uploading))
                             Spacer(Modifier.height(8.dp))
                             SettingsCard {
-                                Spacer(Modifier.height(12.dp))
-                                SyncProgressPanel(
+                                // In-card header matching the Downloads tab: the running-upload label,
+                                // how many photos of the batch are done, and a cancel for the whole burst.
+                                BatchCancelHeader(
+                                    label = stringResource(R.string.activity_uploading),
                                     done = state.uploadDone,
-                                    total = state.uploadTotal,
-                                    events = state.uploadEvents,
-                                    bytesPerSecond = null,
-                                    initiallyExpanded = true,
+                                    total = state.uploadDone + activeUploads.size + queuedUris.size + state.uploadTransfers.size,
+                                    cancelable = true,
+                                    onCancel = { viewModel.cancelUpload() },
                                 )
+                                RowDivider()
+                                activeUploads.forEachIndexed { i, evt ->
+                                    val frac = if (evt.sizeBytes > 0L) {
+                                        (evt.doneBytes.toFloat() / evt.sizeBytes).coerceIn(0f, 1f)
+                                    } else {
+                                        null
+                                    }
+                                    val label = if (evt.status == UploadEventStatus.Encrypting) {
+                                        stringResource(R.string.upload_status_encrypting)
+                                    } else {
+                                        stringResource(R.string.upload_status_uploading)
+                                    }
+                                    TransferPhotoRow(uri = evt.uri, stateLabel = label, progress = frac)
+                                    if (i < activeUploads.lastIndex || queuedUris.isNotEmpty() ||
+                                        state.uploadTransfers.isNotEmpty()) RowDivider()
+                                }
+                                queuedUris.forEachIndexed { i, uri ->
+                                    TransferPhotoRow(
+                                        uri = uri,
+                                        stateLabel = stringResource(R.string.upload_status_queued),
+                                        progress = null,
+                                    )
+                                    if (i < queuedUris.lastIndex || state.uploadTransfers.isNotEmpty()) RowDivider()
+                                }
+                                // Single-photo TransferCenter uploads, e.g. the editor's edit-upload;
+                                // a blank uri still draws a placeholder row so the upload stays visible.
+                                state.uploadTransfers.forEachIndexed { i, t ->
+                                    TransferPhotoRow(
+                                        uri = t.items.firstOrNull().orEmpty(),
+                                        stateLabel = stringResource(R.string.upload_status_uploading),
+                                        progress = null,
+                                    )
+                                    if (i < state.uploadTransfers.lastIndex) RowDivider()
+                                }
                             }
-                            Spacer(Modifier.height(if (queuedUris.isNotEmpty()) 12.dp else 24.dp))
                         }
                     }
+                } else {
+                    item(span = { GridItemSpan(maxLineSpan) }) {
+                        EmptyLabel(stringResource(R.string.activity_empty))
+                    }
                 }
-
+            } else if (tab == ActivityTab.Downloads) {
                 // Downloads: album jobs (WorkManager, cancelable) + gallery batches (TransferCenter).
                 if (state.downloads.isNotEmpty() || state.galleryDownloads.isNotEmpty()) {
                     item(span = { GridItemSpan(maxLineSpan) }) {
                         Column {
                             SectionLabel(stringResource(R.string.activity_downloading))
                             Spacer(Modifier.height(8.dp))
-                            SettingsCard {
-                                state.downloads.forEachIndexed { i, dl ->
-                                    DownloadRow(dl, onCancel = { viewModel.cancelDownload(dl.id) })
-                                    if (i < state.downloads.lastIndex || state.galleryDownloads.isNotEmpty()) RowDivider()
+                            // Album downloads plus any gallery batch that has no per-photo thumbnails
+                            // fall back to a single labelled progress row, kept in one shared card.
+                            val simpleGalleryDownloads = state.galleryDownloads.filter { it.items.isEmpty() }
+                            if (state.downloads.isNotEmpty() || simpleGalleryDownloads.isNotEmpty()) {
+                                SettingsCard {
+                                    state.downloads.forEachIndexed { i, dl ->
+                                        DownloadRow(dl, onCancel = { viewModel.cancelDownload(dl.id) })
+                                        if (i < state.downloads.lastIndex || simpleGalleryDownloads.isNotEmpty()) RowDivider()
+                                    }
+                                    simpleGalleryDownloads.forEachIndexed { i, t ->
+                                        TransferRow(stringResource(R.string.activity_photos), t.done, t.total)
+                                        if (i < simpleGalleryDownloads.lastIndex) RowDivider()
+                                    }
                                 }
-                                state.galleryDownloads.forEachIndexed { i, t ->
-                                    TransferRow(stringResource(R.string.activity_photos), t.done, t.total)
-                                    if (i < state.galleryDownloads.lastIndex) RowDivider()
+                            }
+                            // Gallery selection batches with thumbnails: one card per batch, listing
+                            // the photos still in flight as individual rows. The first t.done photos
+                            // are already saved and drop off the front.
+                            state.galleryDownloads.filter { it.items.isNotEmpty() }.forEach { t ->
+                                val remaining = t.items.drop(t.done)
+                                if (remaining.isNotEmpty()) {
+                                    Spacer(Modifier.height(8.dp))
+                                    SettingsCard {
+                                        // Batch header: how many photos are left, plus a cancel that
+                                        // stops the whole download at once.
+                                        BatchCancelHeader(
+                                            label = stringResource(R.string.activity_downloading_state),
+                                            done = t.done,
+                                            total = t.total,
+                                            cancelable = t.cancelable,
+                                            onCancel = { viewModel.cancelTransfer(t.id) },
+                                        )
+                                        RowDivider()
+                                        remaining.forEachIndexed { i, item ->
+                                            TransferPhotoRow(
+                                                uri = item,
+                                                stateLabel = stringResource(R.string.activity_downloading_state),
+                                                progress = null,
+                                            )
+                                            if (i < remaining.lastIndex) RowDivider()
+                                        }
+                                    }
                                 }
                             }
                             Spacer(Modifier.height(24.dp))
@@ -203,29 +304,7 @@ fun ActivityScreen(
                     }
                 }
 
-                // Upload queue thumbnails (issue #16): the photos still waiting, minus the ones the
-                // progress panel above already shows as uploading, so nothing appears twice.
-                if (queuedUris.isNotEmpty()) {
-                    item(span = { GridItemSpan(maxLineSpan) }) {
-                        Column {
-                            SectionLabel(stringResource(R.string.activity_pending, queuedUris.size))
-                            Spacer(Modifier.height(8.dp))
-                        }
-                    }
-                    items(queuedUris, key = { it }) { uri ->
-                        AsyncImage(
-                            model = Uri.parse(uri),
-                            contentDescription = null,
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier
-                                .aspectRatio(1f)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(colors.bg2),
-                        )
-                    }
-                }
-
-                if (!state.hasActivity) {
+                if (state.downloads.isEmpty() && state.galleryDownloads.isEmpty() && state.offlineTransfers.isEmpty()) {
                     item(span = { GridItemSpan(maxLineSpan) }) {
                         EmptyLabel(stringResource(R.string.activity_empty))
                     }
@@ -271,48 +350,78 @@ fun ActivityScreen(
 private fun DownloadRow(dl: ActivityViewModel.Download, onCancel: () -> Unit) {
     val colors = AppColors.current
     val fraction = if (dl.total > 0) (dl.done.toFloat() / dl.total).coerceIn(0f, 1f) else 0f
-    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                dl.albumName,
-                color = FgPrimary,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Medium,
-                maxLines = 1,
-                modifier = Modifier.weight(1f).padding(end = 8.dp),
-            )
-            Text("${dl.done} / ${dl.total}", color = FgMute, fontSize = 12.sp)
-            Icon(
-                Icons.Default.Close,
-                contentDescription = stringResource(R.string.cancel),
-                tint = FgMute,
-                modifier = Modifier
-                    .padding(start = 10.dp)
-                    .clip(CircleShape)
-                    .clickable(onClick = onCancel)
-                    .padding(4.dp)
-                    .size(18.dp),
-            )
-        }
-        Spacer(Modifier.height(8.dp))
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // Live album cover (the most recent photo saved to the device), with a placeholder box so
+        // the row keeps a thumbnail slot like the per-photo rows before the first cover is available.
         Box(
             modifier = Modifier
-                .fillMaxWidth()
-                .height(4.dp)
-                .clip(RoundedCornerShape(2.dp))
-                .background(colors.line2),
+                .size(44.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(colors.bg2),
+            contentAlignment = Alignment.Center,
         ) {
+            if (dl.coverUri != null) {
+                AsyncImage(
+                    model = Uri.parse(dl.coverUri),
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            } else {
+                Icon(
+                    Icons.Default.CloudDownload,
+                    contentDescription = null,
+                    tint = colors.fgMute,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    dl.albumName,
+                    color = FgPrimary,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f).padding(end = 8.dp),
+                )
+                Text("${dl.done} / ${dl.total}", color = FgMute, fontSize = 12.sp)
+            }
+            Spacer(Modifier.height(8.dp))
             Box(
                 modifier = Modifier
-                    .fillMaxWidth(fraction)
+                    .fillMaxWidth()
                     .height(4.dp)
-                    .background(colors.accent, RoundedCornerShape(2.dp)),
-            )
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(colors.line2),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(fraction)
+                        .height(4.dp)
+                        .background(colors.accent, RoundedCornerShape(2.dp)),
+                )
+            }
         }
+        Icon(
+            Icons.Default.Close,
+            contentDescription = stringResource(R.string.cancel),
+            tint = FgMute,
+            modifier = Modifier
+                .padding(start = 10.dp)
+                .clip(CircleShape)
+                .clickable(onClick = onCancel)
+                .padding(4.dp)
+                .size(18.dp),
+        )
     }
 }
 
@@ -365,7 +474,11 @@ private fun HistoryRow(e: TransferCenter.HistoryEntry) {
         else -> Icons.Default.CloudDownload
     }
     val label = when (e.kind) {
-        TransferCenter.Kind.UPLOAD.name -> stringResource(R.string.activity_hist_upload, e.count)
+        TransferCenter.Kind.UPLOAD.name -> if (!e.name.isNullOrBlank()) {
+            e.name
+        } else {
+            stringResource(R.string.activity_hist_upload, e.count)
+        }
         TransferCenter.Kind.OFFLINE.name -> stringResource(R.string.activity_hist_offline, e.count)
         else -> if (!e.name.isNullOrBlank()) {
             stringResource(R.string.activity_hist_download_named, e.count, e.name)
@@ -431,7 +544,114 @@ private fun HistoryRow(e: TransferCenter.HistoryEntry) {
     }
 }
 
-/** Centered segmented control that flips the screen between the Active and History views. */
+/** One photo in a transfer batch: thumbnail on the left, a status pill, an optional live bar, and an
+ *  optional cancel button. Shared by the Uploads tab and the per-photo gallery downloads. */
+@Composable
+private fun TransferPhotoRow(
+    uri: String,
+    stateLabel: String,
+    progress: Float?,
+    onCancel: (() -> Unit)? = null,
+) {
+    val colors = AppColors.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        AsyncImage(
+            model = Uri.parse(uri),
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier
+                .size(44.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(colors.bg2),
+        )
+        Spacer(Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            // Status pill: what is happening to this file right now.
+            Text(
+                stateLabel,
+                color = colors.accent,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(colors.pillBg)
+                    .border(0.5.dp, colors.pillBorder, RoundedCornerShape(999.dp))
+                    .padding(horizontal = 10.dp, vertical = 4.dp),
+            )
+            if (progress != null) {
+                Spacer(Modifier.height(8.dp))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(4.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(colors.line2),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(progress)
+                            .height(4.dp)
+                            .background(colors.accent, RoundedCornerShape(2.dp)),
+                    )
+                }
+            }
+        }
+        if (onCancel != null) {
+            Icon(
+                Icons.Default.Close,
+                contentDescription = stringResource(R.string.cancel),
+                tint = colors.fgMute,
+                modifier = Modifier
+                    .padding(start = 10.dp)
+                    .clip(CircleShape)
+                    .clickable(onClick = onCancel)
+                    .padding(4.dp)
+                    .size(18.dp),
+            )
+        }
+    }
+}
+
+/** Top row of an upload/download batch card: the operation label, the done/total count, and a cancel
+ *  for the whole batch. Shared by both tabs so they read identically. */
+@Composable
+private fun BatchCancelHeader(label: String, done: Int, total: Int, cancelable: Boolean, onCancel: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            label,
+            color = FgPrimary,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Medium,
+            modifier = Modifier.weight(1f),
+        )
+        Text("$done / $total", color = FgMute, fontSize = 12.sp)
+        if (cancelable) {
+            Icon(
+                Icons.Default.Close,
+                contentDescription = stringResource(R.string.cancel),
+                tint = FgMute,
+                modifier = Modifier
+                    .padding(start = 10.dp)
+                    .clip(CircleShape)
+                    .clickable(onClick = onCancel)
+                    .padding(4.dp)
+                    .size(18.dp),
+            )
+        }
+    }
+}
+
+/** Centered segmented control that flips the screen between the Uploads, Downloads and History views. */
 @Composable
 private fun ActivityTabSwitch(tab: ActivityTab, onTab: (ActivityTab) -> Unit) {
     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
@@ -443,8 +663,11 @@ private fun ActivityTabSwitch(tab: ActivityTab, onTab: (ActivityTab) -> Unit) {
                 .padding(3.dp),
             horizontalArrangement = Arrangement.spacedBy(2.dp),
         ) {
-            ActivitySegment(stringResource(R.string.activity_tab_active), tab == ActivityTab.Active) {
-                onTab(ActivityTab.Active)
+            ActivitySegment(stringResource(R.string.activity_tab_uploads), tab == ActivityTab.Uploads) {
+                onTab(ActivityTab.Uploads)
+            }
+            ActivitySegment(stringResource(R.string.activity_tab_downloads), tab == ActivityTab.Downloads) {
+                onTab(ActivityTab.Downloads)
             }
             ActivitySegment(stringResource(R.string.activity_tab_history), tab == ActivityTab.History) {
                 onTab(ActivityTab.History)
@@ -469,7 +692,7 @@ private fun ActivitySegment(label: String, selected: Boolean, onClick: () -> Uni
     )
 }
 
-/** Centered muted message used by both tabs when there is nothing to show. */
+/** Centered muted message used by the tabs when there is nothing to show. */
 @Composable
 private fun EmptyLabel(text: String) {
     Box(

@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -74,6 +74,7 @@ import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -151,6 +152,9 @@ fun PhotoEditorScreen(
     localUri: String? = null,
     localDisplayName: String? = null,
     localMimeType: String? = null,
+    /** The device photo's original DATE_TAKEN (ms). A Copy inherits it so the edit sorts next to the
+     *  original instead of jumping to the top of the timeline. Null for a foreign "Open with" file. */
+    localCaptureTimeMs: Long? = null,
     cloudPhoto: CloudPhoto? = null,
     /** Non-null when the editor was opened on a Synced photo (device + cloud). The local
      *  save path then propagates the edit up to Drive too so the cloud version doesn't
@@ -226,7 +230,7 @@ fun PhotoEditorScreen(
                 mimeType = externalRequest.mimeType,
             )
             cloudPhoto != null -> vm.loadCloud(cloudPhoto)
-            localUri != null   -> vm.loadLocal(localUri, localDisplayName ?: "photo.jpg", localMimeType ?: "image/jpeg")
+            localUri != null   -> vm.loadLocal(localUri, localDisplayName ?: "photo.jpg", localMimeType ?: "image/jpeg", localCaptureTimeMs)
         }
     }
 
@@ -274,7 +278,10 @@ fun PhotoEditorScreen(
             is SaveResult.SuccessAsCopy -> {
                 android.widget.Toast.makeText(
                     saveContext,
-                    saveContext.getString(R.string.editor_saved_as_copy_toast),
+                    saveContext.getString(
+                        (state.saveResult as? SaveResult.SuccessAsCopy)?.messageRes
+                            ?: R.string.editor_saved_as_copy_toast,
+                    ),
                     android.widget.Toast.LENGTH_LONG,
                 ).show()
                 vm.consumeSaveResult()
@@ -571,12 +578,10 @@ private fun SaveSheet(
         )
         Spacer(Modifier.height(18.dp))
 
-        // Unified with the video editor: only "Save as Copy" is offered. Overwrite is
-        // unreliable for foreign URIs (camera roll, screenshots) because MediaStore
-        // frequently refuses write permission and the fallback leaves a duplicate next
-        // to the original anyway. Skipping straight to Copy makes the outcome
-        // predictable: original always survives, edit lands as a new file next to it
-        // (device) or as a new linkId in Drive (cloud).
+        // A new Copy is the only save option for a cloud-backed photo: the original always
+        // survives and a fresh file is uploaded. Overwrite of a foreign device URI (camera roll,
+        // screenshots) may need a one-time MediaStore write consent, and an un-overwritable format
+        // (RAW/HEIC/GIF) is coerced to a JPEG copy with a toast.
         SaveOptionRow(
             icon = if (isCloud) Icons.Default.CloudUpload else Icons.Default.ContentCopy,
             title = stringResource(if (isCloud) R.string.editor_save_as_new_copy else R.string.video_editor_save_copy),
@@ -589,6 +594,18 @@ private fun SaveSheet(
             ),
             onClick = { onPicked(SaveMode.Copy) },
         )
+        // Overwrite is offered ONLY for a device-only photo (a genuine in-place file write). A
+        // cloud-backed photo (cloud-only or synced) is never overwritten in place: the Photos
+        // backend refuses a second revision on a photo link, so the only cloud save is a new copy.
+        if (!isCloud && !isSynced) {
+            Spacer(Modifier.height(12.dp))
+            SaveOptionRow(
+                icon = Icons.Default.Save,
+                title = stringResource(R.string.editor_save_overwrite),
+                subtitle = stringResource(R.string.editor_save_overwrite_subtitle_device),
+                onClick = { onPicked(SaveMode.Overwrite) },
+            )
+        }
         Spacer(Modifier.height(18.dp))
         Row(
             modifier = Modifier

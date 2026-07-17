@@ -1,3 +1,25 @@
+/*
+ * Photos for Proton
+ * Copyright (C) 2026 Akoos <https://akoos.eu>
+ *
+ * Source:  https://github.com/gitakoos/proton-photos
+ * Website: https://www.photosforproton.eu
+ *
+ * This file is part of Photos for Proton.
+ *
+ * Photos for Proton is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 3 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 package eu.akoos.photos.data.db.dao
 
 import android.content.Context
@@ -30,6 +52,7 @@ class SyncStateDaoTest {
         val context = ApplicationProvider.getApplicationContext<Context>()
         db = Room.inMemoryDatabaseBuilder(context, TestDatabase::class.java)
             .allowMainThreadQueries()
+            .setQueryExecutor { it.run() }
             .build()
         dao = db.syncStateDao()
     }
@@ -93,6 +116,57 @@ class SyncStateDaoTest {
     }
 
     @Test
+    fun `upsert of an existing row preserves its queue columns`() = runTest {
+        // A row queued for upload (as the enqueue paths leave it via markQueued).
+        dao.upsert(entity("uri://1", status = SyncStatus.LOCAL_ONLY))
+        dao.markQueued("uri://1", source = "MANUAL", at = 12345L)
+
+        // A later reconcile re-upserts a plain domain SyncState (queue columns default to un-queued).
+        dao.upsert(entity("uri://1", status = SyncStatus.LOCAL_ONLY))
+
+        val row = dao.getByUri("uri://1")
+        assertNotNull(row)
+        assertTrue(row!!.queued)
+        assertEquals("MANUAL", row.queueSource)
+        assertEquals(12345L, row.queuedAt)
+    }
+
+    @Test
+    fun `upsert of an existing row still updates its domain columns`() = runTest {
+        dao.upsert(entity("uri://1", status = SyncStatus.LOCAL_ONLY))
+        dao.markQueued("uri://1", source = "MANUAL", at = 12345L)
+
+        dao.upsert(entity("uri://1", status = SyncStatus.SYNCED, cloudFileId = "cloud-1"))
+
+        val row = dao.getByUri("uri://1")
+        assertNotNull(row)
+        assertEquals(SyncStatus.SYNCED, row!!.status)
+        assertEquals("cloud-1", row.cloudFileId)
+        // ...while the queue intent set earlier survives the domain-only upsert.
+        assertTrue(row.queued)
+        assertEquals("MANUAL", row.queueSource)
+    }
+
+    @Test
+    fun `upsertAll preserves queue columns on existing rows`() = runTest {
+        dao.upsert(entity("uri://1", status = SyncStatus.LOCAL_ONLY))
+        dao.markQueued("uri://1", source = "ALBUM_ADD", at = 777L)
+
+        dao.upsertAll(listOf(
+            entity("uri://1", status = SyncStatus.LOCAL_ONLY),
+            entity("uri://2", status = SyncStatus.LOCAL_ONLY),
+        ))
+
+        assertEquals(2, dao.observeAll("user1").first().size)
+        val row1 = dao.getByUri("uri://1")
+        assertNotNull(row1)
+        assertTrue(row1!!.queued)
+        assertEquals("ALBUM_ADD", row1.queueSource)
+        // A brand-new row inserted by the same batch is un-queued (INSERT defaults).
+        assertEquals(false, dao.getByUri("uri://2")?.queued)
+    }
+
+    @Test
     fun `getByUri returns entity when present`() = runTest {
         dao.upsert(entity("uri://1"))
 
@@ -133,7 +207,7 @@ class SyncStateDaoTest {
             entity("uri://local-only", status = SyncStatus.LOCAL_ONLY, backedUpAtMs = 50L),
         ))
 
-        val result = dao.getSyncedBefore(500L)
+        val result = dao.getSyncedBefore("user1", 500L)
 
         assertEquals(1, result.size)
         assertEquals("uri://synced-old", result.first().localUri)
@@ -143,7 +217,23 @@ class SyncStateDaoTest {
     fun `LOCAL_ONLY items are excluded from getSyncedBefore`() = runTest {
         dao.upsert(entity("uri://local", status = SyncStatus.LOCAL_ONLY, backedUpAtMs = 1L))
 
-        assertTrue(dao.getSyncedBefore(Long.MAX_VALUE).isEmpty())
+        assertTrue(dao.getSyncedBefore("user1", Long.MAX_VALUE).isEmpty())
+    }
+
+    @Test
+    fun `getSyncedBefore filters by userId`() = runTest {
+        // Both rows are reclaimable on status, stamp and cutoff; only the account differs, so the
+        // other account's row must not surface as a free-up-space candidate.
+        dao.upsertAll(listOf(
+            entity("uri://mine", "user1", status = SyncStatus.SYNCED, backedUpAtMs = 100L),
+            entity("uri://theirs", "user2", status = SyncStatus.SYNCED, backedUpAtMs = 100L),
+        ))
+
+        val result = dao.getSyncedBefore("user1", 500L)
+
+        assertEquals(1, result.size)
+        assertEquals("uri://mine", result.first().localUri)
+        assertEquals(listOf("uri://theirs"), dao.getSyncedBefore("user2", 500L).map { it.localUri })
     }
 
     @Test

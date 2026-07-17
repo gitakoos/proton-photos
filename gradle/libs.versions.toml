@@ -22,11 +22,12 @@ robolectric = "4.13"
 androidxTestCore = "1.6.1"
 androidxHiltNavigationCompose = "1.2.0"
 glance = "1.1.0"
-media3 = "1.4.1"
+media3 = "1.8.0"
 benchmark = "1.3.3"
 uiautomator = "2.3.0"
 profileinstaller = "1.4.1"
 osmdroid = "6.1.20"
+onnxruntime = "1.26.0"
 
 [libraries]
 # Proton Core
@@ -102,6 +103,8 @@ glance-appwidget = { module = "androidx.glance:glance-appwidget", version.ref = 
 glance-material3 = { module = "androidx.glance:glance-material3", version.ref = "glance" }
 media3-exoplayer = { module = "androidx.media3:media3-exoplayer", version.ref = "media3" }
 media3-ui = { module = "androidx.media3:media3-ui", version.ref = "media3" }
+media3-transformer = { module = "androidx.media3:media3-transformer", version.ref = "media3" }
+media3-effect = { module = "androidx.media3:media3-effect", version.ref = "media3" }
 
 # Room — uses KSP
 room-runtime = { module = "androidx.room:room-runtime", version.ref = "room" }
@@ -151,6 +154,10 @@ mockk = { module = "io.mockk:mockk", version.ref = "mockk" }
 androidx-test-ext = { module = "androidx.test.ext:junit", version.ref = "androidxTestExt" }
 robolectric = { module = "org.robolectric:robolectric", version.ref = "robolectric" }
 androidx-test-core = { module = "androidx.test:core", version.ref = "androidxTestCore" }
+androidx-test-runner = { module = "androidx.test:runner", version.ref = "androidxTestCore" }
+
+# On-device ML (magic search, #6)
+onnxruntime-android = { module = "com.microsoft.onnxruntime:onnxruntime-android", version.ref = "onnxruntime" }
 
 # Baseline Profile generation (Macrobenchmark)
 benchmark-macro-junit4 = { module = "androidx.benchmark:benchmark-macro-junit4", version.ref = "benchmark" }

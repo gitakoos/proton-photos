@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -76,20 +76,7 @@ class DeletePhotoUseCase @Inject constructor(
         deleteFromCloud: Boolean,
         hide: Boolean = false,
     ): Result {
-        val cloudLinkIds = items.mapNotNull { item ->
-            when {
-                deleteFromCloud && item is GalleryItem.Synced    -> item.cloud.linkId
-                deleteFromCloud && item is GalleryItem.CloudOnly -> item.cloud.linkId
-                else -> null
-            }
-        }
-        val localUriStrings = items.mapNotNull { item ->
-            when {
-                item is GalleryItem.LocalOnly                    -> item.local.uri
-                item is GalleryItem.Synced && freeUpSpace        -> item.local.uri
-                else -> null
-            }
-        }
+        val (cloudLinkIds, localUriStrings) = computeDeleteTargets(items, freeUpSpace, deleteFromCloud)
 
         // Batch shape up front: item count (overload signal) plus the type mix and cloud/local
         // split, so a delete that later fails is diagnosable from logcat rather than opaque.
@@ -206,20 +193,22 @@ class DeletePhotoUseCase @Inject constructor(
         return Result.Success
     }
 
+    /**
+     * Reconciles each row's SyncStatus after the local MediaStore copy was already removed by the
+     * caller above. Despite its name, [SyncStateRepository.updateStatusAndDeleteLocal] only UPDATES
+     * the status column; it deletes nothing itself.
+     */
     private suspend fun updateSyncStateAfterLocalDelete(items: List<GalleryItem>, freeUpSpace: Boolean, hide: Boolean) {
         for (item in items) {
             try {
-                when {
-                    item is GalleryItem.LocalOnly ->
-                        syncStateRepo.updateStatusAndDeleteLocal(item.local.uri, SyncStatus.LOCAL_ONLY)
-                    // HIDE wins over freeUpSpace: a hidden synced photo must not appear in the
-                    // gallery as a plain CLOUD_ONLY photo or the user has no way to tell which
-                    // cloud photos are hidden. The HIDDEN status also keeps reconcile from
-                    // demoting it on every refresh and the upload pipeline from re-uploading it.
-                    item is GalleryItem.Synced && hide ->
-                        syncStateRepo.updateStatusAndDeleteLocal(item.local.uri, SyncStatus.HIDDEN)
-                    item is GalleryItem.Synced && freeUpSpace ->
-                        syncStateRepo.updateStatusAndDeleteLocal(item.local.uri, SyncStatus.CLOUD_ONLY)
+                val newStatus = postDeleteSyncStatus(item, freeUpSpace, hide)
+                val localUri = when (item) {
+                    is GalleryItem.LocalOnly -> item.local.uri
+                    is GalleryItem.Synced -> item.local.uri
+                    is GalleryItem.CloudOnly -> null
+                }
+                if (newStatus != null && localUri != null) {
+                    syncStateRepo.updateStatusAndDeleteLocal(localUri, newStatus)
                 }
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
@@ -227,5 +216,63 @@ class DeletePhotoUseCase @Inject constructor(
                 Log.w(TAG, "Sync-state update failed for one item after local delete", e)
             }
         }
+    }
+
+    /** Cloud linkIds to trash and device URI strings to delete, produced by [computeDeleteTargets]. */
+    data class DeleteTargets(
+        val cloudLinkIds: List<String>,
+        val localUriStrings: List<String>,
+    )
+
+    companion object {
+        /**
+         * Splits [items] into the cloud linkIds to trash and the device URI strings to delete, the
+         * single safety decision of the whole delete path. Pure and side-effect-free so it can be
+         * pinned by a plain JVM test.
+         *
+         * A cloud copy is trashed only when [deleteFromCloud] is set (a Synced or CloudOnly item's
+         * linkId). A device URI enters the delete set only when [freeUpSpace] is set (a LocalOnly or
+         * Synced item's uri): on a "remove cloud copies, keep local files" delete ([freeUpSpace] false,
+         * [deleteFromCloud] true) a LocalOnly item has no cloud copy to trash and is left untouched,
+         * since deleting it would destroy the only copy of a photo the user chose to keep. A CloudOnly
+         * item never yields a device URI and a LocalOnly item never yields a cloud linkId.
+         */
+        fun computeDeleteTargets(
+            items: List<GalleryItem>,
+            freeUpSpace: Boolean,
+            deleteFromCloud: Boolean,
+        ): DeleteTargets {
+            val cloudLinkIds = items.mapNotNull { item ->
+                when {
+                    deleteFromCloud && item is GalleryItem.Synced    -> item.cloud.linkId
+                    deleteFromCloud && item is GalleryItem.CloudOnly -> item.cloud.linkId
+                    else -> null
+                }
+            }
+            val localUriStrings = items.mapNotNull { item ->
+                when {
+                    item is GalleryItem.LocalOnly && freeUpSpace -> item.local.uri
+                    item is GalleryItem.Synced && freeUpSpace    -> item.local.uri
+                    else -> null
+                }
+            }
+            return DeleteTargets(cloudLinkIds, localUriStrings)
+        }
+
+        /**
+         * The one SyncState transition the local delete implies for a single [item], or null when its
+         * row must be left as-is. A LocalOnly item becomes LOCAL_ONLY; a Synced item becomes HIDDEN on a
+         * hide flow, else CLOUD_ONLY when its device copy was freed. HIDE wins over freeUpSpace so a
+         * hidden synced photo is never rendered as a plain CLOUD_ONLY one and reconcile / the upload
+         * pipeline skip it. A CloudOnly item, or a Synced item that kept its device copy, transitions to
+         * nothing.
+         */
+        fun postDeleteSyncStatus(item: GalleryItem, freeUpSpace: Boolean, hide: Boolean): SyncStatus? =
+            when {
+                item is GalleryItem.LocalOnly -> SyncStatus.LOCAL_ONLY
+                item is GalleryItem.Synced && hide -> SyncStatus.HIDDEN
+                item is GalleryItem.Synced && freeUpSpace -> SyncStatus.CLOUD_ONLY
+                else -> null
+            }
     }
 }

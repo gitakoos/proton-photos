@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -28,6 +28,14 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import me.proton.core.crypto.common.context.CryptoContext
@@ -49,6 +57,8 @@ import eu.akoos.photos.data.db.dao.CloudAlbumDao
 import eu.akoos.photos.data.db.dao.PhotoListingDao
 import eu.akoos.photos.data.db.entity.CloudAlbumEntity
 import eu.akoos.photos.data.db.entity.PhotoListingEntity
+import eu.akoos.photos.data.preferences.SettingsKeys
+import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.entity.AlbumChild
 import eu.akoos.photos.domain.entity.CloudPhoto
@@ -314,6 +324,11 @@ class AlbumService @Inject constructor(
         }
 
         val undecryptedLinkIds = mutableListOf<String>()
+        // Hidden-photo set resolved once so a cover pointing at a hidden photo can be swapped for a
+        // non-hidden member below (a hidden photo must never paint as an album cover). The hidden-album
+        // ids let a hidden album keep its own cover in the Hidden view.
+        val hiddenAlbumIds = runCatching { context.settingsDataStore.data.first()[SettingsKeys.HIDDEN_ALBUM_IDS] }.getOrNull().orEmpty()
+        val hiddenCoverIds = runCatching { observeHiddenAlbumMemberLinkIds().first() }.getOrNull().orEmpty()
         val initialAlbums = albumStubs.map { dto ->
             val link = linkDetailMap[dto.linkId]?.link
             var name = dto.linkId.take(8)
@@ -337,14 +352,7 @@ class AlbumService @Inject constructor(
                 }
             }
             if (!nameDecrypted) undecryptedLinkIds += dto.linkId
-            val coverThumbnailUrl = dto.coverLinkId?.let { coverLinkId ->
-                // 1. Check local DB (fastest — works for synced photos)
-                photoListingDao.getByLinkId(coverLinkId)?.thumbnailUrl
-                // 2. Check thumbnail disk cache (works for cloud-only photos after album was opened once)
-                    ?: File(thumbnailCacheDir, "thumb_$coverLinkId.jpg")
-                        .takeIf { it.exists() && it.length() > 0 }
-                        ?.let { "file://${it.absolutePath}" }
-            }
+            val coverThumbnailUrl = resolveVisibleCoverThumbnail(dto.linkId, dto.coverLinkId, dto.linkId in hiddenAlbumIds, hiddenCoverIds, thumbnailCacheDir)
             val sharing = linkDetailMap[dto.linkId]?.sharing
             Album(
                 linkId = dto.linkId,
@@ -416,16 +424,14 @@ class AlbumService @Inject constructor(
     suspend fun loadAlbumsCached(): List<Album> = withContext(Dispatchers.IO) {
         runCatching {
             val thumbnailCacheDir = File(context.cacheDir, "thumbnails")
+            val hiddenAlbumIds = runCatching { context.settingsDataStore.data.first()[SettingsKeys.HIDDEN_ALBUM_IDS] }.getOrNull().orEmpty()
+            val hiddenCoverIds = runCatching { observeHiddenAlbumMemberLinkIds().first() }.getOrNull().orEmpty()
             cloudAlbumDao.getAll().map { entity ->
                 val domain = entity.toDomain()
-                // Rehydrate coverThumbnailUrl from local sources — the entity doesn't persist
-                // CDN URLs (expiring signatures) so the disk cache is our only offline source.
-                val coverUrl = domain.coverLinkId?.let { coverLinkId ->
-                    photoListingDao.getByLinkId(coverLinkId)?.thumbnailUrl
-                        ?: File(thumbnailCacheDir, "thumb_$coverLinkId.jpg")
-                            .takeIf { it.exists() && it.length() > 0 }
-                            ?.let { "file://${it.absolutePath}" }
-                }
+                // Rehydrate coverThumbnailUrl from local sources (the entity doesn't persist expiring
+                // CDN URLs) and skip a hidden cover, resolving a non-hidden member instead. A hidden
+                // album keeps its own cover for the Hidden view.
+                val coverUrl = resolveVisibleCoverThumbnail(domain.linkId, domain.coverLinkId, domain.linkId in hiddenAlbumIds, hiddenCoverIds, thumbnailCacheDir)
                 domain.copy(coverThumbnailUrl = coverUrl)
             }
         }.getOrElse { e ->
@@ -434,8 +440,76 @@ class AlbumService @Inject constructor(
         }
     }
 
+    /**
+     * Resolve an album's display cover thumbnail, skipping any hidden photo. Uses the server cover
+     * when it is not hidden; if that cover photo is hidden, falls back to the first non-hidden member
+     * with a resolvable thumbnail so a hidden photo never becomes an album's visible cover. Null when
+     * nothing resolves (the card then shows a neutral tile).
+     */
+    private suspend fun resolveVisibleCoverThumbnail(
+        albumLinkId: String,
+        coverLinkId: String?,
+        albumIsHidden: Boolean,
+        hiddenIds: Set<String>,
+        thumbnailCacheDir: File,
+    ): String? {
+        if (coverLinkId == null) return null
+        // A hidden album (shown only in the Hidden view) keeps its real cover: its own members all sit
+        // in hiddenIds, so the skip below would wrongly blank it. Only a non-hidden album skips a
+        // hidden cover.
+        if (albumIsHidden) return thumbnailUrlForLink(coverLinkId, thumbnailCacheDir)
+        // Common path (cover not hidden): resolve it exactly as before, no membership query.
+        if (coverLinkId !in hiddenIds) return thumbnailUrlForLink(coverLinkId, thumbnailCacheDir)
+        for (memberLinkId in runCatching { albumPhotoMembershipDao.getPhotoLinkIds(albumLinkId) }.getOrNull().orEmpty()) {
+            if (memberLinkId in hiddenIds) continue
+            thumbnailUrlForLink(memberLinkId, thumbnailCacheDir)?.let { return it }
+        }
+        return null
+    }
+
+    /** Local thumbnail for a photo link: the DB row's URL (synced) or the on-disk cache (cloud-only). */
+    private suspend fun thumbnailUrlForLink(linkId: String, thumbnailCacheDir: File): String? =
+        photoListingDao.getByLinkId(linkId)?.thumbnailUrl
+            ?: File(thumbnailCacheDir, "thumb_$linkId.jpg")
+                .takeIf { it.exists() && it.length() > 0 }
+                ?.let { "file://${it.absolutePath}" }
+
     /** Wipes the cached album list AND the album→photo membership table. Called from
      *  the sign-out path so cached data doesn't bleed across accounts. */
+    /**
+     * Cloud photo linkIds hidden from every listing: the members of any client-side HIDDEN album
+     * ([SettingsKeys.HIDDEN_ALBUM_IDS]) unioned with the individually-hidden cloud photos
+     * ([SettingsKeys.HIDDEN_CLOUD_PHOTO_IDS]). Reactive: re-emits when either set or an affected
+     * album's membership changes. Emits an empty set (and runs no membership query) when nothing is
+     * hidden, so non-users pay zero cost. A read landing mid-membership-write degrades to "hide
+     * nothing" rather than surfacing an error.
+     */
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    fun observeHiddenAlbumMemberLinkIds(): Flow<Set<String>> {
+        val albumMemberLinkIds = context.settingsDataStore.data
+            .map { it[SettingsKeys.HIDDEN_ALBUM_IDS] ?: emptySet() }
+            .distinctUntilChanged()
+            .flatMapLatest { hiddenIds ->
+                if (hiddenIds.isEmpty()) flowOf(emptySet())
+                else albumPhotoMembershipDao.observeAssociatedPhotoLinkIdsForAlbums(hiddenIds).map { it.toSet() }
+            }
+        val hiddenCloudPhotoIds = context.settingsDataStore.data
+            .map { it[SettingsKeys.HIDDEN_CLOUD_PHOTO_IDS] ?: emptySet() }
+            .distinctUntilChanged()
+        // One combined Set: hidden-album members plus the individually-hidden cloud photos. The
+        // empty-side fast paths keep the "no membership query, no allocation" cost for the common
+        // case where the user has hidden nothing.
+        return combine(albumMemberLinkIds, hiddenCloudPhotoIds) { members, photos ->
+            when {
+                members.isEmpty() -> photos
+                photos.isEmpty() -> members
+                else -> members + photos
+            }
+        }
+            .distinctUntilChanged()
+            .catch { emit(emptySet()) }
+    }
+
     suspend fun clearAlbumCache(): Unit = withContext(Dispatchers.IO) {
         runCatching { cloudAlbumDao.clearAll() }
             .onFailure { Log.w(TAG, "clearAlbumCache: cloudAlbumDao: ${it.message}") }
@@ -1333,7 +1407,8 @@ class AlbumService @Inject constructor(
                 for (entry in rejected) {
                     val detail = entry.response.error ?: "code=${entry.response.code}"
                     eu.akoos.photos.util.SyncDiagnostics.log(
-                        "album-remove: server rejected ${entry.linkId.take(8)} ($detail)"
+                        "album-remove: server rejected ${eu.akoos.photos.util.uploadLogRef(entry.linkId)} " +
+                            "(${eu.akoos.photos.util.sanitizeErrorMessage(detail)})"
                     )
                     Log.w(TAG, "removePhotosFromAlbum: server rejected ${entry.linkId}: $detail")
                 }
@@ -1343,7 +1418,7 @@ class AlbumService @Inject constructor(
                 // Routed through SyncDiagnostics so it survives the release build's log stripping and
                 // shows up in the in-app "Copy log".
                 eu.akoos.photos.util.SyncDiagnostics.log(
-                    "album-remove: chunk of ${chunk.size} failed (${e.message})"
+                    "album-remove: chunk of ${chunk.size} failed (${eu.akoos.photos.util.sanitizeErrorMessage(e.message)})"
                 )
                 Log.w(TAG, "removePhotosFromAlbum: chunk failed (${chunk.size} ids): ${e.message}")
             }

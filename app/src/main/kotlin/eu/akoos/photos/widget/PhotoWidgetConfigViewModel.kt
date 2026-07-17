@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -35,15 +35,20 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.retryWhen
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import me.proton.core.accountmanager.domain.AccountManager
 import me.proton.core.domain.entity.UserId
+import eu.akoos.photos.data.db.dao.CloudAlbumDao
 import eu.akoos.photos.data.db.dao.PhotoListingDao
+import eu.akoos.photos.data.db.entity.CloudAlbumEntity
 import eu.akoos.photos.data.db.entity.PhotoListingEntity
 import eu.akoos.photos.data.repository.drive.ThumbnailDecryptScheduler
 import eu.akoos.photos.domain.entity.LocalAlbum
+import eu.akoos.photos.domain.entity.LocalMediaItem
+import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.LocalMediaRepository
 import javax.inject.Inject
 
@@ -54,6 +59,12 @@ data class WidgetConfigUiState(
     val selectedAlbum: String?   = null,
     val albums: List<LocalAlbum> = emptyList(),
     /**
+     * Device photos offered for [WidgetMode.SELECTED], newest-first. Images only:
+     * the widget renders images, so videos are filtered out. Each item's uri is the
+     * MediaStore content:// uri Coil loads directly (no decrypt needed).
+     */
+    val devicePhotos: List<LocalMediaItem> = emptyList(),
+    /**
      * Pool of cloud photos available for [WidgetMode.CLOUD_SELECTED]. Each entry
      * is a Row from [PhotoListingDao], including the (possibly null) decrypted
      * thumbnailUrl — null means the gallery cell has not yet been viewed so the
@@ -61,6 +72,13 @@ data class WidgetConfigUiState(
      */
     val cloudPhotos: List<PhotoListingEntity> = emptyList(),
     val selectedLinkIds: List<String> = emptyList(),
+    /** Cloud albums the widget can follow in [WidgetMode.CLOUD_ALBUM]. */
+    val cloudAlbums: List<CloudAlbumEntity> = emptyList(),
+    /** linkId of the album chosen for [WidgetMode.CLOUD_ALBUM], or null when none picked. */
+    val selectedCloudAlbumLinkId: String? = null,
+    /** True until the first cloud-photo emission lands, so the picker can show a spinner
+     *  instead of a premature empty state on a cold DB. */
+    val isLoadingCloud: Boolean  = true,
     val isSaving: Boolean        = false,
     val saved: Boolean           = false,
 )
@@ -70,6 +88,8 @@ class PhotoWidgetConfigViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val localMediaRepo: LocalMediaRepository,
     private val photoListingDao: PhotoListingDao,
+    private val cloudAlbumDao: CloudAlbumDao,
+    private val driveRepo: DrivePhotoRepository,
     private val accountManager: AccountManager,
     private val thumbnailScheduler: ThumbnailDecryptScheduler,
 ) : ViewModel() {
@@ -84,6 +104,8 @@ class PhotoWidgetConfigViewModel @Inject constructor(
     init {
         observeAlbums()
         observeCloudPhotos()
+        observeCloudAlbums()
+        warmCloudAlbums()
     }
 
     /**
@@ -117,6 +139,7 @@ class PhotoWidgetConfigViewModel @Inject constructor(
             val linkIds = if (linkIdsRaw.isBlank()) emptyList()
                 else linkIdsRaw.split(PhotoWidgetKeys.URI_SEPARATOR).filter { it.isNotBlank() }
             val album = prefs[PhotoWidgetKeys.ALBUM_NAME]?.takeIf { it.isNotBlank() }
+            val cloudAlbumLinkId = prefs[PhotoWidgetKeys.CLOUD_ALBUM_LINK_ID]?.takeIf { it.isNotBlank() }
             val intervalMin = prefs[PhotoWidgetKeys.INTERVAL_MINUTES]
             val interval = WidgetInterval.entries.firstOrNull { it.minutes == intervalMin }
                 ?: WidgetInterval.ONE_HOUR
@@ -128,6 +151,7 @@ class PhotoWidgetConfigViewModel @Inject constructor(
                     selectedUris = uris,
                     selectedLinkIds = linkIds,
                     selectedAlbum = album,
+                    selectedCloudAlbumLinkId = cloudAlbumLinkId,
                 )
             }
         }
@@ -146,10 +170,44 @@ class PhotoWidgetConfigViewModel @Inject constructor(
             val userId: UserId = accountManager.getPrimaryUserId().first() ?: return@launch
             // Own stream only — photos from shared-with-me albums must not be offered as
             // widget content.
-            photoListingDao.observeOwnStream(userId.id).collectLatest { rows ->
-                val sorted = rows.sortedByDescending { it.captureTime ?: 0L }
-                _state.update { it.copy(cloudPhotos = sorted) }
+            photoListingDao.observeOwnStream(userId.id)
+                .retryWhen { cause, attempt ->
+                    // Belt-and-suspenders: a full-row read that lands mid-write can throw a
+                    // transient CursorWindow error; keep the picker stream alive rather than crash.
+                    android.util.Log.w("WidgetConfigVM", "widget photo stream failed (attempt $attempt), retrying: ${cause.message}")
+                    kotlinx.coroutines.delay((500L * (attempt + 1)).coerceAtMost(5_000L))
+                    true
+                }
+                .collectLatest { rows ->
+                    val sorted = rows.sortedByDescending { it.captureTime ?: 0L }
+                    // Clear the loading flag on the first (and every) emission so the picker
+                    // leaves its spinner state once real data (even an empty list) has arrived.
+                    _state.update { it.copy(cloudPhotos = sorted, isLoadingCloud = false) }
+                }
+        }
+    }
+
+    /**
+     * Stream the cached cloud-album list into [WidgetConfigUiState.cloudAlbums] for the
+     * follow-an-album ([WidgetMode.CLOUD_ALBUM]) picker. DB-backed, so a cold cache shows
+     * nothing until [warmCloudAlbums] refreshes it from the network.
+     */
+    private fun observeCloudAlbums() {
+        viewModelScope.launch {
+            cloudAlbumDao.observeAll().collectLatest { albums ->
+                _state.update { it.copy(cloudAlbums = albums) }
             }
+        }
+    }
+
+    /**
+     * Best-effort network refresh so a cold DB populates the cloud-album picker. Non-blocking
+     * and failure-swallowing. The observed DB stream is the source of truth; this just warms it.
+     */
+    private fun warmCloudAlbums() {
+        viewModelScope.launch {
+            val userId = accountManager.getPrimaryUserId().first() ?: return@launch
+            runCatching { driveRepo.loadAlbums(userId) }
         }
     }
 
@@ -162,6 +220,12 @@ class PhotoWidgetConfigViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Single MediaStore collection feeding both the album picker ([WidgetMode.ALBUM]) and the
+     * device-photo grid ([WidgetMode.SELECTED]). Sharing one collector avoids a second identical
+     * observeLocalMedia() subscription. Device photos are filtered to images and sorted
+     * newest-first for the in-app selectable grid.
+     */
     private fun observeAlbums() {
         viewModelScope.launch {
             localMediaRepo.observeLocalMedia().collectLatest { items ->
@@ -178,7 +242,10 @@ class PhotoWidgetConfigViewModel @Inject constructor(
                         )
                     }
                     .sortedByDescending { it.items.firstOrNull()?.dateTaken ?: 0L }
-                _state.update { it.copy(albums = albums) }
+                val devicePhotos = items
+                    .filter { it.mimeType.startsWith("image/") }
+                    .sortedByDescending { it.dateTaken }
+                _state.update { it.copy(albums = albums, devicePhotos = devicePhotos) }
             }
         }
     }
@@ -192,6 +259,8 @@ class PhotoWidgetConfigViewModel @Inject constructor(
     fun setAlbum(albumName: String) = _state.update { it.copy(selectedAlbum = albumName) }
 
     fun setSelectedLinkIds(linkIds: List<String>) = _state.update { it.copy(selectedLinkIds = linkIds) }
+
+    fun setCloudAlbum(albumLinkId: String) = _state.update { it.copy(selectedCloudAlbumLinkId = albumLinkId) }
 
     /**
      * Persist widget state to Glance DataStore, schedule workers, and signal "done".
@@ -207,13 +276,22 @@ class PhotoWidgetConfigViewModel @Inject constructor(
                 updateAppWidgetState(context, PreferencesGlanceStateDefinition, glanceId) { p ->
                     p.toMutablePreferences().also { mp ->
                         mp[PhotoWidgetKeys.MODE]             = s.mode.name
-                        mp[PhotoWidgetKeys.SELECTED_URIS]    = s.selectedUris
-                            .joinToString(PhotoWidgetKeys.URI_SEPARATOR)
-                        mp[PhotoWidgetKeys.SELECTED_LINK_IDS] = s.selectedLinkIds
-                            .joinToString(PhotoWidgetKeys.URI_SEPARATOR)
                         mp[PhotoWidgetKeys.ALBUM_NAME]       = s.selectedAlbum ?: ""
                         mp[PhotoWidgetKeys.INTERVAL_MINUTES] = s.interval.minutes
                         mp[PhotoWidgetKeys.CURRENT_INDEX]    = 0
+                        if (s.mode == WidgetMode.CLOUD_ALBUM) {
+                            // Follow-the-album persists only the album id; members resolve live at
+                            // update time. Clear the fixed cloud-selection list so a mode switch
+                            // doesn't leave stale linkIds behind.
+                            mp[PhotoWidgetKeys.CLOUD_ALBUM_LINK_ID] = s.selectedCloudAlbumLinkId ?: ""
+                            mp[PhotoWidgetKeys.SELECTED_LINK_IDS]   = ""
+                        } else {
+                            mp[PhotoWidgetKeys.SELECTED_LINK_IDS] = s.selectedLinkIds
+                                .joinToString(PhotoWidgetKeys.URI_SEPARATOR)
+                            mp[PhotoWidgetKeys.CLOUD_ALBUM_LINK_ID] = ""
+                        }
+                        mp[PhotoWidgetKeys.SELECTED_URIS]    = s.selectedUris
+                            .joinToString(PhotoWidgetKeys.URI_SEPARATOR)
                     }
                 }
 

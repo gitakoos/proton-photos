@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -38,4 +38,9 @@ data class LocalMediaItem(
     /** Category-tag ids (Drive PhotoTag enum) from the persisted local-tag cache. Empty when no
      *  fresh cache entry exists yet; categorization then falls back to the cheap heuristics. */
     val tags: Set<Int> = emptySet(),
+    /** True when [dateTaken] came from a real MediaStore DATE_TAKEN. False when it fell back to
+     *  DATE_ADDED (import time), which for a file received from another app can be far from the
+     *  actual capture date the file's own EXIF still carries. Default true so existing constructions
+     *  keep their meaning. */
+    val dateTakenIsExplicit: Boolean = true,
 )

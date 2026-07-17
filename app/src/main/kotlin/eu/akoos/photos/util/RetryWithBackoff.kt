@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -40,14 +40,16 @@ private const val TAG = "RetryBackoff"
  *   • A custom [shouldRetry] predicate evaluated on the thrown exception
  *
  * Backoff: `min(baseMs * 2^attempt, maxBackoffMs)` + random 0..baseMs jitter, but when the failure
- * is a 429 that carries a `Retry-After`, that server-specified wait (clamped to [maxBackoffMs]) is
- * honoured instead, so a rate-limited caller backs off exactly as long as the server asked rather
- * than hammering it sooner. The final attempt's failure is propagated.
+ * is a 429 / 5xx that carries a `Retry-After`, that server-specified wait (clamped to
+ * [maxServerRetryAfterMs], not the shorter generic [maxBackoffMs]) is honoured instead, so a
+ * rate-limited caller waits the full window the server asked for rather than resuming early and
+ * re-triggering the limit. The final attempt's failure is propagated.
  */
 suspend fun <T> retryWithBackoff(
     maxAttempts: Int = 5,
     baseMs: Long = 500,
     maxBackoffMs: Long = 8_000,
+    maxServerRetryAfterMs: Long = 60_000,
     shouldRetry: (Throwable) -> Boolean = { _ -> false },
     block: suspend (attempt: Int) -> T,
 ): T {
@@ -62,7 +64,11 @@ suspend fun <T> retryWithBackoff(
             if (!transient || attempt == maxAttempts - 1) throw e
             val expBackoff = minOf(baseMs shl attempt, maxBackoffMs)
             val jitter = Random.nextLong(0, baseMs)
-            val serverWait = e.retryAfterMsOrNull()?.coerceAtMost(maxBackoffMs)
+            // A server Retry-After is honoured up to maxServerRetryAfterMs (60s) rather than the
+            // shorter generic maxBackoffMs, so the app waits the full server-requested window; the
+            // cap only defends against a hostile / absurd value. The generic exponential path keeps
+            // maxBackoffMs.
+            val serverWait = e.retryAfterMsOrNull()?.coerceAtMost(maxServerRetryAfterMs)
             val wait = serverWait ?: (expBackoff + jitter)
             Log.w(TAG, "attempt ${attempt + 1}/$maxAttempts failed (${e.javaClass.simpleName}: $msg), retrying in ${wait}ms")
             // Survives the release log strip so a rate-limited / flaky upload shows the real cause

@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -104,6 +104,7 @@ class LocationDetailViewModel @Inject constructor(
     private val driveRepo: DrivePhotoRepository,
     private val forceUploadLocalUris: ForceUploadLocalUrisUseCase,
     private val downloadPhotos: DownloadPhotosUseCase,
+    private val transferCenter: eu.akoos.photos.data.transfer.TransferCenter,
     private val albumListEvents: eu.akoos.photos.util.AlbumListEventBus,
 ) : ViewModel() {
 
@@ -223,16 +224,24 @@ class LocationDetailViewModel @Inject constructor(
             val memberships: Map<String, String> = runCatching { driveRepo.getAlbumMemberships(userId) }
                 .getOrDefault(emptyMap())
                 .mapValues { (_, name) -> eu.akoos.photos.util.ProtonPhotosStorage.sanitize(name) }
-            runCatching {
-                downloadPhotos.downloadGalleryItems(
-                    userId, items,
-                    folderName = "",
-                    folderByLinkId = memberships,
-                ) { progress ->
-                    _uiState.update {
-                        it.copy(downloadState = LocationOpState.Working(progress.done, progress.total))
+            val transferId = transferCenter.start(
+                eu.akoos.photos.data.transfer.TransferCenter.Kind.DOWNLOAD, items.size,
+            )
+            try {
+                runCatching {
+                    downloadPhotos.downloadGalleryItems(
+                        userId, items,
+                        folderName = "",
+                        folderByLinkId = memberships,
+                    ) { progress ->
+                        transferCenter.progress(transferId, progress.done)
+                        _uiState.update {
+                            it.copy(downloadState = LocationOpState.Working(progress.done, progress.total))
+                        }
                     }
                 }
+            } finally {
+                transferCenter.finish(transferId)
             }
             _uiState.update { it.copy(downloadState = LocationOpState.Idle, selectedKeys = emptySet()) }
         }

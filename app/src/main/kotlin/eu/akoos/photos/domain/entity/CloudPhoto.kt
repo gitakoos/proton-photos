@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -36,6 +36,10 @@ data class CloudPhoto(
     val contentHash: String? = null,
     /** PhotoTag ids assigned to this photo by Drive (0 = Favorite). */
     val tags: Set<Int> = emptySet(),
+    /** Video length in MILLISECONDS, sourced from the photo's xAttr Media.Duration (populated by our
+     *  own uploads at pairing time and by the background duration backfill). Null for images and for
+     *  videos not yet processed; the grid cell shows a duration pill only when it is present. */
+    val durationMs: Long? = null,
 ) {
     val isFavoriteOnCloud: Boolean get() = 0 in tags
 

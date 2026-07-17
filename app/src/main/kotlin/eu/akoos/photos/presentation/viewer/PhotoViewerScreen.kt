@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -89,6 +89,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.BrokenImage
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Info
@@ -150,6 +151,7 @@ import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.outlined.OfflinePin
 import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.entity.GalleryItem
+import eu.akoos.photos.presentation.gallery.LocalThumbnailUrls
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.Bg0
 import eu.akoos.photos.presentation.theme.Bg2
@@ -226,7 +228,6 @@ fun PhotoViewerScreen(
     items: List<GalleryItem>,
     initialIndex: Int,
     onBack: () -> Unit,
-    showSaveToDevice: Boolean = true,
     sourceAlbumLinkId: String? = null,
     /** True for a shared-with-me album: suppresses every mutating affordance (delete, set cover,
      *  rename, edit) since the backend rejects them from the wrong share id. Save + Info stay. */
@@ -287,6 +288,7 @@ fun PhotoViewerScreen(
     var meteredHintDismissed by remember { mutableStateOf(false) }
     val metadata by viewModel.metadata.collectAsStateWithLifecycle()
     val detailsPlace by viewModel.detailsPlace.collectAsStateWithLifecycle()
+    val detailsAlbums by viewModel.detailsAlbums.collectAsStateWithLifecycle()
     val cloudVideoMeta by viewModel.cloudVideoMeta.collectAsStateWithLifecycle()
     val cloudFullResSize by viewModel.cloudFullResSize.collectAsStateWithLifecycle()
     val isStrippingMetadata by viewModel.isStrippingMetadata.collectAsStateWithLifecycle()
@@ -309,13 +311,12 @@ fun PhotoViewerScreen(
 
     LaunchedEffect(pagerState.settledPage) {
         val item = items.getOrNull(pagerState.settledPage)
-        val localUri = when (item) {
-            is GalleryItem.LocalOnly -> item.local.uri
-            is GalleryItem.Synced -> item.local.uri
-            else -> null
+        if (item != null) {
+            // Item-aware so a hidden cloud photo (hidden by linkId, no device uri) also resolves as
+            // hidden and the menu offers Unhide instead of Hide.
+            viewModel.checkIfHidden(item)
+            viewModel.checkIfFavorite(item)
         }
-        if (localUri != null) viewModel.checkIfHidden(localUri)
-        if (item != null) viewModel.checkIfFavorite(item)
     }
 
     LaunchedEffect(Unit) { viewModel.loadAlbums() }
@@ -784,14 +785,18 @@ fun PhotoViewerScreen(
                 // (Synced/CloudOnly); for a not-yet-uploaded local video draw no poster at all (the
                 // themed background covers the brief pre-first-frame gap) rather than flash the
                 // rotation-broken frame. Photos keep their local-URI poster (Coil honours EXIF).
+                // The timeline projection no longer carries a cloud row's thumbnail URL, so resolve it
+                // from the shared store (falling back to any URL still on the item, e.g. an album row).
+                val thumbUrls = LocalThumbnailUrls.current.value
                 val thumbModel: Any? = when (item) {
                     is GalleryItem.LocalOnly ->
                         if (item.local.mimeType.startsWith("video/")) null
                         else Uri.parse(item.local.uri)
                     is GalleryItem.Synced ->
-                        if (item.local.mimeType.startsWith("video/")) item.cloud.thumbnailUrl
+                        if (item.local.mimeType.startsWith("video/"))
+                            thumbUrls[item.cloud.linkId] ?: item.cloud.thumbnailUrl
                         else Uri.parse(item.local.uri)
-                    is GalleryItem.CloudOnly -> item.cloud.thumbnailUrl
+                    is GalleryItem.CloudOnly -> thumbUrls[item.cloud.linkId] ?: item.cloud.thumbnailUrl
                     null -> null
                 }
                 // Skip the AsyncImage poster for local videos once the user has tapped Play.
@@ -903,12 +908,25 @@ fun PhotoViewerScreen(
                                             .crossfade(true)
                                             .build()
                                     }
+                                    // A corrupt or unsupported file gives Coil nothing to decode, so
+                                    // the viewer would sit on the bare background with no cue that a
+                                    // file is even there. Track the Error state and draw a muted
+                                    // broken-image glyph instead. Re-armed per item so each photo
+                                    // starts clean.
+                                    var fullResFailed by remember(currentItemKey) { mutableStateOf(false) }
                                     AsyncImage(
                                         model = fullResRequest,
                                         contentDescription = null,
                                         contentScale = ContentScale.Fit,
                                         onState = { st ->
-                                            if (st is AsyncImagePainter.State.Success) fullResPainted = true
+                                            when (st) {
+                                                is AsyncImagePainter.State.Success -> {
+                                                    fullResPainted = true
+                                                    fullResFailed = false
+                                                }
+                                                is AsyncImagePainter.State.Error -> fullResFailed = true
+                                                else -> Unit
+                                            }
                                         },
                                         modifier = Modifier
                                             .fillMaxSize()
@@ -918,6 +936,18 @@ fun PhotoViewerScreen(
                                                 translationX = offset.x, translationY = offset.y,
                                             ),
                                     )
+                                    if (fullResFailed) {
+                                        // Centered over the viewer background, a touch larger than
+                                        // the grid tile's placeholder but the same muted treatment.
+                                        Icon(
+                                            Icons.Default.BrokenImage,
+                                            contentDescription = null,
+                                            tint = FgMute.copy(alpha = 0.55f),
+                                            modifier = Modifier
+                                                .align(Alignment.Center)
+                                                .size(64.dp),
+                                        )
+                                    }
                                 }
                             }
                         is PhotoViewerViewModel.ViewerState.ShowVideo -> {
@@ -1123,8 +1153,6 @@ fun PhotoViewerScreen(
                 ) {
                     val isDeleting = deleteState is PhotoViewerViewModel.DeleteState.Working
                     val settledItem = items.getOrNull(pagerState.settledPage)
-                    val isLocalItem = settledItem is GalleryItem.LocalOnly || settledItem is GalleryItem.Synced
-                    val isCloudItem = settledItem is GalleryItem.Synced || settledItem is GalleryItem.CloudOnly
 
                     // Favorite button — hidden for shared-with-me viewers because the
                     // favorite flag is a node-level tag on the OWNER's photo, not a
@@ -1258,7 +1286,7 @@ fun PhotoViewerScreen(
                                     },
                                 )
                             }
-                            if (showSaveToDevice && settledItem is GalleryItem.CloudOnly) {
+                            if (settledItem is GalleryItem.CloudOnly) {
                                 androidx.compose.material3.DropdownMenuItem(
                                     text = { Text(stringResource(R.string.viewer_menu_save_to_device),
                                         color = FgPrimary) },
@@ -1308,13 +1336,11 @@ fun PhotoViewerScreen(
                                     },
                                 )
                             }
-                            // Hide is offered only for on-device-only (LocalOnly) photos: a Synced
-                            // copy keeps its Drive entry so it can't truly be vaulted, and CloudOnly
-                            // has no local file to move. Unhide stays available for any already-hidden
-                            // item so the user can recover it regardless of origin.
-                            val canShowHideToggle = (!isHidden && settledItem is GalleryItem.LocalOnly) ||
-                                (isHidden && isLocalItem)
-                            if (canShowHideToggle) {
+                            // Hide is offered for any settled item: a device-backed photo moves into the
+                            // vault, a synced/cloud photo hides client-side by linkId. Unhide is offered
+                            // for any already-hidden item, device or cloud; [unhideItem] picks the reveal
+                            // path (drop the linkId, or restore the vaulted file) per item kind.
+                            if (settledItem != null) {
                                 androidx.compose.material3.DropdownMenuItem(
                                     text = { Text(stringResource(
                                         if (isHidden) R.string.viewer_menu_unhide
@@ -1327,20 +1353,8 @@ fun PhotoViewerScreen(
                                         menuExpanded = false
                                         val item = settledItem ?: return@DropdownMenuItem
                                         if (isHidden) {
-                                            val uri = when (item) {
-                                                is GalleryItem.LocalOnly -> item.local.uri
-                                                is GalleryItem.Synced    -> item.local.uri
-                                                is GalleryItem.CloudOnly -> null
-                                            }
-                                            val name = when (item) {
-                                                is GalleryItem.LocalOnly -> item.local.displayName
-                                                is GalleryItem.Synced    -> item.local.displayName
-                                                is GalleryItem.CloudOnly -> null
-                                            }
-                                            if (uri != null) {
-                                                viewModel.unhideHiddenItem(uri, name)
-                                                onBack()
-                                            }
+                                            viewModel.unhideItem(item)
+                                            onBack()
                                         } else {
                                             viewModel.hideItem(item)
                                         }
@@ -1428,10 +1442,15 @@ fun PhotoViewerScreen(
                 is GalleryItem.CloudOnly -> settledItem.cloud.mimeType.startsWith("video/")
                 null -> false
             }
+            // Shared across the pill and the reel filmstrip so a drag on either hides the pill's
+            // paused-only frame-step buttons (a seek briefly reports the player as not playing).
+            var isScrubbing by remember { mutableStateOf(false) }
             if (isVideoItem) {
                 VideoControlPill(
                     player       = currentPlayer,
                     videoStarted = videoStarted,
+                    isScrubbing  = isScrubbing,
+                    onScrubbingChange = { isScrubbing = it },
                     onPlay       = { videoStarted = true },
                 )
             }
@@ -1509,10 +1528,28 @@ fun PhotoViewerScreen(
                 }
             }
 
-            // Filmstrip — always, unchanged
+            // Filmstrip reel — the active video's slot widens into a frame scrubber in place.
+            // Detect the current item straight from the pager index (not the settled player) so a
+            // page change flips the slot immediately: the frames come from the current item's own
+            // URI, so the previous video never flashes through and a photo drops back to a plain
+            // thumbnail at once. A cloud video has no local item URI until it downloads, so it falls
+            // back to the player's media URI.
+            val reelItem = items.getOrNull(pagerState.currentPage)
+            val reelVideoUri: Uri? = when (reelItem) {
+                is GalleryItem.LocalOnly ->
+                    if (reelItem.local.mimeType.startsWith("video/")) Uri.parse(reelItem.local.uri) else null
+                is GalleryItem.Synced ->
+                    if (reelItem.local.mimeType.startsWith("video/")) Uri.parse(reelItem.local.uri) else null
+                is GalleryItem.CloudOnly ->
+                    if (reelItem.cloud.mimeType.startsWith("video/")) currentPlayer?.currentMediaItem?.localConfiguration?.uri else null
+                null -> null
+            }
             Filmstrip(
                 items = items,
                 currentPage = pagerState.currentPage,
+                player = if (reelVideoUri != null) currentPlayer else null,
+                videoUri = reelVideoUri,
+                onScrubbingChange = { isScrubbing = it },
                 onThumbnailClick = { idx ->
                     scope.launch { pagerState.animateScrollToPage(idx) }
                 },
@@ -1593,7 +1630,10 @@ fun PhotoViewerScreen(
     if (showMetadata) {
         val item = items.getOrNull(pagerState.settledPage)
         LaunchedEffect(item) {
-            if (item != null) viewModel.loadDetailsPlace(item)
+            if (item != null) {
+                viewModel.loadDetailsPlace(item)
+                viewModel.loadDetailsAlbums(item)
+            }
         }
         ModalBottomSheet(
             onDismissRequest = { showMetadata = false },
@@ -1605,6 +1645,8 @@ fun PhotoViewerScreen(
                 item = item,
                 exif = metadata,
                 place = detailsPlace,
+                localFolder = detailsAlbums.localFolder,
+                cloudAlbums = detailsAlbums.cloudAlbums,
                 cloudVideoMeta = cloudVideoMeta,
                 isStripping = isStrippingMetadata,
                 cloudSizeFallback = cloudFullResSize,

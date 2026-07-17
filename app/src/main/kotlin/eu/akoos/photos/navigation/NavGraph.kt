@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -61,6 +61,9 @@ import kotlinx.coroutines.flow.stateIn
 import me.proton.core.accountmanager.domain.AccountManager
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.data.repository.drive.ThumbnailUrlStore
+import eu.akoos.photos.presentation.gallery.LocalThumbnailUrls
+import androidx.compose.runtime.CompositionLocalProvider
 import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.GalleryItem
@@ -106,12 +109,28 @@ import eu.akoos.photos.presentation.settings.TrashScreen
 import eu.akoos.photos.presentation.viewer.PhotoViewerScreen
 import eu.akoos.photos.presentation.whatsnew.WhatsNewScreen
 import javax.inject.Inject
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.ui.unit.dp
+import androidx.navigation.NavController
+import eu.akoos.photos.R
+import eu.akoos.photos.presentation.common.ThemedSnackbarHost
+import eu.akoos.photos.presentation.common.UndoAction
+import eu.akoos.photos.presentation.common.UndoBarViewModel
+import kotlinx.coroutines.withTimeoutOrNull
 
 sealed class Screen(val route: String) {
     data object Gallery : Screen("gallery")
     data object Settings : Screen("settings")
     data object SyncSettings : Screen("sync_settings")
     data object MetadataSettings : Screen("metadata_settings")
+    data object UploadFileName : Screen("upload_file_name")
+    data object UploadMetadata : Screen("upload_metadata")
+    data object UploadQuality : Screen("upload_quality")
     data object Activity : Screen("activity")
     data object BackupContent : Screen("backup_content")
     data object BackupBehavior : Screen("backup_behavior")
@@ -189,6 +208,19 @@ class NavViewModel @Inject constructor(
     }.stateIn(viewModelScope, SharingStarted.Eagerly, StartupRoute.Unknown)
 }
 
+/**
+ * Exposes the app-scoped [ThumbnailUrlStore] map to the composition. Obtained once at the nav root
+ * so every screen below inherits the live linkId -> thumbnail URL map through [LocalThumbnailUrls];
+ * a decrypt that lands mid-scroll then repaints just the affected cell on any of them without each
+ * screen wiring the store itself.
+ */
+@HiltViewModel
+class ThumbnailUrlsViewModel @Inject constructor(
+    store: ThumbnailUrlStore,
+) : ViewModel() {
+    val urls: StateFlow<Map<String, String>> = store.urls
+}
+
 @Composable
 fun NavGraph(
     onStartLogin: () -> Unit = {},
@@ -211,6 +243,11 @@ fun NavGraph(
 ) {
     val navController = rememberNavController()
     val appColors = AppColors.current
+    // Live linkId -> decrypted thumbnail URL from the app-scoped store, provided once below as a
+    // stable State so every screen's gallery cells resolve their cloud thumbnail without threading
+    // the store in, and a decrypt mid-scroll rebinds only the changed tiles, not the nav root.
+    val thumbnailUrlsViewModel: ThumbnailUrlsViewModel = hiltViewModel()
+    val thumbnailUrlsState = thumbnailUrlsViewModel.urls.collectAsStateWithLifecycle()
     var selectedViewerItems by remember { mutableStateOf<List<GalleryItem>>(emptyList()) }
     var selectedViewerIndex by remember { mutableIntStateOf(0) }
     // Cloud linkIds whose local-side photo is in the Hidden vault — captured from the
@@ -338,6 +375,8 @@ fun NavGraph(
         }
     }
 
+    Box(modifier = Modifier.fillMaxSize()) {
+    CompositionLocalProvider(LocalThumbnailUrls provides thumbnailUrlsState) {
     NavHost(
         navController = navController,
         startDestination = Screen.Loading.route,
@@ -431,6 +470,8 @@ fun NavGraph(
                     navController.navigate(Screen.DeviceFolderDetail.route)
                 },
                 onSettingsClick = { navController.navigate(Screen.Settings.route) },
+                onOpenUploads = { navController.navigate("activity?tab=uploads") },
+                onOpenDownloads = { navController.navigate("activity?tab=downloads") },
                 onHiddenAlbumClick = { navController.navigate(Screen.HiddenAlbum.route) },
                 onSearchClick = { navController.navigate(Screen.Search.route) },
                 onCalendarClick = { navController.navigate(Screen.Calendar.route) },
@@ -543,7 +584,6 @@ fun NavGraph(
                 items = selectedViewerItems,
                 initialIndex = selectedViewerIndex,
                 onBack = { viewerSecure = false; navController.popBackStack() },
-                showSaveToDevice = !viewerFromAlbum,
                 sourceAlbumLinkId = sourceAlbumLinkId,
                 // A non-null `sharedByEmail` on the album means the user is a guest
                 // on someone else's album — every mutating affordance in the viewer
@@ -588,6 +628,8 @@ fun NavGraph(
                         localUri          = external.uri,
                         localDisplayName  = external.displayName,
                         localMimeType     = external.mimeType,
+                        // A foreign "Open with" file has no known capture time.
+                        localCaptureTimeMs = null,
                         cloudPhoto        = null,
                         sourceAlbumLinkId = null,
                         externalRequest   = external,
@@ -625,6 +667,8 @@ fun NavGraph(
                             localUri         = item.local.uri,
                             localDisplayName = item.local.displayName,
                             localMimeType    = item.local.mimeType,
+                            // Inherit the original capture time so a Copy sorts next to the original.
+                            localCaptureTimeMs = item.local.dateTaken,
                             cloudPhoto       = null,
                             sourceAlbumLinkId = sourceAlbumLinkId,
                             onBack           = { navController.popBackStack() },
@@ -668,6 +712,8 @@ fun NavGraph(
                             localUri         = item.local.uri,
                             localDisplayName = item.local.displayName,
                             localMimeType    = item.local.mimeType,
+                            // Inherit the original capture time so a Copy sorts next to the original.
+                            localCaptureTimeMs = item.local.dateTaken,
                             // Edit source is the device file — cloudPhoto stays null so the
                             // bytes come from MediaStore, NOT a fresh download. The cloud
                             // counterpart is wired separately so the save also propagates
@@ -817,9 +863,7 @@ fun NavGraph(
                 onBack = { navController.popBackStack() },
                 onThemeClick = { navController.navigate(Screen.ThemeSettings.route) },
                 onLanguageClick = { navController.navigate(Screen.LanguageSettings.route) },
-                onLayoutClick = { navController.navigate(Screen.TimelineLayout.route) },
                 onTimelineFilterClick = { navController.navigate(Screen.TimelineFilter.route) },
-                onLandingTabClick = { navController.navigate(Screen.LandingTab.route) },
             )
         }
 
@@ -845,19 +889,47 @@ fun NavGraph(
                 onBackupContentClick  = { navController.navigate(Screen.BackupContent.route) },
                 onBackupBehaviorClick = { navController.navigate(Screen.BackupBehavior.route) },
                 onNetworkClick        = { navController.navigate(Screen.BackupNetwork.route) },
-                onMetadataClick       = { navController.navigate(Screen.MetadataSettings.route) },
             )
         }
 
         composable(Screen.MetadataSettings.route) {
             eu.akoos.photos.presentation.settings.MetadataSettingsScreen(
+                onBack         = { navController.popBackStack() },
+                onOpenFileName = { navController.navigate(Screen.UploadFileName.route) },
+                onOpenMetadata = { navController.navigate(Screen.UploadMetadata.route) },
+                onOpenQuality  = { navController.navigate(Screen.UploadQuality.route) },
+            )
+        }
+
+        composable(Screen.UploadFileName.route) {
+            eu.akoos.photos.presentation.settings.UploadFileNameSettingsScreen(
                 onBack = { navController.popBackStack() },
             )
         }
 
-        composable(Screen.Activity.route) {
+        composable(Screen.UploadMetadata.route) {
+            eu.akoos.photos.presentation.settings.UploadMetadataSettingsScreen(
+                onBack = { navController.popBackStack() },
+            )
+        }
+
+        composable(Screen.UploadQuality.route) {
+            eu.akoos.photos.presentation.settings.UploadQualitySettingsScreen(
+                onBack = { navController.popBackStack() },
+            )
+        }
+
+        composable(
+            route = "activity?tab={tab}",
+            arguments = listOf(navArgument("tab") { type = NavType.StringType; defaultValue = "uploads" }),
+        ) { backStackEntry ->
+            val tab = when (backStackEntry.arguments?.getString("tab")) {
+                "downloads" -> eu.akoos.photos.presentation.settings.ActivityTab.Downloads
+                else -> eu.akoos.photos.presentation.settings.ActivityTab.Uploads
+            }
             eu.akoos.photos.presentation.settings.ActivityScreen(
                 onBack = { navController.popBackStack() },
+                initialTab = tab,
             )
         }
 
@@ -871,7 +943,8 @@ fun NavGraph(
 
         composable(Screen.BackupBehavior.route) {
             eu.akoos.photos.presentation.settings.BackupBehaviorSettingsScreen(
-                onBack = { navController.popBackStack() },
+                onBack                  = { navController.popBackStack() },
+                onUploadProcessingClick = { navController.navigate(Screen.MetadataSettings.route) },
             )
         }
 
@@ -922,6 +995,10 @@ fun NavGraph(
         composable(Screen.HiddenAlbum.route) {
             HiddenAlbumScreen(
                 onBack = { navController.popBackStack() },
+                onOpenAlbum = { album ->
+                    selectedAlbum = album
+                    navController.navigate(Screen.AlbumDetail.route)
+                },
                 onPhotoClick = { items, index ->
                     // Pass the entire hidden list to the viewer so the user can swipe between
                     // hidden photos like in the main gallery. Each item is wrapped as a
@@ -930,6 +1007,17 @@ fun NavGraph(
                     selectedViewerItems = items.map { eu.akoos.photos.domain.entity.GalleryItem.LocalOnly(it) }
                     selectedViewerIndex = index
                     selectedViewerHiddenLinkIds = emptySet()
+                    viewerSecure = true
+                    navController.navigate(Screen.Viewer.route)
+                },
+                onCloudPhotoClick = { items, index ->
+                    // Revealed cloud photos are already CloudOnly GalleryItems. Open the secure
+                    // viewer over the whole hidden-cloud list so the user can swipe between them,
+                    // matching the device group's FLAG_SECURE viewer.
+                    selectedViewerItems = items
+                    selectedViewerIndex = index
+                    selectedViewerHiddenLinkIds = emptySet()
+                    viewerFromAlbum = false
                     viewerSecure = true
                     navController.navigate(Screen.Viewer.route)
                 },
@@ -982,9 +1070,11 @@ fun NavGraph(
         composable(Screen.TimelineFilter.route) {
             TimelineFilterScreen(
                 onBack = { navController.popBackStack() },
+                onOpenLayout = { navController.navigate(Screen.TimelineLayout.route) },
                 onOpenCategories = { navController.navigate(Screen.TimelineCategories.route) },
                 onOpenAlbums = { navController.navigate(Screen.TimelineAlbums.route) },
                 onOpenDeviceFolders = { navController.navigate(Screen.TimelineDeviceFolders.route) },
+                onOpenLandingTab = { navController.navigate(Screen.LandingTab.route) },
             )
         }
 
@@ -1085,4 +1175,63 @@ fun NavGraph(
         }
 
     }
+    }
+
+        // One app-wide undo bar: any screen's reversible action shows here, over whatever route is
+        // on top, and a route change consumes it so it never lingers or re-appears elsewhere.
+        UndoSnackbarHost(
+            navController = navController,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(bottom = 24.dp),
+        )
+    }
+}
+
+/**
+ * The single snackbar host for [UndoController]. Renders the pending undoable action for a ~5s
+ * self-dismissing window; tapping Undo runs the restore, and navigating away (or the timeout)
+ * clears it. Lives at the nav-graph root so a delete from the viewer or an album is still undoable
+ * after that screen closes, and the bar is never bound to one screen's lifecycle.
+ */
+@Composable
+private fun UndoSnackbarHost(
+    navController: NavController,
+    modifier: Modifier = Modifier,
+    undoBarViewModel: UndoBarViewModel = hiltViewModel(),
+) {
+    val context = LocalContext.current
+    val pending by undoBarViewModel.pending.collectAsStateWithLifecycle()
+    val hostState = remember { SnackbarHostState() }
+
+    // A destination change consumes the pending action so a stale bar cannot reappear on another
+    // screen when the user comes back.
+    DisposableEffect(navController) {
+        val listener = NavController.OnDestinationChangedListener { _, _, _ -> undoBarViewModel.dismiss() }
+        navController.addOnDestinationChangedListener(listener)
+        onDispose { navController.removeOnDestinationChangedListener(listener) }
+    }
+
+    LaunchedEffect(pending) {
+        val action = pending ?: return@LaunchedEffect
+        val message = when (action) {
+            is UndoAction.Hide -> context.resources.getQuantityString(
+                R.plurals.gallery_hidden_snackbar, action.count, action.count)
+            is UndoAction.Delete -> context.resources.getQuantityString(
+                R.plurals.gallery_moved_to_trash_snackbar, action.count, action.count)
+            is UndoAction.AlbumRemove -> context.resources.getQuantityString(
+                R.plurals.album_removed_undo_snackbar, action.count, action.count)
+        }
+        val result = withTimeoutOrNull(5000L) {
+            hostState.showSnackbar(
+                message = message,
+                actionLabel = context.getString(R.string.gallery_undo),
+                duration = SnackbarDuration.Indefinite,
+            )
+        }
+        if (result == SnackbarResult.ActionPerformed) undoBarViewModel.undo() else undoBarViewModel.dismiss()
+    }
+
+    ThemedSnackbarHost(hostState, modifier = modifier)
 }

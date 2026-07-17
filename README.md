@@ -26,14 +26,14 @@
 | Area | What you get |
 | --- | --- |
 | **End-to-end encrypted** | Photos, videos, albums and names encrypted with ProtonCore + GoOpenPGP. |
-| **Backup** | Per-folder or back-up-everything (with a per-folder exclude list), Wi-Fi-only, continuous (uploads start seconds after capture and resume after a reboot), parallel uploads. Auto re-pairs your library after a reinstall; optional delete-after-backup and one-tap free-up of already-backed-up copies. An Activity screen shows uploads, downloads and offline saves in progress, the photos still waiting to upload, and a history of finished transfers. |
+| **Backup** | Per-folder or back-up-everything (with a per-folder exclude list), Wi-Fi-only, continuous (uploads start seconds after capture and resume after a reboot), parallel uploads. Optional lighter uploads that compress photos and videos to a quality you pick, leaving the on-device originals untouched. Auto re-pairs your library after a reinstall; optional delete-after-backup that routes removed copies to the system trash so they stay recoverable, plus one-tap or automatic scheduled free-up of already-backed-up copies. An Activity screen shows uploads, downloads and offline saves in progress, the photos still waiting to upload, and a history of finished transfers. |
 | **Browse & find** | Pinch-zoom timeline that regroups by day, month or year, a year-jump scrubber, a calendar view (a hero photo and editable place per day, type-to-jump search), a photo map of your located shots with offline place names, per-place pages, search (type, date and sync filters, accent-insensitive), and a memories page (On this day, seasons). |
-| **Albums & sharing** | Cloud-native encrypted albums with custom covers; share by email with viewer or editor roles, manage members and invites, and save albums shared with you into your own library; mirror device folders to matching Drive albums. |
+| **Albums & sharing** | Cloud-native encrypted albums with custom covers; share by email with viewer or editor roles, manage members and invites, and save albums shared with you into your own library; mirror device folders to matching Drive albums. When adding photos, see which albums already hold each one and filter the picker to photos not yet in any album. |
 | **Organize** | Multi-select by long-press or by dragging across the grid, in the timeline, albums and device folders, with bulk back-up, download, add-to-album, delete, hide and strip; a duplicate finder for exact and visually similar photos, on device and in the cloud, with a review step before removing extras; per-folder browsing; a display-only timeline filter; share to any other app. |
 | **Edit** | Photo editor (eight adjustments, filter, redact, rotate, free-form crop, undo and redo) and video editor (trim, crop, rotate, music overlay, strips location metadata); RAW and DNG previews; open a photo from any app straight into the viewer or editor. |
-| **Privacy & lock** | Hidden vault behind biometric or PIN with a blur overlay, per-field metadata stripping (GPS, camera, timestamp, software) on upload or in bulk, mirror-to-local so your on-device copy matches the cloud, in-app cloud trash, and a configurable app lock with timeout. |
+| **Privacy & lock** | Hide any photo, or a whole cloud album, and restore it from the Hidden screen: photos only on this device move into a locked area behind biometric or PIN with a blur overlay, while backed-up and cloud-only photos are hidden from your timeline with the Drive copy never moved or deleted. Per-field metadata stripping (GPS, camera, timestamp, software) on upload or in bulk, including formats such as HEIC that can't be edited in place. Mirror-to-local so your on-device copy matches the cloud, in-app cloud trash, and a configurable app lock with timeout. |
 | **Hardened** | TLS cert pinning on every Proton call, a strict host allowlist with cleartext blocked, no app state carried in cloud auto-backup or device transfer, and logs stripped from release builds. |
-| **Comfort** | Make any cloud photo available offline, pinned at full quality with an offline badge, a Search filter and a storage readout; a full-screen viewer with slideshow and motion-photo playback; a background thumbnail warm-up for smooth scrolling, a home-screen widget (including a Cloud Photos mode served from the encrypted cache), an in-app FAQ, an in-app updater, 11 languages, light, dark and system themes with a pure-black AMOLED option, and 6 colour palettes. |
+| **Comfort** | Make any cloud photo available offline, pinned at full quality with an offline badge, a Search filter and a storage readout; a full-screen viewer with slideshow, motion-photo playback and frame-by-frame video scrubbing with a filmstrip preview; an optional edge-to-edge grid for a denser, gapless timeline; an opt-in screenshot bar to edit, share, upload or link a new screenshot; a background thumbnail warm-up for smooth scrolling, a home-screen widget (including a Cloud Photos mode served from the encrypted cache), an in-app FAQ, an in-app updater, an adaptive app icon, 11 languages, light, dark and system themes with a pure-black AMOLED option, and 6 colour palettes. |
 
 ## Install
 
@@ -96,14 +96,15 @@ app/src/main/kotlin/eu/akoos/photos/
 │   ├── updater/      APK download + install
 │   ├── hidden/       Hidden-vault storage
 │   ├── offline/      Offline pinned-photo blobs
-│   └── transfer/     Live transfer state + history log
+│   ├── transfer/     Live transfer state + history log
+│   └── upload/       Upload-side photo + video compression, mirror + album-add helpers
 ├── di/               Hilt modules (Core, Network, Database, Repository,
 │                     WorkManager, Updater, Stub)
 ├── navigation/       Single NavGraph
 ├── util/             Cross-cutting helpers (Exif, NetworkObserver, ErrorMessageSanitizer,
 │                     OfflineGeocoder for offline reverse-geocoding from a bundled GeoNames dataset)
 ├── worker/           WorkManager workers
-├── service/          Foreground service + boot receiver for continuous backup
+├── service/          Background-sync service + boot receiver + screenshot quick-action overlay
 ├── widget/           Home-screen widget (4 modes incl. Cloud Photos from encrypted cache)
 └── App.kt + MainActivity.kt
 ```

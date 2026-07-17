@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -85,6 +85,7 @@ import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.presentation.common.ConfirmDialog
 import eu.akoos.photos.presentation.common.IconBubble
+import eu.akoos.photos.presentation.gallery.LocalThumbnailUrls
 import eu.akoos.photos.presentation.gallery.PhotoCell
 import eu.akoos.photos.presentation.gallery.photoCellInputsFor
 import eu.akoos.photos.presentation.viewer.PhotoShareSheet
@@ -185,12 +186,16 @@ fun LocationDetailSheet(
     }
 
     // Cover = the newest item's image (the list is sorted newest-first by capture time).
-    val coverModel: Any? = remember(state.items) {
+    // A cloud cover reads its decrypted URL from the shared store first; key on that map so the
+    // cover repaints when the decrypt lands.
+    val thumbUrls = LocalThumbnailUrls.current.value
+    val coverModel: Any? = remember(state.items, thumbUrls) {
         state.items.firstOrNull()?.let { item ->
             when (item) {
                 is GalleryItem.LocalOnly -> Uri.parse(item.local.uri)
                 is GalleryItem.Synced -> Uri.parse(item.local.uri)
-                is GalleryItem.CloudOnly -> item.cloud.thumbnailUrl?.let { Uri.parse(it) }
+                is GalleryItem.CloudOnly ->
+                    (thumbUrls[item.cloud.linkId] ?: item.cloud.thumbnailUrl)?.let { Uri.parse(it) }
             }
         }
     }
@@ -204,6 +209,7 @@ fun LocationDetailSheet(
             .background(Bg0),
     ) {
         val cols = eu.akoos.photos.presentation.gallery.rememberDefaultGridColumns()
+        val seamless = eu.akoos.photos.presentation.gallery.rememberSeamlessGrid()
         // Drag-to-select: long-press a photo then drag to sweep a range (shares the timeline gesture).
         // Cells are keyed by local uri (cloud-only by linkId); the swept keys map to selected keys.
         val selectableKeys = remember(state.items) {
@@ -231,14 +237,21 @@ fun LocationDetailSheet(
             columns = GridCells.Fixed(cols),
             state = gridState,
             // Match the main timeline grid (GalleryGrid): same default columns, 20.dp side inset and
-            // 6.dp gap, so located photos render at the same size as the Photos page.
-            contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 24.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
+            // 6.dp gap, so located photos render at the same size as the Photos page. Edge-to-edge
+            // drops the side inset and rounding and tightens the gap.
+            contentPadding = PaddingValues(
+                start = if (seamless) 0.dp else 20.dp,
+                end = if (seamless) 0.dp else 20.dp,
+                bottom = 24.dp,
+            ),
+            horizontalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 6.dp),
+            verticalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 6.dp),
             modifier = Modifier.fillMaxSize().then(dragSelectModifier),
         ) {
             // Hero header — cover, place name and count, plus the "Save as album" action.
             item(span = { GridItemSpan(maxLineSpan) }) {
+                // Photo tiles bleed to the edge in seamless mode; this header keeps the 20.dp inset.
+                Box(modifier = Modifier.padding(horizontal = if (seamless) 20.dp else 0.dp)) {
                 eu.akoos.photos.presentation.albums.components.AlbumHeroHeader(
                     coverModel = coverModel,
                     title = state.placeName,
@@ -273,6 +286,7 @@ fun LocationDetailSheet(
                         }
                     } else null,
                 )
+                }
             }
 
             if (state.isLoading) {
@@ -285,7 +299,7 @@ fun LocationDetailSheet(
             } else if (state.items.isEmpty()) {
                 item(span = { GridItemSpan(maxLineSpan) }) {
                     Box(
-                        Modifier.fillMaxWidth().height(200.dp),
+                        Modifier.padding(horizontal = if (seamless) 20.dp else 0.dp).fillMaxWidth().height(200.dp),
                         contentAlignment = Alignment.Center,
                     ) {
                         Text(stringResource(R.string.albums_no_photos), color = FgMute, fontSize = 14.sp)
@@ -313,6 +327,8 @@ fun LocationDetailSheet(
                         imageData = inputs.imageData,
                         stableKey = inputs.stableKey,
                         isVideo = inputs.isVideo,
+                        isLocalVideo = inputs.isLocalVideo,
+                        durationMs = inputs.durationMs,
                         isPlaceholder = inputs.isPlaceholder,
                         selected = isSelected,
                         isSelectionMode = state.isSelectionMode,
@@ -321,6 +337,8 @@ fun LocationDetailSheet(
                         isFavorite = inputs.isFavorite,
                         typeBadgeRes = inputs.typeBadgeRes,
                         typeBadgeCdRes = inputs.typeBadgeCdRes,
+                        columns = cols,
+                        cornerRadius = if (seamless) 0.dp else 10.dp,
                         onClick = {
                             // Skip the release-tap that follows a long-press select; it would
                             // otherwise toggle the just-anchored cell back off.

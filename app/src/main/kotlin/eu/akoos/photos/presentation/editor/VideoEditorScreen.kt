@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -26,7 +26,6 @@ package eu.akoos.photos.presentation.editor
 
 import android.graphics.Bitmap
 import android.graphics.Rect as AndroidRect
-import android.media.MediaMetadataRetriever
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -88,8 +87,6 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.foundation.layout.requiredHeight
 import androidx.compose.foundation.layout.requiredWidth
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -116,10 +113,13 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.MediaItem
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.SeekParameters
+import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.ui.PlayerView
 import eu.akoos.photos.R
 import eu.akoos.photos.presentation.common.ConfirmDialog
 import eu.akoos.photos.presentation.common.ErrorPopup
+import eu.akoos.photos.presentation.common.rememberVideoFilmstripFrames
 import eu.akoos.photos.presentation.editor.components.SaveOptionRow
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.Bg0
@@ -301,7 +301,16 @@ fun VideoEditorScreen(
         if (sourceUri == null) {
             null
         } else {
-            ExoPlayer.Builder(context).build().apply {
+            // Cap the preview decode to 1080p. A very-high-res source (8K, 7680x4320)
+            // would otherwise ask MediaCodec for a decoder at native resolution, which
+            // exceeds most devices' hardware ceiling; the renderer then fails silently and
+            // the surface stays black. The track selector picks a decode size the device
+            // can actually handle so the preview plays. The save/re-encode path is separate
+            // and still works at full resolution.
+            val trackSelector = DefaultTrackSelector(context).apply {
+                parameters = buildUponParameters().setMaxVideoSize(1920, 1080).build()
+            }
+            ExoPlayer.Builder(context).setTrackSelector(trackSelector).build().apply {
                 setMediaItem(MediaItem.fromUri(Uri.parse(sourceUri)))
                 prepare()
                 // Start with playWhenReady=true so the renderer immediately decodes and
@@ -311,6 +320,9 @@ fun VideoEditorScreen(
                 // idle and the surface stays black until the user taps play.
                 playWhenReady = true
                 repeatMode = ExoPlayer.REPEAT_MODE_ONE
+                // Frame-accurate seeks so playhead scrubbing lands on the exact frame; scrubbing
+                // mode (toggled during a playhead drag, below) keeps the rapid seeks smooth.
+                setSeekParameters(SeekParameters.EXACT)
             }
         }
     }
@@ -386,44 +398,30 @@ fun VideoEditorScreen(
     // lands in cache, so isLoading guards the early window.
     val hasSource = state.sourceUri != null && !state.isLoading
 
-    // Filmstrip thumbnails live at the screen scope so swapping tools (Trim → Crop →
-    // Trim) does NOT throw away the extracted bitmaps and re-extract — each re-extract
-    // is a 12-frame × ~200 ms MediaMetadataRetriever pass. Hoisting here means the
-    // SnapshotStateList outlives the inner `when (activeTool)` branch swap.
-    val filmstripThumbnails = remember(state.sourceUri, state.durationMs) {
-        androidx.compose.runtime.mutableStateListOf<android.graphics.Bitmap>()
-    }
-    LaunchedEffect(state.sourceUri, state.durationMs) {
-        val uri = state.sourceUri ?: return@LaunchedEffect
-        val durationMs = state.durationMs
-        if (durationMs <= 0L) return@LaunchedEffect
-        filmstripThumbnails.clear()
-        withContext(Dispatchers.IO) {
-            val retriever = MediaMetadataRetriever()
-            runCatching { retriever.setDataSource(context, Uri.parse(uri)) }
-                .onFailure { runCatching { retriever.release() }; return@withContext }
-            val count = 12
-            // 320 px target keeps the 64dp-tall strip crisp on 3x density displays without
-            // burning extra extract time; getScaledFrameAtTime preserves aspect.
-            val targetSize = 320
-            for (i in 0 until count) {
-                val ratio = (i.toFloat() + 0.5f) / count
-                val tUs = (ratio * durationMs * 1000L).toLong()
-                val bmp = runCatching {
-                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O_MR1) {
-                        retriever.getScaledFrameAtTime(
-                            tUs,
-                            MediaMetadataRetriever.OPTION_CLOSEST_SYNC,
-                            targetSize, targetSize,
-                        )
-                    } else {
-                        val full = retriever.getFrameAtTime(tUs, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
-                        full?.let { android.graphics.Bitmap.createScaledBitmap(it, targetSize, targetSize, true) }
-                    }
-                }.getOrNull()
-                if (bmp != null) filmstripThumbnails.add(bmp)
-            }
-            runCatching { retriever.release() }
+    // Filmstrip frames come from the shared extractor so swapping tools (Trim to Crop to
+    // Trim) does NOT throw away the bitmaps and re-extract; the hook fills each slot as it
+    // decodes and caches the finished strip, so the inner `when (activeTool)` branch swap
+    // reads back an already-warm strip. 320 px keeps the 64dp-tall strip crisp on 3x density.
+    // The extractor sources the clip length itself and keys on the URI, so the strip fills as
+    // soon as the source lands; state.durationMs is only a fallback if the container omits it.
+    // The trim UI still takes its window from state.durationMs, which is unaffected here.
+    val filmstrip = rememberVideoFilmstripFrames(
+        uri = state.sourceUri?.let { Uri.parse(it) },
+        frameCount = 12,
+        targetPx = 320,
+        fallbackDurationMs = state.durationMs,
+    )
+    val filmstripThumbnails = filmstrip.frames
+    // Free the extracted frames the moment the editor leaves composition instead of waiting
+    // for the nav entry to pop and GC to run. release() evicts this clip from the shared cache
+    // and recycles its frames; nothing else holds a reference once this screen is gone.
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        onDispose {
+            filmstrip.release()
+            // The recycled filmstrip frames and the dereferenced editor bitmaps are now garbage
+            // but sit on the Java heap until the next GC, keeping the heap number high. Nudge one
+            // collection off the main thread so it reclaims them without janking the exit transition.
+            Thread { System.gc() }.start()
         }
     }
 
@@ -711,7 +709,7 @@ private fun TrimPanel(
     state: VideoEditorUiState,
     vm: VideoEditorViewModel,
     previewPlayer: ExoPlayer?,
-    thumbnails: List<android.graphics.Bitmap>,
+    thumbnails: List<android.graphics.Bitmap?>,
 ) {
     val duration = state.durationMs.coerceAtLeast(1L)
     // Poll the ExoPlayer's currentPosition at ~30 fps so the playhead line on the
@@ -725,16 +723,29 @@ private fun TrimPanel(
     // 0L, 1L)` is always 0 or 1, no matter how far playback actually advanced. Drop the
     // coerceIn — the Canvas's `playheadMs / durationMs` already clips into [0, w].
     var playheadMs by remember(previewPlayer) { mutableStateOf(0L) }
+    // Suppress the poll while the user is scrubbing so it doesn't fight the live seek (the seek
+    // target and currentPosition briefly disagree, which makes the playhead jitter under the finger).
+    var isScrubbing by remember(previewPlayer) { mutableStateOf(false) }
+    // Read the live trim range in the poll without re-keying the loop on every handle drag.
+    val liveTrimStart by androidx.compose.runtime.rememberUpdatedState(state.trimStartMs)
+    val liveTrimEnd by androidx.compose.runtime.rememberUpdatedState(state.trimEndMs)
     androidx.compose.runtime.LaunchedEffect(previewPlayer) {
         while (true) {
             val p = previewPlayer ?: break
-            playheadMs = p.currentPosition
+            if (!isScrubbing) {
+                val pos = p.currentPosition
+                // Keep playback inside the trim range so the preview shows exactly the cut: loop back
+                // to the trim start once playback runs past the trim end (or sits before the start).
+                if (p.isPlaying && (pos >= liveTrimEnd || pos < liveTrimStart)) {
+                    p.seekTo(liveTrimStart)
+                    playheadMs = liveTrimStart
+                } else {
+                    playheadMs = pos
+                }
+            }
             kotlinx.coroutines.delay(33)
         }
     }
-    val sourceUriString = state.sourceUri
-    val sourceUri = remember(sourceUriString) { sourceUriString?.let { Uri.parse(it) } }
-
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         // Start / duration / end pills sit ABOVE the filmstrip — start pinned to the left
         // edge of the strip, end pinned to the right, duration centered. The pill row
@@ -750,13 +761,20 @@ private fun TrimPanel(
             TimePill(formatVideoTime(withTenths = true, ms =state.trimEndMs))
         }
         VideoFilmstripTrimmer(
-            sourceUri = sourceUri,
             durationMs = duration,
             trimStartMs = state.trimStartMs,
             trimEndMs = state.trimEndMs,
             playheadMs = playheadMs,
             thumbnails = thumbnails,
             onTrimChange = { start, end -> vm.setTrimRange(start, end) },
+            onScrubStart = {
+                isScrubbing = true
+                previewPlayer?.setScrubbingModeEnabled(true)
+            },
+            onScrubEnd = {
+                isScrubbing = false
+                previewPlayer?.setScrubbingModeEnabled(false)
+            },
             onScrubMs = { ms ->
                 playheadMs = ms
                 previewPlayer?.seekTo(ms)
@@ -1199,13 +1217,12 @@ private fun formatSpeed(s: Float): String = when (s) {
  * line that follows the live ExoPlayer position. Dragging the playhead seeks the
  * preview; dragging an edge handle moves the trim in/out point.
  *
- * Thumbnails are extracted once per [sourceUri] via MediaMetadataRetriever — 12 frames
- * evenly across the full source duration. We deliberately don't reshuffle the strip when
- * the user moves the trim range; that would re-extract on every drag and tank the UX.
+ * The [thumbnails] are extracted by the shared filmstrip hook at the screen scope and
+ * passed in; the strip deliberately does not reshuffle as the trim range moves, since that
+ * would re-key the frames and tank the UX.
  */
 @Composable
 private fun VideoFilmstripTrimmer(
-    sourceUri: Uri?,
     durationMs: Long,
     trimStartMs: Long,
     trimEndMs: Long,
@@ -1213,9 +1230,13 @@ private fun VideoFilmstripTrimmer(
     /** Hoisted at the screen scope; this composable just renders. Hoisting prevents the
      *  strip from resetting on a tab-switch round trip since the extraction state no longer
      *  dies with this composable. */
-    thumbnails: List<android.graphics.Bitmap>,
+    thumbnails: List<android.graphics.Bitmap?>,
     onTrimChange: (start: Long, end: Long) -> Unit,
     onScrubMs: (Long) -> Unit,
+    /** Fired when a PLAYHEAD scrub begins / ends (not the trim handles), so the host can turn the
+     *  player's scrubbing mode on for the drag and off on release. */
+    onScrubStart: () -> Unit = {},
+    onScrubEnd: () -> Unit = {},
 ) {
     val density = LocalDensity.current
     val handleWidthPx = with(density) { 14.dp.toPx() }
@@ -1227,8 +1248,8 @@ private fun VideoFilmstripTrimmer(
     val stripHeight = 64.dp
 
     // Thumbnails are passed in from the screen scope so they survive activeTool tab
-    // swaps — extracting them inside this composable means switching to Crop/Rotate/
-    // Audio and back re-runs the 12-frame MediaMetadataRetriever pass every time.
+    // swaps; the shared hook caches the finished strip, so a swap back reads a warm strip
+    // instead of re-running the extraction.
 
     var grabbed by remember { mutableStateOf<Grabbed?>(null) }
     var canvasWidthPx by remember { mutableFloatStateOf(1f) }
@@ -1277,6 +1298,7 @@ private fun VideoFilmstripTrimmer(
                                 -> Grabbed.Playhead
                             else -> null
                         }
+                        if (grabbed != null) onScrubStart()
                         if (grabbed == Grabbed.Playhead) {
                             val pct = (offset.x / w).coerceIn(0f, 1f)
                             onScrubMs((pct * durationMs).toLong().coerceIn(latestTrimStart, latestTrimEnd))
@@ -1287,15 +1309,17 @@ private fun VideoFilmstripTrimmer(
                         val pct = (change.position.x / w).coerceIn(0f, 1f)
                         val ms = (pct * durationMs).toLong()
                         when (grabbed) {
-                            Grabbed.Start -> onTrimChange(ms, latestTrimEnd)
-                            Grabbed.End -> onTrimChange(latestTrimStart, ms)
+                            // Seek the preview to the edge being dragged so the boundary frame is
+                            // visible as the handle moves.
+                            Grabbed.Start -> { onTrimChange(ms, latestTrimEnd); onScrubMs(ms) }
+                            Grabbed.End -> { onTrimChange(latestTrimStart, ms); onScrubMs(ms) }
                             Grabbed.Playhead -> onScrubMs(ms.coerceIn(latestTrimStart, latestTrimEnd))
                             null -> Unit
                         }
                         change.consume()
                     },
-                    onDragEnd = { grabbed = null },
-                    onDragCancel = { grabbed = null },
+                    onDragEnd = { grabbed = null; onScrubEnd() },
+                    onDragCancel = { grabbed = null; onScrubEnd() },
                 )
             },
     ) {

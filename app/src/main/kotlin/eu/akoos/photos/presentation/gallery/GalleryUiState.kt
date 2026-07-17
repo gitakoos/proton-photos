@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -22,7 +22,6 @@
 
 package eu.akoos.photos.presentation.gallery
 
-import eu.akoos.photos.presentation.common.UndoAction
 
 import eu.akoos.photos.domain.entity.GalleryItem
 
@@ -34,6 +33,10 @@ data class GalleryUiState(
      *  off the main thread in the ViewModel. The timeline grid iterates this directly instead of
      *  running SimpleDateFormat per item inside composition on every list re-emission. */
     val monthGroups: List<Pair<String, List<GalleryItem>>> = emptyList(),
+    /** Day buckets of [filteredItems] ("d MMMM yyyy" label → items, encounter order) precomputed
+     *  off the main thread in the ViewModel, mirroring [monthGroups]. Drives the 3-column default
+     *  zoom so the opening view does not run SimpleDateFormat per item inside composition. */
+    val dayGroups: List<Pair<String, List<GalleryItem>>> = emptyList(),
     /** "On this day" memories (year → items, most-recent-first) precomputed off the main thread
      *  from the unfiltered [items], matching the carousel's filter-independent source. */
     val onThisDayGroups: List<Pair<Int, List<GalleryItem>>> = emptyList(),
@@ -59,10 +62,6 @@ data class GalleryUiState(
     /** Count of items in the last hide batch that couldn't be copied into the vault. Surfaced as a
      *  partial-result snackbar when the batch finishes; 0 means every selected item hid cleanly. */
     val hideFailureCount: Int = 0,
-    /** Set after a reversible hide / cloud-trash delete just succeeded, so the terminal snackbar
-     *  can offer Undo and restore exactly those items. Null = nothing to undo (e.g. a local-only
-     *  delete, which is not app-reversible). Cleared once the snackbar is consumed. */
-    val undoAction: UndoAction? = null,
     val pendingDeleteIntent: android.app.PendingIntent? = null,
     val multiDownloadState: MultiDownloadState = MultiDownloadState.Idle,
     val multiShareState: MultiShareState = MultiShareState.Idle,
@@ -72,6 +71,10 @@ data class GalleryUiState(
      *  the deferred URIs. */
     val pendingStripIntent: android.app.PendingIntent? = null,
     val isSyncing: Boolean = false,
+    // Active transfers from the TransferCenter, split by direction so the avatar can show an
+    // upload arrow, a download arrow, or both when they run at once.
+    val hasActiveUpload: Boolean = false,
+    val hasActiveDownload: Boolean = false,
     // uploadTotalCount > 0 (with isSyncing) means a back-up is in flight.
     val uploadDoneIdx: Int = 0,
     val uploadTotalCount: Int = 0,
@@ -91,6 +94,9 @@ data class GalleryUiState(
     /** Cloud linkIds in at least one Drive album. [applyFilter] excludes these from [GalleryFilter.All]
      *  when "Hide photos in albums" is on (empty when off); non-All tabs ignore it. */
     val albumHideCloudIds: Set<String> = emptySet(),
+    /** Cloud album linkIds the user hid client-side. The add-to-album picker marks these rows with
+     *  a lock so a hidden album reads as hidden while staying fully selectable. */
+    val hiddenAlbumIds: Set<String> = emptySet(),
 ) {
     val storageFraction: Float
         get() = if (cloudMaxBytes > 0L)

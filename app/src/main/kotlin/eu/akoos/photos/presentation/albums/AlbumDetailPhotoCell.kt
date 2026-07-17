@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -62,12 +62,16 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.PlatformTextStyle
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.CloudPhoto
+import eu.akoos.photos.presentation.common.LocalVideoThumb
+import eu.akoos.photos.presentation.common.rememberLocalVideoThumbnail
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.Bg0
@@ -75,6 +79,15 @@ import eu.akoos.photos.presentation.theme.Bg2
 import eu.akoos.photos.presentation.theme.ErrorColor
 import eu.akoos.photos.presentation.theme.FgDim
 import eu.akoos.photos.presentation.theme.StatusSynced
+import eu.akoos.photos.presentation.util.formatVideoTime
+
+/** Pixel budget for the OS video poster in album tiles. Matches the gallery grid so a synced
+ *  video shares one warm bitmap size across surfaces. */
+private const val ALBUM_THUMB_PX = 320
+
+/** The single secondary corner badge kept at the compact (4-column) density tier, picked by
+ *  priority (duration > offline > type > favorite). [None] means no secondary is present. */
+private enum class AlbumCompactSecondary { Duration, Offline, Type, Favorite, None }
 
 @Composable
 internal fun AvatarCircle(letter: String, tint: Color, size: androidx.compose.ui.unit.Dp = 32.dp) {
@@ -103,6 +116,12 @@ internal fun PhotoCell(
     isSelectionMode: Boolean,
     /** True when this album photo's linkId is pinned for offline; draws the bottom-start badge. */
     isOffline: Boolean = false,
+    /** Live column count of the album grid. Drives the same badge-density tiers as the gallery cell:
+     *  <= 3 shows every badge, == 4 keeps the cloud badge plus one highest-priority secondary, >= 5
+     *  keeps only the cloud badge. Defaults to 3 (all badges) for any caller with no column grid. */
+    columns: Int = 3,
+    /** Edge-to-edge grid: square corners (0.dp) on both the tile clip and the selection border. */
+    seamless: Boolean = false,
     /** True: long-press pops the per-cell menu. False: long-press toggles multi-select via [onLongPress].
      *  Off for shared-with-me albums and while already in multi-select. */
     showLongPressMenu: Boolean = false,
@@ -119,6 +138,11 @@ internal fun PhotoCell(
         else -> null
     }
 
+    // An on-device video twin can show the OS poster instead of decoding a fresh video frame per
+    // bind (which pops in after the grid opens). Cloud-only videos have no local file, so they keep
+    // the decrypted-thumbnail path below.
+    val isLocalVideoTile = localUri != null && photo.mimeType.startsWith("video/")
+
     // Lazy-decrypt: a null thumbnailUrl means the row is metadata-only. Decrypt while visible, cancel on scroll-away.
     if (photo.thumbnailUrl == null && localUri == null) {
         androidx.compose.runtime.DisposableEffect(photo.linkId) {
@@ -134,7 +158,7 @@ internal fun PhotoCell(
         modifier = Modifier
             // Slightly taller than square so corner badges cover less of the photo.
             .aspectRatio(0.85f)
-            .clip(RoundedCornerShape(if (isSelected) 8.dp else 6.dp))
+            .clip(RoundedCornerShape(if (seamless) 0.dp else if (isSelected) 8.dp else 6.dp))
             .background(Bg2)
             // Tap-only by default: with no long-press handler the cell is a plain clickable, and the
             // grid-level drag-select owns the stationary long-press (single-select + range sweep)
@@ -148,25 +172,85 @@ internal fun PhotoCell(
                     else -> Modifier.clickable(onClick = onTap)
                 },
             )
-            .then(if (isSelected) Modifier.border(2.dp, Accent, RoundedCornerShape(8.dp)) else Modifier),
+            .then(if (isSelected) Modifier.border(2.dp, Accent, RoundedCornerShape(if (seamless) 0.dp else 8.dp)) else Modifier),
     ) {
-        if (imageModel != null) {
-            AsyncImage(
+        // For an on-device video, pull the OS poster (system-cached, near-instant) rather than
+        // routing the raw video uri through Coil's frame decoder. Loading keeps the Bg2 tile (nothing
+        // pops); Loaded draws the bitmap; Unavailable (pre-Q or the provider refused) falls through
+        // to the plain image path so the tile is never blank.
+        val osThumb: LocalVideoThumb? =
+            if (isLocalVideoTile) rememberLocalVideoThumbnail(localUri!!, ALBUM_THUMB_PX).value
+            else null
+        when {
+            osThumb is LocalVideoThumb.Loaded -> AsyncImage(
+                model = osThumb.bitmap,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+            osThumb is LocalVideoThumb.Loading -> Unit // Bg2 tile shows through until the poster lands.
+            imageModel != null -> AsyncImage(
                 model = imageModel,
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize(),
             )
-        } else {
-            // Loading placeholder while the on-demand decrypt runs (parent already fills the Bg2 tile).
-            Icon(
-                Icons.Default.Photo,
-                contentDescription = null,
-                tint = FgDim.copy(alpha = 0.45f),
-                modifier = Modifier
-                    .align(Alignment.Center)
-                    .size(26.dp),
-            )
+            else -> {
+                // Loading placeholder while the on-demand decrypt runs (parent already fills the Bg2 tile).
+                Icon(
+                    Icons.Default.Photo,
+                    contentDescription = null,
+                    tint = FgDim.copy(alpha = 0.45f),
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .size(26.dp),
+                )
+            }
+        }
+
+        // Badge-density tiers by the album grid's live column count. As tiles shrink the corner
+        // badges crowd, so denser grids drop the lower-priority ones. The cloud badge is always kept
+        // (top priority); the center play icon is not a badge and stays for every video.
+        //   <= 3 columns: every badge, as before.
+        //   == 4 columns: cloud badge + exactly ONE highest-priority secondary.
+        //   >= 5 columns: cloud badge only.
+        // Secondary priority (high to low): video duration > offline pin > type badge > favorite.
+        val isVideo = photo.mimeType.startsWith("video/")
+        val hasDuration = isVideo && photo.durationMs != null && photo.durationMs > 0
+        val typeBadge: Pair<Int, Int?>? = when {
+            // Videos are already marked by the center play icon, so no separate video badge here.
+            4 in photo.tags -> R.drawable.ic_live to R.string.cd_motion_photo
+            8 in photo.tags -> R.drawable.ic_panorama to R.string.cd_panorama
+            9 in photo.tags -> R.drawable.ic_raw to R.string.gallery_filter_raw
+            else -> null
+        }
+        val isFavorite = 0 in photo.tags
+        val compactSecondary: AlbumCompactSecondary = when {
+            hasDuration      -> AlbumCompactSecondary.Duration
+            isOffline        -> AlbumCompactSecondary.Offline
+            typeBadge != null -> AlbumCompactSecondary.Type
+            isFavorite       -> AlbumCompactSecondary.Favorite
+            else             -> AlbumCompactSecondary.None
+        }
+        val allowDuration = when {
+            columns <= 3 -> true
+            columns == 4 -> compactSecondary == AlbumCompactSecondary.Duration
+            else         -> false
+        }
+        val allowOffline = when {
+            columns <= 3 -> true
+            columns == 4 -> compactSecondary == AlbumCompactSecondary.Offline
+            else         -> false
+        }
+        val allowType = when {
+            columns <= 3 -> true
+            columns == 4 -> compactSecondary == AlbumCompactSecondary.Type
+            else         -> false
+        }
+        val allowFavorite = when {
+            columns <= 3 -> true
+            columns == 4 -> compactSecondary == AlbumCompactSecondary.Favorite
+            else         -> false
         }
 
         // Cloud badge — green when the file is also on-device, white when cloud-only.
@@ -186,36 +270,62 @@ internal fun PhotoCell(
             )
         }
 
-        // Offline badge — bottom-start so it never overlaps the bottom-end cloud badge + type pill,
-        // the top-start selection circle, or the centred video play icon.
-        if (isOffline) {
-            Box(
+        // Bottom-start overlays: the offline-pin badge and the always-on video duration pill share
+        // one Row so they sit side by side (badge first, then the duration) and never overlap. This
+        // corner clears the bottom-end cloud badge + type pill, the top-start selection circle, and
+        // the centred play icon. The pill hides in selection mode alongside the play icon; it shows
+        // only when a real length is known (durationMs backfilled on the cloud photo).
+        val showOfflineBadge = isOffline && allowOffline
+        val showDurationPill = hasDuration && !isSelectionMode && allowDuration
+        if (showOfflineBadge || showDurationPill) {
+            Row(
                 modifier = Modifier
                     .align(Alignment.BottomStart)
-                    .padding(4.dp)
-                    .size(18.dp)
-                    .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(4.dp)),
-                contentAlignment = Alignment.Center,
+                    .padding(4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(3.dp),
             ) {
-                Icon(
-                    Icons.Default.OfflinePin,
-                    contentDescription = stringResource(R.string.offline_make_available),
-                    tint = Color.White,
-                    modifier = Modifier.size(11.dp),
-                )
+                if (showOfflineBadge) {
+                    Box(
+                        modifier = Modifier
+                            .size(18.dp)
+                            .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(4.dp)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            Icons.Default.OfflinePin,
+                            contentDescription = stringResource(R.string.offline_make_available),
+                            tint = Color.White,
+                            modifier = Modifier.size(11.dp),
+                        )
+                    }
+                }
+                if (showDurationPill) {
+                    Box(
+                        modifier = Modifier
+                            .height(18.dp)
+                            .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(4.dp))
+                            .padding(horizontal = 5.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            formatVideoTime(photo.durationMs),
+                            color = Color.White,
+                            fontSize = 10.sp,
+                            // Drop the default bottom font padding so the number sits centered in the pill.
+                            style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false)),
+                        )
+                    }
+                }
             }
         }
 
-        // Type + favorite badge pill from server category tags. 25dp end-padding clears the cloud badge (18dp + 4dp + 3dp).
-        val typeBadge: Pair<Int, Int?>? = when {
-            2 in photo.tags -> R.drawable.ic_video_camera to null
-            4 in photo.tags -> R.drawable.ic_live to R.string.cd_motion_photo
-            8 in photo.tags -> R.drawable.ic_panorama to R.string.cd_panorama
-            9 in photo.tags -> R.drawable.ic_raw to null
-            else -> null
-        }
-        val isFavorite = 0 in photo.tags
-        if (typeBadge != null || isFavorite) {
+        // Type + favorite badge pill from server category tags. 25dp end-padding clears the cloud
+        // badge (18dp + 4dp + 3dp). At the compact tier only the single winning secondary shows, so
+        // a Type winner drops the favorite heart and a Favorite winner drops the type icon.
+        val pillShowType = typeBadge != null && allowType
+        val pillShowFavorite = isFavorite && allowFavorite
+        if (pillShowType || pillShowFavorite) {
             Row(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
@@ -227,10 +337,10 @@ internal fun PhotoCell(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(3.dp),
             ) {
-                if (isFavorite) {
+                if (pillShowFavorite) {
                     Icon(Icons.Default.Favorite, contentDescription = null, tint = Color.White, modifier = Modifier.size(11.dp))
                 }
-                if (typeBadge != null) {
+                if (pillShowType) {
                     Icon(
                         painterResource(typeBadge.first),
                         contentDescription = typeBadge.second?.let { stringResource(it) },
@@ -241,7 +351,7 @@ internal fun PhotoCell(
             }
         }
 
-        if (photo.mimeType.startsWith("video/") && !isSelectionMode) {
+        if (isVideo && !isSelectionMode) {
             Box(
                 modifier = Modifier
                     .size(28.dp)

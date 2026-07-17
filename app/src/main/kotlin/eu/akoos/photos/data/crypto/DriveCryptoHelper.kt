@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -67,6 +67,26 @@ fun parsePhotoLocation(xAttrJson: String): Pair<Double, Double>? = runCatching {
     val lat = location.getDouble("Latitude")
     val lon = location.getDouble("Longitude")
     if (lat in -90.0..90.0 && lon in -180.0..180.0) lat to lon else null
+}.getOrNull()
+
+/**
+ * Extracts a video's duration, in MILLISECONDS, from the Media block of a plaintext XAttr JSON blob
+ * produced by [DriveCryptoHelper]. Drive stores Media.Duration in SECONDS (see the upload path, which
+ * divides the source milliseconds by 1000 and writes a trimmed decimal), so the value is read as a
+ * number (an int, a long, or a float like 7.5), multiplied by 1000 to restore the
+ * milliseconds the UI formats with. The Media block is absent for images and for legacy videos, so a
+ * missing/malformed value or a non-positive duration returns null. Pure and main-process safe.
+ */
+fun parsePhotoDuration(xAttrJson: String): Long? = runCatching {
+    val media = JSONObject(xAttrJson).optJSONObject("Media") ?: return@runCatching null
+    val raw = media.opt("Duration") ?: return@runCatching null
+    val seconds = when (raw) {
+        is Number -> raw.toDouble()
+        is String -> raw.toDoubleOrNull() ?: return@runCatching null
+        else -> return@runCatching null
+    }
+    if (seconds <= 0.0) return@runCatching null
+    Math.round(seconds * 1000.0)
 }.getOrNull()
 
 data class NodeKeyMaterial(

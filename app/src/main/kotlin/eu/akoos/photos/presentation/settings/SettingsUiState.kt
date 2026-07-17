@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -21,6 +21,9 @@
  */
 
 package eu.akoos.photos.presentation.settings
+
+import androidx.annotation.StringRes
+import eu.akoos.photos.domain.entity.UploadCompressionTier
 
 data class SettingsUiState(
     val autoSync: Boolean = true,
@@ -42,8 +45,7 @@ data class SettingsUiState(
     val isSyncing: Boolean = false,
     val syncError: String? = null,
     val autoFreeUp: Boolean = false,
-    val freeUpInterval: FreeUpInterval = FreeUpInterval.AfterBackup,
-    val freeUpWifiOnly: Boolean = true,
+    val freeUpInterval: FreeUpInterval = FreeUpInterval.OneMonth,
     val isFreeingUp: Boolean = false,
     val deviceStorageBytes: Long = 0L,
     // ── Local storage scopes (visibility-only, no quota write-backs) ──────────
@@ -88,7 +90,20 @@ data class SettingsUiState(
     // Metadata stripping. Defaults match the engine readers (which use `?: false`) so the toggles
     // never render ON for a frame while the upload pipeline actually treats them as OFF.
     val stripOnUpload: Boolean = false,
+    /** When true, photos are re-encoded to a lighter JPEG per [compressTier] before reaching Drive.
+     *  The on-device original is never modified. Off by default. */
+    val compressOnUpload: Boolean = false,
+    /** When true, videos are transcoded to a smaller copy per [compressTier] before reaching Drive.
+     *  Separate opt-in from [compressOnUpload]; both share [compressTier]. The on-device original is
+     *  never modified. Off by default. */
+    val compressVideosOnUpload: Boolean = false,
+    /** Which quality tier the upload compression uses when [compressOnUpload] or
+     *  [compressVideosOnUpload] is on. Governs both the photo and the video path. */
+    val compressTier: UploadCompressionTier = UploadCompressionTier.BALANCED,
     val mirrorStripToLocal: Boolean = false,
+    /** When true, the lighter re-encode also overwrites the on-device original (all-files access
+     *  required), so the local file matches the compressed upload. Persisted only for now. */
+    val mirrorCompressToLocal: Boolean = false,
     val renameToCaptureDate: Boolean = false,
     /** When true, the upload pipeline removes the local MediaStore copy once Drive has
      *  the upload. Off by default — opting in delegates "long-term storage" to Proton Drive. */
@@ -104,6 +119,14 @@ data class SettingsUiState(
     /** Privacy opt-in: wipe `cacheDir/fullres/` on every process backgrounding. Off by
      *  default — the 30-min TTL + offline-grace sweeper is the regular behaviour. */
     val clearCacheOnAppClose: Boolean = false,
+    /** Server-side ProtonCore telemetry preference, mirrored read-only in the Privacy screen.
+     *  `null` = not resolved yet. An unresolved value renders a neutral placeholder and never
+     *  "Off": IsTelemetryEnabled falls back to enabled whenever it cannot read the account
+     *  setting, so showing "Off" here would be a false assurance. */
+    val telemetryEnabled: Boolean? = null,
+    /** Opt-in: when true, a foreground watcher shows a quick-action bar over a freshly
+     *  taken screenshot. Off by default; requires the draw-over-other-apps permission. */
+    val screenshotOverlayEnabled: Boolean = false,
     /** When true, the main Photos timeline hides every photo already filed into an
      *  album. Off by default. The Albums + Shared tabs are unaffected. */
     val hidePhotosInAlbums: Boolean = false,
@@ -117,6 +140,13 @@ data class SettingsUiState(
     /** When true, the Photos timeline uses a staggered (masonry) grid that keeps each photo's
      *  aspect ratio. Off by default — the fixed square grid stays the baseline. */
     val mosaicGrid: Boolean = false,
+    /** When true, the Photos timeline is edge-to-edge: no side padding, square corners, a hair-thin
+     *  gap. Off by default: the padded, rounded tiles stay the baseline. */
+    val seamlessGrid: Boolean = false,
+    /** Albums-tab filter default as an AlbumDisplayFilter ordinal (0 = All, 1 = Cloud, 2 = Local). */
+    val albumsDefaultFilter: Int = 0,
+    /** When true, the Albums tab opens on the last-used filter instead of [albumsDefaultFilter]. */
+    val albumsRememberLastFilter: Boolean = false,
     // Trash
     val trashedCount: Int = 0,
     /** Drive (cloud) trash count. `null` = unknown — UI then falls back to the
@@ -160,6 +190,9 @@ data class UploadEvent(
      *  row so the user can tell a 4 GB video from a 4 MB photo at a glance, and gets
      *  *some* feedback while a video upload sits in the row for minutes. */
     val sizeBytes: Long = 0L,
+    /** Live plaintext bytes processed for THIS file's current phase (encrypt or upload); 0
+     *  outside those phases. Drives the per-photo progress bar in the Activity monitor. */
+    val doneBytes: Long = 0L,
 )
 
 enum class UploadEventStatus { Uploading, Queued, Encrypting, Done, Failed }
@@ -209,9 +242,37 @@ enum class LandingTab(val index: Int, val labelRes: Int) {
     }
 }
 
+/** Picker label for an [UploadCompressionTier]. The tier itself is a domain value, so its
+ *  presentation strings live here rather than on the enum. */
+@get:StringRes
+val UploadCompressionTier.labelRes: Int
+    get() = when (this) {
+        UploadCompressionTier.LIGHT -> eu.akoos.photos.R.string.settings_compress_tier_light
+        UploadCompressionTier.BALANCED -> eu.akoos.photos.R.string.settings_compress_tier_balanced
+        UploadCompressionTier.SPACE_SAVER -> eu.akoos.photos.R.string.settings_compress_tier_space_saver
+    }
+
+/** One-line tradeoff description shown under an [UploadCompressionTier]'s picker label. */
+@get:StringRes
+val UploadCompressionTier.descRes: Int
+    get() = when (this) {
+        UploadCompressionTier.LIGHT -> eu.akoos.photos.R.string.settings_compress_tier_light_desc
+        UploadCompressionTier.BALANCED -> eu.akoos.photos.R.string.settings_compress_tier_balanced_desc
+        UploadCompressionTier.SPACE_SAVER -> eu.akoos.photos.R.string.settings_compress_tier_space_saver_desc
+    }
+
+/**
+ * How long a photo must have been backed up before the automatic free-up job may reclaim its
+ * device copy. Persisted by NAME (not ordinal) in [SettingsKeys.FREE_UP_INTERVAL], so entries
+ * reorder freely, while renaming one repoints a saved setting to [fromKey]'s fallback.
+ */
 enum class FreeUpInterval(val labelRes: Int, val ms: Long) {
-    AfterBackup(eu.akoos.photos.R.string.settings_free_up_interval_after_backup, 0L),
+    TenMinutes(eu.akoos.photos.R.string.settings_free_up_interval_10_minutes, 600_000L),
     OneDay(eu.akoos.photos.R.string.settings_free_up_interval_1_day, 86_400_000L),
     OneWeek(eu.akoos.photos.R.string.settings_free_up_interval_1_week, 604_800_000L),
-    OneMonth(eu.akoos.photos.R.string.settings_free_up_interval_1_month, 2_592_000_000L),
+    OneMonth(eu.akoos.photos.R.string.settings_free_up_interval_1_month, 2_592_000_000L);
+
+    companion object {
+        fun fromKey(key: String?): FreeUpInterval = entries.firstOrNull { it.name == key } ?: OneMonth
+    }
 }

@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -113,6 +113,7 @@ class AlbumDownloadWorker @AssistedInject constructor(
             }.onFailure { Log.w(TAG, "setForeground initial failed: ${it.message}") }
         }
 
+        var transferId: Long? = null
         return try {
             // Load CloudPhoto entities for the requested linkIds. `observePhotosByLinkIds`
             // returns the current DB snapshot as its first emission — we just take that and
@@ -122,12 +123,20 @@ class AlbumDownloadWorker @AssistedInject constructor(
                 Log.w(TAG, "No photos found in DB for linkIds=${linkIds.size}")
                 return Result.failure()
             }
+            // Register as an active transfer so the home-screen avatar reflects the album download.
+            transferId = transferCenter.start(
+                eu.akoos.photos.data.transfer.TransferCenter.Kind.DOWNLOAD, photos.size, albumName,
+            )
 
             val savedUris = java.util.concurrent.ConcurrentLinkedQueue<String>()
+            // First saved photo, kept as a FIXED cover so the album row's thumbnail does not
+            // flicker from photo to photo as the download proceeds.
+            var coverUri: String? = null
             val result = downloadPhotos.downloadCloudPhotos(
                 userId, photos, albumName,
-                onSaved = { savedUris.add(it) },
+                onSaved = { savedUris.add(it); if (coverUri == null) coverUri = it },
             ) { progress ->
+                transferId?.let { transferCenter.progress(it, progress.done) }
                 // Publish progress to WorkManager so the in-app album screen can show a progress
                 // ring + cancel without depending on the notification (works even when the
                 // notification is opted out).
@@ -136,6 +145,7 @@ class AlbumDownloadWorker @AssistedInject constructor(
                         KEY_PROGRESS_DONE to progress.done,
                         KEY_PROGRESS_TOTAL to progress.total,
                         KEY_ALBUM_NAME to albumName,
+                        KEY_COVER_URI to (coverUri ?: ""),
                     ))
                 }
                 // Best-effort notification refresh. setForeground throws if the worker was
@@ -166,6 +176,8 @@ class AlbumDownloadWorker @AssistedInject constructor(
             Log.e(TAG, "Album '$albumName' download failed", e)
             Result.failure()
         } finally {
+            // Clear the active-transfer entry so the avatar stops showing this download.
+            transferId?.let { transferCenter.finish(it) }
             // Drop the spilled id-list file once the run ends. If the process is killed mid-run
             // the finally is skipped and the file survives, so WorkManager's re-run can resume.
             listFile?.delete()
@@ -239,6 +251,7 @@ class AlbumDownloadWorker @AssistedInject constructor(
         // WorkManager progress data keys — read by AlbumDetailViewModel to drive the in-app ring.
         const val KEY_PROGRESS_DONE = "progressDone"
         const val KEY_PROGRESS_TOTAL = "progressTotal"
+        const val KEY_COVER_URI = "coverUri"
 
         /**
          * Lazily creates the album-download notification channel. Idempotent — calling on

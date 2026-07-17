@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -42,10 +42,10 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 /**
- * ViewModel for the "Notifications" screen — three opt-out switches backed by the
- * NOTIFY_* keys in [SettingsKeys]. Each key is absent by default and absent reads as
- * `true` (shown), so the toggles all start ON and a fresh install keeps every
- * notification it had before this screen existed.
+ * ViewModel for the "Notifications" screen — three switches backed by the NOTIFY_* keys in
+ * [SettingsKeys]. Album-download and delete-reminder are opt-OUTS: absent reads as `true`
+ * (shown), so a fresh install keeps the notifications it would post anyway. Backup-status is
+ * the opposite, an opt-IN: absent reads as `false`, so that switch starts OFF.
  *
  * The backup-status switch carries extra weight: [SettingsKeys.NOTIFY_BACKUP_STATUS]
  * also decides whether the persistent [BackgroundSyncService] runs. Android refuses to

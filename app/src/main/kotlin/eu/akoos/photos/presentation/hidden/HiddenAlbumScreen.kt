@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -50,6 +50,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.itemsIndexed
@@ -69,6 +70,7 @@ import androidx.compose.material3.Text
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import eu.akoos.photos.R
+import eu.akoos.photos.presentation.common.CloudPhotoCell
 import eu.akoos.photos.presentation.common.IconBubble
 import eu.akoos.photos.presentation.common.SecureScreenEffect
 import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
@@ -96,7 +98,12 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import coil.request.CachePolicy
 import coil.request.ImageRequest
+import eu.akoos.photos.domain.entity.Album
+import eu.akoos.photos.domain.entity.CloudPhoto
+import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.entity.LocalMediaItem
+import eu.akoos.photos.presentation.albums.AlbumCloudBadge
+import eu.akoos.photos.presentation.albums.UnifiedAlbumCard
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.Bg0
 import eu.akoos.photos.presentation.theme.Bg2
@@ -111,6 +118,8 @@ import eu.akoos.photos.presentation.theme.PillBorder
 fun HiddenAlbumScreen(
     onBack: () -> Unit,
     onPhotoClick: (items: List<LocalMediaItem>, index: Int) -> Unit = { _, _ -> },
+    onCloudPhotoClick: (items: List<GalleryItem>, index: Int) -> Unit = { _, _ -> },
+    onOpenAlbum: (Album) -> Unit = {},
     viewModel: HiddenAlbumViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -261,13 +270,20 @@ fun HiddenAlbumScreen(
             val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
             val contentTopPad = floatingHeaderContentTopPadding()
             val cols = eu.akoos.photos.presentation.gallery.rememberDefaultGridColumns()
+            val seamless = eu.akoos.photos.presentation.gallery.rememberSeamlessGrid()
             when {
-                state.isLoading -> LazyVerticalGrid(
+                state.isLoading && state.hiddenAlbums.isEmpty() && state.items.isEmpty() &&
+                    state.hiddenCloudPhotos.isEmpty() -> LazyVerticalGrid(
                     columns = GridCells.Fixed(cols),
                     modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(8.dp, contentTopPad, 8.dp, 100.dp + navBottom),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    contentPadding = PaddingValues(
+                        start = if (seamless) 0.dp else 8.dp,
+                        top = contentTopPad,
+                        end = if (seamless) 0.dp else 8.dp,
+                        bottom = 100.dp + navBottom,
+                    ),
+                    horizontalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 4.dp),
                 ) {
                     items(15) {
                         eu.akoos.photos.presentation.common.ShimmerSquare(
@@ -276,7 +292,8 @@ fun HiddenAlbumScreen(
                         )
                     }
                 }
-                state.items.isEmpty() -> Box(
+                state.hiddenAlbums.isEmpty() && state.items.isEmpty() &&
+                    state.hiddenCloudPhotos.isEmpty() -> Box(
                     Modifier.fillMaxSize().padding(top = contentTopPad),
                     contentAlignment = Alignment.Center,
                 ) {
@@ -297,12 +314,23 @@ fun HiddenAlbumScreen(
                 else -> {
                     val gridState = rememberLazyGridState()
                     // Drag-to-select: long-press a cell then sweep a range (shares the timeline
-                    // gesture). Cells are keyed by uri; the swept keys map straight to selected uris.
-                    // The hit-test reads the grid's own viewportStartOffset, so the large top content
-                    // padding under the floating header is handled without a manual offset.
-                    val selectableKeys = remember(state.items) { state.items.map { it.uri } }
+                    // gesture). The hit-test reads the grid's own viewportStartOffset, so the large top
+                    // content padding under the floating header is handled without a manual offset.
+                    // Selectable keys in grid order: the hidden cloud photos (prefixed) come first, then
+                    // the device photos (keyed by uri), matching the two groups' layout below, so a
+                    // drag sweep runs contiguously across both. Album rows + headers stay out of the map.
+                    val selectableKeys = remember(state.hiddenCloudPhotos, state.items) {
+                        state.hiddenCloudPhotos.map { HIDDEN_CLOUD_SELECTION_PREFIX + it.linkId } +
+                            state.items.map { it.uri }
+                    }
                     val keyToIndex = remember(selectableKeys) {
                         selectableKeys.mapIndexed { i, k -> k to i }.toMap()
+                    }
+                    // The one selection the drag-select reads: device uris plus the prefixed cloud keys,
+                    // so a sweep extends across both groups. setSelectionFromKeys splits it back into the
+                    // two VM sets on every change.
+                    val selectionKeys = remember(state.selectedUris, state.selectedCloudLinkIds) {
+                        state.selectedUris + state.selectedCloudLinkIds.map { HIDDEN_CLOUD_SELECTION_PREFIX + it }
                     }
                     // Armed at the long-press anchor so the cell's release-tap skips toggling the
                     // just-selected cell back off (otherwise a stationary long-press would select
@@ -312,24 +340,114 @@ fun HiddenAlbumScreen(
                         gridState = gridState,
                         items = selectableKeys,
                         indexByKey = keyToIndex,
-                        selected = state.selectedUris,
-                        onSelectionChange = viewModel::setSelectedUris,
+                        selected = selectionKeys,
+                        onSelectionChange = viewModel::setSelectionFromKeys,
                         tapGuard = tapGuard,
                     )
                     LazyVerticalGrid(
                         columns = GridCells.Fixed(cols),
                         state = gridState,
-                        contentPadding = PaddingValues(8.dp, contentTopPad, 8.dp, 100.dp + navBottom),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                        contentPadding = PaddingValues(
+                            start = if (seamless) 0.dp else 8.dp,
+                            top = contentTopPad,
+                            end = if (seamless) 0.dp else 8.dp,
+                            bottom = 100.dp + navBottom,
+                        ),
+                        horizontalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 4.dp),
+                        verticalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 4.dp),
                         modifier = Modifier.fillMaxSize().then(dragMod),
                     ) {
+                        // Hidden cloud albums lead the grid as full-span rows above the photos.
+                        // Their keys aren't in keyToIndex, so the drag-select gesture skips them.
+                        if (state.hiddenAlbums.isNotEmpty()) {
+                            item(span = { GridItemSpan(maxLineSpan) }, key = "hidden_albums_header") {
+                                Text(
+                                    stringResource(R.string.hidden_albums_section),
+                                    color = FgPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
+                                )
+                            }
+                            items(
+                                state.hiddenAlbums.chunked(2),
+                                span = { GridItemSpan(maxLineSpan) },
+                                key = { row -> "hidden_album_row_" + row.joinToString("_") { it.linkId } },
+                            ) { row ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                ) {
+                                    row.forEach { album ->
+                                        HiddenAlbumCard(
+                                            album = album,
+                                            onOpen = { onOpenAlbum(album) },
+                                            onUnhide = { viewModel.unhideAlbum(album.linkId) },
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                    }
+                                    if (row.size == 1) Spacer(Modifier.weight(1f))
+                                }
+                            }
+                        }
+                        // Individually-hidden cloud photos as their own labelled group. Each cell
+                        // decrypts its thumbnail on demand (CloudPhotoCell queues the decrypt on
+                        // compose, cancels on dispose) and reads the decrypted url from the shared
+                        // thumbnail store. Their keys are in keyToIndex, so the grid drag-select picks
+                        // them exactly like the device tiles; tapping opens the viewer, and a long-press
+                        // (or a tap in selection mode) selects for a batch reveal from the bottom dock.
+                        if (state.hiddenCloudPhotos.isNotEmpty()) {
+                            item(span = { GridItemSpan(maxLineSpan) }, key = "hidden_cloud_photos_header") {
+                                Text(
+                                    stringResource(R.string.hidden_cloud_photos_section),
+                                    color = FgPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
+                                )
+                            }
+                            itemsIndexed(
+                                state.hiddenCloudPhotos,
+                                key = { _, photo -> HIDDEN_CLOUD_SELECTION_PREFIX + photo.linkId },
+                            ) { index, photo ->
+                                HiddenCloudPhotoCell(
+                                    photo = photo,
+                                    seamless = seamless,
+                                    isSelectionMode = state.isSelectionMode,
+                                    isSelected = photo.linkId in state.selectedCloudLinkIds,
+                                    onClick = {
+                                        // Skip the release-tap that follows a long-press select; it
+                                        // would otherwise toggle the just-anchored cell back off.
+                                        if (tapGuard.value) tapGuard.value = false
+                                        else if (state.isSelectionMode) viewModel.toggleCloudSelection(photo.linkId)
+                                        else {
+                                            val viewerItems = state.hiddenCloudPhotos.map { GalleryItem.CloudOnly(it) }
+                                            onCloudPhotoClick(viewerItems, index)
+                                        }
+                                    },
+                                    onRequestThumbnail = viewModel::requestCloudThumbnailDecrypt,
+                                    onCancelThumbnail = viewModel::cancelCloudThumbnailDecrypt,
+                                )
+                            }
+                        }
+                        // A short "Hidden Photos" sub-heading only when a cloud group sits above the
+                        // device photos, so the device grid reads as its own group.
+                        if (state.items.isNotEmpty() &&
+                            (state.hiddenAlbums.isNotEmpty() || state.hiddenCloudPhotos.isNotEmpty())
+                        ) {
+                            item(span = { GridItemSpan(maxLineSpan) }, key = "hidden_photos_header") {
+                                Text(
+                                    stringResource(R.string.hidden_photos_title),
+                                    color = FgPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
+                                )
+                            }
+                        }
                         itemsIndexed(state.items, key = { _, item -> item.uri }) { index, item ->
                             HiddenPhotoCell(
                                 item = item,
                                 hasCloudCounterpart = item.uri in state.backedUpUris,
                                 isSelectionMode = state.isSelectionMode,
                                 isSelected = item.uri in state.selectedUris,
+                                seamless = seamless,
                                 onClick = {
                                     // Skip the release-tap that follows a long-press select; it
                                     // would otherwise toggle the just-anchored cell back off.
@@ -429,17 +547,19 @@ private fun HiddenPhotoCell(
     isSelectionMode: Boolean,
     isSelected: Boolean,
     onClick: () -> Unit,
+    // Edge-to-edge grid: square corners on the tile clip and the selection border.
+    seamless: Boolean = false,
 ) {
     Box(
         modifier = Modifier
             .aspectRatio(1f)
-            .clip(RoundedCornerShape(8.dp))
+            .clip(RoundedCornerShape(if (seamless) 0.dp else 8.dp))
             .background(Bg2)
             // The grid owns long-press at its level (drag-to-select), so the cell stays tap-only:
             // in selection mode a tap toggles this cell, otherwise it opens the viewer.
             .clickable { onClick() }
             .then(
-                if (isSelected) Modifier.border(2.5.dp, Accent, RoundedCornerShape(8.dp))
+                if (isSelected) Modifier.border(2.5.dp, Accent, RoundedCornerShape(if (seamless) 0.dp else 8.dp))
                 else Modifier,
             ),
     ) {
@@ -515,6 +635,77 @@ private fun HiddenPhotoCell(
                 }
             }
         }
+    }
+}
+
+/**
+ * A hidden cloud-photo tile. The thumbnail decrypts on demand through [CloudPhotoCell]'s own
+ * request/cancel wiring plus the shared thumbnail store, so nothing is decrypted up front. Tap-only:
+ * the grid-level drag-select owns the long-press, so it behaves exactly like the device hidden tiles.
+ * Tapping opens the viewer over the whole hidden-cloud list; a long-press (or a tap in selection mode)
+ * selects the photo for a batch reveal from the bottom dock.
+ */
+@Composable
+private fun HiddenCloudPhotoCell(
+    photo: CloudPhoto,
+    isSelectionMode: Boolean,
+    isSelected: Boolean,
+    onClick: () -> Unit,
+    onRequestThumbnail: (String) -> Unit,
+    onCancelThumbnail: (String) -> Unit,
+    // Edge-to-edge grid: square corners on the tile clip.
+    seamless: Boolean = false,
+) {
+    CloudPhotoCell(
+        localUri = null,
+        cloudThumbnailUrl = photo.thumbnailUrl,
+        cloudLinkId = photo.linkId,
+        isVideo = photo.mimeType.startsWith("video/"),
+        isSelectionMode = isSelectionMode,
+        isSelected = isSelected,
+        // Tap-only: the grid drag-select owns the long-press, matching the device hidden tiles.
+        onLongClick = null,
+        onClick = onClick,
+        onRequestThumbnail = onRequestThumbnail,
+        onCancelThumbnail = onCancelThumbnail,
+        cornerRadiusDp = if (seamless) 0.dp else 8.dp,
+    )
+}
+
+/**
+ * A hidden cloud-album card. Tapping the card opens the album (its photos still resolve in
+ * AlbumDetail, which queries membership directly). The corner bubble reveals the album by
+ * dropping it from the hidden set, and a long-press does the same as a secondary path.
+ */
+@Composable
+private fun HiddenAlbumCard(
+    album: Album,
+    onOpen: () -> Unit,
+    onUnhide: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(modifier = modifier) {
+        UnifiedAlbumCard(
+            coverModel = album.coverThumbnailUrl,
+            title = album.name,
+            metaText = pluralStringResource(
+                R.plurals.count_items_plural, album.photoCount, album.photoCount,
+            ),
+            cloudBadge = AlbumCloudBadge.Cloud,
+            onClick = onOpen,
+            onLongClick = onUnhide,
+        )
+        IconBubble(
+            icon = Icons.Default.Visibility,
+            contentDescription = stringResource(R.string.albums_unhide_album),
+            onClick = onUnhide,
+            diameter = 32.dp,
+            iconSize = 17.dp,
+            background = PillBgOpaque,
+            borderColor = PillBorder,
+            tint = Accent,
+            modifier = Modifier.align(Alignment.TopEnd).padding(6.dp),
+        )
     }
 }
 

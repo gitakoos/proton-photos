@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -72,6 +72,10 @@ data class PhotoListingEntity(
     val encXAttr: String? = null,
     /** Set once the GPS backfill has processed this row, so it is never reprocessed. */
     val gpsChecked: Boolean = false,
+    /** Video length in MILLISECONDS, recovered from the xAttr Media.Duration block (stored there in
+     *  seconds, converted on parse). Populated for our own uploads at pairing time and for every other
+     *  video by the bounded background duration backfill. Null for images and for rows not yet walked. */
+    val durationMs: Long? = null,
 ) {
     fun toDomain() = CloudPhoto(
         linkId = linkId,
@@ -85,5 +89,6 @@ data class PhotoListingEntity(
         revisionId = revisionId,
         contentHash = contentHash,
         tags = if (tagsCsv.isEmpty()) emptySet() else tagsCsv.split(',').mapNotNull { it.toIntOrNull() }.toSet(),
+        durationMs = durationMs,
     )
 }

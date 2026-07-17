@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -32,6 +32,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.retryWhen
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
@@ -307,6 +308,15 @@ class PhotoStreamService @Inject constructor(
         // its ceiling. flowOn(Default) keeps the per-row map off the collector's Main thread.
         photoListingDao.observeOwnStreamLite(userId.id)
             .map { list -> list.map { it.toDomain() } }
+            .retryWhen { cause, attempt ->
+                // A DAO read that lands mid-write can throw an IllegalStateException: the framework
+                // CursorWindow refills a result whose table was written concurrently (a cloud delete
+                // landing mid-sync). Re-subscribe (re-run the query) rather than terminating the
+                // timeline flow, with a capped backoff so a persistent failure cannot spin.
+                android.util.Log.w(TAG, "cloud photo stream read failed (attempt $attempt), retrying: ${cause.message}")
+                delay((300L * (attempt + 1)).coerceAtMost(3_000L))
+                attempt < 5
+            }
             .flowOn(Dispatchers.Default)
 
     fun observePhotosByLinkIds(linkIds: List<String>): Flow<List<CloudPhoto>> =
@@ -712,7 +722,11 @@ class PhotoStreamService @Inject constructor(
                         // enough crypto ops pile up. Cache-cleared installs still walk the full
                         // path (no cache hits possible), but the steady-state app launch with
                         // existing local cache touches almost no Go code at all.
-                        val existingByLinkId = photoListingDao.getByLinkIds(chunkLinkIds).associateBy { it.linkId }
+                        // Empty on a read failure: the chunk's rows are then treated as new and
+                        // rebuilt, never aborting the refresh over one unreadable batch.
+                        val existingByLinkId = runCatching {
+                            photoListingDao.getByLinkIds(chunkLinkIds).associateBy { it.linkId }
+                        }.getOrElse { emptyMap() }
                         for (stub in chunk) {
                             val cached = existingByLinkId[stub.linkId]
                             // Reuse an existing row when its decrypted thumbnail is still on disk OR it's a
@@ -926,24 +940,32 @@ class PhotoStreamService @Inject constructor(
                 // Stub rows (detail not fetched yet) carry a valid contentHash but are absent from
                 // foundIds when their detail batch failed transiently. Exclude them so a rate-limit
                 // can't make the prune delete the very dedup rows the stub upsert just added.
-                val stubIds = photoListingDao.getIncompleteRows(userId.id).map { it.linkId }.toSet()
-                val toDelete = (existingIds - foundIds - recentUploads - stubIds).toList()
-                    // The debug large-library simulator's synthetic rows aren't in the server
-                    // listing, so a refresh must not prune them out from under an active test.
-                    .let { ids ->
-                        if (eu.akoos.photos.BuildConfig.DEBUG)
-                            ids.filterNot { it.startsWith(LargeLibrarySim.LINK_ID_PREFIX) } else ids
+                // Guarded: if this read ever fails (e.g. a CursorWindow hiccup from a concurrent
+                // delete), skip the prune this pass rather than pruning with an empty stub set.
+                val stubIds = runCatching { photoListingDao.getIncompleteRowLinkIds(userId.id).toSet() }
+                    .getOrElse {
+                        Log.w(TAG, "refreshCloudPhotos: incomplete-rows read failed, skipping stale-entry cleanup this pass: ${it.message}")
+                        null
                     }
-                if (toDelete.isNotEmpty()) {
-                    // Chunk to stay under SQLite's bound-variable limit on a big server-side deletion.
-                    toDelete.chunked(500).forEach { photoListingDao.deleteByLinkIds(it) }
-                    // Forget them in the tracker too — they're confirmed gone from server, so
-                    // they should never be "protected" again on a subsequent refresh.
-                    recentUploadsTracker.forget(toDelete)
-                    Log.d(TAG, "refreshCloudPhotos: removed ${toDelete.size} stale entries " +
-                        "(protected ${recentUploads.size} recent uploads within ${UPLOAD_PROTECTION_WINDOW_MS}ms window)")
+                if (stubIds != null) {
+                    val toDelete = (existingIds - foundIds - recentUploads - stubIds).toList()
+                        // The debug large-library simulator's synthetic rows aren't in the server
+                        // listing, so a refresh must not prune them out from under an active test.
+                        .let { ids ->
+                            if (eu.akoos.photos.BuildConfig.DEBUG)
+                                ids.filterNot { it.startsWith(LargeLibrarySim.LINK_ID_PREFIX) } else ids
+                        }
+                    if (toDelete.isNotEmpty()) {
+                        // Chunk to stay under SQLite's bound-variable limit on a big server-side deletion.
+                        toDelete.chunked(500).forEach { photoListingDao.deleteByLinkIds(it) }
+                        // Forget them in the tracker too: they're confirmed gone from server, so
+                        // they should never be "protected" again on a subsequent refresh.
+                        recentUploadsTracker.forget(toDelete)
+                        Log.d(TAG, "refreshCloudPhotos: removed ${toDelete.size} stale entries " +
+                            "(protected ${recentUploads.size} recent uploads within ${UPLOAD_PROTECTION_WINDOW_MS}ms window)")
+                    }
+                    Log.d(TAG, "refreshCloudPhotos: saved ${foundIds.size} photos")
                 }
-                Log.d(TAG, "refreshCloudPhotos: saved ${foundIds.size} photos")
             } else {
                 Log.d(TAG, "refreshCloudPhotos: partial/resumed pass (fresh=$startedFresh, streamOk=$streamCallSucceeded, failedBatches=$failedBatches) — upserted ${foundIds.size} photos, skipping stale-entry cleanup to avoid data loss")
             }
@@ -969,7 +991,7 @@ class PhotoStreamService @Inject constructor(
 
     /**
      * Fills the detail (name, mime, size, revision, thumbnail material) on rows the full-walk left
-     * as bare stubs because their detail batch failed. ONE bounded pass over [getIncompleteRows]
+     * as bare stubs because their detail batch failed. ONE bounded pass over [getIncompleteRowsLite]
      * only — never a re-walk of the whole listing — and it just upserts the completed rows, so a
      * photo that stays undecryptable is left as a stub (still dedup-safe via its content hash) and
      * not retried in a loop. Mirrors the per-photo build in [doRefreshCloudPhotos]; every completed
@@ -986,7 +1008,11 @@ class PhotoStreamService @Inject constructor(
         accumulatedParentKeys: MutableMap<String, ByteArray>,
         foundIds: MutableSet<String>,
     ) {
-        val incomplete = photoListingDao.getIncompleteRows(userId.id)
+        val incomplete = runCatching { photoListingDao.getIncompleteRowsLite(userId.id) }
+            .getOrElse {
+                Log.w(TAG, "refreshCloudPhotos: incomplete-rows read failed, skipping backfill this pass: ${it.message}")
+                emptyList()
+            }
         if (incomplete.isEmpty()) return
         Log.d(TAG, "refreshCloudPhotos: backfilling ${incomplete.size} incomplete row(s)")
 
@@ -1101,7 +1127,9 @@ class PhotoStreamService @Inject constructor(
 
             // Only photos we don't already have are interesting — new uploads. Tag changes and
             // deletes stay the full refresh's job; this path is purely additive.
-            val existing = photoListingDao.getByLinkIds(page.links.map { it.linkId }).associateBy { it.linkId }
+            val existing = runCatching {
+                photoListingDao.getByLinkIds(page.links.map { it.linkId }).associateBy { it.linkId }
+            }.getOrElse { emptyMap() }
             val newStubs = page.links.filter { existing[it.linkId] == null && !isRecentlyTrashed(it.linkId) }
             if (newStubs.isEmpty()) return
             Log.d(TAG, "refreshNewestPage: ${newStubs.size} new photo(s) on the newest page")

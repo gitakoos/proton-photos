@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -44,6 +44,14 @@ import kotlinx.coroutines.launch
 import me.proton.core.accountmanager.domain.AccountManager
 import me.proton.core.domain.entity.UserId
 import eu.akoos.photos.data.preferences.SettingsKeys
+import eu.akoos.photos.util.MetadataStripConfig
+import eu.akoos.photos.util.ExifHelper
+import eu.akoos.photos.util.StripResult
+import eu.akoos.photos.presentation.common.MultiStripState
+import android.provider.MediaStore
+import android.os.Build
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.entity.GalleryItem
@@ -52,6 +60,9 @@ import eu.akoos.photos.domain.usecase.DeletePhotoUseCase
 import eu.akoos.photos.domain.usecase.ForceUploadLocalUrisUseCase
 import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
 import eu.akoos.photos.presentation.common.SelectionState
+import eu.akoos.photos.presentation.common.UndoController
+import eu.akoos.photos.presentation.common.buildDeleteUndoAction
+import eu.akoos.photos.presentation.common.buildHideUndoAction
 import eu.akoos.photos.presentation.viewer.PublicLinkState
 import eu.akoos.photos.R
 import javax.inject.Inject
@@ -70,6 +81,8 @@ class DeviceFolderDetailViewModel @Inject constructor(
     private val hiddenStorage: eu.akoos.photos.data.hidden.HiddenStorageManager,
     private val driveRepo: DrivePhotoRepository,
     private val publicLink: eu.akoos.photos.presentation.common.PublicLinkController,
+    private val upload: eu.akoos.photos.domain.usecase.UploadPendingUseCase,
+    private val undoController: UndoController,
 ) : ViewModel() {
 
     private val _items = MutableStateFlow<List<GalleryItem>>(emptyList())
@@ -121,9 +134,12 @@ class DeviceFolderDetailViewModel @Inject constructor(
         }
     }
 
-    /** Cancel an in-flight folder back-up — stops the upload worker and clears progress. */
+    /** Stop an in-flight folder back-up and clear this screen's progress, while leaving scheduled
+     *  auto-backup armed. Cooperative: the photo in transit finishes and backs up, remaining queued
+     *  items are not started and stay pending for a later trigger. Never cancels the worker, so the
+     *  in-flight native crypto is never interrupted. */
     fun cancelBackup() {
-        eu.akoos.photos.worker.SyncWorker.cancel(androidx.work.WorkManager.getInstance(context))
+        upload.requestStop()
         _backupTarget.value = emptySet()
     }
 
@@ -339,6 +355,11 @@ class DeviceFolderDetailViewModel @Inject constructor(
      *  HIDDEN_URI_ORIGINAL_NAME_MAP on commit so unhide can restore the original filename. */
     private var pendingHideOriginalNames: List<String> = emptyList()
 
+    /** "privateUri|cloudLinkId" entries for the synced photos in the batch, persisted into
+     *  [SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] on commit so unhide can transplant the existing
+     *  SyncState row onto the restored URI instead of re-uploading a duplicate Drive entry. */
+    private var pendingHideCloudIds: List<String> = emptyList()
+
     private fun selectedGalleryItems(): List<GalleryItem> {
         val sel = selection.value
         return _items.value.filter { localUriOf(it) in sel }
@@ -356,7 +377,13 @@ class DeviceFolderDetailViewModel @Inject constructor(
             _isDeleting.value = true
             try {
                 when (val result = deletePhotoUseCase(userId, items, freeUpSpace, deleteFromCloud)) {
-                    is DeletePhotoUseCase.Result.Success -> selection.clear()
+                    is DeletePhotoUseCase.Result.Success -> {
+                        // No system-trash dialog was needed, so device copies were untouched or removed
+                        // permanently (pre-R): only a cloud trash is reversible, localRecoverable = false.
+                        buildDeleteUndoAction(items, freeUpSpace, deleteFromCloud, hide = false, localRecoverable = false)
+                            ?.let { undoController.offer(it) }
+                        selection.clear()
+                    }
                     is DeletePhotoUseCase.Result.NeedsMediaWritePermission -> {
                         pendingPermissionResult = result
                         _pendingDeleteIntent.value = result.pendingIntent
@@ -370,24 +397,56 @@ class DeviceFolderDetailViewModel @Inject constructor(
     }
 
     /**
-     * Move the selected on-device-only photos into the app's Hidden vault — the same flow the timeline
-     * uses ([GalleryViewModel.hideSelected]): copy each LocalOnly file into app-private storage, then
-     * route through [DeletePhotoUseCase] with `freeUpSpace=true, deleteFromCloud=false, hide=true` so the
-     * MediaStore original is removed (one system-delete dialog on Android 11+). Only LocalOnly photos
-     * qualify: a Synced photo keeps its Drive copy so it can't be vaulted, so it is skipped.
+     * Move the selected photos into the app's Hidden vault or hide them client-side, the same flow the
+     * timeline uses ([GalleryViewModel.hideSelected]). A device-backed photo (device-only or synced) is
+     * copied into app-private storage and routed through [DeletePhotoUseCase] with `freeUpSpace=true,
+     * deleteFromCloud=false, hide=true` so the MediaStore original is removed (one system-delete dialog on
+     * Android 11+); a synced photo also stashes its cloud linkId so unhide can re-pair by id. A cloud-only
+     * photo has no device file, so it hides client-side by linkId. The Drive copy is never touched.
      */
     fun hideSelected() {
-        val hideables = selectedGalleryItems().filterIsInstance<GalleryItem.LocalOnly>()
-        if (hideables.isEmpty()) return
+        val items = selectedGalleryItems()
+        if (items.isEmpty()) return
+        // Only device-only photos move into the vault. A synced (green) photo keeps its device file
+        // in place and hides client-side by its cloud linkId, exactly like a cloud-only photo, so the
+        // shared merge filter drops it everywhere and unhide re-includes it with no re-pairing.
+        val vaultable = items.filterIsInstance<GalleryItem.LocalOnly>()
+        val cloudFilterIds = items.mapNotNull {
+            when (it) {
+                is GalleryItem.Synced    -> it.cloud.linkId
+                is GalleryItem.CloudOnly -> it.cloud.linkId
+                is GalleryItem.LocalOnly -> null
+            }
+        }
         viewModelScope.launch {
             _isDeleting.value = true
             try {
-                // Step 1: copy each on-device file into app-private hidden storage.
+                // Client-side hide for the synced + cloud-only members: add their linkIds to the
+                // hidden set so they drop from every listing. Nothing on Drive changes.
+                if (cloudFilterIds.isNotEmpty()) {
+                    context.settingsDataStore.edit { prefs ->
+                        val existing = prefs[SettingsKeys.HIDDEN_CLOUD_PHOTO_IDS] ?: emptySet()
+                        prefs[SettingsKeys.HIDDEN_CLOUD_PHOTO_IDS] = existing + cloudFilterIds
+                    }
+                }
+                if (vaultable.isEmpty()) {
+                    // Pure cloud-only selection: the client-side hide above is the whole operation.
+                    selection.clear()
+                    return@launch
+                }
+                // Step 1: copy each device file into app-private hidden storage. A synced photo also
+                // stashes its cloud linkId so unhide can re-pair by id instead of re-uploading.
                 val collected = mutableListOf<String>()
                 val folderEntries = mutableListOf<String>()
                 val nameEntries = mutableListOf<String>()
-                for (item in hideables) {
-                    val local = item.local
+                val cloudIdEntries = mutableListOf<String>()
+                for (item in vaultable) {
+                    val local = when (item) {
+                        is GalleryItem.LocalOnly -> item.local
+                        is GalleryItem.Synced    -> item.local
+                        else                     -> continue
+                    }
+                    val cloudLinkId = (item as? GalleryItem.Synced)?.cloud?.linkId
                     val sourceFolder = hiddenStorage.sourceFolderFor(local.uri, local.bucketName)
                     val privateUri = hiddenStorage.store(
                         local.uri, local.displayName, local.mimeType, captureTimeMs = local.dateTaken,
@@ -397,21 +456,27 @@ class DeviceFolderDetailViewModel @Inject constructor(
                         collected += privateUri
                         if (!sourceFolder.isNullOrBlank()) folderEntries += "$privateUri|$sourceFolder"
                         if (local.displayName.isNotBlank()) nameEntries += "$privateUri|${local.displayName}"
+                        if (cloudLinkId != null) cloudIdEntries += "$privateUri|$cloudLinkId"
                     }
                 }
                 if (collected.isEmpty()) return@launch
                 pendingHidePrivateUris = collected
                 pendingHideSourceFolders = folderEntries
                 pendingHideOriginalNames = nameEntries
+                pendingHideCloudIds = cloudIdEntries
 
                 // Step 2: delete the MediaStore originals (one system-delete dialog on Android 11+).
                 val userId = accountManager.getPrimaryUserId().first() ?: run {
                     rollbackPendingHide()
                     return@launch
                 }
-                when (val result = deletePhotoUseCase(userId, hideables, freeUpSpace = true, deleteFromCloud = false, hide = true)) {
+                when (val result = deletePhotoUseCase(userId, vaultable, freeUpSpace = true, deleteFromCloud = false, hide = true)) {
                     is DeletePhotoUseCase.Result.Success -> {
+                        // Snapshot before commitPendingHide() clears the pending list, so Undo restores
+                        // exactly the vault URIs that were just committed.
+                        val hideUris = pendingHidePrivateUris
                         commitPendingHide()
+                        buildHideUndoAction(hideUris)?.let { undoController.offer(it) }
                         selection.clear()
                     }
                     is DeletePhotoUseCase.Result.NeedsMediaWritePermission -> {
@@ -432,9 +497,11 @@ class DeviceFolderDetailViewModel @Inject constructor(
         val uris = pendingHidePrivateUris
         val folderEntries = pendingHideSourceFolders
         val nameEntries = pendingHideOriginalNames
+        val cloudIdEntries = pendingHideCloudIds
         pendingHidePrivateUris = emptyList()
         pendingHideSourceFolders = emptyList()
         pendingHideOriginalNames = emptyList()
+        pendingHideCloudIds = emptyList()
         if (uris.isEmpty()) return
         context.settingsDataStore.edit { prefs ->
             val current = prefs[SettingsKeys.HIDDEN_PHOTO_URIS] ?: emptySet()
@@ -447,6 +514,10 @@ class DeviceFolderDetailViewModel @Inject constructor(
                 val names = prefs[SettingsKeys.HIDDEN_URI_ORIGINAL_NAME_MAP] ?: emptySet()
                 prefs[SettingsKeys.HIDDEN_URI_ORIGINAL_NAME_MAP] = names + nameEntries
             }
+            if (cloudIdEntries.isNotEmpty()) {
+                val cloudIds = prefs[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] ?: emptySet()
+                prefs[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] = cloudIds + cloudIdEntries
+            }
         }
     }
 
@@ -456,6 +527,7 @@ class DeviceFolderDetailViewModel @Inject constructor(
         pendingHidePrivateUris = emptyList()
         pendingHideSourceFolders = emptyList()
         pendingHideOriginalNames = emptyList()
+        pendingHideCloudIds = emptyList()
         for (u in uris) hiddenStorage.delete(u)
     }
 
@@ -476,7 +548,22 @@ class DeviceFolderDetailViewModel @Inject constructor(
                         freeUpSpace = pending.freeUpSpace,
                         hide = pending.hide,
                     )
-                    if (pending.hide) commitPendingHide()
+                    if (pending.hide) {
+                        // Snapshot before commitPendingHide() clears the pending list, then offer Undo.
+                        val hideUris = pendingHidePrivateUris
+                        commitPendingHide()
+                        buildHideUndoAction(hideUris)?.let { undoController.offer(it) }
+                    } else {
+                        // The system trash keeps the local files for ~30 days, so a confirmed delete is
+                        // reversible: localRecoverable = true.
+                        buildDeleteUndoAction(
+                            pending.itemsBeingDeleted,
+                            pending.freeUpSpace,
+                            deleteFromCloud = pending.cloudLinkIds.isNotEmpty(),
+                            hide = false,
+                            localRecoverable = true,
+                        )?.let { undoController.offer(it) }
+                    }
                 }
             }
             selection.clear()
@@ -488,5 +575,110 @@ class DeviceFolderDetailViewModel @Inject constructor(
         pendingPermissionResult = null
         _pendingDeleteIntent.value = null
         rollbackPendingHide()
+    }
+
+    // ── Batch EXIF strip (+ Android 11+ write-permission handshake) ─────────────────────────────
+    // Every folder item is a device file, so the whole selection is strippable (no cloud-only skip),
+    // mirroring the timeline's More -> Strip metadata so the two look and behave the same.
+    private val _multiStripState = MutableStateFlow<MultiStripState>(MultiStripState.Idle)
+    val multiStripState: StateFlow<MultiStripState> = _multiStripState.asStateFlow()
+
+    private val _pendingStripIntent = MutableStateFlow<android.app.PendingIntent?>(null)
+    val pendingStripIntent: StateFlow<android.app.PendingIntent?> = _pendingStripIntent.asStateFlow()
+
+    private var pendingStripConfig: MetadataStripConfig? = null
+    private var pendingStripUris: List<String> = emptyList()
+    private var pendingStripStripped = 0
+    private var pendingStripSkipped = 0
+
+    fun stripMetadataSelected() {
+        val uris = selection.value.toList()
+        if (uris.isEmpty()) return
+        viewModelScope.launch {
+            _multiStripState.value = MultiStripState.Working
+            val prefs = context.settingsDataStore.data.first()
+            val config = MetadataStripConfig(
+                stripGps          = prefs[SettingsKeys.STRIP_GPS] == true,
+                stripCameraInfo   = prefs[SettingsKeys.STRIP_CAMERA_INFO] == true,
+                stripTimestamp    = prefs[SettingsKeys.STRIP_TIMESTAMP] == true,
+                stripSoftwareInfo = prefs[SettingsKeys.STRIP_SOFTWARE_INFO] == true,
+            )
+            if (config.isNoOp) {
+                _multiStripState.value = MultiStripState.Failed(
+                    context.getString(R.string.gallery_enable_metadata_category),
+                )
+                return@launch
+            }
+            runStripPass(config, uris, baseStripped = 0, baseSkipped = 0)
+        }
+    }
+
+    private suspend fun runStripPass(
+        config: MetadataStripConfig,
+        uris: List<String>,
+        baseStripped: Int,
+        baseSkipped: Int,
+    ) {
+        val needsPermission = mutableListOf<String>()
+        val (stripped, failed) = withContext(Dispatchers.IO) {
+            var ok = 0
+            var failedCount = 0
+            for (uri in uris) {
+                when (ExifHelper.stripFieldsInPlace(context, uri, config)) {
+                    is StripResult.Stripped        -> ok++
+                    is StripResult.NeedsPermission  -> needsPermission += uri
+                    is StripResult.Failed          -> failedCount++
+                }
+            }
+            ok to failedCount
+        }
+        val totalStripped = baseStripped + stripped
+        val totalSkipped  = baseSkipped + failed
+        if (needsPermission.isNotEmpty() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            pendingStripConfig   = config
+            pendingStripUris     = needsPermission
+            pendingStripStripped = totalStripped
+            pendingStripSkipped  = totalSkipped
+            _pendingStripIntent.value = MediaStore.createWriteRequest(
+                context.contentResolver, needsPermission.map(android.net.Uri::parse),
+            )
+            _multiStripState.value = MultiStripState.Idle
+            return
+        }
+        selection.clear()
+        _multiStripState.value = MultiStripState.Done(totalStripped, totalSkipped + needsPermission.size)
+    }
+
+    fun onStripPermissionGranted() {
+        val config = pendingStripConfig ?: return
+        val uris = pendingStripUris
+        val baseStripped = pendingStripStripped
+        val baseSkipped = pendingStripSkipped
+        clearPendingStripState()
+        _pendingStripIntent.value = null
+        viewModelScope.launch {
+            _multiStripState.value = MultiStripState.Working
+            runStripPass(config, uris, baseStripped, baseSkipped)
+        }
+    }
+
+    fun clearPendingStripIntent() {
+        val baseStripped = pendingStripStripped
+        val deferred = pendingStripUris.size + pendingStripSkipped
+        clearPendingStripState()
+        _pendingStripIntent.value = null
+        selection.clear()
+        _multiStripState.value = MultiStripState.Done(baseStripped, deferred)
+    }
+
+    private fun clearPendingStripState() {
+        pendingStripConfig = null
+        pendingStripUris = emptyList()
+        pendingStripStripped = 0
+        pendingStripSkipped = 0
+    }
+
+    fun resetMultiStripState() {
+        _multiStripState.value = MultiStripState.Idle
     }
 }

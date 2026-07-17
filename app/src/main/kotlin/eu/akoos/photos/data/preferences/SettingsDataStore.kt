@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -61,6 +61,22 @@ object SettingsKeys {
      *  the fixed square grid. Display-only and limited to the Photos tab. */
     val MOSAIC_GRID = booleanPreferencesKey("mosaic_grid")
 
+    /** When true, the Photos timeline uses an edge-to-edge (seamless) grid: no outer side padding,
+     *  square-cornered tiles, and a hair-thin inter-tile gap. Off by default: the timeline keeps the
+     *  padded, rounded tiles. Display-only and limited to the Photos tab; applies to both the fixed
+     *  and mosaic grids. */
+    val SEAMLESS_GRID = booleanPreferencesKey("seamless_grid")
+
+    /** Albums-tab filter default, an AlbumDisplayFilter ordinal (0 = All, 1 = Cloud, 2 = Local).
+     *  Absent = 0 (All). Applied when [ALBUMS_REMEMBER_LAST_FILTER] is off. */
+    val ALBUMS_DEFAULT_FILTER = intPreferencesKey("albums_default_filter")
+    /** When true, the Albums tab opens on the last filter the user picked ([ALBUMS_LAST_FILTER])
+     *  instead of [ALBUMS_DEFAULT_FILTER]. Off by default. */
+    val ALBUMS_REMEMBER_LAST_FILTER = booleanPreferencesKey("albums_remember_last_filter")
+    /** Last Albums-tab filter the user selected, an AlbumDisplayFilter ordinal. Absent = 0 (All).
+     *  Restored on entry when [ALBUMS_REMEMBER_LAST_FILTER] is on. */
+    val ALBUMS_LAST_FILTER = intPreferencesKey("albums_last_filter")
+
     /** When true (default), the viewer + editor will NOT auto-download cloud full-res
      *  blobs on metered networks. Wifi-only is the data-conscious default; users on
      *  unlimited mobile plans can flip it off in Settings → Sync. Does not affect the
@@ -75,7 +91,6 @@ object SettingsKeys {
     val APP_LOCK_TIMEOUT_MINUTES = intPreferencesKey("app_lock_timeout_minutes")
     val AUTO_FREE_UP = booleanPreferencesKey("auto_free_up")
     val FREE_UP_INTERVAL = stringPreferencesKey("free_up_interval")
-    val FREE_UP_WIFI_ONLY = booleanPreferencesKey("free_up_wifi_only")
     /**
      * 3-state theme mode: "system" | "light" | "dark". Replaces legacy [DARK_MODE] boolean.
      * If absent, falls back to the boolean DARK_MODE; if both absent, defaults to "system".
@@ -104,10 +119,11 @@ object SettingsKeys {
      *  never matters in practice. */
     val UPDATE_LAST_CHECK_MS = longPreferencesKey("update_last_check_ms")
 
-    /** versionName the user dismissed via the "Later" button on the update dialog.
-     *  Cleared (overwritten) when a NEWER version appears, so dismissing 2.0.1 still
-     *  lets 2.0.2 prompt again. */
-    val UPDATE_DISMISSED_VERSION = stringPreferencesKey("update_dismissed_version")
+    /** versionName of an update the last fresh check found still available. Persisted so the
+     *  avatar update indicator survives a relaunch (the dot stays lit while an update exists),
+     *  cleared once a check confirms the app is up to date. Reuses the former dismissed-version
+     *  key slot; there is no permanent per-version dismissal anymore. */
+    val UPDATE_AVAILABLE_VERSION = stringPreferencesKey("update_dismissed_version")
 
     /** User's custom order for the timeline category rail, a CSV of GalleryFilter enum names.
      *  Absent = the default Drive-web order. Reordered by long-pressing a chip and dragging. */
@@ -188,6 +204,19 @@ object SettingsKeys {
     val HIDDEN_URI_ORIGINAL_NAME_MAP = stringSetPreferencesKey("hidden_uri_original_name_map")
 
     /**
+     * mediaUri → capture-date-ms mapping for downloaded files whose MediaStore DATE_TAKEN could
+     * not be persisted, stored as a set of "mediaUri|captureMs" strings (DataStore lacks a Map).
+     * MediaStore only derives DATE_TAKEN from the embedded date for JPEG/HEIF images (and video
+     * mvhd); for a PNG/WebP/GIF download it refuses the column, leaving DATE_TAKEN = 0, so the
+     * file would read as its download date once its cloud twin is gone. The download writes the
+     * real capture date here when the read-back shows the column did not stick, and the local
+     * media scan applies it as the date whenever DATE_TAKEN is 0 — so a downloaded PNG keeps its
+     * true date even after its cloud copy is deleted. Entries for files no longer present are
+     * pruned during the scan, so the map stays bounded.
+     */
+    val DOWNLOAD_DATE_OVERRIDES = stringSetPreferencesKey("download_date_overrides")
+
+    /**
      * User-declared local folder names that aren't backed by an existing MediaStore bucket yet.
      * Shown in Backup Folders so the user can pre-tick a folder and have future photos in it
      * sync automatically. Cleaned up when the same name appears as a populated bucket.
@@ -248,6 +277,15 @@ object SettingsKeys {
      */
     val ALBUM_OPT_IN_MIGRATED = booleanPreferencesKey("album_opt_in_migrated")
 
+    /**
+     * One-shot flag guarding the DataStore → DB import of the legacy [PENDING_ALBUM_ADDS] set into
+     * the explicit upload queue (sync_state.queued + the upload_album_target table). Set true only
+     * after every DB row is written AND the [PENDING_ALBUM_ADDS] key is removed, so a kill mid-import
+     * re-runs cleanly (the DB writes are idempotent). Flipped by
+     * [eu.akoos.photos.data.upload.PendingAlbumAddsImporter].
+     */
+    val PENDING_ALBUM_ADDS_MIGRATED = booleanPreferencesKey("pending_album_adds_migrated")
+
     fun eventAnchorKey(userId: String, volumeId: String) =
         stringPreferencesKey("event_anchor_${userId}_$volumeId")
 
@@ -284,9 +322,11 @@ object SettingsKeys {
     fun pairingSettledKey(userId: String) =
         booleanPreferencesKey("pairing_settled_$userId")
 
-    /** Notification opt-outs. Absent = true (shown). Producers read these before posting; the
-     *  Notifications settings screen toggles them. NOTIFY_BACKUP_STATUS also controls whether the
-     *  persistent background-sync service runs at all (it cannot be foreground without a notification). */
+    /** Notification preferences. Producers read these before posting; the Notifications settings
+     *  screen toggles them. NOTIFY_ALBUM_DOWNLOAD and NOTIFY_DELETE_REMINDER are opt-OUTS: absent =
+     *  true (shown). NOTIFY_BACKUP_STATUS is the opposite, an opt-IN: absent = false (hidden), since
+     *  it also controls whether the persistent background-sync service runs at all (it cannot be
+     *  foreground without a notification) and backup runs without it either way. */
     val NOTIFY_BACKUP_STATUS = booleanPreferencesKey("notify_backup_status")
     val NOTIFY_ALBUM_DOWNLOAD = booleanPreferencesKey("notify_album_download")
     val NOTIFY_DELETE_REMINDER = booleanPreferencesKey("notify_delete_reminder")
@@ -297,9 +337,28 @@ object SettingsKeys {
     val STRIP_TIMESTAMP = booleanPreferencesKey("strip_timestamp")
     val STRIP_SOFTWARE_INFO = booleanPreferencesKey("strip_software_info")
     val STRIP_ON_UPLOAD = booleanPreferencesKey("strip_on_upload")
+    /** When true, the upload pipeline re-encodes each photo to a lighter JPEG before sending it to
+     *  Drive, trading some image quality for a smaller cloud footprint. The on-device original is
+     *  never touched. Off by default. The [COMPRESS_UPLOAD_TIER] ordinal picks how aggressive the
+     *  re-encode is. */
+    val COMPRESS_ON_UPLOAD = booleanPreferencesKey("compress_on_upload")
+    /** When true, the upload pipeline transcodes each video to a smaller copy before sending it to
+     *  Drive, trading some quality for a smaller cloud footprint. Separate opt-in from
+     *  [COMPRESS_ON_UPLOAD]; both share [COMPRESS_UPLOAD_TIER]. The on-device original is never
+     *  touched. Off by default. */
+    val COMPRESS_VIDEO_ON_UPLOAD = booleanPreferencesKey("compress_video_on_upload")
+    /** Ordinal of the selected compression tier, mapping to an [eu.akoos.photos.domain.entity.UploadCompressionTier]
+     *  value. Absent = the Balanced default. Consulted by both the photo ([COMPRESS_ON_UPLOAD]) and
+     *  the video ([COMPRESS_VIDEO_ON_UPLOAD]) path. */
+    val COMPRESS_UPLOAD_TIER = intPreferencesKey("compress_upload_tier")
     /** When true, "strip on upload" also wipes the on-device original (with MANAGE_MEDIA), so the
      *  backed-up copy and the local file stay byte-identical and pair by content hash. */
     val MIRROR_STRIP_TO_LOCAL = booleanPreferencesKey("mirror_strip_to_local")
+    /** When true, "compress on upload" also replaces the on-device original with the lighter
+     *  re-encode (with all-files access), so the backed-up copy and the local file stay identical.
+     *  The full-quality original is overwritten. Persisted only for now; the upload pipeline wires
+     *  it in a later change. */
+    val MIRROR_COMPRESS_TO_LOCAL = booleanPreferencesKey("mirror_compress_to_local")
     /** When true, the upload pipeline derives a new filename from the source's capture
      *  timestamp before sending bytes to Drive — e.g. `IMG_2841.jpg` → `2026-05-29_14-32-08.jpg`.
      *  Cloud-side `displayName` reflects the new name; the on-device file is untouched.
@@ -319,9 +378,29 @@ object SettingsKeys {
      * but could not — typically Android 11+ foreign owned items where the worker has no
      * Activity to drive `MediaStore.createDeleteRequest` consent. The next time the
      * user is in the foreground we drain this set through a batched delete request so
-     * the device file actually goes away instead of silently surviving.
+     * the device file actually goes away instead of silently surviving. Capped at
+     * [PENDING_DELETE_URIS_MAX] so a queue the user never consents to can't grow without bound.
      */
     val PENDING_DELETE_URIS = stringSetPreferencesKey("pending_delete_uris")
+
+    /** Ceiling on [PENDING_DELETE_URIS] so a consent the user never grants can't grow the set
+     *  unbounded. Once reached, the longest-waiting entries are dropped rather than queued on. */
+    const val PENDING_DELETE_URIS_MAX = 200
+
+    /**
+     * Just-created but uncommitted Drive file nodes whose best-effort cleanup delete failed at the
+     * time of a non-retryable upload failure. Each entry is "shareId|linkId" (the two ids the
+     * share-scoped delete_multiple endpoint needs; '|' separator since a Drive linkId is base64 and
+     * can end in '=' padding). The next upload pass drains this set and retries the delete for each,
+     * removing an entry once the server confirms it, so a failed cleanup never leaves an invisible
+     * orphan node wasting the user's Drive quota. Capped at [PENDING_ORPHAN_DELETES_MAX] so a
+     * persistent failure can't grow it without bound.
+     */
+    val PENDING_ORPHAN_DELETES = stringSetPreferencesKey("pending_orphan_deletes")
+
+    /** Ceiling on [PENDING_ORPHAN_DELETES] so a persistent delete failure can't grow the set
+     *  unbounded. Once reached, further failed cleanups are dropped rather than queued. */
+    const val PENDING_ORPHAN_DELETES_MAX = 200
 
     // Hidden album — stores URIs of photos hidden from main gallery
     val HIDDEN_PHOTO_URIS = stringSetPreferencesKey("hidden_photo_uris")
@@ -366,6 +445,11 @@ object SettingsKeys {
      *  Drive backups on Proton's side, only the local viewing cache. */
     val CLEAR_CACHE_ON_APP_CLOSE = booleanPreferencesKey("clear_cache_on_app_close")
 
+    /** Opt-in: when true, a foreground watcher shows a quick-action bar over a freshly taken
+     *  screenshot (edit, share, upload to Drive, make a link). Off by default; needs the
+     *  draw-over-other-apps permission. */
+    val SCREENSHOT_OVERLAY_ENABLED = booleanPreferencesKey("screenshot_overlay_enabled")
+
     /** When true, the Photos timeline hides every cloud photo whose linkId appears
      *  in the album-photo-membership table. The user treats the main feed as an
      *  "unfiled" inbox: once a photo is sorted into an album it disappears from
@@ -389,6 +473,19 @@ object SettingsKeys {
     /** Cloud album linkIds individually hidden from the timeline (per-album toggle), separate from
      *  the [HIDE_PHOTOS_IN_ALBUMS] master switch which hides photos in ALL albums at once. */
     val TIMELINE_EXCLUDED_ALBUM_IDS = stringSetPreferencesKey("timeline_excluded_album_ids")
+    /** Cloud album linkIds hidden as a private album, client-side only (Proton has no custom tags).
+     *  Unlike [TIMELINE_EXCLUDED_ALBUM_IDS] this hides the album's photos EVERYWHERE (timeline,
+     *  search, map, calendar, memories, folders) and removes the album card from the Albums list;
+     *  the album is reachable only through the biometric-gated hidden area. Nothing is deleted or
+     *  modified on Drive, so a hidden album stays intact and reappears on unhide. */
+    val HIDDEN_ALBUM_IDS = stringSetPreferencesKey("hidden_album_ids")
+
+    /** Cloud photo linkIds individually hidden, client-side only (Proton has no custom tags). Holds
+     *  single CloudOnly photos the user hid one by one, the per-photo companion to [HIDDEN_ALBUM_IDS].
+     *  Folded into the same hidden-linkId set the gallery choke point drops, so a hidden cloud photo
+     *  disappears from timeline, search, map, calendar, memories and folders at once. Nothing is
+     *  deleted or modified on Drive, so it reappears on unhide. */
+    val HIDDEN_CLOUD_PHOTO_IDS = stringSetPreferencesKey("hidden_cloud_photo_ids")
 
     // Favorites — stores URIs (local) or linkIds (cloud) of favorited photos
     val FAVORITE_IDS = stringSetPreferencesKey("favorite_ids")

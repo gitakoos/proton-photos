@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -41,6 +41,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import me.proton.core.accountmanager.domain.AccountManager
+import eu.akoos.photos.data.db.dao.AlbumPhotoMembershipDao
 import eu.akoos.photos.data.db.dao.PhotoListingDao
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
@@ -69,6 +70,7 @@ object PhotoWidgetUpdater {
         fun thumbnailScheduler(): ThumbnailDecryptScheduler
         fun photoListingDao(): PhotoListingDao
         fun accountManager(): AccountManager
+        fun albumPhotoMembershipDao(): AlbumPhotoMembershipDao
     }
 
     // ── Public entry point ────────────────────────────────────────────────────
@@ -93,10 +95,11 @@ object PhotoWidgetUpdater {
             val selectedLinkIds = if (selectedLinkIdsRaw.isBlank()) emptyList()
                                   else selectedLinkIdsRaw.split(PhotoWidgetKeys.URI_SEPARATOR)
             val albumName       = prefs[PhotoWidgetKeys.ALBUM_NAME]?.takeIf { it.isNotBlank() }
+            val cloudAlbumLinkId = prefs[PhotoWidgetKeys.CLOUD_ALBUM_LINK_ID]?.takeIf { it.isNotBlank() }
             val currentIndex    = prefs[PhotoWidgetKeys.CURRENT_INDEX] ?: 0
 
             // 2. Resolve the photo list for this mode
-            val photos = resolvePhotos(context, mode, selectedUris, albumName, selectedLinkIds)
+            val photos = resolvePhotos(context, mode, selectedUris, albumName, selectedLinkIds, cloudAlbumLinkId)
             if (photos.isEmpty()) {
                 clearBitmapState(context, glanceId, appWidgetId)
                 return@withContext
@@ -113,7 +116,8 @@ object PhotoWidgetUpdater {
 
             // 4. Load, scale, save bitmap to private cache
             val bitmap = when (mode) {
-                WidgetMode.CLOUD_SELECTED -> loadScaledBitmapFromCloudCache(context, photoRef)
+                WidgetMode.CLOUD_SELECTED,
+                WidgetMode.CLOUD_ALBUM     -> loadScaledBitmapFromCloudCache(context, photoRef)
                 else                       -> loadScaledBitmap(context, photoRef)
             }
             val cachePath = if (bitmap != null) {
@@ -174,6 +178,7 @@ object PhotoWidgetUpdater {
         selectedUris: List<String>,
         albumName: String?,
         selectedLinkIds: List<String>,
+        cloudAlbumLinkId: String?,
     ): List<String> = when (mode) {
         WidgetMode.SELECTED        -> selectedUris.ifEmpty { queryAllImages(context) }
         WidgetMode.ALBUM           -> albumName?.let { queryAlbumImages(context, it) } ?: queryAllImages(context)
@@ -186,6 +191,21 @@ object PhotoWidgetUpdater {
         WidgetMode.CLOUD_SELECTED  -> {
             val hiddenCloudIds = hiddenCloudLinkIds(context)
             selectedLinkIds.filterNot { it in hiddenCloudIds }
+        }
+        // Follow-the-album: read the chosen album's CURRENT member linkIds live from the local
+        // membership rows every cycle, so photos added to the album after setup appear. Strips
+        // the same hidden→cloudId set as CLOUD_SELECTED to keep hidden photos off the home screen.
+        WidgetMode.CLOUD_ALBUM     -> {
+            val memberLinkIds = cloudAlbumLinkId?.let { albumId ->
+                val deps = runCatching {
+                    EntryPointAccessors.fromApplication(context.applicationContext, CloudDeps::class.java)
+                }.getOrNull()
+                deps?.let {
+                    runCatching { it.albumPhotoMembershipDao().getPhotoLinkIds(albumId) }.getOrNull()
+                }
+            } ?: emptyList()
+            val hiddenCloudIds = hiddenCloudLinkIds(context)
+            memberLinkIds.filterNot { it in hiddenCloudIds }
         }
     }
 

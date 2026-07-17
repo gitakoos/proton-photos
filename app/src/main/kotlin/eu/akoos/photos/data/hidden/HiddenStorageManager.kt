@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -29,6 +29,8 @@ import android.os.Build
 import android.provider.MediaStore
 import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
+import eu.akoos.photos.util.ExifHelper
+import eu.akoos.photos.util.Mp4CreationTime
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -193,9 +195,9 @@ class HiddenStorageManager @Inject constructor(
             //
             // Strategy: pull DateTimeOriginal out of the hidden file's EXIF. JPEG / HEIC
             // images that came through our backup pipeline carry the original timestamp
-            // even after a hide/unhide round-trip. Videos rarely have an EXIF block —
-            // accept that they fall back to "now" (the alternative is parsing MP4 atoms,
-            // disproportionate effort).
+            // even after a hide/unhide round-trip. Videos rarely have an EXIF block, so their
+            // capture time comes from the filename suffix; whatever value is found is written
+            // back into the file's mvhd/EXIF below so the scanner keeps it.
             // 1. Filename-encoded capture time wins — that's what we stashed at hide time
             //    via [store]'s captureTimeMs param, covering PNG/WebP/Screenshot/Video
             //    where EXIF DateTimeOriginal is absent. Format: "<uuid>__<ms>.<ext>".
@@ -217,6 +219,18 @@ class HiddenStorageManager @Inject constructor(
                         fmt.parse(dt)?.time
                     }
             }.getOrNull() else null
+
+            // Write the recovered capture time into the file's embedded metadata (mvhd for video,
+            // EXIF for image) BEFORE it is copied back, so MediaStore derives DATE_TAKEN from the
+            // original instead of the restore-time file mtime on strict scanners. Mirrors the download
+            // path; without it a hidden video (which usually has no EXIF) restores at "today".
+            if (captureTimeMs != null && captureTimeMs > 0L) {
+                if (isVideo) {
+                    Mp4CreationTime.stamp(srcFile, captureTimeMs)
+                } else {
+                    ExifHelper.stampDateTakenIfMissing(srcFile, captureTimeMs)
+                }
+            }
 
             // Restore the file to exactly where it came from. [albumFolderName] is the full original
             // RELATIVE_PATH stashed at hide time (e.g. "DCIM/Camera", "Pictures/Vacation", or an app's

@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -118,6 +118,7 @@ import eu.akoos.photos.data.db.dao.PerceptualHashDao
 import eu.akoos.photos.data.db.dao.PhotoListingDao
 import eu.akoos.photos.data.db.dao.PhotoLocationDao
 import eu.akoos.photos.data.db.dao.SyncStateDao
+import eu.akoos.photos.data.db.dao.UploadAlbumTargetDao
 import eu.akoos.photos.data.db.entity.AlbumPhotoMembershipEntity
 import eu.akoos.photos.data.db.entity.CloudAlbumEntity
 import eu.akoos.photos.data.db.entity.DayMetaEntity
@@ -126,6 +127,7 @@ import eu.akoos.photos.data.db.entity.PerceptualHashEntity
 import eu.akoos.photos.data.db.entity.PhotoListingEntity
 import eu.akoos.photos.data.db.entity.PhotoLocationEntity
 import eu.akoos.photos.data.db.entity.SyncStateEntity
+import eu.akoos.photos.data.db.entity.UploadAlbumTargetEntity
 
 @TypeConverters(
     CommonConverters::class,
@@ -149,6 +151,7 @@ import eu.akoos.photos.data.db.entity.SyncStateEntity
         LocalTagEntity::class,
         PhotoLocationEntity::class,
         PerceptualHashEntity::class,
+        UploadAlbumTargetEntity::class,
         // Account
         AccountEntity::class,
         AccountMetadataEntity::class,
@@ -188,7 +191,7 @@ import eu.akoos.photos.data.db.entity.SyncStateEntity
         // Telemetry
         TelemetryEventEntity::class,
     ],
-    version = 14,
+    version = 16,
     exportSchema = true,
 )
 abstract class AppDatabase : BaseDatabase(),
@@ -216,6 +219,7 @@ abstract class AppDatabase : BaseDatabase(),
     abstract fun localTagDao(): LocalTagDao
     abstract fun photoLocationDao(): PhotoLocationDao
     abstract fun perceptualHashDao(): PerceptualHashDao
+    abstract fun uploadAlbumTargetDao(): UploadAlbumTargetDao
 
     abstract override fun accountDao(): AccountDao
     abstract override fun sessionDao(): SessionDao

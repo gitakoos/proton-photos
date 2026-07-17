@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -23,11 +23,15 @@
 package eu.akoos.photos.worker
 
 import android.content.Context
+import android.util.Log
+import androidx.datastore.preferences.core.edit
 import androidx.hilt.work.HiltWorker
 import androidx.work.Constraints
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
+import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
@@ -35,12 +39,14 @@ import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import kotlinx.coroutines.flow.first
 import me.proton.core.accountmanager.domain.AccountManager
+import eu.akoos.photos.data.preferences.SettingsKeys
+import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.usecase.FreeUpSpaceUseCase
 import java.util.concurrent.TimeUnit
 
 @HiltWorker
 class FreeUpSpaceWorker @AssistedInject constructor(
-    @Assisted context: Context,
+    @Assisted private val context: Context,
     @Assisted params: WorkerParameters,
     private val freeUpSpace: FreeUpSpaceUseCase,
     private val accountManager: AccountManager,
@@ -48,10 +54,28 @@ class FreeUpSpaceWorker @AssistedInject constructor(
 
     override suspend fun doWork(): Result {
         val userId = accountManager.getPrimaryUserId().first() ?: return Result.failure()
-        val intervalMs = inputData.getLong(KEY_INTERVAL_MS, DEFAULT_INTERVAL_MS)
+        val intervalMs = inputData.getLong(KEY_INTERVAL_MS, NO_INTERVAL_MS)
+        if (!isUsableInterval(intervalMs)) {
+            Log.w(TAG, "Skipping sweep: request carries no usable interval ($intervalMs)")
+            return Result.failure()
+        }
         val olderThanMs = System.currentTimeMillis() - intervalMs
         return try {
-            freeUpSpace(userId, olderThanMs)
+            // The automatic sweep protects copies the user placed on the device (downloads, undone
+            // deletes); only the manual button reclaims those.
+            when (val result = freeUpSpace(userId, olderThanMs, protectDownloaded = true)) {
+                is FreeUpSpaceUseCase.FreeUpResult.Done ->
+                    Log.d(TAG, "Sweep reclaimed ${result.freed} photo(s)")
+                is FreeUpSpaceUseCase.FreeUpResult.NeedsPermission -> {
+                    // A worker has no Activity to drive the system delete dialog, so the URIs go on
+                    // the batched consent queue that the foreground handler drains.
+                    context.settingsDataStore.edit { p ->
+                        val existing = p[SettingsKeys.PENDING_DELETE_URIS] ?: emptySet()
+                        p[SettingsKeys.PENDING_DELETE_URIS] = existing + result.localUris
+                    }
+                    Log.d(TAG, "Sweep queued ${result.localUris.size} photo(s) for batched consent dialog")
+                }
+            }
             Result.success()
         } catch (e: Exception) {
             // Categorise failures so we only burn the retry budget on transient ones.
@@ -59,8 +83,8 @@ class FreeUpSpaceWorker @AssistedInject constructor(
             // access for a foreign-owned URI, the SAF tree we picked got abandoned by
             // the OS) won't fix themselves on the next attempt — three retries against
             // a permanent error just chews battery and timer slots for nothing.
-            // Transient failures (IO error, network blip during a cloud-status check,
-            // database lock contention) get the existing 3-attempt budget.
+            // Transient failures (IO error, database lock contention) get the existing
+            // 3-attempt budget.
             val isPermanent = e is SecurityException ||
                 e is IllegalStateException ||
                 e is java.io.FileNotFoundException
@@ -70,18 +94,42 @@ class FreeUpSpaceWorker @AssistedInject constructor(
 
     companion object {
         const val TAG = "free_up_worker"
+        private const val NAME_ONESHOT = "free_up_worker_oneshot"
         const val KEY_INTERVAL_MS = "interval_ms"
-        const val DEFAULT_INTERVAL_MS = 0L
 
-        fun schedule(workManager: WorkManager, wifiOnly: Boolean = true, intervalMs: Long = 0L) {
-            val networkType = if (wifiOnly) NetworkType.UNMETERED else NetworkType.CONNECTED
+        /** Read-back sentinel for input data that carries no [KEY_INTERVAL_MS] at all. */
+        internal const val NO_INTERVAL_MS = -1L
+
+        /**
+         * Whether [intervalMs] is an age the sweep may enforce: true only for a strictly positive
+         * value. Pure and side-effect-free so the interval gate can be pinned by a plain JVM test.
+         *
+         * An age of zero puts the cutoff at "now", which matches every backed-up photo, so a
+         * regression here reclaims the device copy of a whole library in one sweep. A request
+         * carrying no usable interval is refused rather than run against a guessed one: reclaiming
+         * a device copy is irreversible, so a sweep nobody asked for is worse than no sweep.
+         */
+        fun isUsableInterval(intervalMs: Long): Boolean = intervalMs > 0L
+
+        /**
+         * The constraint set every scheduled sweep runs under. Pure and side-effect-free so it can
+         * be pinned by a plain JVM test.
+         *
+         * The reclaim is a local MediaStore delete driven by already-persisted sync state, so a
+         * network constraint would only stop the sweep running offline.
+         */
+        fun sweepConstraints(): Constraints = Constraints.Builder()
+            .setRequiredNetworkType(NetworkType.NOT_REQUIRED)
+            .setRequiresBatteryNotLow(true)
+            .build()
+
+        /**
+         * [intervalMs] is how long a photo must have been backed up before its device copy may be
+         * reclaimed, and has no default: every scheduled sweep states the age it enforces.
+         */
+        fun schedule(workManager: WorkManager, intervalMs: Long) {
             val request = PeriodicWorkRequestBuilder<FreeUpSpaceWorker>(1, TimeUnit.HOURS)
-                .setConstraints(
-                    Constraints.Builder()
-                        .setRequiredNetworkType(networkType)
-                        .setRequiresBatteryNotLow(true)
-                        .build()
-                )
+                .setConstraints(sweepConstraints())
                 .setInputData(
                     androidx.work.Data.Builder()
                         .putLong(KEY_INTERVAL_MS, intervalMs)
@@ -89,7 +137,31 @@ class FreeUpSpaceWorker @AssistedInject constructor(
                 )
                 .addTag(TAG)
                 .build()
-            workManager.enqueueUniquePeriodicWork(TAG, ExistingPeriodicWorkPolicy.KEEP, request)
+            // UPDATE (not KEEP) is essential when the user changes the interval: with KEEP,
+            // WorkManager ignores the new input data because the unique-work entry already exists,
+            // so every later sweep keeps reclaiming on the old age. UPDATE replaces it while
+            // preserving the existing work ID and run history.
+            workManager.enqueueUniquePeriodicWork(TAG, ExistingPeriodicWorkPolicy.UPDATE, request)
+        }
+
+        /**
+         * A one-shot sweep for app foreground. The periodic worker fires only hourly and an OEM doze
+         * can delay it for hours, so a photo can sit past its age gate long after the app is opened.
+         * Running the same sweep on launch reclaims eligible copies right then. Same [intervalMs] age
+         * gate and [sweepConstraints]; its own unique name (so it never displaces the periodic entry)
+         * with `APPEND_OR_REPLACE` so repeated launches coalesce instead of stacking.
+         */
+        fun runNow(workManager: WorkManager, intervalMs: Long) {
+            val request = OneTimeWorkRequestBuilder<FreeUpSpaceWorker>()
+                .setConstraints(sweepConstraints())
+                .setInputData(
+                    androidx.work.Data.Builder()
+                        .putLong(KEY_INTERVAL_MS, intervalMs)
+                        .build()
+                )
+                .addTag(TAG)
+                .build()
+            workManager.enqueueUniqueWork(NAME_ONESHOT, ExistingWorkPolicy.APPEND_OR_REPLACE, request)
         }
 
         fun cancel(workManager: WorkManager) {

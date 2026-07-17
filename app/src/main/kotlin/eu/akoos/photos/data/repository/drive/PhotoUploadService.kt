@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -32,6 +32,7 @@ import android.util.Base64
 import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -43,7 +44,11 @@ import kotlinx.coroutines.withContext
 import me.proton.core.crypto.common.context.CryptoContext
 import me.proton.core.domain.entity.UserId
 import me.proton.core.network.data.ApiProvider
+import androidx.datastore.preferences.core.edit
+import kotlinx.coroutines.flow.first
 import eu.akoos.photos.data.api.DriveApiService
+import eu.akoos.photos.data.preferences.SettingsKeys
+import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.util.PhotoTagDetector
 import eu.akoos.photos.data.api.dto.BlockUploadInfoDto
 import eu.akoos.photos.data.api.dto.CommitBlockDto
@@ -152,6 +157,9 @@ private suspend fun <T> retryUploadCall(block: suspend (attempt: Int) -> T): T =
         maxAttempts = 5,
         baseMs = 1500,
         maxBackoffMs = 15_000,
+        // Keep the upload path's honoured Retry-After clamped to its own backoff ceiling (unchanged),
+        // rather than the wider default used by the CDN download path.
+        maxServerRetryAfterMs = 15_000,
         shouldRetry = { e ->
             // Class names first (locale-independent, survives translated vendor JVM messages);
             // substring fallback for wrapper paths where Throwable.cause is dropped.
@@ -224,6 +232,7 @@ class PhotoUploadService @Inject constructor(
     private val cryptoHelper: DriveCryptoHelper,
     private val cryptoContext: CryptoContext,
     private val photoListingDao: PhotoListingDao,
+    private val thumbnailUrlStore: ThumbnailUrlStore,
     private val shareService: PhotosShareService,
     private val recentUploadsTracker: RecentUploadsTracker,
     @ApplicationContext private val context: Context,
@@ -255,7 +264,7 @@ class PhotoUploadService @Inject constructor(
             // Privacy: the diagnostics log must never contain a file name. A short, non-reversible
             // ref derived from the source URI lets the per-file log lines (sha1 / setup / CDN) be
             // correlated without revealing what the file is.
-            val logRef = item.uri.hashCode().toUInt().toString(16).padStart(8, '0').take(6)
+            val logRef = eu.akoos.photos.util.uploadLogRef(item.uri)
             // Per-file slot pools so every concurrent upload makes progress on its own budget.
             val cdnUploadSlots = Semaphore(2)
             val encryptSlots = Semaphore(ENCRYPT_PARALLELISM)
@@ -338,20 +347,30 @@ class PhotoUploadService @Inject constructor(
                 nodePublicKeyArmored = m.nodePublicKeyArmored
             } else {
                 // NodePassphrase is encrypted to the PARENT link's public key — the parent is
-                // the photos root, so use the root link's armored key.
-                val nodeKey = cryptoHelper.generateNodeKey()
+                // the photos root, so use the root link's armored key. Each native libgojni call
+                // below is NonCancellable so a cancel can't tear down the Go runtime mid-call; the
+                // shareService key lookups between them stay cancellable.
+                val nodeKey = withContext(NonCancellable) { cryptoHelper.generateNodeKey() }
                 val rootLinkArmoredKey = shareService.rootLinkArmoredKey()
                     ?: run { shareService.getRootLinkKeyBytes(userId); shareService.rootLinkArmoredKey() }
                     ?: error("Root link armored key not available")
-                val rootLinkPublicKey = cryptoHelper.withCryptoLock {
-                    cryptoContext.pgpCrypto.getPublicKey(rootLinkArmoredKey)
+                val rootLinkPublicKey = withContext(NonCancellable) {
+                    cryptoHelper.withCryptoLock {
+                        cryptoContext.pgpCrypto.getPublicKey(rootLinkArmoredKey)
+                    }
                 }
-                val nodePassphraseEncrypted = cryptoHelper.encryptDataToPgpMessage(nodeKey.passphraseBytes, rootLinkPublicKey)
-                val nodePassphraseSignature = cryptoHelper.signData(nodeKey.passphraseBytes, signingKey.unlockedKeyBytes)
+                val nodePassphraseEncrypted = withContext(NonCancellable) {
+                    cryptoHelper.encryptDataToPgpMessage(nodeKey.passphraseBytes, rootLinkPublicKey)
+                }
+                val nodePassphraseSignature = withContext(NonCancellable) {
+                    cryptoHelper.signData(nodeKey.passphraseBytes, signingKey.unlockedKeyBytes)
+                }
 
                 // Name encrypted to the PARENT (root link) key, not the file's node key, and
                 // signed so the web client can verify nameAuthor.
-                val encryptedName = cryptoHelper.encryptName(item.displayName, rootLinkPublicKey, signingKey.unlockedKeyBytes)
+                val encryptedName = withContext(NonCancellable) {
+                    cryptoHelper.encryptName(item.displayName, rootLinkPublicKey, signingKey.unlockedKeyBytes)
+                }
 
                 // Hash = HMAC-SHA256(plaintextName, rootNodeHashKey) for collision detection.
                 // Abort if the key is missing rather than fall back to the SHA-1 content hex,
@@ -360,14 +379,18 @@ class PhotoUploadService @Inject constructor(
                     cryptoHelper.computeNameHash(item.displayName, it)
                 } ?: error("uploadFile: rootNodeHashKey not cached — refusing to upload with a garbage name hash")
 
-                sessionKey = cryptoHelper.generateSessionKey()
+                sessionKey = withContext(NonCancellable) { cryptoHelper.generateSessionKey() }
                 nodePublicKeyArmored = nodeKey.publicKeyArmored
-                val contentKeyPacketBytes = cryptoHelper.encryptSessionKeyToNode(sessionKey, nodePublicKeyArmored)
+                val contentKeyPacketBytes = withContext(NonCancellable) {
+                    cryptoHelper.encryptSessionKeyToNode(sessionKey, nodePublicKeyArmored)
+                }
                 contentKeyPacketBase64 = cryptoHelper.base64Encode(contentKeyPacketBytes)
                 // Sign the RAW session-key bytes, not the PKESK: the web client decrypts the CKP
                 // first then verifies against the plaintext key, so signing the packet yields
                 // "Signed digest did not match".
-                contentKeyPacketSignature = cryptoHelper.signData(sessionKey.key, signingKey.unlockedKeyBytes)
+                contentKeyPacketSignature = withContext(NonCancellable) {
+                    cryptoHelper.signData(sessionKey.key, signingKey.unlockedKeyBytes)
+                }
 
                 // Create the upload file via the volume files endpoint (see the create call below).
                 val fileRequest = CreateFileRequest(
@@ -525,6 +548,13 @@ class PhotoUploadService @Inject constructor(
                             remainingIndices.map { idx ->
                                 async(Dispatchers.IO) {
                                     encryptSlots.withPermit {
+                                        // No cancellation check here on purpose. Once a photo is in
+                                        // flight its encrypt/sign must run to completion: interrupting
+                                        // an in-progress native PGP call (libgojni on Dispatchers.Default)
+                                        // tears down the Go runtime mid-call and crashes the process with
+                                        // a native SIGSEGV. A "stop" only prevents the NEXT queued item
+                                        // from starting (see UploadPendingUseCase.requestStop); it never
+                                        // reaches an already-running block.
                                         val offset = idx.toLong() * blockSize
                                         // Size the buffer to the remaining bytes (final block may be
                                         // short). When sizeBytes is missing (e.g. MediaStore SIZE not
@@ -550,17 +580,23 @@ class PhotoUploadService @Inject constructor(
                                             else buf.array().copyOf(totalRead)
 
                                         // PGP encrypt + sign serialize through the global cryptoLock;
-                                        // pread/sha256/verifier/spill stay parallel.
-                                        val (encBlock, encSig) = cryptoHelper.withCryptoLock {
-                                            val ls = System.currentTimeMillis()
-                                            val eb = cryptoHelper.encryptBlock(chunk, sessionKey)
-                                            val em = System.currentTimeMillis()
-                                            val es = cryptoHelper.signBlockEncrypted(
-                                                chunk, signingKey.unlockedKeyBytes, nodePublicKeyArmored,
-                                            )
-                                            encryptOnlyMs.addAndGet(em - ls)
-                                            signOnlyMs.addAndGet(System.currentTimeMillis() - em)
-                                            eb to es
+                                        // pread/sha256/verifier/spill stay parallel. The native
+                                        // libgojni region is NonCancellable so a coroutine cancel can
+                                        // never land mid-encrypt and tear down the Go runtime (SIGSEGV);
+                                        // everything around it (block read, spill, CDN upload) stays
+                                        // cancellable so Stop still interrupts promptly.
+                                        val (encBlock, encSig) = withContext(NonCancellable) {
+                                            cryptoHelper.withCryptoLock {
+                                                val ls = System.currentTimeMillis()
+                                                val eb = cryptoHelper.encryptBlock(chunk, sessionKey)
+                                                val em = System.currentTimeMillis()
+                                                val es = cryptoHelper.signBlockEncrypted(
+                                                    chunk, signingKey.unlockedKeyBytes, nodePublicKeyArmored,
+                                                )
+                                                encryptOnlyMs.addAndGet(em - ls)
+                                                signOnlyMs.addAndGet(System.currentTimeMillis() - em)
+                                                eb to es
+                                            }
                                         }
                                         val hashBytes = cryptoHelper.sha256(encBlock)
                                         val xorLen = minOf(verificationCodeBytes.size, encBlock.size)
@@ -648,7 +684,7 @@ class PhotoUploadService @Inject constructor(
                 // DEFAULT (512px) for every supported source.
                 runCatching { generateThumbnailBytes(uploadUri, item.mimeType, THUMBNAIL_DEFAULT_MAX_PX) }
                     .getOrNull()?.let { plain ->
-                        runCatching { cryptoHelper.encryptBlock(plain, sessionKey) }.getOrNull()?.let { enc ->
+                        runCatching { withContext(NonCancellable) { cryptoHelper.encryptBlock(plain, sessionKey) } }.getOrNull()?.let { enc ->
                             runCatching { cryptoHelper.sha256(enc) }.getOrNull()?.let { h ->
                                 thumbSpills.add(ThumbSpill(THUMBNAIL_TYPE_DEFAULT, plain, enc, h))
                             }
@@ -658,7 +694,7 @@ class PhotoUploadService @Inject constructor(
                 if (wantPhotoThumbnail) {
                     runCatching { generateImageThumbnailBytes(uploadUri, item.mimeType, THUMBNAIL_PHOTO_MAX_PX, THUMBNAIL_PHOTO_MAX_BYTES) }
                         .getOrNull()?.let { plain ->
-                            runCatching { cryptoHelper.encryptBlock(plain, sessionKey) }.getOrNull()?.let { enc ->
+                            runCatching { withContext(NonCancellable) { cryptoHelper.encryptBlock(plain, sessionKey) } }.getOrNull()?.let { enc ->
                                 runCatching { cryptoHelper.sha256(enc) }.getOrNull()?.let { h ->
                                     thumbSpills.add(ThumbSpill(THUMBNAIL_TYPE_PHOTO, plain, enc, h))
                                 }
@@ -717,6 +753,9 @@ class PhotoUploadService @Inject constructor(
             coroutineScope {
                 sortedUploadLinks.mapIndexed { idx, uploadLink ->
                     async {
+                        // No cancellation check here: an in-flight photo's CDN PUTs run to completion so
+                        // the block encrypted just above is committed rather than abandoned. A "stop"
+                        // only keeps the NEXT queued item from starting (UploadPendingUseCase.requestStop).
                         val info = blockInfos[idx]
                         if (!info.file.exists()) error("upload temp block evicted: ${info.file.absolutePath}")
                         // Same retry envelope as the metadata calls so mid-block SSL/DNS flakes
@@ -808,7 +847,9 @@ class PhotoUploadService @Inject constructor(
                 committedThumbs.forEach { add(it.hash) }
                 addAll(blockInfos.map { it.hashBytes })
             }
-            val manifestSignature = cryptoHelper.signManifest(manifestHashes, signingKey.unlockedKeyBytes)
+            val manifestSignature = withContext(NonCancellable) {
+                cryptoHelper.signManifest(manifestHashes, signingKey.unlockedKeyBytes)
+            }
             val modTime = DateTimeFormatter.ISO_OFFSET_DATE_TIME.withZone(ZoneOffset.UTC)
                 .format(Instant.ofEpochMilli(item.dateTaken))
             // xAttr.BlockSizes carries PLAINTEXT block boundaries so the Drive Web client
@@ -820,23 +861,25 @@ class PhotoUploadService @Inject constructor(
             // the unrotated MediaStore values only when the caller didn't resolve them.
             val xAttrWidth = xAttrMetadata.displayWidth ?: item.width
             val xAttrHeight = xAttrMetadata.displayHeight ?: item.height
-            val xAttr = cryptoHelper.encryptXAttr(
-                modificationTimeIso  = modTime,
-                sizeBytes            = item.sizeBytes,
-                blockSizes           = plaintextBlockSizes,
-                width                = xAttrWidth,
-                height               = xAttrHeight,
-                durationMillis       = item.duration,
-                nodePublicKeyArmored = nodePublicKeyArmored,
-                signerKeyBytes       = signingKey.unlockedKeyBytes,
-                sha1HexDigest        = hash,
-                latitude             = xAttrMetadata.latitude,
-                longitude            = xAttrMetadata.longitude,
-                cameraOrientation    = xAttrMetadata.cameraOrientation,
-                cameraCaptureTimeIso = xAttrMetadata.cameraCaptureTimeIso,
-                cameraDevice         = xAttrMetadata.cameraDevice,
-                subjectCoordinates   = xAttrMetadata.subjectCoordinates,
-            )
+            val xAttr = withContext(NonCancellable) {
+                cryptoHelper.encryptXAttr(
+                    modificationTimeIso  = modTime,
+                    sizeBytes            = item.sizeBytes,
+                    blockSizes           = plaintextBlockSizes,
+                    width                = xAttrWidth,
+                    height               = xAttrHeight,
+                    durationMillis       = item.duration,
+                    nodePublicKeyArmored = nodePublicKeyArmored,
+                    signerKeyBytes       = signingKey.unlockedKeyBytes,
+                    sha1HexDigest        = hash,
+                    latitude             = xAttrMetadata.latitude,
+                    longitude            = xAttrMetadata.longitude,
+                    cameraOrientation    = xAttrMetadata.cameraOrientation,
+                    cameraCaptureTimeIso = xAttrMetadata.cameraCaptureTimeIso,
+                    cameraDevice         = xAttrMetadata.cameraDevice,
+                    subjectCoordinates   = xAttrMetadata.subjectCoordinates,
+                )
+            }
 
             // Use the correct commit endpoint based on how the file was created:
             //   • createFileByVolume (useVolumeEndpoints=true) → commitRevisionByVolume (v2)
@@ -936,8 +979,15 @@ class PhotoUploadService @Inject constructor(
                     sizeBytes    = item.sizeBytes,
                     revisionId   = revisionId,
                     thumbnailUrl = localThumbnailUrl,
+                    // Seed the video length straight from MediaStore (already milliseconds) so our own
+                    // uploads show a duration pill immediately, without waiting for the xAttr backfill.
+                    durationMs   = item.duration.takeIf { item.mimeType.startsWith("video/") && it > 0 },
                 )
             ))
+            // Also seed the in-memory thumbnail store so a CloudOnly cell paints the just-uploaded
+            // thumbnail immediately (e.g. after the device copy is deleted, turning a Synced photo
+            // cloud-only), without waiting for a decrypt or an app relaunch to seed it from the DB.
+            localThumbnailUrl?.let { thumbnailUrlStore.put(fileId, it) }
             Log.d(TAG, "uploadFile: completed fileId=$fileId, persisted to DB")
             // Success: wipe tempDir now that the bytes are committed to the CDN. Done
             // INSIDE the success branch (not a finally) so the failure branches below
@@ -976,12 +1026,82 @@ class PhotoUploadService @Inject constructor(
                             apiProvider.get<DriveApiService>(userId).invoke {
                                 deleteLinks(orphanShare, eu.akoos.photos.data.api.dto.DeleteLinksRequest(listOf(orphan)))
                             }.valueOrThrow
-                        }.onFailure { Log.w(TAG, "uploadFile: orphan node cleanup (deleteLinks $orphan) failed: ${it.message}") }
+                        }.onFailure {
+                            // The cleanup delete itself failed (auth blip, quota, network). Persist the
+                            // node so the next upload pass retries it instead of leaving an invisible
+                            // orphan on Drive forever.
+                            Log.w(TAG, "uploadFile: orphan node cleanup (deleteLinks $orphan) failed: ${it.message}; queuing for retry")
+                            runCatching { enqueuePendingOrphanDelete(orphanShare, orphan) }
+                        }
                     }
                 }
                 throw e
             }
         }
+
+    /** Serialises read-modify-write on the PENDING_ORPHAN_DELETES set so a concurrent enqueue
+     *  (a second failed upload) and the retry-drain don't clobber each other's edits. */
+    private val orphanQueueMutex = Mutex()
+
+    /**
+     * Records a "shareId|linkId" pair whose best-effort orphan delete just failed, so a later pass
+     * can retry it. Capped at [SettingsKeys.PENDING_ORPHAN_DELETES_MAX]: once full, the new entry is
+     * dropped rather than growing the set unbounded on a persistent failure.
+     */
+    private suspend fun enqueuePendingOrphanDelete(shareId: String, linkId: String) {
+        orphanQueueMutex.withLock {
+            context.settingsDataStore.edit { p ->
+                val existing = p[SettingsKeys.PENDING_ORPHAN_DELETES] ?: emptySet()
+                val entry = "$shareId|$linkId"
+                if (entry in existing || existing.size < SettingsKeys.PENDING_ORPHAN_DELETES_MAX) {
+                    p[SettingsKeys.PENDING_ORPHAN_DELETES] = existing + entry
+                }
+            }
+        }
+    }
+
+    /**
+     * Drains [SettingsKeys.PENDING_ORPHAN_DELETES], retrying the share-scoped delete for each queued
+     * node. An entry is removed only once the server confirms the delete; a still-failing one is left
+     * for the next pass. Cheap when the set is empty (one DataStore read, no network). Called at the
+     * start of an upload pass so a cleanup that failed earlier eventually completes without stranding
+     * an invisible orphan node on Drive.
+     */
+    suspend fun retryPendingOrphanDeletes(userId: UserId) {
+        val queued = context.settingsDataStore.data.first()[SettingsKeys.PENDING_ORPHAN_DELETES]
+            ?: emptySet()
+        if (queued.isEmpty()) return
+        Log.d(TAG, "retryPendingOrphanDeletes: draining ${queued.size} queued orphan delete(s)")
+        val manager = apiProvider.get<DriveApiService>(userId)
+        for (entry in queued) {
+            val sep = entry.indexOf('|')
+            if (sep <= 0 || sep == entry.length - 1) {
+                // Malformed entry (should not happen); drop it so it can't wedge the drain.
+                removePendingOrphanDelete(entry)
+                continue
+            }
+            val shareId = entry.substring(0, sep)
+            val linkId = entry.substring(sep + 1)
+            runCatching {
+                manager.invoke {
+                    deleteLinks(shareId, eu.akoos.photos.data.api.dto.DeleteLinksRequest(listOf(linkId)))
+                }.valueOrThrow
+            }.onSuccess {
+                removePendingOrphanDelete(entry)
+                Log.d(TAG, "retryPendingOrphanDeletes: cleaned orphan $linkId")
+            }.onFailure { Log.w(TAG, "retryPendingOrphanDeletes: retry for $linkId failed: ${it.message}") }
+        }
+    }
+
+    /** Removes a single "shareId|linkId" entry from PENDING_ORPHAN_DELETES after its delete lands. */
+    private suspend fun removePendingOrphanDelete(entry: String) {
+        orphanQueueMutex.withLock {
+            context.settingsDataStore.edit { p ->
+                val existing = p[SettingsKeys.PENDING_ORPHAN_DELETES] ?: emptySet()
+                p[SettingsKeys.PENDING_ORPHAN_DELETES] = existing - entry
+            }
+        }
+    }
 
     /**
      * Generates a JPEG thumbnail from the given media URI. Downscales the image so the

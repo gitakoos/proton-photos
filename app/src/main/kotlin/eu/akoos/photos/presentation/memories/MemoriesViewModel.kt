@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -31,12 +31,14 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.R
 import eu.akoos.photos.data.repository.drive.ThumbnailDecryptScheduler
+import eu.akoos.photos.data.repository.drive.ThumbnailUrlStore
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
 import eu.akoos.photos.util.computeOnThisDay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
@@ -66,6 +68,7 @@ class MemoriesViewModel @Inject constructor(
     getGalleryItems: GetGalleryItemsUseCase,
     accountManager: AccountManager,
     private val thumbnailDecryptScheduler: ThumbnailDecryptScheduler,
+    private val thumbnailUrlStore: ThumbnailUrlStore,
     @ApplicationContext private val context: Context,
 ) : ViewModel() {
 
@@ -90,10 +93,41 @@ class MemoriesViewModel @Inject constructor(
                             thumbnailDecryptScheduler.pinCovers(userId, covers)
                         }
                     }
+                    // The cards draw their cover imperatively (a bitmap built outside any Compose
+                    // cell), so the LocalThumbnailUrls CompositionLocal can't reach them. Overlay the
+                    // store's freshly-decrypted URL onto the cloud-only cover items so they render,
+                    // and repaint live when a decrypt lands after the screen opened. The card set is
+                    // a handful of items, so the extra re-emit per store change is cheap.
+                    .combine(thumbnailUrlStore.urls) { state, urls -> state.withThumbnails(urls) }
             }
         }
         .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), MemoriesUiState())
+
+    /** Stamp the store URLs onto every cloud-only cover in this state (both the On-this-day cover
+     *  items and each season cover). Local/Synced covers paint from their local uri and are left as
+     *  is. Only the cover items are rewritten; the full per-year / per-season item lists carry into
+     *  the viewer, which resolves its own thumbnails. */
+    private fun MemoriesUiState.withThumbnails(urls: Map<String, String>): MemoriesUiState {
+        if (urls.isEmpty()) return this
+        return copy(
+            onThisDay = onThisDay.map { (year, items) ->
+                if (items.isEmpty()) year to items
+                else year to (listOf(resolveThumbnail(items.first(), urls)) + items.drop(1))
+            },
+            seasons = seasons.map { it.copy(cover = resolveThumbnail(it.cover, urls)) },
+        )
+    }
+
+    /** Overlay the store URL onto a cloud-only cover; a Local/Synced cover is returned untouched. */
+    private fun resolveThumbnail(item: GalleryItem, urls: Map<String, String>): GalleryItem =
+        if (item is GalleryItem.CloudOnly) {
+            val url = urls[item.cloud.linkId] ?: item.cloud.thumbnailUrl
+            if (url == item.cloud.thumbnailUrl) item
+            else GalleryItem.CloudOnly(item.cloud.copy(thumbnailUrl = url))
+        } else {
+            item
+        }
 
     /** Cloud linkIds of the Collection cover items (the first On-this-day entry per year plus each
      *  season cover) so they can be pinned and warmed. Local-only covers have no cloud thumbnail to

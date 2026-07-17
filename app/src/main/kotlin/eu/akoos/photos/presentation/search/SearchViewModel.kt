@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -25,39 +25,57 @@
 package eu.akoos.photos.presentation.search
 
 import android.content.Context
+import android.net.Uri
+import androidx.datastore.preferences.core.edit
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 import java.text.Normalizer
 import me.proton.core.accountmanager.domain.AccountManager
+import eu.akoos.photos.data.hidden.HiddenStorageManager
+import eu.akoos.photos.data.offline.OfflineStorageManager
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.data.transfer.TransferCenter
 import eu.akoos.photos.R
 import eu.akoos.photos.data.db.dao.PhotoLocationDao
 import eu.akoos.photos.data.db.entity.PhotoLocationEntity
+import eu.akoos.photos.data.repository.drive.ThumbnailUrlStore
+import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.entity.GalleryItem
+import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.usecase.CategorizeItem
+import eu.akoos.photos.domain.usecase.DeletePhotoUseCase
+import eu.akoos.photos.domain.usecase.DownloadPhotosUseCase
+import eu.akoos.photos.domain.usecase.ForceUploadLocalUrisUseCase
 import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
+import eu.akoos.photos.presentation.common.GalleryItemSelectionController
 import eu.akoos.photos.presentation.gallery.ContentFilter
 import eu.akoos.photos.presentation.gallery.GalleryFilter
 import eu.akoos.photos.presentation.gallery.MediaType
 import eu.akoos.photos.presentation.gallery.SyncStatusFilter
 import eu.akoos.photos.presentation.map.MapPin
 import eu.akoos.photos.util.OfflineGeocoder
+import eu.akoos.photos.util.retryOnDbTear
 import java.util.Calendar
 import javax.inject.Inject
 
@@ -67,6 +85,8 @@ class SearchViewModel @Inject constructor(
     private val getGalleryItems: GetGalleryItemsUseCase,
     private val accountManager: AccountManager,
     private val photoLocationDao: PhotoLocationDao,
+    private val selectionFactory: GalleryItemSelectionController.Factory,
+    private val thumbnailUrlStore: ThumbnailUrlStore,
     @ApplicationContext private val context: Context,
 ) : ViewModel() {
 
@@ -91,6 +111,18 @@ class SearchViewModel @Inject constructor(
                 is GalleryItem.CloudOnly -> null
             }
             uri == null || uri !in hiddenUris
+        }
+
+    /** Overlay the store's freshly-decrypted thumbnail URL onto a cloud-only item so its map pin has
+     *  an image source (the lite feed no longer carries the URL). A Local/Synced fix already paints
+     *  from its local uri, so it is returned untouched. */
+    private fun resolveThumbnail(item: GalleryItem, urls: Map<String, String>): GalleryItem =
+        if (item is GalleryItem.CloudOnly) {
+            val url = urls[item.cloud.linkId] ?: item.cloud.thumbnailUrl
+            if (url == item.cloud.thumbnailUrl) item
+            else GalleryItem.CloudOnly(item.cloud.copy(thumbnailUrl = url))
+        } else {
+            item
         }
 
     private val _query = MutableStateFlow("")
@@ -129,6 +161,7 @@ class SearchViewModel @Inject constructor(
             if (userId == null) flowOf(emptyList())
             else photoLocationDao.observeForUser(userId.id)
         }
+        .retryOnDbTear("SearchGeotagged")
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     /** The geotagged fixes enriched with the [GalleryItem] each id resolves to in the merged library,
@@ -138,7 +171,15 @@ class SearchViewModel @Inject constructor(
     val geotaggedPins: StateFlow<List<MapPin>> = accountManager.getPrimaryUserId()
         .flatMapLatest { userId ->
             if (userId == null) flowOf(emptyList())
-            else combine(geotaggedLocations, getGalleryItems.invoke(userId)) { locs, library ->
+            // The mini-pin thumbnail is built imperatively (outside any Compose cell), so it can't
+            // read the LocalThumbnailUrls CompositionLocal. Fold the store in and stamp each cloud
+            // pin's freshly-decrypted URL onto the item so cloud-only fixes get a thumbnail again;
+            // the set is bounded by the preview marker cap, so the extra re-emit is cheap.
+            else combine(
+                geotaggedLocations,
+                getGalleryItems.invoke(userId),
+                thumbnailUrlStore.urls,
+            ) { locs, library, urls ->
                 val itemByKey = HashMap<String, GalleryItem>(library.size * 2)
                 for (item in library) {
                     when (item) {
@@ -150,7 +191,7 @@ class SearchViewModel @Inject constructor(
                         is GalleryItem.CloudOnly -> itemByKey[item.cloud.linkId] = item
                     }
                 }
-                locs.map { MapPin(it.id, it.latitude, it.longitude, itemByKey[it.id]) }
+                locs.map { MapPin(it.id, it.latitude, it.longitude, itemByKey[it.id]?.let { item -> resolveThumbnail(item, urls) }) }
             }
         }
         .flowOn(Dispatchers.Default)
@@ -205,6 +246,42 @@ class SearchViewModel @Inject constructor(
         _contentFilter.value = ContentFilter()
         _selectedCategory.value = GalleryFilter.All
     }
+
+    // ── Multi-select ──────────────────────────────────────────────────────────────────────────────
+    //
+    // Delegates to the shared [GalleryItemSelectionController] (the timeline uses the same one), so
+    // every selection action, the delete + strip permission handshakes and the Undo offer live in
+    // one place. Only Select-all needs local context — the current results list.
+    val sel = selectionFactory.create(viewModelScope)
+
+    val selectedItems: StateFlow<Set<GalleryItem>> get() = sel.selectedItems
+    val albums: StateFlow<List<Album>> get() = sel.albums
+    val shareIntent get() = sel.shareIntent
+    val offlineBatchResult get() = sel.offlineBatchResult
+    val isDeleting: StateFlow<Boolean> get() = sel.isDeleting
+    val pendingDeleteIntent get() = sel.pendingDeleteIntent
+    val pendingStripIntent get() = sel.pendingStripIntent
+    val multiStripState get() = sel.multiStripState
+
+    fun toggleSelection(item: GalleryItem) = sel.toggleSelection(item)
+    fun setSelection(items: Set<GalleryItem>) = sel.setSelection(items)
+    fun clearSelection() = sel.clearSelection()
+    fun selectAll() = sel.selectAll(results.value)
+    fun shareSelected() = sel.shareSelected()
+    fun addSelectedToAlbum(albumLinkId: String, onResult: (joined: Int, queued: Int) -> Unit) =
+        sel.addSelectedToAlbum(albumLinkId, onResult)
+    fun backUpSelected(onResult: (queued: Int) -> Unit) = sel.backUpSelected(onResult)
+    fun downloadSelected(onResult: (succeeded: Int, failed: Int) -> Unit) = sel.downloadSelected(onResult)
+    fun toggleSelectedOffline() = sel.toggleSelectedOffline()
+    fun hideSelected() = sel.hideSelected()
+    fun deleteSelected(freeUpSpace: Boolean, deleteFromCloud: Boolean) =
+        sel.deleteSelected(freeUpSpace, deleteFromCloud)
+    fun onDeletePermissionGranted() = sel.onDeletePermissionGranted()
+    fun clearPendingDeleteIntent() = sel.clearPendingDeleteIntent()
+    fun stripMetadataSelected() = sel.stripMetadataSelected()
+    fun onStripPermissionGranted() = sel.onStripPermissionGranted()
+    fun clearPendingStripIntent() = sel.clearPendingStripIntent()
+    fun resetMultiStripState() = sel.resetMultiStripState()
 
     private fun applyAll(
         items: List<GalleryItem>,

@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -32,10 +32,12 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.data.db.dao.PhotoLocationDao
 import eu.akoos.photos.data.db.entity.PhotoLocationEntity
 import eu.akoos.photos.data.repository.GpsBackfillScheduler
+import eu.akoos.photos.data.repository.drive.ThumbnailUrlStore
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
 import eu.akoos.photos.util.OfflineGeocoder
+import eu.akoos.photos.util.retryOnDbTear
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -65,6 +67,7 @@ class MapViewModel @Inject constructor(
     private val gpsBackfillScheduler: GpsBackfillScheduler,
     private val drivePhotoRepository: DrivePhotoRepository,
     private val getGalleryItems: GetGalleryItemsUseCase,
+    private val thumbnailUrlStore: ThumbnailUrlStore,
 ) : ViewModel() {
 
     /** Live stream of every located photo for the primary account — the map's marker source. */
@@ -73,6 +76,7 @@ class MapViewModel @Inject constructor(
             if (userId == null) flowOf(emptyList())
             else photoLocationDao.observeForUser(userId.id)
         }
+        .retryOnDbTear("MapLocations")
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     /**
@@ -85,14 +89,23 @@ class MapViewModel @Inject constructor(
     val pins: StateFlow<List<MapPin>> = accountManager.getPrimaryUserId()
         .flatMapLatest { userId ->
             if (userId == null) flowOf(emptyList())
-            else combine(locations, getGalleryItems.invoke(userId)) { locs, library ->
+            // The marker thumbnail is built imperatively (outside any Compose cell), so the
+            // LocalThumbnailUrls CompositionLocal can't reach it. Fold the store map into the flow
+            // and stamp each cloud pin's freshly-decrypted URL onto the item, so a cloud-only fix
+            // has a thumbnail source again and a decrypt that lands later repaints the pin. The set
+            // is bounded by the marker cap, so the extra re-emit per store change is cheap.
+            else combine(
+                locations,
+                getGalleryItems.invoke(userId),
+                thumbnailUrlStore.urls,
+            ) { locs, library, urls ->
                 val itemByKey = itemsByKey(library)
                 // Drop a fix whose photo no longer exists (deleted on the device or in the cloud):
                 // with no library item there's nothing behind the pin, so it would otherwise linger
                 // as an empty marker. The count + city list derive from this resolved set, so they
                 // stay in step too.
                 locs.mapNotNull { loc ->
-                    itemByKey[loc.id]?.let { MapPin(loc.id, loc.latitude, loc.longitude, it) }
+                    itemByKey[loc.id]?.let { MapPin(loc.id, loc.latitude, loc.longitude, resolveThumbnail(it, urls)) }
                 }
             }
         }
@@ -158,6 +171,18 @@ class MapViewModel @Inject constructor(
      * a cloud linkId — so a located row resolves to its [GalleryItem] by id. A Synced item is reachable
      * by both keys; mirrors the resolver in the location-detail screen.
      */
+    /** Overlay the store's freshly-decrypted thumbnail URL onto a cloud-only item so its pin has an
+     *  image source (the lite feed no longer carries the URL). A Local/Synced fix already paints from
+     *  its local uri, so it is returned untouched. */
+    private fun resolveThumbnail(item: GalleryItem, urls: Map<String, String>): GalleryItem =
+        if (item is GalleryItem.CloudOnly) {
+            val url = urls[item.cloud.linkId] ?: item.cloud.thumbnailUrl
+            if (url == item.cloud.thumbnailUrl) item
+            else GalleryItem.CloudOnly(item.cloud.copy(thumbnailUrl = url))
+        } else {
+            item
+        }
+
     private fun itemsByKey(library: List<GalleryItem>): Map<String, GalleryItem> {
         val itemByKey = HashMap<String, GalleryItem>(library.size * 2)
         for (item in library) {

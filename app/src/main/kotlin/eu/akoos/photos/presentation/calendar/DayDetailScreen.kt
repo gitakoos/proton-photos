@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -72,9 +72,11 @@ import eu.akoos.photos.R
 import eu.akoos.photos.presentation.common.IconBubble
 import eu.akoos.photos.presentation.common.fullBleedHorizontal
 import eu.akoos.photos.domain.entity.GalleryItem
+import eu.akoos.photos.presentation.gallery.LocalThumbnailUrls
 import eu.akoos.photos.presentation.gallery.PhotoCell
 import eu.akoos.photos.presentation.gallery.photoCellInputsFor
 import eu.akoos.photos.presentation.gallery.rememberDefaultGridColumns
+import eu.akoos.photos.presentation.gallery.rememberSeamlessGrid
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.Bg2
 import eu.akoos.photos.presentation.theme.PillBg
@@ -135,26 +137,36 @@ fun DayDetailScreen(
             }
         } else {
             val cols = rememberDefaultGridColumns()
+            val seamless = rememberSeamlessGrid()
             LazyVerticalGrid(
                 columns = GridCells.Fixed(cols),
                 modifier = Modifier.fillMaxSize(),
                 // Match the main timeline grid (GalleryGrid): same default columns, 20.dp side inset
                 // and 6.dp gap, so the day's photos render at the same size as the Photos page.
-                contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 48.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
+                // The edge-to-edge layout drops the side inset and rounding and tightens the gap.
+                contentPadding = PaddingValues(
+                    start = if (seamless) 0.dp else 20.dp,
+                    end = if (seamless) 0.dp else 20.dp,
+                    bottom = 48.dp,
+                ),
+                horizontalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 6.dp),
+                verticalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 6.dp),
             ) {
                 // Hero + metadata header span the full row.
                 item(span = { GridItemSpan(maxLineSpan) }, key = "header_hero") {
-                    HeroHeader(
-                        heroItem = heroItem,
-                        dateLabel = dateLabel,
-                        totalPhotos = totalPhotos,
-                    )
+                    // Photo tiles bleed to the edge in seamless mode; this chrome keeps the 20.dp inset.
+                    Box(modifier = Modifier.padding(horizontal = if (seamless) 20.dp else 0.dp)) {
+                        HeroHeader(
+                            heroItem = heroItem,
+                            dateLabel = dateLabel,
+                            totalPhotos = totalPhotos,
+                        )
+                    }
                 }
 
                 item(span = { GridItemSpan(maxLineSpan) }, key = "header_inputs") {
                     Column(modifier = Modifier
+                        .padding(horizontal = if (seamless) 20.dp else 0.dp)
                         .fillMaxWidth()
                         .padding(horizontal = 12.dp, vertical = 8.dp),
                     ) {
@@ -182,12 +194,16 @@ fun DayDetailScreen(
                         imageData = inputs.imageData,
                         stableKey = inputs.stableKey,
                         isVideo = inputs.isVideo,
+                        isLocalVideo = inputs.isLocalVideo,
+                        durationMs = inputs.durationMs,
                         isPlaceholder = inputs.isPlaceholder,
                         showCloudBadge = inputs.showCloudBadge,
                         showSyncedBadge = inputs.showSyncedBadge,
                         isFavorite = inputs.isFavorite,
                         typeBadgeRes = inputs.typeBadgeRes,
                         typeBadgeCdRes = inputs.typeBadgeCdRes,
+                        columns = cols,
+                        cornerRadius = if (seamless) 0.dp else 10.dp,
                         onClick = { onPhotoClick(state.items, index) },
                         // Long-press promotes this thumbnail to the day's cover.
                         onLongClick = { viewModel.setCover(item) },
@@ -298,7 +314,8 @@ private fun HeroHeader(
             val model: Any? = when (heroItem) {
                 is GalleryItem.LocalOnly -> android.net.Uri.parse(heroItem.local.uri)
                 is GalleryItem.Synced    -> android.net.Uri.parse(heroItem.local.uri)
-                is GalleryItem.CloudOnly -> heroItem.cloud.thumbnailUrl
+                is GalleryItem.CloudOnly ->
+                    LocalThumbnailUrls.current.value[heroItem.cloud.linkId] ?: heroItem.cloud.thumbnailUrl
             }
             AsyncImage(
                 model = model,

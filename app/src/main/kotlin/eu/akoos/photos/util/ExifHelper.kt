@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -32,9 +32,119 @@ import android.util.Log
 import android.webkit.MimeTypeMap
 import androidx.exifinterface.media.ExifInterface
 import java.io.File
+import java.io.FileDescriptor
 import java.io.FileOutputStream
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 private const val TAG = "ExifHelper"
+
+/**
+ * Every EXIF tag [copyExifPreservingOrientation] transfers from the original onto an edited copy.
+ * The editor re-encodes pixels via [Bitmap.compress], which drops ALL metadata, so this restores
+ * capture time, camera identity, GPS and shooting parameters onto the saved file. Intentionally
+ * EXCLUDED: [ExifInterface.TAG_ORIENTATION] (the editor bakes rotation into pixels, so the copy is
+ * always upright) and every dimension tag (a crop changes the size). Those are handled separately.
+ */
+@Suppress("DEPRECATION") // TAG_ISO_SPEED_RATINGS carried so the legacy tag copies across too.
+internal val COPYABLE_EXIF_TAGS: Array<String> = arrayOf(
+    // Timestamps
+    ExifInterface.TAG_DATETIME,
+    ExifInterface.TAG_DATETIME_ORIGINAL,
+    ExifInterface.TAG_DATETIME_DIGITIZED,
+    ExifInterface.TAG_OFFSET_TIME,
+    ExifInterface.TAG_OFFSET_TIME_ORIGINAL,
+    ExifInterface.TAG_OFFSET_TIME_DIGITIZED,
+    ExifInterface.TAG_SUBSEC_TIME,
+    ExifInterface.TAG_SUBSEC_TIME_ORIGINAL,
+    ExifInterface.TAG_SUBSEC_TIME_DIGITIZED,
+    // Camera / lens identity
+    ExifInterface.TAG_MAKE,
+    ExifInterface.TAG_MODEL,
+    ExifInterface.TAG_LENS_MAKE,
+    ExifInterface.TAG_LENS_MODEL,
+    ExifInterface.TAG_LENS_SPECIFICATION,
+    ExifInterface.TAG_LENS_SERIAL_NUMBER,
+    ExifInterface.TAG_BODY_SERIAL_NUMBER,
+    // Exposure / optics
+    ExifInterface.TAG_EXPOSURE_TIME,
+    ExifInterface.TAG_F_NUMBER,
+    ExifInterface.TAG_APERTURE_VALUE,
+    ExifInterface.TAG_MAX_APERTURE_VALUE,
+    ExifInterface.TAG_SHUTTER_SPEED_VALUE,
+    ExifInterface.TAG_BRIGHTNESS_VALUE,
+    ExifInterface.TAG_EXPOSURE_BIAS_VALUE,
+    ExifInterface.TAG_EXPOSURE_PROGRAM,
+    ExifInterface.TAG_EXPOSURE_MODE,
+    ExifInterface.TAG_EXPOSURE_INDEX,
+    ExifInterface.TAG_FOCAL_LENGTH,
+    ExifInterface.TAG_FOCAL_LENGTH_IN_35MM_FILM,
+    ExifInterface.TAG_FOCAL_PLANE_X_RESOLUTION,
+    ExifInterface.TAG_FOCAL_PLANE_Y_RESOLUTION,
+    ExifInterface.TAG_FOCAL_PLANE_RESOLUTION_UNIT,
+    ExifInterface.TAG_DIGITAL_ZOOM_RATIO,
+    ExifInterface.TAG_METERING_MODE,
+    ExifInterface.TAG_LIGHT_SOURCE,
+    ExifInterface.TAG_FLASH,
+    ExifInterface.TAG_FLASH_ENERGY,
+    ExifInterface.TAG_WHITE_BALANCE,
+    ExifInterface.TAG_PHOTOGRAPHIC_SENSITIVITY,
+    ExifInterface.TAG_ISO_SPEED_RATINGS,
+    ExifInterface.TAG_ISO_SPEED,
+    ExifInterface.TAG_SENSITIVITY_TYPE,
+    ExifInterface.TAG_RECOMMENDED_EXPOSURE_INDEX,
+    ExifInterface.TAG_SENSING_METHOD,
+    ExifInterface.TAG_SCENE_CAPTURE_TYPE,
+    ExifInterface.TAG_SCENE_TYPE,
+    ExifInterface.TAG_SUBJECT_DISTANCE,
+    ExifInterface.TAG_SUBJECT_DISTANCE_RANGE,
+    ExifInterface.TAG_SUBJECT_AREA,
+    ExifInterface.TAG_SUBJECT_LOCATION,
+    ExifInterface.TAG_CONTRAST,
+    ExifInterface.TAG_SATURATION,
+    ExifInterface.TAG_SHARPNESS,
+    ExifInterface.TAG_GAIN_CONTROL,
+    ExifInterface.TAG_CUSTOM_RENDERED,
+    // Colour / capture description
+    ExifInterface.TAG_COLOR_SPACE,
+    ExifInterface.TAG_WHITE_POINT,
+    ExifInterface.TAG_COMPONENTS_CONFIGURATION,
+    ExifInterface.TAG_MAKER_NOTE,
+    ExifInterface.TAG_USER_COMMENT,
+    ExifInterface.TAG_IMAGE_DESCRIPTION,
+    ExifInterface.TAG_IMAGE_UNIQUE_ID,
+    // Authorship / provenance
+    ExifInterface.TAG_SOFTWARE,
+    ExifInterface.TAG_ARTIST,
+    ExifInterface.TAG_COPYRIGHT,
+    ExifInterface.TAG_CAMERA_OWNER_NAME,
+    ExifInterface.TAG_EXIF_VERSION,
+    // GPS
+    ExifInterface.TAG_GPS_LATITUDE,
+    ExifInterface.TAG_GPS_LATITUDE_REF,
+    ExifInterface.TAG_GPS_LONGITUDE,
+    ExifInterface.TAG_GPS_LONGITUDE_REF,
+    ExifInterface.TAG_GPS_ALTITUDE,
+    ExifInterface.TAG_GPS_ALTITUDE_REF,
+    ExifInterface.TAG_GPS_TIMESTAMP,
+    ExifInterface.TAG_GPS_DATESTAMP,
+    ExifInterface.TAG_GPS_SPEED,
+    ExifInterface.TAG_GPS_SPEED_REF,
+    ExifInterface.TAG_GPS_TRACK,
+    ExifInterface.TAG_GPS_TRACK_REF,
+    ExifInterface.TAG_GPS_IMG_DIRECTION,
+    ExifInterface.TAG_GPS_IMG_DIRECTION_REF,
+    ExifInterface.TAG_GPS_DEST_BEARING,
+    ExifInterface.TAG_GPS_DEST_BEARING_REF,
+    ExifInterface.TAG_GPS_PROCESSING_METHOD,
+    ExifInterface.TAG_GPS_AREA_INFORMATION,
+    ExifInterface.TAG_GPS_DOP,
+    ExifInterface.TAG_GPS_MAP_DATUM,
+    ExifInterface.TAG_GPS_VERSION_ID,
+    ExifInterface.TAG_GPS_DIFFERENTIAL,
+    ExifInterface.TAG_GPS_H_POSITIONING_ERROR,
+)
 
 data class PhotoMetadata(
     val make: String? = null,
@@ -60,6 +170,14 @@ data class PhotoMetadata(
     val exposureMode: Int? = null,
 )
 
+/**
+ * The metadata groups a [MetadataStripConfig] can remove from an upload. A re-encode that rebuilds a
+ * file's EXIF from the original consults these to decide which tags it may carry, so a recompressed
+ * copy never re-injects metadata the strip was meant to erase. Tags outside every group (colour
+ * space, EXIF version, image description) are not part of the strip model and are always copied.
+ */
+enum class ExifMetadataGroup { GPS, CAMERA, TIMESTAMP, SOFTWARE }
+
 data class MetadataStripConfig(
     val stripGps: Boolean = false,
     val stripCameraInfo: Boolean = false,
@@ -69,6 +187,20 @@ data class MetadataStripConfig(
     /** Caller asked to remove nothing — short-circuit the strip pipeline. */
     val isNoOp: Boolean
         get() = !stripGps && !stripCameraInfo && !stripTimestamp && !stripSoftwareInfo
+
+    /**
+     * The [ExifMetadataGroup]s that may be copied onto a re-encoded (recompressed) upload: a group is
+     * allowed only when its strip flag is off. Pure and side-effect-free (it just inverts the four
+     * flags), so a plain JVM test can pin it without Android, a Context, or an ExifInterface. A
+     * stripped group is absent from the result; tags that belong to no modelled group are never
+     * listed here and are always carried by the copy step.
+     */
+    fun allowedCopyGroups(): Set<ExifMetadataGroup> = buildSet {
+        if (!stripGps) add(ExifMetadataGroup.GPS)
+        if (!stripCameraInfo) add(ExifMetadataGroup.CAMERA)
+        if (!stripTimestamp) add(ExifMetadataGroup.TIMESTAMP)
+        if (!stripSoftwareInfo) add(ExifMetadataGroup.SOFTWARE)
+    }
 }
 
 /** Outcome of an in-place strip. [NeedsPermission] means the OS raised a
@@ -219,6 +351,15 @@ object ExifHelper {
                 exif.setAttribute(ExifInterface.TAG_GPS_TRACK_REF, null)
                 exif.setAttribute(ExifInterface.TAG_GPS_PROCESSING_METHOD, null)
                 exif.setAttribute(ExifInterface.TAG_GPS_DOP, null)
+                exif.setAttribute(ExifInterface.TAG_GPS_IMG_DIRECTION, null)
+                exif.setAttribute(ExifInterface.TAG_GPS_IMG_DIRECTION_REF, null)
+                exif.setAttribute(ExifInterface.TAG_GPS_DEST_BEARING, null)
+                exif.setAttribute(ExifInterface.TAG_GPS_DEST_BEARING_REF, null)
+                exif.setAttribute(ExifInterface.TAG_GPS_MAP_DATUM, null)
+                exif.setAttribute(ExifInterface.TAG_GPS_AREA_INFORMATION, null)
+                exif.setAttribute(ExifInterface.TAG_GPS_H_POSITIONING_ERROR, null)
+                exif.setAttribute(ExifInterface.TAG_GPS_VERSION_ID, null)
+                exif.setAttribute(ExifInterface.TAG_GPS_DIFFERENTIAL, null)
             }
             if (config.stripCameraInfo) {
                 exif.setAttribute(ExifInterface.TAG_MAKE, null)
@@ -289,6 +430,19 @@ object ExifHelper {
                     exif.setAttribute(ExifInterface.TAG_GPS_TRACK_REF, null)
                     exif.setAttribute(ExifInterface.TAG_GPS_PROCESSING_METHOD, null)
                     exif.setAttribute(ExifInterface.TAG_GPS_DOP, null)
+                    // Keep this GPS set identical to [stripToTempFile]: the user-facing in-place
+                    // "clean" path calls THIS method, so any GPS tag missing here (compass bearing,
+                    // map datum, positioning error) would survive a manual wipe yet get stripped on
+                    // upload, leaking location context on a photo the user believes is cleaned.
+                    exif.setAttribute(ExifInterface.TAG_GPS_IMG_DIRECTION, null)
+                    exif.setAttribute(ExifInterface.TAG_GPS_IMG_DIRECTION_REF, null)
+                    exif.setAttribute(ExifInterface.TAG_GPS_DEST_BEARING, null)
+                    exif.setAttribute(ExifInterface.TAG_GPS_DEST_BEARING_REF, null)
+                    exif.setAttribute(ExifInterface.TAG_GPS_MAP_DATUM, null)
+                    exif.setAttribute(ExifInterface.TAG_GPS_AREA_INFORMATION, null)
+                    exif.setAttribute(ExifInterface.TAG_GPS_H_POSITIONING_ERROR, null)
+                    exif.setAttribute(ExifInterface.TAG_GPS_VERSION_ID, null)
+                    exif.setAttribute(ExifInterface.TAG_GPS_DIFFERENTIAL, null)
                 }
                 if (config.stripCameraInfo) {
                     // Keep this set in sync with [stripToTempFile] — the user-facing UI
@@ -339,5 +493,256 @@ object ExifHelper {
             Log.w(TAG, "stripFieldsInPlace failed", e)
             StripResult.Failed
         }
+    }
+
+    /** EXIF tags that pin the capture wall-clock time (and its UTC offset / sub-second precision). */
+    private val TIMESTAMP_GROUP_TAGS: Set<String> = setOf(
+        ExifInterface.TAG_DATETIME,
+        ExifInterface.TAG_DATETIME_ORIGINAL,
+        ExifInterface.TAG_DATETIME_DIGITIZED,
+        ExifInterface.TAG_OFFSET_TIME,
+        ExifInterface.TAG_OFFSET_TIME_ORIGINAL,
+        ExifInterface.TAG_OFFSET_TIME_DIGITIZED,
+        ExifInterface.TAG_SUBSEC_TIME,
+        ExifInterface.TAG_SUBSEC_TIME_ORIGINAL,
+        ExifInterface.TAG_SUBSEC_TIME_DIGITIZED,
+    )
+
+    /** EXIF tags that identify the camera / lens or record its per-shot capture settings. */
+    @Suppress("DEPRECATION") // TAG_ISO_SPEED_RATINGS classified so the legacy ISO tag is grouped too.
+    private val CAMERA_GROUP_TAGS: Set<String> = setOf(
+        ExifInterface.TAG_MAKE,
+        ExifInterface.TAG_MODEL,
+        ExifInterface.TAG_LENS_MAKE,
+        ExifInterface.TAG_LENS_MODEL,
+        ExifInterface.TAG_LENS_SPECIFICATION,
+        ExifInterface.TAG_LENS_SERIAL_NUMBER,
+        ExifInterface.TAG_BODY_SERIAL_NUMBER,
+        ExifInterface.TAG_EXPOSURE_TIME,
+        ExifInterface.TAG_F_NUMBER,
+        ExifInterface.TAG_APERTURE_VALUE,
+        ExifInterface.TAG_MAX_APERTURE_VALUE,
+        ExifInterface.TAG_SHUTTER_SPEED_VALUE,
+        ExifInterface.TAG_BRIGHTNESS_VALUE,
+        ExifInterface.TAG_EXPOSURE_BIAS_VALUE,
+        ExifInterface.TAG_EXPOSURE_PROGRAM,
+        ExifInterface.TAG_EXPOSURE_MODE,
+        ExifInterface.TAG_EXPOSURE_INDEX,
+        ExifInterface.TAG_FOCAL_LENGTH,
+        ExifInterface.TAG_FOCAL_LENGTH_IN_35MM_FILM,
+        ExifInterface.TAG_FOCAL_PLANE_X_RESOLUTION,
+        ExifInterface.TAG_FOCAL_PLANE_Y_RESOLUTION,
+        ExifInterface.TAG_FOCAL_PLANE_RESOLUTION_UNIT,
+        ExifInterface.TAG_DIGITAL_ZOOM_RATIO,
+        ExifInterface.TAG_METERING_MODE,
+        ExifInterface.TAG_LIGHT_SOURCE,
+        ExifInterface.TAG_FLASH,
+        ExifInterface.TAG_FLASH_ENERGY,
+        ExifInterface.TAG_WHITE_BALANCE,
+        ExifInterface.TAG_PHOTOGRAPHIC_SENSITIVITY,
+        ExifInterface.TAG_ISO_SPEED_RATINGS,
+        ExifInterface.TAG_ISO_SPEED,
+        ExifInterface.TAG_SENSITIVITY_TYPE,
+        ExifInterface.TAG_RECOMMENDED_EXPOSURE_INDEX,
+        ExifInterface.TAG_SENSING_METHOD,
+        ExifInterface.TAG_SCENE_CAPTURE_TYPE,
+        ExifInterface.TAG_SCENE_TYPE,
+        ExifInterface.TAG_SUBJECT_DISTANCE,
+        ExifInterface.TAG_SUBJECT_DISTANCE_RANGE,
+        ExifInterface.TAG_SUBJECT_AREA,
+        ExifInterface.TAG_SUBJECT_LOCATION,
+        ExifInterface.TAG_CONTRAST,
+        ExifInterface.TAG_SATURATION,
+        ExifInterface.TAG_SHARPNESS,
+        ExifInterface.TAG_GAIN_CONTROL,
+        ExifInterface.TAG_CUSTOM_RENDERED,
+        ExifInterface.TAG_MAKER_NOTE,
+        ExifInterface.TAG_CAMERA_OWNER_NAME,
+    )
+
+    /** EXIF tags that record the editing software, author, or free-text provenance. */
+    private val SOFTWARE_GROUP_TAGS: Set<String> = setOf(
+        ExifInterface.TAG_SOFTWARE,
+        ExifInterface.TAG_ARTIST,
+        ExifInterface.TAG_COPYRIGHT,
+        ExifInterface.TAG_USER_COMMENT,
+    )
+
+    /** EXIF tags that reveal the capture location. */
+    private val GPS_GROUP_TAGS: Set<String> = setOf(
+        ExifInterface.TAG_GPS_LATITUDE,
+        ExifInterface.TAG_GPS_LATITUDE_REF,
+        ExifInterface.TAG_GPS_LONGITUDE,
+        ExifInterface.TAG_GPS_LONGITUDE_REF,
+        ExifInterface.TAG_GPS_ALTITUDE,
+        ExifInterface.TAG_GPS_ALTITUDE_REF,
+        ExifInterface.TAG_GPS_TIMESTAMP,
+        ExifInterface.TAG_GPS_DATESTAMP,
+        ExifInterface.TAG_GPS_SPEED,
+        ExifInterface.TAG_GPS_SPEED_REF,
+        ExifInterface.TAG_GPS_TRACK,
+        ExifInterface.TAG_GPS_TRACK_REF,
+        ExifInterface.TAG_GPS_IMG_DIRECTION,
+        ExifInterface.TAG_GPS_IMG_DIRECTION_REF,
+        ExifInterface.TAG_GPS_DEST_BEARING,
+        ExifInterface.TAG_GPS_DEST_BEARING_REF,
+        ExifInterface.TAG_GPS_PROCESSING_METHOD,
+        ExifInterface.TAG_GPS_AREA_INFORMATION,
+        ExifInterface.TAG_GPS_DOP,
+        ExifInterface.TAG_GPS_MAP_DATUM,
+        ExifInterface.TAG_GPS_VERSION_ID,
+        ExifInterface.TAG_GPS_DIFFERENTIAL,
+        ExifInterface.TAG_GPS_H_POSITIONING_ERROR,
+    )
+
+    /** The [ExifMetadataGroup] an EXIF [tag] belongs to, or null when it is outside the strip model
+     *  and always safe to copy. Every privacy-relevant tag in [COPYABLE_EXIF_TAGS] must be classified:
+     *  an unclassified tag falls through to null and copies unconditionally, which for a GPS tag would
+     *  reintroduce the location a strip was asked to remove. A test pins that invariant. */
+    internal fun groupForTag(tag: String): ExifMetadataGroup? = when (tag) {
+        in GPS_GROUP_TAGS -> ExifMetadataGroup.GPS
+        in TIMESTAMP_GROUP_TAGS -> ExifMetadataGroup.TIMESTAMP
+        in CAMERA_GROUP_TAGS -> ExifMetadataGroup.CAMERA
+        in SOFTWARE_GROUP_TAGS -> ExifMetadataGroup.SOFTWARE
+        else -> null
+    }
+
+    /**
+     * Copies every present tag in [COPYABLE_EXIF_TAGS] from [source] onto [dest], then forces the
+     * destination orientation to [ExifInterface.ORIENTATION_NORMAL] and stamps the edited pixel size
+     * ([bitmapWidth] x [bitmapHeight]). Orientation is forced because the editor bakes any rotation
+     * into the pixels at load, and the dimensions are overwritten (not copied) because a crop changes
+     * the size. Caller must invoke [ExifInterface.saveAttributes] on [dest]; this only sets fields.
+     *
+     * [config] gates the copy by [ExifMetadataGroup]: a tag whose group the config strips is skipped,
+     * so a re-encode never restores metadata the upload was told to remove. The default strips nothing
+     * and copies every group.
+     */
+    private fun copyTagsPreservingOrientation(
+        source: ExifInterface,
+        dest: ExifInterface,
+        bitmapWidth: Int,
+        bitmapHeight: Int,
+        config: MetadataStripConfig = MetadataStripConfig(),
+    ) {
+        val allowedGroups = config.allowedCopyGroups()
+        for (tag in COPYABLE_EXIF_TAGS) {
+            val group = groupForTag(tag)
+            if (group != null && group !in allowedGroups) continue
+            val value = source.getAttribute(tag) ?: continue
+            dest.setAttribute(tag, value)
+        }
+        // The edited copy is always upright (rotation baked into pixels), so the orientation tag must
+        // read NORMAL, since copying the source orientation would make viewers double-rotate the image.
+        dest.setAttribute(
+            ExifInterface.TAG_ORIENTATION,
+            ExifInterface.ORIENTATION_NORMAL.toString(),
+        )
+        // A crop changes the pixel size, so report the edited bitmap's dimensions, never the source's.
+        if (bitmapWidth > 0 && bitmapHeight > 0) {
+            dest.setAttribute(ExifInterface.TAG_IMAGE_WIDTH, bitmapWidth.toString())
+            dest.setAttribute(ExifInterface.TAG_IMAGE_LENGTH, bitmapHeight.toString())
+            dest.setAttribute(ExifInterface.TAG_PIXEL_X_DIMENSION, bitmapWidth.toString())
+            dest.setAttribute(ExifInterface.TAG_PIXEL_Y_DIMENSION, bitmapHeight.toString())
+        }
+    }
+
+    /**
+     * Re-injects the original photo's EXIF (see [copyTagsPreservingOrientation]) from [source] into an
+     * already-written JPEG at [destFile], forcing a NORMAL orientation and the edited [bitmapWidth] x
+     * [bitmapHeight] size. Used by the editor's cloud temp files (where the source is the downloaded
+     * full-res original) and by the upload compressor. Never throws: a failure to copy EXIF must not
+     * fail the save.
+     *
+     * [config] gates which metadata groups are copied: a stripped group's tags are dropped so a
+     * recompressed upload cannot restore metadata the user asked to remove, even when the source is a
+     * container ExifInterface cannot rewrite in place. The default copies every group.
+     */
+    fun copyExifPreservingOrientation(
+        source: ExifInterface,
+        destFile: File,
+        bitmapWidth: Int,
+        bitmapHeight: Int,
+        config: MetadataStripConfig = MetadataStripConfig(),
+    ) {
+        runCatching {
+            val dest = ExifInterface(destFile.absolutePath)
+            copyTagsPreservingOrientation(source, dest, bitmapWidth, bitmapHeight, config)
+            dest.saveAttributes()
+        }.onFailure { Log.w(TAG, "copyExifPreservingOrientation(file) failed", it) }
+    }
+
+    /**
+     * Same contract as the [File] overload, but writes the original EXIF from an already-read
+     * [source] snapshot into a JPEG opened at [destFd] (owned by the caller). Used by the editor's
+     * local-copy and overwrite paths, where the destination is a MediaStore file descriptor and the
+     * source EXIF was captured up front (an overwrite clobbers the file before this runs).
+     */
+    fun copyExifPreservingOrientation(
+        source: ExifInterface,
+        destFd: FileDescriptor,
+        bitmapWidth: Int,
+        bitmapHeight: Int,
+    ) {
+        runCatching {
+            val dest = ExifInterface(destFd)
+            copyTagsPreservingOrientation(source, dest, bitmapWidth, bitmapHeight)
+            dest.saveAttributes()
+        }.onFailure { Log.w(TAG, "copyExifPreservingOrientation(fd) failed", it) }
+    }
+
+    /**
+     * Reads the source EXIF into a detached, in-memory snapshot ([ExifInterface] backed by nothing
+     * writable). Callers use this for the overwrite path, where the destination IS the source: they
+     * capture the tags into a snapshot BEFORE [Bitmap.compress] clobbers the file, then re-inject
+     * from the snapshot afterwards. Returns null when the stream can't be opened or parsed.
+     */
+    fun readExifSnapshot(context: Context, uri: String): ExifInterface? = runCatching {
+        context.contentResolver.openInputStream(Uri.parse(uri))?.use { ExifInterface(it) }
+    }.getOrNull()
+
+    /**
+     * Reads the source EXIF from a local [file] into a snapshot (see the [Context]/URI overload).
+     * Returns null on any parse/read failure.
+     */
+    fun readExifSnapshot(file: File): ExifInterface? = runCatching {
+        ExifInterface(file.absolutePath)
+    }.getOrNull()
+
+    /**
+     * Fill DateTimeOriginal (and DateTime) with [captureEpochMs] ONLY when the file has no original
+     * date yet, so a real camera date is never overwritten and unchanged bytes keep hashing to their
+     * cloud twin. MediaStore derives DATE_TAKEN from this EXIF block on scan, so a downloaded or
+     * unhidden image with no embedded date otherwise lands at "today" on strict scanners. Best-effort
+     * and never throws: a format ExifInterface cannot write is a silent no-op.
+     */
+    fun stampDateTakenIfMissing(file: File, captureEpochMs: Long) {
+        runCatching {
+            val exif = ExifInterface(file.absolutePath)
+            if (exif.getAttribute(ExifInterface.TAG_DATETIME_ORIGINAL).isNullOrBlank()) {
+                val stamp = SimpleDateFormat("yyyy:MM:dd HH:mm:ss", Locale.US).format(Date(captureEpochMs))
+                exif.setAttribute(ExifInterface.TAG_DATETIME_ORIGINAL, stamp)
+                if (exif.getAttribute(ExifInterface.TAG_DATETIME).isNullOrBlank()) {
+                    exif.setAttribute(ExifInterface.TAG_DATETIME, stamp)
+                }
+                exif.saveAttributes()
+            }
+        }.onFailure { Log.w(TAG, "stampDateTakenIfMissing skipped: ${it.message}") }
+    }
+
+    /**
+     * Writes [latitude] / [longitude] into [file]'s GPS EXIF so a downloaded / exported image keeps the
+     * location the app already holds for its cloud twin. [ExifInterface.setLatLong] sets the coordinate
+     * value plus its N/S and E/W reference tags. Best-effort and never throws: a format ExifInterface
+     * cannot write is a silent no-op, so a failed write still leaves a valid downloaded file. Callers
+     * gate this to the EXIF-writable image formats and pass ONLY real coordinates, never invented ones,
+     * so a photo whose GPS was stripped at upload gains nothing here.
+     */
+    fun writeGpsLocation(file: File, latitude: Double, longitude: Double) {
+        runCatching {
+            val exif = ExifInterface(file.absolutePath)
+            exif.setLatLong(latitude, longitude)
+            exif.saveAttributes()
+        }.onFailure { Log.w(TAG, "writeGpsLocation skipped: ${it.message}") }
     }
 }

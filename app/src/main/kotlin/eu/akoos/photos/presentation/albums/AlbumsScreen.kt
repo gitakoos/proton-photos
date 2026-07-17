@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -52,6 +52,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.outlined.Collections
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ModalBottomSheet
@@ -74,6 +75,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -124,9 +126,16 @@ fun AlbumsScreen(
     val pullRefreshState = rememberPullToRefreshState()
     val scope = rememberCoroutineScope()
     var showCreateDialog by remember { mutableStateOf(false) }
-    // Open the create dialog when the header pill fires (each tap increments the signal).
+    // Open the create dialog only when the header pill's signal actually advances past the last one
+    // handled. rememberSaveable persists that watermark through the pager disposing this page, so
+    // returning to the Albums tab (which re-runs this effect with an unchanged signal) no longer
+    // re-opens the dialog.
+    var lastHandledCreateSignal by rememberSaveable { mutableStateOf(0) }
     LaunchedEffect(createRequestSignal) {
-        if (createRequestSignal > 0) showCreateDialog = true
+        if (createRequestSignal > lastHandledCreateSignal) {
+            lastHandledCreateSignal = createRequestSignal
+            showCreateDialog = true
+        }
     }
     // Switching the All / Cloud / Device filter changes the list under the same scroll index, which
     // reads as the grid jumping — snap back to the top whenever the filter changes.
@@ -371,6 +380,10 @@ fun AlbumsScreen(
                 cloudAlbumSheetFor = null
                 cloudAlbumRenameFor = album
             },
+            onHide = {
+                cloudAlbumSheetFor = null
+                viewModel.hideAlbum(album.linkId)
+            },
             onDelete = {
                 cloudAlbumSheetFor = null
                 albumToDelete = album
@@ -441,9 +454,9 @@ fun AlbumsScreen(
 }
 
 /**
- * Bottom sheet that opens on long-press of a cloud album card. Two rows: Rename + Delete.
+ * Bottom sheet that opens on long-press of a cloud album card. Rows: Rename, Hide, Delete.
  * Cloud rename is wired through `AlbumsViewModel.renameCloudAlbum` which round-trips through
- * `DrivePhotoRepository.renameAlbum`.
+ * `DrivePhotoRepository.renameAlbum`. Hide is client-side only via `AlbumsViewModel.hideAlbum`.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -451,6 +464,7 @@ private fun CloudAlbumActionSheet(
     album: Album,
     onDismiss: () -> Unit,
     onRename: () -> Unit,
+    onHide: () -> Unit,
     onDelete: () -> Unit,
 ) {
     val colors = AppColors.current
@@ -482,6 +496,13 @@ private fun CloudAlbumActionSheet(
                 label = stringResource(R.string.album_rename),
                 tint = Accent,
                 onClick = onRename,
+            )
+            Spacer(Modifier.height(8.dp))
+            AlbumActionRow(
+                icon = Icons.Default.VisibilityOff,
+                label = stringResource(R.string.albums_hide_album),
+                tint = Accent,
+                onClick = onHide,
             )
             Spacer(Modifier.height(8.dp))
             AlbumActionRow(

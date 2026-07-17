@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -51,6 +51,7 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.GalleryItem
+import eu.akoos.photos.presentation.gallery.LocalThumbnailUrls
 import eu.akoos.photos.presentation.theme.AppColors
 
 /**
@@ -128,7 +129,8 @@ private fun RecentTile(
     val imageModel: Any? = when (item) {
         is GalleryItem.LocalOnly -> android.net.Uri.parse(item.local.uri)
         is GalleryItem.Synced    -> android.net.Uri.parse(item.local.uri)
-        is GalleryItem.CloudOnly -> item.cloud.thumbnailUrl
+        is GalleryItem.CloudOnly ->
+            LocalThumbnailUrls.current.value[item.cloud.linkId] ?: item.cloud.thumbnailUrl
     }
     val mimeType = when (item) {
         is GalleryItem.LocalOnly -> item.local.mimeType

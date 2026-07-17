@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -24,9 +24,7 @@ package eu.akoos.photos
 
 import android.content.ContentResolver
 import android.content.Intent
-import android.content.IntentFilter
 import android.net.Uri
-import android.os.BatteryManager
 import android.os.Bundle
 import android.provider.OpenableColumns
 import android.widget.Toast
@@ -81,6 +79,7 @@ import eu.akoos.photos.data.preferences.syncEffectivelyEnabled
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.usecase.PendingDeleteNotificationUseCase
 import eu.akoos.photos.presentation.common.ConfirmDialog
+import eu.akoos.photos.presentation.settings.FreeUpInterval
 import eu.akoos.photos.presentation.common.UpdatePromptDialog
 import eu.akoos.photos.presentation.common.UpdatePromptState
 import eu.akoos.photos.presentation.updater.UpdateOrchestrator
@@ -95,6 +94,8 @@ import eu.akoos.photos.presentation.theme.ProtonPhotosTheme
 import eu.akoos.photos.presentation.util.LocaleOverride
 import eu.akoos.photos.data.repository.drive.PhotoStreamService
 import eu.akoos.photos.util.NetworkObserver
+import eu.akoos.photos.util.isBatteryLow
+import eu.akoos.photos.worker.FreeUpSpaceWorker
 import eu.akoos.photos.worker.SyncWorker
 import javax.inject.Inject
 
@@ -182,10 +183,24 @@ class MainActivity : AppCompatActivity() {
             // and the opt-in BG service (keeps the observer alive on Samsung One UI). Gated so
             // auto-sync ON with no folder selected arms nothing.
             SyncWorker.reconcileBackgroundWork(this@MainActivity)
+            // Opt-in screenshot quick-action overlay: a specialUse foreground service cannot be
+            // launched from boot on Android 14+, so re-arm it here on launch when it is enabled and
+            // the draw-over-other-apps grant is still in place. start() also self-guards the grant.
+            if (prefs[SettingsKeys.SCREENSHOT_OVERLAY_ENABLED] == true &&
+                android.provider.Settings.canDrawOverlays(this@MainActivity)
+            ) {
+                eu.akoos.photos.service.ScreenshotOverlayService.start(this@MainActivity)
+            }
             // Kick a OneTime run now so pending uploads start at launch; APPEND_OR_REPLACE coalesces
             // with the periodic run. Only when backup will actually upload.
             if (syncEffectivelyEnabled(this@MainActivity)) {
                 SyncWorker.runNow(this@MainActivity, wifiOnly)
+            }
+            // Reclaim eligible device copies on launch too, not just on the hourly worker an OEM
+            // doze can delay for hours. Same age gate; a sweep with no eligible photo is cheap.
+            if (prefs[SettingsKeys.AUTO_FREE_UP] == true) {
+                val freeUpInterval = FreeUpInterval.fromKey(prefs[SettingsKeys.FREE_UP_INTERVAL])
+                FreeUpSpaceWorker.runNow(WorkManager.getInstance(this@MainActivity), freeUpInterval.ms)
             }
         }
 
@@ -491,21 +506,6 @@ class MainActivity : AppCompatActivity() {
         if (!segment.isNullOrBlank() && segment.contains('.')) return segment
         val ts = System.currentTimeMillis()
         return if (isVideo) "video_$ts.mp4" else "image_$ts.jpg"
-    }
-
-    /**
-     * Runtime analogue of the workers' `setRequiresBatteryNotLow(true)`: reads the sticky
-     * ACTION_BATTERY_CHANGED broadcast and compares to the OS's 15% "battery low" floor. Returns
-     * false (don't block) when the level can't be read, so a missing broadcast never suppresses refresh.
-     */
-    private fun isBatteryLow(): Boolean {
-        val status = runCatching {
-            registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
-        }.getOrNull() ?: return false
-        val level = status.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
-        val scale = status.getIntExtra(BatteryManager.EXTRA_SCALE, -1)
-        if (level < 0 || scale <= 0) return false
-        return level.toFloat() / scale.toFloat() <= 0.15f
     }
 
     override fun onStop() {

@@ -1,3 +1,25 @@
+/*
+ * Photos for Proton
+ * Copyright (C) 2026 Akoos <https://akoos.eu>
+ *
+ * Source:  https://github.com/gitakoos/proton-photos
+ * Website: https://www.photosforproton.eu
+ *
+ * This file is part of Photos for Proton.
+ *
+ * Photos for Proton is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 3 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 package eu.akoos.photos.data.db
 
 import android.content.Context
@@ -158,6 +180,97 @@ class AppDatabaseMigrationTest {
                 assertEquals("the replacement hash won", 99L, cur.getLong(1))
                 assertEquals("the replacement freshness won", "a_20", cur.getString(2))
             }
+    }
+
+    @Test
+    fun migrate_v14_to_v15_addsQueueColumns_backfillsLocalOnly_andCreatesTargetTable() {
+        // A pre-v15 sync_state table with the columns MIGRATION_14_15 touches. Only the queued
+        // backfill depends on `status`, so the seed carries the minimum the migration reads.
+        db.execSQL(
+            """
+            CREATE TABLE sync_state (
+              localUri TEXT NOT NULL PRIMARY KEY,
+              userId TEXT NOT NULL,
+              cloudFileId TEXT,
+              localHash TEXT NOT NULL,
+              cloudHash TEXT,
+              status TEXT NOT NULL,
+              lastSyncAttemptMs INTEGER NOT NULL,
+              lastSyncSuccessMs INTEGER,
+              backedUpAtMs INTEGER,
+              sizeBytes INTEGER NOT NULL
+            )
+            """.trimIndent()
+        )
+        // One LOCAL_ONLY row (must be backfilled queued) and one SYNCED row (must NOT be).
+        db.execSQL(
+            "INSERT INTO sync_state (localUri, userId, cloudFileId, localHash, cloudHash, status, " +
+                "lastSyncAttemptMs, lastSyncSuccessMs, backedUpAtMs, sizeBytes) " +
+                "VALUES ('uri-local', 'u1', NULL, 'h1', NULL, 'LOCAL_ONLY', 10, NULL, NULL, 100)"
+        )
+        db.execSQL(
+            "INSERT INTO sync_state (localUri, userId, cloudFileId, localHash, cloudHash, status, " +
+                "lastSyncAttemptMs, lastSyncSuccessMs, backedUpAtMs, sizeBytes) " +
+                "VALUES ('uri-synced', 'u1', 'cloud-1', 'h2', 'h2', 'SYNCED', 20, 21, 22, 200)"
+        )
+
+        Migrations.MIGRATION_14_15.migrate(db)
+
+        // LOCAL_ONLY row: backfilled queued=1 / AUTO_FOLDER, queuedAt left NULL (deterministic).
+        db.query("SELECT queued, queueSource, queuedAt FROM sync_state WHERE localUri = 'uri-local'")
+            .use { cur ->
+                assertTrue(cur.moveToFirst())
+                assertEquals("LOCAL_ONLY row backfilled queued", 1, cur.getInt(0))
+                assertEquals("AUTO_FOLDER", cur.getString(1))
+                assertTrue("queuedAt stays NULL for backfilled rows", cur.isNull(2))
+            }
+        // SYNCED row: left un-queued (default 0 / NULL).
+        db.query("SELECT queued, queueSource, queuedAt FROM sync_state WHERE localUri = 'uri-synced'")
+            .use { cur ->
+                assertTrue(cur.moveToFirst())
+                assertEquals("SYNCED row must NOT be backfilled queued", 0, cur.getInt(0))
+                assertTrue("queueSource default NULL on non-LOCAL_ONLY row", cur.isNull(1))
+                assertTrue("queuedAt default NULL", cur.isNull(2))
+            }
+
+        // upload_album_target exists and enforces the composite (localUri, albumLinkId) primary key.
+        db.execSQL("INSERT INTO upload_album_target (localUri, albumLinkId) VALUES ('uri-local', 'album-1')")
+        db.execSQL(
+            "INSERT OR IGNORE INTO upload_album_target (localUri, albumLinkId) VALUES ('uri-local', 'album-1')"
+        )
+        db.execSQL("INSERT INTO upload_album_target (localUri, albumLinkId) VALUES ('uri-local', 'album-2')")
+        db.query("SELECT COUNT(*) FROM upload_album_target WHERE localUri = 'uri-local'").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals("the duplicate (uri, album) pair was ignored; the distinct one was kept", 2, cur.getInt(0))
+        }
+    }
+
+    @Test
+    fun migrate_v15_to_v16_addsDurationMsColumn_defaultsNull_preservesRow() {
+        db.execSQL(
+            """
+            INSERT INTO photo_listing (linkId, shareId, volumeId, userId, captureTime,
+                displayName, mimeType, sizeBytes, revisionId, thumbnailUrl)
+            VALUES ('vid','s1','v1','u1',4000,'clip.mp4','video/mp4',9000,'r9','thumb://vid')
+            """.trimIndent()
+        )
+
+        Migrations.MIGRATION_15_16.migrate(db)
+
+        db.query("SELECT linkId, mimeType, durationMs FROM photo_listing WHERE linkId = 'vid'")
+            .use { cur ->
+                assertTrue("expected the seeded row to survive the migration", cur.moveToFirst())
+                assertEquals("vid", cur.getString(0))
+                assertEquals("video/mp4", cur.getString(1))
+                assertTrue("durationMs defaults to NULL on existing rows", cur.isNull(2))
+            }
+
+        // The new column is writable (the backfill / upload path fills it in later).
+        db.execSQL("UPDATE photo_listing SET durationMs = 7500 WHERE linkId = 'vid'")
+        db.query("SELECT durationMs FROM photo_listing WHERE linkId = 'vid'").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals(7500L, cur.getLong(0))
+        }
     }
 
     @Test

@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -71,6 +71,10 @@ class ThumbnailHelpers @Inject constructor(
      * fails.
      *
      * @param sessionKey Session key decrypted from ContentKeyPacket (primary path).
+     * @param background Passed through to [CdnBlockFetcher.fetchBlock]: true for the
+     *  whole-library warm-up so its CDN GETs wait out the shared 429 cooldown; false (default)
+     *  for foreground / visible thumbnail fetches so they are never blocked by the warm-up's
+     *  backoff.
      * @return A `file://` URI to the decrypted JPEG cached on disk, or null on failure.
      */
     suspend fun downloadAndDecryptBinary(
@@ -79,6 +83,7 @@ class ThumbnailHelpers @Inject constructor(
         sessionKey: SessionKey?,
         linkId: String,
         cacheDir: File,
+        background: Boolean = false,
     ): String? {
         return try {
             val decFile = File(cacheDir, "thumb_$linkId.jpg")
@@ -95,7 +100,7 @@ class ThumbnailHelpers @Inject constructor(
                 } else null
             // Thumbnail CDN uses pm-storage-token (same as block CDN), not Authorization: Bearer.
             val encryptedBytes: ByteArray = simBytes ?: try {
-                cdnBlockFetcher.fetchBlock(url = info.bareUrl, token = info.token, maxAttempts = 3)
+                cdnBlockFetcher.fetchBlock(url = info.bareUrl, token = info.token, maxAttempts = 3, background = background)
             } catch (e: Exception) {
                 // Thumbnails are best-effort — a non-2xx after retries means no thumbnail,
                 // not a failed photo. Log and fall through to the empty-bytes short-circuit
@@ -108,18 +113,25 @@ class ThumbnailHelpers @Inject constructor(
 
             val decrypted: ByteArray? = if (sessionKey != null) {
                 // Primary path: session key from ContentKeyPacket (SEIPD-only blocks).
-                val encFile = File(cacheDir, "thumb_enc_$linkId")
-                val outFile = File(cacheDir, "thumb_dec_$linkId")
-                encFile.writeBytes(encryptedBytes)
-                val result = runCatching { cryptoServiceClient.decryptFileToDestination(sessionKey, encFile, outFile) }
-                encFile.delete()
-                if (result.isSuccess) {
-                    val bytes = outFile.readBytes(); outFile.delete(); bytes
-                } else {
+                // Per-call unique work temps so two concurrent decrypts of the SAME linkId (the
+                // gallery scheduler racing PhotoEntityBuilder / AlbumService / the widget updater)
+                // never share a file; a shared name let one path delete the encrypted input while
+                // the other was still reading it inside the crypto.
+                val encFile = File.createTempFile("thumb_enc_${linkId}_", ".tmp", cacheDir)
+                val outFile = File.createTempFile("thumb_dec_${linkId}_", ".tmp", cacheDir)
+                try {
+                    encFile.writeBytes(encryptedBytes)
+                    val result = runCatching { cryptoServiceClient.decryptFileToDestination(sessionKey, encFile, outFile) }
+                    if (result.isSuccess) {
+                        outFile.readBytes()
+                    } else {
+                        Log.w(TAG, "thumbnail sessionKey decrypt failed for $linkId: ${result.exceptionOrNull()?.message}")
+                        // Fallback: try binary-PGP (legacy format)
+                        cryptoServiceClient.decryptBinaryPgpWithNodeKey(encryptedBytes, nodeKeyBytes)
+                    }
+                } finally {
+                    encFile.delete()
                     outFile.delete()
-                    Log.w(TAG, "thumbnail sessionKey decrypt failed for $linkId: ${result.exceptionOrNull()?.message}")
-                    // Fallback: try binary-PGP (legacy format)
-                    cryptoServiceClient.decryptBinaryPgpWithNodeKey(encryptedBytes, nodeKeyBytes)
                 }
             } else {
                 // No session key — try binary-PGP (legacy full PKESK+SEIPD format)

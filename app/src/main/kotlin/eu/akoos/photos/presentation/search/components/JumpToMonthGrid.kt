@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -26,7 +26,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -49,6 +49,7 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.GalleryItem
+import eu.akoos.photos.presentation.gallery.LocalThumbnailUrls
 import eu.akoos.photos.presentation.theme.AppColors
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -91,62 +92,53 @@ fun buildMonthBuckets(items: List<GalleryItem>): List<MonthBucket> {
 }
 
 /**
- * Header + 3-column adaptive grid section that renders [buckets] as month tiles.
- * Each tile previews the bucket's [MonthBucket.coverItem] with a "Month Year" caption.
- * Designed to be embedded inside a parent [androidx.compose.foundation.lazy.LazyColumn] —
- * wrap with `item { ... }` at the call site.
+ * Section header for the search empty-state's month picker. Split out from the row tiles so the
+ * parent [androidx.compose.foundation.lazy.LazyColumn] can host the header and each tile row as
+ * separate list items, which lets a position-based scrubber scrub through the months.
  */
 @Composable
-fun JumpToMonthGridSection(
-    buckets: List<MonthBucket>,
+fun JumpToMonthHeader(modifier: Modifier = Modifier) {
+    val colors = AppColors.current
+    Text(
+        text = stringResource(R.string.search_section_jump_to_month),
+        color = colors.fgPrimary,
+        fontSize = 18.sp,
+        fontWeight = FontWeight.SemiBold,
+        letterSpacing = (-0.3).sp,
+        modifier = modifier.padding(start = 14.dp, end = 14.dp, top = 6.dp, bottom = 10.dp),
+    )
+}
+
+/**
+ * One row of up to three month tiles. Hosted as a standalone list item by the parent
+ * [androidx.compose.foundation.lazy.LazyColumn] so the month picker scrolls (and scrubs) as
+ * granular items rather than one tall block. The bottom padding stands in for the inter-row
+ * spacing the single-block layout used to get from a shared vertical arrangement.
+ */
+@Composable
+fun MonthTileRow(
+    row: List<MonthBucket>,
     onMonthClick: (year: Int, month: Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    if (buckets.isEmpty()) return
-    val colors = AppColors.current
-
-    Column(
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
         modifier = modifier
             .fillMaxWidth()
-            .padding(top = 4.dp, bottom = 16.dp),
+            .padding(horizontal = 14.dp)
+            .padding(bottom = 8.dp),
     ) {
-        Text(
-            text = stringResource(R.string.search_section_jump_to_month),
-            color = colors.fgPrimary,
-            fontSize = 18.sp,
-            fontWeight = FontWeight.SemiBold,
-            letterSpacing = (-0.3).sp,
-            modifier = Modifier.padding(start = 14.dp, end = 14.dp, top = 6.dp, bottom = 10.dp),
-        )
-        // Plain Column of rows (3-per-row) rather than a nested LazyVerticalGrid, because
-        // Compose disallows nesting vertically-scrolling lazy containers without an explicit
-        // height — and we want the parent LazyColumn to own the scroll. Bucket counts are
-        // bounded by total months the user has photos in (rarely >100), so non-lazy
-        // measurement here is cheap.
-        val rows = remember(buckets) { buckets.chunked(3) }
-        Column(
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.padding(horizontal = 14.dp),
-        ) {
-            rows.forEach { row ->
-                androidx.compose.foundation.layout.Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    row.forEach { bucket ->
-                        MonthTile(
-                            bucket = bucket,
-                            onClick = { onMonthClick(bucket.year, bucket.month) },
-                            modifier = Modifier.weight(1f),
-                        )
-                    }
-                    // Pad the trailing row with invisible weight-1 spacers so the last tiles
-                    // don't stretch across the full width when the row isn't full.
-                    repeat(3 - row.size) {
-                        Box(modifier = Modifier.weight(1f))
-                    }
-                }
-            }
+        row.forEach { bucket ->
+            MonthTile(
+                bucket = bucket,
+                onClick = { onMonthClick(bucket.year, bucket.month) },
+                modifier = Modifier.weight(1f),
+            )
+        }
+        // Pad the trailing row with invisible weight-1 spacers so the last tiles
+        // don't stretch across the full width when the row isn't full.
+        repeat(3 - row.size) {
+            Box(modifier = Modifier.weight(1f))
         }
     }
 }
@@ -158,10 +150,11 @@ private fun MonthTile(
     modifier: Modifier = Modifier,
 ) {
     val colors = AppColors.current
+    val thumbUrls = LocalThumbnailUrls.current.value
     val imageModel: Any? = when (val item = bucket.coverItem) {
         is GalleryItem.LocalOnly -> android.net.Uri.parse(item.local.uri)
         is GalleryItem.Synced    -> android.net.Uri.parse(item.local.uri)
-        is GalleryItem.CloudOnly -> item.cloud.thumbnailUrl
+        is GalleryItem.CloudOnly -> thumbUrls[item.cloud.linkId] ?: item.cloud.thumbnailUrl
     }
     val label = remember(bucket.year, bucket.month) {
         val cal = Calendar.getInstance().apply {

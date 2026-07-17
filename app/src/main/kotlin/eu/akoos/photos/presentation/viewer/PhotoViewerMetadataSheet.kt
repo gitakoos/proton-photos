@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -86,6 +86,11 @@ internal fun PhotoMetadataSheet(
     /** Geocoded place name for the Location row (device EXIF or a cloud photo's stored fix), or null
      *  while it resolves / when the photo has no GPS — the row then keeps its dash placeholder. */
     place: String? = null,
+    /** Device folder the photo lives in (LocalOnly / Synced). Null / blank for cloud-only items, which
+     *  hides the Local folder row. */
+    localFolder: String? = null,
+    /** Names of every cloud album the photo belongs to, filled lazily. Empty hides the Cloud albums row. */
+    cloudAlbums: List<String> = emptyList(),
     /** Resolution + length of a cloud-only video, read off its decrypted full-res (it has no EXIF or
      *  on-device media row). Null for other items / until it downloads. */
     cloudVideoMeta: CloudVideoMeta? = null,
@@ -148,7 +153,6 @@ internal fun PhotoMetadataSheet(
             val rowDate = stringResource(R.string.viewer_meta_row_date)
             val rowSize = stringResource(R.string.viewer_meta_row_size)
             val rowType = stringResource(R.string.viewer_meta_row_type)
-            val rowAlbum = stringResource(R.string.viewer_meta_row_album)
             val rowSource = stringResource(R.string.viewer_meta_row_source)
             val rowResolution = stringResource(R.string.viewer_meta_row_resolution)
             val rowDuration = stringResource(R.string.viewer_meta_row_duration)
@@ -190,7 +194,12 @@ internal fun PhotoMetadataSheet(
                 }
                 MetaRow(rowSize, if (sizeBytes > 0) formatBytes(sizeBytes) else "—")
                 MetaRow(rowType, mimeType)
-                localMedia?.bucketName?.let { MetaRow(rowAlbum, it) }
+                (localFolder ?: localMedia?.bucketName)?.takeIf { it.isNotBlank() }?.let {
+                    MetaRow(stringResource(R.string.viewer_meta_row_local_folder), it)
+                }
+                cloudAlbums.takeIf { it.isNotEmpty() }?.let {
+                    MetaRow(stringResource(R.string.viewer_meta_row_cloud_albums), it.joinToString(", "))
+                }
                 MetaRow(rowSource, source)
             }
 

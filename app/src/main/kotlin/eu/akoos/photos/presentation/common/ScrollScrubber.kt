@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -37,6 +37,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
@@ -92,6 +93,34 @@ fun BoxScope.ScrollScrubber(
         firstVisibleIndex = firstVisibleIndex,
         isScrollInProgress = { gridState.isScrollInProgress },
         scrollToItem = { gridState.scrollToItem(it) },
+        topPadding = topPadding,
+        bottomPadding = bottomPadding,
+        minItemsToShow = minItemsToShow,
+    )
+}
+
+/**
+ * [LazyListState] overload for a vertical list (e.g. the duplicate-finder's group column). Same
+ * position-only thumb as the grid overload, driven by the list's item count and first-visible index.
+ */
+@Composable
+fun BoxScope.ScrollScrubber(
+    listState: LazyListState,
+    topPadding: Dp,
+    bottomPadding: Dp,
+    minItemsToShow: Int = 0,
+) {
+    val totalItems by remember(listState) {
+        derivedStateOf { listState.layoutInfo.totalItemsCount }
+    }
+    val firstVisibleIndex by remember(listState) {
+        derivedStateOf { listState.firstVisibleItemIndex }
+    }
+    ScrollScrubberBody(
+        totalItems = totalItems,
+        firstVisibleIndex = firstVisibleIndex,
+        isScrollInProgress = { listState.isScrollInProgress },
+        scrollToItem = { listState.scrollToItem(it) },
         topPadding = topPadding,
         bottomPadding = bottomPadding,
         minItemsToShow = minItemsToShow,

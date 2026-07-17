@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -169,6 +169,8 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
@@ -186,8 +188,9 @@ import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.usecase.CategorizeItem
+import eu.akoos.photos.presentation.common.AlbumMembership
 import eu.akoos.photos.presentation.common.ConfirmDialog
-import eu.akoos.photos.presentation.common.UndoAction
+import eu.akoos.photos.presentation.common.albumMembershipState
 import eu.akoos.photos.presentation.common.anyLocalOnly
 import eu.akoos.photos.presentation.common.ConfirmSheet
 import eu.akoos.photos.presentation.common.DenseGridWarningDialog
@@ -273,6 +276,10 @@ fun GalleryScreen(
     onAlbumClick: (Album) -> Unit = {},
     onDeviceFolderClick: (bucketName: String) -> Unit = {},
     onSettingsClick: () -> Unit,
+    /** Opens the Activity screen on its Uploads tab, from the avatar's active-upload indicator. */
+    onOpenUploads: () -> Unit = {},
+    /** Opens the Activity screen on its Downloads tab, from the avatar's active-download indicator. */
+    onOpenDownloads: () -> Unit = {},
     onHiddenAlbumClick: () -> Unit = {},
     onSearchClick: () -> Unit = {},
     onCalendarClick: () -> Unit = {},
@@ -291,6 +298,9 @@ fun GalleryScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val downloadedCloudLinkIds by viewModel.downloadedCloudLinkIds.collectAsStateWithLifecycle()
+    // Fresh per-cell decrypted thumbnail URLs (see GalleryViewModel.thumbnailUrls). The timeline model
+    // no longer carries them on the row, so the grid resolves each cloud cell's URL from this map.
+    val thumbnailUrls by viewModel.thumbnailUrls.collectAsStateWithLifecycle()
     val albumsViewModel: AlbumsViewModel = hiltViewModel()
     val albumsState by albumsViewModel.uiState.collectAsStateWithLifecycle()
     val sharedViewModel: SharedViewModel = hiltViewModel()
@@ -349,6 +359,29 @@ fun GalleryScreen(
     }
     var sharedFilter by remember { mutableStateOf(SharedFilter.SharedWithMe) }
     var albumFilter by remember { mutableStateOf(AlbumDisplayFilter.All) }
+    // Albums-tab view filter: default narrowing, a remember-last toggle, and the last picked value.
+    val albumsDefaultFilter by remember {
+        context.settingsDataStore.data.map { it[SettingsKeys.ALBUMS_DEFAULT_FILTER] ?: 0 }
+    }.collectAsState(initial = 0)
+    val albumsRememberLastFilter by remember {
+        context.settingsDataStore.data.map { it[SettingsKeys.ALBUMS_REMEMBER_LAST_FILTER] ?: false }
+    }.collectAsState(initial = false)
+    val albumsLastFilter by remember {
+        context.settingsDataStore.data.map { it[SettingsKeys.ALBUMS_LAST_FILTER] ?: 0 }
+    }.collectAsState(initial = 0)
+    // Re-resolve the filter each time the pager reaches the Albums page: last-used when remembering,
+    // otherwise the configured default. Leaving and returning therefore resets to the default
+    // (remember-last off) or restores the last pick (remember-last on), rather than holding whatever
+    // was left on screen from a prior visit. Keyed on currentPage (which advances during the swipe)
+    // and resolved from the already-collected state so the target filter is applied before the page
+    // settles, with no visible "All" flash from awaiting a fresh DataStore read.
+    LaunchedEffect(pagerState.currentPage) {
+        if (pagerState.currentPage != 1) return@LaunchedEffect
+        val ordinal = if (albumsRememberLastFilter) albumsLastFilter else albumsDefaultFilter
+        albumFilter = AlbumDisplayFilter.entries[ordinal.coerceIn(0, AlbumDisplayFilter.entries.lastIndex)]
+    }
+    var showAlbumsFilterSheet by remember { mutableStateOf(false) }
+    val albumsFilterSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var activeEmailFilter by remember { mutableStateOf<String?>(null) }
     var showEmailFilterSheet by remember { mutableStateOf(false) }
     // Bump to ask AlbumsScreen to open its create-album dialog (the Albums-tab "New album" pill).
@@ -605,7 +638,10 @@ fun GalleryScreen(
     }
     LaunchedEffect(state.pendingDeleteIntent) {
         val pi = state.pendingDeleteIntent ?: return@LaunchedEffect
-        deletePermissionLauncher.launch(IntentSenderRequest.Builder(pi.intentSender).build())
+        // Guard the launch so an OEM that throws on a large or foreign trash IntentSender fails
+        // gracefully instead of force-closing.
+        runCatching { deletePermissionLauncher.launch(IntentSenderRequest.Builder(pi.intentSender).build()) }
+            .onFailure { viewModel.clearPendingDeleteIntent() }
     }
 
     // ── Metadata-strip write-permission launcher ──────────────────────────────
@@ -619,7 +655,8 @@ fun GalleryScreen(
     }
     LaunchedEffect(state.pendingStripIntent) {
         val pi = state.pendingStripIntent ?: return@LaunchedEffect
-        stripPermissionLauncher.launch(IntentSenderRequest.Builder(pi.intentSender).build())
+        runCatching { stripPermissionLauncher.launch(IntentSenderRequest.Builder(pi.intentSender).build()) }
+            .onFailure { viewModel.clearPendingStripIntent() }
     }
 
     // ── Multi-select delete sheet ─────────────────────────────────────────────
@@ -665,34 +702,6 @@ fun GalleryScreen(
         if (multiHideState is MultiDeleteState.Failed) {
             snackbarHostState.showSnackbar(multiHideState.message)
             viewModel.resetMultiHideState()
-        }
-    }
-
-    // Undo for the reversible destructive actions (hide → vault, delete → cloud trash). Keyed on
-    // the captured target so it fires once per action, independent of which terminal channel set
-    // it. Not tapping leaves the action exactly as performed; Undo restores precisely those items.
-    val undoAction = state.undoAction
-    LaunchedEffect(undoAction) {
-        if (undoAction == null) return@LaunchedEffect
-        val message = when (undoAction) {
-            is UndoAction.Hide       -> context.resources.getQuantityString(
-                R.plurals.gallery_hidden_snackbar, undoAction.count, undoAction.count)
-            is UndoAction.CloudTrash -> context.resources.getQuantityString(
-                R.plurals.gallery_moved_to_trash_snackbar, undoAction.count, undoAction.count)
-        }
-        // ~5s instead of the old 10s Long snackbar, which lingered too long after every
-        // hide/delete. Indefinite + a timeout gives a custom, self-dismissing window.
-        val result = kotlinx.coroutines.withTimeoutOrNull(5000L) {
-            snackbarHostState.showSnackbar(
-                message     = message,
-                actionLabel = context.getString(R.string.gallery_undo),
-                duration    = androidx.compose.material3.SnackbarDuration.Indefinite,
-            )
-        }
-        if (result == androidx.compose.material3.SnackbarResult.ActionPerformed) {
-            viewModel.undoLastAction()
-        } else {
-            viewModel.clearUndoAction()
         }
     }
 
@@ -839,7 +848,7 @@ fun GalleryScreen(
     }
 
     val isOnlineNow by viewModel.isOnline.collectAsStateWithLifecycle()
-    val updateBannerVersion by viewModel.updateBannerVersion.collectAsStateWithLifecycle()
+    val updateAvailable by viewModel.updateAvailable.collectAsStateWithLifecycle()
 
     Box(
         modifier = Modifier
@@ -910,6 +919,7 @@ fun GalleryScreen(
                                 items              = state.filteredItems,
                                 allItems           = state.items,
                                 monthGroups        = state.monthGroups,
+                                dayGroups          = state.dayGroups,
                                 onThisDayGroups    = state.onThisDayGroups,
                                 gridState          = gridState,
                                 staggeredState     = staggeredState,
@@ -933,6 +943,7 @@ fun GalleryScreen(
                                 downloadedCloudLinkIds = downloadedCloudLinkIds,
                                 favoriteIds = state.favoriteIds,
                                 offlinePinIds = state.offlinePinIds,
+                                thumbnailUrls = thumbnailUrls,
                                 onRequestThumbnail = viewModel::requestThumbnailDecrypt,
                                 onCancelThumbnail  = viewModel::cancelThumbnailDecrypt,
                                 denseGridWarningDismissed = state.denseGridWarningDismissed,
@@ -985,23 +996,30 @@ fun GalleryScreen(
                         onCalendarClick = onCalendarClick,
                         onClearContentFilter = { viewModel.setContentFilter(ContentFilter()) },
                         onHiddenAlbumClick = onHiddenAlbumClick,
-                        // The Albums-tab filter button opens the Timeline filter screen.
+                        // The Photos-tab filter pill opens the Timeline filter screen.
                         onShowAlbumsFilterSheet = onOpenTimelineFilter,
                         onNewAlbumClick = { albumCreateSignal++ },
                         albumFilter = albumFilter,
-                        onAlbumFilterSelected = { albumFilter = it },
+                        onAlbumFilterSelected = { picked ->
+                            albumFilter = picked
+                            tabScope.launch {
+                                context.settingsDataStore.edit { it[SettingsKeys.ALBUMS_LAST_FILTER] = picked.ordinal }
+                            }
+                        },
+                        onOpenAlbumsFilterSheet = { showAlbumsFilterSheet = true },
                         onSharedFilterSelected = { filter ->
                             sharedFilter = filter
                             activeEmailFilter = null
                         },
                         onShowSharedEmailSheet = { showEmailFilterSheet = true },
                         onSettingsClick = onSettingsClick,
+                        onOpenUploads = onOpenUploads,
+                        onOpenDownloads = onOpenDownloads,
                         // Only the page actually in front reports its height, so the content inset and
                         // the selection-mode grid offset track the visible header, not a fading one.
                         onHeaderMeasured = { if (page == pagerState.currentPage) headerHeightPx = it },
-                        updateBannerVersion = updateBannerVersion,
-                        onUpdateBannerOpen = viewModel::openUpdateFromBanner,
-                        onUpdateBannerDismiss = viewModel::dismissUpdateBanner,
+                        updateAvailable = updateAvailable,
+                        onUpdateClick = viewModel::openUpdateFromDot,
                     )
                 }
             }
@@ -1031,6 +1049,7 @@ fun GalleryScreen(
                     // link) instead of sharing straight to the OS chooser.
                     showShareSheet = true
                 },
+                onHide = viewModel::hideSelected,
                 onRequestDelete = { showMultiDeleteSheet = true },
                 // Keep the grid's top inset at the FULL browse-header height while selecting, so it
                 // doesn't jump up when the shorter selection header (no category rail) replaces the
@@ -1054,17 +1073,14 @@ fun GalleryScreen(
                 selectedItems = state.selectedItems,
                 offlinePinIds = state.offlinePinIds,
                 multiDownloadState = multiDownloadState,
-                multiHideState = state.multiHideState,
                 multiStripState = multiStripState,
                 addToAlbumState = addToAlbumState,
-                anyLocalOnly = anyLocalOnly(state.selectedItems),
                 showLabels = showSelectionLabels,
                 onDownload = viewModel::downloadSelected,
                 onMakeAvailableOffline = viewModel::toggleSelectedOffline,
                 onRequestAddToAlbum = { showAddToAlbumSheet = true },
                 onBackUp = { showBackUpConfirm = true },
                 onStripMetadata = viewModel::stripMetadataSelected,
-                onHideSelected = viewModel::hideSelected,
             )
         }
 
@@ -1166,6 +1182,27 @@ fun GalleryScreen(
                 .navigationBarsPadding()
                 .padding(bottom = 96.dp),
         )
+
+        // ── DEBUG heap readout ────────────────────────────────────────────────
+        // Debug-only used/max Java-heap overlay so the maintainer + testers can watch memory while
+        // scrolling a large library and confirm the sustained-scroll heap stays flat. Never compiled
+        // into a release surface (BuildConfig.DEBUG-guarded, mirroring the Activity Test mode toggle).
+        if (eu.akoos.photos.BuildConfig.DEBUG) {
+            val heapStat by viewModel.debugHeapStat.collectAsStateWithLifecycle()
+            if (heapStat.isNotEmpty()) {
+                Text(
+                    text = heapStat,
+                    color = Color.White,
+                    fontSize = 10.sp,
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .statusBarsPadding()
+                        .padding(top = 2.dp, end = 6.dp)
+                        .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(4.dp))
+                        .padding(horizontal = 5.dp, vertical = 2.dp),
+                )
+            }
+        }
     }
 
     // ── Bottom sheets — extracted to GalleryDialogs.kt for JIT-blob shrink ────
@@ -1188,6 +1225,24 @@ fun GalleryScreen(
                 showEmailFilterSheet = false
             },
             onDismiss = { showEmailFilterSheet = false },
+        )
+    }
+    if (showAlbumsFilterSheet) {
+        AlbumsFilterSheet(
+            sheetState = albumsFilterSheetState,
+            default = AlbumDisplayFilter.entries[albumsDefaultFilter.coerceIn(0, AlbumDisplayFilter.entries.lastIndex)],
+            rememberLast = albumsRememberLastFilter,
+            onDefaultChange = { picked ->
+                tabScope.launch {
+                    context.settingsDataStore.edit { it[SettingsKeys.ALBUMS_DEFAULT_FILTER] = picked.ordinal }
+                }
+            },
+            onRememberLastChange = { value ->
+                tabScope.launch {
+                    context.settingsDataStore.edit { it[SettingsKeys.ALBUMS_REMEMBER_LAST_FILTER] = value }
+                }
+            },
+            onDismiss = { showAlbumsFilterSheet = false },
         )
     }
     if (showShareCloudWarning) {
@@ -1249,6 +1304,7 @@ fun GalleryScreen(
                 )
             },
             onDismiss = { showAddToAlbumSheet = false },
+            hiddenAlbumIds = state.hiddenAlbumIds,
         )
     }
     if (showCreateAlbumInline) {
@@ -1328,6 +1384,9 @@ internal fun GalleryAddToAlbumPickerSheet(
     onCreateNew: () -> Unit,
     onCloudAlbumSelected: (Album) -> Unit,
     onDismiss: () -> Unit,
+    hiddenAlbumIds: Set<String> = emptySet(),
+    selectionCloudLinkIds: Set<String> = emptySet(),
+    albumMemberIds: Map<String, Set<String>> = emptyMap(),
 ) {
     val appColors = AppColors.current
 
@@ -1393,6 +1452,11 @@ internal fun GalleryAddToAlbumPickerSheet(
                     .heightIn(max = 360.dp),
             ) {
                 items(cloudAlbums) { album ->
+                    // Derived from the live selection, so ticking another photo re-reads the row.
+                    val membership = albumMembershipState(
+                        selectionCloudLinkIds,
+                        albumMemberIds[album.linkId].orEmpty(),
+                    )
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1422,8 +1486,26 @@ internal fun GalleryAddToAlbumPickerSheet(
                             }
                         }
                         Column(modifier = Modifier.weight(1f)) {
-                            Text(album.name, color = appColors.fgPrimary, fontSize = 15.sp,
-                                fontWeight = FontWeight.Medium)
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            ) {
+                                Text(
+                                    album.name, color = appColors.fgPrimary, fontSize = 15.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    modifier = Modifier.weight(1f, fill = false),
+                                )
+                                // A client-side hidden album stays a valid target; the lock just
+                                // tells the user this row is one of their hidden albums.
+                                if (album.linkId in hiddenAlbumIds) {
+                                    Icon(
+                                        Icons.Default.Lock,
+                                        contentDescription = stringResource(R.string.timeline_filter_hidden_album),
+                                        tint = appColors.fgMute,
+                                        modifier = Modifier.size(14.dp),
+                                    )
+                                }
+                            }
                             Text(
                                 stringResource(
                                     R.string.gallery_album_picker_count_drive,
@@ -1432,6 +1514,50 @@ internal fun GalleryAddToAlbumPickerSheet(
                                     ),
                                 ),
                                 color = appColors.fgMute, fontSize = 12.sp)
+                        }
+                        // Accent check for a fully-covered album, a fraction when the album holds
+                        // part of the selection; nothing at all in the common not-yet-added case.
+                        // Mirrors the viewer sheet's membership tile.
+                        when (membership) {
+                            is AlbumMembership.All -> Box(
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .background(Accent, RoundedCornerShape(14.dp)),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(
+                                    Icons.Default.Check,
+                                    contentDescription = stringResource(R.string.cd_status_all_selected_in_album),
+                                    tint = Color.White,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                            }
+                            is AlbumMembership.Some -> {
+                                // The visible "3 / 5" is digits only; the spoken form carries the meaning.
+                                val fractionCd = stringResource(
+                                    R.string.cd_status_some_selected_in_album,
+                                    membership.inAlbum, membership.total,
+                                )
+                                Box(
+                                    modifier = Modifier
+                                        .background(Accent.copy(alpha = 0.15f), RoundedCornerShape(14.dp))
+                                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                                        // The row merges its children, so replace the bare digits
+                                        // rather than let them read out alongside the spoken form.
+                                        .clearAndSetSemantics { contentDescription = fractionCd },
+                                ) {
+                                    Text(
+                                        stringResource(
+                                            R.string.gallery_album_picker_in_album_fraction,
+                                            membership.inAlbum, membership.total,
+                                        ),
+                                        color = Accent,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                    )
+                                }
+                            }
+                            is AlbumMembership.None -> Unit
                         }
                     }
                 }

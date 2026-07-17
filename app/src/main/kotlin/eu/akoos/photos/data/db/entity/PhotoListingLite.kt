@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -34,6 +34,14 @@ import eu.akoos.photos.domain.entity.CloudPhoto
  * library that transient was hundreds of MB per write and pinned the heap at its ceiling. This
  * projection selects only what the grid binds; the crypto material stays in the table and is read
  * per-linkId by the thumbnail decrypt scheduler when a cell actually needs it.
+ *
+ * thumbnailUrl is NOT part of this projection. A decrypt-completion writes it per-linkId, and Room's
+ * table-level invalidation re-runs this query on every such write regardless. Dropping the column makes
+ * the re-queried rows byte-identical to the last emission, so the distinctUntilChanged in
+ * GetGalleryItemsUseCase drops it before the merge/group rebuild; carrying it would make each write a
+ * distinct emission that forces a whole-timeline rebuild on every thumbnail landing during a sustained
+ * scroll (the churn behind the large-library OOM). The decrypted URL reaches the cell through the
+ * in-memory ThumbnailUrlStore instead, so [toDomain] leaves it null.
  */
 data class PhotoListingLite(
     val linkId: String,
@@ -44,9 +52,11 @@ data class PhotoListingLite(
     val mimeType: String,
     val sizeBytes: Long,
     val revisionId: String,
-    val thumbnailUrl: String?,
     val contentHash: String?,
     val tagsCsv: String,
+    // A tiny nullable Long, unlike the kilobyte-scale crypto blobs, so it is safe to carry on the OOM-lite
+    // feed so the timeline's video cells can show a duration pill without a per-cell lookup.
+    val durationMs: Long?,
 ) {
     fun toDomain() = CloudPhoto(
         linkId = linkId,
@@ -56,9 +66,19 @@ data class PhotoListingLite(
         displayName = displayName,
         mimeType = mimeType,
         sizeBytes = sizeBytes,
-        thumbnailUrl = thumbnailUrl,
+        // Supplied by ThumbnailUrlStore at the cell, not this row (see the class doc).
+        thumbnailUrl = null,
         revisionId = revisionId,
         contentHash = contentHash,
         tags = if (tagsCsv.isEmpty()) emptySet() else tagsCsv.split(',').mapNotNull { it.toIntOrNull() }.toSet(),
+        durationMs = durationMs,
     )
 }
+
+/** Two-column projection for [eu.akoos.photos.data.db.dao.PhotoListingDao.getThumbnailUrlSeed]: the
+ *  startup prime of [eu.akoos.photos.data.repository.drive.ThumbnailUrlStore]. Kept separate from
+ *  [PhotoListingLite] so the seed read never pulls the display columns it doesn't need. */
+data class ThumbnailUrlSeed(
+    val linkId: String,
+    val thumbnailUrl: String?,
+)

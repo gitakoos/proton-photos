@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -62,10 +62,14 @@ class UpdateOrchestrator @Inject constructor(
     /** Hot state surface for the Compose layer. null = no dialog visible. */
     val state: StateFlow<UpdatePromptState?> = _state.asStateFlow()
 
-    /** Version name of an available update the user pushed aside with "Not now". Drives the
-     *  dismissable gallery update banner; null = no banner. */
-    private val _banner = MutableStateFlow<String?>(null)
-    val banner: StateFlow<String?> = _banner.asStateFlow()
+    /**
+     * Persistent "an update exists" signal driving the avatar update dot. TRUE whenever a check
+     * has found an available update, independent of the dialog. It survives dismissing the dialog
+     * and (via the repository's persisted marker, re-hydrated in [runSilentCheck]) an app relaunch;
+     * it only clears when a check confirms the app is up to date.
+     */
+    private val _updateAvailable = MutableStateFlow(false)
+    val updateAvailable: StateFlow<Boolean> = _updateAvailable.asStateFlow()
 
     /**
      * Held between phases so we can recover the install URL after the user grants
@@ -79,10 +83,16 @@ class UpdateOrchestrator @Inject constructor(
     private var downloadJob: Job? = null
 
     /**
-     * Silently checks for an update if the 24h cache hasn't elapsed. On hit, swaps the
-     * dialog state to [UpdatePromptState.Available]. Errors stay silent — the silent
-     * check fires from onResume on every foreground entry and shouldn't yell about a
-     * one-off network flake.
+     * Fires from onResume on every foreground entry. Two responsibilities:
+     *
+     *  1. Re-light the persistent update dot from the repository's saved marker so a
+     *     previously-found update survives a relaunch, WITHOUT opening the dialog during the check.
+     *  2. Run the throttled check. Only when the throttle has elapsed does this hit the network;
+     *     a fresh Available result re-nags via the dialog, a fresh UpToDate clears the dot. A
+     *     throttled call returns UpToDate but leaves the saved marker alone, so the dot (re-hydrated
+     *     from the marker below) stays lit.
+     *
+     * Errors stay silent, a one-off network flake at foreground shouldn't yell at the user.
      */
     suspend fun runSilentCheck() {
         // If a download / install flow is already mid-flight, don't disturb its state.
@@ -90,10 +100,17 @@ class UpdateOrchestrator @Inject constructor(
             _state.value is UpdatePromptState.InstallReady
         ) return
 
+        // Dot on immediately if a prior check left an update pending, dialog stays closed.
+        _updateAvailable.value = repository.knownAvailableVersion() != null
+
         when (val status = repository.checkForUpdateCached()) {
             is UpdateStatus.Available -> showAvailable(status)
-            else -> Unit
+            is UpdateStatus.UpToDate -> Unit
         }
+        // The cached check updates the persisted marker only on a fresh network fetch (Available
+        // sets it, UpToDate clears it); a throttled call leaves it. Re-reading it here reconciles
+        // the dot in all three cases without the dialog being touched by the throttled branch.
+        _updateAvailable.value = repository.knownAvailableVersion() != null
     }
 
     /**
@@ -113,8 +130,11 @@ class UpdateOrchestrator @Inject constructor(
                     showAvailable(status)
                     ManualCheckOutcome.NewVersionShown
                 }
-                is UpdateStatus.DismissedVersion,
-                is UpdateStatus.UpToDate -> ManualCheckOutcome.UpToDate
+                is UpdateStatus.UpToDate -> {
+                    // A forced check is authoritative: no update, so drop the dot too.
+                    _updateAvailable.value = false
+                    ManualCheckOutcome.UpToDate
+                }
             }
         } catch (t: Throwable) {
             // The repository contract is non-throwing, but defend against future changes.
@@ -173,35 +193,16 @@ class UpdateOrchestrator @Inject constructor(
     }
 
     /**
-     * Records the dismissal for the version the user just declined (so the silent check
-     * doesn't re-pester them until a newer release ships) and clears the dialog. Caller
-     * passes the scope so the DataStore write is bound to the host's lifecycle.
+     * "Not now" (or a tap outside the dialog): close the dialog only. The dismissal is transient
+     * and in-memory, nothing is persisted, and the persistent update dot stays lit. The next
+     * check that still finds this update re-shows the dialog, so the reminder comes back on the
+     * normal check cadence rather than being suppressed forever.
      */
-    /** "Not now" on the dialog: close it but keep the update around as a dismissable banner (and
-     *  keep [pendingAvailable] so the banner can re-open the dialog). The version is NOT persisted
-     *  as dismissed here — only the banner's X does that (see [hardDismissBanner]). */
     fun dismiss(@Suppress("UNUSED_PARAMETER") scope: CoroutineScope) {
         downloadJob?.cancel()
         downloadJob = null
         pendingFile = null
-        _banner.value = pendingAvailable?.versionName
         _state.value = null
-    }
-
-    /** Banner X: drop the banner and record the version as dismissed so the silent check stops
-     *  re-offering it until a newer release ships. */
-    fun hardDismissBanner(scope: CoroutineScope) {
-        val version = pendingAvailable?.versionName
-        pendingAvailable = null
-        _banner.value = null
-        if (version != null) {
-            scope.launch { runCatching { repository.dismissVersion(version) } }
-        }
-    }
-
-    /** Banner tap: re-open the update dialog from the still-pending available update. */
-    fun reopenFromBanner() {
-        pendingAvailable?.let { showAvailable(it) }
     }
 
     /**
@@ -218,7 +219,7 @@ class UpdateOrchestrator @Inject constructor(
      */
     private fun showAvailable(status: UpdateStatus.Available) {
         pendingAvailable = status
-        _banner.value = null
+        _updateAvailable.value = true
         val sizeMb = ((status.apkSizeBytes + 1024L * 1024L - 1L) / (1024L * 1024L))
             .toInt()
             .coerceAtLeast(0)

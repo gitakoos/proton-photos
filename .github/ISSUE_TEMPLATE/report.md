@@ -38,9 +38,21 @@ assignees: []
 
 *If it's a feature request, write what you'd like to see and why.*
 
-## Logcat (for crashes — strongly recommended)
+## Diagnostics from the app (easiest, please try this first)
 
-Without a logcat we usually have to guess. Capturing one needs a PC with `adb`. **No third-party app required.**
+The app captures a privacy-safe diagnostics report on its own: the last crash, plus sync and performance info, with **no photos and no account data**.
+
+1. In the app: **Settings > Share diagnostics**.
+2. Tap **Share** and send it to yourself (email, notes, a messaging app), or **Copy to clipboard**.
+3. Paste it below, or attach it as a file. That is usually enough to pinpoint a crash, with no PC or `adb` needed.
+
+```
+paste the app diagnostics here
+```
+
+## Logcat (advanced, only if the diagnostics above are not enough)
+
+A full logcat needs a PC with `adb`. **No third-party app required.**
 
 1. Enable USB debugging: Settings → About phone → tap Build number 7 times → back → System → Developer options → toggle **USB debugging**.
 2. Install Android platform-tools on your computer:

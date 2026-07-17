@@ -41,8 +41,8 @@ android {
         // versionCode bumped per release tag — keep monotonically increasing.
         // versionName mirrors the GitHub release tag (e.g. v2.0.0 → "2.0.0") so the About
         // screen and the published APK report the same version the user downloaded.
-        versionCode = 242
-        versionName = "2.3.9"
+        versionCode = 257
+        versionName = "2.4.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -244,6 +244,10 @@ dependencies {
     implementation(libs.media3.exoplayer)
     implementation(libs.media3.ui)
 
+    // Video upload compression (opt-in transcode)
+    implementation(libs.media3.transformer)
+    implementation(libs.media3.effect)
+
     // Networking
     implementation(libs.retrofit)
     implementation(libs.retrofit.kotlinx.serialization)
@@ -272,6 +276,11 @@ dependencies {
     // Map view — OpenStreetMap tiles, no Google Play Services
     implementation(libs.osmdroid.android)
 
+    // On-device ML: ONNX Runtime for magic search (CLIP). Fully local inference.
+    // Debug-only for now: the proof-of-concept lives in src/debug; kept out of release
+    // builds until the feature is productionised so it adds nothing to the shipped APK.
+    debugImplementation(libs.onnxruntime.android)
+
     // Coroutines
     implementation(libs.coroutines.android)
 
@@ -283,6 +292,8 @@ dependencies {
     testImplementation(libs.robolectric)
     testImplementation(libs.androidx.test.core)
     androidTestImplementation(libs.androidx.test.ext)
+    androidTestImplementation(libs.androidx.test.core)
+    androidTestImplementation(libs.androidx.test.runner)
 
     // Loads the AOT-compilable Baseline Profile shipped inside the APK on every
     // process start. Without this dependency the generated baseline-prof.txt sits

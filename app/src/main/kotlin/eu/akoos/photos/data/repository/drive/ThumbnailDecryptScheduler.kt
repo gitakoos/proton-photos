@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -28,6 +28,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
@@ -37,8 +38,11 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import me.proton.core.domain.entity.UserId
 import eu.akoos.photos.crypto.CryptoServiceClient
+import eu.akoos.photos.data.db.dao.AlbumPhotoMembershipDao
 import eu.akoos.photos.data.db.dao.PhotoListingDao
 import eu.akoos.photos.data.db.entity.PhotoListingEntity
+import eu.akoos.photos.data.preferences.SettingsKeys
+import eu.akoos.photos.data.preferences.settingsDataStore
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
@@ -54,8 +58,8 @@ private const val TAG = "ThumbDecryptSched"
  * Replaces the cold-sync "decrypt EVERY thumbnail up-front" loop in
  * [PhotoStreamService.refreshCloudPhotos] / [AlbumService.loadAlbumPhotos]: that loop
  * piled hundreds of libgojni JNI calls onto the IO dispatcher in a single burst and
- * tripped the `slice bounds out of range [:-1]` SIGABRT on Android-16 beta firmware
- * once GC + Go-runtime memory layout interacted badly. The new path moves the decrypt
+ * tripped the `slice bounds out of range [:-1]` SIGABRT under certain firmware / GC
+ * interactions once GC + Go-runtime memory layout aligned badly. The new path moves the decrypt
  * work to the moment a grid cell becomes visible, bounded by [semaphore] (3 concurrent
  * decrypts max — empirically high enough to keep scroll feeling instant, low enough to
  * stay well below the JNI / GC threshold that triggered SIGABRT).
@@ -99,9 +103,11 @@ class ThumbnailDecryptScheduler @Inject constructor(
     private val cryptoServiceClient: CryptoServiceClient,
     private val thumbnailHelpers: ThumbnailHelpers,
     private val photoListingDao: PhotoListingDao,
+    private val albumPhotoMembershipDao: AlbumPhotoMembershipDao,
     private val linkDetailHelpers: LinkDetailHelpers,
     private val shareService: PhotosShareService,
     private val albumCryptoChain: AlbumCryptoChain,
+    private val thumbnailUrlStore: ThumbnailUrlStore,
     @ApplicationContext private val context: Context,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -170,6 +176,15 @@ class ThumbnailDecryptScheduler @Inject constructor(
     /** One background warm-up at a time — a second trigger (resume, refresh) while one is running is
      *  a no-op instead of stacking another full library walk and its row set in memory. */
     private val backfilling = AtomicBoolean(false)
+
+    /**
+     * Earliest wall-clock ms at which the next BACKGROUND (whole-library warm-up) decrypt may start.
+     * Every worker that picks up a BACKGROUND task reserves the next slot here and waits it out
+     * BEFORE taking a semaphore permit, so the aggregate warm-up CDN request rate across all workers
+     * is capped to one fetch per [BACKGROUND_PACE_MS] (a gentle trickle). VISIBLE / PREFETCH never
+     * touch this gate, so the viewport and look-ahead stay instant even while a warm-up trickles.
+     */
+    private val backgroundPaceUntilMs = AtomicLong(0L)
 
     /**
      * Current viewport generation. Advanced by [bumpGeneration] on each viewport change so
@@ -305,6 +320,16 @@ class ThumbnailDecryptScheduler @Inject constructor(
         if (!backfilling.compareAndSet(false, true)) return
         scope.launch {
             try {
+                // Photos in a client-side hidden album are kept out of the proactive warm-up; snapshot the
+                // member set once so the pass stays consistent across its pages. Resolved via the DAO and
+                // DataStore directly because AlbumService injects this scheduler, so injecting it back
+                // would form a dependency cycle. The on-demand request / prefetch paths do not consult
+                // this set, so revealing a hidden album still warms its thumbnails on demand.
+                val hiddenLinkIds = runCatching {
+                    val hiddenAlbumIds = context.settingsDataStore.data.first()[SettingsKeys.HIDDEN_ALBUM_IDS] ?: emptySet()
+                    if (hiddenAlbumIds.isEmpty()) emptySet()
+                    else albumPhotoMembershipDao.observeAssociatedPhotoLinkIdsForAlbums(hiddenAlbumIds).first().toSet()
+                }.getOrDefault(emptySet())
                 val budget = trimTargetBytes()
                 var cacheBytes = thumbnailCacheBytes()
                 // Walk the library newest-first in bounded pages so only one page of rows (and their
@@ -322,6 +347,7 @@ class ThumbnailDecryptScheduler @Inject constructor(
                         // thumbnails whose bytes never reach the budget — without it the warm-up would
                         // enqueue tens of thousands of decrypts in one burst and flood the pipeline.
                         if (cacheBytes >= budget || enqueuedCount >= MAX_BACKFILL_THUMBNAILS) break@page
+                        if (row.linkId in hiddenLinkIds) continue
                         enqueue(userId, row, Band.BACKGROUND)
                         // Every sample interval, let the workers catch up (so in-flight decrypts can't
                         // outrun the budget guard) and re-measure the cache off disk.
@@ -348,6 +374,12 @@ class ThumbnailDecryptScheduler @Inject constructor(
     private fun enqueue(userId: UserId, photo: PhotoListingEntity, band: Band) {
         // Fail fast on rows that carry no decryptable thumbnail material; the worker
         // re-reads the same fields off the entity when it runs the task.
+        // Every caller (request / prefetch / pinCovers / backfillAll) hydrates a FULL row via a
+        // SELECT * query (getByLinkId / getByLinkIds / getUndecryptedThumbnailsBefore), so this
+        // field IS populated when a URL was persisted and the check genuinely short-circuits the
+        // already-decrypted row. The timeline's lite projection drops thumbnailUrl but never reaches
+        // here. The authoritative short-circuit for a warm-but-unpersisted row is cachedThumbnailUrl()
+        // below, so this stays correct even if a future caller ever passed a projection without it.
         if (photo.thumbnailUrl != null) return
         if (photo.serverThumbnailUrl == null) return
         if (photo.contentKeyPacket == null) return
@@ -360,6 +392,9 @@ class ThumbnailDecryptScheduler @Inject constructor(
         // session before the DB write landed, or persisted then evicted from memory) we just
         // re-point the row at the cached file — a cheap DB write, no JNI — so the cell binds.
         cachedThumbnailUrl(linkId)?.let { url ->
+            // Paint the cell now: the timeline projection no longer carries thumbnailUrl, so the store
+            // is what repaints this tile; the DB write is for persistence + next-launch seeding.
+            thumbnailUrlStore.put(linkId, url)
             scope.launch {
                 runCatching { photoListingDao.updateThumbnailUrl(linkId, url) }
                 // Touch so a re-viewed thumbnail counts as young and survives LRU eviction —
@@ -424,6 +459,24 @@ class ThumbnailDecryptScheduler @Inject constructor(
         return a.seq < b.seq
     }
 
+    /**
+     * Space out BACKGROUND warm-up decrypts to one per [BACKGROUND_PACE_MS] across the whole worker
+     * pool, so the aggregate warm-up CDN request rate is a trickle instead of a flood (proactively
+     * keeping the whole-library warm-up from tripping a 429 in the first place). Reserves the next
+     * slot atomically (concurrent workers claim staggered slots rather than the same one), then
+     * sleeps until it arrives.
+     *
+     * Called BEFORE the semaphore permit is taken, so a paced BACKGROUND task never holds a worker
+     * permit while it waits: a freshly VISIBLE thumbnail can grab all [WORKER_COUNT] permits
+     * immediately mid-warm-up. Only BACKGROUND tasks call this; VISIBLE and PREFETCH are unpaced.
+     */
+    private suspend fun paceBackground() {
+        val now = System.currentTimeMillis()
+        val slot = backgroundPaceUntilMs.updateAndGet { prev -> maxOf(prev, now) + BACKGROUND_PACE_MS }
+        val wait = slot - BACKGROUND_PACE_MS - now
+        if (wait > 0) delay(wait)
+    }
+
     private fun worker() {
         scope.launch {
             for (signal in available) {
@@ -436,9 +489,15 @@ class ThumbnailDecryptScheduler @Inject constructor(
                     // once the queue drains — the woken worker just re-parks.
                     available.trySend(Unit)
                     val linkId = task.photo.linkId
+                    // Trickle the warm-up: BACKGROUND tasks wait out the shared pace gate BEFORE taking a
+                    // permit, so the aggregate warm-up fetch rate stays gentle without ever occupying a
+                    // worker permit a newly VISIBLE thumbnail needs. VISIBLE / PREFETCH skip the gate.
+                    if (task.band == Band.BACKGROUND) paceBackground()
                     try {
                         semaphore.withPermit {
-                            runCatching { decryptOne(task.userId, task.photo) }
+                            // The whole-library warm-up (BACKGROUND band) rides the shared CDN cooldown so a
+                            // 429 burst self-limits; VISIBLE / PREFETCH fetches stay responsive.
+                            runCatching { decryptOne(task.userId, task.photo, task.band == Band.BACKGROUND) }
                                 .onFailure { e -> Log.w(TAG, "decrypt $linkId failed: ${e.message}") }
                         }
                     } finally {
@@ -478,12 +537,18 @@ class ThumbnailDecryptScheduler @Inject constructor(
      * Drop queued work and the parent-key cache. Called on sign-out — keeps decrypted
      * key material from outliving the session. Tasks a worker has already started finish
      * naturally; nothing new is dispatched.
+     *
+     * Zeroing the cache arrays here is safe even while a worker is mid-decrypt: [getParentKeyBytes]
+     * hands every worker a defensive copy of the key, so no in-flight decrypt is ever reading from
+     * the cache's own arrays this wipes. That copy is short-lived (dropped when the decrypt returns),
+     * so it does not meaningfully extend how long key material lives past the session.
      */
     fun clear() {
         scope.launch {
             queueLock.withLock { queue.clear() }
             enqueued.clear()
         }
+        thumbnailUrlStore.clear()
         parentKeyCache.values.forEach { it.fill(0) }
         parentKeyCache.clear()
         pinnedCoverLinkIds.clear()
@@ -512,11 +577,13 @@ class ThumbnailDecryptScheduler @Inject constructor(
      * has its thumbnailUrl nulled so the cell re-decrypts the next time it scrolls into view —
      * a re-warm is one local decrypt, never a network round-trip, because the crypto material
      * stays on the row. Only the final `thumb_<linkId>.jpg` files count toward the cap; the
-     * transient `thumb_enc_*` / `thumb_dec_*` work files have no `.jpg` suffix and are skipped.
+     * transient `thumb_enc_*` / `thumb_dec_*` work files have no `.jpg` suffix and are skipped
+     * by the LRU, but are separately swept here once stale (see [sweepOrphanThumbTemps]).
      */
     private suspend fun trimThumbnailCache() {
         if (!trimming.compareAndSet(false, true)) return
         try {
+            sweepOrphanThumbTemps()
             val cap = maxThumbCacheBytes()
             // Cheap streaming size check FIRST. The common case — the cache at or under budget —
             // exits here without ever materialising a File[] of every cached thumbnail. That listing
@@ -563,11 +630,38 @@ class ThumbnailDecryptScheduler @Inject constructor(
             if (evicted.isNotEmpty()) {
                 runCatching { evicted.chunked(500).forEach { photoListingDao.clearThumbnailUrlsByLinkIds(it) } }
                     .onFailure { Log.w(TAG, "trim: clearing ${evicted.size} rows failed: ${it.message}") }
+                // Drop the evicted URLs from the store too so their cells stop pointing at deleted files
+                // and re-decrypt on next scroll (mirrors the DB null-out above).
+                thumbnailUrlStore.remove(evicted)
                 Log.d(TAG, "thumb cache trim: evicted ${evicted.size}, now ${total / (1024 * 1024)}MB")
             }
         } finally {
             trimming.set(false)
         }
+    }
+
+    /**
+     * Delete `thumb_enc_*` / `thumb_dec_*` decrypt work temps that outlived their decrypt. The
+     * normal path removes them in a finally the instant the decrypt returns (well under a second),
+     * so anything older than [ORPHAN_TEMP_MAX_AGE_MS] was orphaned by a process kill mid-decrypt.
+     * The age gate guarantees an in-flight decrypt's temp is never touched.
+     */
+    private fun sweepOrphanThumbTemps() {
+        val dir = File(context.cacheDir, "thumbnails")
+        if (!dir.isDirectory) return
+        val cutoff = System.currentTimeMillis() - ORPHAN_TEMP_MAX_AGE_MS
+        runCatching {
+            java.nio.file.Files.newDirectoryStream(dir.toPath()).use { stream ->
+                for (path in stream) {
+                    val name = path.fileName.toString()
+                    if (!name.startsWith("thumb_enc_") && !name.startsWith("thumb_dec_")) continue
+                    val mtime = runCatching { java.nio.file.Files.getLastModifiedTime(path).toMillis() }.getOrNull()
+                    if (mtime != null && mtime < cutoff) {
+                        runCatching { java.nio.file.Files.deleteIfExists(path) }
+                    }
+                }
+            }
+        }.onFailure { Log.w(TAG, "trim: orphan temp sweep failed: ${it.message}") }
     }
 
     /** Current total size of the decrypted-thumbnail cache on disk, in bytes. Streams the directory
@@ -587,6 +681,9 @@ class ThumbnailDecryptScheduler @Inject constructor(
                 }
             }
         }.onFailure { Log.w(TAG, "thumbnailCacheBytes: ${it.message}") }
+        // Mirror the just-measured size into the perf diagnostics (byte total only, no paths) so the
+        // copied diagnostics show the on-disk thumbnail cache against the heap.
+        eu.akoos.photos.util.PerfDiagnostics.thumbnailCacheBytes = total
         return total
     }
 
@@ -607,7 +704,7 @@ class ThumbnailDecryptScheduler @Inject constructor(
      *  cache isn't re-trimmed on every subsequent decrypt once it first reaches the cap. */
     private fun trimTargetBytes(): Long = (maxThumbCacheBytes() / 10) * 9
 
-    private suspend fun decryptOne(userId: UserId, photo: PhotoListingEntity) {
+    private suspend fun decryptOne(userId: UserId, photo: PhotoListingEntity, background: Boolean) {
         val linkId = photo.linkId
         val fileUrl = decryptThumbnailToFile(
             userId = userId,
@@ -619,9 +716,12 @@ class ThumbnailDecryptScheduler @Inject constructor(
             encNodeKey = photo.encNodeKey ?: return,
             encNodePass = photo.encNodePassphrase ?: return,
             parentLinkId = photo.parentLinkId ?: return,
+            background = background,
         ) ?: return
-        // Write the URL back to the row. The Flow-based observation re-emits this row
-        // and the grid cell rebinds with the new thumbnailUrl → AsyncImage renders.
+        // Repaint just this cell through the in-memory store (the timeline projection no longer
+        // carries thumbnailUrl, so a per-row DB write no longer re-emits the whole library). The DB
+        // write persists the URL for next-launch seeding.
+        thumbnailUrlStore.put(linkId, fileUrl)
         runCatching { photoListingDao.updateThumbnailUrl(linkId, fileUrl) }
             .onFailure { Log.w(TAG, "decryptOne $linkId: DB update failed: ${it.message}") }
     }
@@ -643,6 +743,7 @@ class ThumbnailDecryptScheduler @Inject constructor(
         encNodeKey: String,
         encNodePass: String,
         parentLinkId: String,
+        background: Boolean = false,
     ): String? {
         val cacheDir = File(context.cacheDir, "thumbnails").also { it.mkdirs() }
         val parentKey = getParentKeyBytes(userId, parentLinkId, volumeId) ?: run {
@@ -662,6 +763,7 @@ class ThumbnailDecryptScheduler @Inject constructor(
             sessionKey = sessionKey,
             linkId = linkId,
             cacheDir = cacheDir,
+            background = background,
         )
         if (first != null) return first
         // The stored CDN url may have expired — signed thumbnail urls return HTTP 404 after a while,
@@ -677,6 +779,7 @@ class ThumbnailDecryptScheduler @Inject constructor(
             sessionKey = sessionKey,
             linkId = linkId,
             cacheDir = cacheDir,
+            background = background,
         )
     }
 
@@ -729,14 +832,19 @@ class ThumbnailDecryptScheduler @Inject constructor(
      *   • Album link: fetch the album's BatchLinkDto, decrypt its nodeKey with the root
      *     key, and memoise in [parentKeyCache] so subsequent thumbnails in the same album
      *     skip the round-trip.
+     *
+     * Every path returns a defensive [ByteArray.copyOf] of the cached key, never the cache's
+     * own array. A worker holds this key across the decrypt below, so handing out a copy lets
+     * [clear] zero the cache originals on sign-out without ever zeroing an array an in-flight
+     * decrypt is still reading from. The short-lived copy is dropped when the decrypt returns.
      */
     private suspend fun getParentKeyBytes(userId: UserId, parentLinkId: String, volumeId: String): ByteArray? {
         // Root link path — keys are managed by PhotosShareService.
         if (parentLinkId == shareService.photosRootLinkId()) {
-            return shareService.getRootLinkKeyBytes(userId)
+            return shareService.getRootLinkKeyBytes(userId)?.copyOf()
         }
 
-        parentKeyCache[parentLinkId]?.let { return it }
+        parentKeyCache[parentLinkId]?.let { return it.copyOf() }
 
         // Shared-with-me album fallback: the seeded cache entry expired (process
         // restart, long background) but the singleton-scoped context map remembers
@@ -763,7 +871,7 @@ class ThumbnailDecryptScheduler @Inject constructor(
                 contextHint = "scheduler shared-album cache-miss albumLinkId=$parentLinkId shareId=${ctx.sharingShareId}",
             ) ?: return null
             parentKeyCache[parentLinkId] = bytes
-            return bytes
+            return bytes.copyOf()
         }
 
         // Owner-side fallback: the album lives in the recipient's own volume, so
@@ -784,7 +892,7 @@ class ThumbnailDecryptScheduler @Inject constructor(
             contextHint = "scheduler owner-side cache-miss albumLinkId=$parentLinkId",
         ) ?: return null
         parentKeyCache[parentLinkId] = bytes
-        return bytes
+        return bytes.copyOf()
     }
 
     private companion object {
@@ -816,6 +924,11 @@ class ThumbnailDecryptScheduler @Inject constructor(
          *  never overshot by more than a few tens of MB, rare enough to stay off the hot path. */
         const val TRIM_CHECK_INTERVAL = 100L
 
+        /** A decrypt work temp (`thumb_enc_*` / `thumb_dec_*`) lives for well under a second, so
+         *  anything older than this was orphaned by a process kill mid-decrypt and is safe to sweep.
+         *  The wide margin guarantees an in-flight decrypt's temp is never deleted. */
+        const val ORPHAN_TEMP_MAX_AGE_MS = 5L * 60 * 1000
+
         /** Background warm-up re-measures the cache (and lets workers drain below
          *  [BACKFILL_QUEUE_HIGH_WATER]) every this many enqueues, so in-flight decrypts can't
          *  overshoot the budget before the size guard notices. */
@@ -824,6 +937,12 @@ class ThumbnailDecryptScheduler @Inject constructor(
         /** Pause the background warm-up's enqueue loop while more than this many tasks are still
          *  queued, pacing it to the decrypt rate instead of dumping the whole library at once. */
         const val BACKFILL_QUEUE_HIGH_WATER = 64
+
+        /** Minimum gap between BACKGROUND (whole-library warm-up) decrypts across the whole worker
+         *  pool. 90 ms caps the aggregate warm-up CDN request rate near 11 fetches/sec, gentle
+         *  enough to seldom trip a 429 while still warming the library steadily. VISIBLE and
+         *  PREFETCH are never paced, so the viewport and look-ahead stay instant during a warm-up. */
+        const val BACKGROUND_PACE_MS = 90L
 
         /** Library-walk page size for the warm-up — bounds how many rows (and their crypto material)
          *  are resident at once while still warming the whole library across successive pages. */

@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -102,6 +102,7 @@ class CloudTrashService @Inject constructor(
     private val apiProvider: ApiProvider,
     private val shareService: PhotosShareService,
     private val photoListingDao: PhotoListingDao,
+    private val syncStateDao: eu.akoos.photos.data.db.dao.SyncStateDao,
     private val downloadService: PhotoDownloadService,
     private val uploadService: PhotoUploadService,
     private val linkDetailHelpers: LinkDetailHelpers,
@@ -143,6 +144,10 @@ class CloudTrashService @Inject constructor(
             // grid while still living on the cloud.
             if (trashed.isNotEmpty()) {
                 runCatching { photoListingDao.deleteByLinkIds(trashed.toList()) }
+                // A cloud copy we just trashed is gone, so drop its stale SYNCED marker right now (the
+                // on-device twin becomes LOCAL_ONLY) instead of waiting out the reconcile grace window.
+                // Re-adding that photo to an album then uploads it fresh instead of doing nothing.
+                runCatching { syncStateDao.demoteSyncedByCloudIds(trashed.toList()) }
                 // Keep these out of the next refresh's upsert until the server's trash propagates, so
                 // an in-flight or about-to-run stream listing (which can still return a just-trashed
                 // photo for ~a minute) can't re-add the rows we just removed and flash the green-cloud
@@ -156,6 +161,7 @@ class CloudTrashService @Inject constructor(
             // surface a phantom failure for something that no longer exists.
             Log.w(TAG, "deleteFiles: DriveNotFoundException: ${e.message}")
             runCatching { photoListingDao.deleteByLinkIds(linkIds) }
+            runCatching { syncStateDao.demoteSyncedByCloudIds(linkIds) }
             photoStreamService.markRecentlyTrashed(linkIds)
             CloudTrashOutcome(linkIds.toSet(), emptySet())
         }

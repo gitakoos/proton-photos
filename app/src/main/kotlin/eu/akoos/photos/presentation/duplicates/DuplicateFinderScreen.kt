@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -48,22 +48,19 @@ import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.navigationBars
 import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
+import eu.akoos.photos.presentation.common.ScrollScrubber
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.PhoneAndroid
-import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -79,10 +76,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -92,7 +89,6 @@ import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.usecase.FindDuplicatesUseCase
 import eu.akoos.photos.domain.usecase.FindDuplicatesUseCase.DuplicateGroup
-import eu.akoos.photos.presentation.common.IconBubble
 import eu.akoos.photos.presentation.gallery.PhotoCell
 import eu.akoos.photos.presentation.gallery.photoCellInputsFor
 import eu.akoos.photos.presentation.memories.FloatingMemoriesHeader
@@ -107,9 +103,9 @@ import eu.akoos.photos.presentation.theme.PillBorder
 
 /**
  * Phase 1 EXACT-duplicate review screen. Lists groups of byte-identical photos (device and cloud
- * kept separate, synced pairs excluded) and lets the user keep exactly one copy of a group and
- * delete the rest. Keeping exactly one is the whole safety model here: the keep selection always
- * has a value (defaults to the first copy) and can never be emptied, so a group can never be wiped.
+ * kept separate, synced pairs excluded) and lets the user tick the copies to delete. At least one
+ * copy of every group always survives: the removal set can never cover a whole group, and the card
+ * hands the view model the complement (the keepers), which it refuses to act on when that is empty.
  */
 @Composable
 fun DuplicateFinderScreen(
@@ -129,7 +125,11 @@ fun DuplicateFinderScreen(
     }
     LaunchedEffect(state.pendingDeleteIntent) {
         val pi = state.pendingDeleteIntent ?: return@LaunchedEffect
-        deletePermissionLauncher.launch(IntentSenderRequest.Builder(pi.intentSender).build())
+        // Guard the launch: on some OEMs a large or foreign trash IntentSender can throw right here,
+        // which would otherwise force-close instead of failing gracefully. Fall back to the normal
+        // "delete failed" path so the user sees a toast, not a crash.
+        runCatching { deletePermissionLauncher.launch(IntentSenderRequest.Builder(pi.intentSender).build()) }
+            .onFailure { viewModel.onDeleteLaunchFailed() }
     }
     val deleteFailed = stringResource(R.string.duplicates_delete_failed)
     LaunchedEffect(state.errorMessage) {
@@ -151,16 +151,27 @@ fun DuplicateFinderScreen(
         val contentTopPad = floatingHeaderContentTopPadding()
 
         var filter by rememberSaveable { mutableStateOf(DupFilter.ALL) }
+        var scope by rememberSaveable { mutableStateOf(DupScope.ALL) }
+        val listState = rememberLazyListState()
 
-        val deviceGroups = state.deviceGroups
-        val cloudGroups = state.cloudGroups
-        val similarGroups = state.similarDeviceGroups + state.similarCloudGroups
-        val hasExact = deviceGroups.isNotEmpty() || cloudGroups.isNotEmpty()
-        val hasSimilar = similarGroups.isNotEmpty() || state.scanningSimilar
-        val hasAnyContent = hasExact || hasSimilar
+        // Both filters narrow at RENDER time only: they pick which of the lists the view model has
+        // already grouped to draw. Re-deriving groups per filter change would rebuild the whole
+        // library in memory and blow the heap on large libraries, so never do that here.
+        val showDevice = scope != DupScope.CLOUD
+        val showCloud = scope != DupScope.DEVICE
+        val deviceGroups = if (showDevice) state.deviceGroups else emptyList()
+        val cloudGroups = if (showCloud) state.cloudGroups else emptyList()
+        val similarDeviceGroups = if (showDevice) state.similarDeviceGroups else emptyList()
+        val similarCloudGroups = if (showCloud) state.similarCloudGroups else emptyList()
         // ALL (the default) shows both kinds; the other two narrow the list to one kind.
         val showExact = filter != DupFilter.SIMILAR
         val showSim = filter != DupFilter.IDENTICAL
+        val exactVisible = showExact && (deviceGroups.isNotEmpty() || cloudGroups.isNotEmpty())
+        val similarVisible = showSim &&
+            (similarDeviceGroups.isNotEmpty() || similarCloudGroups.isNotEmpty() || state.scanningSimilar)
+        val hasAnyContent = state.deviceGroups.isNotEmpty() || state.cloudGroups.isNotEmpty() ||
+            state.similarDeviceGroups.isNotEmpty() || state.similarCloudGroups.isNotEmpty() ||
+            state.scanningSimilar
 
         when {
             state.isLoading -> Box(
@@ -169,14 +180,36 @@ fun DuplicateFinderScreen(
             ) {
                 CircularProgressIndicator(color = Accent, strokeWidth = 2.dp)
             }
-            // Nothing visible for the active filter → a centered empty state.
-            !(showExact && hasExact) && !(showSim && hasSimilar) ->
-                DupEmptyState(stringResource(R.string.duplicates_empty), contentTopPad)
+            // Nothing found at all: no filter combination could reveal anything, so offer no rows.
+            !hasAnyContent ->
+                DupEmptyState(
+                    stringResource(R.string.duplicates_empty),
+                    Modifier.fillMaxSize().padding(top = contentTopPad),
+                )
             else -> LazyColumn(
+                state = listState,
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(16.dp, contentTopPad, 16.dp, 24.dp + navBottom),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
+                item("filters") {
+                    DupFilterRows(
+                        filter = filter,
+                        scope = scope,
+                        onFilterChange = { filter = it },
+                        onScopeChange = { scope = it },
+                    )
+                }
+                // The filter rows stay above this, so a combination that matches nothing is still
+                // recoverable without leaving the screen.
+                if (!exactVisible && !similarVisible) {
+                    item("empty") {
+                        DupEmptyState(
+                            stringResource(R.string.duplicates_empty),
+                            Modifier.fillMaxWidth().padding(vertical = 56.dp),
+                        )
+                    }
+                }
                 if (showExact) {
                     if (deviceGroups.isNotEmpty()) {
                         item("h-device") { SectionLabel(stringResource(R.string.duplicates_section_device)) }
@@ -194,7 +227,7 @@ fun DuplicateFinderScreen(
                     }
                 }
                 if (showSim) {
-                    if (similarGroups.isNotEmpty()) {
+                    if (similarDeviceGroups.isNotEmpty() || similarCloudGroups.isNotEmpty()) {
                         item("h-similar") { SectionLabel(stringResource(R.string.duplicates_section_similar)) }
                         item("hint-similar") {
                             Text(
@@ -202,7 +235,11 @@ fun DuplicateFinderScreen(
                                 color = FgMute, fontSize = 12.sp,
                             )
                         }
-                        items(similarGroups, key = { "s-" + it.type + "-" + it.items.first().stableId }) { group ->
+                        items(similarDeviceGroups, key = { "sd-" + it.items.first().stableId }) { group ->
+                            DuplicateGroupCard(group, similar = true, state.isDeleting, viewModel::deleteExtras,
+                                onOpenViewer, viewModel::requestThumbnailDecrypt, viewModel::cancelThumbnailDecrypt)
+                        }
+                        items(similarCloudGroups, key = { "sc-" + it.items.first().stableId }) { group ->
                             DuplicateGroupCard(group, similar = true, state.isDeleting, viewModel::deleteExtras,
                                 onOpenViewer, viewModel::requestThumbnailDecrypt, viewModel::cancelThumbnailDecrypt)
                         }
@@ -214,18 +251,19 @@ fun DuplicateFinderScreen(
             }
         }
 
-        // Floating pill header (matches Search / Map). The trailing slot carries the type filter:
-        // Identical (byte-identical copies) vs Similar (near-duplicates).
-        val filterTrailing: (@Composable () -> Unit)? =
-            if (!state.isLoading && hasAnyContent) {
-                { DupFilterMenu(filter = filter, onChange = { filter = it }) }
-            } else {
-                null
-            }
+        // Fast-scroll grabber for a long duplicate list (position only; the list is grouped by kind,
+        // not by date, so there is no date axis here). Reuses the albums and folder scrubber.
+        ScrollScrubber(
+            listState = listState,
+            topPadding = contentTopPad,
+            bottomPadding = 24.dp + navBottom,
+            minItemsToShow = 12,
+        )
+
+        // Floating pill header (matches Search / Map).
         FloatingMemoriesHeader(
             title = stringResource(R.string.duplicates_title),
             onBack = onBack,
-            trailing = filterTrailing,
         )
     }
 }
@@ -239,9 +277,9 @@ private fun SectionLabel(text: String) {
 }
 
 @Composable
-private fun DupEmptyState(text: String, topPad: Dp) {
+private fun DupEmptyState(text: String, modifier: Modifier = Modifier) {
     Box(
-        Modifier.fillMaxSize().padding(top = topPad),
+        modifier,
         contentAlignment = Alignment.Center,
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -255,41 +293,110 @@ private fun DupEmptyState(text: String, topPad: Dp) {
 /** The duplicate-list filter modes. ALL (the default) shows exact and similar together. */
 private enum class DupFilter { ALL, IDENTICAL, SIMILAR }
 
-/** A filter icon in the header's trailing slot that opens a small menu to switch the list between
- *  All, Identical (byte-identical copies) and Similar (near-duplicates). The active mode is checked. */
+/** Which side of the library the list is narrowed to. ALL (the default) shows device and cloud. */
+private enum class DupScope { ALL, DEVICE, CLOUD }
+
+/**
+ * Tick or untick [id] for removal. Unticking always succeeds; ticking is refused when it would cover
+ * every copy in [allIds], so the returned set is always a STRICT subset of the group. That single
+ * guard is what keeps [keepIdsForRemoval] non-empty, and with it a group can never be wiped out.
+ */
+internal fun toggleDuplicateRemoval(current: Set<String>, id: String, allIds: Set<String>): Set<String> =
+    if (id in current) current - id
+    else (current + id).takeIf { it.size < allIds.size } ?: current
+
+/** The copies to KEEP, i.e. the ones left unticked. This complement is what the view model's delete
+ *  contract takes; it refuses an empty keep set, which [toggleDuplicateRemoval] can never produce. */
+internal fun keepIdsForRemoval(allIds: Set<String>, removeIds: Set<String>): Set<String> = allIds - removeIds
+
+/** The two choice rows at the head of the list: which kind of duplicate to show, and which side of
+ *  the library to show it from. */
 @Composable
-private fun DupFilterMenu(filter: DupFilter, onChange: (DupFilter) -> Unit) {
-    var open by remember { mutableStateOf(false) }
-    Box {
-        IconBubble(
-            icon = Icons.Default.FilterList,
-            contentDescription = stringResource(R.string.filter_title),
-            onClick = { open = true },
-            tint = Accent,
+private fun DupFilterRows(
+    filter: DupFilter,
+    scope: DupScope,
+    onFilterChange: (DupFilter) -> Unit,
+    onScopeChange: (DupScope) -> Unit,
+) {
+    val all = stringResource(R.string.gallery_filter_all)
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        DupSegmentedRow(
+            listOf(
+                DupSegment(all, filter == DupFilter.ALL) { onFilterChange(DupFilter.ALL) },
+                DupSegment(
+                    stringResource(R.string.duplicates_filter_identical),
+                    filter == DupFilter.IDENTICAL,
+                ) { onFilterChange(DupFilter.IDENTICAL) },
+                DupSegment(
+                    stringResource(R.string.duplicates_filter_similar),
+                    filter == DupFilter.SIMILAR,
+                ) { onFilterChange(DupFilter.SIMILAR) },
+            ),
         )
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            DupFilterItem(stringResource(R.string.gallery_filter_all), filter == DupFilter.ALL) {
-                onChange(DupFilter.ALL); open = false
-            }
-            DupFilterItem(stringResource(R.string.duplicates_filter_identical), filter == DupFilter.IDENTICAL) {
-                onChange(DupFilter.IDENTICAL); open = false
-            }
-            DupFilterItem(stringResource(R.string.duplicates_filter_similar), filter == DupFilter.SIMILAR) {
-                onChange(DupFilter.SIMILAR); open = false
-            }
-        }
+        DupSegmentedRow(
+            listOf(
+                DupSegment(all, scope == DupScope.ALL) { onScopeChange(DupScope.ALL) },
+                DupSegment(
+                    stringResource(R.string.duplicates_badge_device),
+                    scope == DupScope.DEVICE,
+                    Icons.Default.PhoneAndroid,
+                ) { onScopeChange(DupScope.DEVICE) },
+                DupSegment(
+                    stringResource(R.string.duplicates_badge_cloud),
+                    scope == DupScope.CLOUD,
+                    Icons.Default.Cloud,
+                ) { onScopeChange(DupScope.CLOUD) },
+            ),
+        )
     }
 }
 
+/** One option in a [DupSegmentedRow]. The scope row passes the same icons the copy tiles carry, so
+ *  the two read as one vocabulary. */
+private class DupSegment(
+    val label: String,
+    val selected: Boolean,
+    val icon: ImageVector? = null,
+    val onClick: () -> Unit,
+)
+
+/** A single-choice segmented row: the selected option takes the accent fill, the rest sit flat on
+ *  the pill. */
 @Composable
-private fun DupFilterItem(label: String, active: Boolean, onClick: () -> Unit) {
-    DropdownMenuItem(
-        text = { Text(label) },
-        trailingIcon = if (active) {
-            { Icon(Icons.Default.Check, null, tint = Accent, modifier = Modifier.size(18.dp)) }
-        } else null,
-        onClick = onClick,
-    )
+private fun DupSegmentedRow(segments: List<DupSegment>) {
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(20.dp))
+            .background(PillBg)
+            .border(0.5.dp, PillBorder, RoundedCornerShape(20.dp))
+            .padding(3.dp),
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        segments.forEach { segment ->
+            val fg = if (segment.selected) Color.White else FgPrimary
+            Row(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(17.dp))
+                    .background(
+                        if (segment.selected) Accent else Color.Transparent,
+                        RoundedCornerShape(17.dp),
+                    )
+                    .clickable(onClick = segment.onClick)
+                    .padding(horizontal = 14.dp, vertical = 7.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                if (segment.icon != null) {
+                    Icon(segment.icon, null, tint = fg, modifier = Modifier.size(13.dp))
+                }
+                Text(segment.label, color = fg, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+            }
+        }
+    }
 }
 
 /** A small inline row shown while the on-the-fly perceptual pass is still computing. */
@@ -306,9 +413,12 @@ private fun ScanningRow() {
 }
 
 /**
- * One duplicate group. Holds the multi-copy "keep" selection (defaults to the first/oldest copy) so
- * the action below can only ever delete (group − the kept copies) — never the whole group. The keep
- * set is never allowed to empty, and "Delete the others" is disabled when every copy is kept.
+ * One duplicate group. Holds the multi-copy "remove" selection, which starts EMPTY: a copy is only
+ * ever queued for deletion because it was picked here by hand. The action below can then only ever
+ * delete a STRICT subset of the group, never all of it, because the card sends the view model the
+ * complement (the keepers) and the button stays disabled while nothing is ticked. Both sets are
+ * keyed on [group], so pruning a deleted copy re-seeds them together and the removal set can never
+ * name a copy the group no longer holds.
  */
 @Composable
 private fun DuplicateGroupCard(
@@ -320,9 +430,11 @@ private fun DuplicateGroupCard(
     requestDecrypt: (String) -> Unit,
     cancelDecrypt: (String) -> Unit,
 ) {
-    var keepIds by remember(group) { mutableStateOf(setOf(group.items.first().stableId)) }
+    val allIds = remember(group) { group.items.map { it.stableId }.toSet() }
+    // Nothing is ticked up front: a copy is only ever deleted because it was picked here by hand.
+    var removeIds by remember(group) { mutableStateOf(emptySet<String>()) }
     var showConfirm by remember(group) { mutableStateOf(false) }
-    val nothingToDelete = keepIds.size == group.items.size
+    val nothingToDelete = removeIds.isEmpty()
 
     Column(
         modifier = Modifier
@@ -337,7 +449,7 @@ private fun DuplicateGroupCard(
             else stringResource(R.string.duplicates_copies, group.items.size),
             color = FgPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium,
         )
-        Text(stringResource(R.string.duplicates_pick_keep), color = FgMute, fontSize = 12.sp)
+        Text(stringResource(R.string.duplicates_pick_remove), color = FgMute, fontSize = 12.sp)
 
         Row(
             modifier = Modifier.horizontalScroll(rememberScrollState()),
@@ -346,16 +458,10 @@ private fun DuplicateGroupCard(
             group.items.forEachIndexed { index, item ->
                 DuplicateCopyThumb(
                     item = item,
-                    kept = item.stableId in keepIds,
+                    removing = item.stableId in removeIds,
                     onOpen = { onOpenViewer(group.items, index) },
-                    onToggleKeep = {
-                        val id = item.stableId
-                        keepIds = if (id in keepIds) {
-                            // Never empty the keep set — ignore a toggle that would remove the last one.
-                            if (keepIds.size > 1) keepIds - id else keepIds
-                        } else {
-                            keepIds + id
-                        }
+                    onToggleRemove = {
+                        removeIds = toggleDuplicateRemoval(removeIds, item.stableId, allIds)
                     },
                     requestDecrypt = requestDecrypt,
                     cancelDecrypt = cancelDecrypt,
@@ -363,14 +469,23 @@ private fun DuplicateGroupCard(
             }
         }
 
-        TextButton(
-            onClick = { showConfirm = true },
-            enabled = !isDeleting && !nothingToDelete,
-            modifier = Modifier.align(Alignment.End),
+        val canDelete = !isDeleting && !nothingToDelete
+        Box(
+            modifier = Modifier
+                .align(Alignment.CenterHorizontally)
+                .clip(RoundedCornerShape(20.dp))
+                .background(if (canDelete) Accent.copy(alpha = 0.15f) else Color.Transparent)
+                .border(0.5.dp, PillBorder, RoundedCornerShape(20.dp))
+                // Clipped before the click so the press ripple fills the pill, not an inner box.
+                .clickable(enabled = canDelete) { showConfirm = true }
+                .padding(horizontal = 20.dp, vertical = 9.dp),
         ) {
             Text(
-                stringResource(R.string.duplicates_delete_others),
-                color = if (isDeleting || nothingToDelete) FgMute else Accent,
+                if (nothingToDelete) stringResource(R.string.duplicates_confirm_delete)
+                else stringResource(R.string.duplicates_delete_selected, removeIds.size),
+                color = if (canDelete) Accent else FgMute,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Medium,
             )
         }
     }
@@ -383,7 +498,7 @@ private fun DuplicateGroupCard(
             confirmButton = {
                 TextButton(onClick = {
                     showConfirm = false
-                    onDeleteExtras(group, keepIds)
+                    onDeleteExtras(group, keepIdsForRemoval(allIds, removeIds))
                 }) { Text(stringResource(R.string.duplicates_confirm_delete), color = Accent) }
             },
             dismissButton = {
@@ -396,15 +511,17 @@ private fun DuplicateGroupCard(
 }
 
 /**
- * A single copy tile. Tapping the thumbnail opens it full-screen in the viewer; the small corner
- * chip toggles whether this copy is kept. Kept copies carry the accent border and a check.
+ * A single copy tile. Tapping the photo opens it full-screen in the viewer, which is how the copies
+ * get compared; tapping the corner circle ticks this copy for removal. The cell draws its own
+ * selection circle and cloud badge and insets its duration pill around them, so the tile reads
+ * exactly like every other grid in the app and nothing has to be hand-placed around the badge.
  */
 @Composable
 private fun DuplicateCopyThumb(
     item: GalleryItem,
-    kept: Boolean,
+    removing: Boolean,
     onOpen: () -> Unit,
-    onToggleKeep: () -> Unit,
+    onToggleRemove: () -> Unit,
     requestDecrypt: (String) -> Unit,
     cancelDecrypt: (String) -> Unit,
 ) {
@@ -420,77 +537,43 @@ private fun DuplicateCopyThumb(
             onDispose { cancelDecrypt(pendingLinkId) }
         }
     }
-    val viewLargeCd = stringResource(R.string.duplicates_view_large)
+    // The circle's click label names what the tap DOES, so it flips with the state.
+    val toggleCd = stringResource(if (removing) R.string.duplicates_keep else R.string.duplicates_remove)
     Box(
         modifier = Modifier
             .width(116.dp)
-            .height(164.dp)
-            .clip(RoundedCornerShape(10.dp))
-            .border(
-                width = if (kept) 2.dp else 0.dp,
-                color = if (kept) Accent else Color.Transparent,
-                shape = RoundedCornerShape(10.dp),
-            )
-            .clickable(onClickLabel = viewLargeCd, onClick = onOpen),
+            .height(164.dp),
     ) {
         PhotoCell(
             imageData = inputs.imageData,
             stableKey = inputs.stableKey,
             isVideo = inputs.isVideo,
+            isLocalVideo = inputs.isLocalVideo,
+            durationMs = inputs.durationMs,
             isPlaceholder = inputs.isPlaceholder,
-            showCloudBadge = false,
-            showSyncedBadge = false,
+            // The cell's own selection circle and cloud badges keep this tile reading exactly like
+            // every other grid in the app, and it insets its duration pill to clear the badge itself.
+            selected = removing,
+            isSelectionMode = true,
+            showCloudBadge = item is GalleryItem.CloudOnly,
+            showSyncedBadge = item is GalleryItem.Synced,
             isFavorite = false,
             isOffline = false,
             // Fill the taller review tile instead of PhotoCell's default 0.85 grid shape.
             aspectRatioOverride = 116f / 164f,
             typeBadgeRes = inputs.typeBadgeRes,
             typeBadgeCdRes = inputs.typeBadgeCdRes,
+            // Fixed-size review tiles (not a column grid); keep the big-tile tier so every badge shows.
+            columns = 3,
             onClick = onOpen,
         )
-        Row(
+        // Only the circle toggles; a tap on the photo opens it, which is how the copies get compared.
+        Box(
             modifier = Modifier
                 .align(Alignment.TopStart)
-                .padding(4.dp)
-                .clip(RoundedCornerShape(6.dp))
-                .background(if (kept) Accent else Color.Black.copy(alpha = 0.45f))
-                .clickable(onClick = onToggleKeep)
-                .padding(horizontal = 6.dp, vertical = 2.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(2.dp),
-        ) {
-            Icon(
-                if (kept) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
-                null, tint = Color.White, modifier = Modifier.size(12.dp),
-            )
-            Text(stringResource(R.string.duplicates_keep), color = Color.White, fontSize = 10.sp,
-                fontWeight = FontWeight.SemiBold)
-        }
-
-        // Source badge — where this copy lives: a white cloud (Drive only), a GREEN cloud (on Drive
-        // AND device, i.e. Synced), or a phone (device only). Mirrors the gallery's cloud badges.
-        val badgeIcon = if (item is GalleryItem.LocalOnly) Icons.Default.PhoneAndroid else Icons.Default.Cloud
-        val badgeTint = if (item is GalleryItem.Synced) Color(0xFF30D158) else Color.White
-        val badgeLabel = when (item) {
-            is GalleryItem.Synced -> R.string.duplicates_badge_synced
-            is GalleryItem.LocalOnly -> R.string.duplicates_badge_device
-            else -> R.string.duplicates_badge_cloud
-        }
-        Row(
-            modifier = Modifier
-                .align(Alignment.BottomStart)
-                .padding(4.dp)
-                .clip(RoundedCornerShape(6.dp))
-                .background(Color.Black.copy(alpha = 0.55f))
-                .padding(horizontal = 5.dp, vertical = 2.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(3.dp),
-        ) {
-            Icon(badgeIcon, null, tint = badgeTint, modifier = Modifier.size(11.dp))
-            Text(
-                stringResource(badgeLabel),
-                color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.SemiBold,
-            )
-        }
+                .size(32.dp)
+                .clip(CircleShape)
+                .clickable(onClickLabel = toggleCd, onClick = onToggleRemove),
+        )
     }
 }

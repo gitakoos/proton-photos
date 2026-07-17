@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -47,6 +47,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.PermMedia
@@ -127,6 +128,7 @@ fun PermissionsScreen(onBack: () -> Unit) {
     val allFilesGranted = remember(refreshTick) { hasAllFilesAccess() }
     val manageMediaGranted = remember(refreshTick) { hasManageMedia(context) }
     val notificationsGranted = remember(refreshTick) { hasNotificationsPermission(context) }
+    val overlayGranted = remember(refreshTick) { hasOverlayPermission(context) }
     val installGranted = remember(refreshTick) { hasInstallPackages(context) }
 
     SettingsSubPageScaffold(title = stringResource(R.string.permissions_title), onBack = onBack) {
@@ -195,6 +197,18 @@ fun PermissionsScreen(onBack: () -> Unit) {
                     ) {
                         if (notificationsGranted) openAppDetails(context)
                         else notificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                    }
+                }
+                // Display over other apps (SYSTEM_ALERT_WINDOW), system page only, shown on every OS.
+                add {
+                    PermissionRow(
+                        icon = Icons.Default.Layers,
+                        title = stringResource(R.string.permissions_overlay_title),
+                        why = stringResource(R.string.permissions_overlay_why),
+                        granted = overlayGranted,
+                    ) {
+                        if (overlayGranted) openAppDetails(context)
+                        else openOverlaySettings(context)
                     }
                 }
                 // Install updates (REQUEST_INSTALL_PACKAGES) — system page only.
@@ -312,6 +326,9 @@ private fun hasNotificationsPermission(context: android.content.Context): Boolea
 private fun hasInstallPackages(context: android.content.Context): Boolean =
     context.packageManager.canRequestPackageInstalls()
 
+private fun hasOverlayPermission(context: android.content.Context): Boolean =
+    Settings.canDrawOverlays(context)
+
 // ── System-page hand-offs ────────────────────────────────────────────────────
 
 private fun openAppDetails(context: android.content.Context) {
@@ -354,6 +371,15 @@ private fun openInstallSettings(context: android.content.Context) {
     runCatching {
         context.startActivity(
             Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.fromParts("package", context.packageName, null))
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        )
+    }.onFailure { openAppDetails(context) }
+}
+
+private fun openOverlaySettings(context: android.content.Context) {
+    runCatching {
+        context.startActivity(
+            Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.fromParts("package", context.packageName, null))
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
         )
     }.onFailure { openAppDetails(context) }

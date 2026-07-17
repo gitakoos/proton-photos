@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -57,6 +57,7 @@ import eu.akoos.photos.data.db.dao.PerceptualHashDao
 import eu.akoos.photos.data.db.dao.PhotoListingDao
 import eu.akoos.photos.data.db.dao.PhotoLocationDao
 import eu.akoos.photos.data.db.dao.SyncStateDao
+import eu.akoos.photos.data.db.dao.UploadAlbumTargetDao
 import javax.inject.Singleton
 
 @Module
@@ -155,5 +156,10 @@ abstract class DatabaseModule {
         @Provides
         @Singleton
         fun providePerceptualHashDao(db: AppDatabase): PerceptualHashDao = db.perceptualHashDao()
+
+        @Provides
+        @Singleton
+        fun provideUploadAlbumTargetDao(db: AppDatabase): UploadAlbumTargetDao =
+            db.uploadAlbumTargetDao()
     }
 }

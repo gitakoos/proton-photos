@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -33,6 +33,7 @@ import android.os.Looper
 import android.provider.MediaStore
 import androidx.core.content.ContextCompat
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.edit
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.BufferOverflow
@@ -55,6 +56,7 @@ import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.entity.LocalMediaItem
 import eu.akoos.photos.domain.repository.LocalMediaRepository
+import eu.akoos.photos.util.DownloadDateOverride
 import eu.akoos.photos.worker.SyncWorker
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -274,6 +276,13 @@ class LocalMediaRepositoryImpl @Inject constructor(
         val tagCache: Map<String, LocalTagEntity> =
             runCatching { localTagDao.getAll().associateBy { it.uri } }.getOrDefault(emptyMap())
 
+        // Capture-date overrides for downloads whose MediaStore DATE_TAKEN could not be persisted
+        // (a PNG/WebP the provider refuses; see SettingsKeys.DOWNLOAD_DATE_OVERRIDES). Loaded once per
+        // scan and applied per row when the column reads 0; pruned below once the live uris are known.
+        val dateOverrides: Map<String, Long> = runCatching {
+            DownloadDateOverride.parse(context.settingsDataStore.data.first()[SettingsKeys.DOWNLOAD_DATE_OVERRIDES])
+        }.getOrNull() ?: emptyMap()
+
         val projection = arrayOf(
             MediaStore.MediaColumns._ID,
             MediaStore.MediaColumns.DATE_TAKEN,
@@ -304,11 +313,29 @@ class LocalMediaRepositoryImpl @Inject constructor(
             try {
                 context.contentResolver.query(uri, projection, selection, null, sortOrder)?.use { cursor ->
                     while (cursor.moveToNext()) {
-                        result += cursor.toLocalMediaItem(baseUri = uri, tagCache = tagCache)
+                        result += cursor.toLocalMediaItem(
+                            baseUri = uri, tagCache = tagCache, dateOverrides = dateOverrides,
+                        )
                     }
                 }
             } catch (e: Exception) {
                 // Skip inaccessible URIs
+            }
+        }
+
+        // Prune override entries whose file is gone, so the map can't grow without bound. Only open the
+        // DataStore edit when a stale entry actually exists.
+        if (dateOverrides.isNotEmpty()) {
+            val liveUris = result.mapTo(HashSet()) { it.uri }
+            if (dateOverrides.keys.any { it !in liveUris }) {
+                runCatching {
+                    context.settingsDataStore.edit { prefs ->
+                        val current = prefs[SettingsKeys.DOWNLOAD_DATE_OVERRIDES] ?: emptySet()
+                        DownloadDateOverride.prune(current, liveUris)?.let {
+                            prefs[SettingsKeys.DOWNLOAD_DATE_OVERRIDES] = it
+                        }
+                    }
+                }
             }
         }
 
@@ -370,6 +397,7 @@ class LocalMediaRepositoryImpl @Inject constructor(
     private fun android.database.Cursor.toLocalMediaItem(
         baseUri: Uri? = null,
         tagCache: Map<String, LocalTagEntity> = emptyMap(),
+        dateOverrides: Map<String, Long> = emptyMap(),
     ): LocalMediaItem {
         val idCol        = getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
         val dateTakenCol = getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_TAKEN)
@@ -384,12 +412,17 @@ class LocalMediaRepositoryImpl @Inject constructor(
         val durationCol  = getColumnIndex(MediaStore.MediaColumns.DURATION)
 
         val id = getLong(idCol)
-        val rawDateTaken = getLong(dateTakenCol)
-        val dateAdded    = getLong(dateAddedCol)
-        val dateTaken    = if (rawDateTaken > 0) rawDateTaken else dateAdded * 1000L
-        val dateModified = if (dateModCol >= 0) getLong(dateModCol) else 0L
         val root         = baseUri ?: MediaStore.Images.Media.EXTERNAL_CONTENT_URI
         val contentUri   = Uri.withAppendedPath(root, id.toString())
+        val uriString    = contentUri.toString()
+        val rawDateTaken = getLong(dateTakenCol)
+        val dateAdded    = getLong(dateAddedCol)
+        // DATE_TAKEN is authoritative when MediaStore set it. When it left the column 0 (e.g. a
+        // downloaded PNG, whose DATE_TAKEN write MediaStore refuses), a download may have recorded the
+        // real capture date against this uri — prefer that over the file's added date so the photo
+        // keeps its true date even after its cloud twin is deleted.
+        val dateTaken    = DownloadDateOverride.resolveDateTaken(rawDateTaken, dateOverrides[uriString], dateAdded)
+        val dateModified = if (dateModCol >= 0) getLong(dateModCol) else 0L
         val sizeBytes    = getLong(sizeCol)
 
         val displayName  = getString(nameCol) ?: ""
@@ -410,7 +443,6 @@ class LocalMediaRepositoryImpl @Inject constructor(
             }
         }
 
-        val uriString = contentUri.toString()
         // A cache entry counts only while the file is unchanged: same DATE_MODIFIED AND same
         // size. Any drift means the file was replaced (edited, re-saved) so its old tags are
         // discarded and re-detection happens out of band via the tag scheduler.
@@ -431,6 +463,7 @@ class LocalMediaRepositoryImpl @Inject constructor(
             duration    = if (durationCol >= 0) getLong(durationCol) else 0L,
             dateModified = dateModified,
             tags        = cachedTags,
+            dateTakenIsExplicit = rawDateTaken > 0 || uriString in dateOverrides,
         )
     }
 }

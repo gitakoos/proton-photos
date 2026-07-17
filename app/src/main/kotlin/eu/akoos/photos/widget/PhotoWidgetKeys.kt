@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -41,6 +41,12 @@ object PhotoWidgetKeys {
      * inside the app sandbox.
      */
     val SELECTED_LINK_IDS = stringPreferencesKey("selected_link_ids")
+
+    /**
+     * Drive linkId of the album followed by [WidgetMode.CLOUD_ALBUM]. The member
+     * photos are resolved live on each update, so only the album id is persisted.
+     */
+    val CLOUD_ALBUM_LINK_ID = stringPreferencesKey("cloud_album_link_id")
 
     const val URI_SEPARATOR = "|"
 }

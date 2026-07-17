@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -55,14 +55,16 @@ class PhotoWidgetReceiver : GlanceAppWidgetReceiver() {
         super.onDeleted(context, appWidgetIds)
         appWidgetIds.forEach { id -> PhotoWidgetUpdateWorker.cancel(context, id) }
         // goAsync keeps the receiver alive for the off-main cleanup; the scope is
-        // created and cancelled within this broadcast so it never outlives it.
+        // created and cancelled within this broadcast so it never outlives it. The Glance base
+        // onDeleted may already have taken the broadcast async, in which case goAsync returns null,
+        // so guard the finish (calling it on a null result crashed the delete flow).
         val pending = goAsync()
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         scope.launch {
             try {
                 appWidgetIds.forEach { id -> PhotoWidgetUpdater.cleanup(context, id) }
             } finally {
-                pending.finish()
+                pending?.finish()
                 scope.cancel()
             }
         }

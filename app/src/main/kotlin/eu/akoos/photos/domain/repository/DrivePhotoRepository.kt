@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -39,6 +39,8 @@ interface DrivePhotoRepository {
     suspend fun getVolumeId(userId: UserId): String
     suspend fun getShareId(userId: UserId, volumeId: String): String
     fun observeCloudPhotos(userId: UserId): Flow<List<CloudPhoto>>
+    /** Cloud photo linkIds in any client-side hidden album, so listings can drop them everywhere. */
+    fun observeHiddenAlbumMemberLinkIds(): Flow<Set<String>>
     fun observePhotosByLinkIds(linkIds: List<String>): Flow<List<CloudPhoto>>
     suspend fun refreshCloudPhotos(userId: UserId, force: Boolean = false)
     suspend fun refreshCloudPhotosIncremental(userId: UserId)
@@ -142,6 +144,15 @@ interface DrivePhotoRepository {
             totalBytes: Long,
         ) -> Unit)? = null,
     ): String
+
+    /**
+     * Retries any uncommitted-node cleanup deletes that failed during an earlier upload failure.
+     * A non-retryable upload best-effort deletes the just-created file node; if that delete also
+     * fails it is persisted, and this drains that queue so a failed cleanup never leaves an
+     * invisible orphan node wasting Drive quota. Cheap no-op when the queue is empty.
+     */
+    suspend fun retryPendingOrphanDeletes(userId: UserId)
+
     /**
      * Adds photos to an album. Returns an explicit breakdown of per-photo crypto failures so
      * the UI can warn when some entries are missing. If *every* entry fails (and the input was
@@ -478,8 +489,16 @@ interface DrivePhotoRepository {
     /**
      * Walk the cloud photos whose encrypted XAttr hasn't been geocoded yet, decrypt each to recover
      * its GPS Location block, and persist the coordinates so the map plots synced photos. Resumable
-     * and idempotent — a re-run only touches rows not yet checked. Needs no runtime permission
+     * and idempotent, a re-run only touches rows not yet checked. Needs no runtime permission
      * (cloud GPS comes from the photo's own encrypted metadata, not the device MediaStore).
      */
     suspend fun backfillCloudGps(userId: UserId)
+
+    /**
+     * Walk the cloud videos whose duration isn't known yet, decrypt each one's XAttr to recover its
+     * Media.Duration, and persist it (milliseconds) so the grid can show a duration pill without
+     * downloading the file. Resumable and idempotent, a re-run only touches rows still missing a
+     * duration. Reads only the photo's own encrypted metadata, so it needs no runtime permission.
+     */
+    suspend fun backfillVideoDurations(userId: UserId)
 }

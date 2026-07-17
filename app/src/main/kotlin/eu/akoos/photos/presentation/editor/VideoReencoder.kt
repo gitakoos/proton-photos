@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -30,7 +30,10 @@ import android.media.MediaFormat
 import android.media.MediaMuxer
 import android.net.Uri
 import android.os.ParcelFileDescriptor
+import coil.imageLoader
+import eu.akoos.photos.R
 import java.io.File
+import java.io.IOException
 import java.nio.ByteBuffer
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.math.min
@@ -393,6 +396,16 @@ internal class VideoReencoder(private val context: Context) {
             }
 
             onProgress(1f)
+        } catch (oom: OutOfMemoryError) {
+            // Free the image cache FIRST so the recovery + the surfaced error have headroom. The
+            // finally below still releases every codec, surface, extractor, and descriptor; the
+            // half-written output is dropped so a partial mp4 never reaches MediaStore. Rethrown as a
+            // caught-able IOException so the editor's existing catch surfaces the low-memory message
+            // through VideoSaveResult.Failed instead of the process crashing.
+            context.imageLoader.memoryCache?.clear()
+            eu.akoos.photos.util.PerfDiagnostics.recordOom("video-transcode")
+            runCatching { outputFile.delete() }
+            throw IOException(context.getString(R.string.editor_error_low_memory))
         } finally {
             runCatching { decoder?.stop() }
             runCatching { decoder?.release() }
@@ -561,6 +574,14 @@ internal class VideoReencoder(private val context: Context) {
                 )
             }
             onProgress(1f)
+        } catch (oom: OutOfMemoryError) {
+            // See transcode: drop the image cache first, record the numbers-only diagnostics line,
+            // delete the partial output, and rethrow as a caught-able IOException so the editor shows
+            // the low-memory message instead of crashing. The finally still releases every resource.
+            context.imageLoader.memoryCache?.clear()
+            eu.akoos.photos.util.PerfDiagnostics.recordOom("video-streamcopy")
+            runCatching { outputFile.delete() }
+            throw IOException(context.getString(R.string.editor_error_low_memory))
         } finally {
             runCatching { muxer?.stop() }
             runCatching { muxer?.release() }

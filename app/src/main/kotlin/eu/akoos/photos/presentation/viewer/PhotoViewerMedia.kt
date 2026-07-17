@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -36,6 +36,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -52,6 +53,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.rememberScrollState
@@ -63,6 +65,8 @@ import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Icon
@@ -81,6 +85,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
@@ -92,8 +97,10 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.SeekParameters
 import androidx.media3.ui.PlayerView
 import eu.akoos.photos.R
+import eu.akoos.photos.presentation.common.rememberVideoFilmstripFrames
 import eu.akoos.photos.presentation.theme.FgPrimary
 import eu.akoos.photos.presentation.theme.PillBg
 import eu.akoos.photos.presentation.theme.PillBorder
@@ -192,10 +199,15 @@ internal fun VideoPlayer(
     )
 }
 
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 @Composable
 internal fun VideoControlPill(
     player: ExoPlayer?,
     videoStarted: Boolean,
+    /** True while EITHER this pill or the reel filmstrip is being dragged, so the paused-only frame
+     *  step buttons don't flash in mid-scrub (a seek briefly reports the player as not playing). */
+    isScrubbing: Boolean = false,
+    onScrubbingChange: (Boolean) -> Unit = {},
     onPlay: () -> Unit,
 ) {
     var isPlaying  by remember { mutableStateOf(false) }
@@ -208,11 +220,14 @@ internal fun VideoControlPill(
 
     LaunchedEffect(player) {
         if (player == null) return@LaunchedEffect
+        // Frame-accurate seeking so taps and single-frame steps land on the exact frame, not the
+        // nearest keyframe. Rapid drag temporarily drops to keyframe seeks (below) to stay smooth.
+        player.setSeekParameters(SeekParameters.EXACT)
         while (true) {
             isPlaying  = player.isPlaying
             durationMs = player.duration.coerceAtLeast(0)
             if (!isSeeking) currentMs = player.currentPosition
-            delay(200)
+            delay(if (isSeeking) 33 else 200)
         }
     }
 
@@ -224,6 +239,8 @@ internal fun VideoControlPill(
 
     Row(
         modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp)
             .background(PillBg, infoPillShape)
             .border(0.5.dp, PillBorder, infoPillShape)
             .padding(horizontal = 16.dp, vertical = 10.dp),
@@ -247,30 +264,45 @@ internal fun VideoControlPill(
             )
         }
 
+        // One frame back, shown only while genuinely paused (not mid-scrub), for single-frame steps.
+        if (videoStarted && !isPlaying && !isScrubbing) FrameStepButton(player, forward = false)
+
         // Canvas draw lambdas are not composable scope — resolve the reactive color here.
         val seekColor = FgPrimary
 
         Canvas(
             modifier = Modifier
-                .width(90.dp)
-                .height(20.dp)
+                .weight(1f)
+                .height(28.dp)
                 .onGloballyPositioned { trackWidthPx = it.size.width.toFloat().coerceAtLeast(1f) }
                 .pointerInput(player) {
                     if (player == null) return@pointerInput
                     detectDragGestures(
                         onDragStart = { offset ->
                             isSeeking = true
+                            onScrubbingChange(true)
+                            // Scrubbing mode tunes the decode pipeline for rapid drag seeks so the
+                            // frame follows the finger live; EXACT still lands the precise frame.
+                            player.setScrubbingModeEnabled(true)
                             seekRatio = (offset.x / trackWidthPx).coerceIn(0f, 1f)
+                            player.seekTo((seekRatio * durationMs).toLong())
                         },
                         onDrag = { change, _ ->
                             change.consume()
                             seekRatio = (change.position.x / trackWidthPx).coerceIn(0f, 1f)
+                            player.seekTo((seekRatio * durationMs).toLong())
                         },
                         onDragEnd = {
                             player.seekTo((seekRatio * durationMs).toLong())
+                            player.setScrubbingModeEnabled(false)
                             isSeeking = false
+                            onScrubbingChange(false)
                         },
-                        onDragCancel = { isSeeking = false },
+                        onDragCancel = {
+                            player.setScrubbingModeEnabled(false)
+                            isSeeking = false
+                            onScrubbingChange(false)
+                        },
                     )
                 }
                 .pointerInput(player) {
@@ -293,6 +325,9 @@ internal fun VideoControlPill(
             drawCircle(seekColor, radius = 5.dp.toPx(), center = Offset(px, cy))
         }
 
+        // One frame forward, shown only while genuinely paused (not mid-scrub).
+        if (videoStarted && !isPlaying && !isScrubbing) FrameStepButton(player, forward = true)
+
         Text(
             if (durationMs > 0) "${formatVideoTime(currentMs)} / ${formatVideoTime(durationMs)}"
             else "0:00",
@@ -311,6 +346,146 @@ internal fun VideoControlPill(
                 null, tint = FgPrimary.copy(alpha = if (videoStarted) 1f else 0.4f),
                 modifier = Modifier.size(18.dp),
             )
+        }
+    }
+}
+
+/** A single-frame step control, shown only while a video is paused. Seeks exactly one frame back or
+ *  forward using the clip's frame rate (falling back to 30 fps when the container omits it); with the
+ *  player on EXACT seek parameters this lands on the precise frame. */
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+@Composable
+private fun FrameStepButton(player: ExoPlayer?, forward: Boolean) {
+    Box(
+        modifier = Modifier.size(24.dp).clip(CircleShape).clickable {
+            val p = player ?: return@clickable
+            val fps = p.videoFormat?.frameRate?.takeIf { it > 0f } ?: 30f
+            val frameMs = (1000f / fps).toLong().coerceAtLeast(1L)
+            val target = if (forward) p.currentPosition + frameMs else p.currentPosition - frameMs
+            p.seekTo(target.coerceIn(0L, p.duration.coerceAtLeast(0L)))
+        },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            if (forward) Icons.Default.KeyboardArrowRight else Icons.Default.KeyboardArrowLeft,
+            contentDescription = null,
+            tint = FgPrimary,
+            modifier = Modifier.size(20.dp),
+        )
+    }
+}
+
+/**
+ * A frame filmstrip scrubber for the viewer: a row of evenly-spaced thumbnails pulled from the clip
+ * with a playhead line; tap or drag anywhere on it to seek. Gives the Google-Photos-style "see the
+ * frames as you scrub" strip on top of the compact pill. Twelve frames come from the shared
+ * extractor and fill in as they decode; a source the retriever cannot open (still downloading, odd
+ * codec) just stays a plain track with the playhead.
+ */
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+@Composable
+internal fun VideoFilmstrip(
+    player: ExoPlayer?,
+    videoUri: Uri,
+    modifier: Modifier = Modifier,
+    /** Reports scrub start/stop so a shared control (the pill) can hide its paused-only affordances
+     *  while the strip is being dragged. */
+    onScrubbingChange: (Boolean) -> Unit = {},
+) {
+    var durationMs by remember { mutableLongStateOf(0L) }
+    var positionMs by remember { mutableLongStateOf(0L) }
+    var isSeeking by remember { mutableStateOf(false) }
+    var seekRatio by remember { mutableStateOf(0f) }
+    var trackWidthPx by remember { mutableStateOf(1f) }
+    LaunchedEffect(player) {
+        if (player == null) return@LaunchedEffect
+        while (true) {
+            durationMs = player.duration.coerceAtLeast(0)
+            if (!isSeeking) positionMs = player.currentPosition
+            delay(if (isSeeking) 33 else 200)
+        }
+    }
+    // 12 evenly-spaced sync-frames from the shared extractor: progressive fill, bounded-parallel
+    // decode, and a small cache so a pager settle back onto this clip is instant. The extractor
+    // reads the clip length itself and keys on the URI, so the strip starts filling the moment the
+    // page opens instead of waiting on the player to prepare and report a duration. A source the
+    // retrievers cannot open yields empty slots and the strip stays a plain track. The cache owns
+    // the frames' lifecycle (recycled on eviction), so the viewer keeps them warm across settles.
+    val thumbs = rememberVideoFilmstripFrames(
+        uri = videoUri,
+        frameCount = 12,
+        targetPx = 240,
+    ).frames
+
+    val frac = when {
+        isSeeking -> seekRatio
+        durationMs > 0 -> (positionMs.toFloat() / durationMs).coerceIn(0f, 1f)
+        else -> 0f
+    }
+
+    Box(
+        modifier = modifier
+            .clip(androidx.compose.foundation.shape.RoundedCornerShape(8.dp))
+            .background(PillBg)
+            .onGloballyPositioned { trackWidthPx = it.size.width.toFloat().coerceAtLeast(1f) }
+            .pointerInput(player) {
+                if (player == null) return@pointerInput
+                detectDragGestures(
+                    onDragStart = { offset ->
+                        isSeeking = true
+                        onScrubbingChange(true)
+                        player.setScrubbingModeEnabled(true)
+                        seekRatio = (offset.x / trackWidthPx).coerceIn(0f, 1f)
+                        player.seekTo((seekRatio * durationMs).toLong())
+                    },
+                    onDrag = { change, _ ->
+                        change.consume()
+                        seekRatio = (change.position.x / trackWidthPx).coerceIn(0f, 1f)
+                        player.seekTo((seekRatio * durationMs).toLong())
+                    },
+                    onDragEnd = {
+                        player.seekTo((seekRatio * durationMs).toLong())
+                        player.setScrubbingModeEnabled(false)
+                        isSeeking = false
+                        onScrubbingChange(false)
+                    },
+                    onDragCancel = {
+                        player.setScrubbingModeEnabled(false)
+                        isSeeking = false
+                        onScrubbingChange(false)
+                    },
+                )
+            }
+            .pointerInput(player) {
+                if (player == null) return@pointerInput
+                detectTapGestures { offset ->
+                    val r = (offset.x / trackWidthPx).coerceIn(0f, 1f)
+                    player.seekTo((r * durationMs).toLong())
+                }
+            },
+    ) {
+        Row(modifier = Modifier.fillMaxSize()) {
+            for (i in 0 until 12) {
+                val bmp = thumbs.getOrNull(i)
+                if (bmp != null) {
+                    Image(
+                        bitmap = bmp.asImageBitmap(),
+                        contentDescription = null,
+                        modifier = Modifier.weight(1f).fillMaxSize(),
+                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                    )
+                } else {
+                    Box(modifier = Modifier.weight(1f).fillMaxSize().background(PillBg))
+                }
+            }
+        }
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val x = size.width * frac
+            drawLine(
+                Color.White, Offset(x, 0f), Offset(x, size.height),
+                strokeWidth = 2.dp.toPx(), cap = StrokeCap.Round,
+            )
+            drawCircle(Color.White, radius = 4.dp.toPx(), center = Offset(x, size.height / 2f))
         }
     }
 }

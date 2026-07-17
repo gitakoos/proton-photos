@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -51,6 +51,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import me.proton.core.accountmanager.domain.AccountManager
+import me.proton.core.telemetry.domain.usecase.IsTelemetryEnabled
 import me.proton.core.user.domain.usecase.GetUser
 import me.proton.core.user.domain.usecase.ObserveUser
 import eu.akoos.photos.R
@@ -59,7 +60,9 @@ import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.data.preferences.syncEffectivelyEnabled
 import eu.akoos.photos.presentation.lock.AppLockManager
+import eu.akoos.photos.service.ScreenshotOverlayService
 import eu.akoos.photos.domain.entity.SyncStatus
+import eu.akoos.photos.domain.entity.UploadCompressionTier
 import kotlinx.coroutines.flow.combine
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.LocalMediaRepository
@@ -68,6 +71,7 @@ import eu.akoos.photos.domain.usecase.FreeUpSpaceUseCase
 import eu.akoos.photos.domain.usecase.ReconcileSyncStateUseCase
 import eu.akoos.photos.domain.usecase.UploadPendingUseCase
 import eu.akoos.photos.domain.usecase.UploadStatus
+import eu.akoos.photos.util.retryOnDbTear
 import eu.akoos.photos.worker.FreeUpSpaceWorker
 import eu.akoos.photos.worker.SyncWorker
 import javax.inject.Inject
@@ -82,6 +86,7 @@ class SettingsViewModel @Inject constructor(
     private val upload: UploadPendingUseCase,
     private val observeUser: ObserveUser,
     private val getUser: GetUser,
+    private val isTelemetryEnabled: IsTelemetryEnabled,
     private val syncStateRepo: SyncStateRepository,
     private val appLockManager: AppLockManager,
     private val localMediaRepo: LocalMediaRepository,
@@ -96,6 +101,7 @@ class SettingsViewModel @Inject constructor(
     init {
         loadPrefs()
         observeCurrentUser()
+        observeTelemetryEnabled()
         observeBackedUpBytes()
         observeTrashedCount()
         observeCloudTrashOnSession()
@@ -401,16 +407,46 @@ class SettingsViewModel @Inject constructor(
     }
 
     /**
+     * Mirrors the ProtonCore telemetry preference into [SettingsUiState.telemetryEnabled] for the
+     * read-only Privacy row. [IsTelemetryEnabled] suspends on the account settings (network / DB),
+     * so it resolves off the render path and the row shows a neutral placeholder until it lands.
+     * The value re-resolves per primary user, and an account switch drops back to the placeholder
+     * rather than carrying the previous account's answer over.
+     *
+     * A failure keeps `null` (placeholder), never `false`: [IsTelemetryEnabled] itself falls back
+     * to enabled when it cannot read the setting, so rendering "Off" would assure the user of a
+     * privacy state they do not actually have.
+     */
+    private fun observeTelemetryEnabled() {
+        viewModelScope.launch {
+            accountManager.getPrimaryUserId()
+                .distinctUntilChanged()
+                .collectLatest { userId ->
+                    _uiState.update { it.copy(telemetryEnabled = null) }
+                    val enabled = try {
+                        isTelemetryEnabled(userId)
+                    } catch (e: kotlinx.coroutines.CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        android.util.Log.w("SettingsViewModel", "observeTelemetryEnabled: resolve failed", e)
+                        null
+                    }
+                    _uiState.update { it.copy(telemetryEnabled = enabled) }
+                }
+        }
+    }
+
+    /**
      * Observes counts shown in the Sync card.
      *
-     * - **Backed up** = total photos that live on Proton Drive. We observe the cloud-photo
+     * - **Backed up** = total photos that live on Proton Drive. Sourced from the cloud-photo
      *   listing directly (Room Flow), so the number reacts immediately when a fresh upload
      *   lands or when the user deletes a cloud photo / removes a Drive-only album. The previous
      *   implementation counted only SyncState rows in SYNCED status — that misses photos that
      *   exist purely in the cloud (no on-device twin), and never updates after device deletes.
      *
-     * - **Pending** = on-device photos that are scoped for backup but still LOCAL_ONLY in
-     *   SyncState — i.e. genuinely waiting to upload.
+     * - **Pending** = on-device photos that are LOCAL_ONLY AND carry a queued upload intent in
+     *   SyncState (i.e. genuinely waiting to upload), the same set the upload processor selects.
      *
      * - **Backed-up bytes** = sum of cloud-photo sizes. Cleaner than the SyncState sum because
      *   it survives device-side cleanup (Free up space).
@@ -426,9 +462,14 @@ class SettingsViewModel @Inject constructor(
                     val backedUpVideos = cloudPhotos.count { it.mimeType.startsWith("video/") }
                     val backedUpPhotos = cloudPhotos.size - backedUpVideos
                     val backedUpBytes = cloudPhotos.sumOf { it.sizeBytes }
-                    val pendingCount  = syncStates.count { it.status == SyncStatus.LOCAL_ONLY }
+                    // Only rows that are LOCAL_ONLY AND queued are genuinely waiting to back up, the
+                    // same set the upload processor and the Activity screen use. A LOCAL_ONLY row with
+                    // no queue intent (an out-of-scope local file) must not inflate the pending count.
+                    val pendingCount  = syncStates.count { it.status == SyncStatus.LOCAL_ONLY && it.queued }
                     BackedUpSnapshot(backedUpPhotos, backedUpVideos, backedUpBytes, pendingCount)
-                }.collectLatest { snap ->
+                }
+                    .retryOnDbTear("SettingsBackedUp")
+                    .collectLatest { snap ->
                     _uiState.update {
                         it.copy(
                             backedUpBytes     = snap.bytes,
@@ -534,10 +575,7 @@ class SettingsViewModel @Inject constructor(
                     backupEverything = migratedPrefs[SettingsKeys.BACKUP_EVERYTHING] ?: false,
                     excludedFolderNames = migratedPrefs[SettingsKeys.EXCLUDED_FOLDER_NAMES] ?: emptySet(),
                     autoFreeUp = migratedPrefs[SettingsKeys.AUTO_FREE_UP] ?: false,
-                    freeUpInterval = FreeUpInterval.valueOf(
-                        migratedPrefs[SettingsKeys.FREE_UP_INTERVAL] ?: FreeUpInterval.AfterBackup.name
-                    ),
-                    freeUpWifiOnly = migratedPrefs[SettingsKeys.FREE_UP_WIFI_ONLY] ?: true,
+                    freeUpInterval = FreeUpInterval.fromKey(migratedPrefs[SettingsKeys.FREE_UP_INTERVAL]),
                     themeMode = ThemeMode.fromKey(migratedPrefs[SettingsKeys.THEME_MODE]),
                     palette = ThemePalette.fromKey(migratedPrefs[SettingsKeys.THEME_PALETTE]),
                     amoledBlack = migratedPrefs[SettingsKeys.AMOLED_BLACK] ?: false,
@@ -545,7 +583,13 @@ class SettingsViewModel @Inject constructor(
                     lastSyncMs = migratedPrefs[SettingsKeys.LAST_SYNC_MS],
                     language = migratedPrefs[SettingsKeys.LANGUAGE] ?: "system",
                     stripOnUpload = migratedPrefs[SettingsKeys.STRIP_ON_UPLOAD] ?: false,
+                    compressOnUpload = migratedPrefs[SettingsKeys.COMPRESS_ON_UPLOAD] ?: false,
+                    compressVideosOnUpload = migratedPrefs[SettingsKeys.COMPRESS_VIDEO_ON_UPLOAD] ?: false,
+                    compressTier = UploadCompressionTier.fromOrdinalOrDefault(
+                        migratedPrefs[SettingsKeys.COMPRESS_UPLOAD_TIER] ?: UploadCompressionTier.BALANCED.ordinal
+                    ),
                     mirrorStripToLocal = migratedPrefs[SettingsKeys.MIRROR_STRIP_TO_LOCAL] ?: false,
+                    mirrorCompressToLocal = migratedPrefs[SettingsKeys.MIRROR_COMPRESS_TO_LOCAL] ?: false,
                     renameToCaptureDate = migratedPrefs[SettingsKeys.RENAME_TO_CAPTURE_DATE] ?: false,
                     deleteLocalAfterBackup = migratedPrefs[SettingsKeys.DELETE_LOCAL_AFTER_BACKUP] ?: false,
                     stripGps = migratedPrefs[SettingsKeys.STRIP_GPS] ?: false,
@@ -555,11 +599,15 @@ class SettingsViewModel @Inject constructor(
                     appLockEnabled = migratedPrefs[SettingsKeys.APP_LOCK_ENABLED] ?: false,
                     appLockTimeoutMinutes = migratedPrefs[SettingsKeys.APP_LOCK_TIMEOUT_MINUTES] ?: 0,
                     clearCacheOnAppClose = migratedPrefs[SettingsKeys.CLEAR_CACHE_ON_APP_CLOSE] ?: false,
+                    screenshotOverlayEnabled = migratedPrefs[SettingsKeys.SCREENSHOT_OVERLAY_ENABLED] ?: false,
                     hidePhotosInAlbums = migratedPrefs[SettingsKeys.HIDE_PHOTOS_IN_ALBUMS] ?: false,
                     showScrollDate = migratedPrefs[SettingsKeys.SHOW_SCROLL_DATE] ?: false,
                     showSelectionLabels = migratedPrefs[SettingsKeys.SHOW_SELECTION_LABELS] ?: true,
                     reverseTimelineOrder = migratedPrefs[SettingsKeys.REVERSE_TIMELINE_ORDER] ?: false,
                     mosaicGrid = migratedPrefs[SettingsKeys.MOSAIC_GRID] ?: false,
+                    seamlessGrid = migratedPrefs[SettingsKeys.SEAMLESS_GRID] ?: false,
+                    albumsDefaultFilter = migratedPrefs[SettingsKeys.ALBUMS_DEFAULT_FILTER] ?: 0,
+                    albumsRememberLastFilter = migratedPrefs[SettingsKeys.ALBUMS_REMEMBER_LAST_FILTER] ?: false,
                     gridRememberLast = migratedPrefs[SettingsKeys.GRID_REMEMBER_LAST] ?: false,
                     gridDefaultColumns = migratedPrefs[SettingsKeys.GRID_DEFAULT_COLUMNS] ?: 3,
                 )
@@ -640,10 +688,14 @@ class SettingsViewModel @Inject constructor(
                 //    demote SYNCED → CLOUD_ONLY for cloud-deleted items.
                 failedPhaseRes = R.string.settings_sync_failed_reconcile
                 reconcile(userId).collect {}
-                // 2. Upload: send LOCAL_ONLY photos to Proton Drive
-                //    (uploadFile() now immediately saves each photo to the local DB)
+                // 2. Upload: hand the LOCAL_ONLY photos to the SyncWorker rather than uploading
+                //    inline here. The worker is the sole upload owner so the in-app cancel can stop
+                //    the batch; an inline upload in this viewModelScope would be uncancellable. The
+                //    live per-file progress still renders via observeUploadProgress (it reads the
+                //    shared use-case progress flow regardless of who triggered the run), and the
+                //    worker writes LAST_SYNC_MS itself. allowLowBattery = true: the user asked.
                 failedPhaseRes = R.string.settings_sync_failed_upload
-                upload(userId)
+                SyncWorker.runNow(context, _uiState.value.syncWifiOnly, allowLowBattery = true)
                 val now = System.currentTimeMillis()
                 context.settingsDataStore.edit { it[SettingsKeys.LAST_SYNC_MS] = now }
                 _uiState.update { it.copy(lastSyncMs = now) }
@@ -668,19 +720,28 @@ class SettingsViewModel @Inject constructor(
 
     fun clearSyncError() = _uiState.update { it.copy(syncError = null) }
 
+    /**
+     * Applies the free-up settings now in state to the periodic sweep: it stays enqueued only while
+     * [SettingsUiState.autoFreeUp] is on, and always carries the interval the UI shows. Callers run
+     * it after their own state update, so the value it reads is the new one.
+     */
+    private fun applyFreeUpSchedule() {
+        val state = _uiState.value
+        if (state.autoFreeUp) {
+            FreeUpSpaceWorker.schedule(
+                workManager,
+                state.freeUpInterval.ms,
+            )
+        } else {
+            FreeUpSpaceWorker.cancel(workManager)
+        }
+    }
+
     fun setAutoFreeUp(enabled: Boolean) {
         viewModelScope.launch {
             context.settingsDataStore.edit { it[SettingsKeys.AUTO_FREE_UP] = enabled }
             _uiState.update { it.copy(autoFreeUp = enabled) }
-            if (enabled) {
-                FreeUpSpaceWorker.schedule(
-                    workManager,
-                    _uiState.value.freeUpWifiOnly,
-                    _uiState.value.freeUpInterval.ms,
-                )
-            } else {
-                FreeUpSpaceWorker.cancel(workManager)
-            }
+            applyFreeUpSchedule()
         }
     }
 
@@ -688,13 +749,7 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             context.settingsDataStore.edit { it[SettingsKeys.FREE_UP_INTERVAL] = interval.name }
             _uiState.update { it.copy(freeUpInterval = interval) }
-        }
-    }
-
-    fun setFreeUpWifiOnly(wifiOnly: Boolean) {
-        viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.FREE_UP_WIFI_ONLY] = wifiOnly }
-            _uiState.update { it.copy(freeUpWifiOnly = wifiOnly) }
+            applyFreeUpSchedule()
         }
     }
 
@@ -720,6 +775,7 @@ class SettingsViewModel @Inject constructor(
                     }
                 }
             } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
                 _uiState.update { it.copy(isFreeingUp = false, syncError = context.getString(R.string.settings_free_up_error, e.message ?: "")) }
             }
         }
@@ -839,10 +895,38 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    fun setCompressOnUpload(enabled: Boolean) {
+        viewModelScope.launch {
+            context.settingsDataStore.edit { it[SettingsKeys.COMPRESS_ON_UPLOAD] = enabled }
+            _uiState.update { it.copy(compressOnUpload = enabled) }
+        }
+    }
+
+    fun setCompressVideosOnUpload(enabled: Boolean) {
+        viewModelScope.launch {
+            context.settingsDataStore.edit { it[SettingsKeys.COMPRESS_VIDEO_ON_UPLOAD] = enabled }
+            _uiState.update { it.copy(compressVideosOnUpload = enabled) }
+        }
+    }
+
+    fun setCompressTier(tier: UploadCompressionTier) {
+        viewModelScope.launch {
+            context.settingsDataStore.edit { it[SettingsKeys.COMPRESS_UPLOAD_TIER] = tier.ordinal }
+            _uiState.update { it.copy(compressTier = tier) }
+        }
+    }
+
     fun setMirrorStripToLocal(enabled: Boolean) {
         viewModelScope.launch {
             context.settingsDataStore.edit { it[SettingsKeys.MIRROR_STRIP_TO_LOCAL] = enabled }
             _uiState.update { it.copy(mirrorStripToLocal = enabled) }
+        }
+    }
+
+    fun setMirrorCompressToLocal(enabled: Boolean) {
+        viewModelScope.launch {
+            context.settingsDataStore.edit { it[SettingsKeys.MIRROR_COMPRESS_TO_LOCAL] = enabled }
+            _uiState.update { it.copy(mirrorCompressToLocal = enabled) }
         }
     }
 
@@ -921,6 +1005,21 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    /** Persist the screenshot quick-action overlay opt-in and start or stop the watcher
+     *  service to match. The overlay permission is checked by the caller before enabling;
+     *  [ScreenshotOverlayService.start] also self-guards it. */
+    fun setScreenshotOverlayEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            context.settingsDataStore.edit { it[SettingsKeys.SCREENSHOT_OVERLAY_ENABLED] = enabled }
+            _uiState.update { it.copy(screenshotOverlayEnabled = enabled) }
+            if (enabled) {
+                ScreenshotOverlayService.start(context)
+            } else {
+                ScreenshotOverlayService.stop(context)
+            }
+        }
+    }
+
     /** Persist the "hide photos already in albums" Photos-tab filter. The gallery
      *  observes the key directly via its combine chain; this setter is just for
      *  immediate UI feedback in Settings. */
@@ -965,6 +1064,35 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    /** Persist the "edge to edge (seamless) grid" toggle. The Photos grid observes the key directly;
+     *  this setter is for immediate UI feedback in Settings. */
+    fun setSeamlessGrid(enabled: Boolean) {
+        // Mirror to the synchronous boot cache immediately so a grid opened right after the toggle
+        // renders the new layout on the first frame, before the DataStore write propagates.
+        eu.akoos.photos.data.preferences.SeamlessGridPrefsBoot.write(context, enabled)
+        viewModelScope.launch {
+            context.settingsDataStore.edit { it[SettingsKeys.SEAMLESS_GRID] = enabled }
+            _uiState.update { it.copy(seamlessGrid = enabled) }
+        }
+    }
+
+    /** Persist the default Albums-tab filter as an AlbumDisplayFilter ordinal. The Albums tab reads
+     *  the key on entry; this setter is for immediate UI feedback in Settings. */
+    fun setAlbumsDefaultFilter(value: Int) {
+        viewModelScope.launch {
+            context.settingsDataStore.edit { it[SettingsKeys.ALBUMS_DEFAULT_FILTER] = value }
+            _uiState.update { it.copy(albumsDefaultFilter = value) }
+        }
+    }
+
+    /** Persist the "remember the last-used Albums-tab filter" opt-in. */
+    fun setAlbumsRememberLastFilter(value: Boolean) {
+        viewModelScope.launch {
+            context.settingsDataStore.edit { it[SettingsKeys.ALBUMS_REMEMBER_LAST_FILTER] = value }
+            _uiState.update { it.copy(albumsRememberLastFilter = value) }
+        }
+    }
+
     @OptIn(coil.annotation.ExperimentalCoilApi::class)
     fun signOut() {
         viewModelScope.launch {
@@ -983,18 +1111,45 @@ class SettingsViewModel @Inject constructor(
                 //    fetch instead of replaying stale rows that showed up with black thumbnails).
                 cloudRepo.clearCacheForSignOut(userId)
                 // 3. Delete the decrypted on-disk caches + Coil's caches so no decrypted photo or
-                //    thumbnail of the signed-out user stays readable. The offline blobs, the hidden
-                //    vault and the key material are wiped inside clearCacheForSignOut above so EVERY
-                //    sign-out route (including a server-side force-logout) covers them; MediaStore
-                //    originals and the encrypted in-flight upload spill are left alone.
+                //    thumbnail of the signed-out user stays readable, and drop the diagnostics
+                //    buffers, which are process-lifetime and would otherwise carry into a sign-in as
+                //    a different user. The offline blobs, the hidden vault and the key material are
+                //    wiped inside clearCacheForSignOut above so EVERY sign-out route (including a
+                //    server-side force-logout) covers them; MediaStore originals and the encrypted
+                //    in-flight upload spill are left alone.
                 runCatching {
                     kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                         listOf("thumbnails", "fullres", "fullres-session", "editor", "video_editor", "motion")
                             .forEach { File(context.cacheDir, it).deleteRecursively() }
                         context.cacheDir.listFiles { f -> f.name.startsWith("album_dl_") }?.forEach { it.delete() }
+                        // Sign-out only: a widget's cached bitmap is a decrypted cloud photo, and the
+                        // CLOUD_* modes cannot re-fetch one without auth. Sweeping it on any other
+                        // cache-clear route would blank the launcher with nothing able to redraw it.
+                        context.cacheDir.listFiles { f -> f.name.startsWith("widget_") }?.forEach { it.delete() }
+                        eu.akoos.photos.widget.PhotoWidget.clearBitmapCache()
                         val loader = context.imageLoader
                         loader.memoryCache?.clear()
                         loader.diskCache?.clear()
+                        eu.akoos.photos.util.SyncDiagnostics.clear()
+                        eu.akoos.photos.util.PerfDiagnostics.clear()
+                        File(context.filesDir, "diagnostics").deleteRecursively()
+                        // Drop the Glance state still pointing at the swept bitmaps so each widget
+                        // redraws its placeholder now rather than on its next natural tick.
+                        val glanceManager = androidx.glance.appwidget.GlanceAppWidgetManager(context)
+                        glanceManager.getGlanceIds(eu.akoos.photos.widget.PhotoWidget::class.java)
+                            .forEach { glanceId ->
+                                androidx.glance.appwidget.state.updateAppWidgetState(
+                                    context,
+                                    androidx.glance.state.PreferencesGlanceStateDefinition,
+                                    glanceId,
+                                ) { prefs ->
+                                    prefs.toMutablePreferences().also { mp ->
+                                        mp.remove(eu.akoos.photos.widget.PhotoWidgetKeys.CACHED_BITMAP_PATH)
+                                        mp.remove(eu.akoos.photos.widget.PhotoWidgetKeys.CURRENT_URI)
+                                    }
+                                }
+                                eu.akoos.photos.widget.PhotoWidget().update(context, glanceId)
+                            }
                     }
                 }
                 // 4. Clear account-tied DataStore state so a sign-in as a different user can't
@@ -1010,6 +1165,7 @@ class SettingsViewModel @Inject constructor(
                             SettingsKeys.EXCLUDED_FOLDER_NAMES,
                             SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP,
                             SettingsKeys.HIDDEN_URI_ORIGINAL_NAME_MAP,
+                            SettingsKeys.HIDDEN_URI_SOURCE_FOLDER_MAP,
                             SettingsKeys.MANUAL_LOCAL_FOLDER_NAMES,
                             SettingsKeys.ALBUM_BUCKET_MAP,
                             SettingsKeys.PENDING_DELETE_URIS,
@@ -1026,8 +1182,19 @@ class SettingsViewModel @Inject constructor(
                             SettingsKeys.SHOW_SELECTION_LABELS,
                             SettingsKeys.REVERSE_TIMELINE_ORDER,
                             SettingsKeys.MOSAIC_GRID,
-                            // Timeline folder filter is likewise a per-user view preference.
+                            SettingsKeys.SEAMLESS_GRID,
+                            // Albums-tab filter preference + its remembered last value.
+                            SettingsKeys.ALBUMS_DEFAULT_FILTER,
+                            SettingsKeys.ALBUMS_REMEMBER_LAST_FILTER,
+                            SettingsKeys.ALBUMS_LAST_FILTER,
+                            // Timeline folder and album filters are likewise per-user view preferences.
                             SettingsKeys.TIMELINE_EXCLUDED_FOLDER_NAMES,
+                            SettingsKeys.TIMELINE_EXCLUDED_ALBUM_IDS,
+                            // Hidden albums are a per-user, client-side view preference; a second
+                            // account on a shared device must not inherit the previous user's set.
+                            SettingsKeys.HIDDEN_ALBUM_IDS,
+                            // Individually-hidden cloud photos are the same per-user client-side state.
+                            SettingsKeys.HIDDEN_CLOUD_PHOTO_IDS,
                         )
                         accountTied.forEach { prefs.remove(it) }
                         // Per-user dynamic keys (one per volume): the events anchor + the photo

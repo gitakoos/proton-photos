@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -30,6 +30,13 @@ import androidx.room.Transaction
 import eu.akoos.photos.data.db.entity.AlbumPhotoMembershipEntity
 import kotlinx.coroutines.flow.Flow
 
+/** One album ↔ photo edge, projected to the two id columns. Named separately from the entity so the
+ *  reverse lookup stays a two-column read if the table ever grows a column. */
+data class AlbumPhotoMembershipLite(
+    val albumLinkId: String,
+    val photoLinkId: String,
+)
+
 @Dao
 interface AlbumPhotoMembershipDao {
 
@@ -43,6 +50,12 @@ interface AlbumPhotoMembershipDao {
     /** Cloud linkIds in ANY of the given albums — backs the per-album timeline-hide filter. */
     @Query("SELECT DISTINCT photoLinkId FROM album_photo_membership WHERE albumLinkId IN (:albumIds)")
     fun observeAssociatedPhotoLinkIdsForAlbums(albumIds: Set<String>): Flow<List<String>>
+
+    /** Reverse lookup: which albums hold the given photos — backs the add-to-album picker's
+     *  "already in this album" indicator. Rides the photoLinkId index; [photoLinkIds] is a
+     *  user selection, never the whole library, so the IN list stays bounded. */
+    @Query("SELECT albumLinkId, photoLinkId FROM album_photo_membership WHERE photoLinkId IN (:photoLinkIds)")
+    fun observeAlbumIdsForPhotos(photoLinkIds: Set<String>): Flow<List<AlbumPhotoMembershipLite>>
 
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun upsertAll(entries: List<AlbumPhotoMembershipEntity>)

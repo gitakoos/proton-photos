@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -28,10 +28,8 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -56,12 +54,16 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.PhotoAlbum
+import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -77,6 +79,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -94,6 +97,7 @@ import eu.akoos.photos.presentation.settings.ThemePalette
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.ProtonPhotosTheme
 import kotlinx.coroutines.flow.map
+import java.io.File
 
 @AndroidEntryPoint
 class PhotoWidgetConfigActivity : ComponentActivity() {
@@ -170,6 +174,7 @@ class PhotoWidgetConfigActivity : ComponentActivity() {
                     onUris   = viewModel::setSelectedUris,
                     onAlbum  = viewModel::setAlbum,
                     onCloudSelection = viewModel::setSelectedLinkIds,
+                    onCloudAlbum = viewModel::setCloudAlbum,
                     onRequestCloudThumb = viewModel::requestCloudThumbnailDecrypt,
                     onSave   = { viewModel.save(appWidgetId) },
                     onCancel = { finish() },
@@ -190,6 +195,7 @@ private fun WidgetConfigScreen(
     onUris: (List<String>) -> Unit,
     onAlbum: (String) -> Unit,
     onCloudSelection: (List<String>) -> Unit,
+    onCloudAlbum: (String) -> Unit,
     onRequestCloudThumb: (eu.akoos.photos.data.db.entity.PhotoListingEntity) -> Unit,
     onSave: () -> Unit,
     onCancel: () -> Unit,
@@ -200,18 +206,12 @@ private fun WidgetConfigScreen(
     // a fixed bottom bar means the user never has to scroll past everything to reach the actions.
     var step by remember { mutableStateOf(0) }
 
-    // Photo picker launcher (system picker — used by SELECTED mode).
-    val photoPicker = rememberLauncherForActivityResult(
-        ActivityResultContracts.GetMultipleContents(),
-    ) { uris ->
-        if (uris.isNotEmpty()) onUris(uris.map { it.toString() })
-    }
-
     val canSave = when (state.mode) {
         WidgetMode.ALL_PHOTOS     -> true
         WidgetMode.SELECTED       -> state.selectedUris.isNotEmpty()
         WidgetMode.ALBUM          -> state.selectedAlbum != null
         WidgetMode.CLOUD_SELECTED -> state.selectedLinkIds.isNotEmpty()
+        WidgetMode.CLOUD_ALBUM    -> state.selectedCloudAlbumLinkId != null
     }
     // Leave room at the bottom of every scroll area so the floating pill never covers content.
     val bottomInset = 112.dp
@@ -261,16 +261,20 @@ private fun WidgetConfigScreen(
                             onClick     = { onMode(WidgetMode.SELECTED) },
                         )
                         ModeOption(
-                            title       = stringResource(R.string.widget_mode_album),
-                            description = stringResource(R.string.widget_mode_album_desc),
-                            selected    = state.mode == WidgetMode.ALBUM,
-                            onClick     = { onMode(WidgetMode.ALBUM) },
-                        )
-                        ModeOption(
                             title       = stringResource(R.string.widget_mode_cloud),
                             description = stringResource(R.string.widget_mode_cloud_desc),
                             selected    = state.mode == WidgetMode.CLOUD_SELECTED,
                             onClick     = { onMode(WidgetMode.CLOUD_SELECTED) },
+                        )
+                        ModeOption(
+                            title       = stringResource(R.string.widget_mode_album),
+                            description = stringResource(R.string.widget_mode_album_desc),
+                            selected    = state.mode == WidgetMode.ALBUM || state.mode == WidgetMode.CLOUD_ALBUM,
+                            onClick     = {
+                                if (state.mode != WidgetMode.ALBUM && state.mode != WidgetMode.CLOUD_ALBUM) {
+                                    onMode(WidgetMode.ALBUM)
+                                }
+                            },
                         )
                     }
                 }
@@ -310,34 +314,13 @@ private fun WidgetConfigScreen(
                                 )
                             }
                         }
-                        WidgetMode.ALBUM -> {
+                        WidgetMode.ALBUM, WidgetMode.CLOUD_ALBUM -> {
                             Spacer(Modifier.height(4.dp))
                             SectionLabel(stringResource(R.string.widget_section_choose_album))
                         }
                         WidgetMode.SELECTED -> {
                             Spacer(Modifier.height(4.dp))
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                SectionLabel(stringResource(R.string.widget_mode_selected))
-                                Box(
-                                    modifier = Modifier
-                                        .background(colors.surfaceWeak, RoundedCornerShape(8.dp))
-                                        .border(0.5.dp, colors.pillBorder, RoundedCornerShape(8.dp))
-                                        .clickable { photoPicker.launch("image/*") }
-                                        .padding(horizontal = 14.dp, vertical = 8.dp),
-                                ) {
-                                    Text(
-                                        if (state.selectedUris.isEmpty())
-                                            stringResource(R.string.widget_select_photos)
-                                        else
-                                            stringResource(R.string.widget_change_selection),
-                                        color = colors.accent, fontSize = 13.sp, fontWeight = FontWeight.Medium,
-                                    )
-                                }
-                            }
+                            SectionLabel(stringResource(R.string.widget_mode_selected))
                             if (state.selectedUris.isNotEmpty()) {
                                 Text(
                                     stringResource(R.string.widget_photos_selected, state.selectedUris.size),
@@ -345,28 +328,74 @@ private fun WidgetConfigScreen(
                                 )
                             }
                         }
-                        WidgetMode.ALL_PHOTOS -> {}
+                        WidgetMode.ALL_PHOTOS -> {
+                            Spacer(Modifier.height(4.dp))
+                            SectionLabel(stringResource(R.string.widget_all_photos_title))
+                        }
                     }
                 }
 
                 // Scrollable, virtualised content for this mode — fills the space above the pill.
                 when (state.mode) {
                     WidgetMode.ALL_PHOTOS -> {
-                        Box(
+                        Column(
                             modifier = Modifier
                                 .weight(1f)
-                                .fillMaxWidth()
-                                .padding(horizontal = 32.dp),
-                            contentAlignment = Alignment.Center,
+                                .fillMaxWidth(),
+                            verticalArrangement = Arrangement.Center,
+                            horizontalAlignment = Alignment.CenterHorizontally,
                         ) {
+                            Icon(
+                                Icons.Default.PhotoLibrary,
+                                contentDescription = null,
+                                tint = colors.accent,
+                                modifier = Modifier.size(56.dp),
+                            )
+                            Spacer(Modifier.height(16.dp))
+                            Text(
+                                stringResource(R.string.widget_all_photos_title),
+                                color = colors.fgPrimary,
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            Spacer(Modifier.height(6.dp))
                             Text(
                                 stringResource(R.string.widget_mode_all_desc),
-                                color = colors.fgMute, fontSize = 14.sp,
+                                color = colors.fgMute,
+                                fontSize = 14.sp,
+                                modifier = Modifier.padding(horizontal = 32.dp),
                             )
+                            if (state.devicePhotos.isNotEmpty()) {
+                                Spacer(Modifier.height(24.dp))
+                                LazyRow(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    contentPadding = PaddingValues(horizontal = 20.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    items(
+                                        state.devicePhotos.take(12),
+                                        key = { it.uri },
+                                    ) { item ->
+                                        AsyncImage(
+                                            model = Uri.parse(item.uri),
+                                            contentDescription = null,
+                                            contentScale = ContentScale.Crop,
+                                            modifier = Modifier
+                                                .size(60.dp)
+                                                .clip(RoundedCornerShape(10.dp))
+                                                .background(colors.bg2),
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                     WidgetMode.CLOUD_SELECTED -> {
-                        if (state.cloudPhotos.isEmpty()) {
+                        if (state.isLoadingCloud) {
+                            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                                CircularProgressIndicator(color = colors.accent, strokeWidth = 2.dp)
+                            }
+                        } else if (state.cloudPhotos.isEmpty()) {
                             Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                                 Text(
                                     stringResource(R.string.widget_no_cloud_photos),
@@ -381,6 +410,20 @@ private fun WidgetConfigScreen(
                                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                                 verticalArrangement = Arrangement.spacedBy(6.dp),
                             ) {
+                                item(span = { GridItemSpan(maxLineSpan) }) {
+                                    val context = LocalContext.current
+                                    val selectedModels = remember(state.selectedLinkIds) {
+                                        state.selectedLinkIds.map { linkId ->
+                                            val thumb = File(File(context.cacheDir, "thumbnails"), "thumb_$linkId.jpg")
+                                            linkId to (thumb.takeIf { it.exists() } as Any?)
+                                        }
+                                    }
+                                    SelectedTray(
+                                        headerText = stringResource(R.string.widget_cloud_photos_selected, state.selectedLinkIds.size),
+                                        models = selectedModels,
+                                        onRemove = { linkId -> onCloudSelection(state.selectedLinkIds - linkId) },
+                                    )
+                                }
                                 gridItems(state.cloudPhotos, key = { it.linkId }) { photo ->
                                     val isSelected = state.selectedLinkIds.contains(photo.linkId)
                                     Box(
@@ -434,10 +477,10 @@ private fun WidgetConfigScreen(
                         }
                     }
                     WidgetMode.SELECTED -> {
-                        if (state.selectedUris.isEmpty()) {
+                        if (state.devicePhotos.isEmpty()) {
                             Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                                 Text(
-                                    stringResource(R.string.widget_select_photos),
+                                    stringResource(R.string.widget_no_photos),
                                     color = colors.fgMute, fontSize = 14.sp,
                                 )
                             }
@@ -449,40 +492,130 @@ private fun WidgetConfigScreen(
                                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                                 verticalArrangement = Arrangement.spacedBy(6.dp),
                             ) {
-                                gridItems(state.selectedUris, key = { it }) { uri ->
-                                    AsyncImage(
-                                        model = Uri.parse(uri),
-                                        contentDescription = null,
-                                        contentScale = ContentScale.Crop,
+                                item(span = { GridItemSpan(maxLineSpan) }) {
+                                    val selectedModels = remember(state.selectedUris) {
+                                        state.selectedUris.map { uri -> uri to (Uri.parse(uri) as Any?) }
+                                    }
+                                    SelectedTray(
+                                        headerText = stringResource(R.string.widget_photos_selected, state.selectedUris.size),
+                                        models = selectedModels,
+                                        onRemove = { uri -> onUris(state.selectedUris - uri) },
+                                    )
+                                }
+                                gridItems(state.devicePhotos, key = { it.uri }) { item ->
+                                    val isSelected = state.selectedUris.contains(item.uri)
+                                    Box(
                                         modifier = Modifier
                                             .aspectRatio(1f)
                                             .clip(RoundedCornerShape(8.dp))
-                                            .background(colors.bg2),
-                                    )
+                                            .background(colors.bg2)
+                                            .border(
+                                                width = if (isSelected) 2.dp else 0.dp,
+                                                color = if (isSelected) colors.accent else Color.Transparent,
+                                                shape = RoundedCornerShape(8.dp),
+                                            )
+                                            .clickable {
+                                                val newSelection = if (isSelected) {
+                                                    state.selectedUris - item.uri
+                                                } else {
+                                                    state.selectedUris + item.uri
+                                                }
+                                                onUris(newSelection)
+                                            },
+                                    ) {
+                                        AsyncImage(
+                                            model = Uri.parse(item.uri),
+                                            contentDescription = null,
+                                            contentScale = ContentScale.Crop,
+                                            modifier = Modifier.fillMaxSize(),
+                                        )
+                                        if (isSelected) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxSize()
+                                                    .background(colors.accent.copy(alpha = 0.25f)),
+                                            )
+                                            Icon(
+                                                Icons.Default.CheckCircle,
+                                                contentDescription = null,
+                                                tint = colors.accent,
+                                                modifier = Modifier
+                                                    .align(Alignment.TopEnd)
+                                                    .padding(4.dp)
+                                                    .size(18.dp),
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
-                    WidgetMode.ALBUM -> {
-                        if (state.albums.isEmpty()) {
-                            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                                Text(
-                                    stringResource(R.string.widget_no_photos),
-                                    color = colors.fgMute, fontSize = 14.sp,
+                    WidgetMode.ALBUM, WidgetMode.CLOUD_ALBUM -> {
+                        Column(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                            // Device | Cloud source toggle: swaps between the local folder list
+                            // and the cloud album list without leaving the Album mode.
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 20.dp, vertical = 4.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                IntervalChip(
+                                    label    = stringResource(R.string.widget_album_source_device),
+                                    selected = state.mode == WidgetMode.ALBUM,
+                                    onClick  = { onMode(WidgetMode.ALBUM) },
+                                )
+                                IntervalChip(
+                                    label    = stringResource(R.string.widget_album_source_cloud),
+                                    selected = state.mode == WidgetMode.CLOUD_ALBUM,
+                                    onClick  = { onMode(WidgetMode.CLOUD_ALBUM) },
                                 )
                             }
-                        } else {
-                            LazyColumn(
-                                modifier = Modifier.weight(1f).fillMaxWidth(),
-                                contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 4.dp, bottom = bottomInset),
-                                verticalArrangement = Arrangement.spacedBy(6.dp),
-                            ) {
-                                items(state.albums, key = { it.name }) { album ->
-                                    AlbumRow(
-                                        album = album,
-                                        selected = state.selectedAlbum == album.name,
-                                        onClick = { onAlbum(album.name) },
-                                    )
+                            if (state.mode == WidgetMode.CLOUD_ALBUM) {
+                                if (state.cloudAlbums.isEmpty()) {
+                                    Box(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 32.dp), contentAlignment = Alignment.Center) {
+                                        Text(
+                                            stringResource(R.string.widget_no_cloud_albums),
+                                            color = colors.fgMute, fontSize = 14.sp,
+                                        )
+                                    }
+                                } else {
+                                    LazyColumn(
+                                        modifier = Modifier.weight(1f).fillMaxWidth(),
+                                        contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 4.dp, bottom = bottomInset),
+                                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                                    ) {
+                                        items(state.cloudAlbums, key = { it.linkId }) { album ->
+                                            CloudAlbumRow(
+                                                album = album,
+                                                selected = state.selectedCloudAlbumLinkId == album.linkId,
+                                                onClick = { onCloudAlbum(album.linkId) },
+                                            )
+                                        }
+                                    }
+                                }
+                            } else {
+                                if (state.albums.isEmpty()) {
+                                    Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                                        Text(
+                                            stringResource(R.string.widget_no_photos),
+                                            color = colors.fgMute, fontSize = 14.sp,
+                                        )
+                                    }
+                                } else {
+                                    LazyColumn(
+                                        modifier = Modifier.weight(1f).fillMaxWidth(),
+                                        contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 4.dp, bottom = bottomInset),
+                                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                                    ) {
+                                        items(state.albums, key = { it.name }) { album ->
+                                            AlbumRow(
+                                                album = album,
+                                                selected = state.selectedAlbum == album.name,
+                                                onClick = { onAlbum(album.name) },
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -562,6 +695,74 @@ private fun WidgetWizardBar(
 }
 
 // ── Small composables ─────────────────────────────────────────────────────────
+
+/** Horizontal review tray of the currently selected photos, pinned at the top of a selection grid.
+ *  [models] pairs each item's id with its image model (null falls back to a placeholder box). The
+ *  remove badge on each thumbnail calls [onRemove] with that id. Renders nothing when empty. */
+@Composable
+private fun SelectedTray(
+    headerText: String,
+    models: List<Pair<String, Any?>>,
+    onRemove: (String) -> Unit,
+) {
+    if (models.isEmpty()) return
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        SectionLabel(headerText)
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(models, key = { it.first }) { (id, model) ->
+                SelectedTrayThumb(model = model, onRemove = { onRemove(id) })
+            }
+        }
+    }
+}
+
+/** One 64dp square thumbnail in [SelectedTray] with a circular remove badge in the top-end corner. */
+@Composable
+private fun SelectedTrayThumb(
+    model: Any?,
+    onRemove: () -> Unit,
+) {
+    val colors = AppColors.current
+    Box(modifier = Modifier.size(64.dp)) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .clip(RoundedCornerShape(8.dp))
+                .background(colors.bg2),
+        ) {
+            if (model != null) {
+                AsyncImage(
+                    model = model,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+        }
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(2.dp)
+                .size(20.dp)
+                .clip(CircleShape)
+                .background(Color.Black.copy(alpha = 0.55f))
+                .clickable(onClick = onRemove),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                Icons.Default.Close,
+                contentDescription = null,
+                tint = Color.White,
+                modifier = Modifier.size(14.dp),
+            )
+        }
+    }
+}
 
 @Composable
 private fun SectionLabel(text: String) {
@@ -659,6 +860,84 @@ private fun AlbumRow(
             Text(album.name, color = colors.fgPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
             Text(
                 stringResource(R.string.sync_photo_count, album.itemCount),
+                color = colors.fgMute,
+                fontSize = 12.sp,
+            )
+        }
+        if (selected) {
+            Icon(
+                Icons.Default.CheckCircle,
+                contentDescription = null,
+                tint = colors.accent,
+                modifier = Modifier.size(20.dp),
+            )
+        }
+    }
+}
+
+/** Single-select row for a cloud album in the follow-an-album picker. Mirrors [AlbumRow]:
+ *  cover thumbnail, name, and a photo-count subtitle, with the same selected treatment.
+ *  The cover resolves from the decrypted-thumbnail cache the app writes for cloud covers. */
+@Composable
+private fun CloudAlbumRow(
+    album: eu.akoos.photos.data.db.entity.CloudAlbumEntity,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    val colors = AppColors.current
+    val context = LocalContext.current
+    val coverFile = remember(album.coverLinkId) {
+        album.coverLinkId
+            ?.let { File(File(context.cacheDir, "thumbnails"), "thumb_$it.jpg") }
+            ?.takeIf { it.exists() }
+    }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(
+                if (selected) colors.accent.copy(alpha = 0.12f) else colors.cardBg,
+                RoundedCornerShape(10.dp),
+            )
+            .border(
+                1.dp,
+                if (selected) colors.accent else colors.cardBorder,
+                RoundedCornerShape(10.dp),
+            )
+            .clickable(onClick = onClick)
+            .padding(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        if (coverFile != null) {
+            AsyncImage(
+                model              = coverFile,
+                contentDescription = null,
+                contentScale       = ContentScale.Crop,
+                modifier           = Modifier
+                    .size(44.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(colors.bg2),
+            )
+        } else {
+            Box(
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(colors.bg2),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Default.PhotoAlbum,
+                    contentDescription = null,
+                    tint = colors.fgMute,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+        }
+        Column(modifier = Modifier.weight(1f)) {
+            Text(album.name, color = colors.fgPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            Text(
+                stringResource(R.string.sync_photo_count, album.photoCount),
                 color = colors.fgMute,
                 fontSize = 12.sp,
             )

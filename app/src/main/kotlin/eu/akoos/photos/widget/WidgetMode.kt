@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -44,6 +44,15 @@ enum class WidgetMode {
      * is handed to the launcher process for display.
      */
     CLOUD_SELECTED,
+
+    /**
+     * Follows a chosen cloud album: the widget cycles the album's CURRENT member
+     * photos, resolved live on every update from the local membership rows, so
+     * photos added to the album later appear without reconfiguring the widget.
+     * Renders through the same encrypted thumbnail-cache path as [CLOUD_SELECTED],
+     * so only the decoded, scaled bitmap ever reaches the launcher process.
+     */
+    CLOUD_ALBUM,
 }
 
 /** Built-in interval options the user can choose in the config screen.

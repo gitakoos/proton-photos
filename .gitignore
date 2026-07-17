@@ -18,6 +18,10 @@ keystore.properties
 *.log
 /test_out*.txt
 .release_notes_v*.md
+# Internal developer docs: keep the docs/ folder (logo.png) tracked, but the
+# markdown docs (and the archived release notes) stay local and off GitHub.
+docs/*.md
+docs/release-notes/
 
 # Gradle wrapper except the jar
 !gradle/wrapper/gradle-wrapper.jar

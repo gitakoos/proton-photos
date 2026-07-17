@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -35,14 +35,16 @@ package eu.akoos.photos.domain.repository
  * higher-level surface that can present errors when it cares to.
  */
 interface UpdateCheckerRepository {
-    /** Forces a fresh GitHub fetch (ignores 24h cache). For manual "Check for updates" tap. */
+    /** Forces a fresh GitHub fetch (ignores the cache). For manual "Check for updates" tap. */
     suspend fun checkForUpdateForced(): UpdateStatus
 
-    /** Returns cached result if last check was <24h ago; otherwise fetches fresh. */
+    /** Returns cached result if the last check was inside the throttle window; otherwise fetches fresh. */
     suspend fun checkForUpdateCached(): UpdateStatus
 
-    /** Marks a version as dismissed so future cached checks return Hidden until a newer tag appears. */
-    suspend fun dismissVersion(versionName: String)
+    /** The versionName of an update the last fresh check found still available, persisted across
+     *  relaunches. null once a check confirms the app is up to date. Lets the caller light the
+     *  persistent update indicator on relaunch without a network round-trip. */
+    suspend fun knownAvailableVersion(): String?
 }
 
 sealed class UpdateStatus {
@@ -58,7 +60,4 @@ sealed class UpdateStatus {
         val apkAssetName: String,   // e.g. "photosforproton-arm64-v8a-release.apk"
         val releaseNotes: String,   // release body markdown
     ) : UpdateStatus()
-
-    /** A newer version exists but the user previously dismissed it. */
-    data class DismissedVersion(val versionName: String) : UpdateStatus()
 }

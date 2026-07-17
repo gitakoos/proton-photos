@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -79,6 +79,7 @@ import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
 import eu.akoos.photos.presentation.gallery.PhotoCell
 import eu.akoos.photos.presentation.gallery.photoCellInputsFor
 import eu.akoos.photos.presentation.gallery.rememberDefaultGridColumns
+import eu.akoos.photos.presentation.gallery.rememberSeamlessGrid
 import eu.akoos.photos.presentation.gallery.rememberDragMultiSelectModifier
 import eu.akoos.photos.presentation.memories.FloatingMemoriesHeader
 import eu.akoos.photos.presentation.theme.Accent
@@ -122,6 +123,7 @@ fun OfflinePhotosScreen(
             .background(Bg0),
     ) {
         val cols = rememberDefaultGridColumns()
+        val seamless = rememberSeamlessGrid()
         if (items.isEmpty()) {
             Box(
                 Modifier.fillMaxSize().padding(top = contentTopPad),
@@ -157,9 +159,14 @@ fun OfflinePhotosScreen(
                 columns = GridCells.Fixed(cols),
                 state = gridState,
                 modifier = Modifier.fillMaxSize().then(dragMod),
-                contentPadding = PaddingValues(8.dp, contentTopPad, 8.dp, 100.dp + navBottom),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
+                contentPadding = PaddingValues(
+                    start = if (seamless) 0.dp else 8.dp,
+                    top = contentTopPad,
+                    end = if (seamless) 0.dp else 8.dp,
+                    bottom = 100.dp + navBottom,
+                ),
+                horizontalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 4.dp),
+                verticalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 4.dp),
             ) {
                 itemsIndexed(
                     items,
@@ -182,6 +189,8 @@ fun OfflinePhotosScreen(
                         imageData = inputs.imageData,
                         stableKey = inputs.stableKey,
                         isVideo = inputs.isVideo,
+                        isLocalVideo = inputs.isLocalVideo,
+                        durationMs = inputs.durationMs,
                         isPlaceholder = inputs.isPlaceholder,
                         selected = linkId != null && linkId in selectedIds,
                         isSelectionMode = inSelectionMode,
@@ -191,6 +200,8 @@ fun OfflinePhotosScreen(
                         isOffline = inputs.isOffline,
                         typeBadgeRes = inputs.typeBadgeRes,
                         typeBadgeCdRes = inputs.typeBadgeCdRes,
+                        columns = cols,
+                        cornerRadius = if (seamless) 0.dp else 10.dp,
                         onClick = {
                             // Skip the release-tap that follows a long-press select.
                             if (tapGuard.value) tapGuard.value = false

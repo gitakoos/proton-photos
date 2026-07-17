@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -57,6 +57,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Cloud
@@ -69,10 +70,12 @@ import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -99,6 +102,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import eu.akoos.photos.BuildConfig
 import eu.akoos.photos.R
+import eu.akoos.photos.domain.entity.UploadCompressionTier
 import eu.akoos.photos.presentation.common.ConfirmDialog
 import eu.akoos.photos.presentation.common.ErrorPopup
 import eu.akoos.photos.presentation.common.FloatingHeaderScrim
@@ -115,6 +119,7 @@ import eu.akoos.photos.presentation.settings.components.InfoRow
 import eu.akoos.photos.presentation.settings.components.NavRow
 import eu.akoos.photos.presentation.settings.components.RowDivider
 import eu.akoos.photos.presentation.settings.components.SectionLabel
+import eu.akoos.photos.presentation.settings.components.SelectRow
 import eu.akoos.photos.presentation.settings.components.SettingsCard
 import eu.akoos.photos.presentation.settings.components.SettingsSubPageScaffold
 import eu.akoos.photos.presentation.settings.components.ToggleRow
@@ -134,7 +139,7 @@ private fun storageColor(fraction: Float): Color = when {
 }
 
 /**
- * Subtitle for the "Recently Deleted" entry — combines device-side count (known) with
+ * Subtitle for the "Recently Deleted" entry, combines device-side count (known) with
  * the Drive-side count (nullable). When cloud is known we surface both, otherwise we
  * fall back to the device-only pluralised text.
  */
@@ -177,6 +182,11 @@ fun SettingsScreen(
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
     val diagnosticsCopiedMsg = stringResource(R.string.settings_diagnostics_copied)
+    val shareDiagnosticsChooserTitle = stringResource(R.string.settings_copy_diagnostics)
+    // Diagnostics can leave the device two ways: a system share sheet (mail, chat) or the
+    // clipboard. The row opens a small chooser offering both; the assembled text is identical
+    // for either (privacy-safe: numbers, types and flags only, never photos or account data).
+    var showDiagnosticsChooser by remember { mutableStateOf(false) }
 
     // Sync errors render in a copyable [ErrorPopup]: `state.syncError` is set from raw
     // exception messages whose payload can be a multi-line backend response, so a
@@ -191,6 +201,99 @@ fun SettingsScreen(
         )
     }
 
+    if (showDiagnosticsChooser) {
+        // Assembles the privacy-safe bundle once for whichever exit the user picks. Header
+        // (app + version + code, manufacturer/model, Android release + sdk), then the crash
+        // records file, the sync log, and the perf snapshot + ring buffer. Numbers, counts,
+        // types and flags only, wrapped in a markdown fence. Never photos or account data.
+        val buildDiagnostics = {
+            val header = buildString {
+                append("Photos for Proton ")
+                append(BuildConfig.VERSION_NAME)
+                append(" (")
+                append(BuildConfig.VERSION_CODE)
+                append(")\n")
+                append(Build.MANUFACTURER).append(' ').append(Build.MODEL).append('\n')
+                append("Android ").append(Build.VERSION.RELEASE)
+                append(" (sdk ").append(Build.VERSION.SDK_INT).append(')')
+            }
+            // Crash records (privacy-safe: types + code frames only) live in a small file
+            // so they survive the crash; fold them into the same bundle as the sync log.
+            val crashLog = runCatching {
+                java.io.File(java.io.File(context.filesDir, "diagnostics"), "last_crash.txt")
+                    .takeIf { it.exists() }?.readText().orEmpty()
+            }.getOrDefault("")
+            val sync = if (eu.akoos.photos.util.SyncDiagnostics.isEmpty()) ""
+                else eu.akoos.photos.util.SyncDiagnostics.dump()
+            // Live heap / RAM / library-size snapshot plus the perf ring buffer. Numbers,
+            // counts, and flags only (mirrors SyncDiagnostics) so nothing identifies the account.
+            val perfSnapshot = eu.akoos.photos.util.PerfDiagnostics.snapshot(context)
+            val perfBuffer = if (eu.akoos.photos.util.PerfDiagnostics.isEmpty()) ""
+                else eu.akoos.photos.util.PerfDiagnostics.dump()
+            val body = buildString {
+                append("Performance:\n").append(perfSnapshot)
+                if (perfBuffer.isNotBlank()) append('\n').append(perfBuffer)
+                if (sync.isNotBlank()) {
+                    if (isNotEmpty()) append("\n\n")
+                    append("Sync:\n").append(sync)
+                }
+                if (crashLog.isNotBlank()) {
+                    if (isNotEmpty()) append("\n\n")
+                    append("Crashes:\n").append(crashLog.trim())
+                }
+                if (isEmpty()) append("no log yet")
+            }
+            "```\n$header\n\n$body\n```"
+        }
+        // Styled to match [ConfirmDialog], but with two distinct actions (Share / Copy) instead
+        // of a confirm+cancel pair, so a back press or scrim tap just closes without exporting.
+        AlertDialog(
+            onDismissRequest = { showDiagnosticsChooser = false },
+            containerColor = colors.cardBg,
+            titleContentColor = colors.fgPrimary,
+            textContentColor = colors.fgDim,
+            title = {
+                Text(stringResource(R.string.settings_copy_diagnostics), fontWeight = FontWeight.SemiBold)
+            },
+            text = {
+                Text(
+                    stringResource(R.string.settings_copy_diagnostics_desc),
+                    color = colors.fgDim,
+                    fontSize = 13.sp,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showDiagnosticsChooser = false
+                    val send = Intent(Intent.ACTION_SEND).apply {
+                        type = "text/plain"
+                        putExtra(Intent.EXTRA_TEXT, buildDiagnostics())
+                    }
+                    val chooser = Intent.createChooser(send, shareDiagnosticsChooserTitle)
+                    if (context !is Activity) chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    runCatching { context.startActivity(chooser) }
+                }) {
+                    Text(
+                        stringResource(R.string.share_action),
+                        color = colors.accent,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showDiagnosticsChooser = false
+                    clipboard.setText(androidx.compose.ui.text.AnnotatedString(buildDiagnostics()))
+                    android.widget.Toast.makeText(
+                        context, diagnosticsCopiedMsg, android.widget.Toast.LENGTH_SHORT,
+                    ).show()
+                }) {
+                    Text(stringResource(R.string.settings_diagnostics_copy_clipboard), color = colors.fgDim)
+                }
+            },
+        )
+    }
+
     // System delete dialog for "Free up space now" on Android 11+
     val freeUpPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartIntentSenderForResult()
@@ -201,6 +304,17 @@ fun SettingsScreen(
     LaunchedEffect(state.freeUpPendingIntent) {
         state.freeUpPendingIntent?.let { pi ->
             freeUpPermissionLauncher.launch(IntentSenderRequest.Builder(pi.intentSender).build())
+        }
+    }
+
+    // Enabling the screenshot quick-action bar needs the draw-over-other-apps grant. When it is
+    // missing this launcher opens the system permission screen and, on return, only turns the
+    // feature on once the grant actually landed.
+    val overlayPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) {
+        if (android.provider.Settings.canDrawOverlays(context)) {
+            viewModel.setScreenshotOverlayEnabled(true)
         }
     }
 
@@ -218,10 +332,10 @@ fun SettingsScreen(
             Spacer(Modifier.height(contentTopPad))
 
             // ── Account ───────────────────────────────────────────────────────
-            // The whole row is now a tap target — opens AccountScreen with avatar,
+            // The whole row is now a tap target, opens AccountScreen with avatar,
             // storage, web links, and sign out. Sign out moved out of the row to
-            // avoid the cramped triple hit area (avatar / text / sign out) we had
-            // before, and to keep the destructive action behind one more deliberate
+            // avoid the cramped triple hit area (avatar / text / sign out) of the old
+            // layout, and to keep the destructive action behind one more deliberate
             // step.
             CollapsibleSection(label = stringResource(R.string.settings_account_section)) {
             SettingsCard {
@@ -293,7 +407,7 @@ fun SettingsScreen(
                         } else {
                             // Split photos vs videos so the user can spot at a glance that the
                             // backed-up total isn't pure-photos. Reuses the same selection_* strings
-                            // as the gallery/album selection counter — already translated to 6 locales.
+                            // as the gallery/album selection counter, already translated to 6 locales.
                             val backedUpLabel = when {
                                 state.syncedPhotoCount > 0 && state.syncedVideoCount > 0 ->
                                     stringResource(R.string.selection_mixed, state.syncedPhotoCount, state.syncedVideoCount)
@@ -339,7 +453,7 @@ fun SettingsScreen(
                         Icon(Icons.AutoMirrored.Filled.ArrowForwardIos, null, tint = colors.fgMute, modifier = Modifier.size(13.dp))
                     }
                 }
-                // Deferral note — when the auto-sync drain is held back (waiting for Wi-Fi /
+                // Deferral note, when the auto-sync drain is held back (waiting for Wi-Fi /
                 // preparing the first backup) the pending count sits above zero with no active
                 // upload. A one-line reason keeps "queued but idle" from reading as broken.
                 state.uploadDeferReason?.let { reasonRes ->
@@ -351,11 +465,11 @@ fun SettingsScreen(
                     )
                 }
                 // ── Progress bar + expandable per-file list (while syncing OR pending) ──
-                // We render this *inside* the same Sync card (not as a separate card) so the
-                // header row's tap-target stays the gateway to Sync Settings — only the panel
+                // This renders *inside* the same Sync card (not as a separate card) so the
+                // header row's tap-target stays the gateway to Sync Settings, only the panel
                 // below stays interactive in its own right.
                 //
-                // Visibility = isSyncing OR pending > 0 — the OR side means the panel is up
+                // Visibility = isSyncing OR pending > 0, the OR side means the panel is up
                 // already when the OneTime SyncWorker is enqueued but not yet running (the
                 // ViewModel's isSyncing flag tracks only the in-process upload). Without this
                 // the user would see "Pending: 5" with no progress bar for the first second or
@@ -367,7 +481,7 @@ fun SettingsScreen(
                     (pending > 0 && state.uploadTotalCount > 0) ||
                     state.uploadEvents.isNotEmpty()
                 if (showPanel) {
-                    // Fall back to pending count if we don't have a live upload total yet so
+                    // Fall back to pending count when no live upload total exists yet so
                     // the user sees "0 / N" before the first per-file event arrives.
                     val displayTotal = if (state.uploadTotalCount > 0) state.uploadTotalCount else pending
                     SyncProgressPanel(
@@ -385,7 +499,7 @@ fun SettingsScreen(
                     description = stringResource(R.string.activity_row_desc),
                     onClick = onActivityClick,
                 )
-                // Explicit entry to the backup settings — clearer than only the tappable status row.
+                // Explicit entry to the backup settings, clearer than only the tappable status row.
                 RowDivider()
                 NavRow(
                     label = stringResource(R.string.sync_open_settings),
@@ -398,7 +512,7 @@ fun SettingsScreen(
             Spacer(Modifier.height(20.dp))
 
             // ── Storage section ───────────────────────────────────────────────
-            // Recently Deleted + Storage nav grouped together — both are about
+            // Recently Deleted + Storage nav grouped together, both are about
             // "where my data lives on device + Drive". Kept above the device-config
             // section so the user finds disk-space related controls without scrolling.
             CollapsibleSection(label = stringResource(R.string.settings_storage_section)) {
@@ -445,7 +559,7 @@ fun SettingsScreen(
                     onClick = onNotificationsClick,
                 )
                 RowDivider()
-                // Appearance + Language merged into one entry — the destination is the
+                // Appearance + Language merged into one entry, the destination is the
                 // unified appearance screen which now hosts theme + palette + language
                 // in a single scroll. Cuts an entire row from the Settings list.
                 NavRow(
@@ -454,7 +568,7 @@ fun SettingsScreen(
                     onClick = onAppearanceClick,
                 )
                 RowDivider()
-                // Manual update check — taps fire a forced (cache-bypassing) GitHub
+                // Manual update check, taps fire a forced (cache-bypassing) GitHub
                 // Releases query. The orchestrator surfaces the result either through
                 // the UpdatePromptDialog (new version) or a Toast (no update / network
                 // flake). The current versionName lives in the row description so the
@@ -483,31 +597,47 @@ fun SettingsScreen(
                 NavRow(
                     label = stringResource(R.string.settings_copy_diagnostics),
                     description = stringResource(R.string.settings_copy_diagnostics_desc),
-                    onClick = {
-                        val header = buildString {
-                            append("Photos for Proton ")
-                            append(BuildConfig.VERSION_NAME)
-                            append(" (")
-                            append(BuildConfig.VERSION_CODE)
-                            append(")\n")
-                            append(Build.MANUFACTURER).append(' ').append(Build.MODEL).append('\n')
-                            append("Android ").append(Build.VERSION.RELEASE)
-                            append(" (sdk ").append(Build.VERSION.SDK_INT).append(')')
+                    onClick = { showDiagnosticsChooser = true },
+                )
+            }
+            }
+
+            Spacer(Modifier.height(20.dp))
+
+            // ── Extras ─────────────────────────────────────────────────────────
+            // Home for optional utility features that sit outside the core backup
+            // flow. The screenshot quick-action bar is the first entry here.
+            CollapsibleSection(label = stringResource(R.string.settings_section_extras)) {
+            SettingsCard {
+                // Screenshot quick actions is a utility bar over a fresh screenshot; enabling it
+                // needs the draw-over-other-apps grant, so the toggle routes through the launcher
+                // and only flips on once that permission actually landed.
+                ToggleRow(
+                    label = stringResource(R.string.settings_screenshot_overlay),
+                    description = stringResource(R.string.settings_screenshot_overlay_desc),
+                    checked = state.screenshotOverlayEnabled,
+                    onCheckedChange = { enabled ->
+                        if (enabled) {
+                            if (android.provider.Settings.canDrawOverlays(context)) {
+                                viewModel.setScreenshotOverlayEnabled(true)
+                            } else {
+                                overlayPermissionLauncher.launch(
+                                    Intent(
+                                        android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                        android.net.Uri.parse("package:${context.packageName}"),
+                                    )
+                                )
+                            }
+                        } else {
+                            viewModel.setScreenshotOverlayEnabled(false)
                         }
-                        val body = if (eu.akoos.photos.util.SyncDiagnostics.isEmpty()) "no log yet"
-                            else eu.akoos.photos.util.SyncDiagnostics.dump()
-                        val fullText = "```\n$header\n\n$body\n```"
-                        clipboard.setText(androidx.compose.ui.text.AnnotatedString(fullText))
-                        android.widget.Toast.makeText(
-                            context, diagnosticsCopiedMsg, android.widget.Toast.LENGTH_SHORT,
-                        ).show()
                     },
                 )
             }
             }
 
             // Debug-only large-library simulator. Compiled out of release by the BuildConfig.DEBUG
-            // guard — invisible and unreachable in production builds.
+            // guard, invisible and unreachable in production builds.
             if (BuildConfig.DEBUG) {
                 Spacer(Modifier.height(20.dp))
                 LargeLibrarySimCard()
@@ -516,7 +646,7 @@ fun SettingsScreen(
 
         eu.akoos.photos.presentation.common.ThemedSnackbarHost(snackbarHostState, modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding())
 
-        // Floating header — close button on the left (the same side every sub-page puts back),
+        // Floating header, close button on the left (the same side every sub-page puts back),
         // title centered in a pill; the list scrolls under it.
         val debouncedClose = rememberDebouncedAction { onBack() }
         FloatingHeaderScrim()
@@ -559,7 +689,6 @@ fun SyncSettingsScreen(
     onBackupContentClick: () -> Unit = {},
     onBackupBehaviorClick: () -> Unit = {},
     onNetworkClick: () -> Unit = {},
-    onMetadataClick: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -581,13 +710,6 @@ fun SyncSettingsScreen(
             NavRow(
                 label = stringResource(R.string.settings_network_section),
                 onClick = onNetworkClick,
-            )
-            RowDivider()
-            // Metadata processing belongs with backup — stripping/renaming happens on upload.
-            NavRow(
-                label = stringResource(R.string.settings_metadata),
-                description = stringResource(R.string.settings_metadata_desc),
-                onClick = onMetadataClick,
             )
         }
 
@@ -678,6 +800,7 @@ fun BackupContentSettingsScreen(
 @Composable
 fun BackupBehaviorSettingsScreen(
     onBack: () -> Unit,
+    onUploadProcessingClick: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -697,6 +820,18 @@ fun BackupBehaviorSettingsScreen(
                 onCheckedChange = viewModel::setDeleteLocalAfterBackup,
                 indented = true,
                 enabled = state.autoSync,
+            )
+        }
+
+        Spacer(Modifier.height(20.dp))
+
+        // Rename/strip/compress all happen as a photo is backed up, so the processing hub
+        // sits with the other backup-behaviour controls.
+        SettingsCard {
+            NavRow(
+                label = stringResource(R.string.settings_metadata),
+                description = stringResource(R.string.settings_metadata_desc),
+                onClick = onUploadProcessingClick,
             )
         }
     }
@@ -787,6 +922,30 @@ fun StorageSettingsScreen(
             onClearOffline = { viewModel.clearOfflineStorage() },
             onOpenTrash = onOpenTrash,
         )
+
+        Spacer(Modifier.height(20.dp))
+
+        // The recurring counterpart to the manual "Free up" action on the device gauge above,
+        // so it sits with it rather than under backup behaviour.
+        SectionLabel(stringResource(R.string.settings_free_up_auto_section))
+        Spacer(Modifier.height(8.dp))
+        SettingsCard {
+            ToggleRow(
+                label = stringResource(R.string.settings_free_up_auto),
+                description = stringResource(R.string.settings_free_up_auto_desc),
+                checked = state.autoFreeUp,
+                onCheckedChange = viewModel::setAutoFreeUp,
+            )
+            RowDivider()
+            SelectRow(
+                label = stringResource(R.string.settings_free_up_interval),
+                description = stringResource(R.string.settings_free_up_interval_desc),
+                selected = state.freeUpInterval,
+                onSelected = viewModel::setFreeUpInterval,
+                indented = true,
+                enabled = state.autoFreeUp,
+            )
+        }
     }
 }
 
@@ -823,12 +982,42 @@ fun PrivacySecuritySettingsScreen(
 @Composable
 fun MetadataSettingsScreen(
     onBack: () -> Unit,
+    onOpenFileName: () -> Unit = {},
+    onOpenMetadata: () -> Unit = {},
+    onOpenQuality: () -> Unit = {},
+) {
+    SettingsSubPageScaffold(title = stringResource(R.string.settings_metadata), onBack = onBack) {
+        // Hub: each processing concern opens its own focused sub-page (file name / metadata /
+        // quality and size) instead of one long mixed scroll.
+        SettingsCard {
+            NavRow(
+                label = stringResource(R.string.settings_section_file_name),
+                onClick = onOpenFileName,
+            )
+            RowDivider()
+            NavRow(
+                label = stringResource(R.string.settings_privacy_section_metadata),
+                onClick = onOpenMetadata,
+            )
+            RowDivider()
+            NavRow(
+                label = stringResource(R.string.settings_section_quality_size),
+                onClick = onOpenQuality,
+            )
+        }
+    }
+}
+
+// ── Upload processing: File name sub-page ─────────────────────────────────────
+// How the uploaded copy is named. The on-device file keeps its own name.
+
+@Composable
+fun UploadFileNameSettingsScreen(
+    onBack: () -> Unit,
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
-    val context = LocalContext.current
-    SettingsSubPageScaffold(title = stringResource(R.string.settings_metadata), onBack = onBack) {
-        CollapsibleSection(label = stringResource(R.string.settings_privacy_section_metadata)) {
+    SettingsSubPageScaffold(title = stringResource(R.string.settings_section_file_name), onBack = onBack) {
         SettingsCard {
             ToggleRow(
                 label = stringResource(R.string.settings_rename_on_upload),
@@ -836,7 +1025,23 @@ fun MetadataSettingsScreen(
                 checked = state.renameToCaptureDate,
                 onCheckedChange = viewModel::setRenameToCaptureDate,
             )
-            RowDivider()
+        }
+    }
+}
+
+// ── Upload processing: Metadata sub-page ──────────────────────────────────────
+// EXIF stripping on the uploaded copy, with an optional mirror to the original.
+
+@Composable
+fun UploadMetadataSettingsScreen(
+    onBack: () -> Unit,
+    viewModel: SettingsViewModel = hiltViewModel(),
+) {
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val colors = AppColors.current
+    SettingsSubPageScaffold(title = stringResource(R.string.settings_privacy_section_metadata), onBack = onBack) {
+        SettingsCard {
             ToggleRow(
                 label = stringResource(R.string.settings_strip_metadata_upload),
                 description = stringResource(R.string.settings_strip_metadata_upload_desc),
@@ -918,6 +1123,133 @@ fun MetadataSettingsScreen(
                 }
             }
         }
+        if (state.stripOnUpload) {
+            // Footnote: HEIC/HEIF/AVIF cannot store metadata edits, so the uploaded copy is
+            // transcoded to JPEG; the on-device file is left untouched.
+            Spacer(Modifier.height(10.dp))
+            Text(
+                stringResource(R.string.settings_strip_format_note),
+                color = colors.fgMute,
+                fontSize = 12.5.sp,
+                modifier = Modifier.padding(horizontal = 4.dp),
+            )
+        }
+    }
+}
+
+// ── Upload processing: Quality and size sub-page ──────────────────────────────
+// Re-encode the uploaded copy smaller, with an optional mirror to the original.
+
+@Composable
+fun UploadQualitySettingsScreen(
+    onBack: () -> Unit,
+    viewModel: SettingsViewModel = hiltViewModel(),
+) {
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    SettingsSubPageScaffold(title = stringResource(R.string.settings_section_quality_size), onBack = onBack) {
+        // The on-device mirror is a standalone toggle in its own card at the top: shrinking the copy
+        // kept on this device applies to whichever of photos/videos is being compressed, and unlike
+        // the type toggles below it reveals no tier list. The gap to the next card is the separator.
+        SettingsCard {
+            ToggleRow(
+                label = stringResource(R.string.settings_mirror_compress_local),
+                description = stringResource(R.string.settings_mirror_compress_local_desc),
+                checked = state.mirrorCompressToLocal,
+                onCheckedChange = { enabled ->
+                    viewModel.setMirrorCompressToLocal(enabled)
+                    // Writing the on-device original in place needs all-files access on devices
+                    // that refuse a silent MediaStore write even with MANAGE_MEDIA. Send the user
+                    // to that grant screen when they opt in without it; until it's granted the
+                    // mirror falls back to a temp-copy strip and the original stays untouched.
+                    if (enabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
+                        !android.os.Environment.isExternalStorageManager()
+                    ) {
+                        runCatching {
+                            context.startActivity(
+                                Intent(
+                                    android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                                    android.net.Uri.parse("package:${context.packageName}"),
+                                )
+                            )
+                        }.onFailure {
+                            runCatching {
+                                context.startActivity(
+                                    Intent(android.provider.Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
+                                )
+                            }
+                        }
+                    }
+                },
+            )
+        }
+        // The type toggles and the shared quality tier: each toggle reveals the tier list below when
+        // either photos or videos are set to compress.
+        SettingsCard {
+            ToggleRow(
+                label = stringResource(R.string.settings_compress_photos),
+                description = stringResource(R.string.settings_compress_upload_desc),
+                checked = state.compressOnUpload,
+                onCheckedChange = viewModel::setCompressOnUpload,
+            )
+            RowDivider()
+            ToggleRow(
+                label = stringResource(R.string.settings_compress_videos),
+                description = stringResource(R.string.settings_compress_videos_desc),
+                checked = state.compressVideosOnUpload,
+                onCheckedChange = viewModel::setCompressVideosOnUpload,
+            )
+            // The quality tier governs both paths, so it shows whenever either toggle is on.
+            if (state.compressOnUpload || state.compressVideosOnUpload) {
+                UploadCompressionTier.entries.forEach { tier ->
+                    RowDivider()
+                    CompressTierRow(
+                        label = stringResource(tier.labelRes),
+                        description = stringResource(tier.descRes),
+                        selected = state.compressTier == tier,
+                        onClick = { viewModel.setCompressTier(tier) },
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** Single-choice row for the upload-compression tier picker. Mirrors the landing-tab radio row
+ *  style (a filled check on the selected entry) but carries a one-line tradeoff description under
+ *  the label, and sits indented under the "Compress uploads" toggle. */
+@Composable
+private fun CompressTierRow(
+    label: String,
+    description: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    val colors = AppColors.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(start = 32.dp, end = 16.dp, top = 13.dp, bottom = 13.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(label, color = colors.fgPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+            Text(description, color = colors.fgMute, fontSize = 12.5.sp)
+        }
+        Spacer(Modifier.width(12.dp))
+        if (selected) {
+            Box(
+                modifier = Modifier.size(20.dp).background(colors.accent, CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Default.Check,
+                    null,
+                    tint = Color.White,
+                    modifier = Modifier.size(14.dp),
+                )
+            }
         }
     }
 }
@@ -958,10 +1290,25 @@ fun PrivacySettingsScreen(
             InfoRow(
                 label = stringResource(R.string.settings_telemetry),
                 description = stringResource(R.string.settings_telemetry_desc),
-                value = stringResource(R.string.sync_none),
+                value = when (state.telemetryEnabled) {
+                    true -> stringResource(R.string.settings_telemetry_on)
+                    false -> stringResource(R.string.settings_telemetry_off)
+                    // Unresolved stays neutral: the gate defaults to enabled when the
+                    // account setting is unreadable, so "Off" would be a false assurance.
+                    null -> stringResource(R.string.settings_telemetry_checking)
+                },
             )
         }
         }
+        // Footnote: the map draws its background from a public tile endpoint, which is the
+        // one place the app reaches a server outside Proton.
+        Spacer(Modifier.height(10.dp))
+        Text(
+            stringResource(R.string.settings_privacy_map_tiles_note),
+            color = AppColors.current.fgMute,
+            fontSize = 12.5.sp,
+            modifier = Modifier.padding(horizontal = 4.dp),
+        )
     }
 }
 
@@ -996,7 +1343,7 @@ fun SecuritySettingsScreen(
         }
 
         Spacer(Modifier.height(20.dp))
-        // Hidden vault — a lock/biometric-gated photo collection, so it belongs with the app lock.
+        // Hidden vault, a lock/biometric-gated photo collection, so it belongs with the app lock.
         SettingsCard {
             NavRow(
                 label = stringResource(R.string.settings_hidden_photos),
@@ -1031,9 +1378,9 @@ internal fun SyncProgressPanel(
     var expanded by remember { mutableStateOf(initiallyExpanded) }
 
     Column(modifier = Modifier.padding(horizontal = 16.dp).padding(bottom = 14.dp)) {
-        // Linear progress bar — Material 3 default; we override only the track/indicator
-        // colors so it matches the app accent. We render our own rounded-rect background to
-        // sidestep the M3 1.3 stop-indicator (which adds a small dot at the end and looked
+        // Linear progress bar, Material 3 default, with only the track/indicator colors
+        // overridden so it matches the app accent. A hand-drawn rounded-rect background
+        // sidesteps the M3 1.3 stop-indicator (which adds a small dot at the end and looked
         // wrong on a chip-sized 4dp bar).
         Box(
             modifier = Modifier
@@ -1086,8 +1433,8 @@ internal fun SyncProgressPanel(
             Spacer(Modifier.height(10.dp))
             // Show the most recent activity at the top (mirrors a download manager).
             // Pills are self-contained capsules now (PillBg + PillBorder + 999.dp radius),
-            // so the panel doesn't need its own container background — only an 8.dp gap
-            // between rows. We still cap the scroll height so the list can't push the
+            // so the panel doesn't need its own container background, only an 8.dp gap
+            // between rows. The scroll height is still capped so the list can't push the
             // rest of Settings off-screen during a 30-file burst.
             val ordered = remember(events) { events.asReversed() }
             LazyColumn(
@@ -1108,8 +1455,8 @@ internal fun SyncProgressPanel(
 private fun UploadEventRow(evt: UploadEvent) {
     val colors = AppColors.current
     // Each row is a standalone pill: PillBg + 0.5dp PillBorder + 999.dp corner radius,
-    // matching the gallery filter pills and the editor adjustment pills. Read-only —
-    // no clickable modifier — so the row only communicates status, never invites taps.
+    // matching the gallery filter pills and the editor adjustment pills. Read-only -
+    // no clickable modifier, so the row only communicates status, never invites taps.
     val pillShape = RoundedCornerShape(999.dp)
     Row(
         modifier = Modifier
@@ -1121,7 +1468,7 @@ private fun UploadEventRow(evt: UploadEvent) {
     ) {
         // Status glyph at 18dp. Uploading uses a circular progress so users see live
         // activity; the rest are static Material icons tinted from the theme. "Queued"
-        // falls back to a clock — the upload pipeline rarely emits it, but matching the
+        // falls back to a clock, the upload pipeline rarely emits it, but matching the
         // spec keeps the design consistent if it ever does.
         when (evt.status) {
             UploadEventStatus.Uploading -> Box(
@@ -1135,7 +1482,7 @@ private fun UploadEventRow(evt: UploadEvent) {
                 )
             }
             UploadEventStatus.Encrypting -> Box(
-                // Same spinner shape as Uploading but rendered in the dimmer fgDim tint —
+                // Same spinner shape as Uploading but rendered in the dimmer fgDim tint -
                 // signals "pre-network work in progress" without competing visually with the
                 // active CDN-PUT spinner. Keeps the row height stable across phase swaps.
                 modifier = Modifier.size(18.dp),
@@ -1183,9 +1530,30 @@ private fun UploadEventRow(evt: UploadEvent) {
                     fontSize = 10.5.sp,
                 )
             }
+            // Live per-file progress bar while this photo is encrypting or uploading.
+            if ((evt.status == UploadEventStatus.Uploading || evt.status == UploadEventStatus.Encrypting) &&
+                evt.sizeBytes > 0L
+            ) {
+                val frac = (evt.doneBytes.toFloat() / evt.sizeBytes).coerceIn(0f, 1f)
+                Spacer(Modifier.height(5.dp))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(3.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(colors.line2),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(frac)
+                            .height(3.dp)
+                            .background(colors.accent, RoundedCornerShape(2.dp)),
+                    )
+                }
+            }
         }
         Spacer(Modifier.width(10.dp))
-        // Trailing status label — the label colour mirrors the icon so the eye reads
+        // Trailing status label, the label colour mirrors the icon so the eye reads
         // icon + label as a single status token.
         val (label, labelColor) = when (evt.status) {
             UploadEventStatus.Uploading -> stringResource(R.string.upload_status_uploading) to colors.accent
@@ -1556,7 +1924,7 @@ internal fun ProtonStorageRow(state: SettingsUiState) {
  * DEBUG-only card to drive the [eu.akoos.photos.data.repository.drive.LargeLibrarySimulator].
  * Set N, Populate to generate N synthetic photos that exercise the real decrypt + cache treadmill
  * with no CDN traffic, or Clear to remove them. Only ever rendered behind a BuildConfig.DEBUG guard.
- * Strings are inline English — this surface never ships, so it isn't localized.
+ * Strings are inline English, this surface never ships, so it isn't localized.
  */
 @Composable
 private fun LargeLibrarySimCard(
@@ -1566,7 +1934,7 @@ private fun LargeLibrarySimCard(
     val state by viewModel.state.collectAsStateWithLifecycle()
     var text by remember(state.count) { mutableStateOf(if (state.count > 0) state.count.toString() else "") }
 
-    SectionLabel("Developer — large library simulator")
+    SectionLabel("Developer, large library simulator")
     Spacer(Modifier.height(8.dp))
     SettingsCard {
         Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {

@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -27,16 +27,13 @@ import android.os.Environment
 /**
  * Single source of truth for the on-device folder structure Proton Photos owns.
  *
- *   Pictures/                  — default destination for image downloads + copies
- *   Pictures/Recovered/        — files restored from the Hidden vault
- *   Pictures/<AlbumName>/      — user-created manual local albums (images)
- *   Movies/                    — default destination for video downloads + copies
- *   Movies/<AlbumName>/        — manual local albums (videos)
+ *   DCIM/Camera/               loose image + video downloads, copies, edits and screenshots
+ *   DCIM/<AlbumName>/          downloads from a cloud album (e.g. DCIM/Budapest)
  *
- * Previously each path was nested under `Proton Photos/`. That created a redundant
- * gallery folder (every device gallery surfaces "Proton Photos" as a separate album,
- * duplicating "Pictures"), so the layout was flattened to match DownloadPhotosUseCase.
- * Files written before this change keep living at `Pictures/Proton Photos/…` —
+ * Downloads land in DCIM so they sit with the camera roll and a device that backs up DCIM treats
+ * them as on-device photos, and so a per-album download creates a gallery folder like the OEM
+ * gallery does. Earlier builds wrote to Pictures/ and Pictures/&lt;AlbumName&gt;/ (and before that
+ * under a redundant `Proton Photos/` root); files written then keep living where they are, since
  * MediaStore observers still see them.
  *
  * Every write into MediaStore should go through one of these helpers so future relocations
@@ -47,13 +44,19 @@ object ProtonPhotosStorage {
      *  use it as a path segment any more — see DEFAULT_PICTURES below. */
     const val ROOT_NAME = "Proton Photos"
 
-    /** Default download/copy folder for images. Flat: just "Pictures". */
+    /** Default destination for loose image downloads, copies, edits and screenshots: DCIM/Camera.
+     *  Landing in the camera folder keeps the file with the camera roll and lets a device that backs
+     *  up DCIM pick it up as an on-device photo. */
     val DEFAULT_PICTURES: String
-        get() = Environment.DIRECTORY_PICTURES
+        get() = "${Environment.DIRECTORY_DCIM}/Camera"
 
-    /** Default download/copy folder for videos. Flat: just "Movies". */
+    /** Videos share the camera folder, DCIM/Camera. */
     val DEFAULT_MOVIES: String
-        get() = Environment.DIRECTORY_MOVIES
+        get() = "${Environment.DIRECTORY_DCIM}/Camera"
+
+    /** An album downloads into DCIM/&lt;AlbumName&gt;, mirroring how gallery apps create a per-folder
+     *  album on the device (e.g. a "Budapest" album lands in DCIM/Budapest). */
+    fun albumFolder(name: String): String = "${Environment.DIRECTORY_DCIM}/${sanitize(name)}"
 
     /** Strips path separators and trims so an album name can be used as a folder segment. */
     fun sanitize(name: String): String = name

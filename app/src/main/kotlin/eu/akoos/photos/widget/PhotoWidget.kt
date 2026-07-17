@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -158,6 +158,13 @@ class PhotoWidget : GlanceAppWidget() {
             val decoded = runCatching { BitmapFactory.decodeFile(path) }.getOrNull() ?: return null
             bitmapCache.put(key, decoded)
             return decoded
+        }
+
+        /** Drops the decoded photos on sign-out; the process outlives it, so eviction is not automatic. */
+        @JvmStatic
+        @Synchronized
+        fun clearBitmapCache() {
+            bitmapCache.evictAll()
         }
     }
 }

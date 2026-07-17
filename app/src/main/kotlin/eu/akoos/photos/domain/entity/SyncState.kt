@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -32,4 +32,16 @@ data class SyncState(
     val lastSyncSuccessMs: Long?,
     val backedUpAtMs: Long?,
     val sizeBytes: Long,
+    /**
+     * Read-only view of the row's explicit upload intent, surfaced so the upload processor can
+     * select on "LOCAL_ONLY AND queued" instead of every LOCAL_ONLY row. Populated by [toDomain]
+     * on read; the queue columns are still owned by the SyncStateDao queue methods, NOT by the
+     * upsert round-trip. The DAO's partial upsert (updateDomainColumns) deliberately OMITS these,
+     * so writing a SyncState back never disturbs an existing row's queue state; a brand-new row
+     * inserts with the default false/null and is then stamped by markQueued.
+     *
+     * queued = the row is meant to be backed up; queueSource = why (a [QueueSource] constant).
+     */
+    val queued: Boolean = false,
+    val queueSource: String? = null,
 )

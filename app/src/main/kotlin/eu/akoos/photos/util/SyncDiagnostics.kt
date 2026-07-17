@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -23,6 +23,34 @@
 package eu.akoos.photos.util
 
 import java.util.Locale
+
+/**
+ * A stable, non-reversible short reference for the photo at [uri], so the per-file diagnostics lines
+ * of one upload correlate without revealing the file.
+ *
+ * Eight hex digits, not six. A String hash of two consecutive MediaStore uris differs only in its
+ * last digit, so a six-digit prefix collides across the photos of a single batch and makes three
+ * distinct uploads read as one photo retried three times.
+ */
+fun uploadLogRef(uri: String): String = uri.hashCode().toUInt().toString(16).padStart(8, '0')
+
+/**
+ * A one-line, privacy-safe description of why an upload failed, for the diagnostics buffer a tester
+ * pastes into a public issue.
+ *
+ * The exception TYPES are safe to print: they name code, not the account or the photo. The message is
+ * not, so it goes through [sanitizeErrorMessage]. When the throwable wraps a cause, the root is named
+ * too, since the outer type is often a generic wrapper that says nothing. The cause walk is bounded so
+ * a self-referencing chain cannot spin.
+ */
+fun describeUploadFailure(error: Throwable): String {
+    val chain = generateSequence(error) { it.cause?.takeIf { cause -> cause !== it } }.take(8).toList()
+    val root = chain.last()
+    val types =
+        if (root === error) error.javaClass.simpleName
+        else "${error.javaClass.simpleName} caused by ${root.javaClass.simpleName}"
+    return "$types: ${sanitizeErrorMessage(root.message ?: error.message)}"
+}
 
 /**
  * Privacy-safe, in-memory diagnostics ring buffer for the cloud-sync pipeline.

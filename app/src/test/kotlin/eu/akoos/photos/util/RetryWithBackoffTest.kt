@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -227,21 +227,40 @@ class RetryWithBackoffTest {
     }
 
     @Test
-    fun `server Retry-After overrides the computed backoff and is clamped to the cap`() = runTest {
-        // A 429 carrying Retry-After=5000ms with a cap of 2000ms must wait the CAP (clamped), not
-        // the computed exponential, for each of the 2 waits in a 3-attempt run.
+    fun `server Retry-After overrides the computed backoff and is clamped to its own cap`() = runTest {
+        // A 429 carrying Retry-After=5000ms with a server cap of 2000ms must wait the SERVER CAP
+        // (clamped to maxServerRetryAfterMs, independent of the generic maxBackoffMs), not the
+        // computed exponential, for each of the 2 waits in a 3-attempt run.
         val retryAfter = ApiException(
             ApiResult.Error.Http(429, "rate limited", retryAfter = 5_000.milliseconds),
         )
         val cap = 2_000L
         val start = testScheduler.currentTime
         try {
-            retryWithBackoff(maxAttempts = 3, baseMs = 100L, maxBackoffMs = cap) { throw retryAfter }
+            retryWithBackoff(maxAttempts = 3, baseMs = 100L, maxServerRetryAfterMs = cap) { throw retryAfter }
         } catch (_: Throwable) {
         }
         val elapsed = testScheduler.currentTime - start
-        // 2 waits, each clamped to the 2000ms cap, with no jitter on the server-wait path → exactly 4000.
+        // 2 waits, each clamped to the 2000ms server cap, with no jitter on the server-wait path → exactly 4000.
         assertEquals(2 * cap, elapsed)
+    }
+
+    @Test
+    fun `server Retry-After is honoured up to the 60s default when under the cap`() = runTest {
+        // A 429 carrying Retry-After=20000ms is honoured in full under the default 60s server cap,
+        // even though it exceeds the generic 8s maxBackoffMs, so the app waits the full server
+        // window instead of resuming early and re-triggering the limit.
+        val retryAfter = ApiException(
+            ApiResult.Error.Http(429, "rate limited", retryAfter = 20_000.milliseconds),
+        )
+        val start = testScheduler.currentTime
+        try {
+            retryWithBackoff(maxAttempts = 2, baseMs = 100L) { throw retryAfter }
+        } catch (_: Throwable) {
+        }
+        val elapsed = testScheduler.currentTime - start
+        // 1 wait, honoured in full (20000ms) because it is below the 60s default server cap.
+        assertEquals(20_000L, elapsed)
     }
 
     // ─── Response.retryAfterMs ────────────────────────────────────────────────

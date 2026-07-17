@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -63,8 +63,8 @@ import javax.inject.Inject
  * dialog. The upload worker on Android 11+ cannot directly delete foreign owned
  * camera roll items (`contentResolver.delete()` returns 0 rows for items it does
  * not own); it queues the URIs into [SettingsKeys.PENDING_DELETE_URIS] instead, and
- * this handler runs them through [MediaStore.createDeleteRequest] inside an
- * Activity context where the OS will surface the system delete dialog the user
+ * this handler runs them through [MediaStore.createTrashRequest] inside an
+ * Activity context where the OS will surface the system trash dialog the user
  * needs to accept.
  *
  * Mounted once at the top of the NavGraph so the handler is alive for the entire
@@ -82,10 +82,10 @@ class PendingDeleteViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), emptySet())
 
     /**
-     * The user accepted the OS consent dialog for [uris]. The files are already gone
-     * from MediaStore at this point (the system handled the actual delete), so all we
-     * do here is collapse the SyncState rows to CLOUD_ONLY and pop the URIs from the
-     * pending queue so the handler doesn't re-prompt.
+     * The user accepted the OS consent dialog for [uris]. The system has already moved the
+     * files to the trash at this point, which takes them out of MediaStore's normal
+     * queries, so all we do here is collapse the SyncState rows to CLOUD_ONLY and pop the
+     * URIs from the pending queue so the handler doesn't re-prompt.
      */
     fun onConsentGranted(uris: Set<String>) {
         viewModelScope.launch {
@@ -155,7 +155,7 @@ fun PendingDeleteHandler(
         lastPromptedSize = snapshot.size
         scope.launch {
             runCatching {
-                val pi = MediaStore.createDeleteRequest(context.contentResolver, uris)
+                val pi = MediaStore.createTrashRequest(context.contentResolver, uris, true)
                 launcher.launch(IntentSenderRequest.Builder(pi.intentSender).build())
             }.onFailure { inFlight = false }
         }

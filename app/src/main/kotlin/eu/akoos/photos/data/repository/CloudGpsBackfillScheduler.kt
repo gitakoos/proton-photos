@@ -3,7 +3,7 @@
  * Copyright (C) 2026 Akoos <https://akoos.eu>
  *
  * Source:  https://github.com/gitakoos/proton-photos
- * Website: https://photos.akoos.eu
+ * Website: https://www.photosforproton.eu
  *
  * This file is part of Photos for Proton.
  *
@@ -26,19 +26,17 @@ import android.util.Log
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import me.proton.core.domain.entity.UserId
-import eu.akoos.photos.crypto.CryptoServiceClient
-import eu.akoos.photos.data.crypto.parsePhotoLocation
 import eu.akoos.photos.data.db.dao.PhotoListingDao
 import eu.akoos.photos.data.db.dao.PhotoLocationDao
 import eu.akoos.photos.data.db.entity.PhotoListingEntity
 import eu.akoos.photos.data.db.entity.PhotoLocationEntity
-import eu.akoos.photos.data.repository.drive.AlbumCryptoChain
+import eu.akoos.photos.data.repository.drive.AlbumService
 import eu.akoos.photos.data.repository.drive.LinkDetailHelpers
-import eu.akoos.photos.data.repository.drive.PhotosShareService
 import eu.akoos.photos.util.isTransientApiError
 import eu.akoos.photos.util.retryWithBackoff
 import java.util.concurrent.ConcurrentHashMap
@@ -50,24 +48,21 @@ private const val TAG = "CloudGpsBackfill"
 
 /**
  * Fills the persisted [PhotoLocationEntity] table with the GPS fix of every CLOUD photo, so the
- * map plots synced photos the same way it plots on-device ones. Piece 2 stored each photo's
- * encrypted XAttr in `photo_listing.encXAttr` at listing time; this walks every un-checked row
- * ([PhotoListingDao.getUngeocoded]), decrypts the XAttr off the read path, recovers the Location
- * block via [parsePhotoLocation], and upserts the coordinates keyed by the photo's `linkId` (a
- * CloudOnly map item resolves by that id).
+ * map plots synced photos the same way it plots on-device ones. Each photo's encrypted XAttr is
+ * cached in `photo_listing.encXAttr` at listing time; this walks every un-checked row
+ * ([PhotoListingDao.getUngeocoded]), decrypts the XAttr off the read path via [PhotoLocationResolver],
+ * and upserts the recovered coordinates keyed by the photo's `linkId` (a CloudOnly map item resolves
+ * by that id).
  *
  * The link-metadata endpoints omit the revision XAttr, so for any row without a cached one the
  * armored XAttr is fetched per photo from the revision endpoint via
- * [LinkDetailHelpers.fetchRevisionXAttr] — the same source the full-res download reads — while
+ * [LinkDetailHelpers.fetchRevisionXAttrOrThrow] (the same source the full-res download reads), while
  * newly-listed rows that already cached an XAttr skip the fetch.
  *
- * Resolving the parent key mirrors [eu.akoos.photos.data.repository.drive.ThumbnailDecryptScheduler]
- * — the photo's nodeKey was encrypted to its parent link's key (the photos root, or an album).
- * That scheduler's `getParentKeyBytes` is private and seeded with a shared-album context the
- * thumbnail path owns, so rather than refactor a libgojni-sensitive file this replicates the two
- * owner-side branches against the same injected services, with a local parent-key cache so
- * successive photos in one parent skip the second-tier decrypt. A photo whose parent key can't be
- * resolved here (e.g. a shared-with-me album) is simply skipped, like any other per-row failure.
+ * Decrypting a resolved XAttr into a [PhotoLocationEntity] is delegated to [PhotoLocationResolver],
+ * shared with the download path so a synced photo's location survives an export. A photo whose parent
+ * key can't be resolved there (e.g. a shared-with-me album) yields null and is skipped, like any other
+ * per-row failure.
  *
  * The walk is resumable and idempotent: a row is flagged via [PhotoListingDao.markGpsChecked]
  * only once its revision was actually READ (whether or not it carried GPS), so a transient fetch
@@ -81,12 +76,11 @@ private const val TAG = "CloudGpsBackfill"
  */
 @Singleton
 class CloudGpsBackfillScheduler @Inject constructor(
-    private val cryptoServiceClient: CryptoServiceClient,
     private val photoListingDao: PhotoListingDao,
     private val photoLocationDao: PhotoLocationDao,
-    private val shareService: PhotosShareService,
     private val linkDetailHelpers: LinkDetailHelpers,
-    private val albumCryptoChain: AlbumCryptoChain,
+    private val photoLocationResolver: PhotoLocationResolver,
+    private val albumService: AlbumService,
 ) {
     /** Concurrency bound on in-flight XAttr decrypts — a handful keeps JNI / GC pressure low. */
     private val semaphore = Semaphore(WORKER_COUNT)
@@ -101,9 +95,6 @@ class CloudGpsBackfillScheduler @Inject constructor(
     /** One walk at a time — a second trigger while one is running is a no-op, not a double pass. */
     private val backfilling = AtomicBoolean(false)
 
-    /** parentLinkId → decrypted parent key bytes, so photos sharing a parent skip the re-decrypt. */
-    private val parentKeyCache = ConcurrentHashMap<String, ByteArray>()
-
     /**
      * Decrypt + persist the GPS fix for every cloud photo not yet checked for [userId]. Walks the
      * un-geocoded XAttr rows in bounded pages until none remain, fetches paced by [fetchSemaphore]
@@ -115,6 +106,9 @@ class CloudGpsBackfillScheduler @Inject constructor(
     suspend fun backfillAll(userId: UserId) {
         if (!backfilling.compareAndSet(false, true)) return
         try {
+            // Photos in a client-side hidden album are kept out of the proactive geocode; snapshot the
+            // member set once so the walk stays consistent across its pages.
+            val hiddenLinkIds = albumService.observeHiddenAlbumMemberLinkIds().first()
             while (true) {
                 val batch = runCatching { photoListingDao.getUngeocoded(userId.id, PAGE) }
                     .getOrElse { e ->
@@ -123,26 +117,33 @@ class CloudGpsBackfillScheduler @Inject constructor(
                     }
                 if (batch.isEmpty()) break
 
-                val resolved = resolveXAttrs(userId, batch)
+                // Split hidden-album members off the geocode path. They are still flagged (below) so a
+                // page of them advances the marking-based walk instead of stalling it.
+                val (hidden, geocodable) = if (hiddenLinkIds.isEmpty()) emptyList<PhotoListingEntity>() to batch
+                    else batch.partition { it.linkId in hiddenLinkIds }
+
+                val resolved = resolveXAttrs(userId, geocodable)
 
                 // A page whose every fetch failed (offline / rate-limited / endpoint down) resolves
                 // no NEW revision: nothing to mark, so marking-as-checked can't advance the walk.
                 // Stop this pass rather than spin — the rows stay gpsChecked=0 and a later run retries
                 // from the same spot. (Cached rows count as resolved, so a page that's all cache still
-                // makes progress.)
-                if (resolved.ids.isEmpty()) {
+                // makes progress.) A page made up only of hidden rows still advances via the flag below,
+                // so pause only when the geocodable rows resolved nothing.
+                if (resolved.ids.isEmpty() && hidden.isEmpty()) {
                     Log.d(TAG, "page resolved 0 revisions — pausing walk, will retry on a later run")
                     break
                 }
 
                 val located = ConcurrentHashMap.newKeySet<PhotoLocationEntity>()
                 coroutineScope {
-                    batch.forEach { row ->
+                    geocodable.forEach { row ->
                         if (row.linkId !in resolved.ids) return@forEach
                         launch {
                             try {
                                 semaphore.withPermit {
-                                    locate(userId, row, resolved.byLinkId[row.linkId])?.let { located.add(it) }
+                                    photoLocationResolver.locate(userId, row, resolved.byLinkId[row.linkId])
+                                        ?.let { located.add(it) }
                                 }
                             } catch (e: CancellationException) {
                                 throw e
@@ -161,11 +162,12 @@ class CloudGpsBackfillScheduler @Inject constructor(
                             Log.w(TAG, "upsert ${located.size} location(s) failed: ${it.message}")
                         }
                 }
-                // Flag only rows whose revision was actually read (cached or freshly fetched),
-                // including no-GPS ones — those advance the walk and never need reprocessing. Rows
-                // whose fetch FAILED are absent from resolved.ids, so they keep gpsChecked=0 and a
-                // later run retries them.
-                runCatching { photoListingDao.markGpsChecked(resolved.ids.toList()) }
+                // Flag rows whose revision was actually read (cached or freshly fetched), including
+                // no-GPS ones, plus the hidden rows skipped above: both advance the walk and never need
+                // reprocessing. Rows whose fetch FAILED are absent from resolved.ids, so they keep
+                // gpsChecked=0 and a later run retries them.
+                val toMark = resolved.ids.toList() + hidden.map { it.linkId }
+                runCatching { photoListingDao.markGpsChecked(toMark) }
                     .onFailure {
                         if (it is CancellationException) throw it
                         Log.w(TAG, "markGpsChecked failed: ${it.message}")
@@ -252,60 +254,6 @@ class CloudGpsBackfillScheduler @Inject constructor(
         }
         Log.d(TAG, "resolveXAttrs via revision: missing=${missing.size} resolved=${resolvedIds.size} withXAttr=${map.size}")
         return ResolvedXAttrs(map, resolvedIds)
-    }
-
-    /** Decrypt one row's XAttr and return its location, or null when it carries no GPS / can't be
-     *  resolved. [armoredXAttr] is the row's cached XAttr or, for pre-encXAttr rows, the value
-     *  fetched in [resolveXAttrs]. The parent key resolution mirrors the thumbnail scheduler's
-     *  owner-side branches. */
-    private suspend fun locate(
-        userId: UserId,
-        row: PhotoListingEntity,
-        armoredXAttr: String?,
-    ): PhotoLocationEntity? {
-        val encXAttr = armoredXAttr ?: return null
-        val encNodeKey = row.encNodeKey ?: return null
-        val encNodePass = row.encNodePassphrase ?: return null
-        val parentLinkId = row.parentLinkId ?: return null
-        val parentKey = getParentKeyBytes(userId, parentLinkId, row.volumeId) ?: return null
-        val nodeKeyBytes = cryptoServiceClient.decryptNodeKey(encNodeKey, encNodePass, parentKey)
-        val json = cryptoServiceClient.decryptXAttr(encXAttr, nodeKeyBytes) ?: return null
-        val (lat, lon) = parsePhotoLocation(json) ?: return null
-        return PhotoLocationEntity(id = row.linkId, userId = userId.id, latitude = lat, longitude = lon)
-    }
-
-    /**
-     * Decrypted node-key bytes for [parentLinkId], replicating the owner-side resolution in
-     * [eu.akoos.photos.data.repository.drive.ThumbnailDecryptScheduler.getParentKeyBytes]:
-     *   • Photos root link → [PhotosShareService.getRootLinkKeyBytes] (itself cached).
-     *   • Owner-side album → fetch the album's BatchLinkDto, decrypt its nodeKey with the root key,
-     *     and memoise in [parentKeyCache].
-     * Returns null when the album link can't be fetched / decrypted (e.g. a shared-with-me album,
-     * which the thumbnail path resolves through a context map this backfill is not seeded with).
-     */
-    private suspend fun getParentKeyBytes(userId: UserId, parentLinkId: String, volumeId: String): ByteArray? {
-        if (parentLinkId == shareService.photosRootLinkId()) {
-            return shareService.getRootLinkKeyBytes(userId)
-        }
-        parentKeyCache[parentLinkId]?.let { return it }
-
-        val rootKey = shareService.getRootLinkKeyBytes(userId) ?: return null
-        val albumDetail = linkDetailHelpers.batchFetchLinkDetails(userId, volumeId, listOf(parentLinkId))[parentLinkId]
-            ?: run {
-                Log.w(TAG, "getParentKeyBytes: album link $parentLinkId not in batch response")
-                return null
-            }
-        val albumLink = albumDetail.link
-        val albumNodeKey = albumLink.nodeKey ?: return null
-        val albumNodePass = albumLink.nodePassphrase ?: return null
-        val bytes = albumCryptoChain.decryptAlbumKey(
-            nodeKeyArmored = albumNodeKey,
-            nodePassphraseArmored = albumNodePass,
-            parentKeyBytes = rootKey,
-            contextHint = "cloud-gps-backfill albumLinkId=$parentLinkId",
-        ) ?: return null
-        parentKeyCache[parentLinkId] = bytes
-        return bytes
     }
 
     private companion object {
