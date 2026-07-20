@@ -28,15 +28,10 @@ import eu.akoos.photos.data.api.dto.CommitRevisionRequest
 import eu.akoos.photos.data.api.dto.CommitRevisionV2Request
 import eu.akoos.photos.data.api.dto.CreateFileRequest
 import eu.akoos.photos.data.api.dto.CreateFileResponse
-import eu.akoos.photos.data.api.dto.CreateRevisionResponse
 import eu.akoos.photos.data.api.dto.DeleteLinksRequest
-import eu.akoos.photos.data.api.dto.LinkDetailsResponse
 import eu.akoos.photos.data.api.dto.PhotoLinksResponse
-import eu.akoos.photos.data.api.dto.ShareDetailsResponse
-import eu.akoos.photos.data.api.dto.SharesResponse
 import eu.akoos.photos.data.api.dto.ThumbnailBatchRequest
 import eu.akoos.photos.data.api.dto.ThumbnailBatchResponse
-import eu.akoos.photos.data.api.dto.ThumbnailResponse
 import eu.akoos.photos.data.api.dto.UploadBlockRequest
 import eu.akoos.photos.data.api.dto.UploadBlockResponse
 import eu.akoos.photos.data.api.dto.AlbumChildrenResponse
@@ -46,8 +41,6 @@ import eu.akoos.photos.data.api.dto.BatchLinksResponse
 import eu.akoos.photos.data.api.dto.AddAlbumMultipleRequest
 import eu.akoos.photos.data.api.dto.CreateAlbumRequest
 import eu.akoos.photos.data.api.dto.CreateAlbumResponse
-import eu.akoos.photos.data.api.dto.CreatePhotoRequest
-import eu.akoos.photos.data.api.dto.CreatePhotoResponse
 import eu.akoos.photos.data.api.dto.CreatePhotosVolumeRequest
 import eu.akoos.photos.data.api.dto.CreatePhotosVolumeResponse
 import eu.akoos.photos.data.api.dto.VolumeTrashResponse
@@ -88,14 +81,8 @@ interface DriveApiService : BaseRetrofitApi {
     @POST("drive/photos/volumes")
     suspend fun createOrGetPhotosVolume(@Body body: CreatePhotosVolumeRequest): CreatePhotosVolumeResponse
 
-    @GET("drive/volumes/{volumeId}/shares")
-    suspend fun getShares(@Path("volumeId") volumeId: String): SharesResponse
-
     @GET("drive/v2/shares/photos")
     suspend fun getPhotosShare(): PhotosShareResponse
-
-    @GET("drive/v2/shares/{shareId}")
-    suspend fun getShareById(@Path("shareId") shareId: String): ShareDetailsResponse
 
     // v1 share-bootstrap: flat Share (Key/Passphrase/LinkID/VolumeID at top level). Needed for
     // newly created album/photo shares — the v2 path 404s until a share is migrated.
@@ -138,6 +125,18 @@ interface DriveApiService : BaseRetrofitApi {
         @Path("linkId") linkId: String,
         @Body request: eu.akoos.photos.data.api.dto.CopyLinkRequest,
     ): eu.akoos.photos.data.api.dto.CopyLinkResponse
+
+    /**
+     * Renames a link in place: metadata only, so no bytes move and no second link appears. The
+     * route is share-scoped and unversioned, unlike the volume-scoped photo endpoints around it,
+     * so a photo link is addressed by the photos shareId rather than by its volumeId.
+     */
+    @PUT("drive/shares/{shareId}/links/{linkId}/rename")
+    suspend fun renameLink(
+        @Path("shareId") shareId: String,
+        @Path("linkId") linkId: String,
+        @Body request: eu.akoos.photos.data.api.dto.RenameLinkRequest,
+    ): BaseResponse
 
     @POST("drive/photos/volumes/{volumeId}/albums/{albumLinkId}/add-multiple")
     suspend fun addPhotosToAlbum(
@@ -246,20 +245,6 @@ interface DriveApiService : BaseRetrofitApi {
         @Body request: ThumbnailBatchRequest,
     ): ThumbnailBatchResponse
 
-    // Legacy single-revision thumbnail endpoint (kept for possible fallback)
-    @GET("drive/v2/shares/{shareId}/files/{linkId}/revisions/{revisionId}/thumbnail")
-    suspend fun getThumbnailLegacy(
-        @Path("shareId") shareId: String,
-        @Path("linkId") linkId: String,
-        @Path("revisionId") revisionId: String,
-    ): ThumbnailResponse
-
-    @GET("drive/v2/shares/{shareId}/links/{linkId}")
-    suspend fun getLinkDetails(
-        @Path("shareId") shareId: String,
-        @Path("linkId") linkId: String,
-    ): LinkDetailsResponse
-
     // No "v2" prefix here — returns LinkDto with FileProperties.ContentKeyPacket (the v2 path doesn't).
     @GET("drive/shares/{shareId}/links/{linkId}")
     suspend fun getFullLinkDetails(
@@ -275,25 +260,37 @@ interface DriveApiService : BaseRetrofitApi {
         @Body request: BatchLinksRequest,
     ): eu.akoos.photos.data.api.dto.FetchLinksResponse
 
-    @GET("drive/v2/volumes/{volumeId}/events/latest")
+    // No "v2" prefix on either events path. The volume events feed lives at the unversioned
+    // route, same as the share-scoped one, and the v2 router answers "Invalid ID" for it. The
+    // prefix reads as though it should work because `drive/v2/volumes/{volumeId}/shares` does
+    // exist, so the mistake is easy and silent: a feed that never arms just looks like a quiet one.
+    @GET("drive/volumes/{volumeId}/events/latest")
     suspend fun getLatestEventAnchor(
         @Path("volumeId") volumeId: String,
     ): EventAnchorResponse
 
-    @GET("drive/v2/volumes/{volumeId}/events/{anchorId}")
+    @GET("drive/volumes/{volumeId}/events/{anchorId}")
     suspend fun getEvents(
         @Path("volumeId") volumeId: String,
         @Path("anchorId") anchorId: String,
     ): DriveEventsResponse
 
-    @GET("drive/v2/shares/{shareId}/files/{linkId}/revisions")
+    // Unversioned, like every other share-scoped file route. A v2 spelling answers "Path not
+    // found" for a share that has not been migrated.
+    @GET("drive/shares/{shareId}/files/{linkId}/revisions")
     suspend fun listRevisions(
         @Path("shareId") shareId: String,
         @Path("linkId") linkId: String,
     ): RevisionListResponse
 
-    @GET("drive/v2/shares/{shareId}/files/{linkId}/revisions/{revisionId}")
-    suspend fun getRevision(
+    // v1 revision fetch, the path the official client uses for every share-scoped read. A
+    // `drive/v2/shares/...` spelling answers "Path not found" for a share that has not been
+    // migrated, which is what an album share accepted from another user is, so a shared album's
+    // photos would resolve no revision and neither their length nor their full-resolution bytes
+    // could be read. Same split the share bootstrap above already documents. This is the only
+    // share-scoped revision fetch: the owner path falls back here too when the volume route fails.
+    @GET("drive/shares/{shareId}/files/{linkId}/revisions/{revisionId}")
+    suspend fun getRevisionViaShare(
         @Path("shareId") shareId: String,
         @Path("linkId") linkId: String,
         @Path("revisionId") revisionId: String,
@@ -306,39 +303,13 @@ interface DriveApiService : BaseRetrofitApi {
         @Path("revisionId") revisionId: String,
     ): RevisionResponse
 
-    @GET("drive/v2/shares/{shareId}/files/{linkId}/revisions/{revisionId}/blocks/{blockIndex}")
-    suspend fun downloadBlock(
-        @Path("shareId") shareId: String,
-        @Path("linkId") linkId: String,
-        @Path("revisionId") revisionId: String,
-        @Path("blockIndex") blockIndex: Int,
-    ): okhttp3.ResponseBody
-
-    @POST("drive/v2/shares/{shareId}/files")
-    suspend fun createFile(
-        @Path("shareId") shareId: String,
-        @Body request: CreateFileRequest,
-    ): CreateFileResponse
-
-    // Primary photo-creation path (stream-enabled accounts); falls back to createFileByVolume.
-    @POST("drive/photos/volumes/{volumeId}/photos")
-    suspend fun createPhoto(
-        @Path("volumeId") volumeId: String,
-        @Body request: CreatePhotoRequest,
-    ): CreatePhotoResponse
-
-    // Fallback for createPhoto: standard volume-based file creation.
+    // The file-creation route for uploads: every photo link is created here. The photos-stream
+    // route (drive/photos/volumes/{id}/photos) is not a real Drive route and answers 404.
     @POST("drive/v2/volumes/{volumeId}/files")
     suspend fun createFileByVolume(
         @Path("volumeId") volumeId: String,
         @Body request: CreateFileRequest,
     ): CreateFileResponse
-
-    @POST("drive/v2/shares/{shareId}/files/{linkId}/revisions")
-    suspend fun createRevision(
-        @Path("shareId") shareId: String,
-        @Path("linkId") linkId: String,
-    ): CreateRevisionResponse
 
     // Returns a VerificationCode token that must be included in each block's Verifier.Token field.
     @GET("drive/shares/{shareId}/links/{linkId}/revisions/{revisionId}/verification")

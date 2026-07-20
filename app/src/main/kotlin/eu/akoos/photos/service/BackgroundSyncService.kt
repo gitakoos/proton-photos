@@ -250,7 +250,7 @@ class BackgroundSyncService : Service() {
      * upload pipeline, just kick the worker.
      *
      * Runs on the service-scoped IO dispatcher so the DataStore cold-cache read doesn't
-     * block the main thread (the prior `runBlocking` cost up to ~100ms on slow flash).
+     * block the main thread (a blocking read costs up to ~100ms on slow flash).
      * Losing one kick is harmless — the next MediaStore change or the periodic safety
      * net will pick the photos up.
      */

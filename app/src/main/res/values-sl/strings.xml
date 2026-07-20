@@ -282,6 +282,7 @@
     <string name="gallery_create_album_failed">Albuma ni bilo mogoče ustvariti: %1$s</string>
     <string name="gallery_enable_metadata_category">Najprej omogočite kategorijo metapodatkov v Nastavitve → Zasebnost</string>
     <string name="gallery_album_picker_count_drive">%1$s · Drive</string>
+    <string name="gallery_album_picker_count_shared">%1$s · Drive · V skupni rabi</string>
     <string name="album_add_photos">Dodaj fotografije</string>
     <string name="album_picker_title">Dodaj v album</string>
     <string name="album_picker_selected">Izbranih: %1$d</string>
@@ -687,6 +688,9 @@
     <string name="albums_rename_same_name">Novo ime je enako trenutnemu imenu</string>
     <string name="albums_rename_failed">Preimenovanje ni uspelo</string>
     <string name="albums_delete_failed">Albuma ni bilo mogoče izbrisati: %1$s</string>
+    <string name="albums_delete_would_lose_title">Nekatere fotografije so samo tukaj</string>
+    <string name="albums_delete_would_lose_body">Osebe, s katerimi ste delili ta album, so dodale fotografije, ki jih ni v vaši knjižnici. Z izbrisom albuma bodo izbrisane tudi te fotografije.</string>
+    <string name="albums_delete_would_lose_action">Vseeno izbriši</string>
     <string name="albums_renamed_to">Preimenovano v »%1$s«</string>
 
     <!-- Share -->
@@ -750,6 +754,7 @@
     <string name="shared_empty_with_me_body">Albumi, deljeni z vami, se prikažejo tukaj.</string>
     <string name="shared_empty_by_me_body">Delite album ali fotografijo, da jo vidite tukaj.</string>
     <string name="shared_by_email">od %1$s</string>
+    <string name="shared_by_email_full">Delil(a) %1$s</string>
     <string name="shared_photo_count">%1$d fotografij</string>
     <string name="shared_by_me_photos_section">Deljene fotografije</string>
 
@@ -1088,7 +1093,7 @@
     <string name="rename_sheet_subtitle_local">Izberite, kako uveljaviti novo ime v tej napravi.</string>
     <string name="rename_sheet_name_label">Ime datoteke</string>
     <string name="rename_sheet_option_cloud_title">Preimenuj v oblaku</string>
-    <string name="rename_sheet_option_cloud_subtitle">Naloži pod novim imenom, nato pa premakne izvirnik med Nedavno izbrisano.</string>
+    <string name="rename_sheet_option_cloud_subtitle">Preimenuje fotografijo neposredno v Drive, brez ustvarjanja kopije.</string>
     <string name="rename_sheet_option_local_title">Preimenuj izvirnik</string>
     <string name="rename_sheet_option_local_subtitle">Posodobi datoteko na mestu v vaši napravi.</string>
     <string name="rename_sheet_option_copy_title">Shrani kot kopijo</string>
@@ -1296,6 +1301,12 @@
     <string name="whats_new_hide_backed">Zeleni oblak, v telefonu in varnostno kopirano: ostane v napravi, zato jo druge aplikacije še vedno prikazujejo. Ta aplikacija jo skrije samo tukaj, za ključavnico Skritih fotografij; kopija v oblaku se nikoli ne premakne, spremeni ali izbriše.</string>
     <string name="whats_new_hide_cloud">Beli oblak, samo v oblaku: ta aplikacija jo skrije samo tukaj, za ključavnico Skritih fotografij. Kopija v oblaku ostane popolnoma enaka in se nikoli ne premakne, spremeni ali izbriše.</string>
     <string name="whats_new_hide_albums">Skriješ lahko tudi cel album v oblaku in vse je mogoče razveljaviti.</string>
+    <string name="whats_new_shared_add_title">Dodaj v album v skupni rabi</string>
+    <string name="whats_new_shared_add_body">Ko nekdo deli album s teboj in ti dovoli urejanje, lahko vanj dodaš svoje fotografije in jih spet odstraniš.</string>
+    <string name="whats_new_viewer_place_title">Ohrani tvoje mesto</string>
+    <string name="whats_new_viewer_place_body">Brisanje fotografije se premakne na naslednjo, namesto da bi zaprlo pogled fotografije. Ob vrnitvi v mrežo pristaneš pri nazadnje gledani fotografiji, ne pri prvotni.</string>
+    <string name="whats_new_album_guard_title">Preverjanje pred brisanjem albuma</string>
+    <string name="whats_new_album_guard_body">Če je album edino mesto, kjer so shranjene nekatere njegove fotografije, brisanje najprej vpraša za potrditev.</string>
     <string name="whats_new_dup_title">Poišči podvojene fotografije</string>
     <string name="whats_new_dup_body">Zazna natančne kopije in vizualno podobne posnetke, nato eno varno obdržiš in ostale odstraniš.</string>
     <string name="whats_new_offline_title">Na voljo brez povezave</string>
@@ -1314,7 +1325,7 @@
     <string name="whats_new_scrubber_body">Premikaj se po videu s predogledom filmskega traku in napreduj po eno sličico.</string>
     <string name="whats_new_album_title">Pametnejši albumi</string>
     <string name="whats_new_album_body">Poglej, v katerih albumih je izbrana fotografija že, in izbirnik filtriraj na fotografije, ki še niso v nobenem albumu.</string>
-    <string name="whats_new_more">Poleg tega prilagodljiva ikona aplikacije, plast s hitrimi dejanji za posnetke zaslona, varnejše odstranjevanje prek sistemskega koša, zanesljivejši datumi in večja stabilnost pri zelo velikih knjižnicah.</string>
+    <string name="whats_new_more">Poleg tega kopirane povezave ostanejo skrite v predogledu odložišča, velikosti datotek se povsod ujemajo, samodejno sproščanje prostora pred odstranitvijo kopije iz telefona preveri v Drive, veliki albumi in izbori pa so bolj stabilni.</string>
     <string name="offline_card_subtitle">Fotografije, shranjene za ogled brez povezave</string>
     <string name="duplicates_filter_identical">Enake</string>
     <string name="duplicates_filter_similar">Podobne</string>
@@ -1363,7 +1374,7 @@
     <string name="action_remove">Odstrani</string>
     <string name="gallery_add_to_album_queued">Fotografije bodo dodane, ko se nalaganje konča</string>
     <string name="share_role_can_view_desc">Lahko si ogleda album in njegove fotografije.</string>
-    <string name="share_role_can_edit_desc">Lahko dodaja in odstranjuje fotografije ter spremeni naslovnico.</string>
+    <string name="share_role_can_edit_desc">Lahko dodaja in odstranjuje fotografije.</string>
     <string name="settings_show_selection_labels">Oznake gumbov</string>
     <string name="settings_show_selection_labels_desc">Pri izbiranju fotografij pod vsakim gumbom prikaže kratko oznako, da je jasno, kaj kateri počne.</string>
     <string name="sel_label_download">Prenesi</string>

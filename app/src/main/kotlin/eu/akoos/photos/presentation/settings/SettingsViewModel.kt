@@ -761,6 +761,20 @@ class SettingsViewModel @Inject constructor(
             val userId = accountManager.getPrimaryUserId().first() ?: return@launch
             _uiState.update { it.copy(isFreeingUp = true) }
             try {
+                // Check against Drive before deleting anything. This button reclaims every backed-up
+                // photo, including copies the user downloaded back, so acting on a sync_state that
+                // nothing has verified lately could take a last copy. One listing refresh plus one
+                // reconcile pass is the entire check: the refresh drops rows for photos no longer on
+                // Drive, reconcile demotes their sync_state off SYNCED, and the sweep below only
+                // ever touches what is still SYNCED afterwards. A per-photo cloud call would ask
+                // thousands of times what these two ask once, and would lose reconcile's grace
+                // window for uploads the listing has not caught up with yet.
+                //
+                // Unlike syncNow, a failed refresh is deliberately NOT swallowed as best-effort:
+                // sweeping against a listing that could not be refreshed is the situation this
+                // exists to prevent, so it falls through to the catch and the sweep does not run.
+                cloudRepo.refreshCloudPhotos(userId, force = true)
+                reconcile(userId).collect {}
                 when (val result = freeUpSpace(userId, Long.MAX_VALUE)) {
                     is eu.akoos.photos.domain.usecase.FreeUpSpaceUseCase.FreeUpResult.Done -> {
                         val msg = if (result.freed > 0)

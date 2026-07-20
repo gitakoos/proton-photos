@@ -45,9 +45,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
 import androidx.media3.exoplayer.ExoPlayer
@@ -108,6 +106,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.material3.SnackbarHostState
@@ -120,6 +119,7 @@ import androidx.compose.ui.res.stringResource
 import eu.akoos.photos.R
 import eu.akoos.photos.presentation.common.ConfirmDialog
 import eu.akoos.photos.presentation.common.SecureScreenEffect
+import eu.akoos.photos.presentation.common.UndoAction
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -146,11 +146,13 @@ import androidx.compose.material.icons.filled.OfflinePin
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.LibraryAdd
 import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material.icons.filled.RemoveCircleOutline
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.outlined.OfflinePin
 import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.entity.GalleryItem
+import eu.akoos.photos.domain.usecase.DeletePhotoUseCase
 import eu.akoos.photos.presentation.gallery.LocalThumbnailUrls
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.Bg0
@@ -169,6 +171,7 @@ import eu.akoos.photos.presentation.theme.PillBorder
 import eu.akoos.photos.presentation.util.formatVideoTime
 import eu.akoos.photos.util.MetadataStripConfig
 import eu.akoos.photos.util.PhotoMetadata
+import eu.akoos.photos.util.copySensitiveText
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -227,11 +230,19 @@ internal fun reconcileViewerItems(
 fun PhotoViewerScreen(
     items: List<GalleryItem>,
     initialIndex: Int,
-    onBack: () -> Unit,
+    /** Closes the viewer, carrying the photo it settled on so the grid underneath can put the user
+     *  back on it. Null when there is nothing to return to: the viewer never opened, the photo was
+     *  deleted, or the user left on the very photo they came in on and the grid is already there. */
+    onBack: (settledKey: String?) -> Unit,
     sourceAlbumLinkId: String? = null,
     /** True for a shared-with-me album: suppresses every mutating affordance (delete, set cover,
      *  rename, edit) since the backend rejects them from the wrong share id. Save + Info stay. */
     isReadOnlyAlbum: Boolean = false,
+    /** Whether this user may take the photo back out of [sourceAlbumLinkId]. Removing is an edit, so
+     *  it follows the album's write grant rather than plain ownership, which makes it a separate
+     *  question from [isReadOnlyAlbum]: an editor on a shared album keeps this one affordance while
+     *  the rest of the mutating menu stays hidden. */
+    canRemoveFromAlbum: Boolean = false,
     /** Editor pop-back timestamp, keyed into the page-load effect so the viewer drops its bitmap
      *  cache and re-reads fresh bytes after a save. */
     editedAt: Long = 0L,
@@ -244,7 +255,7 @@ fun PhotoViewerScreen(
     onEditItem: (GalleryItem) -> Unit = {},
     viewModel: PhotoViewerViewModel = hiltViewModel(),
 ) {
-    if (items.isEmpty()) { onBack(); return }
+    if (items.isEmpty()) { onBack(null); return }
 
     if (secure) SecureScreenEffect()
 
@@ -254,8 +265,41 @@ fun PhotoViewerScreen(
     // the live merge as-is. See [reconcileViewerItems].
     val liveItems by viewModel.liveItems.collectAsStateWithLifecycle()
     val reconciled = remember(items, liveItems) { reconcileViewerItems(items, liveItems) }
+    // Photos deleted from inside the viewer. The snapshot the caller handed us cannot shrink on its
+    // own (reconciliation swaps items in place and deliberately keeps ones the live merge no longer
+    // carries, since an album view legitimately holds photos the timeline does not), so a delete has
+    // to drop its photo here. Filtering rather than closing is what lets the user keep paging: the
+    // pager is keyed by stableId, so removing the item at the current index leaves that index
+    // holding the NEXT photo, with no scroll to perform.
+    val removedIds = remember { mutableStateListOf<String>() }
+    val visible = remember(reconciled, removedIds.size) {
+        // Hand back the same instance while nothing is removed, preserving the stable list identity
+        // reconcileViewerItems goes out of its way to keep.
+        if (removedIds.isEmpty()) reconciled else reconciled.filterNot { it.stableId in removedIds }
+    }
     // Render off the reconciled list; every per-page lookup below reads from `items` so alias it.
-    @Suppress("NAME_SHADOWING") val items = reconciled
+    @Suppress("NAME_SHADOWING") val items = visible
+    // Changes whenever the set of dropped photos does. Each per-page effect below keys on the page
+    // INDEX, and a removal deliberately leaves that index unchanged (the next photo takes over the
+    // deleted one's slot), so on its own it changes nothing those effects can see. Without this the
+    // viewer would keep the state it built for the photo that is gone: the successor would be drawn,
+    // but never loaded at full resolution, never zoomable, and a video would never start.
+    val pageGeneration = removedIds.size
+    // An undone delete or album removal puts its photo back where it was. Drop exactly the ids that
+    // undo restored, so a photo deleted earlier in this session, whose own undo window has since
+    // been taken over, stays gone.
+    LaunchedEffect(Unit) {
+        viewModel.undoRestored.collect { action ->
+            when (action) {
+                is UndoAction.Delete ->
+                    removedIds.removeAll((action.cloudLinkIds + action.localTrashedUris).toSet())
+                // Inert when the removal targeted an album this viewer is not showing, because no
+                // id was dropped for it in the first place.
+                is UndoAction.AlbumRemove -> removedIds.removeAll(action.photoLinkIds.toSet())
+                else -> Unit
+            }
+        }
+    }
 
     val clampedInitial = initialIndex.coerceIn(0, items.lastIndex)
     val pagerState = rememberPagerState(initialPage = clampedInitial) { items.size }
@@ -264,7 +308,10 @@ fun PhotoViewerScreen(
     // With the in-place swap the index is stable, so the scroll-back below is normally inert; the
     // pager `key` (further down) is what makes a LocalOnly → Synced swap rebind cleanly.
     var anchorKey by remember { mutableStateOf(items.getOrNull(clampedInitial)?.stableId) }
-    LaunchedEffect(pagerState.settledPage) {
+    // The photo the viewer opened on. The grid underneath restores itself to this one on its own,
+    // so only a different photo at exit is worth reporting back.
+    val openedKey = remember { items.getOrNull(clampedInitial)?.stableId }
+    LaunchedEffect(pagerState.settledPage, pageGeneration) {
         items.getOrNull(pagerState.settledPage)?.stableId?.let { anchorKey = it }
     }
     LaunchedEffect(items) {
@@ -309,7 +356,7 @@ fun PhotoViewerScreen(
     // SyncState, which the static `items` snapshot can't reflect.
     val localUriByLinkId by viewModel.localUriByLinkId.collectAsStateWithLifecycle()
 
-    LaunchedEffect(pagerState.settledPage) {
+    LaunchedEffect(pagerState.settledPage, pageGeneration) {
         val item = items.getOrNull(pagerState.settledPage)
         if (item != null) {
             // Item-aware so a hidden cloud photo (hidden by linkId, no device uri) also resolves as
@@ -362,7 +409,7 @@ fun PhotoViewerScreen(
         }
     }
 
-    LaunchedEffect(pagerState.settledPage, editedAt) {
+    LaunchedEffect(pagerState.settledPage, pageGeneration, editedAt) {
         // editedAt bumps after an editor save, re-running this effect to re-read fresh bytes
         // (the URI's Coil memory cache was nuked in invalidateImageCache, so this reads from disk).
         when (val item = items.getOrNull(pagerState.settledPage)) {
@@ -375,7 +422,7 @@ fun PhotoViewerScreen(
 
     // Keyed on `state` (not just the page) so detection runs once the still is actually showing —
     // a cloud image only becomes a file:// after the full-res download lands.
-    LaunchedEffect(state, pagerState.settledPage) {
+    LaunchedEffect(state, pagerState.settledPage, pageGeneration) {
         val item = items.getOrNull(pagerState.settledPage) ?: return@LaunchedEffect
         val s = state as? PhotoViewerViewModel.ViewerState.ShowImage ?: return@LaunchedEffect
         val mime = when (item) {
@@ -399,7 +446,7 @@ fun PhotoViewerScreen(
     DisposableEffect(Unit) { onDispose { viewModel.stopMotionPhoto() } }
 
     // Panorama probe (image items only); the VM scans off-thread, guarded against a mid-scan swipe.
-    LaunchedEffect(pagerState.settledPage) {
+    LaunchedEffect(pagerState.settledPage, pageGeneration) {
         val item = items.getOrNull(pagerState.settledPage)
         val (uri, itemKey, isImage) = when (item) {
             is GalleryItem.LocalOnly -> Triple(
@@ -423,7 +470,7 @@ fun PhotoViewerScreen(
     var containerSize by remember { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
     // Pan distance accumulated past the image edge while zoomed; crossing the threshold pages.
     var edgeOverpan by remember { mutableFloatStateOf(0f) }
-    LaunchedEffect(pagerState.settledPage) { scale = 1f; offset = Offset.Zero; edgeOverpan = 0f }
+    LaunchedEffect(pagerState.settledPage, pageGeneration) { scale = 1f; offset = Offset.Zero; edgeOverpan = 0f }
 
     val transformState = rememberTransformableState { zoomChange, panChange, _ ->
         scale = (scale * zoomChange).coerceIn(1f, 6f)
@@ -471,7 +518,7 @@ fun PhotoViewerScreen(
             pageImageCache.remove(pagerState.settledPage)
         }
     }
-    LaunchedEffect(state, pagerState.settledPage) {
+    LaunchedEffect(state, pagerState.settledPage, pageGeneration) {
         if (state is PhotoViewerViewModel.ViewerState.ShowImage) {
             val page = pagerState.settledPage
             pageImageCache[page] = (state as PhotoViewerViewModel.ViewerState.ShowImage).model
@@ -495,7 +542,7 @@ fun PhotoViewerScreen(
     val startExit = {
         currentPlayer?.let { runCatching { it.playWhenReady = false } }
         exiting = true
-        onBack()
+        onBack(anchorKey.takeIf { it != openedKey })
     }
     // Route the system/gesture back through the same teardown so a hardware back doesn't leave the
     // playing surface to linger through the pop fade either.
@@ -504,7 +551,7 @@ fun PhotoViewerScreen(
     // so the loading badge keeps showing through download + prepare + first-paint and
     // then disappears for good (ordinary pause/resume after that doesn't bring it back).
     var videoEverPlayed by remember { mutableStateOf(false) }
-    LaunchedEffect(pagerState.settledPage) {
+    LaunchedEffect(pagerState.settledPage, pageGeneration) {
         // Reset playback flags but DO NOT null currentPlayer here. The composable for the
         // new page builds a fresh ExoPlayer in its own remember(uri) block and the previous
         // page's player is released by its DisposableEffect onDispose — nulling here added
@@ -569,7 +616,7 @@ fun PhotoViewerScreen(
     // 4-second tick. Key on [settledPage] (not currentPage) so the timer doesn't
     // restart mid-animation when currentPage briefly flips as the pager crosses the
     // threshold.
-    LaunchedEffect(isPlaying, pagerState.settledPage) {
+    LaunchedEffect(isPlaying, pagerState.settledPage, pageGeneration) {
         if (!isPlaying) return@LaunchedEffect
         val settledItem = items.getOrNull(pagerState.settledPage)
         val isVideoItem = when (settledItem) {
@@ -610,6 +657,11 @@ fun PhotoViewerScreen(
     val metadataSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     var showDeleteSheet by remember { mutableStateOf(false) }
+    // stableId of the photo the running delete will take off the screen, or null when the running
+    // delete only converts it (see DeletePhotoUseCase.removesFromGallery). Captured when the sheet's
+    // button is pressed rather than read back when the delete finishes, so nothing depends on where
+    // the pager happens to sit by then.
+    var pendingRemoval by remember { mutableStateOf<String?>(null) }
     var showAddToAlbumSheet by remember { mutableStateOf(false) }
     val addToAlbumSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     // Set when "New album" is tapped in the add-to-album sheet: holds the photo to drop into the
@@ -624,7 +676,6 @@ fun PhotoViewerScreen(
     var showManageLinkSheet by remember { mutableStateOf(false) }
     val manageLinkSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val publicLinkState by viewModel.publicLinkState.collectAsStateWithLifecycle()
-    val clipboard = LocalClipboardManager.current
     val linkCopiedMsg = stringResource(R.string.share_link_copied)
     val passwordSetMsg = stringResource(R.string.share_password_set)
     val passwordRemovedMsg = stringResource(R.string.share_password_removed)
@@ -667,7 +718,25 @@ fun PhotoViewerScreen(
         when (val ds = deleteState) {
             is PhotoViewerViewModel.DeleteState.Done -> {
                 viewModel.resetDeleteState()
-                onBack()
+                val removed = pendingRemoval
+                pendingRemoval = null
+                when {
+                    // Nothing left to look at, and the photo that was on screen is the one just
+                    // deleted, so there is nowhere to send the grid back to.
+                    removed != null && items.size <= 1 -> onBack(null)
+                    removed != null -> {
+                        // Cached full-res images are keyed by page index, and every index past the
+                        // deleted one is about to shift down, so a stale entry would paint the
+                        // deleted photo over its successor.
+                        pageImageCache.clear()
+                        // Bumps pageGeneration, which re-runs every per-page effect against the
+                        // photo that now holds this index (including the one that re-anchors).
+                        removedIds.add(removed)
+                    }
+                    // A delete that only converted the photo (freeing its device copy, or trashing
+                    // its cloud copy) leaves it on screen in its new form. Stay on it.
+                    else -> Unit
+                }
             }
             is PhotoViewerViewModel.DeleteState.NeedsPermission -> {
                 // Launch the Android system "Move to trash" dialog
@@ -686,6 +755,34 @@ fun PhotoViewerScreen(
                 viewModel.resetDeleteState()
             }
             else -> {}
+        }
+    }
+
+    // A photo taken out of the album this viewer is showing leaves the pager the same way a deleted
+    // one does. Read through rememberUpdatedState because the collector below is started once and
+    // would otherwise measure the list as it stood at first composition.
+    val currentItems by rememberUpdatedState(items)
+    // Not lifecycle-gated, unlike the snackbar collectors: the signal carries no replay, so a viewer
+    // paused mid-removal would miss it and keep showing a photo the album no longer holds.
+    LaunchedEffect(sourceAlbumLinkId) {
+        val albumLinkId = sourceAlbumLinkId ?: return@LaunchedEffect
+        viewModel.removeFromAlbumDone.collect { removal ->
+            // The add-to-album sheet can remove from any album the photo belongs to, and only the
+            // one the viewer was opened from decides what this pager holds.
+            if (removal.albumLinkId != albumLinkId) return@collect
+            if (currentItems.size <= 1) {
+                // Nothing left to look at, and the photo on screen is the one just taken out, so
+                // there is nowhere to send the grid back to.
+                onBack(null)
+            } else {
+                // Cached full-res images are keyed by page index, and every index past the removed
+                // one is about to shift down, so a stale entry would paint the removed photo over
+                // its successor.
+                pageImageCache.clear()
+                // Bumps pageGeneration, which re-runs every per-page effect against the photo that
+                // now holds this index (including the one that re-anchors).
+                removedIds.add(removal.photoLinkId)
+            }
         }
     }
 
@@ -1250,43 +1347,10 @@ fun PhotoViewerScreen(
                             containerColor = appColors.cardBg,
                             border = androidx.compose.foundation.BorderStroke(0.5.dp, appColors.pillBorder),
                         ) {
-                            if (items.size > 1) {
-                                androidx.compose.material3.DropdownMenuItem(
-                                    text = { Text(stringResource(
-                                        if (isPlaying) R.string.viewer_pause_slideshow
-                                        else R.string.viewer_play_slideshow,
-                                    ), color = FgPrimary) },
-                                    leadingIcon = { Icon(
-                                        if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                                        null,
-                                        tint = if (isPlaying) Accent else FgPrimary,
-                                        modifier = Modifier.size(20.dp),
-                                    ) },
-                                    onClick = {
-                                        menuExpanded = false
-                                        isPlaying = !isPlaying
-                                    },
-                                )
-                            }
-                            // Share → open the unified share drawer (Send to another app /
-                            // Share with people / Public link) instead of jumping straight to
-                            // the OS sheet. Available across all three subtypes; a shared-album
-                            // guest can still use "Send to another app" (copies bytes out, no
-                            // album grant). Opening the drawer kicks off the public-link lookup.
-                            if (settledItem != null) {
-                                androidx.compose.material3.DropdownMenuItem(
-                                    text = { Text(stringResource(R.string.share_action),
-                                        color = FgPrimary) },
-                                    leadingIcon = { Icon(Icons.Default.Share, null,
-                                        tint = FgPrimary, modifier = Modifier.size(20.dp)) },
-                                    onClick = {
-                                        menuExpanded = false
-                                        viewModel.loadPublicLink(settledItem)
-                                        showShareSheet = true
-                                    },
-                                )
-                            }
-                            if (settledItem is GalleryItem.CloudOnly) {
+                            // A photo inside an album someone else shared is not copied out to the
+                            // device from here; saving that album into your own library is the route
+                            // to a copy. Matches the album's own dock and the offline bubble above.
+                            if (settledItem is GalleryItem.CloudOnly && !isReadOnlyAlbum) {
                                 androidx.compose.material3.DropdownMenuItem(
                                     text = { Text(stringResource(R.string.viewer_menu_save_to_device),
                                         color = FgPrimary) },
@@ -1313,14 +1377,14 @@ fun PhotoViewerScreen(
                                     },
                                 )
                             }
-                            // "Set as album cover" — only visible when the viewer was opened
-                            // from an album (sourceAlbumLinkId != null) AND the item is a cloud
-                            // photo (Synced/CloudOnly carry a Drive linkId — LocalOnly doesn't).
-                            // No-op when the user owns the album but the cover is unchanged,
-                            // because setAlbumCover is idempotent server-side.
-                            val isCloudItemForCover = settledItem is GalleryItem.Synced ||
+                            // Synced / CloudOnly carry a Drive linkId, LocalOnly does not, so both
+                            // album actions below need a cloud-backed item.
+                            val isCloudItem = settledItem is GalleryItem.Synced ||
                                 settledItem is GalleryItem.CloudOnly
-                            if (sourceAlbumLinkId != null && isCloudItemForCover && !isReadOnlyAlbum) {
+                            // "Set as album cover" is offered only when the viewer was opened from
+                            // an album. No-op when the user owns the album but the cover is
+                            // unchanged, because setAlbumCover is idempotent server-side.
+                            if (sourceAlbumLinkId != null && isCloudItem && !isReadOnlyAlbum) {
                                 androidx.compose.material3.DropdownMenuItem(
                                     text = { Text(stringResource(R.string.album_set_as_album_cover),
                                         color = FgPrimary) },
@@ -1340,7 +1404,12 @@ fun PhotoViewerScreen(
                             // vault, a synced/cloud photo hides client-side by linkId. Unhide is offered
                             // for any already-hidden item, device or cloud; [unhideItem] picks the reveal
                             // path (drop the linkId, or restore the vaulted file) per item kind.
-                            if (settledItem != null) {
+                            //
+                            // Not offered inside someone else's album. Hiding is a filter over this
+                            // user's own library, so applying it to a photo that only exists in a
+                            // shared album writes a device-global entry that hides nothing the user
+                            // can see anyway. It reads as a moderation action it is not.
+                            if (settledItem != null && !isReadOnlyAlbum) {
                                 androidx.compose.material3.DropdownMenuItem(
                                     text = { Text(stringResource(
                                         if (isHidden) R.string.viewer_menu_unhide
@@ -1354,10 +1423,29 @@ fun PhotoViewerScreen(
                                         val item = settledItem ?: return@DropdownMenuItem
                                         if (isHidden) {
                                             viewModel.unhideItem(item)
-                                            onBack()
+                                            // Same teardown as any other way out, so the video
+                                            // surface goes with it and the grid gets told where
+                                            // the user ended up.
+                                            startExit()
                                         } else {
                                             viewModel.hideItem(item)
                                         }
+                                    },
+                                )
+                            }
+                            // Destroying someone else's photo is not a guest's call whatever album
+                            // rights they hold, and Drive rejects it, so a shared album offers no
+                            // delete. Taking the photo out of the album, below, is the editor's route.
+                            if (!isReadOnlyAlbum) {
+                                androidx.compose.material3.DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.viewer_menu_delete),
+                                        color = ErrorColor) },
+                                    leadingIcon = { Icon(Icons.Default.DeleteOutline, null,
+                                        tint = ErrorColor, modifier = Modifier.size(20.dp)) },
+                                    enabled = !isDeleting,
+                                    onClick = {
+                                        menuExpanded = false
+                                        showDeleteSheet = true
                                     },
                                 )
                             }
@@ -1371,18 +1459,58 @@ fun PhotoViewerScreen(
                                     showMetadata = true
                                 },
                             )
-                            // Shared-with-me viewers stay strictly read-only — no
-                            // delete affordance for someone else's photo.
-                            if (!isReadOnlyAlbum) {
+                            // Taking the photo back out of the album it was opened from, the one
+                            // route that does not mean backing out to the grid and long-pressing.
+                            // Gated on the album's write grant rather than ownership, so an editor
+                            // on a shared album keeps this while the rest of the mutating menu
+                            // stays hidden.
+                            if (sourceAlbumLinkId != null && canRemoveFromAlbum && isCloudItem) {
                                 androidx.compose.material3.DropdownMenuItem(
-                                    text = { Text(stringResource(R.string.viewer_menu_delete),
+                                    text = { Text(stringResource(R.string.album_remove_from_album),
                                         color = ErrorColor) },
-                                    leadingIcon = { Icon(Icons.Default.DeleteOutline, null,
+                                    leadingIcon = { Icon(Icons.Default.RemoveCircleOutline, null,
                                         tint = ErrorColor, modifier = Modifier.size(20.dp)) },
-                                    enabled = !isDeleting,
+                                    enabled = !isAddingToAlbum,
                                     onClick = {
                                         menuExpanded = false
-                                        showDeleteSheet = true
+                                        val item = settledItem ?: return@DropdownMenuItem
+                                        viewModel.removeFromAlbum(sourceAlbumLinkId, item)
+                                    },
+                                )
+                            }
+                            if (items.size > 1) {
+                                androidx.compose.material3.DropdownMenuItem(
+                                    text = { Text(stringResource(
+                                        if (isPlaying) R.string.viewer_pause_slideshow
+                                        else R.string.viewer_play_slideshow,
+                                    ), color = FgPrimary) },
+                                    leadingIcon = { Icon(
+                                        if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                        null,
+                                        tint = if (isPlaying) Accent else FgPrimary,
+                                        modifier = Modifier.size(20.dp),
+                                    ) },
+                                    onClick = {
+                                        menuExpanded = false
+                                        isPlaying = !isPlaying
+                                    },
+                                )
+                            }
+                            // Share opens the unified share drawer (Send to another app, Share
+                            // with people, Public link) instead of jumping straight to the OS
+                            // sheet, and opening it kicks off the public-link lookup. A guest in
+                            // someone else's album keeps the item; the drawer itself narrows
+                            // which rows it offers there.
+                            if (settledItem != null) {
+                                androidx.compose.material3.DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.share_action),
+                                        color = FgPrimary) },
+                                    leadingIcon = { Icon(Icons.Default.Share, null,
+                                        tint = FgPrimary, modifier = Modifier.size(20.dp)) },
+                                    onClick = {
+                                        menuExpanded = false
+                                        viewModel.loadPublicLink(settledItem)
+                                        showShareSheet = true
                                     },
                                 )
                             }
@@ -1771,6 +1899,13 @@ fun PhotoViewerScreen(
             sheetState = shareSheetState,
             canCreateLink = canCreateLink,
             localUploadEnabled = true,
+            // Inside an album someone else shared, only "Send to another app" survives: it moves
+            // bytes the viewer can already see and grants nobody access to the album. Creating a
+            // public link or inviting people publishes someone else's photo, which is the album
+            // owner's call, and Drive refuses it from a guest. The album's own selection dock
+            // draws the same line.
+            showPublicLink = !isReadOnlyAlbum,
+            showShareWithPeople = !isReadOnlyAlbum,
             onDismiss = { showShareSheet = false },
             onSendToApp = {
                 showShareSheet = false
@@ -1804,7 +1939,7 @@ fun PhotoViewerScreen(
             onUploadAndCreate = { settledItem?.let { viewModel.uploadAndCreateViewedLink(it) } },
             onCopyLink = {
                 viewModel.currentPublicLinkUrl()?.let { url ->
-                    clipboard.setText(AnnotatedString(url))
+                    copySensitiveText(shareContext, "Photo link", url)
                     scope.launch { snackbarHostState.showSnackbar(linkCopiedMsg) }
                 }
             },
@@ -1834,6 +1969,9 @@ fun PhotoViewerScreen(
                     onDismiss = { showDeleteSheet = false },
                     onDelete  = { freeUpSpace, deleteFromCloud ->
                         showDeleteSheet = false
+                        pendingRemoval = item.stableId.takeIf {
+                            DeletePhotoUseCase.removesFromGallery(item, freeUpSpace, deleteFromCloud)
+                        }
                         viewModel.deleteItem(item, freeUpSpace, deleteFromCloud)
                     },
                 )

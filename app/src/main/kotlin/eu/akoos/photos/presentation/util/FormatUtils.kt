@@ -22,6 +22,8 @@
 
 package eu.akoos.photos.presentation.util
 
+/** The one byte formatter for every surface. Binary units (1024) to match how Proton
+ *  reports storage, so a quota shown here equals the same quota on Proton's own pages. */
 fun formatBytes(bytes: Long): String {
     if (bytes < 1024) return "$bytes B"
     val kb = bytes / 1024.0

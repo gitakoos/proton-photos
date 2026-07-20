@@ -41,6 +41,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -70,6 +71,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import eu.akoos.photos.R
 import eu.akoos.photos.presentation.common.IconBubble
+import eu.akoos.photos.presentation.common.ReturnToViewerPhoto
 import eu.akoos.photos.presentation.common.fullBleedHorizontal
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.presentation.gallery.LocalThumbnailUrls
@@ -138,8 +140,22 @@ fun DayDetailScreen(
         } else {
             val cols = rememberDefaultGridColumns()
             val seamless = rememberSeamlessGrid()
+            val gridState = rememberLazyGridState()
+            // Land back on the photo the viewer closed on. One flat run of the day's photos, behind
+            // the hero and the description row, which are the two full-width slots ahead of them.
+            // The cells key on a type-prefixed local key the viewer knows nothing about, so match on
+            // the gallery identity instead: this grid hands the viewer its items untouched.
+            val returnGroups = remember(state.items) { listOf(state.items) }
+            ReturnToViewerPhoto(
+                gridState = gridState,
+                groups = returnGroups,
+                headerPerGroup = false,
+                leadingSlots = 2,
+                keyOf = { it.stableId },
+            )
             LazyVerticalGrid(
                 columns = GridCells.Fixed(cols),
+                state = gridState,
                 modifier = Modifier.fillMaxSize(),
                 // Match the main timeline grid (GalleryGrid): same default columns, 20.dp side inset
                 // and 6.dp gap, so the day's photos render at the same size as the Photos page.

@@ -33,6 +33,7 @@ import eu.akoos.photos.data.api.dto.BatchLinksRequest
 import eu.akoos.photos.data.api.dto.DeleteLinksRequest
 import eu.akoos.photos.data.api.dto.FavoriteRequest
 import eu.akoos.photos.data.api.dto.LinkCoreDto
+import eu.akoos.photos.data.api.dto.RenameLinkRequest
 import eu.akoos.photos.data.api.dto.TagRequest
 import eu.akoos.photos.data.api.dto.ThumbnailBatchRequest
 import eu.akoos.photos.data.db.dao.PhotoListingDao
@@ -40,6 +41,7 @@ import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.CloudTrashItem
 import eu.akoos.photos.domain.entity.DriveNotFoundException
 import eu.akoos.photos.domain.entity.LocalMediaItem
+import eu.akoos.photos.util.forEachSqlChunk
 import eu.akoos.photos.util.retryWithBackoff
 import java.security.MessageDigest
 import javax.inject.Inject
@@ -89,12 +91,40 @@ internal fun rejectedLinkIds(
     responses: List<eu.akoos.photos.data.api.dto.TrashActionOutcomeEntry>,
 ): Set<String> = responses.filter { it.response.code != 1000 }.map { it.linkId }.toSet()
 
+/** Which key set a photo rename may use, decided from the photo's wire parent. */
+internal enum class RenameParent {
+    /** Wire parent is the photos root, so the root link key and the root NodeHashKey both apply. */
+    PHOTOS_ROOT,
+
+    /** Wire parent is another link, or unknown. Renaming with root keys here would write a name
+     *  nothing can decrypt, so the rename must not run at all. */
+    UNSUPPORTED,
+}
+
+/**
+ * Answers only one question: does the photos-root key set speak for this photo's name?
+ *
+ * The parent whose key wrapped a photo's NodePassphrase is not always the parent the server files
+ * the link under. Adding a photo to an album rewraps that passphrase to the album key while the
+ * wire ParentLinkID stays on the photos root, and [AlbumCryptoChain.selectPhotoParentKey] carries
+ * that rule for the passphrase side. Name encryption and the name Hash follow the WIRE parent
+ * instead, so anything other than an exact photos-root match answers [RenameParent.UNSUPPORTED]
+ * rather than guessing. An empty id counts as unknown: a blank parent matching a blank root would
+ * otherwise read as agreement.
+ */
+internal fun renameParentFor(photoParentLinkId: String?, photosRootLinkId: String?): RenameParent =
+    if (!photoParentLinkId.isNullOrEmpty() && photoParentLinkId == photosRootLinkId) {
+        RenameParent.PHOTOS_ROOT
+    } else {
+        RenameParent.UNSUPPORTED
+    }
+
 /**
  * Drive trash + favorite + rename operations.
  *
- * `renameOrCopyCloudPhoto` lives here because Drive has no server-side rename endpoint —
- * it's emulated as download-then-reupload + optional trash, which is conceptually still a
- * trash-or-keep operation on the original linkId. All API calls go through
+ * [renameCloudPhoto] renames a link in place through the server's own share-scoped rename route.
+ * [copyCloudPhotoAs] builds a second photo from the same bytes, and lives here because it runs on
+ * the same volume-scoped calls as the trash code. All API calls go through
  * [PhotosShareService.networkSemaphore] for shared permit accounting.
  */
 @Singleton
@@ -107,6 +137,8 @@ class CloudTrashService @Inject constructor(
     private val uploadService: PhotoUploadService,
     private val linkDetailHelpers: LinkDetailHelpers,
     private val photoStreamService: PhotoStreamService,
+    private val cryptoHelper: eu.akoos.photos.data.crypto.DriveCryptoHelper,
+    private val cryptoContext: me.proton.core.crypto.common.context.CryptoContext,
 ) {
     suspend fun deleteFiles(userId: UserId, linkIds: List<String>): CloudTrashOutcome = withContext(Dispatchers.IO) {
         if (linkIds.isEmpty()) return@withContext CloudTrashOutcome(emptySet(), emptySet())
@@ -143,11 +175,16 @@ class CloudTrashService @Inject constructor(
             // cell drops out immediately. A rejected link stays so it doesn't vanish from the
             // grid while still living on the cloud.
             if (trashed.isNotEmpty()) {
-                runCatching { photoListingDao.deleteByLinkIds(trashed.toList()) }
+                // Chunked: a multi-select delete is user-sized, and one oversized IN list would fail the
+                // whole statement, leaving every row behind. Failures are logged rather than swallowed,
+                // since a silent one shows up later as a deleted photo still sitting in the grid.
+                runCatching { trashed.forEachSqlChunk { photoListingDao.deleteByLinkIds(userId.id, it) } }
+                    .onFailure { Log.w(TAG, "deleteFiles: local listing delete failed: ${it.message}") }
                 // A cloud copy we just trashed is gone, so drop its stale SYNCED marker right now (the
                 // on-device twin becomes LOCAL_ONLY) instead of waiting out the reconcile grace window.
                 // Re-adding that photo to an album then uploads it fresh instead of doing nothing.
-                runCatching { syncStateDao.demoteSyncedByCloudIds(trashed.toList()) }
+                runCatching { trashed.forEachSqlChunk { syncStateDao.demoteSyncedByCloudIds(it) } }
+                    .onFailure { Log.w(TAG, "deleteFiles: sync-state demote failed: ${it.message}") }
                 // Keep these out of the next refresh's upsert until the server's trash propagates, so
                 // an in-flight or about-to-run stream listing (which can still return a just-trashed
                 // photo for ~a minute) can't re-add the rows we just removed and flash the green-cloud
@@ -160,8 +197,10 @@ class CloudTrashService @Inject constructor(
             // The links are already gone server-side — treat as fully trashed so callers don't
             // surface a phantom failure for something that no longer exists.
             Log.w(TAG, "deleteFiles: DriveNotFoundException: ${e.message}")
-            runCatching { photoListingDao.deleteByLinkIds(linkIds) }
-            runCatching { syncStateDao.demoteSyncedByCloudIds(linkIds) }
+            runCatching { linkIds.forEachSqlChunk { photoListingDao.deleteByLinkIds(userId.id, it) } }
+                .onFailure { Log.w(TAG, "deleteFiles: local listing delete failed: ${it.message}") }
+            runCatching { linkIds.forEachSqlChunk { syncStateDao.demoteSyncedByCloudIds(it) } }
+                .onFailure { Log.w(TAG, "deleteFiles: sync-state demote failed: ${it.message}") }
             photoStreamService.markRecentlyTrashed(linkIds)
             CloudTrashOutcome(linkIds.toSet(), emptySet())
         }
@@ -458,14 +497,128 @@ class CloudTrashService @Inject constructor(
         }
 
     /**
-     * Drive Photos has no server-side rename endpoint; emulate it by re-uploading the
-     * same bytes under the new name and (optionally) trashing the original.
+     * Renames a cloud photo in place: one metadata call, the same linkId, no second photo. Album
+     * membership and every other reference to the link survive untouched, because nothing about the
+     * link changes except its name.
+     *
+     * The Name ciphertext and the name Hash both belong to the parent the SERVER files the link
+     * under, which is not always the parent whose key wrapped the NodePassphrase: a photo added to
+     * an album carries an album-wrapped passphrase while its wire ParentLinkID still points at the
+     * photos root. [renameParentFor] holds that line and refuses any parent the root key set cannot
+     * speak for, since encrypting to the wrong key writes a name nothing can read back.
+     *
+     * Throws on any crypto or API failure. A rename that quietly did nothing is indistinguishable
+     * from one that worked, so the caller has to be able to tell the two apart.
      */
-    suspend fun renameOrCopyCloudPhoto(
+    suspend fun renameCloudPhoto(userId: UserId, photo: CloudPhoto, newName: String): Unit =
+        withContext(Dispatchers.IO) {
+            val trimmed = newName.trim()
+            require(trimmed.isNotEmpty()) { "Name cannot be empty" }
+
+            val volumeId = photo.volumeId.ifEmpty { shareService.getVolumeId(userId) }
+            val manager = apiProvider.get<DriveApiService>(userId)
+
+            // Resolve the root link key first: it self-heals a session that cached the root link
+            // with a null NodeHashKey because the batch endpoint omitted the Folder DTO, which is
+            // what makes the hash key below available on the first attempt.
+            val rootLinkKeyBytes = shareService.getRootLinkKeyBytes(userId)
+                ?: error("Root link key unavailable")
+            val rootLinkArmored = shareService.rootLinkArmoredKey()
+                ?: error("Root link armored key unavailable")
+            val rootNodeHashKey = shareService.rootNodeHashKeyBytes()
+                ?: error("Root NodeHashKey unavailable")
+            val shareId = photo.shareId.ifEmpty { shareService.shareId().orEmpty() }
+            if (shareId.isEmpty()) error("Photos shareId unavailable")
+
+            val detail = linkDetailHelpers
+                .batchFetchLinkDetails(userId, volumeId, listOf(photo.linkId))[photo.linkId]
+                ?: error("Photo not found on Drive")
+            val parent = renameParentFor(detail.link.parentLinkId, shareService.photosRootLinkId())
+            if (parent != RenameParent.PHOTOS_ROOT) error("This photo cannot be renamed in place")
+
+            // OriginalHash is recomputed from the photo's own decrypted name rather than echoed
+            // back from the server's Hash, so it lands in the same hash-space as newHash below. A
+            // stored Hash computed under a different key answers a different question, and the
+            // server rejects the pair as out of date.
+            val currentEncryptedName = detail.link.name ?: error("Photo has no encrypted name")
+            val currentPlainName = cryptoHelper.decryptLinkName(currentEncryptedName, rootLinkKeyBytes)
+                ?: error("Could not read the photo's current name")
+            val originalHash = cryptoHelper.computeNameHash(currentPlainName, rootNodeHashKey)
+
+            val rootPublicKey = cryptoHelper.withCryptoLock {
+                cryptoContext.pgpCrypto.getPublicKey(rootLinkArmored)
+            }
+            val signingKey = cryptoHelper.getAddressSigningKey(userId)
+            val newEncryptedName = cryptoHelper.encryptName(trimmed, rootPublicKey, signingKey.unlockedKeyBytes)
+            val newHash = cryptoHelper.computeNameHash(trimmed, rootNodeHashKey)
+
+            suspend fun send(withOriginalHash: String) {
+                shareService.networkSemaphore.withPermit {
+                    manager.invoke {
+                        renameLink(
+                            shareId,
+                            photo.linkId,
+                            RenameLinkRequest(
+                                name = newEncryptedName,
+                                hash = newHash,
+                                originalHash = withOriginalHash,
+                                mimeType = photo.mimeType,
+                                signatureAddress = signingKey.email,
+                            ),
+                        )
+                    }.valueOrThrow
+                }
+            }
+
+            // The recomputed OriginalHash is the one the server accepts, since it shares a
+            // hash-space with newHash. The two values only diverge when the stored hash was written
+            // under a different key, so when they agree the question does not arise at all. The
+            // retry behind it covers that divergence, which `AlbumService.renameAlbum` documents for
+            // albums written by older versions, without making a photo pay a request for it in the
+            // ordinary case. The log names which value answered.
+            val serverHash = detail.link.hash
+            if (serverHash == null || serverHash == originalHash) {
+                send(originalHash)
+            } else {
+                try {
+                    send(originalHash)
+                } catch (e: Exception) {
+                    if (e is kotlinx.coroutines.CancellationException) throw e
+                    Log.w(TAG, "renameCloudPhoto: recomputed OriginalHash rejected (${e.message}), retrying with the server's")
+                    send(serverHash)
+                    Log.d(TAG, "renameCloudPhoto: the server's own Hash was the accepted OriginalHash")
+                }
+            }
+
+            // The link keeps its id, so the listing row is updated in place instead of being
+            // dropped. The fingerprint has to move with the name: it digests the ciphertext a stored
+            // name was decrypted from, so a stale one costs the next sync walk a decrypt to re-derive
+            // a name it already holds, and a wrong one would mask a rename made on another client.
+            photoListingDao.getByLinkId(photo.linkId)?.let { existing ->
+                photoListingDao.upsertAll(
+                    listOf(
+                        existing.copy(
+                            displayName = trimmed,
+                            nameFingerprint = nameFingerprint(newEncryptedName),
+                        ),
+                    ),
+                )
+            }
+            Log.d(TAG, "renameCloudPhoto: renamed ${photo.linkId}")
+        }
+
+    /**
+     * Builds a SECOND cloud photo from the same bytes under a new name, leaving the source link
+     * untouched. This is the "Save as copy" path; an in-place rename is [renameCloudPhoto].
+     *
+     * Kept as its own path because it reaches the server differently: the rename route is
+     * share-scoped, whereas every photo operation here is volume-scoped, so a copy stays available
+     * for any photo the rename route will not take.
+     */
+    suspend fun copyCloudPhotoAs(
         userId: UserId,
         photo: CloudPhoto,
         newName: String,
-        trashOriginal: Boolean,
     ): String = withContext(Dispatchers.IO) {
         val fullResFile = downloadService.downloadFullResPhoto(userId, photo)
         if (!fullResFile.exists() || fullResFile.length() == 0L) error("Full-res download failed for ${photo.linkId}")
@@ -488,7 +641,7 @@ class CloudTrashService @Inject constructor(
         }
 
         val fileUri = android.net.Uri.fromFile(fullResFile).toString()
-        // Preserve the original capture time on rename so the photo stays in its timeline slot.
+        // The copy carries the source's capture time, so it lands in the same timeline slot.
         val item = LocalMediaItem(
             uri         = fileUri,
             dateTaken   = photo.captureTime * 1000L,
@@ -500,11 +653,6 @@ class CloudTrashService @Inject constructor(
             height      = 0,
             duration    = 0L,
         )
-        val newLinkId = uploadService.uploadFile(userId, item, hash, fileUri)
-        if (trashOriginal) {
-            runCatching { deleteFiles(userId, listOf(photo.linkId)) }
-                .onFailure { e -> Log.w(TAG, "rename: trashing original ${photo.linkId} failed: ${e.message}") }
-        }
-        newLinkId
+        uploadService.uploadFile(userId, item, hash, fileUri)
     }
 }

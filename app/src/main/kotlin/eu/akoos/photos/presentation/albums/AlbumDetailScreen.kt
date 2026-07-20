@@ -83,7 +83,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FileDownload
-import androidx.compose.material.icons.filled.LibraryAdd
+import androidx.compose.material.icons.filled.MoveToInbox
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.filled.Info
@@ -128,9 +128,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -148,6 +146,7 @@ import eu.akoos.photos.presentation.viewer.ManagePublicLinkSheet
 import eu.akoos.photos.presentation.viewer.PhotoShareSheet
 import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.presentation.common.IconBubble
+import eu.akoos.photos.presentation.common.ReturnToViewerPhoto
 import eu.akoos.photos.presentation.common.SelectionBottomDock
 import eu.akoos.photos.presentation.common.SelectionDockItem
 import eu.akoos.photos.presentation.common.SelectionTopBar
@@ -168,6 +167,7 @@ import eu.akoos.photos.presentation.theme.PillBg
 import eu.akoos.photos.presentation.theme.PillBgOpaque
 import eu.akoos.photos.presentation.theme.PillBorder
 import eu.akoos.photos.presentation.theme.StatusSynced
+import eu.akoos.photos.util.copySensitiveText
 
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
@@ -215,7 +215,6 @@ fun AlbumDetailScreen(
     var showShareCloudWarning by remember { mutableStateOf(false) }
     val shareSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scope = rememberCoroutineScope()
-    val clipboard = LocalClipboardManager.current
     // Unified photo-selection share drawer + its manage-link sheet — same as the timeline.
     var showPhotoShareSheet by remember { mutableStateOf(false) }
     val photoShareSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -262,7 +261,7 @@ fun AlbumDetailScreen(
     val linkCopiedMsg = stringResource(R.string.album_link_copied)
     LaunchedEffect(state.shareLink) {
         val link = state.shareLink ?: return@LaunchedEffect
-        clipboard.setText(AnnotatedString(link))
+        copySensitiveText(shareCtx, "Album link", link)
         snackbarHostState.showSnackbar(linkCopiedMsg)
         viewModel.clearShareLink()
     }
@@ -399,6 +398,17 @@ fun AlbumDetailScreen(
             onSelectionChange = viewModel::setSelectedPhotos,
             tapGuard = tapGuard,
         )
+        // Land back on the photo the viewer closed on. The hero header is the one slot ahead of the
+        // photos, and each month bucket carries its own header. Photos open as Synced or CloudOnly,
+        // and both report the cloud linkId back.
+        val returnGroups = remember(photoGroups) { photoGroups.values.toList() }
+        ReturnToViewerPhoto(
+            gridState = gridState,
+            groups = returnGroups,
+            headerPerGroup = true,
+            leadingSlots = 1,
+            keyOf = { it.value.linkId },
+        )
         LazyVerticalGrid(
             columns = GridCells.Fixed(cols),
             state = gridState,
@@ -469,8 +479,9 @@ fun AlbumDetailScreen(
                         }
                     },
                     titleActions = {
-                            // Add photos — owner-only (a shared-with-me guest can't edit the album).
-                            if (!state.isSharedWithMe) {
+                            // Add photos. Offered for an album you own, and for one shared with you
+                            // when the sharer granted edit rights.
+                            if (state.canAddPhotos) {
                                 Box(
                                     modifier = Modifier
                                         .size(40.dp)
@@ -531,8 +542,12 @@ fun AlbumDetailScreen(
                                             modifier = Modifier.size(18.dp),
                                         )
                                     }
+                                    // MoveToInbox, not LibraryAdd: the latter draws a plus on a
+                                    // stack, which reads as "add photos here" and is exactly what
+                                    // an editor reaches for. This action copies the album into
+                                    // your own library instead, and the plus now belongs to Add.
                                     state.isSharedWithMe -> Icon(
-                                        Icons.Default.LibraryAdd,
+                                        Icons.Default.MoveToInbox,
                                         stringResource(R.string.shared_save_to_library),
                                         tint = Accent, modifier = Modifier.size(18.dp),
                                     )
@@ -650,7 +665,13 @@ fun AlbumDetailScreen(
             }
 
             when {
-                state.isLoading -> {
+                // Only skeleton an EMPTY grid. Reloading one that already has photos (returning from
+                // the viewer re-runs load(), and so does every undo and pull-to-refresh) must leave
+                // them in place: swapping them for nine placeholders collapses the grid, and a
+                // collapsed grid clamps its restored scroll offset to the top, which is what threw
+                // the user back to the first row. The refresh already shows through the pull-to-
+                // refresh spinner, which is gated on exactly this pair of conditions.
+                state.isLoading && state.photos.isEmpty() -> {
                     items(9, span = { GridItemSpan(1) }) {
                         eu.akoos.photos.presentation.common.ShimmerSquare(
                             modifier = Modifier.fillMaxWidth(),
@@ -924,11 +945,16 @@ fun AlbumDetailScreen(
             // device, so gate both like the gallery does. Keep Download visible while a download is
             // mid-flight so its cancel control stays reachable.
             val anyCloudOnlySelected = state.selectedPhotos.any { it !in state.localUriByLinkId }
+            // Taking a copy is not offered for an album someone else shared: those photos live on
+            // the owner's volume, and the supported route to a copy is saving the album into your
+            // own library, which the header action already offers. Same line the hide and cover
+            // affordances draw.
+            val canTakeCopies = !state.isSharedWithMe
             SelectionBottomDock {
                 // Download selected. While the worker runs this item becomes the cancel control:
                 // a determinate ring tracks progress and the caption reads "Cancel".
                 val dl = state.downloadState as? AlbumDownloadState.Working
-                if (anyCloudOnlySelected || isDownloadingSel) {
+                if (canTakeCopies && (anyCloudOnlySelected || isDownloadingSel)) {
                     SelectionDockItem(
                         icon = Icons.Default.FileDownload,
                         label = stringResource(R.string.sel_label_download),
@@ -945,7 +971,7 @@ fun AlbumDetailScreen(
                 }
                 // Make available offline — pins the full-res copy into the app so album photos open
                 // with no connection. A tap toggles: pins the selection, or removes it if all pinned.
-                if (anyCloudOnlySelected) {
+                if (canTakeCopies && anyCloudOnlySelected) {
                     SelectionDockItem(
                         icon = Icons.Default.OfflinePin,
                         label = stringResource(R.string.sel_label_offline),
@@ -961,7 +987,11 @@ fun AlbumDetailScreen(
                         onClick = { showSetCoverConfirm = true },
                     )
                 }
-                if (!state.isSharedWithMe) {
+                // Removing is an edit, so it follows the same right as adding rather than plain
+                // ownership. An editor on a shared album may take photos back out of it, including
+                // ones another member added: album membership records no contributor, so "only your
+                // own" is not answerable, and the official client draws the same line.
+                if (state.canAddPhotos) {
                     SelectionDockItem(
                         icon = Icons.Default.RemoveCircleOutline,
                         label = stringResource(R.string.action_remove),
@@ -1035,7 +1065,11 @@ fun AlbumDetailScreen(
         PhotoShareSheet(
             sheetState = photoShareSheetState,
             canCreateLink = true,
-            showPublicLink = state.selectedCount == 1,
+            // Publishing a photo is the album owner's call and Drive refuses the request from a
+            // guest, so an album shared with this user offers no link to create. The viewer's own
+            // menu already draws this line. Sending a copy to another app stays either way: that
+            // moves bytes the guest can already see and grants nobody access to the album.
+            showPublicLink = state.selectedCount == 1 && !state.isSharedWithMe,
             showShareWithPeople = false,
             onDismiss = { showPhotoShareSheet = false },
             onSendToApp = {
@@ -1060,7 +1094,7 @@ fun AlbumDetailScreen(
             onCreateLink = { viewModel.createSelectedPhotoLink() },
             onCopyLink = {
                 viewModel.currentPublicLinkUrl()?.let { url ->
-                    clipboard.setText(AnnotatedString(url))
+                    copySensitiveText(shareCtx, "Photo link", url)
                     scope.launch { snackbarHostState.showSnackbar(linkCopiedMsg) }
                 }
             },

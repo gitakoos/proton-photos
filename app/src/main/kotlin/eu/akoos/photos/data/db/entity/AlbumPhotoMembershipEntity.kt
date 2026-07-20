@@ -26,9 +26,10 @@ import androidx.room.Entity
 import androidx.room.Index
 
 /**
- * Album ↔ photo edge table. A photo physically lives in the photos root (photo_listing.parentLinkId
- * points at the root, NOT the album), so this join is the only way to enumerate an album's photos
- * for offline reads.
+ * Album ↔ photo edge table. An owned photo lives in the photos root, so its photo_listing row is
+ * parented to the root rather than to the album; only a shared-with-me album's rows carry the
+ * album as their parent. This join is therefore the one way to enumerate an album's photos for
+ * offline reads whichever shape they have.
  */
 @Entity(
     tableName = "album_photo_membership",

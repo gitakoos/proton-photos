@@ -38,6 +38,7 @@ import eu.akoos.photos.data.db.dao.PerceptualHashDao
 import eu.akoos.photos.data.db.dao.PhotoListingDao
 import eu.akoos.photos.data.db.dao.SyncStateDao
 import eu.akoos.photos.data.db.dao.DayMetaDao
+import eu.akoos.photos.data.db.entity.PhotoListingEntity
 import eu.akoos.photos.data.hidden.HiddenStorageManager
 import eu.akoos.photos.data.offline.OfflineStorageManager
 import eu.akoos.photos.data.repository.drive.AlbumService
@@ -60,6 +61,7 @@ import eu.akoos.photos.domain.entity.ShareInvitation
 import eu.akoos.photos.domain.entity.ShareMember
 import eu.akoos.photos.domain.entity.SharedPhoto
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
+import eu.akoos.photos.util.combineSqlChunks
 import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -142,6 +144,9 @@ class DrivePhotoRepositoryImpl @Inject constructor(
     override suspend fun loadAlbumsCached(): List<Album> =
         albumService.loadAlbumsCached()
 
+    override suspend fun loadSharedAddableAlbumsCached(): List<Album> =
+        albumService.loadSharedAddableAlbumsCached()
+
     override suspend fun prefetchAlbumsMembership(userId: UserId, albums: List<Album>) =
         albumService.prefetchAlbumsMembership(userId, albums)
 
@@ -163,15 +168,31 @@ class DrivePhotoRepositoryImpl @Inject constructor(
     override suspend fun loadAlbumPhotosCached(albumLinkId: String): List<CloudPhoto> =
         albumService.loadAlbumPhotosCached(albumLinkId)
 
+    /**
+     * Routes by where the album lives. An album on this user's own volume takes the add-to-album
+     * call; one shared with them lives on the sharer's volume, where a membership cannot reference
+     * a photo of ours, so it goes through a cross-volume copy instead.
+     *
+     * The lookup is cache-only and falls through to the owned path when it finds nothing, which is
+     * the common case: only shared-with-me albums carry a sharer, so an unknown album is treated as
+     * ours exactly as before.
+     */
     override suspend fun addPhotosToAlbum(
         userId: UserId,
         albumLinkId: String,
         photoLinkIds: List<String>,
-    ): DrivePhotoRepository.AddPhotosToAlbumResult =
-        albumService.addPhotosToAlbum(userId, albumLinkId, photoLinkIds)
+    ): DrivePhotoRepository.AddPhotosToAlbumResult {
+        val sharedAlbum = runCatching { albumService.loadSharedAddableAlbumsCached() }
+            .getOrNull().orEmpty().firstOrNull { it.linkId == albumLinkId }
+        return if (sharedAlbum != null) {
+            albumSharingService.addPhotosToSharedAlbum(userId, sharedAlbum, photoLinkIds)
+        } else {
+            albumService.addPhotosToAlbum(userId, albumLinkId, photoLinkIds)
+        }
+    }
 
-    override suspend fun deleteAlbum(userId: UserId, albumLinkId: String): Unit =
-        albumService.deleteAlbum(userId, albumLinkId)
+    override suspend fun deleteAlbum(userId: UserId, albumLinkId: String, deletePhotosToo: Boolean): Unit =
+        albumService.deleteAlbum(userId, albumLinkId, deletePhotosToo)
 
     override suspend fun getAlbumMemberships(userId: UserId): Map<String, String> =
         albumService.getAlbumMemberships(userId)
@@ -179,11 +200,22 @@ class DrivePhotoRepositoryImpl @Inject constructor(
     override suspend fun getAlbumIdsByPhoto(userId: UserId): Map<String, Set<String>> =
         albumService.getAlbumIdsByPhoto(userId)
 
+    /**
+     * Routed the same way as the add: an album shared with this user sits on the sharer's volume,
+     * so the request has to be addressed there. Unlike the add it needs nothing else, since
+     * dropping a membership never leaves the album's own volume.
+     */
     override suspend fun removePhotosFromAlbum(
         userId: UserId,
         albumLinkId: String,
         photoLinkIds: List<String>,
-    ): List<String> = albumService.removePhotosFromAlbum(userId, albumLinkId, photoLinkIds)
+    ): List<String> {
+        val sharedAlbum = runCatching { albumService.loadSharedAddableAlbumsCached() }
+            .getOrNull().orEmpty().firstOrNull { it.linkId == albumLinkId }
+        return albumService.removePhotosFromAlbum(
+            userId, albumLinkId, photoLinkIds, albumVolumeId = sharedAlbum?.volumeId,
+        )
+    }
 
     override suspend fun renameAlbum(userId: UserId, albumLinkId: String, newName: String): Unit =
         albumService.renameAlbum(userId, albumLinkId, newName)
@@ -216,12 +248,11 @@ class DrivePhotoRepositoryImpl @Inject constructor(
     override suspend fun retryPendingOrphanDeletes(userId: UserId) =
         uploadService.retryPendingOrphanDeletes(userId)
 
-    override suspend fun renameOrCopyCloudPhoto(
+    override suspend fun copyCloudPhotoAs(
         userId: UserId,
         photo: CloudPhoto,
         newName: String,
-        trashOriginal: Boolean,
-    ): String = cloudTrashService.renameOrCopyCloudPhoto(userId, photo, newName, trashOriginal)
+    ): String = cloudTrashService.copyCloudPhotoAs(userId, photo, newName)
 
     override suspend fun setCloudFavorite(userId: UserId, photo: CloudPhoto, favorite: Boolean): Boolean =
         cloudTrashService.setCloudFavorite(userId, photo, favorite)
@@ -370,7 +401,11 @@ class DrivePhotoRepositoryImpl @Inject constructor(
         albumSharingService.loadSharedByMePhotos(userId)
 
     override fun observeSharedByMePhotos(linkIds: List<String>): Flow<List<SharedPhoto>> =
-        photoListingDao.observeByLinkIds(linkIds).map { rows ->
+        // Chunked: the shared-by-me feed grows with how much the user has shared. The comparator
+        // restates observeByLinkIds' ORDER BY, though the feed order below is what actually ships.
+        linkIds.combineSqlChunks(compareByDescending<PhotoListingEntity> { it.captureTime }) { chunk ->
+            photoListingDao.observeByLinkIds(chunk)
+        }.map { rows ->
             val byId = rows.associateBy { it.linkId }
             // Preserve the caller's order (the feed order) and drop rows the DB doesn't have yet.
             linkIds.mapNotNull { id ->

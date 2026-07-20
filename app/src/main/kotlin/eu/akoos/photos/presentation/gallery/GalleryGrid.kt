@@ -98,6 +98,7 @@ import coil.request.ImageRequest
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.presentation.common.DenseGridWarningDialog
+import eu.akoos.photos.presentation.common.ReturnToViewerPhoto
 import eu.akoos.photos.presentation.memories.OnThisDayCarousel
 import eu.akoos.photos.presentation.memories.OnThisDayCard
 import eu.akoos.photos.presentation.theme.Accent
@@ -445,6 +446,34 @@ internal fun PhotoGrid(
         tapGuard = tapGuard,
         enabled = dragSelectEnabled,
     )
+
+    // Land back on the photo the viewer closed on. Both layouts emit the same shape around their
+    // photos, the optional banner and On-this-day row first and then one header per group, so one
+    // description of it serves both. In None grouping the single bucket gets no header, which is
+    // exactly the flat case an empty group list means.
+    val returnLeadingSlots =
+        (if (permissionState == PermissionState.Denied ||
+                permissionState == PermissionState.PermanentlyDenied) 1 else 0) +
+        (if (showOnThisDay && onThisDayByYear.isNotEmpty()) 1 else 0)
+    val returnGroups = remember(grouped) { grouped.map { (_, groupItems) -> groupItems } }
+    val returnHasHeaders = effectiveGrouping != TimelineGrouping.None
+    if (mosaicGrid) {
+        ReturnToViewerPhoto(
+            gridState = staggeredState,
+            groups = returnGroups,
+            headerPerGroup = returnHasHeaders,
+            leadingSlots = returnLeadingSlots,
+            keyOf = { it.stableId },
+        )
+    } else {
+        ReturnToViewerPhoto(
+            gridState = gridState,
+            groups = returnGroups,
+            headerPerGroup = returnHasHeaders,
+            leadingSlots = returnLeadingSlots,
+            keyOf = { it.stableId },
+        )
+    }
 
     if (mosaicGrid) {
         MosaicPhotoGrid(

@@ -166,14 +166,12 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -197,6 +195,7 @@ import eu.akoos.photos.presentation.common.DenseGridWarningDialog
 import eu.akoos.photos.presentation.common.EmptyState
 import eu.akoos.photos.presentation.common.ErrorPopup
 import eu.akoos.photos.util.sanitizeErrorMessage
+import eu.akoos.photos.util.copySensitiveText
 import eu.akoos.photos.presentation.albums.AlbumsScreen
 import eu.akoos.photos.presentation.albums.AlbumsViewModel
 import eu.akoos.photos.presentation.shared.SharedScreen
@@ -759,7 +758,6 @@ fun GalleryScreen(
     val shareSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val manageLinkSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val publicLinkState by viewModel.publicLinkState.collectAsStateWithLifecycle()
-    val clipboard = LocalClipboardManager.current
     val linkCopiedMsg = stringResource(R.string.share_link_copied)
     val passwordSetMsg = stringResource(R.string.share_password_set)
     val passwordRemovedMsg = stringResource(R.string.share_password_removed)
@@ -1290,7 +1288,7 @@ fun GalleryScreen(
     if (showAddToAlbumSheet && state.selectedItems.isNotEmpty()) {
         GalleryAddToAlbumDialog(
             selectedItems = state.selectedItems,
-            cloudAlbums = albumsState.albums,
+            cloudAlbums = albumsState.addableAlbums,
             sheetState = addToAlbumSheetState,
             onCreateNew = {
                 showAddToAlbumSheet = false
@@ -1357,7 +1355,7 @@ fun GalleryScreen(
             onUploadAndCreate = { viewModel.uploadAndCreateSelectedLink() },
             onCopyLink = {
                 viewModel.currentPublicLinkUrl()?.let { url ->
-                    clipboard.setText(AnnotatedString(url))
+                    copySensitiveText(context, "Photo link", url)
                     tabScope.launch { snackbarHostState.showSnackbar(linkCopiedMsg) }
                 }
             },
@@ -1508,7 +1506,11 @@ internal fun GalleryAddToAlbumPickerSheet(
                             }
                             Text(
                                 stringResource(
-                                    R.string.gallery_album_picker_count_drive,
+                                    // Someone else's album reads "Shared" instead of "Drive", so a
+                                    // row that adds to another person's album is never mistaken for
+                                    // one of your own.
+                                    if (album.isSharedWithMe) R.string.gallery_album_picker_count_shared
+                                    else R.string.gallery_album_picker_count_drive,
                                     androidx.compose.ui.res.pluralStringResource(
                                         R.plurals.count_photos_plural, album.photoCount, album.photoCount,
                                     ),

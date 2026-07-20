@@ -885,7 +885,7 @@ class PhotoUploadService @Inject constructor(
             //   • createFileByVolume (useVolumeEndpoints=true) → commitRevisionByVolume (v2)
             //     The v2 endpoint implicitly commits all uploaded blocks/thumbnails via CDN.
             //     No BlockList or ThumbnailList needed in the request body.
-            //   • createPhoto / stream path (useVolumeEndpoints=false) → legacy share-based commit
+            //   • stream path (useVolumeEndpoints=false) → legacy share-based commit
             //     Requires explicit BlockList, ThumbnailList, ContentKeyPacket in the request.
             // Drive's wire ContentHash on a photo upload is HMAC-SHA256(rootNodeHashKey, sha256-hex-of-content),
             // NOT the bare SHA-256 of the content. Drive web's `photosTransferPayloadBuilder` rejects
@@ -944,6 +944,14 @@ class PhotoUploadService @Inject constructor(
                 }
             }
             Log.d(TAG, "uploadFile: committed fileId=$fileId v2=$useVolumeEndpoints (thumbnails=${committedThumbs.map { it.type }})")
+
+            // The node is committed and is the user's photo now, so it must never be a cleanup
+            // target again. Everything below this line still writes (upload tracking, the DB row),
+            // and a throw from any of it lands in the non-retryable branch further down, which
+            // deletes whatever these two still point at. Clearing them here is what stops that
+            // branch from reaching a live photo.
+            orphanFileId = null
+            orphanShareId = null
 
             // Track this upload so refreshCloudPhotos doesn't delete it if the photo
             // stream is temporarily unavailable. Persisted so a process restart between this

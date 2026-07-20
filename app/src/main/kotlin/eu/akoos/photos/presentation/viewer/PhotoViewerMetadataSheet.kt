@@ -73,6 +73,7 @@ import eu.akoos.photos.presentation.theme.FgDim
 import eu.akoos.photos.presentation.theme.FgMute
 import eu.akoos.photos.presentation.theme.FgPrimary
 import eu.akoos.photos.presentation.theme.Line2
+import eu.akoos.photos.presentation.util.formatBytes
 import eu.akoos.photos.util.MetadataStripConfig
 import eu.akoos.photos.util.PhotoMetadata
 import java.text.SimpleDateFormat
@@ -554,9 +555,3 @@ internal fun formatExifDateTime(raw: String): String = try {
     val parsed = SimpleDateFormat("yyyy:MM:dd HH:mm:ss", Locale.US).parse(raw.trim())
     if (parsed != null) SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(parsed) else raw
 } catch (_: Exception) { raw }
-
-internal fun formatBytes(bytes: Long): String = when {
-    bytes >= 1_000_000 -> "%.1f MB".format(bytes / 1_000_000.0)
-    bytes >= 1_000     -> "%.0f KB".format(bytes / 1_000.0)
-    else               -> "$bytes B"
-}

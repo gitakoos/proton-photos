@@ -230,7 +230,7 @@ class CalendarViewModel @Inject constructor(
         if (terms.isEmpty()) return emptyList()
 
         // Pull EVERY DayMeta row so each annotated day's description is in the haystack below.
-        // Biasing the fetch on one term used to drop matches whose term lived only in the
+        // Biasing the fetch on one term would drop matches whose term lives only in the
         // description of a row the bias filtered out; the table is small (one row per annotated
         // day), so loading all of it is cheap and correct.
         val uid = primaryUserId

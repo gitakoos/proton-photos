@@ -281,6 +281,7 @@
     <string name="gallery_create_album_failed">Nie udało się utworzyć albumu: %1$s</string>
     <string name="gallery_enable_metadata_category">Najpierw włącz kategorię metadanych w Ustawienia → Prywatność</string>
     <string name="gallery_album_picker_count_drive">%1$s · Drive</string>
+    <string name="gallery_album_picker_count_shared">%1$s · Drive · Udostępniony</string>
     <string name="album_add_photos">Dodaj zdjęcia</string>
     <string name="album_picker_title">Dodaj do albumu</string>
     <string name="album_picker_selected">Wybrano: %1$d</string>
@@ -686,6 +687,9 @@
     <string name="albums_rename_same_name">Nowa nazwa jest taka sama jak obecna</string>
     <string name="albums_rename_failed">Zmiana nazwy nie powiodła się</string>
     <string name="albums_delete_failed">Nie udało się usunąć albumu: %1$s</string>
+    <string name="albums_delete_would_lose_title">Część zdjęć jest tylko tutaj</string>
+    <string name="albums_delete_would_lose_body">Osoby, którym udostępniono ten album, dodały zdjęcia, których nie ma w Twojej bibliotece. Usunięcie albumu usunie także te zdjęcia.</string>
+    <string name="albums_delete_would_lose_action">Usuń mimo to</string>
     <string name="albums_renamed_to">Zmieniono nazwę na „%1$s”</string>
 
     <!-- Share -->
@@ -749,6 +753,7 @@
     <string name="shared_empty_with_me_body">Albumy udostępnione Tobie pojawią się tutaj.</string>
     <string name="shared_empty_by_me_body">Udostępnij album lub zdjęcie, aby zobaczyć je tutaj.</string>
     <string name="shared_by_email">przez %1$s</string>
+    <string name="shared_by_email_full">Udostępnił(a) %1$s</string>
     <string name="shared_photo_count">%1$d zdjęć</string>
     <string name="shared_by_me_photos_section">Udostępnione zdjęcia</string>
 
@@ -1087,7 +1092,7 @@
     <string name="rename_sheet_subtitle_local">Wybierz, jak zastosować nową nazwę na tym urządzeniu.</string>
     <string name="rename_sheet_name_label">Nazwa pliku</string>
     <string name="rename_sheet_option_cloud_title">Zmień nazwę w chmurze</string>
-    <string name="rename_sheet_option_cloud_subtitle">Wysyła pod nową nazwą, a następnie przenosi oryginał do Ostatnio usuniętych.</string>
+    <string name="rename_sheet_option_cloud_subtitle">Zmienia nazwę zdjęcia bezpośrednio w Drive, bez tworzenia kopii.</string>
     <string name="rename_sheet_option_local_title">Zmień nazwę oryginału</string>
     <string name="rename_sheet_option_local_subtitle">Aktualizuje plik w miejscu na Twoim urządzeniu.</string>
     <string name="rename_sheet_option_copy_title">Zapisz jako kopię</string>
@@ -1295,6 +1300,12 @@
     <string name="whats_new_hide_backed">Zielona chmura, na telefonie i w kopii zapasowej: pozostaje na urządzeniu, więc inne aplikacje nadal je pokazują. Ta aplikacja ukrywa je tylko tutaj, za blokadą Ukrytych zdjęć; kopia w chmurze nigdy nie jest przenoszona, zmieniana ani usuwana.</string>
     <string name="whats_new_hide_cloud">Biała chmura, tylko w chmurze: ta aplikacja ukrywa je tylko tutaj, za blokadą Ukrytych zdjęć. Kopia w chmurze pozostaje dokładnie taka sama i nigdy nie jest przenoszona, zmieniana ani usuwana.</string>
     <string name="whats_new_hide_albums">Możesz też ukryć cały album w chmurze, a wszystko można cofnąć.</string>
+    <string name="whats_new_shared_add_title">Dodaj do udostępnionego albumu</string>
+    <string name="whats_new_shared_add_body">Gdy ktoś udostępni ci album i pozwoli go edytować, możesz dodać do niego własne zdjęcia i ponownie je usunąć.</string>
+    <string name="whats_new_viewer_place_title">Zapamiętuje twoje miejsce</string>
+    <string name="whats_new_viewer_place_body">Usunięcie zdjęcia przechodzi do następnego, zamiast zamykać widok zdjęcia. Po powrocie do siatki trafiasz na ostatnio oglądane zdjęcie, a nie na to, które zostało otwarte.</string>
+    <string name="whats_new_album_guard_title">Sprawdzenie przed usunięciem albumu</string>
+    <string name="whats_new_album_guard_body">Jeśli album jest jedynym miejscem, w którym przechowywane są niektóre jego zdjęcia, usunięcie najpierw pyta o potwierdzenie.</string>
     <string name="whats_new_dup_title">Znajdź duplikaty zdjęć</string>
     <string name="whats_new_dup_body">Wykrywa dokładne kopie i wizualnie podobne ujęcia, a następnie bezpiecznie zachowasz jedno i usuniesz resztę.</string>
     <string name="whats_new_offline_title">Dostępne offline</string>
@@ -1313,7 +1324,7 @@
     <string name="whats_new_scrubber_body">Przewijaj wideo z podglądem taśmy filmowej i przechodź po jednej klatce.</string>
     <string name="whats_new_album_title">Sprytniejsze albumy</string>
     <string name="whats_new_album_body">Zobacz, w których albumach jest już wybrane zdjęcie, i przefiltruj wybór do zdjęć, których nie ma jeszcze w żadnym albumie.</string>
-    <string name="whats_new_more">Do tego adaptacyjna ikona aplikacji, warstwa szybkich akcji dla zrzutów ekranu, bezpieczniejsze usuwanie przez kosz systemowy, bardziej niezawodne daty oraz większa stabilność przy bardzo dużych bibliotekach.</string>
+    <string name="whats_new_more">Do tego skopiowane linki pozostają ukryte w podglądzie schowka, rozmiary plików zgadzają się wszędzie tam, gdzie się pojawiają, automatyczne zwalnianie miejsca sprawdza w Drive przed usunięciem kopii z telefonu, a duże albumy i zaznaczenia działają stabilniej.</string>
     <string name="offline_card_subtitle">Zdjęcia zapisane do przeglądania offline</string>
     <string name="duplicates_filter_identical">Identyczne</string>
     <string name="duplicates_filter_similar">Podobne</string>
@@ -1356,7 +1367,7 @@
     <string name="action_remove">Usuń</string>
     <string name="gallery_add_to_album_queued">Zdjęcia zostaną dodane po zakończeniu przesyłania</string>
     <string name="share_role_can_view_desc">Może oglądać album i jego zdjęcia.</string>
-    <string name="share_role_can_edit_desc">Może dodawać i usuwać zdjęcia oraz zmieniać okładkę.</string>
+    <string name="share_role_can_edit_desc">Może dodawać i usuwać zdjęcia.</string>
     <string name="settings_show_selection_labels">Etykiety przycisków</string>
     <string name="settings_show_selection_labels_desc">Pokazuje krótką etykietę pod każdym przyciskiem podczas zaznaczania zdjęć, aby było jasne, co robi każdy z nich.</string>
     <string name="sel_label_download">Pobierz</string>

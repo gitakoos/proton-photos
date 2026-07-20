@@ -53,7 +53,7 @@
     <string name="onboarding_album_mirror_add_custom">Aggiungi nome personalizzato</string>
 
     <string name="onboarding_about_title">Client indipendente di terze parti</string>
-    <string name="onboarding_about_subtitle">Realizzato da uno sviluppatore. Senza alcun legame con Proton AG. Codice sorgente disponibile, licenza GPL, nessuna telemetria nostra.</string>
+    <string name="onboarding_about_subtitle">Realizzato da uno sviluppatore. Senza alcun legame con Proton AG. Codice sorgente disponibile, licenza GPL, nessuna telemetria propria.</string>
     <string name="onboarding_about_author_subtitle">Sito personale dello sviluppatore.</string>
     <string name="onboarding_about_github_subtitle">Codice sorgente completo su GitHub.</string>
 
@@ -619,6 +619,7 @@
     <string name="shared_empty_with_me_body">Gli album condivisi con te appariranno qui.</string>
     <string name="shared_empty_by_me_body">Condividi un album o una foto per vederlo qui.</string>
     <string name="shared_by_email">da %1$s</string>
+    <string name="shared_by_email_full">Condiviso da %1$s</string>
     <string name="shared_photo_count">%1$d foto</string>
     <string name="shared_by_me_photos_section">Foto condivise</string>
 
@@ -934,7 +935,7 @@
     <string name="rename_sheet_subtitle_local">Scegli come applicare il nuovo nome su questo dispositivo.</string>
     <string name="rename_sheet_name_label">Nome file</string>
     <string name="rename_sheet_option_cloud_title">Rinomina nel cloud</string>
-    <string name="rename_sheet_option_cloud_subtitle">Carica con il nuovo nome, poi sposta l\'originale in Eliminati di recente.</string>
+    <string name="rename_sheet_option_cloud_subtitle">Rinomina la foto direttamente su Drive, senza crearne una copia.</string>
     <string name="rename_sheet_option_local_title">Rinomina originale</string>
     <string name="rename_sheet_option_local_subtitle">Aggiorna il file direttamente sul tuo dispositivo.</string>
     <string name="rename_sheet_option_copy_title">Salva come copia</string>
@@ -1109,6 +1110,7 @@
     <string name="gallery_create_album_failed">Impossibile creare l\'album: %1$s</string>
     <string name="gallery_enable_metadata_category">Attiva prima una categoria di metadati in Impostazioni → Privacy</string>
     <string name="gallery_album_picker_count_drive">%1$s · Drive</string>
+    <string name="gallery_album_picker_count_shared">%1$s · Drive · Condiviso</string>
     <string name="album_add_photos">Aggiungi foto</string>
     <string name="album_picker_title">Aggiungi all\'album</string>
     <string name="album_picker_selected">%1$d selezionate</string>
@@ -1121,6 +1123,9 @@
     <string name="albums_rename_same_name">Il nuovo nome è uguale a quello attuale</string>
     <string name="albums_rename_failed">Ridenominazione non riuscita</string>
     <string name="albums_delete_failed">Impossibile eliminare l\'album: %1$s</string>
+    <string name="albums_delete_would_lose_title">Alcune foto esistono solo qui</string>
+    <string name="albums_delete_would_lose_body">Le persone con cui hai condiviso questo album hanno aggiunto foto che non sono nella tua libreria. Eliminando l\'album vengono eliminate anche quelle foto.</string>
+    <string name="albums_delete_would_lose_action">Elimina comunque</string>
     <string name="albums_renamed_to">Rinominato in \"%1$s\"</string>
 
     <string name="cd_album_fully_backed_up">Backup completo</string>
@@ -1258,6 +1263,12 @@
     <string name="whats_new_hide_backed">Nuvola verde, sul telefono e con backup: resta sul tuo dispositivo, quindi le altre app continuano a mostrarla. Questa app la nasconde solo qui, dietro il blocco di Foto nascoste; la tua copia nel cloud non viene mai spostata, modificata né eliminata.</string>
     <string name="whats_new_hide_cloud">Nuvola bianca, solo nel cloud: questa app la nasconde solo qui, dietro il blocco di Foto nascoste. La tua copia nel cloud resta esattamente com\'è, senza mai essere spostata, modificata né eliminata.</string>
     <string name="whats_new_hide_albums">Puoi nascondere anche un intero album del cloud, e tutto è reversibile.</string>
+    <string name="whats_new_shared_add_title">Aggiungi a un album condiviso</string>
+    <string name="whats_new_shared_add_body">Quando qualcuno condivide un album con te e ti permette di modificarlo, puoi aggiungere le tue foto e rimuoverle di nuovo.</string>
+    <string name="whats_new_viewer_place_title">Ricorda il tuo punto</string>
+    <string name="whats_new_viewer_place_body">Eliminando una foto si passa alla successiva invece di chiudere la vista foto. Tornando alla griglia arrivi sull\'ultima foto vista, non su quella che avevi aperto.</string>
+    <string name="whats_new_album_guard_title">Un controllo prima di eliminare un album</string>
+    <string name="whats_new_album_guard_body">Se un album è l\'unico posto in cui sono conservate alcune delle sue foto, l\'eliminazione chiede prima conferma.</string>
     <string name="whats_new_dup_title">Trova foto duplicate</string>
     <string name="whats_new_dup_body">Individua le copie esatte e gli scatti visivamente simili, poi tieni una foto in sicurezza ed elimina il resto.</string>
     <string name="whats_new_offline_title">Disponibile offline</string>
@@ -1276,7 +1287,7 @@
     <string name="whats_new_scrubber_body">Scorri un video con un\'anteprima a striscia di pellicola e avanza un fotogramma alla volta.</string>
     <string name="whats_new_album_title">Album più intelligenti</string>
     <string name="whats_new_album_body">Vedi in quali album è già presente una foto che hai scelto e filtra il selettore sulle foto non ancora in alcun album.</string>
-    <string name="whats_new_more">Inoltre un\'icona dell\'app adattiva, un livello di azioni rapide per gli screenshot, una rimozione più sicura tramite il cestino di sistema, date più affidabili e maggiore stabilità con librerie molto grandi.</string>
+    <string name="whats_new_more">Inoltre i link copiati restano nascosti nell\'anteprima degli appunti, le dimensioni dei file coincidono ovunque compaiano, la liberazione automatica verifica su Drive prima di rimuovere una copia dal telefono, e gli album e le selezioni di grandi dimensioni reggono meglio.</string>
     <string name="offline_card_subtitle">Foto salvate per la visualizzazione offline</string>
     <string name="duplicates_filter_identical">Identiche</string>
     <string name="duplicates_filter_similar">Simili</string>
@@ -1328,7 +1339,7 @@
     <string name="action_remove">Rimuovi</string>
     <string name="gallery_add_to_album_queued">Le foto verranno aggiunte al termine del caricamento</string>
     <string name="share_role_can_view_desc">Può vedere l\'album e le sue foto.</string>
-    <string name="share_role_can_edit_desc">Può aggiungere e rimuovere foto e cambiare la copertina.</string>
+    <string name="share_role_can_edit_desc">Può aggiungere e rimuovere foto.</string>
     <string name="settings_show_selection_labels">Etichette dei pulsanti</string>
     <string name="settings_show_selection_labels_desc">Mostra una breve etichetta sotto ogni pulsante quando selezioni le foto, così è chiaro cosa fa ciascuno.</string>
     <string name="sel_label_download">Scarica</string>

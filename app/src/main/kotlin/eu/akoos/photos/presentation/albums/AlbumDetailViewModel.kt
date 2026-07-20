@@ -38,13 +38,13 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.retryWhen
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
@@ -75,6 +75,12 @@ import eu.akoos.photos.util.retryOnDbTear
 import eu.akoos.photos.util.sanitizeErrorMessage
 import eu.akoos.photos.worker.AlbumDownloadWorker
 import javax.inject.Inject
+
+/** How many times the album's photo observe may re-subscribe before the failure reaches the screen.
+ *  Enough to ride out a torn cursor window during a chunked upsert, too few to mask a read that
+ *  cannot succeed at all: that one would otherwise leave the grid on its skeleton with nothing
+ *  said. */
+private const val PHOTO_OBSERVE_MAX_RETRIES = 5L
 
 /** Summary of a bulk invite-by-email batch. [failures] is the raw error message per failed email. */
 data class InviteBatchResult(
@@ -171,10 +177,19 @@ data class AlbumDetailUiState(
     val isLeavingAlbum: Boolean = false,
     /** Set true on leave success so the screen pops back; the ViewModel never navigates on its own. */
     val leaveAlbumDone: Boolean = false,
+    /** True when this is a shared-with-me album the sharer granted edit rights on. */
+    val sharedAlbumIsEditable: Boolean = false,
 ) {
     val isSelectionMode: Boolean get() = selectedPhotos.isNotEmpty()
     val selectedCount: Int get() = selectedPhotos.size
     val isSharedWithMe: Boolean get() = sharedByEmail != null
+
+    /**
+     * Whether to offer adding photos here. Owning the album is enough; a shared one needs the edit
+     * grant, and an album whose grant is not known yet counts as read-only, so the button never
+     * appears for something the server would refuse.
+     */
+    val canAddPhotos: Boolean get() = !isSharedWithMe || sharedAlbumIsEditable
 }
 
 data class SaveToLibraryResult(
@@ -309,6 +324,14 @@ class AlbumDetailViewModel @Inject constructor(
             shareId = shareId, sharedByEmail = sharedByEmail, volumeId = volumeId, error = null,
         ) }
         albumJob = viewModelScope.launch {
+            // The edit grant comes from the cached shared-with-me set rather than a navigation
+            // argument: it is a property of the share that can change without the user reopening
+            // the screen, and the cached list is already filtered to what this user may add to.
+            if (sharedByEmail != null) {
+                val editable = runCatching { driveRepo.loadSharedAddableAlbumsCached() }
+                    .getOrNull().orEmpty().any { it.linkId == albumLinkId }
+                _uiState.update { it.copy(sharedAlbumIsEditable = editable) }
+            }
             // Phase 1: instant cache read so re-opening feels free. Pre-migration rows (parentLinkId == null) miss here.
             val cached = runCatching { driveRepo.loadAlbumPhotosCached(albumLinkId) }.getOrNull().orEmpty()
             if (cached.isNotEmpty()) {
@@ -407,17 +430,12 @@ class AlbumDetailViewModel @Inject constructor(
         observeJob?.cancel()
         observedLinkIds = linkIds
         observeJob = viewModelScope.launch {
+            // A large album's full-row read can land mid-chunk-upsert (the album load upserts photos
+            // in batches while this observe is live) and throw a transient CursorWindow error, so
+            // re-subscribe rather than let it reach the collector as a force-close. Capped, because a
+            // read that keeps failing is not a torn window and no number of retries will fix it.
             val photosFlow = driveRepo.observePhotosByLinkIds(linkIds)
-                .retryWhen { cause, attempt ->
-                    // A large album's full-row read can land mid-chunk-upsert (the album load
-                    // upserts photos in batches while this observe is live) and throw a transient
-                    // CursorWindow error. retryWhen re-subscribes so the grid refills on the next
-                    // emission instead of an uncaught force-close; back off, capped, so a
-                    // persistently-failing read can't spin the CPU.
-                    android.util.Log.w("AlbumDetailVM", "album photo observe failed (attempt $attempt), retrying: ${cause.message}")
-                    kotlinx.coroutines.delay((500L * (attempt + 1)).coerceAtMost(5_000L))
-                    true
-                }
+                .retryOnDbTear("AlbumDetailVM", maxAttempts = PHOTO_OBSERVE_MAX_RETRIES)
             // Drop members hidden individually (a cloud photo hidden here or from another surface) or
             // that belong to a hidden album. The album observes its members directly, bypassing the
             // global timeline filter, so an already-hidden member would otherwise still show here. A
@@ -434,6 +452,12 @@ class AlbumDetailViewModel @Inject constructor(
                 val hidden = if (_uiState.value.albumLinkId in hiddenAlbumIds) emptySet() else hiddenMembers
                 dbRows to hidden
             }
+                // Terminal failure of the observe, past its retry cap. Surfacing it drops the skeleton
+                // and says what went wrong, where a swallowed one leaves the album loading forever.
+                .catch { e ->
+                    Log.e("AlbumDetailVM", "album photo observe gave up", e)
+                    _uiState.update { it.copy(isLoading = false, error = sanitizeErrorMessage(e.message)) }
+                }
                 .collect { (dbRows, hidden) ->
                 val byId = dbRows.associateBy { it.linkId }
                 val ordered = linkIds.mapNotNull { byId[it] }
@@ -816,8 +840,16 @@ class AlbumDetailViewModel @Inject constructor(
                     .fold(
                         onSuccess = { removed ->
                             val removedSet = removed.toSet()
-                            // Removal is reversible: offer Undo to re-add exactly the confirmed ones.
-                            if (removed.isNotEmpty()) {
+                            // Removal is reversible on your own album: Undo re-adds exactly the
+                            // confirmed ones.
+                            //
+                            // Not offered on a shared album, because the undo cannot honour it. Its
+                            // photos live on the sharer's volume, so re-adding them is a membership
+                            // change there, while the add path this undo calls copies a photo from
+                            // this device's own volume and would not find them. An Undo that
+                            // silently does nothing is worse than no Undo, so the button stays away
+                            // until the membership re-add exists.
+                            if (removed.isNotEmpty() && !_uiState.value.isSharedWithMe) {
                                 undoController.offer(
                                     eu.akoos.photos.presentation.common.UndoAction.AlbumRemove(albumLinkId, removed),
                                 )

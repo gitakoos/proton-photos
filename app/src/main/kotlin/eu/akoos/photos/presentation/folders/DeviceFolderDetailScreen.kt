@@ -100,6 +100,7 @@ import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.presentation.common.anyHideable
 import eu.akoos.photos.presentation.common.ConfirmSheet
 import eu.akoos.photos.presentation.common.IconBubble
+import eu.akoos.photos.presentation.common.ReturnToViewerPhoto
 import eu.akoos.photos.presentation.common.SelectionBottomDock
 import eu.akoos.photos.presentation.common.SelectionDockItem
 import eu.akoos.photos.presentation.common.SelectionTopBar
@@ -130,6 +131,7 @@ import eu.akoos.photos.presentation.theme.FgPrimary
 import eu.akoos.photos.presentation.theme.PillBg
 import eu.akoos.photos.presentation.theme.PillBgOpaque
 import eu.akoos.photos.presentation.theme.PillBorder
+import eu.akoos.photos.util.copySensitiveText
 
 /**
  * Browse one device folder's photos and upload selected ones to Drive. Long-press to enter
@@ -194,7 +196,6 @@ fun DeviceFolderDetailScreen(
     var showManageLinkSheet by remember { mutableStateOf(false) }
     val manageLinkSheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val publicLinkState by viewModel.publicLinkState.collectAsStateWithLifecycle()
-    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
     val linkCopiedMsg = stringResource(R.string.album_link_copied)
     val albums by viewModel.albums.collectAsStateWithLifecycle()
 
@@ -324,6 +325,17 @@ fun DeviceFolderDetailScreen(
             selected = selectedUris,
             onSelectionChange = viewModel::setSelectedUris,
             tapGuard = tapGuard,
+        )
+        // Land back on the photo the viewer closed on. The hero header is the one slot ahead of the
+        // photos, and each month bucket carries its own header. The cells key a Synced photo by its
+        // local uri, but the viewer is handed the items themselves, so match on the gallery identity.
+        val returnGroups = remember(photoGroups) { photoGroups.values.toList() }
+        ReturnToViewerPhoto(
+            gridState = gridState,
+            groups = returnGroups,
+            headerPerGroup = true,
+            leadingSlots = 1,
+            keyOf = { it.value.stableId },
         )
         LazyVerticalGrid(
             columns = GridCells.Fixed(cols),
@@ -743,7 +755,7 @@ fun DeviceFolderDetailScreen(
                 onCreateLink = { viewModel.uploadAndCreateSelectedLink() },
                 onCopyLink = {
                     viewModel.currentPublicLinkUrl()?.let { url ->
-                        clipboard.setText(androidx.compose.ui.text.AnnotatedString(url))
+                        copySensitiveText(shareCtx, "Photo link", url)
                         scope.launch { snackbarHostState.showSnackbar(linkCopiedMsg) }
                     }
                 },

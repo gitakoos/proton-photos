@@ -619,6 +619,7 @@
     <string name="shared_empty_with_me_body">Mit dir geteilte Alben erscheinen hier.</string>
     <string name="shared_empty_by_me_body">Teile ein Album oder ein Foto, um es hier zu sehen.</string>
     <string name="shared_by_email">von %1$s</string>
+    <string name="shared_by_email_full">Geteilt von %1$s</string>
     <string name="shared_photo_count">%1$d Fotos</string>
     <string name="shared_by_me_photos_section">Geteilte Fotos</string>
 
@@ -924,7 +925,7 @@
     <string name="rename_sheet_subtitle_local">Wähle, wie der neue Name auf diesem Gerät angewendet wird.</string>
     <string name="rename_sheet_name_label">Dateiname</string>
     <string name="rename_sheet_option_cloud_title">In der Cloud umbenennen</string>
-    <string name="rename_sheet_option_cloud_subtitle">Lädt unter dem neuen Namen hoch und verschiebt das Original in „Zuletzt gelöscht“.</string>
+    <string name="rename_sheet_option_cloud_subtitle">Benennt das Foto direkt in Drive um, ohne eine Kopie anzulegen.</string>
     <string name="rename_sheet_option_local_title">Original umbenennen</string>
     <string name="rename_sheet_option_local_subtitle">Aktualisiert die Datei direkt auf deinem Gerät.</string>
     <string name="rename_sheet_option_copy_title">Als Kopie speichern</string>
@@ -1098,6 +1099,7 @@
     <string name="gallery_create_album_failed">Album konnte nicht erstellt werden: %1$s</string>
     <string name="gallery_enable_metadata_category">Aktiviere zuerst eine Metadaten-Kategorie unter Einstellungen → Datenschutz</string>
     <string name="gallery_album_picker_count_drive">%1$s · Drive</string>
+    <string name="gallery_album_picker_count_shared">%1$s · Drive · Geteilt</string>
     <string name="album_add_photos">Fotos hinzufügen</string>
     <string name="album_picker_title">Zum Album hinzufügen</string>
     <string name="album_picker_selected">%1$d ausgewählt</string>
@@ -1110,6 +1112,9 @@
     <string name="albums_rename_same_name">Der neue Name entspricht dem aktuellen Namen</string>
     <string name="albums_rename_failed">Umbenennen fehlgeschlagen</string>
     <string name="albums_delete_failed">Album konnte nicht gelöscht werden: %1$s</string>
+    <string name="albums_delete_would_lose_title">Einige Fotos gibt es nur hier</string>
+    <string name="albums_delete_would_lose_body">Personen, mit denen du dieses Album geteilt hast, haben Fotos hinzugefügt, die nicht in deiner Mediathek sind. Wenn du das Album löschst, werden auch diese Fotos gelöscht.</string>
+    <string name="albums_delete_would_lose_action">Trotzdem löschen</string>
     <string name="albums_renamed_to">Umbenannt in „%1$s“</string>
 
     <string name="cd_album_fully_backed_up">Vollständig gesichert</string>
@@ -1245,6 +1250,12 @@
     <string name="whats_new_hide_backed">Grüne Wolke, auf deinem Telefon und gesichert: Es bleibt auf deinem Gerät, sodass andere Apps es weiterhin anzeigen. Diese App versteckt es nur hier, hinter der Sperre der Versteckten Fotos; deine Cloud-Kopie wird nie verschoben, geändert oder gelöscht.</string>
     <string name="whats_new_hide_cloud">Weiße Wolke, nur in der Cloud: Diese App versteckt es nur hier, hinter der Sperre der Versteckten Fotos. Deine Cloud-Kopie bleibt genau so, wie sie ist, und wird nie verschoben, geändert oder gelöscht.</string>
     <string name="whats_new_hide_albums">Du kannst auch ein ganzes Cloud-Album verstecken, und alles lässt sich rückgängig machen.</string>
+    <string name="whats_new_shared_add_title">Zu einem geteilten Album hinzufügen</string>
+    <string name="whats_new_shared_add_body">Wenn jemand ein Album mit dir teilt und dir die Bearbeitung erlaubt, kannst du eigene Fotos hinzufügen und wieder entfernen.</string>
+    <string name="whats_new_viewer_place_title">Merkt sich deine Stelle</string>
+    <string name="whats_new_viewer_place_body">Beim Löschen eines Fotos geht es zum nächsten weiter, statt die Fotoansicht zu schließen. Zurück im Raster landest du bei dem Foto, bei dem du aufgehört hast, nicht bei dem, das du geöffnet hast.</string>
+    <string name="whats_new_album_guard_title">Eine Prüfung vor dem Löschen eines Albums</string>
+    <string name="whats_new_album_guard_body">Wenn ein Album der einzige Ort ist, an dem einige seiner Fotos liegen, fragt das Löschen vorher nach.</string>
     <string name="whats_new_dup_title">Doppelte Fotos finden</string>
     <string name="whats_new_dup_body">Erkennt exakte Kopien und visuell ähnliche Aufnahmen, dann kannst du eines sicher behalten und den Rest entfernen.</string>
     <string name="whats_new_offline_title">Offline verfügbar</string>
@@ -1263,7 +1274,7 @@
     <string name="whats_new_scrubber_body">Spule ein Video mit einer Filmstreifen-Vorschau und gehe Bild für Bild weiter.</string>
     <string name="whats_new_album_title">Klügere Alben</string>
     <string name="whats_new_album_body">Sieh, in welchen Alben ein ausgewähltes Foto schon liegt, und filtere die Auswahl auf Fotos, die noch in keinem Album sind.</string>
-    <string name="whats_new_more">Dazu ein adaptives App-Symbol, eine Schnellaktions-Überlagerung für Screenshots, sichereres Entfernen über den Systempapierkorb, verlässlichere Datumsangaben und mehr Stabilität bei sehr großen Bibliotheken.</string>
+    <string name="whats_new_more">Dazu bleiben kopierte Links in der Zwischenablage-Vorschau verborgen, Dateigrößen stimmen überall überein, die automatische Freigabe fragt bei Drive nach, bevor sie eine Kopie vom Telefon entfernt, und große Alben und Auswahlen bleiben stabiler.</string>
     <string name="offline_card_subtitle">Für die Offline-Ansicht gespeicherte Fotos</string>
     <string name="duplicates_filter_identical">Identisch</string>
     <string name="duplicates_filter_similar">Ähnlich</string>
@@ -1307,7 +1318,7 @@
     <string name="action_remove">Entfernen</string>
     <string name="gallery_add_to_album_queued">Fotos werden hinzugefügt, sobald der Upload abgeschlossen ist</string>
     <string name="share_role_can_view_desc">Kann das Album und seine Fotos ansehen.</string>
-    <string name="share_role_can_edit_desc">Kann Fotos hinzufügen und entfernen sowie das Cover ändern.</string>
+    <string name="share_role_can_edit_desc">Kann Fotos hinzufügen und entfernen.</string>
     <string name="settings_show_selection_labels">Schaltflächen-Beschriftungen</string>
     <string name="settings_show_selection_labels_desc">Zeigt beim Auswählen von Fotos unter jeder Schaltfläche eine kurze Beschriftung an, damit klar ist, was sie bewirkt.</string>
     <string name="sel_label_download">Download</string>

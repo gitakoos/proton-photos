@@ -289,7 +289,10 @@ fun LocationDetailSheet(
                 }
             }
 
-            if (state.isLoading) {
+            // Skeleton only an empty grid: swapping photos that are already there for placeholders
+            // collapses it and throws the reader back to the first row, and a refresh that finds
+            // nothing new would do that for no visible gain.
+            if (state.isLoading && state.items.isEmpty()) {
                 items(9, span = { GridItemSpan(1) }) {
                     eu.akoos.photos.presentation.common.ShimmerSquare(
                         modifier = Modifier.fillMaxWidth(),

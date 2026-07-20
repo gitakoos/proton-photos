@@ -322,6 +322,23 @@ object SettingsKeys {
     fun pairingSettledKey(userId: String) =
         booleanPreferencesKey("pairing_settled_$userId")
 
+    /** When a reconcile pass last completed against a fully-listed cloud library, as epoch millis.
+     *  Written at the end of the pass under the same condition as [pairingSettledKey], so a run that
+     *  threw, or one that only ever saw a half-walked listing, leaves it alone.
+     *
+     *  It answers one question for the automatic free-up sweep: how old is the picture of the cloud
+     *  that `sync_state` was last checked against. The sweep deletes the device copy of a SYNCED
+     *  photo, and the only thing standing between that and deleting a last copy is reconcile having
+     *  recently demoted photos whose cloud twin is gone. Backup off cancels the background sync
+     *  entirely, so an unopened app can leave that check unrun indefinitely while the hourly sweep
+     *  keeps running; this timestamp is what lets the sweep notice and stand down.
+     *
+     *  What it does NOT prove is that the cloud listing itself was re-fetched in the same pass, only
+     *  that it had been fully walked. That is acceptable here because every caller that reconciles
+     *  refreshes first, and the case being defended against is nothing running at all. */
+    fun cloudVerifiedAtKey(userId: String) =
+        longPreferencesKey("cloud_verified_at_$userId")
+
     /** Notification preferences. Producers read these before posting; the Notifications settings
      *  screen toggles them. NOTIFY_ALBUM_DOWNLOAD and NOTIFY_DELETE_REMINDER are opt-OUTS: absent =
      *  true (shown). NOTIFY_BACKUP_STATUS is the opposite, an opt-IN: absent = false (hidden), since

@@ -544,6 +544,7 @@ private class FakeDrivePhotoRepository : DrivePhotoRepository {
     override suspend fun refreshCloudPhotos(userId: UserId, force: Boolean) {}
     override suspend fun refreshCloudPhotosIncremental(userId: UserId) {}
     override suspend fun loadAlbumsCached(): List<Album> = emptyList()
+    override suspend fun loadSharedAddableAlbumsCached(): List<Album> = emptyList()
     override suspend fun prefetchAlbumsMembership(userId: UserId, albums: List<Album>) {}
     override suspend fun getAlbumMemberships(userId: UserId): Map<String, String> = emptyMap()
     override suspend fun getAlbumIdsByPhoto(userId: UserId): Map<String, Set<String>> = emptyMap()
@@ -562,15 +563,14 @@ private class FakeDrivePhotoRepository : DrivePhotoRepository {
         preResolvedLinkDetail: eu.akoos.photos.data.api.dto.BatchLinkDto?,
         onProgress: ((doneBytes: Long, totalBytes: Long) -> Unit)?,
     ): File = error("unused")
-    override suspend fun renameOrCopyCloudPhoto(
+    override suspend fun copyCloudPhotoAs(
         userId: UserId,
         photo: CloudPhoto,
         newName: String,
-        trashOriginal: Boolean,
     ): String = error("unused")
     override suspend fun setCloudFavorite(userId: UserId, photo: CloudPhoto, favorite: Boolean): Boolean = false
     override suspend fun setCloudTag(userId: UserId, photo: CloudPhoto, tagId: Int, add: Boolean): Boolean = false
-    override suspend fun deleteAlbum(userId: UserId, albumLinkId: String) {}
+    override suspend fun deleteAlbum(userId: UserId, albumLinkId: String, deletePhotosToo: Boolean) {}
     override suspend fun removePhotosFromAlbum(
         userId: UserId,
         albumLinkId: String,

@@ -25,15 +25,23 @@ package eu.akoos.photos.data.db.dao
 import androidx.room.Database
 import androidx.room.RoomDatabase
 import eu.akoos.photos.data.db.entity.AlbumPhotoMembershipEntity
+import eu.akoos.photos.data.db.entity.CloudAlbumEntity
 import eu.akoos.photos.data.db.entity.PhotoListingEntity
 import eu.akoos.photos.data.db.entity.SyncStateEntity
 
 @Database(
-    entities = [PhotoListingEntity::class, SyncStateEntity::class, AlbumPhotoMembershipEntity::class],
+    entities = [
+        PhotoListingEntity::class,
+        SyncStateEntity::class,
+        AlbumPhotoMembershipEntity::class,
+        CloudAlbumEntity::class,
+    ],
     version = 1,
     exportSchema = false,
 )
 abstract class TestDatabase : RoomDatabase() {
     abstract fun photoListingDao(): PhotoListingDao
     abstract fun syncStateDao(): SyncStateDao
+    abstract fun albumPhotoMembershipDao(): AlbumPhotoMembershipDao
+    abstract fun cloudAlbumDao(): CloudAlbumDao
 }

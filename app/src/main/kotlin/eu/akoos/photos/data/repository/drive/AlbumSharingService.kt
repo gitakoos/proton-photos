@@ -58,6 +58,7 @@ import eu.akoos.photos.domain.entity.PendingInvitation
 import eu.akoos.photos.domain.entity.ShareInvitation
 import eu.akoos.photos.domain.entity.ShareMember
 import eu.akoos.photos.domain.entity.SharedPhoto
+import eu.akoos.photos.util.flatMapSqlChunks
 import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -82,6 +83,7 @@ class AlbumSharingService @Inject constructor(
     private val photoListingDao: PhotoListingDao,
     private val albumPhotoMembershipDao: eu.akoos.photos.data.db.dao.AlbumPhotoMembershipDao,
     private val cloudAlbumDao: eu.akoos.photos.data.db.dao.CloudAlbumDao,
+    private val albumCacheCleanup: AlbumCacheCleanup,
     private val authRepository: AuthRepository,
     private val sessionProvider: SessionProvider,
     private val cryptoContext: me.proton.core.crypto.common.context.CryptoContext,
@@ -105,7 +107,9 @@ class AlbumSharingService @Inject constructor(
             val memberIds = runCatching { albumPhotoMembershipDao.getPhotoLinkIds(albumLinkId) }
                 .getOrDefault(emptyList())
             if (memberIds.isNotEmpty()) {
-                val firstFromDb = photoListingDao.getByLinkIds(memberIds)
+                // Chunked: an album's membership is unbounded, and an oversized IN list would fail the
+                // read outright, dropping the cover back to the disk-cache scan below for no reason.
+                val firstFromDb = memberIds.flatMapSqlChunks { photoListingDao.getByLinkIds(it) }
                     .firstOrNull { !it.thumbnailUrl.isNullOrBlank() }
                     ?.thumbnailUrl
                 if (firstFromDb != null) return firstFromDb
@@ -852,8 +856,7 @@ class AlbumSharingService @Inject constructor(
             // No resolvable membership — server leave is a no-op, but still wipe local cache so
             // the album disappears instead of lingering as an orphan until the next refresh.
             Log.w(TAG, "leaveSharedAlbum: own membership not found on shareId=$shareId — local-cache wipe only")
-            cloudAlbumDao.deleteByLinkId(albumLinkId)
-            albumPhotoMembershipDao.deleteAllForAlbum(albumLinkId)
+            albumCacheCleanup.dropCachedAlbum(userId, albumLinkId)
             return@withContext
         }
 
@@ -871,9 +874,10 @@ class AlbumSharingService @Inject constructor(
             throw e
         }
 
-        // 4. Local cache cleanup so the grid updates immediately.
-        cloudAlbumDao.deleteByLinkId(albumLinkId)
-        albumPhotoMembershipDao.deleteAllForAlbum(albumLinkId)
+        // 4. Local cache cleanup so the grid updates immediately. The album's photo rows go with it:
+        //    a guest's copy exists only to back this album, and the timeline relies on the very
+        //    membership rows being dropped here to keep those photos out.
+        albumCacheCleanup.dropCachedAlbum(userId, albumLinkId)
     }
 
     /**
@@ -886,6 +890,12 @@ class AlbumSharingService @Inject constructor(
         val manager = apiProvider.get<DriveApiService>(userId)
         val result = mutableListOf<Album>()
         val seenLinkIds = mutableSetOf<String>()
+        // Resolved once for the whole walk: every share bootstrap below carries the caller's own
+        // membership rows, and the address is what identifies which row is ours when an invitation
+        // went to more than one of the user's addresses.
+        val ownAddressIds = runCatching {
+            userAddressRepository.getAddresses(userId).map { it.addressId.id }.toSet()
+        }.getOrDefault(emptySet())
 
         // Primary: Photos-specific endpoint — the official client's path for album shares.
         val albumStubs = mutableListOf<AlbumDto>()
@@ -1001,6 +1011,7 @@ class AlbumSharingService @Inject constructor(
                         sharingShareId = shareId,
                         sharedByEmail = shareDetails.creator,
                         volumeId = stub.volumeId,
+                        permissions = ownPermissionsIn(shareDetails, ownAddressIds),
                     ))
                 }
             } catch (e: Exception) {
@@ -1101,6 +1112,7 @@ class AlbumSharingService @Inject constructor(
                     sharingShareId = link.shareId,
                     sharedByEmail = shareDetails.creator,
                     volumeId = link.volumeId,
+                    permissions = ownPermissionsIn(shareDetails, ownAddressIds),
                 ))
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
@@ -1109,6 +1121,20 @@ class AlbumSharingService @Inject constructor(
         }
 
         Log.d(TAG, "loadSharedWithMeAlbums: DONE — photosStubs=${albumStubs.size} afterPhotosDecrypt=$resultsAfterPhotosEndpoint v2AlbumRaw=${sharedLinks.size} finalTotal=${result.size}")
+
+        // Persist alongside the owned albums so the add-to-album picker can offer the ones this
+        // user may contribute to without a network round trip. Both statements are scoped to
+        // shared rows, so an owned album is never touched here, just as the owned refresh no
+        // longer evicts these. Best-effort for the same reason the owned path is: the cache is a
+        // performance optimisation and the caller already holds the real answer.
+        runCatching {
+            val now = System.currentTimeMillis()
+            cloudAlbumDao.upsertAll(result.map { eu.akoos.photos.data.db.entity.CloudAlbumEntity.fromDomain(it, now) })
+            cloudAlbumDao.deleteSharedWhereNotIn(result.map { it.linkId })
+        }.onFailure { e ->
+            Log.w(TAG, "loadSharedWithMeAlbums: cache persist failed (${e.message}), in-memory result still returned")
+        }
+
         result
     }
 
@@ -1154,7 +1180,9 @@ class AlbumSharingService @Inject constructor(
 
         // 3. Keep only library photos (present in the stream listing) and build the item
         //    straight from the already-decrypted row.
-        val rows = runCatching { photoListingDao.getByLinkIds(candidateLinkIds) }
+        // Chunked: the shared-by-me feed is paginated to exhaustion above, so the candidate list grows
+        // with how much the user has shared and can exceed the statement's host-variable cap.
+        val rows = runCatching { candidateLinkIds.flatMapSqlChunks { photoListingDao.getByLinkIds(it) } }
             .getOrDefault(emptyList())
             .associateBy { it.linkId }
         val result = candidateLinkIds.mapNotNull { linkId ->
@@ -1275,6 +1303,11 @@ class AlbumSharingService @Inject constructor(
             }.valueOrThrow
         }
         Log.d(TAG, "acceptInvitation: accepted $invitationId")
+        // Pull the shared-with-me list straight away so the freshly accepted album is cached and
+        // the add-to-album picker can offer it. Without this the cache only fills the next time the
+        // Shared tab loads, so the album stays missing from the picker until the app restarts.
+        runCatching { loadSharedWithMeAlbums(userId) }
+            .onFailure { e -> Log.w(TAG, "acceptInvitation: shared album refresh failed (${e.message})") }
     }
 
     /**
@@ -1491,11 +1524,45 @@ class AlbumSharingService @Inject constructor(
         var copied = 0
         val failures = mutableListOf<String>()
         val copiedLinkIds = mutableListOf<String>()
-        val totalToCopy = children.distinct().size
+
+        // Skip photos this library already holds, so contributing to a shared album and then saving
+        // that album does not bring your own photo back as a second copy.
+        //
+        // Matching is on contentHash, which works here because the copy paths carry the source's
+        // hash over rather than recomputing one for the target. A photo this user contributed
+        // therefore still carries their own hash and is recognised. A photo the sharer uploaded
+        // themselves carries theirs and is copied even if the same image exists here, which is the
+        // conservative direction: a missed skip costs a duplicate, a wrong skip loses a photo.
+        val skippable = runCatching {
+            val candidateHashes = children.distinct().mapNotNull { linkId ->
+                val d = photoDetailMap[linkId]
+                d?.photo?.contentHash ?: d?.link?.fileProperties?.activeRevision?.photo?.contentHash
+            }
+            if (candidateHashes.isEmpty()) emptySet() else candidateHashes
+                .chunked(500)
+                .flatMap { photoListingDao.findExistingContentHashes(userId.id, it) }
+                .toSet()
+        }.getOrElse { e ->
+            // A failed lookup must not block the save; it only means nothing gets skipped.
+            Log.w(TAG, "saveSharedAlbumToOwnLibrary: duplicate lookup failed (${e.message}), copying everything")
+            emptySet()
+        }
+
+        val toCopy = children.distinct().filter { linkId ->
+            val d = photoDetailMap[linkId]
+            val hash = d?.photo?.contentHash ?: d?.link?.fileProperties?.activeRevision?.photo?.contentHash
+            hash == null || hash !in skippable
+        }
+        val skippedCount = children.distinct().size - toCopy.size
+        if (skippedCount > 0) {
+            Log.d(TAG, "saveSharedAlbumToOwnLibrary: skipping $skippedCount photo(s) already in this library")
+        }
+
+        val totalToCopy = toCopy.size
         // Initial emission so the UI shows "0 of N" instead of a generic spinner once the
         // children list is in hand.
         onProgress(0, totalToCopy)
-        for (photoLinkId in children.distinct()) {
+        for (photoLinkId in toCopy) {
             val detail = photoDetailMap[photoLinkId]
             val photoLink = detail?.link
             if (photoLink?.nodePassphrase == null || photoLink.name == null) {
@@ -1596,9 +1663,183 @@ class AlbumSharingService @Inject constructor(
         val totalRequested: Int,
     )
 
+    /**
+     * Adds this user's own photos to an album someone else shared with them, for a member the
+     * sharer granted edit rights to.
+     *
+     * This is a COPY, not the add-to-album call the owned path uses, and that is not a shortcut.
+     * An album membership is a reference inside one volume, so it cannot point at a photo sitting
+     * on a different volume; the contributor's photo lives on theirs and the album on the sharer's.
+     * The official client splits on exactly this and copies whenever the two volumes differ. The
+     * copy lands on the sharer's volume, so it counts against the album owner's storage.
+     *
+     * Direction aside, this is the same operation [saveSharedAlbumToOwnLibrary] performs the other
+     * way round, and it re-uses that path's crypto: passphrase and name are rewrapped from the
+     * photo's current parent (this user's Photos root) to the album's key, preserving the original
+     * session key, because Drive rejects a fresh-session-key rewrap.
+     *
+     * Per-photo failures are collected rather than thrown, so one undecryptable or server-refused
+     * photo cannot sink the rest of the batch.
+     */
+    suspend fun addPhotosToSharedAlbum(
+        userId: UserId,
+        album: Album,
+        photoLinkIds: List<String>,
+    ): eu.akoos.photos.domain.repository.DrivePhotoRepository.AddPhotosToAlbumResult = withContext(Dispatchers.IO) {
+        if (photoLinkIds.isEmpty()) {
+            return@withContext eu.akoos.photos.domain.repository.DrivePhotoRepository.AddPhotosToAlbumResult(emptyList(), emptyList())
+        }
+        val sharingShareId = album.sharingShareId
+            ?: error("addPhotosToSharedAlbum: album ${album.linkId} has no share id")
+        val targetVolumeId = album.volumeId
+            ?: error("addPhotosToSharedAlbum: album ${album.linkId} has no volume id")
+        require(album.canAddPhotos) {
+            "addPhotosToSharedAlbum: no edit rights on album ${album.linkId}"
+        }
+
+        val manager = apiProvider.get<DriveApiService>(userId)
+        val signingKey = cryptoHelper.getAddressSigningKey(userId)
+
+        // The source side: these photos belong to this user, so their passphrases and names are
+        // wrapped to this user's own Photos-root key and they live on this user's own volume.
+        val ownVolumeId = shareService.getVolumeId(userId)
+        val rootLinkKeyBytes = shareService.getRootLinkKeyBytes(userId)
+            ?: error("addPhotosToSharedAlbum: cannot load root link key")
+
+        // The target side, reached through the share rather than the user's own volume. This is the
+        // part the owned path cannot do: a foreign album is absent from that volume, so its link
+        // has to be fetched via the share and its key unwrapped with the share key.
+        val bootstrap = semaphore.withPermit {
+            manager.invoke { getShareBootstrap(sharingShareId) }.valueOrThrow
+        }
+        val shareKeyBytes = cryptoHelper.decryptExternalShareKey(
+            userId,
+            bootstrap.key ?: error("addPhotosToSharedAlbum: share bootstrap missing Key"),
+            bootstrap.passphrase ?: error("addPhotosToSharedAlbum: share bootstrap missing Passphrase"),
+        )
+        val albumDetail = linkDetailHelpers
+            .batchFetchLinkDetailsViaShare(userId, sharingShareId, listOf(album.linkId))[album.linkId]
+            ?: error("addPhotosToSharedAlbum: album link not found via share: ${album.linkId}")
+        val albumLink = albumDetail.link
+        val albumNodeKeyArmored = albumLink.nodeKey
+            ?: error("addPhotosToSharedAlbum: album has no NodeKey")
+        val albumKeyBytes = cryptoHelper.decryptNodeKey(
+            albumNodeKeyArmored,
+            albumLink.nodePassphrase ?: error("addPhotosToSharedAlbum: album has no NodePassphrase"),
+            shareKeyBytes,
+        )
+        val albumPublicKeyArmored = cryptoHelper.withCryptoLock {
+            cryptoContext.pgpCrypto.getPublicKey(albumNodeKeyArmored)
+        }
+        // The album's name-hash key, so the copied photo's Hash is computed in the album's
+        // namespace rather than the contributor's; a hash from the wrong key is rejected.
+        //
+        // Read from three shapes because the two endpoints disagree on where it lives: the volume
+        // batch endpoint returns Album and Folder as siblings of Link, while the share endpoint
+        // nests AlbumProperties inside Link. A fetch through a share only ever fills the nested
+        // one, which is what made the first attempt fail on a missing key.
+        val albumNodeHashKeyEncrypted = albumDetail.album?.nodeHashKey
+            ?: albumLink.albumProperties?.nodeHashKey
+            ?: albumLink.folderProperties?.nodeHashKey
+            ?: albumDetail.folder?.nodeHashKey
+            ?: error("addPhotosToSharedAlbum: album has no NodeHashKey in any known shape")
+        val albumNodeHashKeyBytes = cryptoHelper.withCryptoLock {
+            cryptoContext.pgpCrypto.decryptData(albumNodeHashKeyEncrypted, albumKeyBytes)
+        }
+
+        val photoDetailMap = linkDetailHelpers.batchFetchLinkDetails(userId, ownVolumeId, photoLinkIds)
+        val succeeded = mutableListOf<String>()
+        val failed = mutableListOf<String>()
+
+        for (photoLinkId in photoLinkIds) {
+            val photoDto = photoDetailMap[photoLinkId]
+            val photoLink = photoDto?.link
+            if (photoLink?.nodePassphrase == null || photoLink.name == null) {
+                Log.w(TAG, "addPhotosToSharedAlbum: missing crypto fields for $photoLinkId")
+                failed += photoLinkId
+                continue
+            }
+            try {
+                val newNodePass = cryptoHelper.reencryptNodePassphraseForCopy(
+                    sourceNodePassphraseArmored = photoLink.nodePassphrase,
+                    sourceParentKeyBytes = rootLinkKeyBytes,
+                    targetParentPublicKeyArmored = albumPublicKeyArmored,
+                    signerKeyBytes = signingKey.unlockedKeyBytes,
+                )
+                val newName = cryptoHelper.reencryptLinkNameForCopy(
+                    sourceNameArmored = photoLink.name,
+                    sourceParentKeyBytes = rootLinkKeyBytes,
+                    targetParentPublicKeyArmored = albumPublicKeyArmored,
+                    signerKeyBytes = signingKey.unlockedKeyBytes,
+                )
+                val plainName = String(newName.plainBytes, Charsets.UTF_8)
+                val newNameHash = cryptoHelper.computeNameHash(plainName, albumNodeHashKeyBytes)
+
+                val contentHash = photoDto.photo?.contentHash
+                    ?: photoLink.fileProperties?.activeRevision?.photo?.contentHash
+                val photosBlock = contentHash?.let {
+                    eu.akoos.photos.data.api.dto.CopyLinkRequest.PhotosCopyData(
+                        contentHash = it,
+                        relatedPhotos = emptyList(),
+                    )
+                }
+
+                // Same rule as the save-to-library direction: the backend accepts
+                // NodePassphraseSignature + SignatureEmail only when the source link is anonymous,
+                // and rejects them with code 2001 on an owner-signed photo. Ours are owner-signed,
+                // so both stay null unless the source really carries no signature.
+                val sourceIsAnonymous = photoLink.signatureEmail.orEmpty().isEmpty()
+
+                val request = eu.akoos.photos.data.api.dto.CopyLinkRequest(
+                    name = newName.armoredName,
+                    hash = newNameHash,
+                    targetVolumeId = targetVolumeId,
+                    targetParentLinkId = album.linkId,
+                    nodePassphrase = newNodePass.armoredPassphrase,
+                    nameSignatureEmail = signingKey.email,
+                    nodePassphraseSignature = if (sourceIsAnonymous) newNodePass.armoredSignature else null,
+                    signatureEmail = if (sourceIsAnonymous) signingKey.email else null,
+                    photos = photosBlock,
+                )
+                semaphore.withPermit {
+                    manager.invoke { copyLink(ownVolumeId, photoLinkId, request) }.valueOrThrow
+                }
+                succeeded += photoLinkId
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                Log.w(TAG, "addPhotosToSharedAlbum: copy failed linkId=$photoLinkId msg=${e.message}", e)
+                failed += photoLinkId
+            }
+        }
+
+        Log.d(TAG, "addPhotosToSharedAlbum: album=${album.linkId} ok=${succeeded.size} failed=${failed.size}")
+        eu.akoos.photos.domain.repository.DrivePhotoRepository.AddPhotosToAlbumResult(succeeded, failed)
+    }
+
     private companion object {
         // Wire Name is just a label for the share record; the album's real name reaches the
         // server via [GeneratedAlbumShare.nameKeyPacketBase64].
         private const val SHARE_DISPLAY_NAME = "New Share"
     }
+}
+
+/**
+ * This user's own permission bitmask on a share, read out of the bootstrap the recipient already
+ * fetches. Drive returns 4 for a viewer and 6 for an editor.
+ *
+ * Memberships are caller-scoped, so any row belongs to this user; [ownAddressIds] only picks the
+ * right one when an invitation reached several of the user's addresses, and the first row is the
+ * fallback when the address set could not be resolved. Returns null when the share carries no
+ * membership at all, which is what an owner's own share looks like, and null is read everywhere as
+ * "not an editor" so an unknown grant never unlocks an add.
+ *
+ * Pure and side-effect-free so the row-picking can be pinned by a plain JVM test.
+ */
+internal fun ownPermissionsIn(
+    bootstrap: eu.akoos.photos.data.api.dto.ShareBootstrapResponse,
+    ownAddressIds: Set<String>,
+): Long? {
+    val membership = bootstrap.memberships.firstOrNull { it.addressId in ownAddressIds }
+        ?: bootstrap.memberships.firstOrNull()
+    return membership?.permissions
 }

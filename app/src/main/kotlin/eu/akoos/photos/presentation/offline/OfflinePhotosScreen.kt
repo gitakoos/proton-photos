@@ -75,6 +75,7 @@ import kotlinx.coroutines.delay
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.presentation.common.IconBubble
+import eu.akoos.photos.presentation.common.ReturnToViewerPhoto
 import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
 import eu.akoos.photos.presentation.gallery.PhotoCell
 import eu.akoos.photos.presentation.gallery.photoCellInputsFor
@@ -154,6 +155,15 @@ fun OfflinePhotosScreen(
                 selected = selectedIds,
                 onSelectionChange = viewModel::setSelected,
                 tapGuard = tapGuard,
+            )
+            // Land back on the photo the viewer closed on. One flat run of cloud photos, no header
+            // and nothing ahead of them.
+            val returnGroups = remember(items) { listOf(items) }
+            ReturnToViewerPhoto(
+                gridState = gridState,
+                groups = returnGroups,
+                headerPerGroup = false,
+                keyOf = { it.stableId },
             )
             LazyVerticalGrid(
                 columns = GridCells.Fixed(cols),

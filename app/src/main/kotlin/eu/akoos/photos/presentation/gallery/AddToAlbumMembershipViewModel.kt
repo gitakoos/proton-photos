@@ -29,6 +29,8 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import eu.akoos.photos.data.db.dao.AlbumPhotoMembershipDao
+import eu.akoos.photos.data.db.dao.AlbumPhotoMembershipLite
+import eu.akoos.photos.util.combineSqlChunks
 import javax.inject.Inject
 
 /**
@@ -51,7 +53,14 @@ class AddToAlbumMembershipViewModel @Inject constructor(
      */
     fun observeSelectionAlbumMembership(photoLinkIds: Set<String>): Flow<Map<String, Set<String>>> =
         if (photoLinkIds.isEmpty()) flowOf(emptyMap())
-        else albumPhotoMembershipDao.observeAlbumIdsForPhotos(photoLinkIds)
+        // Chunked: select-all hands this the whole library, past the statement's host-variable cap.
+        // The query declares no ORDER BY and the rows are grouped below, so the comparator only has
+        // to keep a merged read from reshuffling between emissions.
+        else photoLinkIds.combineSqlChunks(
+            compareBy<AlbumPhotoMembershipLite>({ it.albumLinkId }, { it.photoLinkId }),
+        ) { chunk ->
+            albumPhotoMembershipDao.observeAlbumIdsForPhotos(chunk.toSet())
+        }
             .map { rows ->
                 rows.groupBy({ it.albumLinkId }, { it.photoLinkId })
                     .mapValues { (_, ids) -> ids.toSet() }

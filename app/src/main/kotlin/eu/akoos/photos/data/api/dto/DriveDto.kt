@@ -51,20 +51,6 @@ data class VolumeShareDto(
     @SerialName("LinkID") val linkId: String? = null,
 )
 
-@Serializable
-data class SharesResponse(
-    @SerialName("Shares") val shares: List<ShareDto>,
-    @SerialName("Code") val code: Int,
-)
-
-@Serializable
-data class ShareDto(
-    @SerialName("ShareID") val shareId: String,
-    @SerialName("Type") val type: Int,
-    @SerialName("LinkID") val linkId: String,
-    @SerialName("VolumeID") val volumeId: String,
-)
-
 // Pagination cursor is the last photo's LinkID, sent as the PreviousPageLastLinkID query param.
 @Serializable
 data class PhotoLinksResponse(
@@ -123,14 +109,6 @@ data class AcceptInvitationRequest(
 )
 
 
-@Serializable
-data class ThumbnailResponse(
-    @SerialName("ThumbnailBareURL") val thumbnailBareUrl: String? = null,
-    @SerialName("BareURL") val bareUrl: String? = null,
-    @SerialName("Token") val token: String? = null,
-    @SerialName("Code") val code: Int,
-)
-
 // POST /drive/volumes/{volumeId}/thumbnails — batch thumbnail URL fetch
 @Serializable
 data class ThumbnailBatchRequest(
@@ -151,61 +129,8 @@ data class ThumbnailBatchResponse(
 )
 
 @Serializable
-data class LinkDetailsResponse(
-    @SerialName("Link") val link: PhotoLinkDto,
-    @SerialName("Code") val code: Int,
-)
-
-@Serializable
 data class FullLinkResponse(
     @SerialName("Link") val link: LinkCoreDto,
-    @SerialName("Code") val code: Int,
-)
-
-@Serializable
-data class CreatePhotoLinkData(
-    @SerialName("Name") val name: String,
-    @SerialName("Hash") val hash: String,
-    @SerialName("ParentLinkID") val parentLinkId: String,
-    @SerialName("MIMEType") val mimeType: String,
-    @SerialName("NodeKey") val nodeKey: String,
-    @SerialName("NodePassphrase") val nodePassphrase: String,
-    @SerialName("NodePassphraseSignature") val nodePassphraseSignature: String,
-    @SerialName("SignatureEmail") val signatureEmail: String,
-    // CKP at the Link level maps to FileProperties.ContentKeyPacket (the web client's location).
-    @SerialName("ContentKeyPacket") val contentKeyPacket: String? = null,
-    @SerialName("ContentKeyPacketSignature") val contentKeyPacketSignature: String? = null,
-)
-
-@Serializable
-data class CreatePhotoMetadata(
-    @SerialName("CaptureTime") val captureTime: Long,
-    @SerialName("Tags") val tags: List<Int> = emptyList(),
-    // CKP here is stored at Photo.ContentKeyPacket (the location clients read on decrypt).
-    @SerialName("ContentKeyPacket") val contentKeyPacket: String? = null,
-    @SerialName("ContentKeyPacketSignature") val contentKeyPacketSignature: String? = null,
-)
-
-@Serializable
-data class CreatePhotoRequest(
-    @SerialName("Photo") val photo: CreatePhotoMetadata,
-    @SerialName("Link") val link: CreatePhotoLinkData,
-)
-
-@Serializable
-data class CreatedPhotoLinkDto(
-    @SerialName("LinkID") val linkId: String,
-    @SerialName("RevisionID") val revisionId: String? = null,
-)
-
-@Serializable
-data class CreatedPhotoWrapperDto(
-    @SerialName("Link") val link: CreatedPhotoLinkDto,
-)
-
-@Serializable
-data class CreatePhotoResponse(
-    @SerialName("Photo") val photo: CreatedPhotoWrapperDto,
     @SerialName("Code") val code: Int,
 )
 
@@ -233,17 +158,6 @@ data class CreateFileResponse(
 data class CreatedFileDto(
     @SerialName("ID") val id: String,
     @SerialName("RevisionID") val revisionId: String,
-)
-
-@Serializable
-data class CreateRevisionResponse(
-    @SerialName("Revision") val revision: CreatedRevisionDto,
-    @SerialName("Code") val code: Int,
-)
-
-@Serializable
-data class CreatedRevisionDto(
-    @SerialName("ID") val id: String,
 )
 
 // Send ONLY {"Type": N} — adding Hash/Size/Index/EncSignature makes the server reject the
@@ -456,6 +370,10 @@ data class AlbumChildDto(
     @SerialName("LinkID") val linkId: String,
     @SerialName("CaptureTime") val captureTime: Long? = null,
     @SerialName("AddedTime") val addedTime: Long? = null,
+    /** Set when the photo is physically parented to the album rather than merely referenced by it,
+     *  which is how a copy contributed by someone the album was shared with arrives. Defaulted so a
+     *  response that omits the field falls back to the parent-based derivation instead of failing. */
+    @SerialName("IsChildOfAlbum") val isChildOfAlbum: Boolean = false,
 )
 
 @Serializable
@@ -490,8 +408,11 @@ data class LinkCoreDto(
     @SerialName("LinkID") val linkId: String,
     @SerialName("Type") val type: Int,
     @SerialName("Name") val name: String? = null,
-    // Server-canonical name hash. Pass it back verbatim as OriginalHash on rename/move — a
-    // locally recomputed value fails the optimistic-concurrency check with "out of date".
+    // Server-canonical name hash. For OriginalHash on a rename, recompute the value locally from
+    // the current decrypted name under the same NodeHashKey the new hash uses, rather than echoing
+    // this one back: a stored hash can sit in a different hash-space, which is what the server
+    // reads as "out of date". `AlbumService.renameAlbum` records how that happens and both the
+    // album and the photo rename rely on it.
     @SerialName("Hash") val hash: String? = null,
     @SerialName("ParentLinkID") val parentLinkId: String? = null,
     @SerialName("CreateTime") val createTime: Long? = null,
@@ -510,6 +431,13 @@ data class LinkCoreDto(
     @SerialName("FileProperties") val fileProperties: LinkFilePropertiesDto? = null,
     // Kept for non-file links (albums, folders) and backward-compat.
     @SerialName("ActiveRevision") val activeRevision: ActiveRevisionDto? = null,
+    // Album and folder metadata nested INSIDE the link. The volume batch endpoint returns these as
+    // siblings of Link (see [BatchLinkDto.album] / [BatchLinkDto.folder]), but the share endpoint
+    // nests them here instead, so a link fetched through a share carries its NodeHashKey only in
+    // this shape. Without these fields the block is dropped silently during parsing and reads as a
+    // missing key. Both are populated for an album (the album block is the specific one).
+    @SerialName("AlbumProperties") val albumProperties: AlbumMetaDto? = null,
+    @SerialName("FolderProperties") val folderProperties: LinkFolderDto? = null,
 )
 
 /** Link.FileProperties: ContentKeyPacket is the PKESK for the content-block session key. */
@@ -602,13 +530,7 @@ data class PhotosShareResponse(
     @SerialName("Code") val code: Int,
 )
 
-@Serializable
-data class ShareDetailsResponse(
-    @SerialName("Share") val share: ShareFullDto,
-    @SerialName("Code") val code: Int,
-)
-
-/** v1 share-bootstrap: all share fields at the top level (v2 [ShareDetailsResponse] wraps them in `Share`). */
+/** v1 share-bootstrap: all share fields at the top level, where the v2 shape nests them under `Share`. */
 @Serializable
 data class ShareBootstrapResponse(
     @SerialName("Code") val code: Int,
@@ -763,6 +685,21 @@ data class UpdateAlbumLinkData(
 data class UpdateAlbumRequest(
     @SerialName("CoverLinkID") val coverLinkId: String? = null,
     @SerialName("Link") val link: UpdateAlbumLinkData? = null,
+)
+
+/**
+ * Renames a link in place, keeping its linkId. [originalHash] is the server's
+ * optimistic-concurrency check: it has to answer for the name the link currently carries, so a
+ * rename racing another client's is rejected instead of silently overwriting it. [mimeType] rides
+ * along unchanged, because renaming never touches the bytes.
+ */
+@Serializable
+data class RenameLinkRequest(
+    @SerialName("Name") val name: String,
+    @SerialName("Hash") val hash: String,
+    @SerialName("OriginalHash") val originalHash: String,
+    @SerialName("MIMEType") val mimeType: String,
+    @SerialName("SignatureAddress") val signatureAddress: String,
 )
 
 /**

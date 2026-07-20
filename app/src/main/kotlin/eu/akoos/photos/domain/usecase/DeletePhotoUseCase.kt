@@ -274,5 +274,21 @@ class DeletePhotoUseCase @Inject constructor(
                 item is GalleryItem.Synced && freeUpSpace -> SyncStatus.CLOUD_ONLY
                 else -> null
             }
+
+        /**
+         * Whether this delete makes [item] disappear from the gallery, as opposed to converting it into
+         * a photo that is still listed.
+         *
+         * Only three of the five delete choices actually remove anything: a Synced photo keeps a copy
+         * unless BOTH sides go, so freeing its device space leaves a cloud photo behind and trashing its
+         * cloud copy leaves the device file behind. Both of those keep the item on screen, in a
+         * different form, which is why a caller cannot treat "delete finished" as "the photo is gone".
+         */
+        fun removesFromGallery(item: GalleryItem, freeUpSpace: Boolean, deleteFromCloud: Boolean): Boolean =
+            when (item) {
+                is GalleryItem.LocalOnly -> freeUpSpace
+                is GalleryItem.CloudOnly -> deleteFromCloud
+                is GalleryItem.Synced -> freeUpSpace && deleteFromCloud
+            }
     }
 }

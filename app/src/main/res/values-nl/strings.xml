@@ -623,6 +623,7 @@
     <string name="shared_empty_with_me_body">Albums die met je worden gedeeld verschijnen hier.</string>
     <string name="shared_empty_by_me_body">Deel een album of een foto om het hier te zien.</string>
     <string name="shared_by_email">door %1$s</string>
+    <string name="shared_by_email_full">Gedeeld door %1$s</string>
     <string name="shared_photo_count">%1$d foto\'s</string>
     <string name="shared_by_me_photos_section">Gedeelde foto\'s</string>
 
@@ -941,7 +942,7 @@
     <string name="rename_sheet_subtitle_local">Kies hoe je de nieuwe naam toepast op dit apparaat.</string>
     <string name="rename_sheet_name_label">Bestandsnaam</string>
     <string name="rename_sheet_option_cloud_title">Hernoemen in de cloud</string>
-    <string name="rename_sheet_option_cloud_subtitle">Uploadt onder de nieuwe naam en verplaatst het origineel daarna naar Recent verwijderd.</string>
+    <string name="rename_sheet_option_cloud_subtitle">Hernoemt de foto rechtstreeks in Drive, zonder een kopie te maken.</string>
     <string name="rename_sheet_option_local_title">Origineel hernoemen</string>
     <string name="rename_sheet_option_local_subtitle">Werkt het bestand ter plaatse bij op je apparaat.</string>
     <string name="rename_sheet_option_copy_title">Opslaan als kopie</string>
@@ -1117,6 +1118,7 @@
     <string name="gallery_create_album_failed">Kan album niet aanmaken: %1$s</string>
     <string name="gallery_enable_metadata_category">Schakel eerst een metadatacategorie in onder Instellingen → Privacy</string>
     <string name="gallery_album_picker_count_drive">%1$s · Drive</string>
+    <string name="gallery_album_picker_count_shared">%1$s · Drive · Gedeeld</string>
     <string name="album_add_photos">Foto\'s toevoegen</string>
     <string name="album_picker_title">Aan album toevoegen</string>
     <string name="album_picker_selected">%1$d geselecteerd</string>
@@ -1129,6 +1131,9 @@
     <string name="albums_rename_same_name">De nieuwe naam is gelijk aan de huidige naam</string>
     <string name="albums_rename_failed">Naam wijzigen mislukt</string>
     <string name="albums_delete_failed">Kan album niet verwijderen: %1$s</string>
+    <string name="albums_delete_would_lose_title">Sommige foto\'s staan alleen hier</string>
+    <string name="albums_delete_would_lose_body">Mensen met wie je dit album deelde hebben foto\'s toegevoegd die niet in je bibliotheek staan. Als je het album verwijdert, worden die foto\'s ook verwijderd.</string>
+    <string name="albums_delete_would_lose_action">Toch verwijderen</string>
     <string name="albums_renamed_to">Hernoemd naar „%1$s”</string>
 
     <string name="cd_album_fully_backed_up">Volledig geback-upt</string>
@@ -1263,6 +1268,12 @@
     <string name="whats_new_hide_backed">Groene wolk, op je telefoon en met back-up: hij blijft op je apparaat, dus andere apps tonen hem nog steeds. Deze app verbergt hem alleen hier, achter het slot van Verborgen foto\'s; je kopie in de cloud wordt nooit verplaatst, gewijzigd of verwijderd.</string>
     <string name="whats_new_hide_cloud">Witte wolk, alleen in de cloud: deze app verbergt hem alleen hier, achter het slot van Verborgen foto\'s. Je kopie in de cloud blijft precies zoals hij is en wordt nooit verplaatst, gewijzigd of verwijderd.</string>
     <string name="whats_new_hide_albums">Je kunt ook een heel cloudalbum verbergen, en alles is omkeerbaar.</string>
+    <string name="whats_new_shared_add_title">Aan een gedeeld album toevoegen</string>
+    <string name="whats_new_shared_add_body">Als iemand een album met je deelt en je het mag bewerken, kun je er je eigen foto\'s aan toevoegen en ze weer verwijderen.</string>
+    <string name="whats_new_viewer_place_title">Onthoudt waar je gebleven bent</string>
+    <string name="whats_new_viewer_place_body">Bij het verwijderen van een foto ga je naar de volgende in plaats van dat de fotoweergave sluit. Terug in het raster kom je uit bij de laatst bekeken foto, niet bij de foto die je opende.</string>
+    <string name="whats_new_album_guard_title">Een controle voor het verwijderen van een album</string>
+    <string name="whats_new_album_guard_body">Als een album de enige plek is waar sommige van zijn foto\'s bewaard worden, wordt er eerst om bevestiging gevraagd.</string>
     <string name="whats_new_dup_title">Dubbele foto\'s vinden</string>
     <string name="whats_new_dup_body">Herkent exacte kopieën en visueel vergelijkbare opnames, houd er dan veilig één en verwijder de rest.</string>
     <string name="whats_new_offline_title">Offline beschikbaar</string>
@@ -1281,7 +1292,7 @@
     <string name="whats_new_scrubber_body">Spoel door een video met een filmstrookvoorbeeld en ga beeld voor beeld verder.</string>
     <string name="whats_new_album_title">Slimmere albums</string>
     <string name="whats_new_album_body">Zie in welke albums een gekozen foto al zit en filter de kiezer op foto\'s die nog in geen enkel album staan.</string>
-    <string name="whats_new_more">Plus een aanpasbaar app-pictogram, een laag met snelle acties voor schermafbeeldingen, veiliger verwijderen via de systeemprullenbak, betrouwbaardere datums en meer stabiliteit bij zeer grote bibliotheken.</string>
+    <string name="whats_new_more">Plus gekopieerde links blijven verborgen in het klembordvoorbeeld, bestandsgroottes komen overal overeen, automatisch ruimte vrijmaken controleert bij Drive voordat een kopie van je telefoon wordt verwijderd, en grote albums en selecties blijven beter overeind.</string>
     <string name="offline_card_subtitle">Foto\'s opgeslagen voor offline weergave</string>
     <string name="duplicates_filter_identical">Identiek</string>
     <string name="duplicates_filter_similar">Vergelijkbaar</string>
@@ -1337,7 +1348,7 @@
     <string name="action_remove">Verwijderen</string>
     <string name="gallery_add_to_album_queued">Foto\'s worden toegevoegd zodra het uploaden klaar is</string>
     <string name="share_role_can_view_desc">Kan het album en de foto\'s bekijken.</string>
-    <string name="share_role_can_edit_desc">Kan foto\'s toevoegen en verwijderen en de hoes wijzigen.</string>
+    <string name="share_role_can_edit_desc">Kan foto\'s toevoegen en verwijderen.</string>
     <string name="settings_show_selection_labels">Knoplabels</string>
     <string name="settings_show_selection_labels_desc">Toont een kort label onder elke knop wanneer je foto\'s selecteert, zodat duidelijk is wat elke knop doet.</string>
     <string name="sel_label_download">Downloaden</string>

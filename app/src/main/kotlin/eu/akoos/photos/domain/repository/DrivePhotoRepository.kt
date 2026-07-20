@@ -55,6 +55,9 @@ interface DrivePhotoRepository {
      */
     suspend fun loadAlbumsCached(): List<Album>
 
+    /** Cached shared-with-me albums this user has edit rights on, for the add-to-album picker. */
+    suspend fun loadSharedAddableAlbumsCached(): List<Album>
+
     /**
      * Background pass that walks each album's children pagination on Drive and persists the
      * `albumLinkId → photoLinkId` rows so a subsequent `loadAlbumPhotos(...)` call hits the
@@ -177,18 +180,16 @@ interface DrivePhotoRepository {
     ): eu.akoos.photos.data.repository.drive.CloudTrashOutcome
 
     /**
-     * Renames a cloud photo. Since the Drive Photos API does not expose a server-side rename
-     * endpoint, this is implemented as download-then-reupload-as-[newName]. When [trashOriginal]
-     * is true (rename-in-place semantics), the source [photo].linkId is moved to Recently Deleted
-     * after the new upload succeeds; otherwise the original stays as well (save-as-copy).
+     * Builds a second cloud photo from [photo]'s bytes under [newName], by downloading the full-res
+     * original and re-uploading it. The source link stays where it is, so this serves the
+     * "Save as copy" action rather than a rename.
      *
      * Returns the new linkId.
      */
-    suspend fun renameOrCopyCloudPhoto(
+    suspend fun copyCloudPhotoAs(
         userId: UserId,
         photo: CloudPhoto,
         newName: String,
-        trashOriginal: Boolean,
     ): String
 
     /**
@@ -209,7 +210,9 @@ interface DrivePhotoRepository {
      * Tag 0 (Favorites) routes through the favorite path. Returns true on success.
      */
     suspend fun setCloudTag(userId: UserId, photo: CloudPhoto, tagId: Int, add: Boolean): Boolean
-    suspend fun deleteAlbum(userId: UserId, albumLinkId: String)
+    /** @throws eu.akoos.photos.domain.entity.AlbumDeleteWouldLosePhotos when the server refuses
+     *  because the album holds the only copy of some photos and [deletePhotosToo] is false. */
+    suspend fun deleteAlbum(userId: UserId, albumLinkId: String, deletePhotosToo: Boolean = false)
 
     /**
      * Removes the album reference for each [photoLinkIds] without touching the underlying

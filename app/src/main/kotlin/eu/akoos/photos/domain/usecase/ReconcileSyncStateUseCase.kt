@@ -412,6 +412,11 @@ class ReconcileSyncStateUseCase @Inject constructor(
         if (initialListingComplete) {
             context.settingsDataStore.edit { p ->
                 p[SettingsKeys.pairingSettledKey(userId.id)] = true
+                // Same condition, same moment: this pass checked sync_state against the full cloud
+                // set, so anything whose twin had gone has been demoted by now. The automatic
+                // free-up sweep reads this to decide whether its picture of the cloud is recent
+                // enough to delete a device copy against.
+                p[SettingsKeys.cloudVerifiedAtKey(userId.id)] = System.currentTimeMillis()
             }
         }
 

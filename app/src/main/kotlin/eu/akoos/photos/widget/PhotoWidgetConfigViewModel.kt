@@ -194,7 +194,7 @@ class PhotoWidgetConfigViewModel @Inject constructor(
      */
     private fun observeCloudAlbums() {
         viewModelScope.launch {
-            cloudAlbumDao.observeAll().collectLatest { albums ->
+            cloudAlbumDao.observeOwned().collectLatest { albums ->
                 _state.update { it.copy(cloudAlbums = albums) }
             }
         }

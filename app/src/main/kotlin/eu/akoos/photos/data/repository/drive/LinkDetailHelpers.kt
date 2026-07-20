@@ -177,32 +177,12 @@ class LinkDetailHelpers @Inject constructor(
      * Fetches one photo's encrypted XAttr from its active revision. The link-metadata endpoints
      * (volume + share) omit the revision XAttr; only the revision endpoint returns it. Tries the
      * volume revision endpoint first, then the share-based one, mirroring PhotoDownloadService.
-     */
-    suspend fun fetchRevisionXAttr(
-        userId: UserId,
-        volumeId: String,
-        shareId: String,
-        linkId: String,
-        revisionId: String,
-    ): String? {
-        val manager = apiProvider.get<DriveApiService>(userId)
-        return shareService.networkSemaphore.withPermit {
-            runCatching {
-                manager.invoke { getRevisionByVolume(volumeId, linkId, revisionId) }.valueOrThrow.revision.xAttr
-            }.getOrNull()
-                ?: runCatching {
-                    manager.invoke { getRevision(shareId, linkId, revisionId) }.valueOrThrow.revision.xAttr
-                }.getOrNull()
-        }
-    }
-
-    /**
-     * Like [fetchRevisionXAttr], but distinguishes a successful fetch with no XAttr (returns null)
-     * from a fetch that FAILED (rethrows the underlying error after the volume + share fallbacks are
-     * both exhausted). The swallow-and-return-null shape of [fetchRevisionXAttr] can't tell those
-     * apart; the GPS backfill needs to, so it only marks a row checked once its revision was actually
-     * read and retries the ones whose fetch threw. Rides the same [PhotosShareService.networkSemaphore]
-     * permit pool.
+     *
+     * A null return means the fetch SUCCEEDED and the revision carried no XAttr; a fetch that
+     * failed rethrows once both the volume and share paths are exhausted. The GPS backfill needs
+     * those two apart, so it only marks a row checked once its revision was actually read and
+     * retries the ones whose fetch threw. Rides the [PhotosShareService.networkSemaphore] permit
+     * pool.
      */
     suspend fun fetchRevisionXAttrOrThrow(
         userId: UserId,
@@ -216,7 +196,11 @@ class LinkDetailHelpers @Inject constructor(
             runCatching {
                 manager.invoke { getRevisionByVolume(volumeId, linkId, revisionId) }.valueOrThrow.revision.xAttr
             }.getOrElse {
-                manager.invoke { getRevision(shareId, linkId, revisionId) }.valueOrThrow.revision.xAttr
+                // v1, the path the official client uses for every share-scoped read. The v2 share
+                // route answers "Path not found" for a share that has not been migrated, which is
+                // what an album share accepted from another user is, and that is exactly the case
+                // this fallback exists to serve.
+                manager.invoke { getRevisionViaShare(shareId, linkId, revisionId) }.valueOrThrow.revision.xAttr
             }
         }
     }

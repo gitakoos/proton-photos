@@ -281,6 +281,7 @@
     <string name="gallery_create_album_failed">Nepodarilo sa vytvoriť album: %1$s</string>
     <string name="gallery_enable_metadata_category">Najprv povoľte kategóriu metadát v Nastavenia → Súkromie</string>
     <string name="gallery_album_picker_count_drive">%1$s · Drive</string>
+    <string name="gallery_album_picker_count_shared">%1$s · Drive · Zdieľané</string>
     <string name="album_add_photos">Pridať fotky</string>
     <string name="album_picker_title">Pridať do albumu</string>
     <string name="album_picker_selected">Vybraných: %1$d</string>
@@ -686,6 +687,9 @@
     <string name="albums_rename_same_name">Nový názov je rovnaký ako súčasný názov</string>
     <string name="albums_rename_failed">Premenovanie zlyhalo</string>
     <string name="albums_delete_failed">Nepodarilo sa odstrániť album: %1$s</string>
+    <string name="albums_delete_would_lose_title">Niektoré fotky sú len tu</string>
+    <string name="albums_delete_would_lose_body">Ľudia, s ktorými ste album zdieľali, pridali fotky, ktoré nemáte v knižnici. Odstránením albumu sa odstránia aj tieto fotky.</string>
+    <string name="albums_delete_would_lose_action">Napriek tomu odstrániť</string>
     <string name="albums_renamed_to">Premenované na „%1$s“</string>
 
     <!-- Share -->
@@ -749,6 +753,7 @@
     <string name="shared_empty_with_me_body">Albumy zdieľané s vami sa objavia tu.</string>
     <string name="shared_empty_by_me_body">Zdieľajte album alebo fotku, aby ste ich tu videli.</string>
     <string name="shared_by_email">od %1$s</string>
+    <string name="shared_by_email_full">Zdieľal(a) %1$s</string>
     <string name="shared_photo_count">%1$d fotiek</string>
     <string name="shared_by_me_photos_section">Zdieľané fotky</string>
 
@@ -1087,7 +1092,7 @@
     <string name="rename_sheet_subtitle_local">Vyberte, ako sa nový názov uplatní v tomto zariadení.</string>
     <string name="rename_sheet_name_label">Názov súboru</string>
     <string name="rename_sheet_option_cloud_title">Premenovať v cloude</string>
-    <string name="rename_sheet_option_cloud_subtitle">Nahrá pod novým názvom a originál presunie do Nedávno odstránených.</string>
+    <string name="rename_sheet_option_cloud_subtitle">Premenuje fotku priamo na Drive, bez vytvorenia kópie.</string>
     <string name="rename_sheet_option_local_title">Premenovať originál</string>
     <string name="rename_sheet_option_local_subtitle">Aktualizuje súbor priamo vo vašom zariadení.</string>
     <string name="rename_sheet_option_copy_title">Uložiť ako kópiu</string>
@@ -1295,6 +1300,12 @@
     <string name="whats_new_hide_backed">Zelený oblak, v telefóne a zálohované: zostáva v tvojom zariadení, takže ju ostatné aplikácie naďalej zobrazujú. Táto aplikácia ju skryje len tu, za zámkom Skrytých fotiek; tvoja kópia v cloude sa nikdy nepresunie, nezmení ani nevymaže.</string>
     <string name="whats_new_hide_cloud">Biely oblak, len v cloude: táto aplikácia ju skryje len tu, za zámkom Skrytých fotiek. Tvoja kópia v cloude zostane presne taká, aká je, a nikdy sa nepresunie, nezmení ani nevymaže.</string>
     <string name="whats_new_hide_albums">Skryť môžeš aj celý album v cloude a všetko sa dá vrátiť späť.</string>
+    <string name="whats_new_shared_add_title">Pridať do zdieľaného albumu</string>
+    <string name="whats_new_shared_add_body">Keď s tebou niekto zdieľa album a povolí ti úpravy, môžeš doň pridať vlastné fotky a zase ich odobrať.</string>
+    <string name="whats_new_viewer_place_title">Nezabudne, kde si</string>
+    <string name="whats_new_viewer_place_body">Zmazanie fotky prejde na ďalšiu namiesto toho, aby zavrelo zobrazenie fotky. Návrat do mriežky ťa vráti k naposledy zobrazenej fotke, nie k tej pôvodnej.</string>
+    <string name="whats_new_album_guard_title">Kontrola pred zmazaním albumu</string>
+    <string name="whats_new_album_guard_body">Ak je album jediné miesto, kde sú niektoré jeho fotky uložené, zmazanie sa najprv opýta.</string>
     <string name="whats_new_dup_title">Nájsť duplicitné fotky</string>
     <string name="whats_new_dup_body">Nájde presné kópie a vizuálne podobné zábery, potom jednu bezpečne ponecháš a zvyšok odstrániš.</string>
     <string name="whats_new_offline_title">Dostupné offline</string>
@@ -1313,7 +1324,7 @@
     <string name="whats_new_scrubber_body">Prechádzaj video s náhľadom filmového pásu a posúvaj sa po jednom snímku.</string>
     <string name="whats_new_album_title">Šikovnejšie albumy</string>
     <string name="whats_new_album_body">Uvidíš, v ktorých albumoch už vybraná fotka je, a výber môžeš obmedziť len na fotky, ktoré zatiaľ nie sú v žiadnom albume.</string>
-    <string name="whats_new_more">K tomu prispôsobivá ikona aplikácie, vrstva rýchlych akcií pre snímky obrazovky, bezpečnejšie odstraňovanie cez systémový kôš, spoľahlivejšie dátumy a vyššia stabilita pri veľmi veľkých knižniciach.</string>
+    <string name="whats_new_more">K tomu skopírované odkazy zostávajú skryté v náhľade schránky, veľkosti súborov sa všade zhodujú, automatické uvoľňovanie miesta si pred odobraním kópie z telefónu overí Drive a veľké albumy aj rozsiahle výbery držia pokope lepšie.</string>
     <string name="offline_card_subtitle">Fotky uložené na offline prezeranie</string>
     <string name="duplicates_filter_identical">Rovnaké</string>
     <string name="duplicates_filter_similar">Podobné</string>
@@ -1366,7 +1377,7 @@
     <string name="action_remove">Odstrániť</string>
     <string name="gallery_add_to_album_queued">Fotky sa pridajú po dokončení nahrávania</string>
     <string name="share_role_can_view_desc">Môže prezerať album a jeho fotky.</string>
-    <string name="share_role_can_edit_desc">Môže pridávať a odstraňovať fotky a meniť obal.</string>
+    <string name="share_role_can_edit_desc">Môže pridávať a odstraňovať fotky.</string>
     <string name="settings_show_selection_labels">Popisky tlačidiel</string>
     <string name="settings_show_selection_labels_desc">Pri výbere fotiek zobrazí pod každým tlačidlom krátky popisok, aby bolo jasné, čo ktoré robí.</string>
     <string name="sel_label_download">Stiahnuť</string>

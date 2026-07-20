@@ -74,9 +74,24 @@ data class AlbumsUiState(
     val error: String? = null,
     val isCreatingAlbum: Boolean = false,
     val createAlbumError: String? = null,
+    /** Albums someone else shared with this user and granted edit rights on. */
+    val sharedAddableAlbums: List<Album> = emptyList(),
+    /** Set to an album's linkId when the server refused to delete it because that would destroy
+     *  photos held nowhere else, so the screen can put the choice to the user. */
+    val deleteWouldLosePhotosFor: String? = null,
 ) {
     /** Cloud albums hidden client-side drop off the Albums grid. */
     val visibleCloudAlbums: List<Album> get() = albums.filter { it.linkId !in hiddenAlbumIds }
+
+    /**
+     * Every album a selected photo may be added to: the user's own, plus the shared ones they hold
+     * edit rights on.
+     *
+     * Deliberately separate from [albums]. The Albums grid is about what the user owns, and shared
+     * albums have their own tab, so folding them in there would move things around unasked. A
+     * picker is the one place both belong, because the question there is "where may this photo go".
+     */
+    val addableAlbums: List<Album> get() = visibleCloudAlbums + sharedAddableAlbums
 }
 
 @HiltViewModel
@@ -204,6 +219,12 @@ class AlbumsViewModel @Inject constructor(
             if (cached.isNotEmpty()) {
                 _uiState.update { it.copy(isLoading = false, albums = cached) }
             }
+            // Cache-only, so it costs nothing on this path and the add-to-album picker has its
+            // destinations ready without the shared-with-me walk. Refreshed by the Shared tab.
+            val sharedAddable = runCatching { driveRepo.loadSharedAddableAlbumsCached() }.getOrNull().orEmpty()
+            if (sharedAddable.isNotEmpty()) {
+                _uiState.update { it.copy(sharedAddableAlbums = sharedAddable) }
+            }
 
             // Phase 2: network refresh, online only — else keep the painted cache.
             if (!networkObserver.isOnline.value) {
@@ -320,20 +341,36 @@ class AlbumsViewModel @Inject constructor(
         )
     }
 
-    fun deleteAlbum(albumLinkId: String) {
+    /**
+     * Deletes an album.
+     *
+     * [deletePhotosToo] false is the safe first attempt: the server refuses it when the album holds
+     * the only copy of some photos, and that refusal is surfaced as a question rather than an error
+     * so the user decides. Passing true is that decision, made knowingly.
+     */
+    fun deleteAlbum(albumLinkId: String, deletePhotosToo: Boolean = false) {
         viewModelScope.launch {
             val userId = accountManager.getPrimaryUserId().first() ?: return@launch
             try {
-                driveRepo.deleteAlbum(userId, albumLinkId)
+                driveRepo.deleteAlbum(userId, albumLinkId, deletePhotosToo)
                 _uiState.update { state ->
-                    state.copy(albums = state.albums.filter { it.linkId != albumLinkId })
+                    state.copy(
+                        albums = state.albums.filter { it.linkId != albumLinkId },
+                        deleteWouldLosePhotosFor = null,
+                    )
                 }
+            } catch (e: eu.akoos.photos.domain.entity.AlbumDeleteWouldLosePhotos) {
+                // Not a failure: the album still exists and nothing was touched. Hand the choice up.
+                _uiState.update { it.copy(deleteWouldLosePhotosFor = albumLinkId) }
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 _uiState.update { it.copy(error = context.getString(R.string.albums_delete_failed, e.message ?: "")) }
             }
         }
     }
+
+    fun dismissDeleteWouldLosePhotos() =
+        _uiState.update { it.copy(deleteWouldLosePhotosFor = null) }
 
     /**
      * Hide a cloud album client-side by adding its linkId to [SettingsKeys.HIDDEN_ALBUM_IDS]. The

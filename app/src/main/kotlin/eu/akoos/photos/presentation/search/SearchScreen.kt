@@ -117,6 +117,7 @@ import eu.akoos.photos.presentation.common.anyLocalOnly
 import eu.akoos.photos.presentation.common.hasDownloadable
 import eu.akoos.photos.presentation.common.allLocalOnly
 import eu.akoos.photos.presentation.common.MultiStripState
+import eu.akoos.photos.presentation.common.ReturnToViewerPhoto
 import eu.akoos.photos.presentation.common.ScrollScrubber
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PrivacyTip
@@ -530,6 +531,16 @@ fun SearchScreen(
                     enabled = !isDeleting,
                 )
                 val seamless = rememberSeamlessGrid()
+                // Land back on the photo the viewer closed on. Results are one flat run with no
+                // header and nothing ahead of them. The cells key on the prefixed local keyOf(),
+                // which the viewer knows nothing about, so match on the gallery identity instead.
+                val returnGroups = remember(results) { listOf(results) }
+                ReturnToViewerPhoto(
+                    gridState = resultsGridState,
+                    groups = returnGroups,
+                    headerPerGroup = false,
+                    keyOf = { it.stableId },
+                )
                 LazyVerticalGrid(
                     columns = GridCells.Fixed(3),
                     state = resultsGridState,

@@ -171,8 +171,8 @@ class LargeLibrarySimulator @Inject constructor(
         val userId = accountManager.getPrimaryUserId().first()
         val ids = (userId?.let { photoListingDao.getAllLinkIds(it.id) } ?: emptyList())
             .filter { it.startsWith(LargeLibrarySim.LINK_ID_PREFIX) }
-        if (ids.isNotEmpty()) {
-            ids.chunked(BATCH_SIZE).forEach { photoListingDao.deleteByLinkIds(it) }
+        if (userId != null && ids.isNotEmpty()) {
+            ids.chunked(BATCH_SIZE).forEach { photoListingDao.deleteByLinkIds(userId.id, it) }
             // Drop the decrypted thumbnails the scheduler wrote for these rows.
             val thumbDir = File(context.cacheDir, "thumbnails")
             ids.forEach { File(thumbDir, "thumb_$it.jpg").delete() }

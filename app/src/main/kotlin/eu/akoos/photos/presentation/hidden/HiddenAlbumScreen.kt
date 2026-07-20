@@ -72,6 +72,7 @@ import androidx.compose.ui.res.stringResource
 import eu.akoos.photos.R
 import eu.akoos.photos.presentation.common.CloudPhotoCell
 import eu.akoos.photos.presentation.common.IconBubble
+import eu.akoos.photos.presentation.common.ReturnToViewerPhoto
 import eu.akoos.photos.presentation.common.SecureScreenEffect
 import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
 import androidx.compose.runtime.Composable
@@ -343,6 +344,33 @@ fun HiddenAlbumScreen(
                         selected = selectionKeys,
                         onSelectionChange = viewModel::setSelectionFromKeys,
                         tapGuard = tapGuard,
+                    )
+                    // Land back on the photo the viewer closed on. The album block leads the grid
+                    // ahead of every photo, then the cloud group and the device group each carry one
+                    // header. An empty cloud group is dropped rather than passed through: its header
+                    // is only emitted alongside it, and counting a phantom one would push the device
+                    // photos a slot out. The two groups hand the viewer different lists (CloudOnly
+                    // for the cloud photos, LocalOnly for the device ones), so each is reduced here
+                    // to the key it reports back.
+                    val returnLeadingSlots = remember(state.hiddenAlbums) {
+                        if (state.hiddenAlbums.isEmpty()) 0
+                        else 1 + state.hiddenAlbums.chunked(2).size
+                    }
+                    val returnGroups = remember(state.hiddenCloudPhotos, state.items) {
+                        val devicePhotos = state.items.map { it.uri }
+                        if (state.hiddenCloudPhotos.isEmpty()) listOf(devicePhotos)
+                        else listOf(state.hiddenCloudPhotos.map { it.linkId }, devicePhotos)
+                    }
+                    // The device group's sub-heading is emitted only when a group sits above it, so
+                    // "one header each" holds exactly when there are cloud photos or albums to lead.
+                    val returnHasHeaders =
+                        state.hiddenCloudPhotos.isNotEmpty() || state.hiddenAlbums.isNotEmpty()
+                    ReturnToViewerPhoto(
+                        gridState = gridState,
+                        groups = returnGroups,
+                        headerPerGroup = returnHasHeaders,
+                        leadingSlots = returnLeadingSlots,
+                        keyOf = { it },
                     )
                     LazyVerticalGrid(
                         columns = GridCells.Fixed(cols),

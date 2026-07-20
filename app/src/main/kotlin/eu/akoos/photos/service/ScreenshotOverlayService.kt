@@ -82,6 +82,7 @@ import eu.akoos.photos.domain.repository.SyncStateRepository
 import eu.akoos.photos.domain.usecase.ForceUploadLocalUrisUseCase
 import eu.akoos.photos.presentation.settings.ThemePalette
 import eu.akoos.photos.presentation.theme.paletteAccent
+import eu.akoos.photos.util.copySensitiveText
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -1884,8 +1885,7 @@ class ScreenshotOverlayService : Service() {
 
     private fun copyLinkToClipboard(url: String) {
         runCatching {
-            val clipboard = getSystemService(CLIPBOARD_SERVICE) as? ClipboardManager ?: return
-            clipboard.setPrimaryClip(ClipData.newPlainText("Photo link", url))
+            copySensitiveText(this, "Photo link", url)
         }
     }
 

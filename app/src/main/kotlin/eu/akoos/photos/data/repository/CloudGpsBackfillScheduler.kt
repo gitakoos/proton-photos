@@ -37,6 +37,7 @@ import eu.akoos.photos.data.db.entity.PhotoListingEntity
 import eu.akoos.photos.data.db.entity.PhotoLocationEntity
 import eu.akoos.photos.data.repository.drive.AlbumService
 import eu.akoos.photos.data.repository.drive.LinkDetailHelpers
+import eu.akoos.photos.data.repository.drive.PhotosShareService
 import eu.akoos.photos.util.isTransientApiError
 import eu.akoos.photos.util.retryWithBackoff
 import java.util.concurrent.ConcurrentHashMap
@@ -81,6 +82,7 @@ class CloudGpsBackfillScheduler @Inject constructor(
     private val linkDetailHelpers: LinkDetailHelpers,
     private val photoLocationResolver: PhotoLocationResolver,
     private val albumService: AlbumService,
+    private val shareService: PhotosShareService,
 ) {
     /** Concurrency bound on in-flight XAttr decrypts — a handful keeps JNI / GC pressure low. */
     private val semaphore = Semaphore(WORKER_COUNT)
@@ -106,11 +108,20 @@ class CloudGpsBackfillScheduler @Inject constructor(
     suspend fun backfillAll(userId: UserId) {
         if (!backfilling.compareAndSet(false, true)) return
         try {
+            // Every fetch below addresses this user's own volume, so the walk is scoped to it: a row
+            // from an album another user shared could never resolve a revision here, and would be
+            // re-offered on every pass. Unavailable (offline, or a share not bootstrapped yet) simply
+            // defers the pass, the same treatment a failed page gets.
+            val ownVolumeId = runCatching { shareService.getVolumeId(userId) }.getOrNull()
+            if (ownVolumeId.isNullOrBlank()) {
+                Log.d(TAG, "own volume id unavailable, deferring this pass")
+                return
+            }
             // Photos in a client-side hidden album are kept out of the proactive geocode; snapshot the
             // member set once so the walk stays consistent across its pages.
             val hiddenLinkIds = albumService.observeHiddenAlbumMemberLinkIds().first()
             while (true) {
-                val batch = runCatching { photoListingDao.getUngeocoded(userId.id, PAGE) }
+                val batch = runCatching { photoListingDao.getUngeocoded(userId.id, ownVolumeId, PAGE) }
                     .getOrElse { e ->
                         if (e is CancellationException) throw e
                         Log.w(TAG, "query failed: ${e.message}"); break

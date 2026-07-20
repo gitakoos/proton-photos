@@ -41,6 +41,7 @@ import eu.akoos.photos.data.api.dto.BatchLinkDto
 import eu.akoos.photos.data.api.dto.RevisionBlockDto
 import eu.akoos.photos.crypto.CryptoServiceClient
 import eu.akoos.photos.data.crypto.DriveCryptoHelper
+import eu.akoos.photos.data.db.dao.PhotoListingDao
 import eu.akoos.photos.domain.entity.CloudPhoto
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
@@ -74,6 +75,9 @@ class PhotoDownloadService @Inject constructor(
     private val shareService: PhotosShareService,
     private val linkDetailHelpers: LinkDetailHelpers,
     private val cdnBlockFetcher: CdnBlockFetcher,
+    private val albumCryptoChain: AlbumCryptoChain,
+    private val sharedAlbumKeyStore: SharedAlbumKeyStore,
+    private val photoListingDao: PhotoListingDao,
     @ApplicationContext private val context: Context,
 ) {
     private val semaphore get() = shareService.networkSemaphore
@@ -183,32 +187,80 @@ class PhotoDownloadService @Inject constructor(
         val rootLinkKeyBytes = shareService.getRootLinkKeyBytes(userId) ?: error("Cannot decrypt root link key")
         val manager = apiProvider.get<DriveApiService>(userId)
 
+        // ── Shared-album routing ─────────────────────────────────────────────────
+        // A photo inside an album another user shared comes back from the API with a NULL
+        // ParentLinkID, because the recipient cannot see the owner's photos root. The stored row is
+        // the only place the album is still named: the recipient-side load pins parentLinkId to the
+        // album linkId. Resolving the album's SharingContext here is what lets the fetches below run
+        // through the share instead of a volume this user is not a member of. Null for every photo
+        // the user owns, which leaves the whole owner path untouched.
+        val sharingContext: AlbumCryptoChain.SharingContext? = run {
+            // A photo sitting on this user's own volume cannot be inside an album someone else
+            // shared, so the owner path settles here and pays for none of the lookups below. The
+            // volume id is cached after the first read, and a failure to read it falls through to
+            // the lookups, which answer null for an owned photo anyway.
+            val ownVolumeId = runCatching { shareService.getVolumeId(userId) }.getOrNull()
+            if (ownVolumeId != null && photo.volumeId == ownVolumeId) return@run null
+            val albumLinkId = try {
+                photoListingDao.getByLinkId(photo.linkId)?.parentLinkId
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                Log.w(TAG, "downloadFullResPhoto: listing row lookup failed for ${photo.linkId}: ${e.message}")
+                null
+            }
+            albumLinkId?.takeIf { it != shareService.photosRootLinkId() }
+                ?.let { sharedAlbumKeyStore.contextFor(userId, it) }
+        }
+
+        // Names which of the two routes this photo takes, so a failure below can be told apart
+        // from one that never entered the shared branch at all. Everything between here and the
+        // content-key resolution throws without logging, which otherwise leaves no trace.
+        Log.d(TAG, "downloadFullResPhoto: ${photo.linkId} route=${if (sharingContext != null) "share ${sharingContext.sharingShareId}" else "own volume"}")
+
         // ── Node key ─────────────────────────────────────────────────────────────
         // Use the caller-prefetched link detail when present (bulk-download path resolved it in a
         // 50-wide batch up front); otherwise fall back to the per-file one-element batch fetch.
-        // Keyed strictly by this photo's linkId, so no cross-file key material can leak in.
-        val linkDetail: BatchLinkDto = preResolvedLinkDetail
-            ?: linkDetailHelpers.batchFetchLinkDetails(userId, photo.volumeId, listOf(photo.linkId))[photo.linkId]
-            ?: error("Link not found: ${photo.linkId}")
+        // Keyed strictly by this photo's linkId, so no cross-file key material can leak in. A shared
+        // album's photo goes through the share endpoint, the only one that answers for a link on
+        // someone else's volume.
+        val linkDetail: BatchLinkDto = preResolvedLinkDetail ?: run {
+            val fetched = if (sharingContext != null) {
+                linkDetailHelpers.batchFetchLinkDetailsViaShare(
+                    userId, sharingContext.sharingShareId, listOf(photo.linkId),
+                )
+            } else {
+                linkDetailHelpers.batchFetchLinkDetails(userId, photo.volumeId, listOf(photo.linkId))
+            }
+            fetched[photo.linkId]
+        } ?: error("Link not found: ${photo.linkId}")
         val link = linkDetail.link
         val nodeKeyArmored = link.nodeKey ?: error("No nodeKey for ${photo.linkId}")
         val nodePassphraseArmored = link.nodePassphrase ?: error("No nodePassphrase for ${photo.linkId}")
 
         val parentLinkId = link.parentLinkId
-        val parentKeyBytes: ByteArray = if (parentLinkId == null || parentLinkId == shareService.photosRootLinkId()) {
+        val parentKeyBytes: ByteArray = if (sharingContext != null) {
+            // [AlbumCryptoChain.selectPhotoParentKey] holds the rule: the sender rewraps every
+            // photo's NodePassphrase to the album key when adding it, so the album key is the only
+            // one that opens it for a recipient, whatever the wire parent says.
+            albumCryptoChain.selectPhotoParentKey(
+                rootLinkKeyBytes = rootLinkKeyBytes,
+                albumKeyBytes = sharingContext.albumKeyBytes,
+                photoParentLinkId = parentLinkId,
+                photosRootLinkId = shareService.photosRootLinkId(),
+                sharingContext = sharingContext,
+            ) ?: error("No album key for shared photo ${photo.linkId}")
+        } else if (parentLinkId == null || parentLinkId == shareService.photosRootLinkId()) {
             rootLinkKeyBytes
         } else {
             val albumDetailMap = linkDetailHelpers.batchFetchLinkDetails(userId, photo.volumeId, listOf(parentLinkId))
             val albumLink = albumDetailMap[parentLinkId]?.link
-            if (albumLink?.nodeKey != null && albumLink.nodePassphrase != null) {
-                try {
-                    cryptoServiceClient.decryptNodeKey(albumLink.nodeKey, albumLink.nodePassphrase, rootLinkKeyBytes)
-                } catch (e: Exception) {
-                    if (e is kotlinx.coroutines.CancellationException) throw e
-                    Log.w(TAG, "downloadFullResPhoto: album key decrypt failed: ${e.message}")
-                    rootLinkKeyBytes
-                }
-            } else rootLinkKeyBytes
+                ?: error("Parent album link not found for ${photo.linkId}: $parentLinkId")
+            val albumNodeKey = albumLink.nodeKey ?: error("No nodeKey on parent album $parentLinkId")
+            val albumNodePass = albumLink.nodePassphrase ?: error("No nodePassphrase on parent album $parentLinkId")
+            // A failed parent key is fatal, matching both official clients. Substituting the root key
+            // can never open a passphrase wrapped to the album, so it only trades a precise error for
+            // a decrypt failure one step later.
+            cryptoServiceClient.decryptNodeKey(albumNodeKey, albumNodePass, rootLinkKeyBytes)
         }
         val nodeKeyBytes = cryptoServiceClient.decryptNodeKey(nodeKeyArmored, nodePassphraseArmored, parentKeyBytes)
 
@@ -219,6 +271,8 @@ class PhotoDownloadService @Inject constructor(
         //   3. Photo.ActiveRevision.RevisionID        ← Photos-API field
         //   4. Link.ActiveRevision.ID                 ← legacy fallback
         //   5. listRevisions API call
+        // Source 3 stays null on the shared path: the share endpoint fills only `link`, leaving the
+        // `photo` / `album` / `folder` sub-fields unset, so the chain simply falls through it.
         val revisionId: String = photo.revisionId.ifEmpty {
             link.fileProperties?.activeRevision?.id?.takeIf { it.isNotEmpty() }
                 ?: linkDetail.photo?.activeRevision?.revisionId?.takeIf { it.isNotEmpty() }
@@ -226,8 +280,11 @@ class PhotoDownloadService @Inject constructor(
         } ?: run {
             Log.d(TAG, "downloadFullResPhoto: revisionId missing, trying listRevisions for ${photo.linkId}")
             try {
+                // The row's own shareId is this user's primary share, which does not cover a link on
+                // the owner's volume, so a shared album's photo is listed through its sharing share.
+                val revListShareId = sharingContext?.sharingShareId ?: photo.shareId
                 val revList = semaphore.withPermit {
-                    manager.invoke { listRevisions(photo.shareId, photo.linkId) }.valueOrThrow
+                    manager.invoke { listRevisions(revListShareId, photo.linkId) }.valueOrThrow
                 }
                 (revList.revisions.firstOrNull { it.state == 1 } ?: revList.revisions.firstOrNull())?.id
             } catch (e: Exception) {
@@ -238,13 +295,21 @@ class PhotoDownloadService @Inject constructor(
         } ?: error("No revisionId for ${photo.linkId}")
 
         // ── Fetch revision (for block download URLs) ──────────────────────────────
+        // The sharing share reaches a revision on the owner's volume; the volume endpoint does not,
+        // so a shared album's photo asks the share directly rather than paying a failed call first.
         val revisionResp = semaphore.withPermit {
-            try {
-                manager.invoke { getRevisionByVolume(photo.volumeId, photo.linkId, revisionId) }.valueOrThrow
-            } catch (e: Exception) {
-                if (e is kotlinx.coroutines.CancellationException) throw e
-                Log.w(TAG, "downloadFullResPhoto: volume getRevision failed (${e.message}), trying share-based")
-                manager.invoke { getRevision(photo.shareId, photo.linkId, revisionId) }.valueOrThrow
+            if (sharingContext != null) {
+                manager.invoke {
+                    getRevisionViaShare(sharingContext.sharingShareId, photo.linkId, revisionId)
+                }.valueOrThrow
+            } else {
+                try {
+                    manager.invoke { getRevisionByVolume(photo.volumeId, photo.linkId, revisionId) }.valueOrThrow
+                } catch (e: Exception) {
+                    if (e is kotlinx.coroutines.CancellationException) throw e
+                    Log.w(TAG, "downloadFullResPhoto: volume getRevision failed (${e.message}), trying share-based")
+                    manager.invoke { getRevisionViaShare(photo.shareId, photo.linkId, revisionId) }.valueOrThrow
+                }
             }
         }
 

@@ -274,6 +274,135 @@ class AppDatabaseMigrationTest {
     }
 
     @Test
+    fun migrate_v16_to_v17_addsPermissionsColumn_defaultsNull_preservesRows() {
+        // A pre-v17 cloud_albums table with the columns that existed before the permission bitmask.
+        db.execSQL(
+            """
+            CREATE TABLE cloud_albums (
+              linkId TEXT NOT NULL PRIMARY KEY,
+              name TEXT NOT NULL,
+              photoCount INTEGER NOT NULL,
+              coverLinkId TEXT,
+              lastActivityTimeMs INTEGER,
+              sharingShareId TEXT,
+              sharingShareUrlId TEXT,
+              sharedByEmail TEXT,
+              volumeId TEXT,
+              lastFetchedMs INTEGER NOT NULL DEFAULT 0
+            )
+            """.trimIndent()
+        )
+        db.execSQL(
+            """
+            INSERT INTO cloud_albums (linkId, name, photoCount, sharedByEmail, volumeId, lastFetchedMs)
+            VALUES ('own','Holiday',12,NULL,'volA',100), ('guest','Wedding',3,'her@example.test','volB',200)
+            """.trimIndent()
+        )
+
+        Migrations.MIGRATION_16_17.migrate(db)
+
+        // Both rows survive, and neither claims a permission it was never told about. That NULL is
+        // load-bearing: it is read as "not an editor", so an album cached before this column
+        // existed stays read-only until the next refresh answers the question for real.
+        db.query("SELECT linkId, name, sharedByEmail, permissions FROM cloud_albums ORDER BY linkId")
+            .use { cur ->
+                assertTrue("expected the seeded rows to survive the migration", cur.moveToFirst())
+                assertEquals("guest", cur.getString(0))
+                assertEquals("Wedding", cur.getString(1))
+                assertEquals("her@example.test", cur.getString(2))
+                assertTrue("permissions defaults to NULL on existing rows", cur.isNull(3))
+
+                assertTrue(cur.moveToNext())
+                assertEquals("own", cur.getString(0))
+                assertTrue("an owned album has no permission either", cur.isNull(3))
+            }
+
+        // The new column is writable: the shared-with-me refresh fills it in from the bootstrap.
+        db.execSQL("UPDATE cloud_albums SET permissions = 6 WHERE linkId = 'guest'")
+        db.query("SELECT permissions FROM cloud_albums WHERE linkId = 'guest'").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals(6L, cur.getLong(0))
+        }
+    }
+
+    @Test
+    fun migrate_v17_to_v18_addsIsChildOfAlbumColumn_backfillsAlbumChildren_leavesStreamPhotosAlone() {
+        // Bring the fixture to the shape MIGRATION_17_18 reads: photo_listing carrying a parent, and
+        // the cached album list that answers whether a given parent is an album. Both come from the
+        // real migrations rather than hand-written SQL, so the fixture cannot drift from the schema.
+        Migrations.MIGRATION_4_5.migrate(db)
+        Migrations.MIGRATION_6_7.migrate(db)
+        db.execSQL(
+            "INSERT INTO cloud_albums (linkId, name, photoCount, lastFetchedMs) VALUES ('album-1','Wedding',2,0)"
+        )
+        // Three rows: one contributed into the album, one the user added to that same album (still
+        // parented to the photos root), and one from before parentLinkId existed at all.
+        db.execSQL(
+            """
+            INSERT INTO photo_listing (linkId, shareId, volumeId, userId, captureTime,
+                displayName, mimeType, sizeBytes, revisionId, thumbnailUrl, parentLinkId)
+            VALUES ('contributed','s1','v1','u1',1000,'guest.jpg','image/jpeg',1024,'r1',NULL,'album-1'),
+                   ('in-my-album','s1','v1','u1',2000,'mine.jpg','image/jpeg',2048,'r2',NULL,'photos-root'),
+                   ('legacy','s1','v1','u1',3000,'old.jpg','image/jpeg',512,'r3',NULL,NULL)
+            """.trimIndent()
+        )
+
+        Migrations.MIGRATION_17_18.migrate(db)
+
+        db.query("SELECT linkId, isChildOfAlbum FROM photo_listing ORDER BY linkId").use { cur ->
+            assertTrue("expected the seeded rows to survive the migration", cur.moveToFirst())
+            assertEquals("contributed", cur.getString(0))
+            assertEquals("a row parented to a cached album is backfilled as an album child", 1, cur.getInt(1))
+
+            assertTrue(cur.moveToNext())
+            assertEquals("in-my-album", cur.getString(0))
+            assertEquals("a root-parented photo stays a stream photo, album or not", 0, cur.getInt(1))
+
+            assertTrue(cur.moveToNext())
+            assertEquals("legacy", cur.getString(0))
+            assertEquals("a row with no parent at all stays on the timeline", 0, cur.getInt(1))
+        }
+
+        // The new column is writable: every sync path sets it from the parent or the wire field.
+        db.execSQL("UPDATE photo_listing SET isChildOfAlbum = 1 WHERE linkId = 'legacy'")
+        db.query("SELECT isChildOfAlbum FROM photo_listing WHERE linkId = 'legacy'").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals(1, cur.getInt(0))
+        }
+    }
+
+    @Test
+    fun migrate_v18_to_v19_addsNameFingerprintColumn_defaultsNull_preservesRows() {
+        db.execSQL(
+            """
+            INSERT INTO photo_listing (linkId, shareId, volumeId, userId, captureTime,
+                displayName, mimeType, sizeBytes, revisionId, thumbnailUrl)
+            VALUES ('named','s1','v1','u1',1000,'holiday.jpg','image/jpeg',1024,'r1','thumb://a')
+            """.trimIndent()
+        )
+
+        Migrations.MIGRATION_18_19.migrate(db)
+
+        db.query("SELECT linkId, displayName, nameFingerprint FROM photo_listing WHERE linkId = 'named'")
+            .use { cur ->
+                assertTrue("expected the seeded row to survive the migration", cur.moveToFirst())
+                assertEquals("named", cur.getString(0))
+                assertEquals("the stored name is untouched", "holiday.jpg", cur.getString(1))
+                // That NULL is the point of the column rather than an oversight: the digest belongs
+                // to ciphertext this migration cannot see, and null is read as "recheck", so the
+                // first refresh after the upgrade repairs any name that already drifted.
+                assertTrue("nameFingerprint defaults to NULL on existing rows", cur.isNull(2))
+            }
+
+        // The new column is writable: every path that decrypts a name records the digest it came from.
+        db.execSQL("UPDATE photo_listing SET nameFingerprint = 'a1b2c3d4' WHERE linkId = 'named'")
+        db.query("SELECT nameFingerprint FROM photo_listing WHERE linkId = 'named'").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals("a1b2c3d4", cur.getString(0))
+        }
+    }
+
+    @Test
     fun migrate_v2_through_v4_chain_appliesBothMigrations() {
         // Seed a pure v2 row.
         db.execSQL(

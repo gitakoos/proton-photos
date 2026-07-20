@@ -28,7 +28,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -45,21 +44,21 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.Cloud
-import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Compress
-import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.GroupAdd
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.PhotoAlbum
+import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Smartphone
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -92,8 +91,8 @@ import javax.inject.Inject
 /**
  * Persists the one-time "What's new" dismissal. [markSeen] writes the current versionCode to
  * [SettingsKeys.WHATS_NEW_SEEN_VERSION] so the screen can never reappear for this version. The
- * screen calls it on every exit (Got-it, a feature Open button, or back), so whichever path the
- * user takes out of the screen settles the gate.
+ * screen calls it on every exit (Got-it or back), so whichever path the user takes out of the
+ * screen settles the gate.
  */
 @HiltViewModel
 class WhatsNewViewModel @Inject constructor(
@@ -108,12 +107,11 @@ class WhatsNewViewModel @Inject constructor(
     }
 }
 
-/** One feature highlight fed into the pager: its icon chip and strings, plus an optional jump. */
+/** One feature highlight fed into the pager: its icon chip and strings. */
 private class WhatsNewFeature(
     val icon: ImageVector,
     val titleRes: Int,
     val bodyRes: Int,
-    val onOpen: (() -> Unit)? = null,
 )
 
 /**
@@ -159,33 +157,20 @@ private fun packFeaturePages(count: Int, pageHeight: Dp, cardHeight: Dp, spacing
 @Composable
 fun WhatsNewScreen(
     onDone: () -> Unit,
-    onOpenDuplicates: () -> Unit,
-    onOpenOffline: () -> Unit,
     viewModel: WhatsNewViewModel = hiltViewModel(),
 ) {
     val colors = AppColors.current
 
-    // Feature cards after Hide, in order. The two with a jump mark the version seen before leaving.
+    // Feature cards after Hide, in order.
     val features = listOf(
+        WhatsNewFeature(Icons.Default.GroupAdd, R.string.whats_new_shared_add_title, R.string.whats_new_shared_add_body),
+        WhatsNewFeature(Icons.Default.Bookmark, R.string.whats_new_viewer_place_title, R.string.whats_new_viewer_place_body),
+        WhatsNewFeature(Icons.Default.Shield, R.string.whats_new_album_guard_title, R.string.whats_new_album_guard_body),
         WhatsNewFeature(Icons.Default.CleaningServices, R.string.whats_new_freeup_title, R.string.whats_new_freeup_body),
         WhatsNewFeature(Icons.Default.Compress, R.string.whats_new_compress_title, R.string.whats_new_compress_body),
         WhatsNewFeature(Icons.Default.GridView, R.string.whats_new_seamless_title, R.string.whats_new_seamless_body),
         WhatsNewFeature(Icons.Default.Movie, R.string.whats_new_scrubber_title, R.string.whats_new_scrubber_body),
         WhatsNewFeature(Icons.Default.PhotoAlbum, R.string.whats_new_album_title, R.string.whats_new_album_body),
-        WhatsNewFeature(
-            Icons.Default.ContentCopy, R.string.whats_new_dup_title, R.string.whats_new_dup_body,
-            onOpen = {
-                viewModel.markSeen()
-                onOpenDuplicates()
-            },
-        ),
-        WhatsNewFeature(
-            Icons.Default.CloudDownload, R.string.whats_new_offline_title, R.string.whats_new_offline_body,
-            onOpen = {
-                viewModel.markSeen()
-                onOpenOffline()
-            },
-        ),
     )
 
     Box(
@@ -235,7 +220,6 @@ fun WhatsNewScreen(
                                     icon = feature.icon,
                                     title = stringResource(feature.titleRes),
                                     body = stringResource(feature.bodyRes),
-                                    onOpen = feature.onOpen,
                                 )
                             }
                         }
@@ -312,16 +296,12 @@ private fun WhatsNewPagerDots(current: Int, count: Int) {
     }
 }
 
-/**
- * One feature highlight: a leading icon chip, a bold title, a short description, and an optional
- * "Open" text button that jumps straight to the feature.
- */
+/** One feature highlight: a leading icon chip, a bold title, and a short description. */
 @Composable
 private fun WhatsNewCard(
     icon: ImageVector,
     title: String,
     body: String,
-    onOpen: (() -> Unit)? = null,
 ) {
     val colors = AppColors.current
     Row(
@@ -347,17 +327,6 @@ private fun WhatsNewCard(
         ) {
             Text(title, color = colors.fgPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
             Text(body, color = colors.fgDim, fontSize = 13.sp)
-            if (onOpen != null) {
-                TextButton(
-                    onClick = onOpen,
-                    contentPadding = PaddingValues(horizontal = 0.dp, vertical = 6.dp),
-                ) {
-                    Text(
-                        stringResource(R.string.whats_new_open),
-                        color = colors.accent, fontSize = 14.sp, fontWeight = FontWeight.Medium,
-                    )
-                }
-            }
         }
     }
 }

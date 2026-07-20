@@ -102,6 +102,10 @@ class ThumbnailHelpers @Inject constructor(
             val encryptedBytes: ByteArray = simBytes ?: try {
                 cdnBlockFetcher.fetchBlock(url = info.bareUrl, token = info.token, maxAttempts = 3, background = background)
             } catch (e: Exception) {
+                // A scrolled-away thumbnail cancels its own fetch. Rethrow so the coroutine
+                // unwinds instead of the cancellation being logged as a download failure and
+                // the rest of this function running for a result nobody awaits.
+                if (e is kotlinx.coroutines.CancellationException) throw e
                 // Thumbnails are best-effort — a non-2xx after retries means no thumbnail,
                 // not a failed photo. Log and fall through to the empty-bytes short-circuit
                 // below so the upper layer surfaces null (and the gallery falls back to a
@@ -145,6 +149,7 @@ class ThumbnailHelpers @Inject constructor(
             decFile.writeBytes(decrypted)
             "file://${decFile.absolutePath}"
         } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
             Log.w(TAG, "downloadAndDecryptBinary failed linkId=$linkId: ${e.message}")
             null
         }

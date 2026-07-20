@@ -59,11 +59,15 @@ import eu.akoos.photos.data.db.entity.CloudAlbumEntity
 import eu.akoos.photos.data.db.entity.PhotoListingEntity
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.data.repository.VideoDurationBackfillScheduler
 import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.entity.AlbumChild
+import eu.akoos.photos.domain.entity.AlbumDeleteWouldLosePhotos
 import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.DriveNotFoundException
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
+import eu.akoos.photos.util.flatMapSqlChunks
+import eu.akoos.photos.util.forEachSqlChunk
 import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -73,6 +77,11 @@ private const val TAG = "AlbumSvc"
 // The add-multiple / remove-multiple album endpoints reject any request with more than 10 links
 // ("This collection should contain 10 elements or less"), so both paths chunk to this size.
 private const val ALBUM_LINK_BATCH_MAX = 10
+
+/** Drive's "this would destroy data" refusal, returned when deleting an album that holds the only
+ *  copy of some photos. A plain HTTP status cannot be used to spot it: the response is a 422, which
+ *  many unrelated validation failures also return. */
+private const val ALBUM_DELETE_DATA_LOSS_CODE = 200302
 
 
 /**
@@ -93,7 +102,10 @@ class AlbumService @Inject constructor(
     private val thumbnailHelpers: ThumbnailHelpers,
     private val photoEntityBuilder: PhotoEntityBuilder,
     private val thumbnailDecryptScheduler: ThumbnailDecryptScheduler,
+    private val videoDurationBackfillScheduler: VideoDurationBackfillScheduler,
     private val albumCryptoChain: AlbumCryptoChain,
+    private val sharedAlbumKeyStore: SharedAlbumKeyStore,
+    private val albumCacheCleanup: AlbumCacheCleanup,
     @ApplicationContext private val context: Context,
 ) {
     private val semaphore get() = shareService.networkSemaphore
@@ -426,7 +438,7 @@ class AlbumService @Inject constructor(
             val thumbnailCacheDir = File(context.cacheDir, "thumbnails")
             val hiddenAlbumIds = runCatching { context.settingsDataStore.data.first()[SettingsKeys.HIDDEN_ALBUM_IDS] }.getOrNull().orEmpty()
             val hiddenCoverIds = runCatching { observeHiddenAlbumMemberLinkIds().first() }.getOrNull().orEmpty()
-            cloudAlbumDao.getAll().map { entity ->
+            cloudAlbumDao.getOwned().map { entity ->
                 val domain = entity.toDomain()
                 // Rehydrate coverThumbnailUrl from local sources (the entity doesn't persist expiring
                 // CDN URLs) and skip a hidden cover, resolving a non-hidden member instead. A hidden
@@ -435,7 +447,39 @@ class AlbumService @Inject constructor(
                 domain.copy(coverThumbnailUrl = coverUrl)
             }
         }.getOrElse { e ->
-            Log.w(TAG, "loadAlbumsCached: failed (${e.message}) — returning empty")
+            Log.w(TAG, "loadAlbumsCached: failed (${e.message}), returning empty")
+            emptyList()
+        }
+    }
+
+    /**
+     * Cached albums someone else shared with this user and that this user may add photos to.
+     *
+     * Read straight from the cache with no network call: the add-to-album picker opens on a tap and
+     * cannot wait on the shared-with-me walk, which is a bootstrap per share. The rows are refreshed
+     * whenever the Shared tab loads. Covers are left alone because the picker renders a name list.
+     *
+     * Filtered to what the user can actually contribute to, so a viewer-only album never appears as
+     * a destination that would fail on tap.
+     */
+    suspend fun loadSharedAddableAlbumsCached(): List<Album> = withContext(Dispatchers.IO) {
+        runCatching {
+            val thumbnailCacheDir = File(context.cacheDir, "thumbnails")
+            val hiddenCoverIds = runCatching { observeHiddenAlbumMemberLinkIds().first() }.getOrNull().orEmpty()
+            cloudAlbumDao.getSharedWithMe()
+                .map { it.toDomain() }
+                .filter { it.canAddPhotos }
+                .map { album ->
+                    // Same cover rehydration the owned list gets: the entity never persists an
+                    // expiring CDN URL, so without this the picker draws these rows blank.
+                    album.copy(
+                        coverThumbnailUrl = resolveVisibleCoverThumbnail(
+                            album.linkId, album.coverLinkId, false, hiddenCoverIds, thumbnailCacheDir,
+                        )
+                    )
+                }
+        }.getOrElse { e ->
+            Log.w(TAG, "loadSharedAddableAlbumsCached: failed (${e.message}), returning empty")
             emptyList()
         }
     }
@@ -729,14 +773,17 @@ class AlbumService @Inject constructor(
      * never opened before, or for pre-v5 legacy rows where parentLinkId is null.
      */
     suspend fun loadAlbumPhotosCached(albumLinkId: String): List<CloudPhoto> = withContext(Dispatchers.IO) {
-        // Album → photos is many-to-many: photos physically live in the photos-root
-        // folder on Drive, the album is just a reference list. We walk that reference
-        // list via the membership table, then fetch the matching photo_listing rows.
-        // The membership join is required because photo_listing.parentLinkId points at
-        // the root, not the album, so a parent-based lookup would return zero rows.
+        // Album → photos is many-to-many: an owned photo physically lives in the photos-root
+        // folder on Drive and the album is just a reference list, so its photo_listing row is
+        // parented to the root. Only a shared-with-me album's rows are parented to the album
+        // itself. The membership table is the one lookup that covers both shapes; a
+        // parent-based query would miss every owned photo.
         val photoLinkIds = albumPhotoMembershipDao.getPhotoLinkIds(albumLinkId)
         if (photoLinkIds.isEmpty()) return@withContext emptyList()
-        val rowsByLinkId = photoListingDao.getByLinkIds(photoLinkIds).associateBy { it.linkId }
+        // Chunked: an album's membership is unbounded, and one oversized IN list would fail the whole
+        // read, leaving the cached paint empty for exactly the albums that most need it.
+        val rowsByLinkId = photoLinkIds.flatMapSqlChunks { photoListingDao.getByLinkIds(it) }
+            .associateBy { it.linkId }
         // The final ordering is captureTime DESC (with linkId tie-break) applied at the
         // end of this function. The membership-table walk below only resolves rows; the
         // single sort site keeps the cache paint and the network refresh in agreement.
@@ -833,6 +880,21 @@ class AlbumService @Inject constructor(
         if (sharingShareId != null && albumKeyBytes == null) {
             error("loadAlbumPhotos: shared-album key unavailable for $albumLinkId")
         }
+        // The recipient-side crypto bundle for this album, resolved once. The thumbnail scheduler's
+        // cache-miss fallback, the video-duration pass, and every per-photo parent-key selection in the
+        // chunk loop below all want the same share id + key pair, so building it here keeps the "is the
+        // share resolved yet" question single-valued instead of re-asked per photo.
+        val sharingContext = if (
+            sharingShareId != null && albumKeyBytes != null && sharedAlbumParentKeyBytes != null
+        ) {
+            AlbumCryptoChain.SharingContext(
+                albumLinkId = albumLinkId,
+                sharingShareId = sharingShareId,
+                sharedShareKeyBytes = sharedAlbumParentKeyBytes,
+                albumKeyBytes = albumKeyBytes,
+            )
+        } else null
+
         // Seed the lazy-thumbnail scheduler with the album key we just decrypted, so cells
         // scrolling into view skip the per-photo album-key resolution round trip.
         // For shared-with-me albums we also seed a SharingContext so the scheduler's
@@ -840,19 +902,14 @@ class AlbumService @Inject constructor(
         // with the share key bytes) instead of the recipient's own volume — without that
         // hook a long backgrounded session would lose the in-memory cache entry and the
         // grid would silently regress to placeholders after process restart.
-        if (albumKeyBytes != null) {
-            if (sharingShareId != null && sharedAlbumParentKeyBytes != null) {
-                thumbnailDecryptScheduler.populateSharedAlbumContext(
-                    AlbumCryptoChain.SharingContext(
-                        albumLinkId = albumLinkId,
-                        sharingShareId = sharingShareId,
-                        sharedShareKeyBytes = sharedAlbumParentKeyBytes,
-                        albumKeyBytes = albumKeyBytes,
-                    ),
-                )
-            } else {
-                thumbnailDecryptScheduler.populateParentKeys(mapOf(albumLinkId to albumKeyBytes))
-            }
+        if (sharingContext != null) {
+            // The store is what every other reader of this album asks, notably the full-resolution
+            // download, whose own link fetch sees a null parent for these photos and so has nothing
+            // to resolve the album from on its own.
+            sharedAlbumKeyStore.put(sharingContext)
+            thumbnailDecryptScheduler.populateSharedAlbumContext(sharingContext)
+        } else if (albumKeyBytes != null) {
+            thumbnailDecryptScheduler.populateParentKeys(mapOf(albumLinkId to albumKeyBytes))
         }
 
         // Fetch album children using the resolved volumeId (may be an external share's volume)
@@ -864,7 +921,12 @@ class AlbumService @Inject constructor(
                 manager.invoke { getAlbumChildren(resolvedVolumeId, albumLinkId, anchor) }.valueOrThrow
             }
             resp.photos.mapTo(children) { dto ->
-                AlbumChild(linkId = dto.linkId, captureTime = dto.captureTime, addedTime = dto.addedTime)
+                AlbumChild(
+                    linkId = dto.linkId,
+                    captureTime = dto.captureTime,
+                    addedTime = dto.addedTime,
+                    isChildOfAlbum = dto.isChildOfAlbum,
+                )
             }
             anchor = if (resp.more) resp.anchorId else null
         } while (anchor != null)
@@ -958,6 +1020,15 @@ class AlbumService @Inject constructor(
         Log.d(TAG, "loadAlbumPhotos: fetched ${thumbnailUrlMap.size} thumbnail URLs for album $albumLinkId")
         val ownPublicKeys = cryptoHelper.getOwnPublicKeysArmored(userId)
 
+        // Parent-side answer to "does this photo live only inside an album", used wherever the
+        // listing left IsChildOfAlbum unset. The album being opened joins the cached set because
+        // this call is the proof it is one, which covers an album opened before its own row landed.
+        val albumLinkIds = runCatching { cloudAlbumDao.getAllLinkIds().toSet() }
+            .getOrElse {
+                Log.w(TAG, "loadAlbumPhotos: cached album ids unavailable: ${it.message}")
+                emptySet()
+            } + albumLinkId
+
         // Deduplicate by linkId in case the same photo was added to the album multiple times.
         val uniqueChildren = children.distinctBy { it.linkId }
         if (uniqueChildren.size != children.size) {
@@ -1018,14 +1089,6 @@ class AlbumService @Inject constructor(
                 // falls back to root only for legacy pre-rewrap data, and pins to album for any
                 // shared-with-me path since the recipient has no useful root key.
                 val photoParentLinkId = linkDetailMap[child.linkId]?.link?.parentLinkId
-                val sharingContext = if (sharingShareId != null && albumKeyBytes != null && sharedAlbumParentKeyBytes != null) {
-                    AlbumCryptoChain.SharingContext(
-                        albumLinkId = albumLinkId,
-                        sharingShareId = sharingShareId,
-                        sharedShareKeyBytes = sharedAlbumParentKeyBytes,
-                        albumKeyBytes = albumKeyBytes,
-                    )
-                } else null
                 val photoParentKeyBytes = albumCryptoChain.selectPhotoParentKey(
                     rootLinkKeyBytes = rootLinkKeyBytes,
                     albumKeyBytes = albumKeyBytes,
@@ -1056,6 +1119,9 @@ class AlbumService @Inject constructor(
                     // share private key bytes as a second candidate so the photo
                     // Name actually decrypts in the Details sheet.
                     fallbackParentKeyBytes = sharedAlbumParentKeyBytes,
+                    albumLinkIds = albumLinkIds,
+                    knownChildOfAlbum = child.isChildOfAlbum,
+                    photosRootLinkId = shareService.photosRootLinkId(),
                 )
                 // Shared-with-me album: pin every photo's persisted parentLinkId to the
                 // album linkId, regardless of what the share endpoint returns on the wire.
@@ -1067,8 +1133,11 @@ class AlbumService @Inject constructor(
                 // wrong endpoint and the grid would stay at placeholders. The override
                 // also keeps the on-disk row stable across cache evictions and process
                 // restarts so the same lookup path keeps working on later opens.
+                //
+                // isChildOfAlbum follows that pin: a row reachable only through an album someone
+                // shared belongs to the album alone, so the timeline must not claim it either.
                 val entity = if (sharingShareId != null) {
-                    builtEntity.copy(parentLinkId = albumLinkId)
+                    builtEntity.copy(parentLinkId = albumLinkId, isChildOfAlbum = true)
                 } else {
                     builtEntity
                 }
@@ -1106,6 +1175,15 @@ class AlbumService @Inject constructor(
             // The inter-chunk breather exists to let the GC land between crypto bursts;
             // an all-cached chunk ran no crypto, so it skips the delay.
             if (chunkNewEntities.isNotEmpty()) kotlinx.coroutines.delay(interChunkDelayMs)
+        }
+
+        // The album's rows are durable by here, which is what lets the video-duration pass find them on
+        // its first query. The bundle that unlocked the album is also the only thing that unlocks the
+        // LENGTH of its videos: such a row keeps the owner's volumeId, so the volume-scoped duration
+        // walk cannot reach it and its grid tile carries no length pill until this pass fills the value
+        // in. The pass runs on the scheduler's own scope, so nothing here waits on it.
+        if (sharingContext != null) {
+            videoDurationBackfillScheduler.populateSharedAlbumContext(userId, sharingContext)
         }
 
         // Match Drive web UI: captureTime DESC. Drive's pagination order is addedTime
@@ -1345,29 +1423,62 @@ class AlbumService @Inject constructor(
         DrivePhotoRepository.AddPhotosToAlbumResult(succeeded, failed)
     }
 
-    suspend fun deleteAlbum(userId: UserId, albumLinkId: String): Unit = withContext(Dispatchers.IO) {
+    /**
+     * Deletes the album container.
+     *
+     * [deletePhotosToo] maps to the server's `DeleteAlbumPhotos` flag. Left false, the server
+     * REFUSES the delete with [ALBUM_DELETE_DATA_LOSS_CODE] when the album holds photos that exist
+     * nowhere else in the owner's library, which is what a guest's contribution looks like: it was
+     * copied onto this volume parented to the album, never to the photos root. That refusal is not
+     * an error to swallow, it is the server offering a choice, so it surfaces as
+     * [AlbumDeleteWouldLosePhotos] for the caller to put to the user.
+     */
+    suspend fun deleteAlbum(
+        userId: UserId,
+        albumLinkId: String,
+        deletePhotosToo: Boolean = false,
+    ): Unit = withContext(Dispatchers.IO) {
         try {
             val volumeId = shareService.getVolumeId(userId)
             val manager = apiProvider.get<DriveApiService>(userId)
             // DELETE /drive/photos/volumes/{volumeId}/albums/{albumLinkId}?DeleteAlbumPhotos=0
             // Photos inside the album are NOT deleted; only the album container is removed.
-            semaphore.withPermit {
-                manager.invoke { deleteAlbum(volumeId, albumLinkId, deleteAlbumPhotos = 0) }.valueOrThrow
+            try {
+                semaphore.withPermit {
+                    manager.invoke {
+                        deleteAlbum(volumeId, albumLinkId, deleteAlbumPhotos = if (deletePhotosToo) 1 else 0)
+                    }.valueOrThrow
+                }
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                if (isAlbumDeleteDataLoss(e)) throw AlbumDeleteWouldLosePhotos(albumLinkId)
+                throw e
             }
             // Drop the local rows too, otherwise loadAlbumsCached repaints the dead
-            // album on the next cold start. Mirrors leaveSharedAlbum's cache cleanup.
-            cloudAlbumDao.deleteByLinkId(albumLinkId)
-            albumPhotoMembershipDao.deleteAllForAlbum(albumLinkId)
+            // album on the next cold start. Shares leaveSharedAlbum's cleanup, which leaves an
+            // owned album's photos alone and only clears them for one shared with this user.
+            albumCacheCleanup.dropCachedAlbum(userId, albumLinkId)
             invalidateMembershipCache()
             Log.d(TAG, "deleteAlbum: deleted albumLinkId=$albumLinkId")
         } catch (e: DriveNotFoundException) {
             // Already gone server-side — still wipe local cache so the grid doesn't
             // keep showing a phantom album entry.
             Log.w(TAG, "deleteAlbum: DriveNotFoundException: ${e.message}")
-            cloudAlbumDao.deleteByLinkId(albumLinkId)
-            albumPhotoMembershipDao.deleteAllForAlbum(albumLinkId)
+            albumCacheCleanup.dropCachedAlbum(userId, albumLinkId)
             invalidateMembershipCache()
         }
+    }
+
+    /**
+     * Whether [e] is the server saying an album delete would destroy photos held nowhere else.
+     *
+     * Matched on Proton's own error code rather than the HTTP status, because the status is a plain
+     * 422 that a dozen unrelated validation failures also produce.
+     */
+    private fun isAlbumDeleteDataLoss(e: Throwable): Boolean {
+        val http = (e as? me.proton.core.network.domain.ApiException)?.error
+            as? me.proton.core.network.domain.ApiResult.Error.Http ?: return false
+        return http.proton?.code == ALBUM_DELETE_DATA_LOSS_CODE
     }
 
     /**
@@ -1376,13 +1487,22 @@ class AlbumService @Inject constructor(
      * doesn't hit the API limit. Returns the linkIds the server confirmed; chunks that fail
      * are logged and excluded so the UI can still react to partial success.
      */
+    /**
+     * Removes photos from an album's membership.
+     *
+     * [albumVolumeId] overrides the volume the request is addressed to, which is what an album
+     * shared with this user needs: it lives on the sharer's volume, and the caller's own volume
+     * holds no such album. Unlike adding, this needs no copy and no re-encryption, because dropping
+     * a membership is a change inside the album's own volume and touches no photo bytes.
+     */
     suspend fun removePhotosFromAlbum(
         userId: UserId,
         albumLinkId: String,
         photoLinkIds: List<String>,
+        albumVolumeId: String? = null,
     ): List<String> = withContext(Dispatchers.IO) {
         if (photoLinkIds.isEmpty()) return@withContext emptyList()
-        val volumeId = shareService.getVolumeId(userId)
+        val volumeId = albumVolumeId ?: shareService.getVolumeId(userId)
         val manager = apiProvider.get<DriveApiService>(userId)
         val removed = mutableListOf<String>()
         // The add/remove-multiple endpoints reject any request carrying more than 10 links
@@ -1428,8 +1548,10 @@ class AlbumService @Inject constructor(
             // Mirror the add path: keep the local membership table in step with the
             // server so reactive consumers (gallery filter, album cache) re-emit
             // immediately. Failure here is non-fatal — the prefetch will resync.
+            // Chunked on `removed`, which accumulates across every ALBUM_LINK_BATCH_MAX request above
+            // and so grows with the whole selection, not with one request's 10 links.
             runCatching {
-                albumPhotoMembershipDao.deleteForAlbumPhotos(albumLinkId, removed)
+                removed.forEachSqlChunk { albumPhotoMembershipDao.deleteForAlbumPhotos(albumLinkId, it) }
             }.onFailure { Log.w(TAG, "removePhotosFromAlbum: membership delete failed: ${it.message}") }
             invalidateMembershipCache()
         }

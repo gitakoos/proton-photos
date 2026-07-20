@@ -310,6 +310,24 @@ fun AlbumsScreen(
         )
     }
 
+    // ── Second confirmation, raised by the server, not by us ──────────────────
+    // The delete above asks for no photo deletion, and Drive refuses it outright when the album
+    // holds the only copy of some photos. That happens once someone the album was shared with has
+    // contributed: their photo arrives as a copy parented to the album and never enters this
+    // library, so removing the album really would destroy it. Nothing has been touched at this
+    // point, the album is still there, and the user gets to decide with the fact in front of them.
+    state.deleteWouldLosePhotosFor?.let { albumLinkId ->
+        ConfirmDialog(
+            title = stringResource(R.string.albums_delete_would_lose_title),
+            message = stringResource(R.string.albums_delete_would_lose_body),
+            confirmLabel = stringResource(R.string.albums_delete_would_lose_action),
+            dismissLabel = stringResource(R.string.cancel),
+            onConfirm = { viewModel.deleteAlbum(albumLinkId, deletePhotosToo = true) },
+            onDismiss = { viewModel.dismissDeleteWouldLosePhotos() },
+            destructive = true,
+        )
+    }
+
     // ── Create Album dialog ────────────────────────────────────────────────────
     if (showCreateDialog) {
         var albumName by remember { mutableStateOf("") }

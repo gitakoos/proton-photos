@@ -553,10 +553,18 @@ internal fun AddToAlbumSheet(
                             }
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(album.name, color = FgPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium)
-                                val subtitle = if (isMember)
-                                    stringResource(R.string.viewer_tap_to_remove_from_album)
-                                else
-                                    pluralStringResource(R.plurals.count_photos_plural, album.photoCount, album.photoCount)
+                                val photoCountText = pluralStringResource(
+                                    R.plurals.count_photos_plural, album.photoCount, album.photoCount,
+                                )
+                                // Same subtitle vocabulary as the gallery drawer. Both sheets answer
+                                // the same question about the same albums, so they read alike.
+                                val subtitle = when {
+                                    isMember -> stringResource(R.string.viewer_tap_to_remove_from_album)
+                                    album.isSharedWithMe ->
+                                        stringResource(R.string.gallery_album_picker_count_shared, photoCountText)
+                                    else ->
+                                        stringResource(R.string.gallery_album_picker_count_drive, photoCountText)
+                                }
                                 Text(
                                     subtitle,
                                     color = if (isMember) Accent else FgMute,

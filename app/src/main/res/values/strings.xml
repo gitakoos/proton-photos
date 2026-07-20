@@ -75,7 +75,7 @@
     <string name="onboarding_album_mirror_add_custom">Add custom folder name</string>
 
     <string name="onboarding_about_title">Independent third party client</string>
-    <string name="onboarding_about_subtitle">Made by one developer. Not affiliated with Proton AG. Source available, GPL licensed, no telemetry of our own.</string>
+    <string name="onboarding_about_subtitle">Made by one developer. Not affiliated with Proton AG. Source available, GPL licensed, no telemetry of its own.</string>
     <string name="onboarding_about_author_subtitle">Personal site of the developer.</string>
     <string name="onboarding_about_github_subtitle">Full source code on GitHub.</string>
 
@@ -298,6 +298,7 @@
     <string name="gallery_create_album_failed">Could not create album: %1$s</string>
     <string name="gallery_enable_metadata_category">Enable a metadata category in Settings → Privacy first</string>
     <string name="gallery_album_picker_count_drive">%1$s · Drive</string>
+    <string name="gallery_album_picker_count_shared">%1$s · Drive · Shared</string>
     <!-- How many of the selected photos an album already holds, e.g. "3 / 5". Digits only, so it
          needs no translation; the spoken form is cd_status_some_selected_in_album. -->
     <string name="gallery_album_picker_in_album_fraction" translatable="false">%1$d / %2$d</string>
@@ -677,7 +678,7 @@
     <string name="sel_label_album">Album</string>
     <string name="sel_label_upload">Upload</string>
     <string name="share_role_can_view_desc">Can look at the album and its photos.</string>
-    <string name="share_role_can_edit_desc">Can add and remove photos and change the cover.</string>
+    <string name="share_role_can_edit_desc">Can add and remove photos.</string>
 
     <!-- Theme mode -->
     <string name="theme_mode_system">System</string>
@@ -781,6 +782,9 @@
     <string name="albums_rename_same_name">New name is the same as the current name</string>
     <string name="albums_rename_failed">Rename failed</string>
     <string name="albums_delete_failed">Failed to delete album: %1$s</string>
+    <string name="albums_delete_would_lose_title">Some photos live only here</string>
+    <string name="albums_delete_would_lose_body">People you shared this album with added photos that are not in your library. Deleting the album deletes those photos as well.</string>
+    <string name="albums_delete_would_lose_action">Delete anyway</string>
     <string name="albums_renamed_to">Renamed to \"%1$s\"</string>
 
     <!-- Share -->
@@ -844,6 +848,7 @@
     <string name="shared_empty_with_me_body">Albums shared with you will appear here.</string>
     <string name="shared_empty_by_me_body">Share an album or a photo to see it here.</string>
     <string name="shared_by_email">by %1$s</string>
+    <string name="shared_by_email_full">Shared by %1$s</string>
     <string name="shared_photo_count">%1$d photos</string>
     <string name="shared_by_me_photos_section">Shared photos</string>
 
@@ -1165,7 +1170,7 @@
     <string name="rename_sheet_subtitle_local">Choose how to apply the new name on this device.</string>
     <string name="rename_sheet_name_label">File name</string>
     <string name="rename_sheet_option_cloud_title">Rename in cloud</string>
-    <string name="rename_sheet_option_cloud_subtitle">Uploads under the new name, then moves the original to Recently Deleted.</string>
+    <string name="rename_sheet_option_cloud_subtitle">Renames the photo in Drive without making a copy.</string>
     <string name="rename_sheet_option_local_title">Rename original</string>
     <string name="rename_sheet_option_local_subtitle">Updates the file in place on your device.</string>
     <string name="rename_sheet_option_copy_title">Save as copy</string>
@@ -1357,6 +1362,12 @@
     <string name="whats_new_hide_backed">Green cloud, on your phone and backed up: it stays on your device, so other apps still show it. This app only hides it here, behind the Hidden lock; your cloud copy is never moved, changed or deleted.</string>
     <string name="whats_new_hide_cloud">White cloud, only in the cloud: this app only hides it here, behind the Hidden lock. Your cloud copy stays exactly as it is, never moved, changed or deleted.</string>
     <string name="whats_new_hide_albums">You can hide a whole cloud album too, and everything is reversible.</string>
+    <string name="whats_new_shared_add_title">Add to a shared album</string>
+    <string name="whats_new_shared_add_body">When someone shares an album with you and lets you edit it, you can add your own photos to it and remove them again.</string>
+    <string name="whats_new_viewer_place_title">Keeps your place</string>
+    <string name="whats_new_viewer_place_body">Deleting a photo moves to the next one instead of closing the photo view. Going back to the grid lands on the photo you stopped at, not the one you opened.</string>
+    <string name="whats_new_album_guard_title">A check before deleting an album</string>
+    <string name="whats_new_album_guard_body">If an album is the only place some of its photos are kept, deleting it asks first.</string>
     <string name="whats_new_dup_title">Find duplicate photos</string>
     <string name="whats_new_dup_body">Spot exact copies and visually similar shots, then safely keep one and remove the rest.</string>
     <string name="whats_new_offline_title">Available offline</string>
@@ -1375,7 +1386,7 @@
     <string name="whats_new_scrubber_body">Scrub a video with a filmstrip preview and step one frame at a time.</string>
     <string name="whats_new_album_title">Smarter albums</string>
     <string name="whats_new_album_body">See which albums already hold a photo you picked, and filter the picker to photos not in any album yet.</string>
-    <string name="whats_new_more">Plus an adaptive app icon, a screenshot quick-action overlay, safer removal through the system trash, more dependable dates, and steadier very large libraries.</string>
+    <string name="whats_new_more">Plus copied links stay hidden in the clipboard preview, file sizes match everywhere they appear, automatic free-up checks with Drive before removing a copy from your phone, and large albums and selections hold together better.</string>
     <string name="duplicates_filter_identical">Identical</string>
     <string name="duplicates_filter_similar">Similar</string>
 </resources>

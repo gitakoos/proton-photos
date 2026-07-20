@@ -233,5 +233,52 @@ object Migrations {
         }
     }
 
-    val ALL: Array<Migration> = arrayOf(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16)
+    /**
+     * Carries this user's own permission bitmask on a shared-with-me album (4 = viewer,
+     * 6 = viewer + editor), so the app can tell whether it may offer to add photos.
+     *
+     * Nullable with no default: an existing row genuinely has no answer yet, and null is read as
+     * "not an editor" everywhere, so old rows stay read-only until the next refresh fills them in.
+     */
+    val MIGRATION_16_17 = object : Migration(16, 17) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE cloud_albums ADD COLUMN permissions INTEGER DEFAULT NULL")
+        }
+    }
+
+    /**
+     * v17 → v18: photo_listing gains the per-row "lives only inside an album" fact, which tells a
+     * photo contributed to a shared album apart from one the user backed up themselves. Both sit in
+     * the same table under the same userId on the same volume, and only the parent distinguishes them.
+     *
+     * The backfill is what makes an upgraded install correct: every row already parented to a cached
+     * album is an album child, and without marking them they would keep surfacing on the timeline
+     * whenever their album's membership edges are absent, and keep being swept away as stale.
+     */
+    val MIGRATION_17_18 = object : Migration(17, 18) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE photo_listing ADD COLUMN isChildOfAlbum INTEGER NOT NULL DEFAULT 0")
+            db.execSQL(
+                "UPDATE photo_listing SET isChildOfAlbum = 1 " +
+                    "WHERE parentLinkId IN (SELECT linkId FROM cloud_albums)"
+            )
+        }
+    }
+
+    /**
+     * v18 → v19: photo_listing records a digest of the encrypted name each row's displayName came
+     * from, so a refresh can tell a photo renamed elsewhere from one that never changed without
+     * decrypting every name it walks past.
+     *
+     * No backfill: the digest belongs to ciphertext this migration cannot see. Null is deliberately
+     * the state every existing row lands in, because null means "recheck", and that one pass is what
+     * repairs the names that already drifted.
+     */
+    val MIGRATION_18_19 = object : Migration(18, 19) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE photo_listing ADD COLUMN nameFingerprint TEXT")
+        }
+    }
+
+    val ALL: Array<Migration> = arrayOf(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19)
 }

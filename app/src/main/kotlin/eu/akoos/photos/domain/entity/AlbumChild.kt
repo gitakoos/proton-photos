@@ -26,4 +26,7 @@ data class AlbumChild(
     val linkId: String,
     val captureTime: Long?,
     val addedTime: Long?,
+    /** The photo lives inside the album rather than in the owner's photo stream, so it belongs to
+     *  the album alone. Authoritative when the listing states it; otherwise derived from the parent. */
+    val isChildOfAlbum: Boolean = false,
 )

@@ -23,6 +23,7 @@
 package eu.akoos.photos.presentation.shared
 
 import android.content.Context
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -44,6 +45,8 @@ import eu.akoos.photos.presentation.gallery.SharedFilter
 import eu.akoos.photos.util.friendlyNetworkError
 import eu.akoos.photos.util.sanitizeErrorMessage
 import javax.inject.Inject
+
+private const val TAG = "SharedVM"
 
 data class SharedUiState(
     val isLoading: Boolean = true,
@@ -113,6 +116,30 @@ class SharedViewModel @Inject constructor(
     }
 
     fun clearError() = _uiState.update { it.copy(error = null) }
+
+    /**
+     * Leaves an album someone shared with this user, straight from the Shared grid.
+     *
+     * The same call the album screen makes, offered here so a guest can drop an album without
+     * opening it first. The list reloads afterwards rather than removing the row optimistically,
+     * so a server-side refusal never leaves a phantom gap in the grid.
+     */
+    fun leaveSharedAlbum(album: Album) {
+        val shareId = album.sharingShareId ?: run {
+            _uiState.update { it.copy(error = context.getString(R.string.album_leave_missing_details)) }
+            return
+        }
+        viewModelScope.launch {
+            val userId = accountManager.getPrimaryUserId().first() ?: return@launch
+            runCatching { driveRepo.leaveSharedAlbum(userId, shareId, album.linkId) }
+                .onSuccess { refresh() }
+                .onFailure { e ->
+                    if (e is kotlinx.coroutines.CancellationException) throw e
+                    Log.w(TAG, "leaveSharedAlbum failed: ${e.message}")
+                    _uiState.update { it.copy(error = context.getString(R.string.album_leave_failed)) }
+                }
+        }
+    }
 
     // ── Bulk selection of shared-by-me photos ───────────────────────────────────
 

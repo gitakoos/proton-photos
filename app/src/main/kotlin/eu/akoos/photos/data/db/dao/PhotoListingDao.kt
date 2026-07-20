@@ -44,19 +44,24 @@ interface PhotoListingDao {
     fun observeAll(userId: String): Flow<List<PhotoListingEntity>>
 
     /**
-     * The user's own photo stream. Shared-with-me photos sit in the same table parented to an
-     * album linkId, so excluding rows whose parent is a known album keeps them off the timeline;
-     * own photos are parented to the photos root. NULL parentLinkId = legacy own photos, kept visible.
+     * The user's own photo stream: every row except the ones that exist only inside an album.
+     *
+     * A photo contributed to a shared album sits in this same table under this same userId, and
+     * `isChildOfAlbum` is the one fact that separates it from a backed-up photo. Reading that per-row
+     * flag rather than testing the parent against the membership edges also means the answer holds
+     * while an album's edges are absent, and keeps a correlated subquery out of the hottest query in
+     * the app. A photo the user added to their own album stays parented to the photos root, so it is
+     * not an album child and still belongs here.
      */
     @Query(
-        "SELECT * FROM photo_listing WHERE userId = :userId AND (parentLinkId IS NULL OR " +
-            "parentLinkId NOT IN (SELECT DISTINCT albumLinkId FROM album_photo_membership)) " +
+        "SELECT * FROM photo_listing WHERE userId = :userId AND isChildOfAlbum = 0 " +
             "ORDER BY captureTime DESC",
     )
     fun observeOwnStream(userId: String): Flow<List<PhotoListingEntity>>
 
     /**
-     * Display-only projection of [observeOwnStream] for the timeline feed — selects just the columns
+     * Display-only projection of [observeOwnStream] for the timeline feed, on the same
+     * `isChildOfAlbum = 0` rule, and selects just the columns
      * the grid binds, NOT the per-row crypto material. The full entity's encNodeKey / contentKeyPacket
      * / encNodePassphrase / encXAttr are armored PGP blocks (kilobytes each); selecting them for the
      * whole library on every Room re-emit, only to drop them in toDomain(), pins the heap at its
@@ -73,8 +78,7 @@ interface PhotoListingDao {
     @Query(
         "SELECT linkId, shareId, volumeId, captureTime, displayName, mimeType, sizeBytes, revisionId, " +
             "contentHash, tagsCsv, durationMs FROM photo_listing WHERE userId = :userId AND " +
-            "(parentLinkId IS NULL OR parentLinkId NOT IN (SELECT DISTINCT albumLinkId FROM album_photo_membership)) " +
-            "ORDER BY captureTime DESC",
+            "isChildOfAlbum = 0 ORDER BY captureTime DESC",
     )
     fun observeOwnStreamLite(userId: String): Flow<List<PhotoListingLite>>
 
@@ -114,8 +118,20 @@ interface PhotoListingDao {
     @Query("DELETE FROM photo_listing WHERE userId = :userId")
     suspend fun deleteAll(userId: String)
 
-    @Query("DELETE FROM photo_listing WHERE linkId IN (:linkIds)")
-    suspend fun deleteByLinkIds(linkIds: List<String>)
+    /**
+     * Scoped by user exactly as [deleteAll] is.
+     *
+     * linkId is this table's primary key, so a row belongs to whichever account wrote it last, and
+     * an account switch leaves the previous account's rows in place until something clears them.
+     * The scope is what makes a delete driven by one account's server response a no-op against a
+     * row that currently belongs to another, rather than a silent eviction from that account's
+     * cached library.
+     *
+     * Callers slice [linkIds] with [eu.akoos.photos.util.forEachSqlChunk]: one host variable per
+     * element, against a per-statement cap this list can exceed on a large server-side deletion.
+     */
+    @Query("DELETE FROM photo_listing WHERE userId = :userId AND linkId IN (:linkIds)")
+    suspend fun deleteByLinkIds(userId: String, linkIds: List<String>)
 
     @Query("SELECT * FROM photo_listing WHERE linkId = :linkId LIMIT 1")
     suspend fun getByLinkId(linkId: String): PhotoListingEntity?
@@ -124,6 +140,27 @@ interface PhotoListingDao {
     @Query("SELECT linkId FROM photo_listing WHERE userId = :userId")
     suspend fun getAllLinkIds(userId: String): List<String>
 
+    /**
+     * The refresh sweep's candidate set: rows the volume's photo listing is entitled to speak for.
+     *
+     * Two constraints, one per way a row can be missing from that keep-set through no fault of its own.
+     *
+     * The volume constraint covers albums shared WITH this user. Such a photo is stored under this
+     * user's own userId but keeps the OWNER's volumeId, and the stream walk that builds the keep-set
+     * covers only this user's own volume, so a userId-only scope would offer up rows that have no way
+     * to be kept and every clean full refresh would evict the shared album's offline cache.
+     *
+     * The album-child constraint covers the user's OWN volume. A photo someone contributed to an
+     * album this user shared out is copied onto this volume parented to the album, and the volume
+     * listing returns stream photos only, never album children. Left as a candidate it would be
+     * swept on every full refresh, come back on the next album open, and vanish again.
+     */
+    @Query(
+        "SELECT linkId FROM photo_listing WHERE userId = :userId AND volumeId = :volumeId " +
+            "AND isChildOfAlbum = 0",
+    )
+    suspend fun getSweepCandidateLinkIds(userId: String, volumeId: String): List<String>
+
     /** Page of undecrypted-thumbnail rows with capture time before [beforeTime], newest first — fed to
      *  the scheduler's background warm-up so the most recently captured photos warm first and the cold
      *  tail decrypts on demand. Paged (not one big query) so a huge library's rows — each carrying
@@ -131,11 +168,27 @@ interface PhotoListingDao {
     @Query("SELECT * FROM photo_listing WHERE userId = :userId AND thumbnailUrl IS NULL AND captureTime < :beforeTime ORDER BY captureTime DESC LIMIT :limit")
     suspend fun getUndecryptedThumbnailsBefore(userId: String, beforeTime: Long, limit: Int): List<PhotoListingEntity>
 
-    /** Returns entities for the given linkIds — used to preserve existing thumbnailUrls during refresh. */
+    /** Returns entities for the given linkIds — used to preserve existing thumbnailUrls during refresh.
+     *  Callers chunk [linkIds]: one host variable per element, against a per-statement cap. */
     @Query("SELECT * FROM photo_listing WHERE linkId IN (:linkIds)")
     suspend fun getByLinkIds(linkIds: List<String>): List<PhotoListingEntity>
 
-    /** Live observation for a specific set of linkIds — used by album detail screen. */
+    /**
+     * Which of [contentHashes] this user's library already holds.
+     *
+     * Answers "do I already have this photo" for the save-a-shared-album path. A contentHash is
+     * `HMAC-SHA256(rootNodeHashKey, content-sha)`, so it is scoped to the volume that produced it
+     * and only matches across volumes because the copy paths carry the source's hash over instead
+     * of recomputing one. That is precisely the case worth catching: a photo this user contributed
+     * to a shared album keeps their own hash, so it is recognised when the album is saved back.
+     *
+     * Callers must chunk the input at 500 (SQLite's bind-variable limit is 999 on older Android).
+     */
+    @Query("SELECT contentHash FROM photo_listing WHERE userId = :userId AND contentHash IN (:contentHashes)")
+    suspend fun findExistingContentHashes(userId: String, contentHashes: List<String>): List<String>
+
+    /** Live observation for a specific set of linkIds — used by album detail screen. Callers chunk
+     *  [linkIds] and restate this ORDER BY when merging the slices back together. */
     @Query("SELECT * FROM photo_listing WHERE linkId IN (:linkIds) ORDER BY captureTime DESC")
     fun observeByLinkIds(linkIds: List<String>): Flow<List<PhotoListingEntity>>
 
@@ -169,9 +222,17 @@ interface PhotoListingDao {
     /** Page of rows the GPS backfill has not yet processed, newest first — regardless of whether a
      *  cached encXAttr is present (rows synced before the encXAttr column carry none and have their
      *  XAttr fetched on demand). Paged so a large library's crypto-bearing rows never all sit in
-     *  memory at once. */
-    @Query("SELECT * FROM photo_listing WHERE userId = :userId AND gpsChecked = 0 AND revisionId != '' ORDER BY captureTime DESC LIMIT :limit")
-    suspend fun getUngeocoded(userId: String, limit: Int): List<PhotoListingEntity>
+     *  memory at once.
+     *
+     *  Volume-scoped for the same reason as [getSweepCandidateLinkIds]: a photo in an album another
+     *  user shared is stored under this user's own userId but keeps the OWNER's volumeId, and its
+     *  revision cannot be fetched from this user's volume. Such a row could never be marked as
+     *  processed, so a userId-only scope would re-offer it on every pass for good. */
+    @Query(
+        "SELECT * FROM photo_listing WHERE userId = :userId AND volumeId = :volumeId AND gpsChecked = 0 " +
+            "AND revisionId != '' ORDER BY captureTime DESC LIMIT :limit",
+    )
+    suspend fun getUngeocoded(userId: String, volumeId: String, limit: Int): List<PhotoListingEntity>
 
     /** Marks rows as GPS-processed so the backfill never revisits them, whether or not a fix was found. */
     @Query("UPDATE photo_listing SET gpsChecked = 1 WHERE linkId IN (:linkIds)")
@@ -180,12 +241,37 @@ interface PhotoListingDao {
     /** Page of VIDEO rows whose duration hasn't been recovered yet, newest first, which bounds the
      *  duration backfill so it never re-walks a photo whose duration is already known. Matches only
      *  video mime types (an image never carries a Media.Duration worth reading). Paged so a large
-     *  library's crypto-bearing rows never all sit in memory at once. */
+     *  library's crypto-bearing rows never all sit in memory at once.
+     *
+     *  Volume-scoped exactly as [getUngeocoded] is: a video in an album another user shared keeps
+     *  the OWNER's volumeId, so its revision never resolves here and its durationMs stays NULL,
+     *  which is this query's own bound. Without the volume it would be re-offered on every pass. */
     @Query(
-        "SELECT * FROM photo_listing WHERE userId = :userId AND durationMs IS NULL AND revisionId != '' " +
-            "AND mimeType LIKE 'video/%' ORDER BY captureTime DESC LIMIT :limit",
+        "SELECT * FROM photo_listing WHERE userId = :userId AND volumeId = :volumeId AND durationMs IS NULL " +
+            "AND revisionId != '' AND mimeType LIKE 'video/%' ORDER BY captureTime DESC LIMIT :limit",
     )
-    suspend fun getVideosMissingDuration(userId: String, limit: Int): List<PhotoListingEntity>
+    suspend fun getVideosMissingDuration(userId: String, volumeId: String, limit: Int): List<PhotoListingEntity>
+
+    /** Page of VIDEO rows inside ONE album whose duration hasn't been recovered yet, newest first, the
+     *  per-album counterpart to [getVideosMissingDuration]. Matches only video mime types (an image
+     *  never carries a Media.Duration worth reading). Paged so a large album's crypto-bearing rows never
+     *  all sit in memory at once.
+     *
+     *  Selected by parent rather than by volume because these are the rows a volume can never name: a
+     *  video in an album another user shared keeps the OWNER's volumeId, so no volume this user holds
+     *  covers it. Such a row has its parentLinkId pinned to the album linkId when the album loads, which
+     *  makes the parent the column that identifies one album's rows, and scoping to a single album is
+     *  what keeps this walk separate from the volume-wide one. */
+    @Query(
+        "SELECT * FROM photo_listing WHERE userId = :userId AND parentLinkId = :albumLinkId " +
+            "AND durationMs IS NULL AND revisionId != '' AND mimeType LIKE 'video/%' " +
+            "ORDER BY captureTime DESC LIMIT :limit",
+    )
+    suspend fun getAlbumVideosMissingDuration(
+        userId: String,
+        albumLinkId: String,
+        limit: Int,
+    ): List<PhotoListingEntity>
 
     /** Writes JUST the recovered duration for one video, keyed by linkId, since a full-row upsert would
      *  race a concurrent metadata refresh and could clobber a freshly-decrypted field with a stale one. */

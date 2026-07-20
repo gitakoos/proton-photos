@@ -38,6 +38,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -46,12 +47,15 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.MailOutline
+import androidx.compose.material.icons.filled.MoveToInbox
 import androidx.compose.material.icons.filled.People
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -69,10 +73,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -92,12 +95,14 @@ import eu.akoos.photos.presentation.gallery.SharedFilter
 import eu.akoos.photos.presentation.viewer.ManagePublicLinkSheet
 import eu.akoos.photos.presentation.viewer.PublicLinkState
 import eu.akoos.photos.presentation.theme.Accent
+import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.Bg0
 import eu.akoos.photos.presentation.theme.ErrorColor
 import eu.akoos.photos.presentation.theme.FgMute
 import eu.akoos.photos.presentation.theme.FgPrimary
 import eu.akoos.photos.presentation.theme.PillBg
 import eu.akoos.photos.presentation.theme.PillBorder
+import eu.akoos.photos.util.copySensitiveText
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -145,7 +150,7 @@ fun SharedScreen(
 
     // ── Manage public link sheet (a single shared photo) ─────────────────────────
     val publicLinkState by viewModel.publicLinkState.collectAsStateWithLifecycle()
-    val clipboard = LocalClipboardManager.current
+    val shareCtx = LocalContext.current
     val sheetScope = rememberCoroutineScope()
     val manageSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var showManageSheet by remember { mutableStateOf(false) }
@@ -153,6 +158,10 @@ fun SharedScreen(
     val linkCopiedMsg = stringResource(R.string.share_link_copied)
     val passwordSetMsg = stringResource(R.string.share_password_set)
     val passwordRemovedMsg = stringResource(R.string.share_password_removed)
+
+    // ── Long-press sheet on an album shared with this user ───────────────────────
+    var sharedAlbumSheetFor by remember { mutableStateOf<Album?>(null) }
+    var leaveAlbumConfirmFor by remember { mutableStateOf<Album?>(null) }
 
     Box(
         modifier = Modifier
@@ -237,6 +246,12 @@ fun SharedScreen(
                             SharedAlbumCard(
                                 album = album,
                                 onClick = { onAlbumClick(album) },
+                                // Only an album shared WITH this user has anything to offer here;
+                                // the grid also holds the user's own shared-by-me albums, whose
+                                // actions live on the album screen.
+                                onLongClick = if (album.isSharedWithMe) {
+                                    { sharedAlbumSheetFor = album }
+                                } else null,
                             )
                         }
 
@@ -309,6 +324,39 @@ fun SharedScreen(
         )
     }
 
+    sharedAlbumSheetFor?.let { album ->
+        SharedWithMeAlbumActionSheet(
+            album = album,
+            onDismiss = { sharedAlbumSheetFor = null },
+            // Saving runs with a progress counter and a cancel affordance that live on the album
+            // screen, so this opens the album rather than starting a long copy from a sheet the
+            // user is about to dismiss.
+            onSaveToLibrary = {
+                sharedAlbumSheetFor = null
+                onAlbumClick(album)
+            },
+            onLeave = {
+                sharedAlbumSheetFor = null
+                leaveAlbumConfirmFor = album
+            },
+        )
+    }
+
+    leaveAlbumConfirmFor?.let { album ->
+        ConfirmDialog(
+            title = stringResource(R.string.leave_album_confirm_title),
+            message = stringResource(R.string.leave_album_confirm_body),
+            confirmLabel = stringResource(R.string.leave_album_confirm_action),
+            dismissLabel = stringResource(R.string.share_invite_cancel),
+            destructive = true,
+            onConfirm = {
+                leaveAlbumConfirmFor = null
+                viewModel.leaveSharedAlbum(album)
+            },
+            onDismiss = { leaveAlbumConfirmFor = null },
+        )
+    }
+
     if (showManageSheet) {
         val mapped = when (val s = publicLinkState) {
             is SharedViewModel.PublicLinkState.None -> PublicLinkState.None
@@ -328,7 +376,7 @@ fun SharedScreen(
             onCreateLink = { viewModel.createLink() },
             onCopyLink = {
                 viewModel.currentPublicLinkUrl()?.let { url ->
-                    clipboard.setText(AnnotatedString(url))
+                    copySensitiveText(shareCtx, "Photo link", url)
                     sheetScope.launch { snackbarHost.showSnackbar(linkCopiedMsg) }
                 }
             },
@@ -583,7 +631,7 @@ private fun PendingInvitationsSection(
 // ── Album card ────────────────────────────────────────────────────────────────
 
 @Composable
-private fun SharedAlbumCard(album: Album, onClick: () -> Unit) {
+private fun SharedAlbumCard(album: Album, onClick: () -> Unit, onLongClick: (() -> Unit)? = null) {
     // Use the unified card so an album looks identical here, in Albums tab, and in the
     // gallery merged view. Shared-with-me gets a blue pill; my own shared albums use violet.
     val shareBadge = when {
@@ -601,5 +649,98 @@ private fun SharedAlbumCard(album: Album, onClick: () -> Unit) {
         shareBadge = shareBadge,
         cloudBadge = eu.akoos.photos.presentation.albums.AlbumCloudBadge.Cloud,
         onClick    = onClick,
+        onLongClick = onLongClick ?: {},
     )
+}
+
+/**
+ * Long-press actions for an album someone shared with this user, offered from the Shared grid so a
+ * guest does not have to open the album to save or drop it.
+ *
+ * Deliberately short. A guest owns none of this album, so renaming, hiding and deleting have no
+ * meaning here, and sharing it onward is the owner's right. What is left is taking a copy and
+ * walking away, plus the one fact worth stating outright: whose album this is.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SharedWithMeAlbumActionSheet(
+    album: Album,
+    onDismiss: () -> Unit,
+    onSaveToLibrary: () -> Unit,
+    onLeave: () -> Unit,
+) {
+    val colors = AppColors.current
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = colors.cardBg,
+        scrimColor = Color.Black.copy(alpha = 0.5f),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text(
+                "\"${album.name}\"",
+                color = colors.fgPrimary,
+                fontSize = 17.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(top = 8.dp),
+            )
+            album.sharedByEmail?.let { email ->
+                // The full sentence, not the card's compact "by <email>": on a sheet the reader
+                // has no album row above it to supply the missing verb.
+                Text(
+                    stringResource(R.string.shared_by_email_full, email),
+                    color = colors.fgMute,
+                    fontSize = 13.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Spacer(Modifier.height(16.dp))
+            SharedAlbumActionRow(
+                icon = Icons.Default.MoveToInbox,
+                label = stringResource(R.string.shared_save_to_library),
+                tint = Accent,
+                onClick = onSaveToLibrary,
+            )
+            Spacer(Modifier.height(8.dp))
+            SharedAlbumActionRow(
+                icon = Icons.AutoMirrored.Filled.ExitToApp,
+                label = stringResource(R.string.leave_album),
+                tint = ErrorColor,
+                onClick = onLeave,
+            )
+        }
+    }
+}
+
+/** Matches the album grid's action rows exactly, so the two long-press sheets read as one design. */
+@Composable
+private fun SharedAlbumActionRow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    tint: Color,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(PillBg)
+            .border(0.5.dp, PillBorder, RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Icon(icon, null, tint = tint, modifier = Modifier.size(20.dp))
+        Text(label, color = AppColors.current.fgPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+    }
 }

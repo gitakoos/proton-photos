@@ -62,6 +62,7 @@ import me.proton.core.accountmanager.domain.AccountManager
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.data.repository.drive.ThumbnailUrlStore
+import eu.akoos.photos.presentation.common.LocalViewerReturnKey
 import eu.akoos.photos.presentation.gallery.LocalThumbnailUrls
 import androidx.compose.runtime.CompositionLocalProvider
 import eu.akoos.photos.domain.entity.Album
@@ -250,6 +251,10 @@ fun NavGraph(
     val thumbnailUrlsState = thumbnailUrlsViewModel.urls.collectAsStateWithLifecycle()
     var selectedViewerItems by remember { mutableStateOf<List<GalleryItem>>(emptyList()) }
     var selectedViewerIndex by remember { mutableIntStateOf(0) }
+    // The return leg of the line above: the photo the viewer closed on, for the grid underneath to
+    // land on. Held as the State itself rather than a delegate because it is handed down through
+    // [LocalViewerReturnKey], which every photo grid reads and clears once it has acted.
+    val viewerReturnKey = remember { mutableStateOf<String?>(null) }
     // Cloud linkIds whose local-side photo is in the Hidden vault — captured from the
     // gallery state at viewer-open time so the viewer can blur + label them too. Without
     // this, opening a hidden cloud counterpart from the photos page showed the un-blurred
@@ -376,7 +381,10 @@ fun NavGraph(
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
-    CompositionLocalProvider(LocalThumbnailUrls provides thumbnailUrlsState) {
+    CompositionLocalProvider(
+        LocalThumbnailUrls provides thumbnailUrlsState,
+        LocalViewerReturnKey provides viewerReturnKey,
+    ) {
     NavHost(
         navController = navController,
         startDestination = Screen.Loading.route,
@@ -413,23 +421,10 @@ fun NavGraph(
         }
 
         composable(Screen.WhatsNew.route) {
-            // The screen marks the version seen internally (markSeen) before invoking any of these,
-            // so every exit path settles the gate. Done/back simply pop back to the gallery the
-            // screen sits on top of. The Open buttons navigate to the feature AND pop WhatsNew so a
-            // back press from the feature returns to the gallery, not to this screen.
-            WhatsNewScreen(
-                onDone = { navController.popBackStack() },
-                onOpenDuplicates = {
-                    navController.navigate(Screen.DuplicateFinder.route) {
-                        popUpTo(Screen.WhatsNew.route) { inclusive = true }
-                    }
-                },
-                onOpenOffline = {
-                    navController.navigate(Screen.Offline.route) {
-                        popUpTo(Screen.WhatsNew.route) { inclusive = true }
-                    }
-                },
-            )
+            // The screen marks the version seen internally (markSeen) before invoking onDone, so
+            // every exit path settles the gate. Done/back simply pop back to the gallery the
+            // screen sits on top of.
+            WhatsNewScreen(onDone = { navController.popBackStack() })
         }
 
         composable(Screen.Gallery.route) {
@@ -583,13 +578,22 @@ fun NavGraph(
             PhotoViewerScreen(
                 items = selectedViewerItems,
                 initialIndex = selectedViewerIndex,
-                onBack = { viewerSecure = false; navController.popBackStack() },
+                onBack = { settledKey ->
+                    viewerSecure = false
+                    viewerReturnKey.value = settledKey
+                    navController.popBackStack()
+                },
                 sourceAlbumLinkId = sourceAlbumLinkId,
                 // A non-null `sharedByEmail` on the album means the user is a guest
                 // on someone else's album — every mutating affordance in the viewer
                 // (delete / set-as-cover / favorite / rename / add-to-album / edit)
                 // collapses into a no-op + hides itself behind this flag.
                 isReadOnlyAlbum = viewerFromAlbum && selectedAlbum?.sharedByEmail != null,
+                // Taking a photo out of an album is an edit, so it follows the same right as
+                // adding rather than plain ownership. That makes it a separate question from
+                // isReadOnlyAlbum: an editor on a shared album may remove, and is exactly the
+                // person with no other route to it.
+                canRemoveFromAlbum = viewerFromAlbum && selectedAlbum?.canAddPhotos == true,
                 editedAt = editedAt,
                 hiddenCloudLinkIds = selectedViewerHiddenLinkIds,
                 secure = viewerSecure,

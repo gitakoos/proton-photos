@@ -644,6 +644,7 @@
     <string name="shared_empty_with_me_body">A veled megosztott albumok itt fognak megjelenni.</string>
     <string name="shared_empty_by_me_body">Ossz meg egy albumot vagy egy fotót, és itt látni fogod.</string>
     <string name="shared_by_email">%1$s által</string>
+    <string name="shared_by_email_full">Megosztotta: %1$s</string>
     <string name="shared_photo_count">%1$d kép</string>
     <string name="shared_by_me_photos_section">Megosztott fotók</string>
 
@@ -949,7 +950,7 @@
     <string name="rename_sheet_subtitle_local">Válaszd ki, hogyan kerüljön az új név az eszközöd fájljára.</string>
     <string name="rename_sheet_name_label">Fájlnév</string>
     <string name="rename_sheet_option_cloud_title">Átnevezés a felhőben</string>
-    <string name="rename_sheet_option_cloud_subtitle">Az új névvel feltölti, az eredeti pedig a Nemrég törölt mappába kerül.</string>
+    <string name="rename_sheet_option_cloud_subtitle">A fotót a Drive-on nevezi át, másolat készítése nélkül.</string>
     <string name="rename_sheet_option_local_title">Eredeti átnevezése</string>
     <string name="rename_sheet_option_local_subtitle">Helyben frissíti a fájlt az eszközödön.</string>
     <string name="rename_sheet_option_copy_title">Mentés másolatként</string>
@@ -1123,6 +1124,7 @@
     <string name="gallery_create_album_failed">Nem sikerült létrehozni az albumot: %1$s</string>
     <string name="gallery_enable_metadata_category">Először engedélyezz egy metaadat-kategóriát a Beállítások → Adatvédelem menüben</string>
     <string name="gallery_album_picker_count_drive">%1$s · Drive</string>
+    <string name="gallery_album_picker_count_shared">%1$s · Drive · Megosztott</string>
     <string name="album_add_photos">Fotók hozzáadása</string>
     <string name="album_picker_title">Albumhoz adás</string>
     <string name="album_picker_selected">%1$d kijelölve</string>
@@ -1135,6 +1137,9 @@
     <string name="albums_rename_same_name">Az új név megegyezik a jelenlegivel</string>
     <string name="albums_rename_failed">Az átnevezés nem sikerült</string>
     <string name="albums_delete_failed">Nem sikerült törölni az albumot: %1$s</string>
+    <string name="albums_delete_would_lose_title">Néhány fotó csak itt van meg</string>
+    <string name="albums_delete_would_lose_body">Akikkel megosztottad ezt az albumot, olyan fotókat tettek bele, amelyek nincsenek meg a könyvtáradban. Az album törlésével ezek a fotók is törlődnek.</string>
+    <string name="albums_delete_would_lose_action">Törlés mindenképp</string>
     <string name="albums_renamed_to">Átnevezve erre: „%1$s”</string>
 
     <string name="cd_album_fully_backed_up">Teljesen mentve</string>
@@ -1272,6 +1277,12 @@
     <string name="whats_new_hide_backed">Zöld felhő, a telefonodon és biztonsági mentéssel: az eszközödön marad, így más alkalmazások továbbra is megjelenítik. Ez az alkalmazás csak itt rejti el, a zárolt Rejtett fotók mögött; a felhőben lévő másolatodat soha nem mozgatja, módosítja vagy törli.</string>
     <string name="whats_new_hide_cloud">Fehér felhő, csak a felhőben: ez az alkalmazás csak itt rejti el, a zárolt Rejtett fotók mögött. A felhőben lévő másolatod pontosan úgy marad, ahogy van; soha nem mozgatja, módosítja vagy törli.</string>
     <string name="whats_new_hide_albums">Egy egész felhőalbumot is elrejthetsz, és minden visszafordítható.</string>
+    <string name="whats_new_shared_add_title">Hozzáadás megosztott albumhoz</string>
+    <string name="whats_new_shared_add_body">Ha valaki megoszt veled egy albumot és a szerkesztést is engedélyezi, hozzáadhatod a saját fotóidat, és el is távolíthatod őket.</string>
+    <string name="whats_new_viewer_place_title">Megjegyzi, hol tartottál</string>
+    <string name="whats_new_viewer_place_body">Egy fotó törlése a következőre lép ahelyett, hogy bezárná a fotónézetet. A rácsba visszatérve annál a fotónál landolsz, ahol abbahagytad, nem annál, amelyiket megnyitottad.</string>
+    <string name="whats_new_album_guard_title">Ellenőrzés az album törlése előtt</string>
+    <string name="whats_new_album_guard_body">Ha egy album az egyetlen hely, ahol néhány fotója meg van őrizve, a törlés előbb rákérdez.</string>
     <string name="whats_new_dup_title">Duplikált fotók keresése</string>
     <string name="whats_new_dup_body">Megtalálja a pontos másolatokat és a vizuálisan hasonló képeket, majd egyet biztonságosan megtarthatsz, a többit törölheted.</string>
     <string name="whats_new_offline_title">Offline elérhető</string>
@@ -1290,7 +1301,7 @@
     <string name="whats_new_scrubber_body">Tekerd a videót filmszalag-előnézettel, és lépj egyszerre egy kockát.</string>
     <string name="whats_new_album_title">Okosabb albumok</string>
     <string name="whats_new_album_body">Lásd, mely albumokban van már benne egy kiválasztott fotó, és szűrd a választót azokra a fotókra, amelyek még egyetlen albumban sincsenek.</string>
-    <string name="whats_new_more">Emellett adaptív alkalmazásikon, gyorsműveleti réteg képernyőképekhez, biztonságosabb eltávolítás a rendszerkukán át, megbízhatóbb dátumok, és stabilabb működés a nagyon nagy könyvtáraknál.</string>
+    <string name="whats_new_more">Emellett a másolt hivatkozások rejtve maradnak a vágólap előnézetében, a fájlméretek mindenhol egyeznek, az automatikus helyfelszabadítás a Drive-on is ellenőriz, mielőtt eltávolít egy másolatot a telefonodról, és a nagy albumok és kijelölések stabilabban működnek.</string>
     <string name="offline_card_subtitle">Offline megtekintésre mentett fotók</string>
     <string name="duplicates_filter_identical">Azonos</string>
     <string name="duplicates_filter_similar">Hasonló</string>
@@ -1305,7 +1316,7 @@
     <string name="action_remove">Eltávolítás</string>
     <string name="gallery_add_to_album_queued">A fotók a feltöltés befejezése után kerülnek hozzáadásra</string>
     <string name="share_role_can_view_desc">Megnézheti az albumot és a fotóit.</string>
-    <string name="share_role_can_edit_desc">Hozzáadhat és eltávolíthat fotókat, és módosíthatja a borítót.</string>
+    <string name="share_role_can_edit_desc">Hozzáadhat és eltávolíthat fotókat.</string>
     <string name="settings_show_selection_labels">Gombfeliratok</string>
     <string name="settings_show_selection_labels_desc">Rövid feliratot jelenít meg minden gomb alatt a fotók kijelölésekor, hogy egyértelmű legyen, melyik mit csinál.</string>
     <string name="sel_label_download">Letöltés</string>

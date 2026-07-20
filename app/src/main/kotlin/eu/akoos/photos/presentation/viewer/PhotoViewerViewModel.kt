@@ -86,6 +86,11 @@ data class CloudVideoMeta(val width: Int, val height: Int, val durationMs: Long)
  *  to many). */
 data class DetailsAlbums(val localFolder: String? = null, val cloudAlbums: List<String> = emptyList())
 
+/** A completed album removal: the album the photo was taken out of, plus the photo's Drive linkId.
+ *  Both ids travel together so a viewer can tell a removal from the album it was opened from apart
+ *  from one aimed at any other album the photo also belongs to. */
+data class AlbumRemoval(val albumLinkId: String, val photoLinkId: String)
+
 @HiltViewModel
 class PhotoViewerViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
@@ -105,6 +110,7 @@ class PhotoViewerViewModel @Inject constructor(
     private val getGalleryItems: GetGalleryItemsUseCase,
     private val undoController: UndoController,
     private val thumbnailUrlStore: eu.akoos.photos.data.repository.drive.ThumbnailUrlStore,
+    private val cloudTrashService: eu.akoos.photos.data.repository.drive.CloudTrashService,
 ) : ViewModel() {
 
     private companion object {
@@ -196,6 +202,10 @@ class PhotoViewerViewModel @Inject constructor(
      *  chooser. replay=0 + single-buffer so a paused screen doesn't block the emit. */
     private val _shareIntent = MutableSharedFlow<android.content.Intent>(replay = 0, extraBufferCapacity = 1)
     val shareIntent: SharedFlow<android.content.Intent> = _shareIntent.asSharedFlow()
+
+    /** Fires when an undo puts a deleted photo back. The viewer drops photos it deleted from its own
+     *  pager, and only this tells it that one of them is worth showing again. */
+    val undoRestored: SharedFlow<UndoAction> = undoController.restored
 
     /** Single-photo public-link state shown in the manage-link sheet, owned by [publicLink].
      *  Reset to [PublicLinkState.None] on every page load so a link from the previously viewed
@@ -354,6 +364,12 @@ class PhotoViewerViewModel @Inject constructor(
      *  [addToAlbumDone]. */
     private val _setCoverDone = MutableSharedFlow<Unit>(replay = 0, extraBufferCapacity = 1)
     val setCoverDone: SharedFlow<Unit> = _setCoverDone.asSharedFlow()
+
+    /** One-shot on a successful remove-from-album, so a viewer showing that album's membership can
+     *  drop the photo from its pager. Same replay=0 + single-buffer shape as [addToAlbumDone];
+     *  failures flow through [transientError] and emit nothing, leaving the photo on screen. */
+    private val _removeFromAlbumDone = MutableSharedFlow<AlbumRemoval>(replay = 0, extraBufferCapacity = 1)
+    val removeFromAlbumDone: SharedFlow<AlbumRemoval> = _removeFromAlbumDone.asSharedFlow()
 
     /** Errors that the UI should toast/snackbar. Set by previously-silent failure paths
      *  (add-to-album, download-to-device, load albums) so the user gets feedback instead of a
@@ -1137,8 +1153,8 @@ class PhotoViewerViewModel @Inject constructor(
 
     /**
      * Renames [item] to [newName].
-     * - [replaceOriginal] true ("Rename original"): local renamed in-place; cloud re-uploaded with
-     *   the new name and the old linkId trashed.
+     * - [replaceOriginal] true ("Rename original"): the file is renamed where it already is, on the
+     *   device or on Drive, keeping its identity.
      * - [replaceOriginal] false ("Save as copy"): a new MediaStore entry / new cloud linkId; the
      *   original stays.
      */
@@ -1290,7 +1306,15 @@ class PhotoViewerViewModel @Inject constructor(
     private suspend fun renameCloud(photo: CloudPhoto, newName: String, replaceOriginal: Boolean, sourceAlbumLinkId: String?) {
         val userId = accountManager.getPrimaryUserId().first()
             ?: error(context.getString(R.string.viewer_not_signed_in))
-        val newLinkId = cloudRepo.renameOrCopyCloudPhoto(userId, photo, newName, trashOriginal = replaceOriginal)
+        if (replaceOriginal) {
+            // In-place rename: the linkId, the album membership and the bytes all stay put, so
+            // there is no new link to file anywhere. A failure propagates to renameItem, which turns
+            // it into RenameState.Failed and shows it in the rename sheet. Falling back to the copy
+            // path on failure would hand the user the duplicate this call exists to avoid.
+            cloudTrashService.renameCloudPhoto(userId, photo, newName)
+            return
+        }
+        val newLinkId = cloudRepo.copyCloudPhotoAs(userId, photo, newName)
         // Keep the new linkId in the same album the source was in (best-effort).
         sourceAlbumLinkId?.let { albumId ->
             runCatching { cloudRepo.addPhotosToAlbum(userId, albumId, listOf(newLinkId)) }
@@ -1336,11 +1360,15 @@ class PhotoViewerViewModel @Inject constructor(
             // picker show (including albums created this session). A fresh network fetch alone can
             // surface fewer entries while it's slow or a detail chunk fails, which left the viewer's
             // picker missing albums. Then refresh from the network.
+            // Shared albums this user may contribute to belong in the picker too, and the network
+            // refresh below returns only owned albums, so they are appended to both results rather
+            // than fetched once and overwritten.
+            val sharedAddable = runCatching { cloudRepo.loadSharedAddableAlbumsCached() }.getOrNull().orEmpty()
             runCatching { cloudRepo.loadAlbumsCached() }.getOrNull()
                 ?.takeIf { it.isNotEmpty() }
-                ?.let { _albums.value = it }
+                ?.let { _albums.value = it + sharedAddable }
             runCatching { cloudRepo.loadAlbums(userId) }
-                .onSuccess { _albums.value = it }
+                .onSuccess { _albums.value = it + sharedAddable }
                 .onFailure { e ->
                     // Passive prefetch on viewer open: a no-network failure is expected (e.g.
                     // opening a pinned photo offline) and must not pop a "no connection" snackbar.
@@ -1421,7 +1449,17 @@ class PhotoViewerViewModel @Inject constructor(
             runCatching { cloudRepo.removePhotosFromAlbum(userId, albumLinkId, listOf(cloudLinkId)) }
                 .onSuccess {
                     _currentPhotoAlbumIds.value = _currentPhotoAlbumIds.value - albumLinkId
-                    undoController.offer(UndoAction.AlbumRemove(albumLinkId, listOf(cloudLinkId)))
+                    // Undo re-adds by copying from this device's own volume, which cannot reach a
+                    // photo that lives on the sharer's volume, so a shared album gets no Undo
+                    // rather than one that silently does nothing. Same rule the album grid follows.
+                    // An album missing from the loaded list is not confirmed as this user's own, so
+                    // it takes the same quiet path.
+                    val isOwnAlbum =
+                        _albums.value.firstOrNull { it.linkId == albumLinkId }?.isSharedWithMe == false
+                    if (isOwnAlbum) {
+                        undoController.offer(UndoAction.AlbumRemove(albumLinkId, listOf(cloudLinkId)))
+                    }
+                    _removeFromAlbumDone.tryEmit(AlbumRemoval(albumLinkId, cloudLinkId))
                 }
                 .onFailure { e ->
                     _transientError.value = context.getString(
