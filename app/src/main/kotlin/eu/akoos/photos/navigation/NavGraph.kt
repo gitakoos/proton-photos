@@ -108,6 +108,7 @@ import eu.akoos.photos.presentation.map.MapScreen
 import eu.akoos.photos.presentation.search.SearchScreen
 import eu.akoos.photos.presentation.settings.TrashScreen
 import eu.akoos.photos.presentation.viewer.PhotoViewerScreen
+import eu.akoos.photos.presentation.whatsnew.WhatsNewHistoryScreen
 import eu.akoos.photos.presentation.whatsnew.WhatsNewScreen
 import javax.inject.Inject
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -159,6 +160,13 @@ sealed class Screen(val route: String) {
     data object Account : Screen("account_settings")
     data object Onboarding : Screen("onboarding")
     data object WhatsNew : Screen("whats_new")
+
+    /** The update history list, and one release read from it. */
+    data object WhatsNewHistory : Screen("whats_new_history")
+
+    data object WhatsNewRelease : Screen("whats_new_release/{version}") {
+        fun route(version: String) = "whats_new_release/$version"
+    }
     data object AppearanceSettings : Screen("appearance_settings")
     data object LandingTab : Screen("landing_tab")
     data object ThemeSettings : Screen("theme_settings")
@@ -425,6 +433,25 @@ fun NavGraph(
             // every exit path settles the gate. Done/back simply pop back to the gallery the
             // screen sits on top of.
             WhatsNewScreen(onDone = { navController.popBackStack() })
+        }
+
+        composable(Screen.WhatsNewHistory.route) {
+            WhatsNewHistoryScreen(
+                onBack = { navController.popBackStack() },
+                onOpenRelease = { version -> navController.navigate(Screen.WhatsNewRelease.route(version)) },
+            )
+        }
+
+        composable(
+            Screen.WhatsNewRelease.route,
+            arguments = listOf(navArgument("version") { type = NavType.StringType }),
+        ) { entry ->
+            // An unknown version resolves to the newest rather than showing an empty pager, so a
+            // stale link or a removed catalog entry cannot strand the user on a blank screen.
+            WhatsNewScreen(
+                onDone = { navController.popBackStack() },
+                version = entry.arguments?.getString("version"),
+            )
         }
 
         composable(Screen.Gallery.route) {
@@ -844,6 +871,7 @@ fun NavGraph(
                 onAppearanceClick         = { navController.navigate(Screen.AppearanceSettings.route) },
                 onLanguageClick           = { navController.navigate(Screen.LanguageSettings.route) },
                 onAboutClick              = { navController.navigate(Screen.About.route) },
+                onWhatsNewClick           = { navController.navigate(Screen.WhatsNewHistory.route) },
                 onFaqClick                = { navController.navigate(Screen.Faq.route) },
                 onAccountClick            = { navController.navigate(Screen.Account.route) },
                 onCheckForUpdatesClick    = onCheckForUpdates,

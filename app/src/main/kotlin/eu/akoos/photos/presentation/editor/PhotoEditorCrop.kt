@@ -69,36 +69,13 @@ import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.FgPrimary
 import eu.akoos.photos.presentation.theme.PillBg
 import eu.akoos.photos.presentation.theme.PillBorder
-import kotlin.math.max
-import kotlin.math.min
-
-private enum class CropAspect(val label: String, val ratio: Float?) {
-    Original("Original", null),
-    OneToOne("1:1", 1f),
-    FourThree("4:3", 4f / 3f),
-    ThreeFour("3:4", 3f / 4f),
-    SixteenNine("16:9", 16f / 9f),
-    NineSixteen("9:16", 9f / 16f),
-}
-
-private fun centeredCrop(srcW: Int, srcH: Int, aspect: Float): android.graphics.Rect {
-    val srcRatio = srcW.toFloat() / srcH
-    return if (srcRatio > aspect) {
-        val newW = (srcH * aspect).toInt().coerceAtLeast(1)
-        val xOffset = (srcW - newW) / 2
-        android.graphics.Rect(xOffset, 0, xOffset + newW, srcH)
-    } else {
-        val newH = (srcW / aspect).toInt().coerceAtLeast(1)
-        val yOffset = (srcH - newH) / 2
-        android.graphics.Rect(0, yOffset, srcW, yOffset + newH)
-    }
-}
 
 @Composable
 internal fun CropPanel(
     state: EditorUiState,
     vm: PhotoEditorViewModel,
-    pendingCropRect: android.graphics.Rect?,
+    lockedAspect: CropAspect,
+    onLockedAspectChange: (CropAspect) -> Unit,
     onPendingCropRectChange: (android.graphics.Rect?) -> Unit,
 ) {
     // Full-image bounds and ratio math run against the DISPLAYED crop bitmap (rotation
@@ -107,16 +84,6 @@ internal fun CropPanel(
     val disp = state.adjustedBitmapNoCrop ?: state.originalBitmap ?: return
     val dispW = disp.width
     val dispH = disp.height
-    // The chip "selected" indicator compares against the pending rect (what's currently
-    // showing in the overlay), not the committed cropRect, so tapping a ratio chip
-    // updates the preview immediately and the chip lights up. Original = full-image.
-    val pending = pendingCropRect ?: android.graphics.Rect(0, 0, dispW, dispH)
-    val fullImage = pending.left == 0 && pending.top == 0
-        && pending.right == dispW && pending.bottom == dispH
-    val selected = CropAspect.entries.firstOrNull { aspect ->
-        if (aspect.ratio == null) fullImage
-        else pending == centeredCrop(dispW, dispH, aspect.ratio)
-    } ?: if (fullImage) CropAspect.Original else null
 
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         // Aspect ratio chips — same pill recipe as the photos page filter row.
@@ -125,7 +92,10 @@ internal fun CropPanel(
             modifier = Modifier.fillMaxWidth(),
         ) {
             items(CropAspect.entries.toList()) { aspect ->
-                val isSelected = aspect == selected
+                // The lit chip is the one the user tapped, and it stays lit while that shape is
+                // locked, even after the rect is dragged smaller or moved. Comparing rects would
+                // unlight it the moment the frame was nudged.
+                val isSelected = aspect == lockedAspect
                 Box(
                     modifier = Modifier
                         .height(38.dp)
@@ -135,25 +105,36 @@ internal fun CropPanel(
                         )
                         .then(if (!isSelected) Modifier.border(0.5.dp, PillBorder, pillShape) else Modifier)
                         .clickable {
-                            // Tapping a ratio chip both shows the rect in the overlay AND
-                            // commits it live (no Apply step). Original ratio = full image,
-                            // committed as null so the pipeline skips a full-size crop.
-                            if (aspect.ratio == null) {
-                                onPendingCropRectChange(android.graphics.Rect(0, 0, dispW, dispH))
-                                vm.applyCrop(null)
-                            } else {
-                                val newRect = centeredCrop(dispW, dispH, aspect.ratio)
-                                onPendingCropRectChange(newRect)
-                                vm.applyCrop(newRect)
+                            // Tapping a chip locks the shape AND shows it, with no Apply step.
+                            // Free only releases the lock and leaves the rect where the user put
+                            // it, so it commits nothing and spawns no undo entry. Original is the
+                            // whole image, committed as null so the pipeline skips a full-size crop.
+                            val ratio = aspect.lockRatio(dispW, dispH)
+                            onLockedAspectChange(aspect)
+                            when {
+                                aspect == CropAspect.Free -> Unit
+                                aspect == CropAspect.Original -> {
+                                    onPendingCropRectChange(android.graphics.Rect(0, 0, dispW, dispH))
+                                    vm.applyCrop(null)
+                                }
+                                ratio != null -> {
+                                    val newRect = centeredCrop(dispW, dispH, ratio).toRect()
+                                    onPendingCropRectChange(newRect)
+                                    vm.applyCrop(newRect)
+                                }
                             }
                         }
                         .padding(horizontal = 14.dp),
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
-                        // Numeric ratios (1:1, 16:9, …) stay as glyph labels; only the
-                        // "Original" entry is a translatable word.
-                        if (aspect == CropAspect.Original) stringResource(R.string.editor_filter_original) else aspect.label,
+                        // Numeric ratios (1:1, 16:9, …) stay as glyph labels; only the word
+                        // entries are translatable.
+                        when (aspect) {
+                            CropAspect.Free -> stringResource(R.string.editor_crop_free)
+                            CropAspect.Original -> stringResource(R.string.editor_filter_original)
+                            else -> aspect.label
+                        },
                         color = if (isSelected) Accent else FgPrimary,
                         fontSize = 13.sp,
                         fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
@@ -165,14 +146,15 @@ internal fun CropPanel(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             modifier = Modifier.fillMaxWidth(),
         ) {
-            // Reset clears the committed crop and snaps the pending rect back to full image.
-            // No Apply chip — drags and ratio chips already commit live (see onCropRectCommit
-            // and the chip click above).
+            // Reset clears the committed crop, releases any lock, and snaps the pending rect
+            // back to full image. No Apply chip, because drags and ratio chips already commit
+            // live (see onCropRectCommit and the chip click above).
             ActionChip(
                 label = androidx.compose.ui.res.stringResource(R.string.editor_crop_reset),
                 icon = Icons.Default.Restore,
                 enabled = true,
                 onClick = {
+                    onLockedAspectChange(CropAspect.Free)
                     onPendingCropRectChange(android.graphics.Rect(0, 0, dispW, dispH))
                     vm.applyCrop(null)
                 },
@@ -188,6 +170,7 @@ internal fun CropPanel(
  * pointer input for:
  *   - dragging any corner to resize the rect (clamped to bitmap bounds, min size 32 px)
  *   - dragging inside the rect to translate it (clamped to bitmap bounds)
+ * A non-null [lockedRatio] holds the rect's shape through every resize; see [resizeCrop].
  * All math is in bitmap-pixel coordinates; the on-screen scale is recomputed from the
  * [Image]'s fit-rect each composition.
  */
@@ -195,6 +178,7 @@ internal fun CropPanel(
 internal fun CropPreview(
     bitmap: Bitmap,
     cropRect: android.graphics.Rect?,
+    lockedRatio: Float?,
     onCropRectChanged: (android.graphics.Rect) -> Unit,
     onCropRectCommit: (android.graphics.Rect) -> Unit,
 ) {
@@ -214,6 +198,9 @@ internal fun CropPreview(
         cropRect ?: android.graphics.Rect(0, 0, bitmap.width, bitmap.height),
     )
     val rect = rectState.value
+    // Same reason as the rect: the lock changes when a chip is tapped, and the gesture loop
+    // must read the current one rather than the one that was set when it started.
+    val lockState = androidx.compose.runtime.rememberUpdatedState(lockedRatio)
 
     Box(
         modifier = Modifier
@@ -274,54 +261,18 @@ internal fun CropPreview(
                                     .coerceIn(0f, bitmap.width.toFloat()).toInt()
                                 val by = ((change.position.y - fit.offsetY) / fit.scale)
                                     .coerceIn(0f, bitmap.height.toFloat()).toInt()
-                                val min = minCropPx.toInt()
-                                val r = when (h) {
-                                    CropHandle.TopLeft -> android.graphics.Rect(
-                                        bx.coerceAtMost(rect.right - min),
-                                        by.coerceAtMost(rect.bottom - min),
-                                        rect.right, rect.bottom,
-                                    )
-                                    CropHandle.TopRight -> android.graphics.Rect(
-                                        rect.left,
-                                        by.coerceAtMost(rect.bottom - min),
-                                        bx.coerceAtLeast(rect.left + min),
-                                        rect.bottom,
-                                    )
-                                    CropHandle.BottomLeft -> android.graphics.Rect(
-                                        bx.coerceAtMost(rect.right - min),
-                                        rect.top,
-                                        rect.right,
-                                        by.coerceAtLeast(rect.top + min),
-                                    )
-                                    CropHandle.BottomRight -> android.graphics.Rect(
-                                        rect.left,
-                                        rect.top,
-                                        bx.coerceAtLeast(rect.left + min),
-                                        by.coerceAtLeast(rect.top + min),
-                                    )
-                                    // Edge grabs — drag one side, the other three stay put.
-                                    CropHandle.Top -> android.graphics.Rect(
-                                        rect.left, by.coerceAtMost(rect.bottom - min), rect.right, rect.bottom,
-                                    )
-                                    CropHandle.Bottom -> android.graphics.Rect(
-                                        rect.left, rect.top, rect.right, by.coerceAtLeast(rect.top + min),
-                                    )
-                                    CropHandle.Left -> android.graphics.Rect(
-                                        bx.coerceAtMost(rect.right - min), rect.top, rect.right, rect.bottom,
-                                    )
-                                    CropHandle.Right -> android.graphics.Rect(
-                                        rect.left, rect.top, bx.coerceAtLeast(rect.left + min), rect.bottom,
-                                    )
-                                    CropHandle.Inside -> {
-                                        // Bodily translate, preserving W×H and clamping to
-                                        // bitmap bounds on both axes.
-                                        val w = rect.width()
-                                        val hgt = rect.height()
-                                        val newLeft = (bx - insideOffsetX).coerceIn(0, bitmap.width - w)
-                                        val newTop  = (by - insideOffsetY).coerceIn(0, bitmap.height - hgt)
-                                        android.graphics.Rect(newLeft, newTop, newLeft + w, newTop + hgt)
-                                    }
-                                }
+                                val r = resizeCrop(
+                                    box = rect.toCropBox(),
+                                    handle = h,
+                                    bx = bx,
+                                    by = by,
+                                    ratio = lockState.value,
+                                    boundsW = bitmap.width,
+                                    boundsH = bitmap.height,
+                                    minPx = minCropPx.toInt(),
+                                    insideOffsetX = insideOffsetX,
+                                    insideOffsetY = insideOffsetY,
+                                ).toRect()
                                 onCropRectChanged(r)
                             },
                             // Commit the freshest rect on release so the crop applies without
@@ -403,8 +354,6 @@ internal fun CropPreview(
         }
     }
 }
-
-private enum class CropHandle { TopLeft, TopRight, BottomLeft, BottomRight, Top, Bottom, Left, Right, Inside }
 
 /**
  * Edge-buffer crop-handle picker (ported from the video editor). A touch lands on a corner

@@ -436,6 +436,7 @@
     <string name="editor_adj_tone">Tonalità</string>
     <string name="editor_adj_temperature">Temperatura</string>
     <string name="editor_crop_reset">Ripristina</string>
+    <string name="editor_crop_free">Libero</string>
     <string name="hidden_photos_title">Foto nascoste</string>
     <string name="hidden_albums_section">Album nascosti</string>
     <string name="hidden_cloud_photos_section">Foto nascoste nel cloud</string>
@@ -448,6 +449,7 @@
     <string name="hide_cloud_copy_notice">Le foto salvate restano nel tuo Proton Drive. Nasconderle le rimuove solo dalla galleria di questo dispositivo.</string>
     <string name="album_rename">Rinomina album</string>
     <string name="albums_hide_album">Nascondi album</string>
+    <string name="albums_reorder">Riordina album</string>
     <string name="album_rename_confirm">Rinomina</string>
     <string name="album_remove_from_album">Rimuovi dall\'album</string>
     <string name="album_set_as_cover">Imposta come copertina</string>
@@ -977,6 +979,11 @@
     <string name="albums_filter_default_heading">Predefinito all\'apertura</string>
     <string name="albums_filter_remember_last">Ricorda l\'ultimo filtro usato</string>
     <string name="albums_filter_remember_last_summary">Apri gli album con l\'ultimo filtro selezionato</string>
+    <string name="albums_sort_heading">Ordina per</string>
+    <string name="albums_sort_custom">Personalizzato</string>
+    <string name="albums_sort_name">Nome (A-Z)</string>
+    <string name="albums_sort_activity">Ultima attività</string>
+    <string name="albums_sort_count">Numero di foto</string>
     <string name="albums_toggle_cloud_albums">Mostra o nascondi gli album</string>
 
     <!-- Photo viewer details / metadata sheet -->
@@ -1287,7 +1294,15 @@
     <string name="whats_new_scrubber_body">Scorri un video con un\'anteprima a striscia di pellicola e avanza un fotogramma alla volta.</string>
     <string name="whats_new_album_title">Album più intelligenti</string>
     <string name="whats_new_album_body">Vedi in quali album è già presente una foto che hai scelto e filtra il selettore sulle foto non ancora in alcun album.</string>
-    <string name="whats_new_more">Inoltre i link copiati restano nascosti nell\'anteprima degli appunti, le dimensioni dei file coincidono ovunque compaiano, la liberazione automatica verifica su Drive prima di rimuovere una copia dal telefono, e gli album e le selezioni di grandi dimensioni reggono meglio.</string>
+    <string name="whats_new_albums_title">Ordina e riorganizza i tuoi album</string>
+    <string name="whats_new_albums_intro">La scheda Album ora ha un menu di ordinamento, con quattro criteri:</string>
+    <string name="whats_new_albums_drag">Per un ordine personalizzato, tieni premuto un album, scegli Riordina album e trascina le copertine dove vuoi. L\'ordine resta finché non lo cambi.</string>
+    <string name="whats_new_crop_title">Ritaglia con una forma fissa</string>
+    <string name="whats_new_crop_body">Scegli 1:1, 4:3, 16:9 o la forma della foto stessa nell\'editor: il riquadro la mantiene mentre lo rimpicciolisci.</string>
+    <string name="whats_new_history_desc">Leggi le novità di questo aggiornamento e dei precedenti</string>
+    <string name="whats_new_version">Versione %1$s</string>
+    <string name="whats_new_more_241">Inoltre le foto eliminate su un altro dispositivo spariscono anche qui con una libreria molto grande, rinominare una foto non lascia più una copia e un nome cambiato altrove arriva fino a qui.</string>
+    <string name="whats_new_more_240">Inoltre i link copiati restano nascosti nell\'anteprima degli appunti, le dimensioni dei file coincidono ovunque compaiano, la liberazione automatica verifica su Drive prima di rimuovere una copia dal telefono, e gli album e le selezioni di grandi dimensioni reggono meglio.</string>
     <string name="offline_card_subtitle">Foto salvate per la visualizzazione offline</string>
     <string name="duplicates_filter_identical">Identiche</string>
     <string name="duplicates_filter_similar">Simili</string>

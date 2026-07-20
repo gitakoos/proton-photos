@@ -174,6 +174,7 @@ fun SettingsScreen(
     onFaqClick: () -> Unit = {},
     onAccountClick: () -> Unit = {},
     onCheckForUpdatesClick: () -> Unit = {},
+    onWhatsNewClick: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -580,6 +581,15 @@ fun SettingsScreen(
                         BuildConfig.VERSION_NAME,
                     ),
                     onClick = onCheckForUpdatesClick,
+                )
+                RowDivider()
+                // Sits next to the update check because both answer a version question. Without
+                // this row the post-update screen is reachable exactly once, so tapping past it
+                // loses the highlights for good.
+                NavRow(
+                    label = stringResource(R.string.whats_new_title),
+                    description = stringResource(R.string.whats_new_history_desc),
+                    onClick = onWhatsNewClick,
                 )
                 RowDivider()
                 NavRow(

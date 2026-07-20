@@ -103,6 +103,7 @@
     <string name="editor_error_low_memory">Za obdelavo tega ni dovolj pomnilnika. Zaprite druge aplikacije ali uporabite manjšo datoteko.</string>
     <string name="editor_auto_fix">Samodejni popravek</string>
     <string name="editor_crop_reset">Ponastavi</string>
+    <string name="editor_crop_free">Poljubno</string>
     <!-- Adjustment pill labels in the redesigned Adjust panel. The Auto pill reuses
          the existing editor_auto_fix string. -->
     <string name="editor_adj_brightness">Svetlost</string>
@@ -595,6 +596,7 @@
     <string name="cd_select_month">Izberi ta mesec</string>
     <string name="album_rename">Preimenuj album</string>
     <string name="albums_hide_album">Skrij album</string>
+    <string name="albums_reorder">Prerazporedi albume</string>
     <string name="album_rename_confirm">Preimenuj</string>
     <string name="album_remove_from_album">Odstrani iz albuma</string>
     <string name="album_set_as_cover">Nastavi kot naslovnico</string>
@@ -1137,6 +1139,11 @@
     <string name="albums_filter_default_heading">Privzeto ob odpiranju</string>
     <string name="albums_filter_remember_last">Zapomni si nazadnje uporabljeni filter</string>
     <string name="albums_filter_remember_last_summary">Albume odpiraj z nazadnje izbranim filtrom</string>
+    <string name="albums_sort_heading">Razvrsti po</string>
+    <string name="albums_sort_custom">Po meri</string>
+    <string name="albums_sort_name">Ime (A-Z)</string>
+    <string name="albums_sort_activity">Zadnja dejavnost</string>
+    <string name="albums_sort_count">Število fotografij</string>
     <string name="albums_toggle_cloud_albums">Pokaži ali skrij albume</string>
 
     <!-- Photo viewer details / metadata sheet -->
@@ -1325,7 +1332,15 @@
     <string name="whats_new_scrubber_body">Premikaj se po videu s predogledom filmskega traku in napreduj po eno sličico.</string>
     <string name="whats_new_album_title">Pametnejši albumi</string>
     <string name="whats_new_album_body">Poglej, v katerih albumih je izbrana fotografija že, in izbirnik filtriraj na fotografije, ki še niso v nobenem albumu.</string>
-    <string name="whats_new_more">Poleg tega kopirane povezave ostanejo skrite v predogledu odložišča, velikosti datotek se povsod ujemajo, samodejno sproščanje prostora pred odstranitvijo kopije iz telefona preveri v Drive, veliki albumi in izbori pa so bolj stabilni.</string>
+    <string name="whats_new_albums_title">Razvrščanje in prerazporejanje albumov</string>
+    <string name="whats_new_albums_intro">Zavihek Albumi ima zdaj meni za razvrščanje s štirimi možnostmi:</string>
+    <string name="whats_new_albums_drag">Za svoj vrstni red pridržite album, izberite Prerazporedi albume in povlecite naslovnice, kamor želite. Vrstni red ostane, dokler ga ne spremenite.</string>
+    <string name="whats_new_crop_title">Obrezovanje v stalnem razmerju</string>
+    <string name="whats_new_crop_body">V urejevalniku izberite 1:1, 4:3, 16:9 ali obliko same fotografije in okvir jo ohrani, ko ga pomanjšujete.</string>
+    <string name="whats_new_history_desc">Preberite novosti te in prejšnjih posodobitev</string>
+    <string name="whats_new_version">Različica %1$s</string>
+    <string name="whats_new_more_241">Poleg tega fotografije, izbrisane na drugi napravi, izginejo tudi tu tudi pri zelo veliki knjižnici, preimenovanje ne pusti več kopije, ime, spremenjeno drugje, pa pride tudi sem.</string>
+    <string name="whats_new_more_240">Poleg tega kopirane povezave ostanejo skrite v predogledu odložišča, velikosti datotek se povsod ujemajo, samodejno sproščanje prostora pred odstranitvijo kopije iz telefona preveri v Drive, veliki albumi in izbori pa so bolj stabilni.</string>
     <string name="offline_card_subtitle">Fotografije, shranjene za ogled brez povezave</string>
     <string name="duplicates_filter_identical">Enake</string>
     <string name="duplicates_filter_similar">Podobne</string>

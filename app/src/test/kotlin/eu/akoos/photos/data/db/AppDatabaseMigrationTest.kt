@@ -403,6 +403,70 @@ class AppDatabaseMigrationTest {
     }
 
     @Test
+    fun migrate_v19_to_v20_createsSweepSnapshotTable_compositeKeyIsPerUserVolumeLink() {
+        Migrations.MIGRATION_19_20.migrate(db)
+
+        // The table exists and accepts a row shaped exactly like ListingSweepSnapshotEntity.
+        db.execSQL(
+            "INSERT INTO listing_sweep_snapshot (userId, volumeId, linkId) VALUES ('u1','volA','link-1')"
+        )
+        // Re-offering the same candidate is not news (the DAO inserts with IGNORE), while the same
+        // linkId under another volume is a different candidate and must survive alongside it.
+        db.execSQL(
+            "INSERT OR IGNORE INTO listing_sweep_snapshot (userId, volumeId, linkId) VALUES ('u1','volA','link-1')"
+        )
+        db.execSQL(
+            "INSERT INTO listing_sweep_snapshot (userId, volumeId, linkId) VALUES ('u1','volB','link-1')"
+        )
+        db.execSQL(
+            "INSERT INTO listing_sweep_snapshot (userId, volumeId, linkId) VALUES ('u2','volA','link-1')"
+        )
+
+        db.query("SELECT COUNT(*) FROM listing_sweep_snapshot").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals("the duplicate candidate was ignored; the distinct scopes were kept", 3, cur.getInt(0))
+        }
+
+        // The generation reads and deletes are all scoped to one (userId, volumeId) pair.
+        db.execSQL("DELETE FROM listing_sweep_snapshot WHERE userId = 'u1' AND volumeId = 'volA'")
+        db.query("SELECT userId, volumeId FROM listing_sweep_snapshot ORDER BY userId, volumeId")
+            .use { cur ->
+                assertTrue(cur.moveToFirst())
+                assertEquals("u1", cur.getString(0))
+                assertEquals("clearing one generation leaves the other volume's alone", "volB", cur.getString(1))
+
+                assertTrue(cur.moveToNext())
+                assertEquals("another account's generation is untouched too", "u2", cur.getString(0))
+            }
+    }
+
+    @Test
+    fun migrate_v19_to_v20_leavesTheNewTableEmpty_andPhotoRowsUntouched() {
+        db.execSQL(
+            """
+            INSERT INTO photo_listing (linkId, shareId, volumeId, userId, captureTime,
+                displayName, mimeType, sizeBytes, revisionId, thumbnailUrl)
+            VALUES ('kept','s1','v1','u1',1000,'holiday.jpg','image/jpeg',1024,'r1','thumb://a')
+            """.trimIndent()
+        )
+
+        Migrations.MIGRATION_19_20.migrate(db)
+
+        // Empty is the correct state to arrive at, not an oversight: a row's whole value is that it
+        // was read at a known moment relative to a listing walk, and this migration has no walk to
+        // speak for. Seeding it from photo_listing here would hand the next pass a candidate set
+        // whose age it cannot know — and what stays in that set is what the sweep deletes.
+        db.query("SELECT COUNT(*) FROM listing_sweep_snapshot").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals("no backfill: the first fresh pass materialises its own generation", 0, cur.getInt(0))
+        }
+        db.query("SELECT displayName FROM photo_listing WHERE linkId = 'kept'").use { cur ->
+            assertTrue("expected the seeded row to survive the migration", cur.moveToFirst())
+            assertEquals("holiday.jpg", cur.getString(0))
+        }
+    }
+
+    @Test
     fun migrate_v2_through_v4_chain_appliesBothMigrations() {
         // Seed a pure v2 row.
         db.execSQL(

@@ -436,6 +436,7 @@
     <string name="editor_adj_tone">Teinte</string>
     <string name="editor_adj_temperature">Température</string>
     <string name="editor_crop_reset">Réinitialiser</string>
+    <string name="editor_crop_free">Libre</string>
     <string name="hidden_photos_title">Photos masquées</string>
     <string name="hidden_albums_section">Albums masqués</string>
     <string name="hidden_cloud_photos_section">Photos cloud masquées</string>
@@ -448,6 +449,7 @@
     <string name="hide_cloud_copy_notice">Les photos sauvegardées restent dans votre Proton Drive. Les masquer les retire seulement de la galerie de cet appareil.</string>
     <string name="album_rename">Renommer l\'album</string>
     <string name="albums_hide_album">Masquer l\'album</string>
+    <string name="albums_reorder">Réorganiser les albums</string>
     <string name="album_rename_confirm">Renommer</string>
     <string name="album_remove_from_album">Retirer de l\'album</string>
     <string name="album_set_as_cover">Définir comme couverture</string>
@@ -967,6 +969,11 @@
     <string name="albums_filter_default_heading">Par défaut à l\'ouverture</string>
     <string name="albums_filter_remember_last">Mémoriser le dernier filtre utilisé</string>
     <string name="albums_filter_remember_last_summary">Ouvrir les albums avec le dernier filtre sélectionné</string>
+    <string name="albums_sort_heading">Trier par</string>
+    <string name="albums_sort_custom">Personnalisé</string>
+    <string name="albums_sort_name">Nom (A-Z)</string>
+    <string name="albums_sort_activity">Dernière activité</string>
+    <string name="albums_sort_count">Nombre de photos</string>
     <string name="albums_toggle_cloud_albums">Afficher ou masquer les albums</string>
 
     <!-- Photo viewer details / metadata sheet -->
@@ -1274,7 +1281,15 @@
     <string name="whats_new_scrubber_body">Parcourez une vidéo avec un aperçu en bande de film et avancez image par image.</string>
     <string name="whats_new_album_title">Albums plus malins</string>
     <string name="whats_new_album_body">Voyez dans quels albums se trouve déjà une photo que vous avez choisie, et filtrez le sélecteur sur les photos qui ne sont encore dans aucun album.</string>
-    <string name="whats_new_more">Avec aussi les liens copiés masqués dans l\'aperçu du presse-papiers, des tailles de fichiers identiques partout où elles apparaissent, une libération automatique qui vérifie auprès de Drive avant de retirer une copie de votre téléphone, et une meilleure tenue des grands albums et des grandes sélections.</string>
+    <string name="whats_new_albums_title">Trier et réorganiser vos albums</string>
+    <string name="whats_new_albums_intro">L\'onglet Albums dispose maintenant d\'un menu de tri, avec quatre ordres :</string>
+    <string name="whats_new_albums_drag">Pour un ordre personnalisé, maintenez un album appuyé, choisissez Réorganiser les albums, puis faites glisser les couvertures où vous voulez. L\'ordre est conservé jusqu\'à ce que vous le changiez.</string>
+    <string name="whats_new_crop_title">Recadrer selon une forme fixe</string>
+    <string name="whats_new_crop_body">Choisissez 1:1, 4:3, 16:9 ou la forme de la photo dans l\'éditeur : le cadre la conserve pendant que vous le réduisez.</string>
+    <string name="whats_new_history_desc">Consultez les nouveautés de cette mise à jour et des précédentes</string>
+    <string name="whats_new_version">Version %1$s</string>
+    <string name="whats_new_more_241">De plus, les photos supprimées sur un autre appareil disparaissent ici même avec une très grande bibliothèque, renommer une photo ne laisse plus de copie, et un nom modifié ailleurs arrive jusqu\'ici.</string>
+    <string name="whats_new_more_240">Avec aussi les liens copiés masqués dans l\'aperçu du presse-papiers, des tailles de fichiers identiques partout où elles apparaissent, une libération automatique qui vérifie auprès de Drive avant de retirer une copie de votre téléphone, et une meilleure tenue des grands albums et des grandes sélections.</string>
     <string name="offline_card_subtitle">Photos enregistrées pour la consultation hors ligne</string>
     <string name="duplicates_filter_identical">Identiques</string>
     <string name="duplicates_filter_similar">Similaires</string>

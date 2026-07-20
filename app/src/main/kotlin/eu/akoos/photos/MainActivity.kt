@@ -206,8 +206,9 @@ class MainActivity : AppCompatActivity() {
 
         // Early cloud-photo refresh once a primary user resolves, so thumbnails are landing by the
         // time the gallery appears. setGentleSync(true) paces the decrypt burst slowly under the
-        // heavy first screen; GalleryViewModel flips it off when visible. refreshFullMutex single-
-        // flights it, so the later syncOnLaunch refresh just awaits this one. Gated on the same
+        // heavy first screen; GalleryViewModel flips it off when visible. The walk is single-
+        // flighted and runs on the app scope, so the later syncOnLaunch refresh just awaits this
+        // one, and backgrounding the Activity no longer abandons it midway. Gated on the same
         // constraints as the sync workers: auto-sync on, not low battery, not metered when Wi-Fi-only.
         lifecycleScope.launch {
             val userId = accountManager.getPrimaryUserId().first() ?: return@launch

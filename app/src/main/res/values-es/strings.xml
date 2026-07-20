@@ -436,6 +436,7 @@
     <string name="editor_adj_tone">Tono</string>
     <string name="editor_adj_temperature">Temperatura</string>
     <string name="editor_crop_reset">Restablecer</string>
+    <string name="editor_crop_free">Libre</string>
     <string name="hidden_photos_title">Fotos ocultas</string>
     <string name="hidden_albums_section">Álbumes ocultos</string>
     <string name="hidden_cloud_photos_section">Fotos ocultas en la nube</string>
@@ -448,6 +449,7 @@
     <string name="hide_cloud_copy_notice">Las fotos respaldadas permanecen en tu Proton Drive. Ocultarlas solo las quita de la galería de este dispositivo.</string>
     <string name="album_rename">Renombrar álbum</string>
     <string name="albums_hide_album">Ocultar álbum</string>
+    <string name="albums_reorder">Reordenar álbumes</string>
     <string name="album_rename_confirm">Renombrar</string>
     <string name="album_remove_from_album">Quitar del álbum</string>
     <string name="album_set_as_cover">Establecer como portada</string>
@@ -977,6 +979,11 @@
     <string name="albums_filter_default_heading">Predeterminado al abrir</string>
     <string name="albums_filter_remember_last">Recordar el último filtro usado</string>
     <string name="albums_filter_remember_last_summary">Abrir los álbumes con el filtro seleccionado por última vez</string>
+    <string name="albums_sort_heading">Ordenar por</string>
+    <string name="albums_sort_custom">Personalizado</string>
+    <string name="albums_sort_name">Nombre (A-Z)</string>
+    <string name="albums_sort_activity">Última actividad</string>
+    <string name="albums_sort_count">Número de fotos</string>
     <string name="albums_toggle_cloud_albums">Mostrar u ocultar álbumes</string>
 
     <!-- Photo viewer details / metadata sheet -->
@@ -1287,7 +1294,15 @@
     <string name="whats_new_scrubber_body">Desplázate por un vídeo con una vista previa de tira de película y avanza un fotograma cada vez.</string>
     <string name="whats_new_album_title">Álbumes más inteligentes</string>
     <string name="whats_new_album_body">Consulta en qué álbumes ya está una foto que elegiste y filtra el selector para ver las fotos que aún no están en ningún álbum.</string>
-    <string name="whats_new_more">Además, los enlaces copiados quedan ocultos en la vista previa del portapapeles, los tamaños de archivo coinciden en todos los sitios donde aparecen, la liberación automática consulta con Drive antes de quitar una copia del teléfono, y los álbumes y las selecciones grandes aguantan mejor.</string>
+    <string name="whats_new_albums_title">Ordena y reorganiza tus álbumes</string>
+    <string name="whats_new_albums_intro">La pestaña Álbumes ya tiene un menú de ordenación con cuatro criterios:</string>
+    <string name="whats_new_albums_drag">Para tu propio orden, mantén pulsado un álbum, elige Reordenar álbumes y arrastra las portadas donde quieras. El orden se mantiene hasta que lo cambies.</string>
+    <string name="whats_new_crop_title">Recortar con una forma fija</string>
+    <string name="whats_new_crop_body">Elige 1:1, 4:3, 16:9 o la forma de la propia foto en el editor, y el marco la conserva mientras lo haces más pequeño.</string>
+    <string name="whats_new_history_desc">Consulta las novedades de esta actualización y de las anteriores</string>
+    <string name="whats_new_version">Versión %1$s</string>
+    <string name="whats_new_more_241">Además, las fotos eliminadas en otro dispositivo desaparecen aquí incluso con una biblioteca muy grande, cambiar el nombre ya no deja una copia y un nombre modificado en otro sitio llega hasta aquí.</string>
+    <string name="whats_new_more_240">Además, los enlaces copiados quedan ocultos en la vista previa del portapapeles, los tamaños de archivo coinciden en todos los sitios donde aparecen, la liberación automática consulta con Drive antes de quitar una copia del teléfono, y los álbumes y las selecciones grandes aguantan mejor.</string>
     <string name="offline_card_subtitle">Fotos guardadas para ver sin conexión</string>
     <string name="duplicates_filter_identical">Idénticas</string>
     <string name="duplicates_filter_similar">Similares</string>

@@ -23,9 +23,22 @@
 package eu.akoos.photos.presentation.albums
 
 import android.net.Uri
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.EaseInOut
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.StartOffset
+import androidx.compose.animation.core.VisibilityThreshold
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -40,7 +53,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyGridScope
+import androidx.compose.foundation.lazy.grid.LazyGridItemInfo
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -50,13 +63,16 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.outlined.Collections
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ModalBottomSheet
 import eu.akoos.photos.presentation.common.ConfirmDialog
+import eu.akoos.photos.presentation.common.IconBubble
 import eu.akoos.photos.presentation.common.ScrollScrubber
 import eu.akoos.photos.presentation.theme.ErrorColor
 import androidx.compose.material3.CircularProgressIndicator
@@ -71,28 +87,38 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import eu.akoos.photos.domain.entity.Album
+import eu.akoos.photos.domain.usecase.moveInArrangement
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import eu.akoos.photos.R
@@ -104,7 +130,87 @@ import eu.akoos.photos.presentation.theme.FgMute
 import eu.akoos.photos.presentation.theme.FgPrimary
 import eu.akoos.photos.presentation.theme.Line2
 import eu.akoos.photos.presentation.theme.PillBg
+import eu.akoos.photos.presentation.theme.PillBgOpaque
 import eu.akoos.photos.presentation.theme.PillBorder
+
+/** Height of the reorder-mode bar, also the grid's extra top inset while that mode is on. */
+private val ReorderBarHeight = 52.dp
+
+/** Grid index the cloud albums start at: the pinned Memories cell is the one item{} emitted ahead of them. */
+private const val CloudSegmentStart = 1
+
+/** The laid-out cell at [gridIndex], or null once it has scrolled out of the viewport. */
+private fun LazyGridState.cellAt(gridIndex: Int): LazyGridItemInfo? =
+    layoutInfo.visibleItemsInfo.firstOrNull { it.index == gridIndex }
+
+/**
+ * Index into the cloud-album list of the cell holding [point], or null for anything that is not a
+ * cloud card.
+ *
+ * One range check carries the whole rule. The Memories cell is laid out ahead of the segment and
+ * the device folders behind it, so subtracting the segment's start puts both outside `0 until`
+ * [cloudCount] — neither can be displaced, and neither can be dropped onto. A point in the gap
+ * between two cards belongs to no cell at all and reads as "no target", which is what leaves an
+ * arrangement untouched when a drag ends between slots.
+ */
+private fun LazyGridState.cloudIndexAt(point: Offset, cloudCount: Int): Int? {
+    val cell = layoutInfo.visibleItemsInfo.firstOrNull {
+        point.x >= it.offset.x && point.x < it.offset.x + it.size.width &&
+            point.y >= it.offset.y && point.y < it.offset.y + it.size.height
+    } ?: return null
+    return (cell.index - CloudSegmentStart).takeIf { it in 0 until cloudCount }
+}
+
+/** How deep from each edge of the grid's content window a held card starts pulling the grid along,
+ *  as a share of that window. A share rather than a fixed depth so the reach scales with the screen
+ *  the grid was given. */
+private const val EdgeScrollBandFraction = 0.15f
+
+/** Speed of that pull at the very edge, per second. Only the edge itself runs this fast, so a card
+ *  can still be parked on a row part-way into the band. */
+private val EdgeScrollMaxSpeed = 500.dp
+
+/** Longest frame the pull will bill for. A stalled frame would otherwise move the grid by however
+ *  long the stall lasted, in one jump. */
+private const val EdgeScrollMaxFrameSeconds = 1f / 30f
+
+/** Peak tilt of the arrange-mode wobble, either side of upright. A hint that the card is loose, so
+ *  it stays under the angle at which the eye starts reading it as an effect. */
+private const val WobbleDegrees = 1.2f
+
+/** One leg of the sway — a full there-and-back cycle is twice this. */
+private const val WobbleLegMillis = 380
+
+/** Upper bound of the per-card jitter added to that leg. */
+private const val WobbleLegJitterMillis = 90
+
+/**
+ * Tilt for one card being arranged, or a flat 0 while [active] is false.
+ *
+ * Cards sharing a period and a starting point sway as one sheet rather than as loose items, so
+ * [seed] spreads both. It is the album's id and not its grid index because a drag renumbers every
+ * card it shifts, which would re-seed them and jump their tilt mid-swap.
+ *
+ * The animation lives in the active branch alone, so leaving the mode disposes it.
+ */
+@Composable
+private fun rememberReorderWobble(active: Boolean, seed: Int): State<Float> {
+    if (!active) return remember { mutableFloatStateOf(0f) }
+    val hash = seed and Int.MAX_VALUE
+    val leg = WobbleLegMillis + (hash shr 8) % WobbleLegJitterMillis
+    val transition = rememberInfiniteTransition(label = "albumWobble")
+    return transition.animateFloat(
+        initialValue = -WobbleDegrees,
+        targetValue = WobbleDegrees,
+        animationSpec = infiniteRepeatable(
+            animation = tween(leg, easing = EaseInOut),
+            repeatMode = RepeatMode.Reverse,
+            // Enters the sway part-way through it, spread over the whole there-and-back cycle.
+            initialStartOffset = StartOffset(hash % (leg * 2)),
+        ),
+        label = "albumWobbleTilt",
+    )
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -137,9 +243,33 @@ fun AlbumsScreen(
             showCreateDialog = true
         }
     }
+    // Reorder mode is entered deliberately from the long-press sheet rather than armed by the
+    // press itself: the cards are combinedClickable and the grid's right edge carries the
+    // scrubber, so a gesture-armed drag would be fighting both. Plain remember, not
+    // rememberSaveable — the mode is a stance the user is holding right now, so it belongs with
+    // the screen and never reaches the settings store.
+    var reorderMode by remember { mutableStateOf(false) }
+    BackHandler(enabled = reorderMode) { reorderMode = false }
+    // Cloud-album ids in the order the cards are laid out while arranging. Seeded when the mode
+    // opens and read only while it is open, so a finished arrangement cannot shadow a sort the user
+    // picks afterwards.
+    var arrangedIds by remember { mutableStateOf<List<String>>(emptyList()) }
+    // The card under the finger: which album, where its top-left has been dragged to in the grid's
+    // own coordinates, and the lift that carries it there from whichever slot it currently holds.
+    var draggedAlbumId by remember { mutableStateOf<String?>(null) }
+    var dragPosition by remember { mutableStateOf(Offset.Zero) }
+    var dragOffset by remember { mutableStateOf(Offset.Zero) }
+    // Where inside the card the finger came down. The card's position and the finger move by the
+    // same deltas from there on, so this stays the distance between the two and is what gives the
+    // auto-scroll the finger's own place in the grid rather than the card's corner.
+    var dragGrip by remember { mutableStateOf(Offset.Zero) }
     // Switching the All / Cloud / Device filter changes the list under the same scroll index, which
-    // reads as the grid jumping — snap back to the top whenever the filter changes.
-    LaunchedEffect(displayFilter) { gridState.scrollToItem(0) }
+    // reads as the grid jumping — snap back to the top whenever the filter changes. The filter also
+    // decides whether cloud albums are on screen at all, so an arrangement in progress ends with it.
+    LaunchedEffect(displayFilter) {
+        reorderMode = false
+        gridState.scrollToItem(0)
+    }
     var albumToDelete by remember { mutableStateOf<Album?>(null) }
 
     // Cloud-album long-press surfaces a Rename + Delete bottom sheet. Holding the in-flight
@@ -172,7 +302,96 @@ fun AlbumsScreen(
         }
     }
 
-    val albums = state.visibleCloudAlbums
+    // The ViewModel's list leads, except while an arrangement is open: then the local order holds
+    // the cards in the slots the finger has put them in, so the reflow is visible under the finger
+    // instead of a store round-trip later. An album that arrives mid-arrangement is unknown to that
+    // order and trails, staying put until the mode is re-entered.
+    val albums = if (reorderMode && arrangedIds.isNotEmpty()) {
+        state.visibleCloudAlbums.sortedBy { album ->
+            arrangedIds.indexOf(album.linkId).takeIf { it >= 0 } ?: Int.MAX_VALUE
+        }
+    } else {
+        state.visibleCloudAlbums
+    }
+    LaunchedEffect(reorderMode) {
+        arrangedIds = if (reorderMode) albums.map { it.linkId } else emptyList()
+    }
+
+    /**
+     * Store the arrangement as the grid is showing it. Cloud albums the grid cannot see — the ones
+     * hidden client-side — keep a slot at the end, because the stored order replaces the previous
+     * one outright and a save that only knew the visible cards would drop theirs every time.
+     */
+    fun saveArrangement() {
+        val shown = arrangedIds
+        if (shown.isEmpty()) return
+        viewModel.saveAlbumArrangement(shown + state.albums.map { it.linkId }.filterNot { it in shown })
+    }
+
+    /**
+     * Put the held card where [dragPosition] now points: take the slot under its centre when that
+     * is a different cloud card, then measure the lift from whichever slot it ends up owning.
+     *
+     * Both the pointer handler and the auto-scroll loop run this. Slots move under a finger that is
+     * holding still exactly as much as under one that is moving, and the lift is measured against a
+     * slot, so re-running it on every scrolled frame is what keeps the card on the finger instead of
+     * letting it ride away with its old slot.
+     */
+    fun settleDrag(albumId: String) {
+        val from = arrangedIds.indexOf(albumId)
+        val cell = (if (from >= 0) gridState.cellAt(CloudSegmentStart + from) else null) ?: return
+        // The card's own centre picks the target, so how far it has to travel to take a slot does
+        // not depend on where inside it the finger landed.
+        val centre = dragPosition + Offset(cell.size.width / 2f, cell.size.height / 2f)
+        val to = gridState.cloudIndexAt(centre, arrangedIds.size)
+        // A move lands the card on the slot its target holds right now, so the lift is measured from
+        // that slot rather than the one being left.
+        var slot = cell.offset
+        if (to != null && to != from) {
+            gridState.cellAt(CloudSegmentStart + to)?.let { slot = it.offset }
+            arrangedIds = moveInArrangement(arrangedIds, from, to)
+        }
+        dragOffset = dragPosition - Offset(slot.x.toFloat(), slot.y.toFloat())
+    }
+
+    val density = LocalDensity.current
+    // Pull the grid along while a held card sits near an edge, so an arrangement is not confined to
+    // the screenful the card was picked up in. One loop covers the whole drag and idles outside the
+    // bands: the other cards are wobbling, so frames are being produced regardless and an idle turn
+    // buys nothing back by unsubscribing from them.
+    LaunchedEffect(draggedAlbumId) {
+        val albumId = draggedAlbumId ?: return@LaunchedEffect
+        val maxSpeed = with(density) { EdgeScrollMaxSpeed.toPx() }
+        var previousFrame = 0L
+        while (true) {
+            val frame = withFrameNanos { it }
+            // Billed per elapsed second rather than per frame, so the pull covers the same ground on
+            // a 120Hz panel as on a 60Hz one.
+            val elapsed = if (previousFrame == 0L) 0f else (frame - previousFrame) / 1_000_000_000f
+            previousFrame = frame
+            val info = gridState.layoutInfo
+            // Measured off the content window: the strips the grid pads for the floating header and
+            // for the bottom bar hold no cards, so treating them as inside the window would put the
+            // whole top band behind the reorder bar.
+            val top = (info.viewportStartOffset + info.beforeContentPadding).toFloat()
+            val bottom = (info.viewportEndOffset - info.afterContentPadding).toFloat()
+            val velocity = edgeScrollVelocity(
+                pointerY = dragPosition.y + dragGrip.y,
+                contentTop = top,
+                contentBottom = bottom,
+                band = (bottom - top) * EdgeScrollBandFraction,
+                maxVelocity = maxSpeed,
+            )
+            if (velocity == 0f || elapsed <= 0f) continue
+            // The pull only ever serves this card's move, so it stops at the ends of the
+            // arrangement. Past them there is no slot left to take and the grid would scroll the
+            // card's own slot out from under it, taking the card off screen with it.
+            val at = arrangedIds.indexOf(albumId)
+            if (at < 0 || (velocity > 0f && at == arrangedIds.lastIndex) || (velocity < 0f && at == 0)) continue
+            gridState.scrollBy(velocity * elapsed.coerceAtMost(EdgeScrollMaxFrameSeconds))
+            settleDrag(albumId)
+        }
+    }
 
     Box(modifier = Modifier.fillMaxSize()) {
         PullToRefreshBox(
@@ -235,7 +454,9 @@ fun AlbumsScreen(
                         columns = GridCells.Fixed(2),
                         state = gridState,
                         contentPadding = PaddingValues(
-                            top = topPadding + 12.dp,
+                            // The reorder bar floats over the grid, so the first row is pushed
+                            // clear of it instead of starting underneath it.
+                            top = topPadding + 12.dp + if (reorderMode) ReorderBarHeight else 0.dp,
                             start = 20.dp,
                             end = 20.dp,
                             bottom = 120.dp,
@@ -252,10 +473,86 @@ fun AlbumsScreen(
                                 albums,
                                 key = { "cloud_${it.linkId}" },
                             ) { album ->
+                                val dragged = album.linkId == draggedAlbumId
+                                // The lifted card is already following the finger and needs no
+                                // invitation to be picked up.
+                                val wobble = rememberReorderWobble(
+                                    active = reorderMode && !dragged,
+                                    seed = album.linkId.hashCode(),
+                                )
+                                // Only the cloud cards go inert while arranging: opening an album
+                                // or reopening the sheet mid-arrangement would both be a surprise,
+                                // and the mode leaves their gestures free for the arrangement
+                                // itself. The Memories card and the device folders below are not
+                                // part of the arrangement, so they keep their own taps.
                                 CloudAlbumCard(
                                     album       = album,
+                                    interactionsEnabled = !reorderMode,
                                     onClick     = { onAlbumClick(album) },
                                     onLongClick = { cloudAlbumSheetFor = album },
+                                    modifier = Modifier
+                                        .animateItem(
+                                            // The dragged card is placed by the finger, so letting
+                                            // the grid animate it into its new slot as well would
+                                            // pull it out from under the finger after every swap.
+                                            placementSpec = if (dragged) null else spring(
+                                                stiffness = Spring.StiffnessMediumLow,
+                                                visibilityThreshold = IntOffset.VisibilityThreshold,
+                                            ),
+                                        )
+                                        .zIndex(if (dragged) 1f else 0f)
+                                        // Read inside the layer block, so a frame of sway costs a
+                                        // redraw of this card rather than a recomposition.
+                                        .graphicsLayer {
+                                            translationX = if (dragged) dragOffset.x else 0f
+                                            translationY = if (dragged) dragOffset.y else 0f
+                                            rotationZ = wobble.value
+                                        }
+                                        .then(
+                                            // Press and hold to pick a card up, so a plain swipe is
+                                            // left to the grid: a gesture that claims every
+                                            // touch-and-move leaves a library taller than the screen
+                                            // with no way to scroll while arranging, stranding every
+                                            // album below the fold. Nothing else is waiting on the
+                                            // hold — the mode has already taken combinedClickable off
+                                            // these cards — and the wait consumes nothing, so the
+                                            // grid still takes over the moment the finger passes
+                                            // touch slop.
+                                            //
+                                            // These handlers outlive the composition that built them,
+                                            // so they read arrangedIds rather than albums or the
+                                            // item's index: only state stays current in here.
+                                            if (!reorderMode) Modifier else Modifier.pointerInput(album.linkId) {
+                                                detectDragGesturesAfterLongPress(
+                                                    onDragStart = { grip ->
+                                                        val from = arrangedIds.indexOf(album.linkId)
+                                                        val cell = if (from >= 0) gridState.cellAt(CloudSegmentStart + from) else null
+                                                        if (cell != null) {
+                                                            draggedAlbumId = album.linkId
+                                                            dragPosition = Offset(cell.offset.x.toFloat(), cell.offset.y.toFloat())
+                                                            dragGrip = grip
+                                                            dragOffset = Offset.Zero
+                                                        }
+                                                    },
+                                                    onDragEnd = {
+                                                        if (draggedAlbumId == album.linkId) {
+                                                            draggedAlbumId = null
+                                                            dragOffset = Offset.Zero
+                                                            saveArrangement()
+                                                        }
+                                                    },
+                                                    onDragCancel = {
+                                                        draggedAlbumId = null
+                                                        dragOffset = Offset.Zero
+                                                    },
+                                                ) { change, drag ->
+                                                    change.consume()
+                                                    if (draggedAlbumId != album.linkId) return@detectDragGesturesAfterLongPress
+                                                    dragPosition += drag
+                                                    settleDrag(album.linkId)
+                                                }
+                                            }
+                                        ),
                                 )
                             }
                         }
@@ -276,6 +573,49 @@ fun AlbumsScreen(
                             }
                         }
                     }
+            }
+        }
+
+        // Reorder-mode bar: says the mode is on and offers the single way out. Mirrors the
+        // selection-mode header used on the photo grids (close bubble + state pill), sitting under
+        // the host's floating header because this screen is a pager page and does not own the top
+        // of the window. Opaque fill so it stays readable with album covers scrolling beneath it.
+        if (reorderMode) {
+            Row(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(top = topPadding, start = 20.dp, end = 20.dp)
+                    .height(ReorderBarHeight),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                IconBubble(
+                    icon = Icons.Default.Close,
+                    contentDescription = stringResource(R.string.close),
+                    onClick = { reorderMode = false },
+                    diameter = 40.dp,
+                    iconSize = 20.dp,
+                    background = PillBgOpaque,
+                    borderColor = PillBorder,
+                    tint = FgPrimary,
+                )
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(PillBgOpaque)
+                        .border(0.5.dp, PillBorder, RoundedCornerShape(999.dp))
+                        .padding(horizontal = 14.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Icon(Icons.Default.DragHandle, null, tint = Accent, modifier = Modifier.size(18.dp))
+                    Text(
+                        stringResource(R.string.albums_reorder),
+                        color = FgPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
         }
 
@@ -402,6 +742,10 @@ fun AlbumsScreen(
                 cloudAlbumSheetFor = null
                 viewModel.hideAlbum(album.linkId)
             },
+            onReorder = {
+                cloudAlbumSheetFor = null
+                reorderMode = true
+            },
             onDelete = {
                 cloudAlbumSheetFor = null
                 albumToDelete = album
@@ -472,9 +816,11 @@ fun AlbumsScreen(
 }
 
 /**
- * Bottom sheet that opens on long-press of a cloud album card. Rows: Rename, Hide, Delete.
+ * Bottom sheet that opens on long-press of a cloud album card. Rows: Rename, Hide, Reorder, Delete.
  * Cloud rename is wired through `AlbumsViewModel.renameCloudAlbum` which round-trips through
  * `DrivePhotoRepository.renameAlbum`. Hide is client-side only via `AlbumsViewModel.hideAlbum`.
+ * Reorder is the odd one out: it acts on the grid rather than on this album, and is here because
+ * the press that opens this sheet is the same press a rearrangement starts from.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -483,6 +829,7 @@ private fun CloudAlbumActionSheet(
     onDismiss: () -> Unit,
     onRename: () -> Unit,
     onHide: () -> Unit,
+    onReorder: () -> Unit,
     onDelete: () -> Unit,
 ) {
     val colors = AppColors.current
@@ -521,6 +868,13 @@ private fun CloudAlbumActionSheet(
                 label = stringResource(R.string.albums_hide_album),
                 tint = Accent,
                 onClick = onHide,
+            )
+            Spacer(Modifier.height(8.dp))
+            AlbumActionRow(
+                icon = Icons.Default.DragHandle,
+                label = stringResource(R.string.albums_reorder),
+                tint = Accent,
+                onClick = onReorder,
             )
             Spacer(Modifier.height(8.dp))
             AlbumActionRow(
@@ -565,7 +919,13 @@ private fun shareBadgeOf(album: Album): AlbumShareBadge = when {
 }
 
 @Composable
-private fun CloudAlbumCard(album: Album, onClick: () -> Unit, onLongClick: () -> Unit = {}) {
+private fun CloudAlbumCard(
+    album: Album,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    onLongClick: () -> Unit = {},
+    interactionsEnabled: Boolean = true,
+) {
     // Cloud Album entity has no per-mime-type breakdown, so we only have a total to show.
     // Using the media-neutral count_items_plural keeps "1 item" / "N items" pluralisation
     // correct without promising a photos-vs-videos split we can't compute without per-album
@@ -578,8 +938,10 @@ private fun CloudAlbumCard(album: Album, onClick: () -> Unit, onLongClick: () ->
         ),
         shareBadge  = shareBadgeOf(album),
         cloudBadge  = AlbumCloudBadge.Cloud,
+        interactionsEnabled = interactionsEnabled,
         onClick     = onClick,
         onLongClick = onLongClick,
+        modifier    = modifier,
     )
 }
 

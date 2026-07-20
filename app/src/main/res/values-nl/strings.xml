@@ -102,6 +102,7 @@
     <string name="editor_error_low_memory">Onvoldoende geheugen om dit te verwerken. Sluit andere apps of gebruik een kleiner bestand.</string>
     <string name="editor_auto_fix">Auto-correctie</string>
     <string name="editor_crop_reset">Herstellen</string>
+    <string name="editor_crop_free">Vrij</string>
     <!-- Adjustment pill labels in the redesigned Adjust panel. The Auto pill reuses
          the existing editor_auto_fix string. -->
     <string name="editor_adj_brightness">Helderheid</string>
@@ -477,6 +478,7 @@
     <string name="cd_select_month">Deze maand selecteren</string>
     <string name="album_rename">Album hernoemen</string>
     <string name="albums_hide_album">Album verbergen</string>
+    <string name="albums_reorder">Albums herschikken</string>
     <string name="album_rename_confirm">Hernoemen</string>
     <string name="album_remove_from_album">Uit album verwijderen</string>
     <string name="album_set_as_cover">Als omslag instellen</string>
@@ -986,6 +988,11 @@
     <string name="albums_filter_default_heading">Standaard bij openen</string>
     <string name="albums_filter_remember_last">Laatst gebruikte filter onthouden</string>
     <string name="albums_filter_remember_last_summary">Albums openen met het laatst gekozen filter</string>
+    <string name="albums_sort_heading">Sorteren op</string>
+    <string name="albums_sort_custom">Aangepast</string>
+    <string name="albums_sort_name">Naam (A-Z)</string>
+    <string name="albums_sort_activity">Laatste activiteit</string>
+    <string name="albums_sort_count">Aantal foto\'s</string>
     <string name="albums_toggle_cloud_albums">Albums tonen of verbergen</string>
 
     <!-- Photo viewer details / metadata sheet -->
@@ -1292,7 +1299,15 @@
     <string name="whats_new_scrubber_body">Spoel door een video met een filmstrookvoorbeeld en ga beeld voor beeld verder.</string>
     <string name="whats_new_album_title">Slimmere albums</string>
     <string name="whats_new_album_body">Zie in welke albums een gekozen foto al zit en filter de kiezer op foto\'s die nog in geen enkel album staan.</string>
-    <string name="whats_new_more">Plus gekopieerde links blijven verborgen in het klembordvoorbeeld, bestandsgroottes komen overal overeen, automatisch ruimte vrijmaken controleert bij Drive voordat een kopie van je telefoon wordt verwijderd, en grote albums en selecties blijven beter overeind.</string>
+    <string name="whats_new_albums_title">Albums sorteren en herschikken</string>
+    <string name="whats_new_albums_intro">Het tabblad Albums heeft nu een sorteermenu met vier volgordes:</string>
+    <string name="whats_new_albums_drag">Voor je eigen volgorde houd je een album ingedrukt, kies je Albums herschikken en sleep je de covers waar je ze wilt. De volgorde blijft staan tot je hem wijzigt.</string>
+    <string name="whats_new_crop_title">Bijsnijden met een vaste vorm</string>
+    <string name="whats_new_crop_body">Kies 1:1, 4:3, 16:9 of de vorm van de foto zelf in de editor, en het kader behoudt die vorm terwijl je het kleiner maakt.</string>
+    <string name="whats_new_history_desc">Lees de hoogtepunten van deze en eerdere updates</string>
+    <string name="whats_new_version">Versie %1$s</string>
+    <string name="whats_new_more_241">Bovendien verdwijnen foto\'s die op een ander apparaat zijn verwijderd hier ook bij een heel grote bibliotheek, laat hernoemen geen kopie meer achter en komt een elders gewijzigde naam hier aan.</string>
+    <string name="whats_new_more_240">Plus gekopieerde links blijven verborgen in het klembordvoorbeeld, bestandsgroottes komen overal overeen, automatisch ruimte vrijmaken controleert bij Drive voordat een kopie van je telefoon wordt verwijderd, en grote albums en selecties blijven beter overeind.</string>
     <string name="offline_card_subtitle">Foto\'s opgeslagen voor offline weergave</string>
     <string name="duplicates_filter_identical">Identiek</string>
     <string name="duplicates_filter_similar">Vergelijkbaar</string>

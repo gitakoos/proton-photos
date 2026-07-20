@@ -280,5 +280,23 @@ object Migrations {
         }
     }
 
-    val ALL: Array<Migration> = arrayOf(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19)
+    /**
+     * v19 → v20: new `listing_sweep_snapshot` table, which holds one refresh pass's sweep candidates
+     * from before its listing walk starts until pagination reaches the end.
+     *
+     * No backfill, and the empty table is the correct state to arrive at. A row's whole value is
+     * that it was read at a known moment relative to a walk, and this migration has no walk in
+     * flight to speak for; the first pass that starts fresh materialises the generation it consumes.
+     */
+    val MIGRATION_19_20 = object : Migration(19, 20) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `listing_sweep_snapshot` (" +
+                    "`userId` TEXT NOT NULL, `volumeId` TEXT NOT NULL, `linkId` TEXT NOT NULL, " +
+                    "PRIMARY KEY(`userId`, `volumeId`, `linkId`))"
+            )
+        }
+    }
+
+    val ALL: Array<Migration> = arrayOf(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20)
 }

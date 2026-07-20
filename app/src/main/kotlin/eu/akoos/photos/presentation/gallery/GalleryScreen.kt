@@ -185,6 +185,7 @@ import coil.request.ImageRequest
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.entity.GalleryItem
+import eu.akoos.photos.domain.usecase.AlbumSortMode
 import eu.akoos.photos.domain.usecase.CategorizeItem
 import eu.akoos.photos.presentation.common.AlbumMembership
 import eu.akoos.photos.presentation.common.ConfirmDialog
@@ -368,6 +369,10 @@ fun GalleryScreen(
     val albumsLastFilter by remember {
         context.settingsDataStore.data.map { it[SettingsKeys.ALBUMS_LAST_FILTER] ?: 0 }
     }.collectAsState(initial = 0)
+    // Only drives the sheet's selection; the grid reads this key on its own side.
+    val albumsSortMode by remember {
+        context.settingsDataStore.data.map { AlbumSortMode.fromOrdinal(it[SettingsKeys.ALBUMS_SORT_MODE]) }
+    }.collectAsState(initial = AlbumSortMode.Default)
     // Re-resolve the filter each time the pager reaches the Albums page: last-used when remembering,
     // otherwise the configured default. Leaving and returning therefore resets to the default
     // (remember-last off) or restores the last pick (remember-last on), rather than holding whatever
@@ -1230,6 +1235,7 @@ fun GalleryScreen(
             sheetState = albumsFilterSheetState,
             default = AlbumDisplayFilter.entries[albumsDefaultFilter.coerceIn(0, AlbumDisplayFilter.entries.lastIndex)],
             rememberLast = albumsRememberLastFilter,
+            sortMode = albumsSortMode,
             onDefaultChange = { picked ->
                 tabScope.launch {
                     context.settingsDataStore.edit { it[SettingsKeys.ALBUMS_DEFAULT_FILTER] = picked.ordinal }
@@ -1238,6 +1244,11 @@ fun GalleryScreen(
             onRememberLastChange = { value ->
                 tabScope.launch {
                     context.settingsDataStore.edit { it[SettingsKeys.ALBUMS_REMEMBER_LAST_FILTER] = value }
+                }
+            },
+            onSortModeChange = { picked ->
+                tabScope.launch {
+                    context.settingsDataStore.edit { it[SettingsKeys.ALBUMS_SORT_MODE] = picked.ordinal }
                 }
             },
             onDismiss = { showAlbumsFilterSheet = false },

@@ -826,7 +826,7 @@ class GalleryViewModel @Inject constructor(
         // needs the gentle (first-screen) cadence — flip the live signal off so any in-flight
         // full refresh speeds back up to the normal pace on its next chunk. Done before the
         // userId await so it takes effect immediately on arrival. The refresh below coalesces
-        // onto that same in-flight one via refreshFullMutex (single-flight) — no second refresh.
+        // onto that same in-flight one (the walk is single-flighted) — no second refresh.
         photoStreamService.setGentleSync(false)
         viewModelScope.launch {
             val userId = accountManager.getPrimaryUserId().first() ?: return@launch

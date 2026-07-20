@@ -113,6 +113,7 @@ import me.proton.core.usersettings.data.entity.UserSettingsEntity
 import eu.akoos.photos.data.db.dao.AlbumPhotoMembershipDao
 import eu.akoos.photos.data.db.dao.CloudAlbumDao
 import eu.akoos.photos.data.db.dao.DayMetaDao
+import eu.akoos.photos.data.db.dao.ListingSweepSnapshotDao
 import eu.akoos.photos.data.db.dao.LocalTagDao
 import eu.akoos.photos.data.db.dao.PerceptualHashDao
 import eu.akoos.photos.data.db.dao.PhotoListingDao
@@ -122,6 +123,7 @@ import eu.akoos.photos.data.db.dao.UploadAlbumTargetDao
 import eu.akoos.photos.data.db.entity.AlbumPhotoMembershipEntity
 import eu.akoos.photos.data.db.entity.CloudAlbumEntity
 import eu.akoos.photos.data.db.entity.DayMetaEntity
+import eu.akoos.photos.data.db.entity.ListingSweepSnapshotEntity
 import eu.akoos.photos.data.db.entity.LocalTagEntity
 import eu.akoos.photos.data.db.entity.PerceptualHashEntity
 import eu.akoos.photos.data.db.entity.PhotoListingEntity
@@ -152,6 +154,7 @@ import eu.akoos.photos.data.db.entity.UploadAlbumTargetEntity
         PhotoLocationEntity::class,
         PerceptualHashEntity::class,
         UploadAlbumTargetEntity::class,
+        ListingSweepSnapshotEntity::class,
         // Account
         AccountEntity::class,
         AccountMetadataEntity::class,
@@ -191,7 +194,7 @@ import eu.akoos.photos.data.db.entity.UploadAlbumTargetEntity
         // Telemetry
         TelemetryEventEntity::class,
     ],
-    version = 19,
+    version = 20,
     exportSchema = true,
 )
 abstract class AppDatabase : BaseDatabase(),
@@ -220,6 +223,7 @@ abstract class AppDatabase : BaseDatabase(),
     abstract fun photoLocationDao(): PhotoLocationDao
     abstract fun perceptualHashDao(): PerceptualHashDao
     abstract fun uploadAlbumTargetDao(): UploadAlbumTargetDao
+    abstract fun listingSweepSnapshotDao(): ListingSweepSnapshotDao
 
     abstract override fun accountDao(): AccountDao
     abstract override fun sessionDao(): SessionDao

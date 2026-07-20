@@ -191,6 +191,21 @@ fun PhotoEditorScreen(
     // pendingCropRect just mirrors that committed value for the overlay. Snapped chips and
     // Reset also seed this rect.
     var pendingCropRect by remember { mutableStateOf<android.graphics.Rect?>(null) }
+    // The shape the crop is locked to. Deliberately NOT in EditorAdjustments: adjustments are
+    // undo/redo state, so a lock stored there would push an undo entry on every chip tap.
+    // It outlives a tool switch on purpose, because the rect does too (it is restored from the
+    // committed cropRect above): clearing only the lock would show the user a locked-looking
+    // frame with Free lit, and the next drag would then break the shape they can see.
+    var lockedAspect by remember { mutableStateOf(CropAspect.Free) }
+    // A quarter turn swaps the display's axes, so the locked shape turns with it and 4:3 becomes
+    // 3:4. Driven off rotationDegrees rather than the rotate button, so undo and redo of a turn
+    // carry the lock back too. A half turn leaves the shape alone.
+    var lastLockRotation by remember { mutableStateOf(state.adjustments.rotationDegrees) }
+    androidx.compose.runtime.LaunchedEffect(state.adjustments.rotationDegrees) {
+        val now = state.adjustments.rotationDegrees
+        if (((now - lastLockRotation) / 90) % 2 != 0) lockedAspect = lockedAspect.turned()
+        lastLockRotation = now
+    }
     // Seed pendingCropRect whenever the user enters the Crop tool, and clear it when
     // they leave. Full-image bounds come from the DISPLAYED crop bitmap (rotation already
     // baked in, so width/height match the rect's display space). adjustedBitmapNoCrop may
@@ -326,7 +341,13 @@ fun PhotoEditorScreen(
             canUndo = canUndo,
             canRedo = canRedo,
             onBack = confirmedOnBack,
-            onReset = { vm.resetAll() },
+            // Reset wipes the committed adjustments, so the crop overlay's own draft state has to
+            // go with them or the frame and the lit chip would outlive the crop they describe.
+            onReset = {
+                vm.resetAll()
+                pendingCropRect = null
+                lockedAspect = CropAspect.Free
+            },
             onUndo = { vm.undo() },
             onRedo = { vm.redo() },
             onSave = { showSaveSheet = true },
@@ -369,6 +390,7 @@ fun PhotoEditorScreen(
                     // rect on the wrong canvas size and produce out-of-bounds reads → crash.
                     bitmap = state.adjustedBitmapNoCrop ?: state.originalBitmap!!,
                     cropRect = pendingCropRect,
+                    lockedRatio = cropDisplayBitmap?.let { lockedAspect.lockRatio(it.width, it.height) },
                     // During the drag only the lightweight overlay rect updates (no re-render).
                     onCropRectChanged = { pendingCropRect = it },
                     // On release the rect commits to crop state, so other tabs and save reflect
@@ -471,7 +493,8 @@ fun PhotoEditorScreen(
                     Tool.Crop   -> CropPanel(
                         state = state,
                         vm = vm,
-                        pendingCropRect = pendingCropRect,
+                        lockedAspect = lockedAspect,
+                        onLockedAspectChange = { lockedAspect = it },
                         onPendingCropRectChange = { pendingCropRect = it },
                     )
                     Tool.Redact -> RedactPanel(state, vm)

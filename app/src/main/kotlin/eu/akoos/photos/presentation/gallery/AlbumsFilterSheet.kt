@@ -24,6 +24,8 @@ package eu.akoos.photos.presentation.gallery
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -39,21 +41,25 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import eu.akoos.photos.R
+import eu.akoos.photos.domain.usecase.AlbumSortMode
 import eu.akoos.photos.presentation.settings.components.ToggleRow
 import eu.akoos.photos.presentation.theme.FgMute
 import eu.akoos.photos.presentation.theme.FgPrimary
 
-/** Bottom sheet for the Albums-tab view filter. Sets an optional default applied on open plus a
- *  remember-last toggle; the active All/Cloud/Local narrowing is cycled from the rail pill. While
- *  remember-last is on the default row is greyed and inert, since the last-used value takes over. */
+/** Bottom sheet for the Albums-tab view filter and grid order. Sets an optional default applied on
+ *  open plus a remember-last toggle; the active All/Cloud/Local narrowing is cycled from the rail
+ *  pill. While remember-last is on the default row is greyed and inert, since the last-used value
+ *  takes over. A sort pick lands on the grid behind the sheet, which observes the stored order. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AlbumsFilterSheet(
     sheetState: SheetState,
     default: AlbumDisplayFilter,
     rememberLast: Boolean,
+    sortMode: AlbumSortMode,
     onDefaultChange: (AlbumDisplayFilter) -> Unit,
     onRememberLastChange: (Boolean) -> Unit,
+    onSortModeChange: (AlbumSortMode) -> Unit,
     onDismiss: () -> Unit,
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
@@ -97,6 +103,17 @@ fun AlbumsFilterSheet(
                 checked = rememberLast,
                 onCheckedChange = onRememberLastChange,
             )
+
+            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                Text(
+                    text = stringResource(R.string.albums_sort_heading),
+                    color = FgMute,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
+                    letterSpacing = 0.6.sp,
+                )
+                AlbumSortChipRow(selected = sortMode, onSelected = onSortModeChange)
+            }
         }
     }
 }
@@ -120,6 +137,34 @@ private fun AlbumFilterChipRow(
                 label = label,
                 selected = selected == filter,
                 onClick = { if (enabled) onSelected(filter) },
+            )
+        }
+    }
+}
+
+/** Chips for the [AlbumSortMode] values, in the order they are offered. Wraps rather than clipping,
+ *  since four labels overrun one line on a narrow screen in most locales. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun AlbumSortChipRow(
+    selected: AlbumSortMode,
+    onSelected: (AlbumSortMode) -> Unit,
+) {
+    val options = listOf(
+        AlbumSortMode.Custom to stringResource(R.string.albums_sort_custom),
+        AlbumSortMode.NameAsc to stringResource(R.string.albums_sort_name),
+        AlbumSortMode.LastActivity to stringResource(R.string.albums_sort_activity),
+        AlbumSortMode.PhotoCount to stringResource(R.string.albums_sort_count),
+    )
+    FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        options.forEach { (mode, label) ->
+            FilterChip(
+                label = label,
+                selected = selected == mode,
+                onClick = { onSelected(mode) },
             )
         }
     }

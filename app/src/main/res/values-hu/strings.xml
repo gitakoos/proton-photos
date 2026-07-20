@@ -461,6 +461,7 @@
     <string name="editor_adj_tone">Tónus</string>
     <string name="editor_adj_temperature">Hőmérséklet</string>
     <string name="editor_crop_reset">Visszaállítás</string>
+    <string name="editor_crop_free">Szabad</string>
     <string name="hidden_photos_title">Rejtett fotók</string>
     <string name="hidden_albums_section">Rejtett albumok</string>
     <string name="hidden_cloud_photos_section">Rejtett felhőfotók</string>
@@ -473,6 +474,7 @@
     <string name="hide_cloud_copy_notice">A mentett fotók megmaradnak a Proton Drive-on. Az elrejtés csak az eszköz galériájából távolítja el őket.</string>
     <string name="album_rename">Album átnevezése</string>
     <string name="albums_hide_album">Album elrejtése</string>
+    <string name="albums_reorder">Albumok átrendezése</string>
     <string name="album_rename_confirm">Átnevez</string>
     <string name="album_remove_from_album">Eltávolítás az albumból</string>
     <string name="album_set_as_cover">Beállítás borítóként</string>
@@ -992,6 +994,11 @@
     <string name="albums_filter_default_heading">Alapértelmezett megnyitáskor</string>
     <string name="albums_filter_remember_last">Utoljára használt szűrő megjegyzése</string>
     <string name="albums_filter_remember_last_summary">Az albumok az utoljára kiválasztott szűrővel nyílnak meg</string>
+    <string name="albums_sort_heading">Rendezés</string>
+    <string name="albums_sort_custom">Egyéni</string>
+    <string name="albums_sort_name">Név (A-Z)</string>
+    <string name="albums_sort_activity">Legutóbbi módosítás</string>
+    <string name="albums_sort_count">Fotók száma</string>
     <string name="albums_toggle_cloud_albums">Albumok megjelenítése vagy elrejtése</string>
 
     <!-- Photo viewer details / metadata sheet -->
@@ -1301,7 +1308,15 @@
     <string name="whats_new_scrubber_body">Tekerd a videót filmszalag-előnézettel, és lépj egyszerre egy kockát.</string>
     <string name="whats_new_album_title">Okosabb albumok</string>
     <string name="whats_new_album_body">Lásd, mely albumokban van már benne egy kiválasztott fotó, és szűrd a választót azokra a fotókra, amelyek még egyetlen albumban sincsenek.</string>
-    <string name="whats_new_more">Emellett a másolt hivatkozások rejtve maradnak a vágólap előnézetében, a fájlméretek mindenhol egyeznek, az automatikus helyfelszabadítás a Drive-on is ellenőriz, mielőtt eltávolít egy másolatot a telefonodról, és a nagy albumok és kijelölések stabilabban működnek.</string>
+    <string name="whats_new_albums_title">Albumok rendezése és átrendezése</string>
+    <string name="whats_new_albums_intro">Az Albumok fülön mostantól van rendezés menü, négyféle sorrenddel:</string>
+    <string name="whats_new_albums_drag">Saját sorrendhez tartsd nyomva az albumot, válaszd az Albumok átrendezése pontot, majd húzd a borítókat oda, ahová szeretnéd. A sorrend megmarad, amíg meg nem változtatod.</string>
+    <string name="whats_new_crop_title">Vágás rögzített alakban</string>
+    <string name="whats_new_crop_body">Válaszd az 1:1, 4:3, 16:9 arányt vagy a fotó saját alakját a szerkesztőben, és a keret megtartja azt, miközben kisebbre húzod.</string>
+    <string name="whats_new_history_desc">Olvasd el ennek és a korábbi frissítéseknek az újdonságait</string>
+    <string name="whats_new_version">%1$s verzió</string>
+    <string name="whats_new_more_241">Emellett a másik eszközön törölt fotók nagy könyvtárnál is eltűnnek innen, az átnevezés már nem hagy hátra másolatot, és a máshol megváltoztatott név is megérkezik ide.</string>
+    <string name="whats_new_more_240">Emellett a másolt hivatkozások rejtve maradnak a vágólap előnézetében, a fájlméretek mindenhol egyeznek, az automatikus helyfelszabadítás a Drive-on is ellenőriz, mielőtt eltávolít egy másolatot a telefonodról, és a nagy albumok és kijelölések stabilabban működnek.</string>
     <string name="offline_card_subtitle">Offline megtekintésre mentett fotók</string>
     <string name="duplicates_filter_identical">Azonos</string>
     <string name="duplicates_filter_similar">Hasonló</string>

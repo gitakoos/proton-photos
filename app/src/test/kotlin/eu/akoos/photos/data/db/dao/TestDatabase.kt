@@ -26,6 +26,7 @@ import androidx.room.Database
 import androidx.room.RoomDatabase
 import eu.akoos.photos.data.db.entity.AlbumPhotoMembershipEntity
 import eu.akoos.photos.data.db.entity.CloudAlbumEntity
+import eu.akoos.photos.data.db.entity.ListingSweepSnapshotEntity
 import eu.akoos.photos.data.db.entity.PhotoListingEntity
 import eu.akoos.photos.data.db.entity.SyncStateEntity
 
@@ -35,6 +36,7 @@ import eu.akoos.photos.data.db.entity.SyncStateEntity
         SyncStateEntity::class,
         AlbumPhotoMembershipEntity::class,
         CloudAlbumEntity::class,
+        ListingSweepSnapshotEntity::class,
     ],
     version = 1,
     exportSchema = false,
@@ -44,4 +46,5 @@ abstract class TestDatabase : RoomDatabase() {
     abstract fun syncStateDao(): SyncStateDao
     abstract fun albumPhotoMembershipDao(): AlbumPhotoMembershipDao
     abstract fun cloudAlbumDao(): CloudAlbumDao
+    abstract fun listingSweepSnapshotDao(): ListingSweepSnapshotDao
 }

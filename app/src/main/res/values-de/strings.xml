@@ -436,6 +436,7 @@
     <string name="editor_adj_tone">Ton</string>
     <string name="editor_adj_temperature">Farbtemperatur</string>
     <string name="editor_crop_reset">Zurücksetzen</string>
+    <string name="editor_crop_free">Frei</string>
     <string name="hidden_photos_title">Versteckte Fotos</string>
     <string name="hidden_albums_section">Versteckte Alben</string>
     <string name="hidden_cloud_photos_section">Versteckte Cloud-Fotos</string>
@@ -448,6 +449,7 @@
     <string name="hide_cloud_copy_notice">Gesicherte Fotos bleiben in deinem Proton Drive. Das Ausblenden entfernt sie nur aus der Galerie dieses Geräts.</string>
     <string name="album_rename">Album umbenennen</string>
     <string name="albums_hide_album">Album ausblenden</string>
+    <string name="albums_reorder">Alben neu anordnen</string>
     <string name="album_rename_confirm">Umbenennen</string>
     <string name="album_remove_from_album">Aus Album entfernen</string>
     <string name="album_set_as_cover">Als Titelbild festlegen</string>
@@ -967,6 +969,11 @@
     <string name="albums_filter_default_heading">Standard beim Öffnen</string>
     <string name="albums_filter_remember_last">Zuletzt verwendeten Filter merken</string>
     <string name="albums_filter_remember_last_summary">Alben mit dem zuletzt gewählten Filter öffnen</string>
+    <string name="albums_sort_heading">Sortieren nach</string>
+    <string name="albums_sort_custom">Benutzerdefiniert</string>
+    <string name="albums_sort_name">Name (A-Z)</string>
+    <string name="albums_sort_activity">Letzte Aktivität</string>
+    <string name="albums_sort_count">Anzahl der Fotos</string>
     <string name="albums_toggle_cloud_albums">Alben ein- oder ausblenden</string>
 
     <!-- Photo viewer details / metadata sheet -->
@@ -1274,7 +1281,15 @@
     <string name="whats_new_scrubber_body">Spule ein Video mit einer Filmstreifen-Vorschau und gehe Bild für Bild weiter.</string>
     <string name="whats_new_album_title">Klügere Alben</string>
     <string name="whats_new_album_body">Sieh, in welchen Alben ein ausgewähltes Foto schon liegt, und filtere die Auswahl auf Fotos, die noch in keinem Album sind.</string>
-    <string name="whats_new_more">Dazu bleiben kopierte Links in der Zwischenablage-Vorschau verborgen, Dateigrößen stimmen überall überein, die automatische Freigabe fragt bei Drive nach, bevor sie eine Kopie vom Telefon entfernt, und große Alben und Auswahlen bleiben stabiler.</string>
+    <string name="whats_new_albums_title">Alben sortieren und neu anordnen</string>
+    <string name="whats_new_albums_intro">Der Alben-Tab hat jetzt ein Sortiermenü mit vier Reihenfolgen:</string>
+    <string name="whats_new_albums_drag">Für eine eigene Reihenfolge ein Album gedrückt halten, Alben neu anordnen wählen und die Cover an die gewünschte Stelle ziehen. Die Reihenfolge bleibt, bis du sie änderst.</string>
+    <string name="whats_new_crop_title">Auf ein festes Format zuschneiden</string>
+    <string name="whats_new_crop_body">Wähle im Editor 1:1, 4:3, 16:9 oder das Format des Fotos, und der Rahmen behält es beim Verkleinern bei.</string>
+    <string name="whats_new_history_desc">Die Highlights dieses und früherer Updates nachlesen</string>
+    <string name="whats_new_version">Version %1$s</string>
+    <string name="whats_new_more_241">Außerdem verschwinden auf einem anderen Gerät gelöschte Fotos auch bei einer sehr großen Mediathek hier, das Umbenennen hinterlässt keine Kopie mehr, und ein anderswo geänderter Name kommt hier an.</string>
+    <string name="whats_new_more_240">Dazu bleiben kopierte Links in der Zwischenablage-Vorschau verborgen, Dateigrößen stimmen überall überein, die automatische Freigabe fragt bei Drive nach, bevor sie eine Kopie vom Telefon entfernt, und große Alben und Auswahlen bleiben stabiler.</string>
     <string name="offline_card_subtitle">Für die Offline-Ansicht gespeicherte Fotos</string>
     <string name="duplicates_filter_identical">Identisch</string>
     <string name="duplicates_filter_similar">Ähnlich</string>

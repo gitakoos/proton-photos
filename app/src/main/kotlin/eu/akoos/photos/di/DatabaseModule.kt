@@ -52,6 +52,7 @@ import eu.akoos.photos.data.db.Migrations
 import eu.akoos.photos.data.db.dao.AlbumPhotoMembershipDao
 import eu.akoos.photos.data.db.dao.CloudAlbumDao
 import eu.akoos.photos.data.db.dao.DayMetaDao
+import eu.akoos.photos.data.db.dao.ListingSweepSnapshotDao
 import eu.akoos.photos.data.db.dao.LocalTagDao
 import eu.akoos.photos.data.db.dao.PerceptualHashDao
 import eu.akoos.photos.data.db.dao.PhotoListingDao
@@ -161,5 +162,10 @@ abstract class DatabaseModule {
         @Singleton
         fun provideUploadAlbumTargetDao(db: AppDatabase): UploadAlbumTargetDao =
             db.uploadAlbumTargetDao()
+
+        @Provides
+        @Singleton
+        fun provideListingSweepSnapshotDao(db: AppDatabase): ListingSweepSnapshotDao =
+            db.listingSweepSnapshotDao()
     }
 }

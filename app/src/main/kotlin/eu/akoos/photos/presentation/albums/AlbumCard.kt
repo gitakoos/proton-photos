@@ -87,6 +87,9 @@ fun UnifiedAlbumCard(
     cloudBadge: AlbumCloudBadge = AlbumCloudBadge.None,
     /** Shows a "Folder" pill for bucket-derived local albums (rename/delete refused for these). */
     isDeviceFolder: Boolean = false,
+    /** False while a grid-wide mode owns the card's gestures. The clickable is dropped outright
+     *  rather than pointed at no-op lambdas, so the card cannot ripple at a tap it will ignore. */
+    interactionsEnabled: Boolean = true,
     onClick: () -> Unit,
     onLongClick: () -> Unit = {},
     modifier: Modifier = Modifier,
@@ -94,7 +97,13 @@ fun UnifiedAlbumCard(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
+            .then(
+                if (interactionsEnabled) {
+                    Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick)
+                } else {
+                    Modifier
+                }
+            ),
     ) {
         Box(
             modifier = Modifier

@@ -34,6 +34,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import me.proton.core.domain.entity.UserId
 import eu.akoos.photos.data.crypto.DriveCryptoHelper
+import eu.akoos.photos.data.db.dao.ListingSweepSnapshotDao
 import eu.akoos.photos.data.db.dao.PerceptualHashDao
 import eu.akoos.photos.data.db.dao.PhotoListingDao
 import eu.akoos.photos.data.db.dao.SyncStateDao
@@ -90,6 +91,7 @@ class DrivePhotoRepositoryImpl @Inject constructor(
     private val cloudGpsBackfillScheduler: CloudGpsBackfillScheduler,
     private val videoDurationBackfillScheduler: VideoDurationBackfillScheduler,
     private val photoListingDao: PhotoListingDao,
+    private val listingSweepSnapshotDao: ListingSweepSnapshotDao,
     private val syncStateDao: SyncStateDao,
     private val dayMetaDao: DayMetaDao,
     private val perceptualHashDao: PerceptualHashDao,
@@ -442,6 +444,13 @@ class DrivePhotoRepositoryImpl @Inject constructor(
         albumSharingService.acceptInvitation(userId, invitationId)
 
     override suspend fun clearCacheForSignOut(userId: UserId) {
+        // FIRST, and awaited: the full cloud walk runs on the app scope so it survives the screen
+        // that started it, which also means it survives sign-out unless stopped here. Every wipe
+        // below is undone by a walk still paginating past it — rows land back in photo_listing for
+        // an account that is gone, decrypted with material wipeKeyCache is about to zero. Every
+        // sign-out route reaches this method (explicit sign-out, force-logout, 2FA and key-check
+        // failures all converge on onAccountDisabled), so this is the one place that covers them.
+        runCatching { streamService.cancelRefreshFor(userId) }
         // Wipe all plaintext key material before the user's tokens disappear, so even if the
         // process keeps running afterwards a heap inspection can't pull keys from this Singleton.
         shareService.wipeKeyCache()
@@ -459,6 +468,8 @@ class DrivePhotoRepositoryImpl @Inject constructor(
         // decrypt material was gone), and stale pairing/day-meta rows lingered too. Per-user
         // (userId-scoped) so any other account still signed in is left intact.
         runCatching { photoListingDao.deleteAll(userId.id) }
+        // The refresh sweep's candidate set names the same rows, so it goes with them.
+        runCatching { listingSweepSnapshotDao.clearForUser(userId.id) }
         runCatching { syncStateDao.deleteAll(userId.id) }
         runCatching { dayMetaDao.deleteAll(userId.id) }
         // Drop the cached cloud album list so the next signed-in user doesn't see the previous

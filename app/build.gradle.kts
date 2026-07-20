@@ -41,8 +41,8 @@ android {
         // versionCode bumped per release tag — keep monotonically increasing.
         // versionName mirrors the GitHub release tag (e.g. v2.0.0 → "2.0.0") so the About
         // screen and the published APK report the same version the user downloaded.
-        versionCode = 259
-        versionName = "2.4.1-test1"
+        versionCode = 260
+        versionName = "2.4.1-test2"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 

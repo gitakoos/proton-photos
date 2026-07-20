@@ -102,6 +102,7 @@
     <string name="editor_error_low_memory">Nedostatek paměti ke zpracování. Zkuste zavřít jiné aplikace nebo použít menší soubor.</string>
     <string name="editor_auto_fix">Automatická úprava</string>
     <string name="editor_crop_reset">Obnovit</string>
+    <string name="editor_crop_free">Volný</string>
     <!-- Adjustment pill labels in the redesigned Adjust panel. The Auto pill reuses
          the existing editor_auto_fix string. -->
     <string name="editor_adj_brightness">Jas</string>
@@ -594,6 +595,7 @@
     <string name="cd_select_month">Vybrat tento měsíc</string>
     <string name="album_rename">Přejmenovat album</string>
     <string name="albums_hide_album">Skrýt album</string>
+    <string name="albums_reorder">Změnit pořadí alb</string>
     <string name="album_rename_confirm">Přejmenovat</string>
     <string name="album_remove_from_album">Odebrat z alba</string>
     <string name="album_set_as_cover">Nastavit jako obal</string>
@@ -1136,6 +1138,11 @@
     <string name="albums_filter_default_heading">Výchozí při otevření</string>
     <string name="albums_filter_remember_last">Zapamatovat naposledy použitý filtr</string>
     <string name="albums_filter_remember_last_summary">Otevírat alba s naposledy vybraným filtrem</string>
+    <string name="albums_sort_heading">Řadit podle</string>
+    <string name="albums_sort_custom">Vlastní</string>
+    <string name="albums_sort_name">Název (A-Z)</string>
+    <string name="albums_sort_activity">Poslední aktivita</string>
+    <string name="albums_sort_count">Počet fotek</string>
     <string name="albums_toggle_cloud_albums">Zobrazit nebo skrýt alba</string>
 
     <!-- Photo viewer details / metadata sheet -->
@@ -1324,7 +1331,15 @@
     <string name="whats_new_scrubber_body">Procházej video s náhledem filmového pásu a posouvej se po jednom snímku.</string>
     <string name="whats_new_album_title">Chytřejší alba</string>
     <string name="whats_new_album_body">Uvidíš, ve kterých albech už vybraná fotka je, a výběr můžeš omezit jen na fotky, které zatím nejsou v žádném albu.</string>
-    <string name="whats_new_more">K tomu zkopírované odkazy zůstávají skryté v náhledu schránky, velikosti souborů se všude shodují, automatické uvolňování místa si před odebráním kopie z telefonu ověří Drive a velká alba i rozsáhlé výběry drží pohromadě lépe.</string>
+    <string name="whats_new_albums_title">Řazení a přeskupení alb</string>
+    <string name="whats_new_albums_intro">Karta Alba má nyní nabídku řazení se čtyřmi možnostmi:</string>
+    <string name="whats_new_albums_drag">Pro vlastní pořadí podržte album, zvolte Změnit pořadí alb a přetáhněte obaly tam, kam chcete. Pořadí zůstane, dokud ho nezměníte.</string>
+    <string name="whats_new_crop_title">Oříznutí v pevném poměru</string>
+    <string name="whats_new_crop_body">V editoru zvolte 1:1, 4:3, 16:9 nebo tvar samotné fotky a rámeček si ho zachová i při zmenšování.</string>
+    <string name="whats_new_history_desc">Přečtěte si novinky z této i dřívějších aktualizací</string>
+    <string name="whats_new_version">Verze %1$s</string>
+    <string name="whats_new_more_241">Navíc fotky smazané na jiném zařízení zmizí i zde i u velmi rozsáhlé knihovny, přejmenování už nenechává kopii a jméno změněné jinde dorazí i sem.</string>
+    <string name="whats_new_more_240">K tomu zkopírované odkazy zůstávají skryté v náhledu schránky, velikosti souborů se všude shodují, automatické uvolňování místa si před odebráním kopie z telefonu ověří Drive a velká alba i rozsáhlé výběry drží pohromadě lépe.</string>
     <string name="offline_card_subtitle">Fotky uložené pro offline prohlížení</string>
     <string name="duplicates_filter_identical">Stejné</string>
     <string name="duplicates_filter_similar">Podobné</string>

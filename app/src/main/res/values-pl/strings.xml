@@ -102,6 +102,7 @@
     <string name="editor_error_low_memory">Za mało pamięci, aby to przetworzyć. Zamknij inne aplikacje lub użyj mniejszego pliku.</string>
     <string name="editor_auto_fix">Autokorekta</string>
     <string name="editor_crop_reset">Resetuj</string>
+    <string name="editor_crop_free">Dowolny</string>
     <!-- Adjustment pill labels in the redesigned Adjust panel. The Auto pill reuses
          the existing editor_auto_fix string. -->
     <string name="editor_adj_brightness">Jasność</string>
@@ -594,6 +595,7 @@
     <string name="cd_select_month">Zaznacz ten miesiąc</string>
     <string name="album_rename">Zmień nazwę albumu</string>
     <string name="albums_hide_album">Ukryj album</string>
+    <string name="albums_reorder">Zmień kolejność albumów</string>
     <string name="album_rename_confirm">Zmień nazwę</string>
     <string name="album_remove_from_album">Usuń z albumu</string>
     <string name="album_set_as_cover">Ustaw jako okładkę</string>
@@ -1136,6 +1138,11 @@
     <string name="albums_filter_default_heading">Domyślnie przy otwieraniu</string>
     <string name="albums_filter_remember_last">Zapamiętaj ostatnio użyty filtr</string>
     <string name="albums_filter_remember_last_summary">Otwieraj albumy z ostatnio wybranym filtrem</string>
+    <string name="albums_sort_heading">Sortuj według</string>
+    <string name="albums_sort_custom">Własna kolejność</string>
+    <string name="albums_sort_name">Nazwa (A-Z)</string>
+    <string name="albums_sort_activity">Ostatnia aktywność</string>
+    <string name="albums_sort_count">Liczba zdjęć</string>
     <string name="albums_toggle_cloud_albums">Pokaż lub ukryj albumy</string>
 
     <!-- Photo viewer details / metadata sheet -->
@@ -1324,7 +1331,15 @@
     <string name="whats_new_scrubber_body">Przewijaj wideo z podglądem taśmy filmowej i przechodź po jednej klatce.</string>
     <string name="whats_new_album_title">Sprytniejsze albumy</string>
     <string name="whats_new_album_body">Zobacz, w których albumach jest już wybrane zdjęcie, i przefiltruj wybór do zdjęć, których nie ma jeszcze w żadnym albumie.</string>
-    <string name="whats_new_more">Do tego skopiowane linki pozostają ukryte w podglądzie schowka, rozmiary plików zgadzają się wszędzie tam, gdzie się pojawiają, automatyczne zwalnianie miejsca sprawdza w Drive przed usunięciem kopii z telefonu, a duże albumy i zaznaczenia działają stabilniej.</string>
+    <string name="whats_new_albums_title">Sortowanie i zmiana kolejności albumów</string>
+    <string name="whats_new_albums_intro">Karta Albumy ma teraz menu sortowania z czterema porządkami:</string>
+    <string name="whats_new_albums_drag">Aby ustawić własną kolejność, przytrzymaj album, wybierz Zmień kolejność albumów i przeciągnij okładki tam, gdzie chcesz. Kolejność zostaje, dopóki jej nie zmienisz.</string>
+    <string name="whats_new_crop_title">Kadrowanie w stałych proporcjach</string>
+    <string name="whats_new_crop_body">Wybierz w edytorze 1:1, 4:3, 16:9 albo kształt samego zdjęcia, a ramka zachowa go przy zmniejszaniu.</string>
+    <string name="whats_new_history_desc">Przeczytaj nowości z tej i wcześniejszych aktualizacji</string>
+    <string name="whats_new_version">Wersja %1$s</string>
+    <string name="whats_new_more_241">Ponadto zdjęcia usunięte na innym urządzeniu znikają tutaj nawet przy bardzo dużej bibliotece, zmiana nazwy nie zostawia już kopii, a nazwa zmieniona gdzie indziej dociera do tej aplikacji.</string>
+    <string name="whats_new_more_240">Do tego skopiowane linki pozostają ukryte w podglądzie schowka, rozmiary plików zgadzają się wszędzie tam, gdzie się pojawiają, automatyczne zwalnianie miejsca sprawdza w Drive przed usunięciem kopii z telefonu, a duże albumy i zaznaczenia działają stabilniej.</string>
     <string name="offline_card_subtitle">Zdjęcia zapisane do przeglądania offline</string>
     <string name="duplicates_filter_identical">Identyczne</string>
     <string name="duplicates_filter_similar">Podobne</string>

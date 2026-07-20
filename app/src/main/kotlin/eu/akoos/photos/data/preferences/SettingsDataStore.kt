@@ -77,6 +77,19 @@ object SettingsKeys {
      *  Restored on entry when [ALBUMS_REMEMBER_LAST_FILTER] is on. */
     val ALBUMS_LAST_FILTER = intPreferencesKey("albums_last_filter")
 
+    /** Albums-grid sort mode, an AlbumSortMode ordinal (0 = Custom, 1 = NameAsc, 2 = LastActivity,
+     *  3 = PhotoCount). Absent = LastActivity, which is the order the album cache is read in, so an
+     *  install that never picks a mode keeps the grid it already had. */
+    val ALBUMS_SORT_MODE = intPreferencesKey("albums_sort_mode")
+
+    /** The user's own Albums-grid arrangement, a '|'-separated list of album linkIds, read only
+     *  when [ALBUMS_SORT_MODE] is Custom. Absent or empty = no arrangement yet, which Custom
+     *  resolves as LastActivity. '|' matches [PENDING_ORPHAN_DELETES] and the widget's id lists,
+     *  since a Drive linkId is base64 and can end in '=' padding. Holds ids the grid is not
+     *  currently showing, so a hidden album keeps its slot for its return; never pruned against
+     *  what is on screen. */
+    val ALBUMS_CUSTOM_ORDER = stringPreferencesKey("albums_custom_order")
+
     /** When true (default), the viewer + editor will NOT auto-download cloud full-res
      *  blobs on metered networks. Wifi-only is the data-conscious default; users on
      *  unlimited mobile plans can flip it off in Settings → Sync. Does not affect the
@@ -297,10 +310,12 @@ object SettingsKeys {
     fun photoListingCursorKey(userId: String, volumeId: String) =
         stringPreferencesKey("photo_listing_cursor_${userId}_$volumeId")
 
-    /** True once the photo-stream listing has been walked end to end (every page fetched without
-     *  a failure). Gates the incremental event anchor — future deltas are only safe to track once
-     *  the whole library is in the DB. Reset to false at the start of a walk and left false on any
-     *  page failure so the next run keeps walking older photos. */
+    /** True once the photo-stream listing has been walked end to end AND every detail batch landed,
+     *  i.e. the DB holds the whole library in full. Decides whether the next walk starts fresh or
+     *  resumes the saved cursor, and whether the missing-anchor account polls its newest page. Reset
+     *  to false at the start of a walk and left false on any page or batch failure so the next run
+     *  keeps walking older photos. The event anchor is gated separately and more loosely, on the
+     *  listing alone — see `PhotoStreamService.lastFullRefreshComplete`. */
     fun photoListingCompleteKey(userId: String, volumeId: String) =
         booleanPreferencesKey("photo_listing_complete_${userId}_$volumeId")
 

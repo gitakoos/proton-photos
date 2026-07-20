@@ -34,6 +34,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
@@ -47,6 +48,10 @@ import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.LocalMediaRepository
+import eu.akoos.photos.domain.usecase.AlbumSortMode
+import eu.akoos.photos.domain.usecase.decodeAlbumOrder
+import eu.akoos.photos.domain.usecase.encodeAlbumOrder
+import eu.akoos.photos.domain.usecase.sortAlbums
 import eu.akoos.photos.util.friendlyNetworkError
 import eu.akoos.photos.util.sanitizeErrorMessage
 import javax.inject.Inject
@@ -107,7 +112,18 @@ class AlbumsViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(AlbumsUiState())
     val uiState: StateFlow<AlbumsUiState> = _uiState.asStateFlow()
 
+    /** The grid order in force. Every album list this ViewModel publishes goes through [applySort],
+     *  so the cached paint and the network refresh can never disagree about the order. */
+    private val sortMode = MutableStateFlow(AlbumSortMode.Default)
+
+    /** The user's own arrangement, read only by [AlbumSortMode.Custom]. */
+    private val customOrder = MutableStateFlow<List<String>>(emptyList())
+
+    private fun applySort(albums: List<Album>): List<Album> =
+        sortAlbums(albums, sortMode.value, customOrder.value)
+
     init {
+        observeSortMode()
         loadAlbums()
         observeDeviceFolders()
         // Re-fetch on share-state changes so the grid badge updates without a manual pull-to-refresh.
@@ -123,6 +139,56 @@ class AlbumsViewModel @Inject constructor(
                     st.copy(albums = st.albums.map {
                         if (it.linkId == albumId) it.copy(coverThumbnailUrl = coverUrl) else it
                     })
+                }
+            }
+        }
+    }
+
+    /**
+     * Track the persisted grid order, both the mode and the user's own arrangement, and re-sort what
+     * is already on screen when either changes, so a new order takes effect without waiting for a
+     * reload. Read as one pair because both come from the same store and feed the same sort;
+     * [kotlinx.coroutines.flow.distinctUntilChanged] keeps writes to unrelated settings, which the
+     * store also emits on, from re-sorting the grid for nothing.
+     */
+    private fun observeSortMode() {
+        viewModelScope.launch {
+            context.settingsDataStore.data
+                .map { prefs ->
+                    AlbumSortMode.fromOrdinal(prefs[SettingsKeys.ALBUMS_SORT_MODE]) to
+                        decodeAlbumOrder(prefs[SettingsKeys.ALBUMS_CUSTOM_ORDER])
+                }
+                .distinctUntilChanged()
+                .catch { emit(AlbumSortMode.Default to emptyList()) }
+                .collect { (mode, order) ->
+                    sortMode.value = mode
+                    customOrder.value = order
+                    _uiState.update { it.copy(albums = applySort(it.albums)) }
+                }
+        }
+    }
+
+    /**
+     * Persist the user's own album arrangement AND switch the grid to [AlbumSortMode.Custom].
+     *
+     * The two are deliberately one write. An arrangement stored while a name or last-activity sort
+     * is in force would be re-sorted away the instant it was read back, so the card would spring
+     * out of the slot it was just put in and the arrangement would look discarded. Keeping the pair
+     * here rather than at the call site means no caller can save an arrangement that the active
+     * sort silently overrides. One [androidx.datastore.preferences.core.edit] block, so the store
+     * emits both together and the grid re-sorts once.
+     *
+     * [orderedLinkIds] replaces the stored arrangement outright, so it must carry every album the
+     * user has placed rather than only the ones the grid is currently showing. Hidden albums are
+     * filtered out after ordering and shared albums render from another surface, so narrowing this
+     * to what is visible would drop those albums' slots on every save.
+     */
+    fun saveAlbumArrangement(orderedLinkIds: List<String>) {
+        viewModelScope.launch {
+            runCatching {
+                context.settingsDataStore.edit {
+                    it[SettingsKeys.ALBUMS_CUSTOM_ORDER] = encodeAlbumOrder(orderedLinkIds)
+                    it[SettingsKeys.ALBUMS_SORT_MODE] = AlbumSortMode.Custom.ordinal
                 }
             }
         }
@@ -217,7 +283,7 @@ class AlbumsViewModel @Inject constructor(
             // Phase 1: instant cache read so the grid paints on cold/airplane-mode launch.
             val cached = runCatching { driveRepo.loadAlbumsCached() }.getOrNull().orEmpty()
             if (cached.isNotEmpty()) {
-                _uiState.update { it.copy(isLoading = false, albums = cached) }
+                _uiState.update { it.copy(isLoading = false, albums = applySort(cached)) }
             }
             // Cache-only, so it costs nothing on this path and the add-to-album picker has its
             // destinations ready without the shared-with-me walk. Refreshed by the Shared tab.
@@ -241,7 +307,7 @@ class AlbumsViewModel @Inject constructor(
             }
             runCatching { driveRepo.loadAlbums(userId) }.fold(
                 onSuccess = { albums ->
-                    _uiState.update { it.copy(isLoading = false, albums = albums) }
+                    _uiState.update { it.copy(isLoading = false, albums = applySort(albums)) }
                     // Fire-and-forget membership prefetch so a later album-open paints from cache.
                     // Delayed 5 s so foreground gallery decrypts get first crack at the network semaphore.
                     viewModelScope.launch {
