@@ -142,9 +142,8 @@ class ListingSweepSnapshotDaoTest {
         recentUploads: Set<String> = emptySet(),
         volumeId: String = OWN_VOLUME,
     ): List<String> {
-        val stubIds = photoListingDao.getIncompleteRowLinkIds(USER).toSet()
         val unaccountedFor = snapshotDao.getGeneration(USER, volumeId)
-        val toDelete = removableListingIds(unaccountedFor, recentUploads, stubIds)
+        val toDelete = removableListingIds(unaccountedFor, recentUploads)
         toDelete.forEachSqlChunk { photoListingDao.deleteByLinkIds(USER, it) }
         snapshotDao.clearGeneration(USER, volumeId)
         return toDelete
@@ -268,6 +267,23 @@ class ListingSweepSnapshotDaoTest {
 
         assertTrue("a failed detail batch is not evidence that a photo is gone", deleted.isEmpty())
         assertNotNull(photoListingDao.getByLinkId("detail-failed"))
+    }
+
+    @Test
+    fun `a stub the server no longer lists is pruned`() = runTest {
+        // The mirror of the case above. This stub was listed on an earlier pass, its detail never
+        // landed, and it was then deleted on another client. This walk does not list it, so it stays
+        // in the generation. A photo the server has dropped is gone from Drive whether or not its
+        // detail ever loaded here, so it leaves rather than sit on the timeline unreachable forever.
+        photoListingDao.upsertAll(listOf(entity("kept"), stub("gone-stub")))
+        startFreshPass()
+
+        listPage("kept")
+        val deleted = sweepAtEndOfPagination()
+
+        assertEquals(listOf("gone-stub"), deleted)
+        assertNull("a deletion reaches a photo that never finished loading", photoListingDao.getByLinkId("gone-stub"))
+        assertNotNull(photoListingDao.getByLinkId("kept"))
     }
 
     @Test

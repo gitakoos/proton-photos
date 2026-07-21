@@ -668,6 +668,7 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             val userId = accountManager.getPrimaryUserId().first() ?: return@launch
             _uiState.update { it.copy(isSyncing = true, syncError = null) }
+            eu.akoos.photos.util.SyncDiagnostics.log("sync now: manual refresh requested")
             // Names which step is running so a thrown failure reports the phase that broke
             // ("Couldn't reconcile" vs "Couldn't upload") instead of one generic "Sync failed".
             var failedPhaseRes = R.string.settings_sync_failed

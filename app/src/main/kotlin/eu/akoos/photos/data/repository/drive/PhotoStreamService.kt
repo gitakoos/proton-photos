@@ -200,6 +200,22 @@ internal fun shouldResetEventAnchor(e: Throwable): Boolean {
     return e is me.proton.core.network.domain.ApiException
 }
 
+/**
+ * The Link.State the Proton API reports for a photo in the trash, as opposed to STATE_ACTIVE = 1.
+ * Values match the official Drive client (LinkDto.STATE_ACTIVE / STATE_TRASHED).
+ */
+internal const val LINK_STATE_TRASHED = 2
+
+/**
+ * Whether a volume event means the photo has left this user's active stream. A hard delete arrives
+ * as [eventType] 0; a "delete" on any Proton client only trashes first (emptying the trash later is
+ * the hard delete), and a trash arrives as an ordinary update carrying [LINK_STATE_TRASHED]. Both
+ * take the photo out of the listing the full walk reconciles against, so the feed removes it rather
+ * than re-adding it from the update that announced the trash.
+ */
+internal fun isStreamRemovalEvent(eventType: Int, linkState: Int?): Boolean =
+    eventType == 0 || linkState == LINK_STATE_TRASHED
+
 /** How long to wait before re-trying a failed listing page: the server's Retry-After when it sent
  *  one (so we back off exactly as asked), otherwise an escalating, capped backoff. */
 private fun listingRetryWaitMs(e: Throwable, attempt: Int): Long {
@@ -513,9 +529,9 @@ class PhotoStreamService @Inject constructor(
         // The walk runs on the app scope; only this await belongs to the caller. Whatever the walk
         // throws surfaces here, which is what lets the free-up sweep refuse to run on a refresh it
         // could not complete.
-        fullWalk.run(userId) {
+        fullWalk.run(userId, force) { passForced ->
             withContext(Dispatchers.IO) {
-                doRefreshCloudPhotos(userId, force)
+                doRefreshCloudPhotos(userId, passForced)
                 lastFullRefreshCompletedMs.set(System.currentTimeMillis())
             }
         }
@@ -769,22 +785,24 @@ class PhotoStreamService @Inject constructor(
             // is what lets a library too large to list in one pass ever prune at all.
             if (paginationComplete) {
                 val recentUploads = recentUploadsTracker.snapshotWithinMs(UPLOAD_PROTECTION_WINDOW_MS)
-                // Stub rows (detail not fetched yet) still carry the contentHash the dedup index
-                // needs, so pruning one would invite a re-upload of a photo already on Drive.
-                // Guarded: if this read ever fails (e.g. a CursorWindow hiccup from a concurrent
-                // delete), skip the sweep this pass rather than sweep with an empty stub set.
-                val stubIds = runCatching { photoListingDao.getIncompleteRowLinkIds(userId.id).toSet() }
-                    .getOrElse {
-                        Log.w(TAG, "refreshCloudPhotos: incomplete-rows read failed, skipping stale-entry cleanup this pass: ${it.message}")
-                        null
-                    }
+                // What a completed walk left unaccounted for: rows the server stopped listing. Those
+                // photos are gone from Drive, so their local rows are stale and are removed here. The
+                // one row that must survive is one still mid-upload from this device, whose cloud copy
+                // exists but a page may not list it yet, which is what the recent-uploads window
+                // protects. A stub (detail not fetched) is NOT protected: a photo the server no longer
+                // lists is not on Drive, so the dedup reason to hold its contentHash does not apply to
+                // it, and a photo deleted elsewhere must leave whether or not its detail ever loaded
+                // here.
+                // Guarded: if the set read fails (e.g. a CursorWindow hiccup from a concurrent delete),
+                // skip the sweep this pass rather than sweep against a half-read set.
                 val unaccountedFor = runCatching { listingSweepSnapshotDao.getGeneration(userId.id, activeVolumeId) }
                     .getOrElse {
                         Log.w(TAG, "refreshCloudPhotos: sweep set read failed, skipping stale-entry cleanup this pass: ${it.message}")
+                        eu.akoos.photos.util.SyncDiagnostics.log("sweep skipped: candidate set read failed (${it.message})")
                         null
                     }
-                if (stubIds != null && unaccountedFor != null) {
-                    val toDelete = removableListingIds(unaccountedFor, recentUploads, stubIds)
+                if (unaccountedFor != null) {
+                    val toDelete = removableListingIds(unaccountedFor, recentUploads)
                         // The debug large-library simulator's synthetic rows aren't in the server
                         // listing, so a refresh must not prune them out from under an active test.
                         .let { ids ->
@@ -800,6 +818,12 @@ class PhotoStreamService @Inject constructor(
                         Log.d(TAG, "refreshCloudPhotos: removed ${toDelete.size} stale entries " +
                             "(protected ${recentUploads.size} recent uploads within ${UPLOAD_PROTECTION_WINDOW_MS}ms window)")
                     }
+                    // Surfaced in the shared diagnostics (not just logcat) so a tester's dump shows
+                    // whether the sweep ran and what it accounted for.
+                    eu.akoos.photos.util.SyncDiagnostics.log(
+                        "sweep: ${unaccountedFor.size} server-absent, removed ${toDelete.size}, " +
+                            "kept ${recentUploads.size} recent upload(s)"
+                    )
                     // The generation has answered the one question it existed for; the next fresh
                     // pass reads its own.
                     runCatching { listingSweepSnapshotDao.clearGeneration(userId.id, activeVolumeId) }
@@ -1577,7 +1601,7 @@ class PhotoStreamService @Inject constructor(
                 }
                 for (event in eventsResp.events) {
                     val linkId = event.link?.linkId ?: event.linkId ?: continue
-                    if (event.eventType == 0) {
+                    if (isStreamRemovalEvent(event.eventType, event.link?.state)) {
                         deleteLinkIds += linkId
                     } else {
                         upsertLinkIds += linkId
@@ -1607,6 +1631,24 @@ class PhotoStreamService @Inject constructor(
             upsertLinkIds = upsertLinkIds.filter { it !in deleteLinkIds }.toMutableList()
             if (upsertLinkIds.isNotEmpty()) {
                 val linkDetailMap = linkDetailHelpers.batchFetchLinkDetails(userId, volumeId, upsertLinkIds)
+
+                // A trash can reach the feed as an update whose event payload does not carry the new
+                // state, but the link endpoint always does. Any candidate the fetch reports trashed is
+                // removed like a delete rather than upserted, or the full listing (which already
+                // dropped it) and this feed would take turns removing and re-adding it.
+                val trashedNow = upsertLinkIds.filter { linkDetailMap[it]?.link?.state == LINK_STATE_TRASHED }
+                if (trashedNow.isNotEmpty()) {
+                    trashedNow.forEachSqlChunk { photoListingDao.deleteByLinkIds(userId.id, it) }
+                    try {
+                        trashedNow.forEachSqlChunk { albumPhotoMembershipDao.deleteForPhotos(it) }
+                    } catch (e: Exception) {
+                        if (e is kotlinx.coroutines.CancellationException) throw e
+                        Log.w(TAG, "incremental: album membership cleanup failed for trashed: ${e.message}")
+                    }
+                    upsertLinkIds = upsertLinkIds.filterNot { it in trashedNow }.toMutableList()
+                    eu.akoos.photos.util.SyncDiagnostics.log("incremental: ${trashedNow.size} trashed elsewhere, removed locally")
+                    Log.d(TAG, "incremental: removed ${trashedNow.size} trashed links")
+                }
 
                 val rootLinkId = shareService.photosRootLinkId()
                 val parentKeyCache = mutableMapOf<String?, ByteArray?>()

@@ -57,23 +57,64 @@ class DetachedWalk(private val scope: CoroutineScope) {
     private val lock = Mutex()
     private var owner: UserId? = null
     private var inFlight: Deferred<Unit>? = null
+    // Set while a walk is in flight to ask it for one more pass once it ends; at most one pending.
+    private var rerunForced = false
 
     /**
      * Runs [block] on [scope], or joins the walk already running for [userId], and waits for it.
      *
      * The wait belongs to the caller and the walk does not: a cancelled caller stops awaiting,
      * while the walk carries on to its end for whoever asks next.
+     *
+     * A [forced] caller guarantees a listing pass runs for its press. A walk already in flight
+     * began before the press and answers nothing it asked for, so rather than ride it the forced
+     * caller has the walk make one more pass once the current one ends; a gentle caller just waits
+     * alongside the pass in flight. [block] is told whether the pass it runs is forced. A burst of
+     * forced presses during one walk collapses to a single extra pass, since the latch holds at
+     * most one pending rerun.
      */
-    suspend fun run(userId: UserId, block: suspend () -> Unit) {
+    suspend fun run(userId: UserId, forced: Boolean = false, block: suspend (forced: Boolean) -> Unit) {
         val walk = lock.withLock {
             val existing = inFlight
             if (existing != null && existing.isActive) {
-                if (owner == userId) return@withLock existing
-                // Superseded, not joined: a walk writes rows keyed to the account it started for.
-                existing.cancel()
+                if (owner != userId) {
+                    // Superseded, not joined: a walk writes rows keyed to the account it started for.
+                    existing.cancel()
+                    rerunForced = false
+                } else {
+                    // A walk for this user is already running. A forced caller asks it to run one
+                    // more pass once the current one ends, rather than silently riding a pass that
+                    // began before the press; a gentle caller simply waits alongside it.
+                    if (forced) rerunForced = true
+                    return@withLock existing
+                }
             }
             owner = userId
-            scope.async { block() }.also { inFlight = it }
+            rerunForced = false
+            scope.async {
+                var passForced = forced
+                while (true) {
+                    block(passForced)
+                    val again = lock.withLock {
+                        if (rerunForced) {
+                            rerunForced = false
+                            true
+                        } else {
+                            // Commit to finishing under the same lock a forced caller would take to
+                            // request another pass, so a press can never land between this check and
+                            // the coroutine ending and be dropped. Unpublishing here also means the
+                            // next refresh starts a real walk instead of joining a spent one.
+                            if (owner == userId) {
+                                inFlight = null
+                                owner = null
+                            }
+                            false
+                        }
+                    }
+                    if (!again) break
+                    passForced = true
+                }
+            }.also { inFlight = it }
         }
         walk.await()
     }
@@ -95,6 +136,9 @@ class DetachedWalk(private val scope: CoroutineScope) {
             if (existing == null || owner != userId) return@withLock null
             inFlight = null
             owner = null
+            // Drop any queued forced rerun: the follow-up pass must not fire once this account's
+            // rows and key material are wiped.
+            rerunForced = false
             existing
         }
         walk?.cancelAndJoin()

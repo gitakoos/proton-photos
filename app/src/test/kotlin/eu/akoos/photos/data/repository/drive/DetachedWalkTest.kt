@@ -92,7 +92,7 @@ class DetachedWalkTest {
         var walkFinished = false
 
         val caller = launch {
-            walk.run(userA) {
+            walk.run(userA) { _ ->
                 started.complete(Unit)
                 release.await()
                 walkFinished = true
@@ -119,7 +119,7 @@ class DetachedWalkTest {
         val release = CompletableDeferred<Unit>()
 
         val first = launch {
-            walk.run(userA) {
+            walk.run(userA) { _ ->
                 walksStarted.incrementAndGet()
                 release.await()
             }
@@ -127,7 +127,7 @@ class DetachedWalkTest {
         advanceUntilIdle()
 
         val second = launch {
-            walk.run(userA) {
+            walk.run(userA) { _ ->
                 walksStarted.incrementAndGet()
                 release.await()
             }
@@ -152,7 +152,7 @@ class DetachedWalkTest {
         val callers = List(2) {
             launch {
                 runCatching {
-                    walk.run(userA) {
+                    walk.run(userA) { _ ->
                         release.await()
                         error("listing refused")
                     }
@@ -176,7 +176,7 @@ class DetachedWalkTest {
 
         launch {
             runCatching {
-                walk.run(userA) {
+                walk.run(userA) { _ ->
                     started.complete(Unit)
                     delay(10 * 60_000L)
                     reachedEnd = true
@@ -199,7 +199,7 @@ class DetachedWalkTest {
         var walkFinished = false
 
         launch {
-            walk.run(userA) {
+            walk.run(userA) { _ ->
                 started.complete(Unit)
                 release.await()
                 walkFinished = true
@@ -225,7 +225,7 @@ class DetachedWalkTest {
 
         launch {
             runCatching {
-                walk.run(userA) {
+                walk.run(userA) { _ ->
                     firstStarted.complete(Unit)
                     delay(10 * 60_000L)
                     firstReachedEnd = true
@@ -235,7 +235,7 @@ class DetachedWalkTest {
         firstStarted.await()
 
         val switched = launch {
-            walk.run(userB) {
+            walk.run(userB) { _ ->
                 secondStarted = true
                 release.await()
             }
@@ -254,9 +254,129 @@ class DetachedWalkTest {
         val walk = DetachedWalk(appScope())
         val walksStarted = AtomicInteger()
 
-        walk.run(userA) { walksStarted.incrementAndGet() }
-        walk.run(userA) { walksStarted.incrementAndGet() }
+        walk.run(userA) { _ -> walksStarted.incrementAndGet() }
+        walk.run(userA) { _ -> walksStarted.incrementAndGet() }
 
         assertEquals(2, walksStarted.get())
+    }
+
+    @Test
+    fun `an idle forced caller runs one pass and it is forced`() = runTest {
+        // A forced press must actually list. With no walk to join it simply starts one, and the
+        // pass it starts is marked forced.
+        val walk = DetachedWalk(appScope())
+        val passes = mutableListOf<Boolean>()
+
+        walk.run(userA, forced = true) { passForced -> passes.add(passForced) }
+
+        assertEquals("a forced press with nothing in flight runs exactly one forced pass", listOf(true), passes)
+    }
+
+    @Test
+    fun `a forced caller mid-walk adds exactly one more pass and it is forced`() = runTest {
+        // A forced press landing during a walk must not ride the pass in flight, which began before
+        // the press. It queues one more pass that starts once this one ends, run forced.
+        val walk = DetachedWalk(appScope())
+        val passes = mutableListOf<Boolean>()
+        val release = CompletableDeferred<Unit>()
+
+        val gentle = launch {
+            walk.run(userA) { passForced ->
+                passes.add(passForced)
+                release.await()
+            }
+        }
+        advanceUntilIdle()
+
+        val forced = launch { walk.run(userA, forced = true) { _ -> } }
+        advanceUntilIdle()
+        assertEquals("the forced caller must not start a concurrent pass", listOf(false), passes)
+
+        release.complete(Unit)
+        gentle.join()
+        forced.join()
+        assertEquals("the forced press must add exactly one more pass, itself forced", listOf(false, true), passes)
+    }
+
+    @Test
+    fun `several forced callers during one walk collapse to a single extra pass`() = runTest {
+        // The rerun latch holds one bit, not a queue. A burst of forced presses on a busy walk earns
+        // exactly one extra pass between them, never one apiece.
+        val walk = DetachedWalk(appScope())
+        val passes = AtomicInteger()
+        val release = CompletableDeferred<Unit>()
+
+        val gentle = launch {
+            walk.run(userA) { _ ->
+                passes.incrementAndGet()
+                release.await()
+            }
+        }
+        advanceUntilIdle()
+
+        val forcedCallers = List(3) {
+            launch { walk.run(userA, forced = true) { _ -> } }
+        }
+        advanceUntilIdle()
+
+        release.complete(Unit)
+        gentle.join()
+        forcedCallers.forEach { it.join() }
+        assertEquals("three forced presses on a busy walk add one pass, not three", 2, passes.get())
+    }
+
+    @Test
+    fun `a gentle caller mid-walk adds no extra pass`() = runTest {
+        // Only a forced press earns a rerun. A gentle second caller just waits on the pass in flight
+        // and adds nothing.
+        val walk = DetachedWalk(appScope())
+        val passes = AtomicInteger()
+        val release = CompletableDeferred<Unit>()
+
+        val first = launch {
+            walk.run(userA) { _ ->
+                passes.incrementAndGet()
+                release.await()
+            }
+        }
+        advanceUntilIdle()
+
+        val second = launch { walk.run(userA) { _ -> passes.incrementAndGet() } }
+        advanceUntilIdle()
+
+        release.complete(Unit)
+        first.join()
+        second.join()
+        assertEquals("a gentle second caller must not add a pass", 1, passes.get())
+    }
+
+    @Test
+    fun `cancelling for the account drops a queued forced rerun`() = runTest {
+        // Sign-out clears the latch. A forced follow-up must not fire once the account's rows and
+        // keys are gone.
+        val walk = DetachedWalk(appScope())
+        val passes = mutableListOf<Boolean>()
+        val release = CompletableDeferred<Unit>()
+
+        val gentle = launch {
+            runCatching {
+                walk.run(userA) { passForced ->
+                    passes.add(passForced)
+                    release.await()
+                }
+            }
+        }
+        advanceUntilIdle()
+
+        val forced = launch { runCatching { walk.run(userA, forced = true) { _ -> } } }
+        advanceUntilIdle()
+
+        walk.cancelFor(userA)
+        release.complete(Unit)
+        advanceUntilIdle()
+        gentle.join()
+        forced.join()
+
+        assertEquals("a forced rerun queued at sign-out must never run", listOf(false), passes)
     }
 }

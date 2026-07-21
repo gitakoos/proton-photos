@@ -28,13 +28,13 @@ import org.junit.Test
 
 /**
  * The refresh sweep's removal decision. [removableListingIds] answers "which stored rows did this
- * pass fail to account for", and both sweep sites feed it the same shape: an own-volume candidate
- * set plus one protection set per reason a row may be missing yet still valid (the server listing,
- * an upload the index has not caught up with, a stub whose detail batch failed).
+ * pass fail to account for": an own-volume candidate set minus one protection set per reason a row
+ * may be missing from a completed listing yet still valid (the photos it did list, and an upload the
+ * stream index has not caught up with).
  *
  * The volume half of the rule is enforced by the query that builds the candidate set and is pinned
  * in PhotoListingDaoTest; what is pinned here is that a protected row is never offered up and an
- * unaccounted-for one always is. Pure sets → no DI / DB / network is exercised.
+ * unaccounted-for one always is. Pure sets, so no DI / DB / network is exercised.
  */
 class RemovableListingIdsTest {
 
@@ -63,17 +63,6 @@ class RemovableListingIdsTest {
         val recentUploads = setOf("fresh")
 
         assertTrue(removableListingIds(stored, listed, recentUploads).isEmpty())
-    }
-
-    @Test
-    fun `a stub row missing from the found set is kept`() {
-        // A stub is a row whose detail batch failed transiently. It still carries the contentHash
-        // the dedup index needs, so pruning it would invite a re-upload of a photo already on Drive.
-        val stored = listOf("own1", "stub")
-        val found = setOf("own1")
-        val stubs = setOf("stub")
-
-        assertTrue(removableListingIds(stored, found, emptySet(), stubs).isEmpty())
     }
 
     @Test
