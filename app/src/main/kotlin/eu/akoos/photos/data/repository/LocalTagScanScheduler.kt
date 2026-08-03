@@ -120,11 +120,15 @@ class LocalTagScanScheduler @Inject constructor(
     }
 
     /**
-     * Clear the persisted tag cache once if [PhotoTagDetector.DETECTOR_VERSION] has moved since
+     * Discard every cached detection once if [PhotoTagDetector.DETECTOR_VERSION] has moved since
      * the cache was last written (tracked in a tiny prefs entry). A version bump means the
-     * detection rules changed, so every cached row is potentially stale; wiping forces a full
+     * detection rules changed, so every cached verdict is potentially stale; clearing forces a full
      * re-detect on the scan that follows. A no-op on every run where the version is unchanged,
      * so after the first call it costs nothing.
+     *
+     * [LocalTagDao.clearDetections] and not a whole-table delete, because a row can also carry the
+     * categories the user picked for that file. Those are not the detector's to discard: a change to
+     * its rules says nothing about a choice a person made, and no re-scan could recover one.
      */
     private suspend fun ensureDetectorVersion() {
         if (versionEnsured) return
@@ -133,10 +137,10 @@ class LocalTagScanScheduler @Inject constructor(
             val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             val stored = prefs.getInt(KEY_DETECTOR_VERSION, 0)
             if (stored != PhotoTagDetector.DETECTOR_VERSION) {
-                runCatching { localTagDao.deleteAll() }
+                runCatching { localTagDao.clearDetections() }
                     .onFailure { Log.w(TAG, "tag cache wipe failed: ${it.message}") }
                 prefs.edit().putInt(KEY_DETECTOR_VERSION, PhotoTagDetector.DETECTOR_VERSION).apply()
-                Log.i(TAG, "detector version $stored -> ${PhotoTagDetector.DETECTOR_VERSION}; tag cache cleared")
+                Log.i(TAG, "detector version $stored -> ${PhotoTagDetector.DETECTOR_VERSION}; detections cleared")
             }
             versionEnsured = true
         }
@@ -208,6 +212,8 @@ class LocalTagScanScheduler @Inject constructor(
             displayName = item.displayName,
             sizeBytes = item.sizeBytes,
         )
+        // userTagsCsv is deliberately absent: upsertDetection writes the detection columns only, so a
+        // re-scan of a file the user has categorised keeps their choice.
         val entity = LocalTagEntity(
             uri = item.uri,
             dateModified = item.dateModified,
@@ -215,7 +221,7 @@ class LocalTagScanScheduler @Inject constructor(
             tagsCsv = tagIds.joinToString(","),
             scannedAt = System.currentTimeMillis(),
         )
-        runCatching { localTagDao.upsert(entity) }
+        runCatching { localTagDao.upsertDetection(entity) }
             .onFailure { Log.w(TAG, "upsert ${item.uri} failed: ${it.message}") }
     }
 

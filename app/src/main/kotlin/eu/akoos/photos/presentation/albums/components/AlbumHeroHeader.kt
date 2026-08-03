@@ -23,7 +23,6 @@
 package eu.akoos.photos.presentation.albums.components
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -34,14 +33,10 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -51,7 +46,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -59,16 +53,16 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
-import eu.akoos.photos.R
 import eu.akoos.photos.presentation.common.fullBleedHorizontal
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.Bg2
 import eu.akoos.photos.presentation.theme.PillBorder
 
 /**
- * Hero header for [AlbumDetailScreen]: 4:3 cover, a title row (name + optional rename pencil), and a
- * meta row with [metaLeading] (share avatars) + count on the left and [titleActions] at the far right.
- * Actions live on the meta row so a long album name can't shove them around. [coverModel] is anything Coil loads.
+ * Hero header for [AlbumDetailScreen]: 4:3 cover, then the name and a single meta line carrying
+ * [metaLeading] (share avatars), the photo count and [titleActions] at its end. The count takes the
+ * slack between them, so a long album name can't shove the actions around and a long count ellipses
+ * instead of pushing them off. [coverModel] is anything Coil loads.
  */
 @Composable
 internal fun AlbumHeroHeader(
@@ -78,8 +72,6 @@ internal fun AlbumHeroHeader(
     /** Live scroll offset (px) of the header, read inside graphicsLayer so the cover can parallax
      *  behind the scrolling content without recomposing. */
     coverParallax: () -> Float = { 0f },
-    canRename: Boolean = true,
-    onRenameClick: () -> Unit = {},
     titleActions: @Composable (RowScope.() -> Unit)? = null,
     metaLeading: @Composable (RowScope.() -> Unit)? = null,
 ) {
@@ -134,41 +126,27 @@ internal fun AlbumHeroHeader(
                 .padding(horizontal = 20.dp)
                 .padding(top = 20.dp, bottom = 16.dp),
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    title,
-                    color = AppColors.current.fgPrimary,
-                    fontSize = 24.sp,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false),
-                )
-                if (canRename) {
-                    Spacer(Modifier.size(8.dp))
-                    Box(
-                        modifier = Modifier
-                            .size(32.dp)
-                            .clip(CircleShape)
-                            .clickable(onClick = onRenameClick),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(
-                            Icons.Default.Edit,
-                            contentDescription = stringResource(R.string.album_rename),
-                            tint = AppColors.current.fgDim,
-                            modifier = Modifier.size(18.dp),
-                        )
-                    }
-                }
-            }
-            Spacer(Modifier.height(8.dp))
-            // Fixed height fits the 40.dp action buttons so a late member fetch doesn't shift the layout.
-            if (metaLeading != null || photoCountText.isNotEmpty() || titleActions != null) {
+            Text(
+                title,
+                color = AppColors.current.fgPrimary,
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            if (metaLeading != null || titleActions != null || photoCountText.isNotEmpty()) {
+                Spacer(Modifier.height(8.dp))
+                // The floor clears a 40.dp control where there are actions and the 24.dp avatars
+                // where there aren't, so a member fetch or a control that mounts only while a worker
+                // runs lands in space that is already reserved instead of resizing the header. It is
+                // a minimum rather than a fixed height so the count still grows with the font scale.
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    modifier = Modifier.height(40.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = if (titleActions != null) 40.dp else 24.dp),
                 ) {
                     if (metaLeading != null) {
                         metaLeading()
@@ -177,16 +155,20 @@ internal fun AlbumHeroHeader(
                         }
                     }
                     if (photoCountText.isNotEmpty()) {
-                        Text(photoCountText, color = AppColors.current.fgMute, fontSize = 14.sp)
-                    }
-                    if (titleActions != null) {
-                        Spacer(Modifier.weight(1f))
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            content = titleActions,
+                        Text(
+                            photoCountText,
+                            color = AppColors.current.fgMute,
+                            fontSize = 14.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
                         )
+                    } else {
+                        // Without a count there is nothing weighted to hold the middle, so an empty
+                        // filler still pins the actions to the trailing edge.
+                        Spacer(Modifier.weight(1f))
                     }
+                    titleActions?.invoke(this)
                 }
             }
         }

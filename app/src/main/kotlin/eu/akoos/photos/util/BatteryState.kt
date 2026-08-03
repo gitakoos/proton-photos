@@ -22,10 +22,16 @@
 
 package eu.akoos.photos.util
 
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.os.BatteryManager
+import android.os.Build
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 
 /**
  * Runtime analogue of the workers' `setRequiresBatteryNotLow(true)`, for the background work that
@@ -42,3 +48,38 @@ fun Context.isBatteryLow(): Boolean {
     if (level < 0 || scale <= 0) return false
     return level.toFloat() / scale.toFloat() <= 0.15f
 }
+
+/**
+ * [isBatteryLow] as a live flow, for a screen that explains why backup is waiting: the answer stops
+ * being true the moment the phone goes on a charger, and a note that lingers after that would be
+ * the same kind of stale claim it exists to replace.
+ *
+ * Emits the current value immediately (the sticky broadcast answers without waiting for a change),
+ * then on every battery change, deduplicated to the low/not-low boolean so the frequent per-percent
+ * and per-voltage broadcasts do not repaint anything.
+ *
+ * EXPORTED is required: ACTION_BATTERY_CHANGED comes from the system UID, and NOT_EXPORTED drops it
+ * silently, which leaves the receiver looking armed while it never fires.
+ */
+fun Context.batteryLowFlow(): Flow<Boolean> = callbackFlow {
+    val receiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            trySend(isBatteryLow())
+        }
+    }
+    val filter = IntentFilter(Intent.ACTION_BATTERY_CHANGED)
+    // The sticky broadcast makes this registration itself deliver the current state, so no separate
+    // priming send is needed.
+    runCatching {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED)
+        } else {
+            registerReceiver(receiver, filter)
+        }
+    }.onFailure {
+        // Without the broadcast there is nothing to report, and claiming "waiting for battery" on a
+        // guess would be worse than staying quiet.
+        trySend(false)
+    }
+    awaitClose { runCatching { unregisterReceiver(receiver) } }
+}.distinctUntilChanged()

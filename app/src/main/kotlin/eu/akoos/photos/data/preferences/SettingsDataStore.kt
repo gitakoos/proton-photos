@@ -49,7 +49,6 @@ object SettingsKeys {
     /** When true, the selection-mode action buttons (share, delete, download, set as cover, remove)
      *  show a short text label beneath the icon. On by default; users who prefer icon-only can
      *  turn it off so the action bars stay compact. */
-    val SHOW_SELECTION_LABELS = booleanPreferencesKey("show_selection_labels")
 
     /** When true, the Photos timeline is flipped so the oldest photos sit at the top and the
      *  newest at the bottom (scroll up for older). Off by default — the timeline stays newest-first.
@@ -81,6 +80,20 @@ object SettingsKeys {
      *  3 = PhotoCount). Absent = LastActivity, which is the order the album cache is read in, so an
      *  install that never picks a mode keeps the grid it already had. */
     val ALBUMS_SORT_MODE = intPreferencesKey("albums_sort_mode")
+
+    /** Direction the photos inside an album are listed in, an AlbumPhotoSortMode ordinal
+     *  (0 = NewestFirst, 1 = OldestFirst). Absent = NewestFirst, the order albums have always
+     *  opened on. One global choice every album shares: a per-album key would grow with the
+     *  library and rewrite the whole preferences file on each change. */
+    val ALBUM_PHOTO_SORT_MODE = intPreferencesKey("album_photo_sort_mode")
+
+    /** Direction the photos inside a device folder are listed in, an AlbumPhotoSortMode ordinal
+     *  (0 = NewestFirst, 1 = OldestFirst). Absent = NewestFirst, the order a folder opens on. Its
+     *  own key rather than [ALBUM_PHOTO_SORT_MODE]: a folder and an album are browsed for different
+     *  reasons, so a direction chosen in one has no claim on the other. One global choice every
+     *  folder shares, since a per-folder key would grow with the device's bucket list and rewrite
+     *  the whole preferences file on each change. */
+    val DEVICE_FOLDER_PHOTO_SORT_MODE = intPreferencesKey("device_folder_photo_sort_mode")
 
     /** The user's own Albums-grid arrangement, a '|'-separated list of album linkIds, read only
      *  when [ALBUMS_SORT_MODE] is Custom. Absent or empty = no arrangement yet, which Custom
@@ -137,6 +150,24 @@ object SettingsKeys {
      *  cleared once a check confirms the app is up to date. Reuses the former dismissed-version
      *  key slot; there is no permanent per-version dismissal anymore. */
     val UPDATE_AVAILABLE_VERSION = stringPreferencesKey("update_dismissed_version")
+
+    /** When false, the periodic background release check is cancelled and no update notification
+     *  is posted. Absent = on: an app that is rarely opened is exactly the one that needs to be
+     *  told about a new version. The manual Settings check is unaffected either way. */
+    val UPDATE_BACKGROUND_CHECK = booleanPreferencesKey("update_background_check")
+
+    /** versionName the update notification has already been posted for. The background check keeps
+     *  finding the same release every period, so this is what keeps one announcement from becoming
+     *  a recurring one. Cleared once a check confirms the app is up to date. */
+    val UPDATE_NOTIFIED_VERSION = stringPreferencesKey("update_notified_version")
+
+    /** versionName of an APK the background check has already downloaded, alongside
+     *  [UPDATE_STAGED_FILE] holding where it sits. Persisted because the download happens with the
+     *  app closed, so the in-memory handle the update prompt normally holds is long gone by the
+     *  time the user opens the app. Both are cleared once the archive is installed, superseded or
+     *  found missing. */
+    val UPDATE_STAGED_VERSION = stringPreferencesKey("update_staged_version")
+    val UPDATE_STAGED_FILE = stringPreferencesKey("update_staged_file")
 
     /** User's custom order for the timeline category rail, a CSV of GalleryFilter enum names.
      *  Absent = the default Drive-web order. Reordered by long-pressing a chip and dragging. */
@@ -217,17 +248,54 @@ object SettingsKeys {
     val HIDDEN_URI_ORIGINAL_NAME_MAP = stringSetPreferencesKey("hidden_uri_original_name_map")
 
     /**
-     * mediaUri → capture-date-ms mapping for downloaded files whose MediaStore DATE_TAKEN could
-     * not be persisted, stored as a set of "mediaUri|captureMs" strings (DataStore lacks a Map).
+     * hiddenUri → everything else the hidden photo owned that is keyed by its device uri, as a set of
+     * "hiddenUri|sourceUri|favourite|userTags|coverFolder|albums" strings (same flatten as the maps
+     * above, one entry per hidden photo that has anything to carry).
+     *
+     * A hide changes the photo's uri twice — content:// to file:// and on to a fresh content:// — so
+     * every store keyed by that uri loses the photo unless the hide copies the answer forward. The
+     * favourite heart, the categories the user chose, the folder cover they pinned and the albums the
+     * photo is queued to join are all such answers, and none of them can be worked out again from the
+     * bytes. Written before the original is deleted and read back onto the restored uri, so a round
+     * trip through the vault leaves the photo exactly as it went in. Encoded and decoded through
+     * [eu.akoos.photos.data.hidden.HiddenVaultCarry].
+     */
+    val HIDDEN_URI_CARRIED_MAP = stringSetPreferencesKey("hidden_uri_carried_map")
+
+    /**
+     * Hides that have copied their bytes into the vault but not yet had their MediaStore original
+     * removed, as a set of "hiddenUri|sourceUri" strings (same flatten as the maps above).
+     *
+     * Written BEFORE the delete and cleared right after it, so the window a process death can land in
+     * always leaves a record of what was being moved. Kept apart from [HIDDEN_PHOTO_URIS] so an entry
+     * that has not confirmed yet cannot read as an ordinary hidden photo. The source uri is the whole
+     * payload: it is what tells a later reconciliation whether the delete ever happened.
+     */
+    val HIDDEN_PENDING_HIDES = stringSetPreferencesKey("hidden_pending_hides")
+
+    /**
+     * mediaUri → capture-date-ms mapping for files whose MediaStore DATE_TAKEN is missing or
+     * wrong, stored as a set of "mediaUri|captureMs" strings (DataStore lacks a Map).
      * MediaStore only derives DATE_TAKEN from the embedded date for JPEG/HEIF images (and video
      * mvhd); for a PNG/WebP/GIF download it refuses the column, leaving DATE_TAKEN = 0, so the
      * file would read as its download date once its cloud twin is gone. The download writes the
      * real capture date here when the read-back shows the column did not stick, and the local
-     * media scan applies it as the date whenever DATE_TAKEN is 0 — so a downloaded PNG keeps its
-     * true date even after its cloud copy is deleted. Entries for files no longer present are
-     * pruned during the scan, so the map stays bounded.
+     * media scan reports an entry ahead of the column, so a downloaded PNG keeps its true date
+     * even after its cloud copy is deleted. Entries for files no longer present are pruned
+     * during the scan, so the map stays bounded.
      */
+    // The download wording is kept for continuity with the entries already stored on devices.
     val DOWNLOAD_DATE_OVERRIDES = stringSetPreferencesKey("download_date_overrides")
+
+    /**
+     * folderName → cover-uri mapping for device folders whose cover the user pinned, stored as a set
+     * of "folderName|coverUri" strings (same flatten as [HIDDEN_URI_SOURCE_FOLDER_MAP]). The key is
+     * the MediaStore bucket display name, matching every other per-folder preference here. A folder
+     * with no entry, or one whose pinned photo is not among its current items, falls back to its
+     * newest photo. Entries are read and written through [eu.akoos.photos.util.FolderCoverMap], and
+     * pruned during the local media scan once it proves the pinned file is gone.
+     */
+    val FOLDER_COVER_URI_MAP = stringSetPreferencesKey("folder_cover_uri_map")
 
     /**
      * User-declared local folder names that aren't backed by an existing MediaStore bucket yet.
@@ -437,9 +505,6 @@ object SettingsKeys {
     // Hidden album — stores URIs of photos hidden from main gallery
     val HIDDEN_PHOTO_URIS = stringSetPreferencesKey("hidden_photo_uris")
 
-    // Timeline grouping preference
-    val TIMELINE_GROUPING = stringPreferencesKey("timeline_grouping")
-
     /** True once the user dismissed the "densest layout may slow scrolling" heads-up with
      *  "Don't show again". Absent/false = the one-time notice still appears the first time the
      *  timeline is zoomed out to the densest grid in a session. */
@@ -470,6 +535,19 @@ object SettingsKeys {
      */
     val WHATS_NEW_SEEN_VERSION = intPreferencesKey("whats_new_seen_version")
 
+    /** Off switch for the news feed. Absent reads as on. When off, the feed is not fetched and the
+     *  unread dot never shows, so a user who does not want it pays nothing for it. */
+    val NEWS_ENABLED = booleanPreferencesKey("news_enabled")
+
+    /** The [id]s of the news entries the user has already seen. Opening the news screen sets this to
+     *  exactly the entries in the current feed, so it stays bounded and only a genuinely new id
+     *  counts as unread. Kept by id, not by count, so editing an entry never re-alerts. */
+    val NEWS_READ_IDS = stringSetPreferencesKey("news_read_ids")
+
+    /** The last feed fetched, stored raw so the news screen and the unread dot both read from the
+     *  same cache the moment the app opens, with no network wait, and still work offline. */
+    val NEWS_CACHE_JSON = stringPreferencesKey("news_cache_json")
+
     /** Privacy opt-in: when true, wipe the full-res blob cache every time the app
      *  process is backgrounded. Off by default — most users prefer the 30-min TTL
      *  + offline grace behaviour. Security-conscious users who want zero on-disk
@@ -488,8 +566,6 @@ object SettingsKeys {
      *  the timeline. Off by default so existing users see no change. The Albums
      *  and Shared tabs are untouched — only the Photos tab honours this filter. */
     val HIDE_PHOTOS_IN_ALBUMS = booleanPreferencesKey("hide_photos_in_albums")
-    val HIDE_DEVICE_FOLDERS_IN_ALBUMS = booleanPreferencesKey("hide_device_folders_in_albums")
-    val HIDE_CLOUD_ALBUMS_IN_ALBUMS = booleanPreferencesKey("hide_cloud_albums_in_albums")
 
     /**
      * Bucket display names the user has chosen to keep OUT of the main Photos timeline.
@@ -502,6 +578,25 @@ object SettingsKeys {
      * same cross-path collision caveat as [EXCLUDED_FOLDER_NAMES].
      */
     val TIMELINE_EXCLUDED_FOLDER_NAMES = stringSetPreferencesKey("timeline_excluded_folder_names")
+
+    /**
+     * Bucket display names whose folder the user has hidden, the device-folder counterpart of
+     * [HIDDEN_ALBUM_IDS]. The card leaves the Albums grid and the folder is reached from the
+     * biometric-gated Hidden Photos area, which is where it is unhidden again.
+     *
+     * The folder's photos do NOT all survive on the device. A photo that exists only here moves
+     * into the app-private vault, and that move deletes its MediaStore original for good: the vault
+     * copy is the last one left, and signing out empties the vault. A backed-up photo keeps both
+     * its device file and its Drive copy and is only filtered out of the listings this app draws.
+     *
+     * Deliberately NOT [TIMELINE_EXCLUDED_FOLDER_NAMES], which is the opposite trade: that one
+     * drops the folder's photos from the timeline while leaving its card on the grid and touching
+     * no file at all. A folder can be in either set, both, or neither.
+     *
+     * Matches MediaStore bucket display names, the same identity every other per-folder preference
+     * here uses, with the same cross-path collision caveat as [EXCLUDED_FOLDER_NAMES].
+     */
+    val HIDDEN_FOLDER_NAMES = stringSetPreferencesKey("hidden_folder_names")
     /** Cloud album linkIds individually hidden from the timeline (per-album toggle), separate from
      *  the [HIDE_PHOTOS_IN_ALBUMS] master switch which hides photos in ALL albums at once. */
     val TIMELINE_EXCLUDED_ALBUM_IDS = stringSetPreferencesKey("timeline_excluded_album_ids")
@@ -539,6 +634,17 @@ object SettingsKeys {
     const val RECENT_UPLOAD_TTL_MS = 60L * 60L * 1000L
 
     /**
+     * True once the user has agreed to fetch the on-device text-detection model, which the viewer's
+     * read-the-text gesture needs and which is several megabytes. Absent means the agreement has not
+     * been given yet, and the gesture asks.
+     *
+     * Only an acceptance is stored. A refusal is not, because the prompt never appears on its own:
+     * it only ever follows the user asking to read the text on a photo, so asking again on the next
+     * such request is the answer to that request rather than a second attempt at the same one.
+     */
+    val OCR_MODEL_DOWNLOAD_ALLOWED = booleanPreferencesKey("ocr_model_download_allowed")
+
+    /**
      * DEBUG-only large-library simulator size. N synthetic photo_listing rows are generated
      * (0 = off / not simulating). Only read by the BuildConfig.DEBUG-gated simulator UI +
      * [eu.akoos.photos.data.repository.drive.LargeLibrarySimulator]; the production
@@ -549,10 +655,14 @@ object SettingsKeys {
 
 /**
  * Single source of truth for "is auto-backup actually going to upload anything". Auto-sync can be
- * ON yet effectively idle when no folder is selected and back-up-everything is off — in that state
- * the upload pipeline already early-returns (UploadPendingUseCase / LocalMediaRepositoryImpl), so
- * the background triggers should not be armed either. Mirrors that exact predicate so the
- * trigger-arming gate and the upload gate can never disagree. AUTO_SYNC absent = ON.
+ * ON yet effectively idle when no folder is selected and back-up-everything is off, and in that
+ * state waking the device to find nothing is pure drain, so the background triggers are not armed.
+ *
+ * This decides ARMING only. It is not the gate that stops an upload: an explicit "back up now", an
+ * album-add and an editor save all reach the pipeline without passing here, and a foreground refresh
+ * kicks a run of its own. The queue itself is where the switch is enforced, on each row's
+ * [eu.akoos.photos.domain.entity.QueueSource], which is what tells a folder-sweep row apart from a
+ * photo the user asked for. AUTO_SYNC absent = ON.
  */
 suspend fun syncEffectivelyEnabled(context: Context): Boolean {
     val prefs = context.settingsDataStore.data.first()

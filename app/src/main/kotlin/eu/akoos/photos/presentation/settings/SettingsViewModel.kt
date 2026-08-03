@@ -41,6 +41,8 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.firstOrNull
@@ -55,7 +57,11 @@ import me.proton.core.telemetry.domain.usecase.IsTelemetryEnabled
 import me.proton.core.user.domain.usecase.GetUser
 import me.proton.core.user.domain.usecase.ObserveUser
 import eu.akoos.photos.R
+import eu.akoos.photos.data.hidden.HiddenVaultJournal
+import eu.akoos.photos.data.hidden.HiddenVaultLeftovers
+import eu.akoos.photos.data.hidden.HiddenVaultRecords
 import eu.akoos.photos.data.offline.OfflineStorageManager
+import eu.akoos.photos.data.preferences.AccountScopedPreferences
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.data.preferences.syncEffectivelyEnabled
@@ -93,6 +99,8 @@ class SettingsViewModel @Inject constructor(
     private val cloudRepo: DrivePhotoRepository,
     private val cloudTrashService: eu.akoos.photos.data.repository.drive.CloudTrashService,
     private val offlineStore: OfflineStorageManager,
+    private val hiddenStorage: eu.akoos.photos.data.hidden.HiddenStorageManager,
+    private val hiddenVaultJournal: HiddenVaultJournal,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SettingsUiState())
@@ -107,6 +115,7 @@ class SettingsViewModel @Inject constructor(
         observeCloudTrashOnSession()
         observeUploadProgress()
         observeExcludedFolders()
+        observeVaultedCount()
         refreshLocalStorage()
         loadCloudTrashCount()
     }
@@ -125,6 +134,79 @@ class SettingsViewModel @Inject constructor(
                 .collectLatest { excluded ->
                     _uiState.update { it.copy(excludedFolderNames = excluded) }
                 }
+        }
+    }
+
+    /**
+     * Count what a sign-out takes with it: the photos the vault holds FILES for.
+     *
+     * Only a vault entry counts. An entry hiding a photo that is still on the device or on Drive is a
+     * filter, and sign-out only drops the filter — nothing of the photo is lost, so warning about it
+     * would be a warning the user cannot act on.
+     *
+     * Three things together keep the figure from ever sitting below what the wipe destroys.
+     * Reconciliation is awaited first, so a hide interrupted between removing its original and
+     * recording its entry is already settled — published as a vault entry, or dropped because its
+     * original is proven to still be on the device — before any number reaches the screen. The count
+     * itself then comes from the files on disk as well as the index, because the wipe takes the vault
+     * directory whole whether or not anything refers to a file in it. And
+     * [SettingsUiState.vaultedCountSettled] holds the confirmation back until the first real figure
+     * lands, so the dialog cannot open on a number the user then watches change.
+     *
+     * Both the reconciliation and the directory listing run off the main thread, and the listing is
+     * repeated only when the index itself changes.
+     */
+    private fun observeVaultedCount() {
+        viewModelScope.launch {
+            hiddenVaultJournal.reconcile()
+            context.settingsDataStore.data
+                .map { prefs ->
+                    (prefs[SettingsKeys.HIDDEN_PHOTO_URIS] ?: emptySet()) to
+                        HiddenVaultRecords.pairedUris(prefs[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] ?: emptySet())
+                }
+                .distinctUntilChanged()
+                // An unreadable preference store leaves the count at zero, but the confirmation is
+                // still better shown than withheld: a user who cannot sign out has no way forward.
+                .catch { _uiState.update { state -> state.copy(vaultedCountSettled = true) } }
+                .collectLatest { (indexed, paired) ->
+                    val recorded = indexed.filterTo(HashSet()) { hiddenStorage.isHiddenUri(it) }
+                    val everything = try {
+                        withContext(Dispatchers.IO) {
+                            HiddenVaultLeftovers.vaultedUris(
+                                blobUris = hiddenStorage.vaultBlobUris(),
+                                recordedVaultUris = recorded,
+                            )
+                        }
+                    } catch (e: Exception) {
+                        if (e is CancellationException) throw e
+                        android.util.Log.w("SettingsViewModel", "vault count: directory unreadable", e)
+                        recorded
+                    }
+                    _uiState.update {
+                        it.copy(
+                            vaultedPhotoCount = everything.size,
+                            // A vault file no record names cannot name a Drive copy either, so the
+                            // intersection is exactly the photos a sign-out leaves recoverable.
+                            vaultedCloudBackedCount = everything.count { uri -> uri in paired },
+                            vaultedCountSettled = true,
+                        )
+                    }
+                }
+        }
+    }
+
+    /**
+     * Pull a fresh vault snapshot into [SettingsUiState.vaultDiagnostics] for the shared diagnostics
+     * bundle, which the screen assembles from state alone.
+     *
+     * Read on demand rather than observed: it walks the vault directory, so a screen that kept it live
+     * would re-walk it on every preference change to answer a question nobody has asked yet. The
+     * diagnostics chooser opening is exactly when the answer is wanted.
+     */
+    fun refreshVaultDiagnostics() {
+        viewModelScope.launch {
+            val snapshot = hiddenVaultJournal.vaultSnapshot()
+            _uiState.update { it.copy(vaultDiagnostics = snapshot) }
         }
     }
 
@@ -275,16 +357,26 @@ class SettingsViewModel @Inject constructor(
                             uploadedBytesByUri.clear()
                             current.copy(uploadBytesPerSecond = null, uploadDeferReason = null)
                         }
-                        UploadStatus.WaitingForWifi, UploadStatus.PreparingBackup -> {
+                        UploadStatus.WaitingForWifi,
+                        UploadStatus.PreparingBackup,
+                        UploadStatus.StorageFull -> {
                             // Deferral frame — no per-file payload. Surface the reason as a
                             // one-line note in the Sync card without touching the events list
-                            // or byte counters.
-                            val reason = if (evt.status == UploadStatus.WaitingForWifi) {
-                                R.string.sync_deferred_waiting_wifi
-                            } else {
-                                R.string.sync_deferred_preparing
+                            // or byte counters. StorageFull also ends the batch, so it clears the
+                            // live counters the way Idle does; the reason itself has to survive,
+                            // because nothing will resolve it until the user frees space.
+                            val reason = when (evt.status) {
+                                UploadStatus.WaitingForWifi -> R.string.sync_deferred_waiting_wifi
+                                UploadStatus.StorageFull -> R.string.sync_deferred_storage_full
+                                else -> R.string.sync_deferred_preparing
                             }
-                            current.copy(uploadDeferReason = reason)
+                            if (evt.status == UploadStatus.StorageFull) {
+                                batchStartMs = 0L
+                                uploadedBytesByUri.clear()
+                                current.copy(uploadBytesPerSecond = null, uploadDeferReason = reason)
+                            } else {
+                                current.copy(uploadDeferReason = reason)
+                            }
                         }
                         else -> {
                             val uiStatus = when (evt.status) {
@@ -295,7 +387,8 @@ class SettingsViewModel @Inject constructor(
                                 UploadStatus.Queued -> UploadEventStatus.Queued
                                 UploadStatus.Idle,
                                 UploadStatus.WaitingForWifi,
-                                UploadStatus.PreparingBackup -> UploadEventStatus.Done // unreachable
+                                UploadStatus.PreparingBackup,
+                                UploadStatus.StorageFull -> UploadEventStatus.Done // unreachable
                             }
                             // New-batch detection: a fresh Uploading/Encrypting event that
                             // arrives when the previous batch fully completed (done == total > 0)
@@ -526,13 +619,12 @@ class SettingsViewModel @Inject constructor(
      *
      * Cached in memory with a 5-minute TTL via [SettingsUiState.lastCloudTrashFetchMs]
      * so re-entering the Settings screen doesn't fire a Drive call on every navigation.
-     * Public [refreshCloudTrashCount] bypasses the TTL for pull-to-refresh use sites.
      */
-    private fun loadCloudTrashCount(force: Boolean = false) {
+    private fun loadCloudTrashCount() {
         viewModelScope.launch {
             val now = System.currentTimeMillis()
             val last = _uiState.value.lastCloudTrashFetchMs
-            if (!force && last > 0L && (now - last) < CLOUD_TRASH_TTL_MS) return@launch
+            if (last > 0L && (now - last) < CLOUD_TRASH_TTL_MS) return@launch
             val userId = accountManager.getPrimaryUserId().first() ?: return@launch
             val result = runCatching { cloudTrashService.getCloudTrash(userId) }
             _uiState.update {
@@ -542,11 +634,6 @@ class SettingsViewModel @Inject constructor(
                 )
             }
         }
-    }
-
-    /** Force-refresh the Drive trash count, bypassing the in-memory TTL. */
-    fun refreshCloudTrashCount() {
-        loadCloudTrashCount(force = true)
     }
 
     private fun loadPrefs() {
@@ -600,14 +687,10 @@ class SettingsViewModel @Inject constructor(
                     appLockTimeoutMinutes = migratedPrefs[SettingsKeys.APP_LOCK_TIMEOUT_MINUTES] ?: 0,
                     clearCacheOnAppClose = migratedPrefs[SettingsKeys.CLEAR_CACHE_ON_APP_CLOSE] ?: false,
                     screenshotOverlayEnabled = migratedPrefs[SettingsKeys.SCREENSHOT_OVERLAY_ENABLED] ?: false,
-                    hidePhotosInAlbums = migratedPrefs[SettingsKeys.HIDE_PHOTOS_IN_ALBUMS] ?: false,
                     showScrollDate = migratedPrefs[SettingsKeys.SHOW_SCROLL_DATE] ?: false,
-                    showSelectionLabels = migratedPrefs[SettingsKeys.SHOW_SELECTION_LABELS] ?: true,
                     reverseTimelineOrder = migratedPrefs[SettingsKeys.REVERSE_TIMELINE_ORDER] ?: false,
                     mosaicGrid = migratedPrefs[SettingsKeys.MOSAIC_GRID] ?: false,
                     seamlessGrid = migratedPrefs[SettingsKeys.SEAMLESS_GRID] ?: false,
-                    albumsDefaultFilter = migratedPrefs[SettingsKeys.ALBUMS_DEFAULT_FILTER] ?: 0,
-                    albumsRememberLastFilter = migratedPrefs[SettingsKeys.ALBUMS_REMEMBER_LAST_FILTER] ?: false,
                     gridRememberLast = migratedPrefs[SettingsKeys.GRID_REMEMBER_LAST] ?: false,
                     gridDefaultColumns = migratedPrefs[SettingsKeys.GRID_DEFAULT_COLUMNS] ?: 3,
                 )
@@ -696,6 +779,10 @@ class SettingsViewModel @Inject constructor(
                 //    shared use-case progress flow regardless of who triggered the run), and the
                 //    worker writes LAST_SYNC_MS itself. allowLowBattery = true: the user asked.
                 failedPhaseRes = R.string.settings_sync_failed_upload
+                // Mark the run as asked-for before handing it over, so it still uploads with
+                // auto-backup switched off. This row is a one-tap action, not a setting: gating it
+                // on the switch would leave a button that reconciles and then quietly does nothing.
+                upload.requestManualRun()
                 SyncWorker.runNow(context, _uiState.value.syncWifiOnly, allowLowBattery = true)
                 val now = System.currentTimeMillis()
                 context.settingsDataStore.edit { it[SettingsKeys.LAST_SYNC_MS] = now }
@@ -754,66 +841,6 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    // Tracks URIs pending system delete dialog confirmation (set by freeUpNow, cleared by onFreeUpPermissionGranted)
-    private var pendingFreeUpLocalUris: List<String> = emptyList()
-
-    fun freeUpNow() {
-        viewModelScope.launch {
-            val userId = accountManager.getPrimaryUserId().first() ?: return@launch
-            _uiState.update { it.copy(isFreeingUp = true) }
-            try {
-                // Check against Drive before deleting anything. This button reclaims every backed-up
-                // photo, including copies the user downloaded back, so acting on a sync_state that
-                // nothing has verified lately could take a last copy. One listing refresh plus one
-                // reconcile pass is the entire check: the refresh drops rows for photos no longer on
-                // Drive, reconcile demotes their sync_state off SYNCED, and the sweep below only
-                // ever touches what is still SYNCED afterwards. A per-photo cloud call would ask
-                // thousands of times what these two ask once, and would lose reconcile's grace
-                // window for uploads the listing has not caught up with yet.
-                //
-                // Unlike syncNow, a failed refresh is deliberately NOT swallowed as best-effort:
-                // sweeping against a listing that could not be refreshed is the situation this
-                // exists to prevent, so it falls through to the catch and the sweep does not run.
-                cloudRepo.refreshCloudPhotos(userId, force = true)
-                reconcile(userId).collect {}
-                when (val result = freeUpSpace(userId, Long.MAX_VALUE)) {
-                    is eu.akoos.photos.domain.usecase.FreeUpSpaceUseCase.FreeUpResult.Done -> {
-                        val msg = if (result.freed > 0)
-                            context.getString(R.string.settings_freed_photos, result.freed)
-                        else
-                            context.getString(R.string.settings_free_up_none)
-                        _uiState.update { it.copy(isFreeingUp = false, syncError = msg) }
-                    }
-                    is eu.akoos.photos.domain.usecase.FreeUpSpaceUseCase.FreeUpResult.NeedsPermission -> {
-                        pendingFreeUpLocalUris = result.localUris
-                        _uiState.update { it.copy(isFreeingUp = false, freeUpPendingIntent = result.pendingIntent) }
-                    }
-                }
-            } catch (e: Exception) {
-                if (e is kotlinx.coroutines.CancellationException) throw e
-                _uiState.update { it.copy(isFreeingUp = false, syncError = context.getString(R.string.settings_free_up_error, e.message ?: "")) }
-            }
-        }
-    }
-
-    /** Called when the system delete dialog returns RESULT_OK. */
-    fun onFreeUpPermissionGranted() {
-        viewModelScope.launch {
-            // System already deleted the files; update DB accordingly
-            pendingFreeUpLocalUris.forEach { localUri ->
-                syncStateRepo.updateStatusAndDeleteLocal(localUri, eu.akoos.photos.domain.entity.SyncStatus.CLOUD_ONLY)
-            }
-            val freed = pendingFreeUpLocalUris.size
-            pendingFreeUpLocalUris = emptyList()
-            _uiState.update { it.copy(freeUpPendingIntent = null,
-                syncError = context.getString(R.string.settings_freed_photos, freed)) }
-        }
-    }
-
-    fun clearFreeUpIntent() {
-        pendingFreeUpLocalUris = emptyList()
-        _uiState.update { it.copy(freeUpPendingIntent = null) }
-    }
 
     fun setThemeMode(mode: ThemeMode) {
         viewModelScope.launch {
@@ -1035,29 +1062,12 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    /** Persist the "hide photos already in albums" Photos-tab filter. The gallery
-     *  observes the key directly via its combine chain; this setter is just for
-     *  immediate UI feedback in Settings. */
-    fun setHidePhotosInAlbums(enabled: Boolean) {
-        viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.HIDE_PHOTOS_IN_ALBUMS] = enabled }
-            _uiState.update { it.copy(hidePhotosInAlbums = enabled) }
-        }
-    }
-
     /** Persist the "show a floating date while scrolling the timeline" toggle. The Photos grid
      *  observes the key directly; this setter is for immediate UI feedback in Settings. */
     fun setShowScrollDate(enabled: Boolean) {
         viewModelScope.launch {
             context.settingsDataStore.edit { it[SettingsKeys.SHOW_SCROLL_DATE] = enabled }
             _uiState.update { it.copy(showScrollDate = enabled) }
-        }
-    }
-
-    fun setShowSelectionLabels(enabled: Boolean) {
-        viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.SHOW_SELECTION_LABELS] = enabled }
-            _uiState.update { it.copy(showSelectionLabels = enabled) }
         }
     }
 
@@ -1088,23 +1098,6 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             context.settingsDataStore.edit { it[SettingsKeys.SEAMLESS_GRID] = enabled }
             _uiState.update { it.copy(seamlessGrid = enabled) }
-        }
-    }
-
-    /** Persist the default Albums-tab filter as an AlbumDisplayFilter ordinal. The Albums tab reads
-     *  the key on entry; this setter is for immediate UI feedback in Settings. */
-    fun setAlbumsDefaultFilter(value: Int) {
-        viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.ALBUMS_DEFAULT_FILTER] = value }
-            _uiState.update { it.copy(albumsDefaultFilter = value) }
-        }
-    }
-
-    /** Persist the "remember the last-used Albums-tab filter" opt-in. */
-    fun setAlbumsRememberLastFilter(value: Boolean) {
-        viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.ALBUMS_REMEMBER_LAST_FILTER] = value }
-            _uiState.update { it.copy(albumsRememberLastFilter = value) }
         }
     }
 
@@ -1171,64 +1164,7 @@ class SettingsViewModel @Inject constructor(
                 //    inherit the previous account's sync state, folder selection, recent upload
                 //    ids, or favourite list. We keep UI preferences (theme, palette, language) and
                 //    machine-level flags (onboarding-complete, app-lock, update throttle).
-                runCatching {
-                    context.settingsDataStore.edit { prefs ->
-                        val accountTied = setOf<androidx.datastore.preferences.core.Preferences.Key<*>>(
-                            SettingsKeys.LAST_SYNC_MS,
-                            SettingsKeys.SYNC_FOLDER_NAMES,
-                            SettingsKeys.BACKUP_EVERYTHING,
-                            SettingsKeys.EXCLUDED_FOLDER_NAMES,
-                            SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP,
-                            SettingsKeys.HIDDEN_URI_ORIGINAL_NAME_MAP,
-                            SettingsKeys.HIDDEN_URI_SOURCE_FOLDER_MAP,
-                            SettingsKeys.MANUAL_LOCAL_FOLDER_NAMES,
-                            SettingsKeys.ALBUM_BUCKET_MAP,
-                            SettingsKeys.PENDING_DELETE_URIS,
-                            SettingsKeys.HIDDEN_PHOTO_URIS,
-                            SettingsKeys.OFFLINE_PIN_IDS,
-                            SettingsKeys.FAVORITE_IDS,
-                            SettingsKeys.RECENT_UPLOAD_IDS,
-                            // Hide-photos-in-albums is a per-user view preference. Without
-                            // adding it here, a shared device that signs out → signs back in
-                            // as a different account inherits the previous user's choice.
-                            SettingsKeys.HIDE_PHOTOS_IN_ALBUMS,
-                            SettingsKeys.HIDE_DEVICE_FOLDERS_IN_ALBUMS,
-                            SettingsKeys.SHOW_SCROLL_DATE,
-                            SettingsKeys.SHOW_SELECTION_LABELS,
-                            SettingsKeys.REVERSE_TIMELINE_ORDER,
-                            SettingsKeys.MOSAIC_GRID,
-                            SettingsKeys.SEAMLESS_GRID,
-                            // Albums-tab filter preference + its remembered last value.
-                            SettingsKeys.ALBUMS_DEFAULT_FILTER,
-                            SettingsKeys.ALBUMS_REMEMBER_LAST_FILTER,
-                            SettingsKeys.ALBUMS_LAST_FILTER,
-                            // Timeline folder and album filters are likewise per-user view preferences.
-                            SettingsKeys.TIMELINE_EXCLUDED_FOLDER_NAMES,
-                            SettingsKeys.TIMELINE_EXCLUDED_ALBUM_IDS,
-                            // Hidden albums are a per-user, client-side view preference; a second
-                            // account on a shared device must not inherit the previous user's set.
-                            SettingsKeys.HIDDEN_ALBUM_IDS,
-                            // Individually-hidden cloud photos are the same per-user client-side state.
-                            SettingsKeys.HIDDEN_CLOUD_PHOTO_IDS,
-                        )
-                        accountTied.forEach { prefs.remove(it) }
-                        // Per-user dynamic keys (one per volume): the events anchor + the photo
-                        // listing resume cursor/complete flag. A stale events anchor surviving
-                        // sign-out is what returned a 404 on the next login until the cache was
-                        // cleared by hand.
-                        val dynamicPrefixes = listOf(
-                            "event_anchor_${userId.id}_",
-                            "photo_listing_cursor_${userId.id}_",
-                            "photo_listing_complete_${userId.id}_",
-                            "photo_listing_ever_complete_${userId.id}_",
-                            "pairing_settled_${userId.id}",
-                        )
-                        prefs.asMap().keys
-                            .filter { key -> dynamicPrefixes.any { key.name.startsWith(it) } }
-                            .toList()
-                            .forEach { prefs.remove(it) }
-                    }
-                }
+                runCatching { AccountScopedPreferences.clear(context, userId) }
                 // Reset the MainActivity-held lock timestamps BEFORE disableAccount triggers
                 // the route change. A re-login by a different user inherits a fresh
                 // sinceBackground window so the next resume can't fire the previous user's

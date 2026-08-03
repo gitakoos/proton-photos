@@ -395,8 +395,12 @@ class CalendarViewModel @Inject constructor(
                 }
         }
 
+        /** The key the day buckets are built with, which is why the locale is pinned rather than
+         *  left to the device. `%d` renders through the format locale's own digits, so on a phone set
+         *  to Persian, Arabic, Bengali or Burmese this returned a key spelled in those digits while
+         *  every bucket was keyed in Latin ones, and every day in the calendar looked empty. */
         fun formatDate(year: Int, month: Int, day: Int): String =
-            "%04d-%02d-%02d".format(year, month, day)
+            String.format(Locale.US, "%04d-%02d-%02d", year, month, day)
     }
 }
 

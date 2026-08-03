@@ -38,6 +38,17 @@ data class LocalMediaItem(
     /** Category-tag ids (Drive PhotoTag enum) from the persisted local-tag cache. Empty when no
      *  fresh cache entry exists yet; categorization then falls back to the cheap heuristics. */
     val tags: Set<Int> = emptySet(),
+    /**
+     * Category-tag ids the USER picked for this file, kept apart from [tags] because they answer
+     * different questions: [tags] is a detection, empty simply meaning "not scanned yet", while an
+     * empty set here means "no choice made, categorise automatically". Folding the two together
+     * would make a choice on an unscanned file read as a finished detection and suppress the
+     * heuristics that still have to run for it.
+     *
+     * Non-empty, it is the complete and authoritative category set for the file: [CategorizeItem]
+     * returns it verbatim, with no union and no heuristics on top.
+     */
+    val userTags: Set<Int> = emptySet(),
     /** True when [dateTaken] came from a real MediaStore DATE_TAKEN. False when it fell back to
      *  DATE_ADDED (import time), which for a file received from another app can be far from the
      *  actual capture date the file's own EXIF still carries. Default true so existing constructions

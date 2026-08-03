@@ -47,3 +47,33 @@ fun mimeToFileExtension(mimeType: String): String {
         else -> sub
     }
 }
+
+/**
+ * The MIME type a file at [path] holds, read from its extension alone, or the empty string for an
+ * extension this app has no photo or video type for.
+ *
+ * The other direction of [mimeToFileExtension], and the answer for a file the content resolver has
+ * nothing to say about: `getType` resolves a `content://` uri through its provider and returns null
+ * for a plain `file://` one, so an app-private file — a vault copy, a cache blob — needs its type
+ * derived from what it is named. Takes a full path, a uri string or a bare file name; only the part
+ * after the last dot is read. Pure.
+ */
+fun mimeFromPath(path: String): String =
+    when (path.substringAfterLast('.', "").lowercase()) {
+        "jpg", "jpeg" -> "image/jpeg"
+        "png" -> "image/png"
+        "heic", "heif" -> "image/heic"
+        "webp" -> "image/webp"
+        "gif" -> "image/gif"
+        "bmp" -> "image/bmp"
+        "avif" -> "image/avif"
+        "dng" -> "image/x-adobe-dng"
+        "mp4", "m4v" -> "video/mp4"
+        "mov" -> "video/quicktime"
+        "webm" -> "video/webm"
+        "mkv" -> "video/x-matroska"
+        "avi" -> "video/x-msvideo"
+        "3gp" -> "video/3gpp"
+        "ts" -> "video/mp2t"
+        else -> ""
+    }

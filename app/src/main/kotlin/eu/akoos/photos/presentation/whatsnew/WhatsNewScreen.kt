@@ -52,6 +52,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -152,6 +153,14 @@ fun WhatsNewScreen(
 ) {
     val colors = AppColors.current
     val release = remember(version) { whatsNewReleaseFor(version) }
+
+    // A system back gesture pops this screen through the host's own handler, which never reaches the
+    // header's onBack, so the version stayed unseen and the screen returned on every launch. Marking
+    // it here first makes the gesture settle the gate exactly as the button and the arrow do.
+    BackHandler {
+        viewModel.markSeen()
+        onDone()
+    }
 
     Box(
         modifier = Modifier

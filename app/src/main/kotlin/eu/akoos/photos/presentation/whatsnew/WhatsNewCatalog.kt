@@ -24,18 +24,24 @@ package eu.akoos.photos.presentation.whatsnew
 
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.Campaign
+import androidx.compose.material.icons.filled.Checklist
 import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Compress
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Crop
+import androidx.compose.material.icons.filled.DeleteSweep
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.GroupAdd
+import androidx.compose.material.icons.filled.HdrOn
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.PhotoAlbum
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.SwapVert
+import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.ui.graphics.vector.ImageVector
 import eu.akoos.photos.R
 
@@ -91,7 +97,13 @@ internal val WhatsNewReleases: List<WhatsNewRelease> = listOf(
         hero = WhatsNewHero.AlbumOrder,
         features = listOf(
             WhatsNewFeature(Icons.Default.Crop, R.string.whats_new_crop_title, R.string.whats_new_crop_body),
+            WhatsNewFeature(Icons.Default.Edit, R.string.whats_new_metadata_title, R.string.whats_new_metadata_body),
+            WhatsNewFeature(Icons.Default.TextFields, R.string.whats_new_text_title, R.string.whats_new_text_body),
+            WhatsNewFeature(Icons.Default.HdrOn, R.string.whats_new_hdr_title, R.string.whats_new_hdr_body),
             WhatsNewFeature(Icons.Default.GroupAdd, R.string.whats_new_shared_add_title, R.string.whats_new_shared_add_body),
+            WhatsNewFeature(Icons.Default.Checklist, R.string.whats_new_selection_title, R.string.whats_new_selection_body),
+            WhatsNewFeature(Icons.Default.DeleteSweep, R.string.whats_new_freeup_review_title, R.string.whats_new_freeup_review_body),
+            WhatsNewFeature(Icons.Default.Campaign, R.string.whats_new_news_title, R.string.whats_new_news_body),
             WhatsNewFeature(Icons.Default.Bookmark, R.string.whats_new_viewer_place_title, R.string.whats_new_viewer_place_body),
             WhatsNewFeature(Icons.Default.Shield, R.string.whats_new_album_guard_title, R.string.whats_new_album_guard_body),
         ),

@@ -22,7 +22,6 @@
 
 package eu.akoos.photos.domain.usecase
 
-import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
 import android.net.Uri
@@ -33,6 +32,8 @@ import androidx.core.app.NotificationCompat
 import androidx.datastore.preferences.core.edit
 import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.R
+import eu.akoos.photos.data.notification.NotificationIds
+import eu.akoos.photos.data.notification.ensureNotificationChannel
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.entity.SyncStatus
@@ -129,19 +130,14 @@ class PendingDeleteNotificationUseCase @Inject constructor(
             return
         }
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && nm.getNotificationChannel(DELETE_CHANNEL_ID) == null) {
-            val channel = NotificationChannel(
-                DELETE_CHANNEL_ID,
-                context.getString(R.string.delete_consent_channel_name),
-                NotificationManager.IMPORTANCE_DEFAULT,
-            ).apply {
-                description = context.getString(R.string.delete_consent_channel_desc)
-                setShowBadge(false)
-                setSound(null, null)
-                enableVibration(false)
-            }
-            nm.createNotificationChannel(channel)
-        }
+        ensureNotificationChannel(
+            context,
+            id = DELETE_CHANNEL_ID,
+            name = context.getString(R.string.delete_consent_channel_name),
+            description = context.getString(R.string.delete_consent_channel_desc),
+            importance = NotificationManager.IMPORTANCE_DEFAULT,
+            silent = true,
+        )
         val trashRequestPi = runCatching {
             MediaStore.createTrashRequest(context.contentResolver, uris, true)
         }.getOrElse {
@@ -200,11 +196,7 @@ class PendingDeleteNotificationUseCase @Inject constructor(
             uri.substringAfterLast('/').toLongOrNull() ?: -1L
 
         const val DELETE_CHANNEL_ID = "delete_consent"
-        // Distinct from SyncWorker.NOTIFICATION_ID (4243), AlbumDownloadWorker
-        // (4242), and BackgroundSyncService (4244). A unique ID per channel is
-        // required because a single foreground service update would otherwise
-        // clobber the delete consent notification post.
-        const val DELETE_NOTIFICATION_ID = 4245
+        const val DELETE_NOTIFICATION_ID = NotificationIds.DELETE_CONSENT
         private const val TAG = "PendingDeleteNotif"
     }
 }

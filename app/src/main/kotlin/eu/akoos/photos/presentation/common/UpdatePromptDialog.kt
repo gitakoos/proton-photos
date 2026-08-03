@@ -44,7 +44,7 @@ import eu.akoos.photos.presentation.theme.AppColors
  * dialog that swaps body + buttons by state:
  *
  *   - [UpdatePromptState.Available]    → "new version + size", Update/Later
- *   - [UpdatePromptState.Downloading]  → progress bar, no buttons, non-dismissible
+ *   - [UpdatePromptState.Downloading]  → progress bar, Cancel, no tap-outside dismiss
  *   - [UpdatePromptState.InstallReady] → "tap to install", Update/Later
  *   - [UpdatePromptState.Error]        → friendly error, single dismiss button
  *
@@ -75,6 +75,9 @@ sealed class UpdatePromptState {
         NETWORK,
         PERMISSION_DENIED,
         VERIFICATION,
+
+        /** The downloaded build does not rank above the installed one, so it is refused. */
+        ALREADY_CURRENT,
     }
 }
 
@@ -88,6 +91,8 @@ fun UpdatePromptDialog(
     val title = stringResource(R.string.update_available_title)
 
     AlertDialog(
+        // A download is stopped from its own Cancel button rather than by a tap outside, so a stray
+        // tap cannot throw away a part-downloaded APK.
         onDismissRequest = if (state is UpdatePromptState.Downloading) {
             {}
         } else {
@@ -141,6 +146,8 @@ fun UpdatePromptDialog(
                             stringResource(R.string.update_permission_required)
                         UpdatePromptState.ErrorKind.VERIFICATION ->
                             stringResource(R.string.update_verification_failed)
+                        UpdatePromptState.ErrorKind.ALREADY_CURRENT ->
+                            stringResource(R.string.update_no_update)
                     }
                     Text(body, color = colors.fgDim, fontSize = 13.sp)
                 }
@@ -176,6 +183,18 @@ fun UpdatePromptDialog(
                     TextButton(onClick = onDismiss) {
                         Text(
                             stringResource(R.string.update_action_later),
+                            color = colors.fgDim,
+                        )
+                    }
+                }
+            }
+            // The download runs behind a modal, so without this the user is held for the whole APK.
+            // The dismiss already cancels the job and drops the partial file.
+            is UpdatePromptState.Downloading -> {
+                {
+                    TextButton(onClick = onDismiss) {
+                        Text(
+                            stringResource(R.string.cancel),
                             color = colors.fgDim,
                         )
                     }

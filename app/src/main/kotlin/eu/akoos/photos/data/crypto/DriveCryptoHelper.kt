@@ -515,24 +515,30 @@ class DriveCryptoHelper @Inject constructor(
     }
 
     /**
-     * Re-targets a link Name to a new parent key the way Drive Android's ChangeMessage does: reuse
-     * the OLD name's session key, re-encrypt + embed-sign the plaintext under it, write a fresh
-     * PKESK to the new parent. Preserving the session-key lineage matters — Drive web's decryptName
-     * rejects fresh-session-key re-wraps (the same failure [reencryptNodePassphraseForCopy] fixed).
+     * The one rule every write to an existing link Name obeys: recover the session key already bound
+     * to [oldNameArmored], encrypt + embed-sign [newPlaintextName] under THAT key, and join a fresh
+     * PKESK for [targetPublicKeyArmored] to it. Mirrors Drive Android's ChangeMessage
+     * (getSessionKeyFromEncryptedMessage → encrypt under it → encryptSessionKey → join), down to the
+     * binary literal: PGPCrypto exposes no text-mode session-key encryption, and encryptAndSignData
+     * is the primitive the official client renames through.
+     *
+     * Throws when no PKESK opens with [oldDecryptKeyBytes]. Quietly minting a fresh session key is
+     * the defect itself — it orphans every key packet already issued against the old one.
      */
-    fun changeNameRecipient(
+    private fun changeNameUnderSameSessionKey(
         oldNameArmored: String,
         oldDecryptKeyBytes: ByteArray,
         newPlaintextName: String,
         targetPublicKeyArmored: String,
         signerKeyBytes: ByteArray,
+        caller: String,
     ): String = cryptoLock.withLock {
         val packets = cryptoContext.pgpCrypto.getEncryptedPackets(oldNameArmored)
         val pkesks = packets.filter { it.type == PacketType.Key }.map { it.packet }
-        require(pkesks.isNotEmpty()) { "changeNameRecipient: source has no PKESK" }
+        require(pkesks.isNotEmpty()) { "$caller: source has no PKESK" }
         val sessionKey = pkesks.firstNotNullOfOrNull { pk ->
             runCatching { cryptoContext.pgpCrypto.decryptSessionKey(pk, oldDecryptKeyBytes) }.getOrNull()
-        } ?: error("changeNameRecipient: no PKESK decrypted with source key")
+        } ?: error("$caller: no PKESK decrypted with source key")
         val dataPacket = cryptoContext.pgpCrypto.encryptAndSignData(
             newPlaintextName.toByteArray(Charsets.UTF_8),
             sessionKey,
@@ -542,6 +548,57 @@ class DriveCryptoHelper @Inject constructor(
         val keyPacket = cryptoContext.pgpCrypto.encryptSessionKey(sessionKey, targetPublicKeyArmored)
         cryptoContext.pgpCrypto.getArmored(keyPacket + dataPacket, PGPHeader.Message)
     }
+
+    /**
+     * Re-targets a link Name to a new parent key. Preserving the session-key lineage matters — Drive
+     * web's decryptName rejects fresh-session-key re-wraps (the same failure
+     * [reencryptNodePassphraseForCopy] fixed).
+     */
+    fun changeNameRecipient(
+        oldNameArmored: String,
+        oldDecryptKeyBytes: ByteArray,
+        newPlaintextName: String,
+        targetPublicKeyArmored: String,
+        signerKeyBytes: ByteArray,
+    ): String = changeNameUnderSameSessionKey(
+        oldNameArmored = oldNameArmored,
+        oldDecryptKeyBytes = oldDecryptKeyBytes,
+        newPlaintextName = newPlaintextName,
+        targetPublicKeyArmored = targetPublicKeyArmored,
+        signerKeyBytes = signerKeyBytes,
+        caller = "changeNameRecipient",
+    )
+
+    /**
+     * Renames a link in place, keeping its Name session key.
+     *
+     * That session key is immutable for the life of the link. Sharing a link uploads the Name's
+     * session key re-encrypted under the share key as `NameKeyPacket`; the server cannot decrypt
+     * anything, so all it can do is substitute that stored packet when it serves the link in a share
+     * context, and no endpoint refreshes it afterwards. Encrypting the new name under a fresh session
+     * key therefore leaves every recipient holding a key packet that opens nothing, and the shared
+     * name collapses to a link-id stub (#88).
+     *
+     * [oldNameArmored] is the Name ciphertext currently stored on the link and [oldDecryptKeyBytes]
+     * the key that reads it — normally the same parent key whose public half is
+     * [parentPublicKeyArmored]. The new data packet carries a binary literal, matching the official
+     * client's rename; [encryptName]'s text literal applies only to a name being minted for the
+     * first time, where no session key exists to keep.
+     */
+    fun renameNamePreservingSessionKey(
+        oldNameArmored: String,
+        oldDecryptKeyBytes: ByteArray,
+        newPlaintextName: String,
+        parentPublicKeyArmored: String,
+        signerKeyBytes: ByteArray,
+    ): String = changeNameUnderSameSessionKey(
+        oldNameArmored = oldNameArmored,
+        oldDecryptKeyBytes = oldDecryptKeyBytes,
+        newPlaintextName = newPlaintextName,
+        targetPublicKeyArmored = parentPublicKeyArmored,
+        signerKeyBytes = signerKeyBytes,
+        caller = "renameNamePreservingSessionKey",
+    )
 
     /**
      * Re-wraps a Link Name for the copy pipeline: decrypts with the source parent key, re-encrypts +
@@ -598,6 +655,9 @@ class DriveCryptoHelper @Inject constructor(
     /**
      * Encrypts the link name to [parentPublicKeyArmored] AND signs it. The web client always signs
      * names; without a signature it shows "Missing signature for name".
+     *
+     * Only for a name that does not exist yet — this mints a fresh session key, so renaming an
+     * existing link belongs in [renameNamePreservingSessionKey].
      */
     fun encryptName(
         name: String,

@@ -23,6 +23,7 @@
 package eu.akoos.photos.widget
 
 import android.content.Context
+import android.util.Log
 import androidx.glance.appwidget.GlanceAppWidgetManager
 import androidx.glance.appwidget.state.getAppWidgetState
 import androidx.glance.appwidget.state.updateAppWidgetState
@@ -34,8 +35,8 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.retryWhen
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -44,13 +45,20 @@ import me.proton.core.domain.entity.UserId
 import eu.akoos.photos.data.db.dao.CloudAlbumDao
 import eu.akoos.photos.data.db.dao.PhotoListingDao
 import eu.akoos.photos.data.db.entity.CloudAlbumEntity
-import eu.akoos.photos.data.db.entity.PhotoListingEntity
-import eu.akoos.photos.data.repository.drive.ThumbnailDecryptScheduler
+import eu.akoos.photos.data.db.entity.PhotoPickerRow
 import eu.akoos.photos.domain.entity.LocalAlbum
 import eu.akoos.photos.domain.entity.LocalMediaItem
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.LocalMediaRepository
+import eu.akoos.photos.util.retryOnDbTear
+import eu.akoos.photos.util.sanitizeErrorMessage
 import javax.inject.Inject
+
+/** How many times the picker's cloud-photo stream may re-subscribe before the failure reaches the
+ *  screen, matching the album grid's cap. Enough to ride out a torn cursor window while a sync writes
+ *  the same table, too few to mask a read that cannot succeed at all: that one would otherwise leave
+ *  the picker spinning with nothing said. */
+private const val CLOUD_PHOTOS_MAX_RETRIES = 5L
 
 data class WidgetConfigUiState(
     val mode: WidgetMode         = WidgetMode.ALL_PHOTOS,
@@ -65,12 +73,12 @@ data class WidgetConfigUiState(
      */
     val devicePhotos: List<LocalMediaItem> = emptyList(),
     /**
-     * Pool of cloud photos available for [WidgetMode.CLOUD_SELECTED]. Each entry
-     * is a Row from [PhotoListingDao], including the (possibly null) decrypted
-     * thumbnailUrl — null means the gallery cell has not yet been viewed so the
-     * thumbnail is not in the app cache. The widget worker will request it lazily.
+     * Pool of cloud photos available for [WidgetMode.CLOUD_SELECTED], newest first. Each entry is the
+     * two-column picker projection: a link id and the (possibly null) decrypted thumbnailUrl — null
+     * means no cell has decrypted this photo yet, so its thumbnail is not in the app cache. The widget
+     * worker will request it lazily.
      */
-    val cloudPhotos: List<PhotoListingEntity> = emptyList(),
+    val cloudPhotos: List<PhotoPickerRow> = emptyList(),
     val selectedLinkIds: List<String> = emptyList(),
     /** Cloud albums the widget can follow in [WidgetMode.CLOUD_ALBUM]. */
     val cloudAlbums: List<CloudAlbumEntity> = emptyList(),
@@ -79,6 +87,9 @@ data class WidgetConfigUiState(
     /** True until the first cloud-photo emission lands, so the picker can show a spinner
      *  instead of a premature empty state on a cold DB. */
     val isLoadingCloud: Boolean  = true,
+    /** Sanitized reason the cloud-photo stream stopped, set when it failed past its retry cap. Shown
+     *  in place of the empty-library line so an unreadable library never reads as an empty one. */
+    val cloudError: String?      = null,
     val isSaving: Boolean        = false,
     val saved: Boolean           = false,
 )
@@ -91,7 +102,6 @@ class PhotoWidgetConfigViewModel @Inject constructor(
     private val cloudAlbumDao: CloudAlbumDao,
     private val driveRepo: DrivePhotoRepository,
     private val accountManager: AccountManager,
-    private val thumbnailScheduler: ThumbnailDecryptScheduler,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(WidgetConfigUiState())
@@ -158,31 +168,38 @@ class PhotoWidgetConfigViewModel @Inject constructor(
     }
 
     /**
-     * Stream the user's cloud photo listing into [WidgetConfigUiState.cloudPhotos].
-     * Sorted newest-first by captureTime so the picker shows recent shots at the
-     * top. The list includes photos whose thumbnail has not been decrypted yet
-     * (thumbnailUrl == null) — the picker UI can either request a decrypt on
-     * scroll or show a placeholder; the widget worker handles the lazy decrypt
-     * on its own when the widget cycles to a not-yet-materialised entry.
+     * Stream the user's cloud photo listing into [WidgetConfigUiState.cloudPhotos], newest first.
+     *
+     * The two-column picker projection, not the whole rows: the grid keys on the link id and binds the
+     * thumbnail, while a full read would carry every row's armored crypto blocks (kilobytes each) into
+     * ViewModel state the moment the widget is added. A cell whose thumbnail is still null asks for a
+     * decrypt through [requestCloudThumbnailDecrypt], which hydrates that one row's crypto material by
+     * link id. Newest-first is the query's own ORDER BY, so no second sorted copy of the library. The
+     * widget worker handles the lazy decrypt on its own when the widget cycles to a
+     * not-yet-materialised entry.
      */
     private fun observeCloudPhotos() {
         viewModelScope.launch {
             val userId: UserId = accountManager.getPrimaryUserId().first() ?: return@launch
             // Own stream only — photos from shared-with-me albums must not be offered as
             // widget content.
-            photoListingDao.observeOwnStream(userId.id)
-                .retryWhen { cause, attempt ->
-                    // Belt-and-suspenders: a full-row read that lands mid-write can throw a
-                    // transient CursorWindow error; keep the picker stream alive rather than crash.
-                    android.util.Log.w("WidgetConfigVM", "widget photo stream failed (attempt $attempt), retrying: ${cause.message}")
-                    kotlinx.coroutines.delay((500L * (attempt + 1)).coerceAtMost(5_000L))
-                    true
+            photoListingDao.observeOwnStreamPickerRows(userId.id)
+                // A read that lands mid-write can throw a transient CursorWindow error, so
+                // re-subscribe rather than let it reach the collector. Capped, because a read that
+                // keeps failing is not a torn window and no number of retries will fix it.
+                .retryOnDbTear("WidgetConfigVM", maxAttempts = CLOUD_PHOTOS_MAX_RETRIES)
+                // Terminal failure of the stream, past its retry cap. Surfacing it drops the spinner
+                // and says what went wrong, where a swallowed one leaves the picker loading forever.
+                .catch { e ->
+                    Log.e("WidgetConfigVM", "widget photo stream gave up", e)
+                    _state.update {
+                        it.copy(isLoadingCloud = false, cloudError = sanitizeErrorMessage(e.message))
+                    }
                 }
                 .collectLatest { rows ->
-                    val sorted = rows.sortedByDescending { it.captureTime ?: 0L }
                     // Clear the loading flag on the first (and every) emission so the picker
                     // leaves its spinner state once real data (even an empty list) has arrived.
-                    _state.update { it.copy(cloudPhotos = sorted, isLoadingCloud = false) }
+                    _state.update { it.copy(cloudPhotos = rows, isLoadingCloud = false, cloudError = null) }
                 }
         }
     }
@@ -211,12 +228,14 @@ class PhotoWidgetConfigViewModel @Inject constructor(
         }
     }
 
-    /** Push a thumbnail decrypt request through the scheduler so the picker can
-     *  render the cell as soon as the bytes land in the on-disk cache. */
-    fun requestCloudThumbnailDecrypt(photo: PhotoListingEntity) {
+    /** Push a thumbnail decrypt request through the scheduler so the picker can render the cell as
+     *  soon as the bytes land in the on-disk cache. Keyed by link id: the repository looks that one
+     *  row's encrypted material up, which is what lets the picker's own read skip it. Deduped by the
+     *  scheduler, so a re-run on recomposition is free. */
+    fun requestCloudThumbnailDecrypt(linkId: String) {
         viewModelScope.launch {
             val userId = accountManager.getPrimaryUserId().first() ?: return@launch
-            thumbnailScheduler.request(userId, photo)
+            driveRepo.requestThumbnailDecrypt(userId, linkId)
         }
     }
 

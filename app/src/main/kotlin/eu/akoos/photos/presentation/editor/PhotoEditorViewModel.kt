@@ -54,6 +54,7 @@ import kotlinx.coroutines.withContext
 import me.proton.core.accountmanager.domain.AccountManager
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.data.hidden.HiddenVaultRecords
 import eu.akoos.photos.data.transfer.TransferCenter
 import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.LocalMediaItem
@@ -183,6 +184,10 @@ class PhotoEditorViewModel @Inject constructor(
     // Reports the background edit-upload to the Activity monitor + avatar ring, the same surface the
     // gallery download / offline pin loops use. The upload itself is unchanged; this only tracks it.
     private val transferCenter: eu.akoos.photos.data.transfer.TransferCenter,
+    // A vaulted photo is an app-private file with no MediaStore row: a copy of one has to be written
+    // and recorded by the vault, or it leaves the hidden area.
+    private val hiddenStorage: eu.akoos.photos.data.hidden.HiddenStorageManager,
+    private val hiddenVaultEditor: eu.akoos.photos.data.hidden.HiddenVaultEditor,
     // Application-lifetime scope for the cloud upload that outlives the editor: it must keep running
     // after save() returns and the screen navigates away (viewModelScope is cancelled at that point).
     @eu.akoos.photos.di.AppScope private val appScope: CoroutineScope,
@@ -1343,11 +1348,57 @@ class PhotoEditorViewModel @Inject constructor(
         else -> "image/webp" // WEBP / WEBP_LOSSY / WEBP_LOSSLESS
     }
 
-    private fun saveLocal(bitmap: Bitmap, source: EditorSource.Local, mode: SaveMode, quality: Int, editTimestampMs: Long, dateTakenMs: Long): Uri? {
+    private suspend fun saveLocal(bitmap: Bitmap, source: EditorSource.Local, mode: SaveMode, quality: Int, editTimestampMs: Long, dateTakenMs: Long): Uri? {
         return when (mode) {
             SaveMode.Overwrite -> overwriteLocal(bitmap, source, quality)
-            SaveMode.Copy      -> insertLocalCopy(bitmap, source, quality, editTimestampMs = editTimestampMs, dateTakenMs = dateTakenMs)
+            // A copy of a vaulted photo stays in the vault. The MediaStore insert below would put the
+            // edited pixels of a photo the user hid into a plain visible file in the camera folder, which is
+            // the hide undone rather than a copy of it.
+            SaveMode.Copy      ->
+                if (hiddenStorage.isHiddenUri(source.uri))
+                    insertVaultCopy(bitmap, source, quality, editTimestampMs = editTimestampMs, dateTakenMs = dateTakenMs)
+                else
+                    insertLocalCopy(bitmap, source, quality, editTimestampMs = editTimestampMs, dateTakenMs = dateTakenMs)
         }
+    }
+
+    /**
+     * Writes the edited pixels as a SECOND vaulted photo, returning its `file://` uri, and leaves the
+     * one that was edited exactly as it is.
+     *
+     * The vault's own writer produces the file, so the copy is named the way every hidden photo is —
+     * a private code carrying its capture time, which is what the grid sorts on and what a reveal
+     * rebuilds DATE_TAKEN from — and the vault then records it as a hidden photo of its own, giving it
+     * the same name, folder and reveal every other one has.
+     */
+    private suspend fun insertVaultCopy(
+        bitmap: Bitmap,
+        source: EditorSource.Local,
+        quality: Int,
+        editTimestampMs: Long,
+        dateTakenMs: Long,
+    ): Uri? {
+        val copyUri = hiddenStorage.create("jpg", dateTakenMs) { out ->
+            bitmap.compress(Bitmap.CompressFormat.JPEG, quality, out)
+        } ?: error("Could not write the copy into the hidden area")
+        // Re-inject the source's EXIF so the copy is a metadata-complete twin except for the pixels,
+        // matching what a copy of any other device photo keeps.
+        val originalExif = ExifHelper.readExifSnapshot(context, source.uri)
+        if (originalExif != null) {
+            runCatching {
+                context.contentResolver.openFileDescriptor(Uri.parse(copyUri), "rw")?.use { pfd ->
+                    ExifHelper.copyExifPreservingOrientation(
+                        originalExif, pfd.fileDescriptor, bitmap.width, bitmap.height,
+                    )
+                }
+            }
+        }
+        hiddenVaultEditor.adoptCopy(
+            sourceUri = source.uri,
+            copyUri = copyUri,
+            displayName = HiddenVaultRecords.recordedName(stamp(source.displayName, editTimestampMs), "jpg"),
+        )
+        return Uri.parse(copyUri)
     }
 
     // Throws SecurityException on foreign URIs (caller recovers). No IS_PENDING dance — on a foreign
@@ -1703,11 +1754,15 @@ class PhotoEditorViewModel @Inject constructor(
             ?: return Triple(false, false, MetadataStripConfig())
         val stripOnUpload = prefs[SettingsKeys.STRIP_ON_UPLOAD] ?: false
         val mirrorStripToLocal = prefs[SettingsKeys.MIRROR_STRIP_TO_LOCAL] ?: false
+        // Authorship rides on the software setting exactly as in [UploadPendingUseCase]: the upload
+        // strip is driven by one preference, so both tag groups move together here too.
+        val stripSoftwareInfo = prefs[SettingsKeys.STRIP_SOFTWARE_INFO] ?: false
         val config = MetadataStripConfig(
             stripGps = prefs[SettingsKeys.STRIP_GPS] ?: false,
             stripCameraInfo = prefs[SettingsKeys.STRIP_CAMERA_INFO] ?: false,
             stripTimestamp = prefs[SettingsKeys.STRIP_TIMESTAMP] ?: false,
-            stripSoftwareInfo = prefs[SettingsKeys.STRIP_SOFTWARE_INFO] ?: false,
+            stripSoftwareInfo = stripSoftwareInfo,
+            stripAuthorship = stripSoftwareInfo,
         )
         return Triple(stripOnUpload, mirrorStripToLocal, config)
     }

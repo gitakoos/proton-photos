@@ -22,7 +22,6 @@
 
 package eu.akoos.photos.service
 
-import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
 import android.content.BroadcastReceiver
@@ -38,6 +37,7 @@ import android.os.IBinder
 import android.os.Looper
 import android.provider.MediaStore
 import android.util.Log
+import androidx.annotation.RequiresApi
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
@@ -46,6 +46,8 @@ import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import dagger.hilt.android.AndroidEntryPoint
 import eu.akoos.photos.R
+import eu.akoos.photos.data.notification.NotificationIds
+import eu.akoos.photos.data.notification.ensureNotificationChannel
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.usecase.PendingDeleteNotificationUseCase
@@ -201,6 +203,20 @@ class BackgroundSyncService : Service() {
         return START_STICKY
     }
 
+    /**
+     * Android 15 caps how long a `dataSync` foreground service may run within a rolling day and
+     * calls this once the app is out of budget. The service has seconds to stop itself before the
+     * platform kills the process with an ANR, and the inherited no-op spends them doing nothing, so
+     * stop here. [stopSelf] also drops the START_STICKY restart, which the platform would refuse to
+     * foreground for the rest of the window anyway; the periodic worker and the OS content-URI
+     * trigger keep backup running without this service.
+     */
+    @RequiresApi(Build.VERSION_CODES.VANILLA_ICE_CREAM)
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        Log.w(TAG, "dataSync foreground budget exhausted; stopping")
+        stopSelf()
+    }
+
     override fun onDestroy() {
         super.onDestroy()
         handler.removeCallbacksAndMessages(null)
@@ -286,9 +302,7 @@ class BackgroundSyncService : Service() {
     companion object {
         const val TAG = "bg_sync_service"
         const val CHANNEL_ID = "bg_sync_service"
-        // Distinct from SyncWorker (4243) and AlbumDownloadWorker (4242) so the foreground
-        // notifications don't collide.
-        const val NOTIFICATION_ID = 4244
+        const val NOTIFICATION_ID = NotificationIds.BACKGROUND_SYNC_SERVICE
 
         /** 5-second debounce — camera bursts (10 photos in 2 seconds) coalesce into one sync run. */
         private const val DEBOUNCE_MS = 5_000L
@@ -322,19 +336,14 @@ class BackgroundSyncService : Service() {
          * while still seeing per-upload progress, or vice versa.
          */
         fun ensureChannel(context: Context) {
-            val nm = context.getSystemService(NotificationManager::class.java) ?: return
-            if (nm.getNotificationChannel(CHANNEL_ID) != null) return
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                context.getString(R.string.bg_sync_service_channel_name),
-                NotificationManager.IMPORTANCE_LOW,
-            ).apply {
-                description = context.getString(R.string.bg_sync_service_channel_desc)
-                setShowBadge(false)
-                setSound(null, null)
-                enableVibration(false)
-            }
-            nm.createNotificationChannel(channel)
+            ensureNotificationChannel(
+                context,
+                id = CHANNEL_ID,
+                name = context.getString(R.string.bg_sync_service_channel_name),
+                description = context.getString(R.string.bg_sync_service_channel_desc),
+                importance = NotificationManager.IMPORTANCE_LOW,
+                silent = true,
+            )
         }
     }
 }

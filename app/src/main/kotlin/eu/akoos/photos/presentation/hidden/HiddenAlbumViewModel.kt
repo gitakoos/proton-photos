@@ -42,21 +42,26 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.update
+import eu.akoos.photos.domain.entity.SyncStatus
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import kotlinx.coroutines.Dispatchers
 import me.proton.core.accountmanager.domain.AccountManager
 import me.proton.core.domain.entity.UserId
-import eu.akoos.photos.data.hidden.HiddenStorageManager
+import eu.akoos.photos.R
+import eu.akoos.photos.data.hidden.HiddenFolderProgress
+import eu.akoos.photos.data.hidden.HiddenFolderRecords
+import eu.akoos.photos.data.hidden.HiddenVaultJournal
+import eu.akoos.photos.data.hidden.HiddenVaultRecords
+import eu.akoos.photos.data.hidden.HiddenVaultRestorer
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.LocalMediaItem
-import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.LocalMediaRepository
-import eu.akoos.photos.domain.repository.SyncStateRepository
+import eu.akoos.photos.presentation.albums.DeviceFolder
+import eu.akoos.photos.presentation.albums.DeviceFolderCards
 import eu.akoos.photos.util.friendlyNetworkError
 import eu.akoos.photos.util.sanitizeErrorMessage
 import javax.inject.Inject
@@ -71,15 +76,34 @@ data class HiddenAlbumUiState(
     /** Cloud albums the user hid client-side, resolved from HIDDEN_ALBUM_IDS to full cards
      *  so the vault can reveal and reopen them. Empty until the album source resolves. */
     val hiddenAlbums: List<Album> = emptyList(),
+    /** Device folders the user hid, resolved from HIDDEN_FOLDER_NAMES to the same cards the Albums
+     *  grid draws, so the vault can reveal and reopen them. Their photos are in the vault, so the
+     *  count and the cover come from what the vault recorded rather than from a device scan. */
+    val hiddenFolders: List<DeviceFolder> = emptyList(),
+    /** done/total of a folder being restored out of the vault, or null when none is. */
+    val folderRestore: HiddenFolderProgress? = null,
     /** Individually-hidden cloud photos, resolved from HIDDEN_CLOUD_PHOTO_IDS to displayable cards
      *  so the vault can show them, open them in the viewer, and unhide them. The id set is small, so
      *  CloudPhoto (already the lean display projection, no crypto material) is safe to hold here. */
     val hiddenCloudPhotos: List<CloudPhoto> = emptyList(),
-    /** hiddenUri → has-cloud-counterpart. Derived from HIDDEN_URI_CLOUD_ID_MAP at load
-     *  time so the cell can render a green cloud badge for hidden photos that are also
-     *  backed up — without this the user couldn't tell which hidden items are safe to
-     *  delete (cloud copy exists) vs which are device-only. */
+    /** The vaulted photos that still have a Drive copy, read live off the vault's own cloud-id
+     *  records so the cell can draw the green cloud over them. It is the one thing separating a photo
+     *  the user can get back from Drive from one whose only bytes are the vault file, which is what
+     *  makes deleting it here reversible or final. */
     val backedUpUris: Set<String> = emptySet(),
+    /**
+     * linkIds among [hiddenCloudPhotos] whose device copy is still sitting in the phone's gallery.
+     *
+     * Hiding a backed-up photo once meant filtering its cloud copy and leaving the device file where
+     * it was; it now moves that file into the vault. Both kinds survive an update and both stay
+     * hidden here, but only the newer kind is out of reach of the phone's other gallery apps. This
+     * set is what lets the screen say so instead of showing two different protections as one.
+     *
+     * The test is a `SYNCED` sync row against a hidden linkId: a vaulted photo's row reads `HIDDEN`,
+     * and a photo with no device copy at all has no local uri to pair, so `SYNCED` names exactly the
+     * one that still has its file on the device.
+     */
+    val looseDeviceCopyLinkIds: Set<String> = emptySet(),
     /** URIs the user has selected. Selection mode is active whenever this is non-empty. */
     val selectedUris: Set<String> = emptySet(),
     /** linkIds of individually-hidden cloud photos the user has selected. Shares the one selection
@@ -90,6 +114,14 @@ data class HiddenAlbumUiState(
 ) {
     val isSelectionMode: Boolean get() = selectedUris.isNotEmpty() || selectedCloudLinkIds.isNotEmpty()
     val selectedCount: Int get() = selectedUris.size + selectedCloudLinkIds.size
+
+    /** Every photo the grid can select: the device tiles plus the hidden cloud ones. The album and
+     *  folder cards are not photos, so they stay out of it. */
+    val selectableCount: Int get() = items.size + hiddenCloudPhotos.size
+
+    /** True once the selection holds every selectable photo, so the header's control can offer to
+     *  clear it instead. */
+    val allSelected: Boolean get() = selectableCount > 0 && selectedCount == selectableCount
 }
 
 @HiltViewModel
@@ -97,9 +129,10 @@ class HiddenAlbumViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val accountManager: AccountManager,
     private val localMediaRepo: LocalMediaRepository,
-    private val hiddenStorage: HiddenStorageManager,
-    private val syncStateRepo: SyncStateRepository,
+    private val hiddenVaultJournal: HiddenVaultJournal,
+    private val hiddenVaultRestorer: HiddenVaultRestorer,
     private val driveRepo: DrivePhotoRepository,
+    private val syncStateRepo: eu.akoos.photos.domain.repository.SyncStateRepository,
     private val networkObserver: eu.akoos.photos.util.NetworkObserver,
 ) : ViewModel() {
 
@@ -116,6 +149,17 @@ class HiddenAlbumViewModel @Inject constructor(
 
     /** Twin of [albumsJob] for the individually-hidden cloud-photo resolver, cancelled on [lock]. */
     private var cloudPhotosJob: Job? = null
+    private var looseCopiesJob: Job? = null
+
+    /** Twin of [albumsJob] for the hidden device-folder resolver, cancelled on [lock]. */
+    private var foldersJob: Job? = null
+
+    /** The running folder restore, so a second tap on the same card cannot start a parallel one. */
+    private var folderRestoreJob: Job? = null
+
+    /** Raised by [cancelFolderRestore] and polled between photos. A flag rather than a job cancel,
+     *  so the restore stops at a photo boundary and still clears the folder when it emptied. */
+    private val stopFolderRestore = java.util.concurrent.atomic.AtomicBoolean(false)
 
     /** Cached primary userId for the on-demand thumbnail-decrypt requests, kept fresh from the account flow. */
     @Volatile private var primaryUserId: UserId? = null
@@ -129,6 +173,8 @@ class HiddenAlbumViewModel @Inject constructor(
         observeHiddenPhotos()
         observeHiddenAlbums()
         observeHiddenCloudPhotos()
+        observeLooseDeviceCopies()
+        observeHiddenFolders()
     }
 
     fun onAuthenticationFailed() {
@@ -149,11 +195,17 @@ class HiddenAlbumViewModel @Inject constructor(
         albumsJob = null
         cloudPhotosJob?.cancel()
         cloudPhotosJob = null
+        looseCopiesJob?.cancel()
+        looseCopiesJob = null
+        foldersJob?.cancel()
+        foldersJob = null
         _uiState.value = _uiState.value.copy(
             isAuthenticated = false,
             items = emptyList(),
             hiddenAlbums = emptyList(),
+            hiddenFolders = emptyList(),
             hiddenCloudPhotos = emptyList(),
+            looseDeviceCopyLinkIds = emptySet(),
             selectedUris = emptySet(),
             selectedCloudLinkIds = emptySet(),
         )
@@ -161,8 +213,8 @@ class HiddenAlbumViewModel @Inject constructor(
 
     /**
      * Reactive observation of the hidden set. Every edit to [SettingsKeys.HIDDEN_PHOTO_URIS]
-     * or [SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] — whether from this VM's [hidePhoto] /
-     * [unhidePhoto], or from another VM (e.g. PhotoViewerViewModel's renameLocal which
+     * or [SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] — whether from this VM's [unhidePhoto],
+     * or from another VM (e.g. PhotoViewerViewModel's renameLocal which
      * swaps the URI in the set when a hidden file is renamed) — re-runs the resolution
      * pipeline and pushes a fresh list into [_uiState]. Kills the "stale until close +
      * re-open" symptom on rename / add / remove.
@@ -174,14 +226,26 @@ class HiddenAlbumViewModel @Inject constructor(
         observeJob?.cancel()
         _uiState.value = _uiState.value.copy(isLoading = true)
         observeJob = viewModelScope.launch {
+            // Repair whatever an interrupted hide left behind before the first read resolves, so a
+            // photo whose delete landed but whose record did not shows up here instead of sitting
+            // invisible until sign-out takes it. Runs once per process and writes through the same
+            // preferences the observer below collects, so any change it makes re-emits on its own.
+            hiddenVaultJournal.reconcile()
+            // The photos hidden on their own. One vaulted along with its whole folder is reached
+            // inside that folder's card below, so listing it here too would put the same photo on the
+            // screen twice; [HiddenFolderRecords.looseVaultedUris] is the one rule that splits them.
             val urisFlow = context.settingsDataStore.data
-                .map { it[SettingsKeys.HIDDEN_PHOTO_URIS] ?: emptySet() }
+                .map { prefs ->
+                    HiddenFolderRecords.looseVaultedUris(
+                        vaultedUris = prefs[SettingsKeys.HIDDEN_PHOTO_URIS] ?: emptySet(),
+                        sourceFolderEntries = prefs[SettingsKeys.HIDDEN_URI_SOURCE_FOLDER_MAP] ?: emptySet(),
+                        hiddenFolderNames = prefs[SettingsKeys.HIDDEN_FOLDER_NAMES] ?: emptySet(),
+                    )
+                }
                 .distinctUntilChanged()
             val backedUpFlow = context.settingsDataStore.data
                 .map { prefs ->
-                    (prefs[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] ?: emptySet())
-                        .map { it.substringBefore('|') }
-                        .toSet()
+                    HiddenVaultRecords.pairedUris(prefs[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] ?: emptySet())
                 }
                 .distinctUntilChanged()
             combine(urisFlow, backedUpFlow) { uris, backedUp -> uris to backedUp }
@@ -197,12 +261,17 @@ class HiddenAlbumViewModel @Inject constructor(
                     // code as the display name. Surface the original filename recorded at hide
                     // time instead, when one is present.
                     val nameMap = context.settingsDataStore.data.first()[SettingsKeys.HIDDEN_URI_ORIGINAL_NAME_MAP] ?: emptySet()
+                    // Newest first, matching the hidden cloud photos this same grid shows beside these
+                    // (PhotoStreamService.observePhotosByLinkIds orders on captureTime descending), so
+                    // one screen does not run on two orders. The stored set has no order of its own.
+                    // The sort is stable, so a vault entry old enough to record no capture time keeps a
+                    // fixed place instead of moving between reads.
                     val items = hiddenUris.mapNotNull { uri ->
                         localMediaRepo.queryByUri(uri)?.let { item ->
                             val original = nameMap.firstOrNull { it.startsWith("$uri|") }?.substringAfter('|')
                             if (!original.isNullOrBlank()) item.copy(displayName = original) else item
                         }
-                    }
+                    }.sortedByDescending { it.dateTaken }
                     _uiState.value = _uiState.value.copy(
                         items = items,
                         backedUpUris = backedUpUris,
@@ -263,6 +332,38 @@ class HiddenAlbumViewModel @Inject constructor(
      * can't overwrite the list. Unhiding a photo (its id leaves the set) drops its cell on the next
      * emission.
      */
+    /**
+     * Track which hidden cloud photos still have their device file on the phone.
+     *
+     * Runs off the same hidden-id set the cards are drawn from, joined against the sync rows, so the
+     * answer changes the moment either does: revealing a photo drops it, and vaulting its file flips
+     * its row off `SYNCED` and drops it too. Reads the lean sync rows the app already observes rather
+     * than touching MediaStore, so it costs nothing on a large library.
+     */
+    private fun observeLooseDeviceCopies() {
+        looseCopiesJob?.cancel()
+        looseCopiesJob = viewModelScope.launch {
+            val userId = accountManager.getPrimaryUserId().first() ?: return@launch
+            val hiddenIds = context.settingsDataStore.data
+                .map { it[SettingsKeys.HIDDEN_CLOUD_PHOTO_IDS] ?: emptySet() }
+                .distinctUntilChanged()
+            combine(hiddenIds, syncStateRepo.observeAll(userId)) { ids, states ->
+                if (ids.isEmpty()) {
+                    emptySet()
+                } else {
+                    states.asSequence()
+                        .filter { it.status == SyncStatus.SYNCED }
+                        .mapNotNull { it.cloudFileId }
+                        .filter { it in ids }
+                        .toSet()
+                }
+            }
+                .distinctUntilChanged()
+                .catch { emit(emptySet()) }
+                .collect { loose -> _uiState.update { it.copy(looseDeviceCopyLinkIds = loose) } }
+        }
+    }
+
     private fun observeHiddenCloudPhotos() {
         cloudPhotosJob?.cancel()
         cloudPhotosJob = viewModelScope.launch {
@@ -284,6 +385,81 @@ class HiddenAlbumViewModel @Inject constructor(
     }
 
     /**
+     * Resolve the hidden device-folder names into cards and keep the list live.
+     *
+     * Both the list and every count on it come from the vault's own records: the stored names say
+     * which folders are hidden, and the `"vaultUri|sourceFolder"` records say what the vault holds for
+     * each. A device scan cannot answer either question — a folder the vault holds entirely leaves no
+     * MediaStore row carrying its bucket name, and a row that IS still there after a hide belongs to a
+     * photo that was never hidden.
+     *
+     * An empty name set short-circuits: nothing is hidden in the common case, and there is no work to
+     * do for it.
+     */
+    private fun observeHiddenFolders() {
+        foldersJob?.cancel()
+        foldersJob = viewModelScope.launch {
+            context.settingsDataStore.data
+                .map { prefs ->
+                    val names = prefs[SettingsKeys.HIDDEN_FOLDER_NAMES] ?: emptySet()
+                    if (names.isEmpty()) emptyList() else DeviceFolderCards.hidden(
+                        hiddenNames = names,
+                        vaultedByFolder = HiddenFolderRecords.vaultedByBucket(
+                            sourceFolderEntries = prefs[SettingsKeys.HIDDEN_URI_SOURCE_FOLDER_MAP] ?: emptySet(),
+                            vaultedUris = prefs[SettingsKeys.HIDDEN_PHOTO_URIS] ?: emptySet(),
+                        ),
+                    )
+                }
+                .distinctUntilChanged()
+                .catch { emit(emptyList()) }
+                .collect { folders ->
+                    _uiState.value = _uiState.value.copy(hiddenFolders = folders)
+                }
+        }
+    }
+
+    /**
+     * Reveal a hidden device folder: every photo the vault holds for it returns to the device, then
+     * its name leaves [SettingsKeys.HIDDEN_FOLDER_NAMES] and its card returns to the Albums grid.
+     *
+     * A folder can hold thousands, so the work reports progress and [cancelFolderRestore] stops it.
+     * A stopped restore leaves the photos it already returned on the device and the rest in the
+     * vault, with the folder still listed here so they can be reached again.
+     */
+    fun unhideFolder(folderName: String) {
+        if (folderRestoreJob?.isActive == true) return
+        stopFolderRestore.set(false)
+        folderRestoreJob = viewModelScope.launch {
+            try {
+                val failed = hiddenVaultRestorer.restoreFolder(
+                    bucketName = folderName,
+                    onProgress = { done, total ->
+                        _uiState.value = _uiState.value.copy(
+                            folderRestore = HiddenFolderProgress(done, total, restoring = true),
+                        )
+                    },
+                    shouldStop = { stopFolderRestore.get() },
+                )
+                if (failed > 0) {
+                    _uiState.value = _uiState.value.copy(
+                        error = context.resources.getQuantityString(
+                            R.plurals.hidden_restore_failed_some, failed, failed,
+                        ),
+                    )
+                }
+            } finally {
+                _uiState.value = _uiState.value.copy(folderRestore = null)
+            }
+        }
+    }
+
+    /** Stop a folder restore between photos. Cooperative: the file in transit finishes returning to
+     *  the device rather than being interrupted half-written. */
+    fun cancelFolderRestore() {
+        stopFolderRestore.set(true)
+    }
+
+    /**
      * Reveal a hidden cloud album by dropping its linkId from [SettingsKeys.HIDDEN_ALBUM_IDS]. The
      * combine in [observeHiddenAlbums] re-emits on the edit, so the card leaves this section and the
      * album's photos return to the rest of the app. Mirrors [unhidePhoto]'s DataStore edit.
@@ -297,100 +473,27 @@ class HiddenAlbumViewModel @Inject constructor(
         }
     }
 
-    fun hidePhoto(uri: String) {
-        viewModelScope.launch {
-            context.settingsDataStore.edit { prefs ->
-                val current = prefs[SettingsKeys.HIDDEN_PHOTO_URIS] ?: emptySet()
-                prefs[SettingsKeys.HIDDEN_PHOTO_URIS] = current + uri
-            }
-            // No explicit reload — observeHiddenPhotos() is watching the set Flow and
-            // re-emits on the edit above.
-        }
-    }
-
+    /**
+     * Return one vaulted photo to the device. [HiddenVaultRestorer] owns the whole round trip — the
+     * recorded name, folder and cloud pairing — so a photo revealed from here, from the folder screen
+     * or by an undo comes back the same way.
+     *
+     * The in-memory display name is passed as a fallback for a vault entry old enough to have
+     * recorded none; without it the private code the file is stored under would land on the device.
+     *
+     * No explicit reload: the restorer's DataStore edit re-emits into [observeHiddenPhotos], which
+     * re-resolves the grid from the persisted set. A photo that could not be written back stays in
+     * the vault with everything it owns, so the only thing left to do is say so.
+     */
     fun unhidePhoto(uri: String) {
         viewModelScope.launch {
-            // Look up the cloud linkId we stashed at hide time so we can transplant the
-            // existing SyncState row onto the freshly-restored MediaStore URI — that's
-            // what keeps reconcile from treating the restored file as a brand-new local
-            // photo and re-uploading it as a duplicate Drive entry.
-            val cloudLinkId: String? = run {
-                val prefs = context.settingsDataStore.data.first()
-                val tokens = prefs[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] ?: emptySet()
-                tokens.firstOrNull { it.startsWith("$uri|") }?.substringAfter('|')
+            val restored = hiddenVaultRestorer.restorePhoto(
+                uri,
+                fallbackDisplayName = _uiState.value.items.firstOrNull { it.uri == uri }?.displayName,
+            )
+            if (!restored) {
+                _uiState.value = _uiState.value.copy(error = context.getString(R.string.hidden_restore_failed))
             }
-            // Source folder recorded at hide time so the file returns to where it came from
-            // instead of the Pictures/Movies root. Absent for items hidden before this map
-            // existed — restore then keeps its root default.
-            // Original filename recorded at hide time so the restored entry keeps its name.
-            // Absent for items hidden before this map existed — restore then generates a name.
-            val sourceFolder: String?
-            val storedName: String?
-            run {
-                val prefs = context.settingsDataStore.data.first()
-                sourceFolder = prefs[SettingsKeys.HIDDEN_URI_SOURCE_FOLDER_MAP]
-                    ?.firstOrNull { it.startsWith("$uri|") }
-                    ?.substringAfter('|')
-                storedName = prefs[SettingsKeys.HIDDEN_URI_ORIGINAL_NAME_MAP]
-                    ?.firstOrNull { it.startsWith("$uri|") }
-                    ?.substringAfter('|')
-            }
-            // If [uri] is an app-private hidden file, restore it to MediaStore so other gallery
-            // apps can see it again, then drop it from the hidden set.
-            var restoredUri: String? = null
-            if (hiddenStorage.isHiddenUri(uri)) {
-                // Prefer the name persisted at hide time — the in-memory item's displayName is
-                // derived from the private UUID file, so it would otherwise restore as a code.
-                val displayName = storedName ?: _uiState.value.items.firstOrNull { it.uri == uri }?.displayName
-                restoredUri = withContext(Dispatchers.IO) {
-                    hiddenStorage.restore(uri, displayName, albumFolderName = sourceFolder)
-                }
-            }
-            context.settingsDataStore.edit { prefs ->
-                val current = prefs[SettingsKeys.HIDDEN_PHOTO_URIS] ?: emptySet()
-                prefs[SettingsKeys.HIDDEN_PHOTO_URIS] = current - uri
-                val mapping = prefs[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] ?: emptySet()
-                prefs[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] = mapping.filterNot { it.startsWith("$uri|") }.toSet()
-                val folders = prefs[SettingsKeys.HIDDEN_URI_SOURCE_FOLDER_MAP] ?: emptySet()
-                prefs[SettingsKeys.HIDDEN_URI_SOURCE_FOLDER_MAP] = folders.filterNot { it.startsWith("$uri|") }.toSet()
-                val names = prefs[SettingsKeys.HIDDEN_URI_ORIGINAL_NAME_MAP] ?: emptySet()
-                prefs[SettingsKeys.HIDDEN_URI_ORIGINAL_NAME_MAP] = names.filterNot { it.startsWith("$uri|") }.toSet()
-            }
-            // Synced-photo round-trip: pull the OLD HIDDEN SyncState row (keyed on the
-            // pre-hide URI) forward onto the new MediaStore URI, status=SYNCED. Without
-            // this, the restored file has no SyncState — reconcile sees existingSync=null,
-            // can't match by id/hash, falls through to byName/byNameAndDate, and on any
-            // mismatch (e.g. drift across the hide cycle) starts a fresh upload.
-            if (cloudLinkId != null && restoredUri != null) {
-                runCatching {
-                    val userId = accountManager.getPrimaryUserId().first()
-                    val oldRow = syncStateRepo.getByCloudId(cloudLinkId)
-                    if (oldRow != null && userId != null) {
-                        // Drop the stale HIDDEN row (its localUri no longer exists on disk)
-                        // and write a fresh SYNCED row keyed on the new MediaStore URI,
-                        // carrying over the hash + backed-up timestamp so the row's history
-                        // (e.g. "last sync 3 days ago") doesn't reset. deleteLocalOnlyByUris
-                        // doesn't fit (status is HIDDEN here), so we re-key by upserting the
-                        // new row first then nuking the old localUri via the available
-                        // updateStatusAndDeleteLocal helper.
-                        syncStateRepo.upsert(
-                            oldRow.copy(
-                                localUri = restoredUri,
-                                status = SyncStatus.SYNCED,
-                            ),
-                            userId,
-                        )
-                        // Old HIDDEN row keyed on the dead URI — flip status so it stops
-                        // surfacing in any "hidden cloud" listings and gets cleaned up by
-                        // the next reconcile pass.
-                        syncStateRepo.updateStatusAndDeleteLocal(oldRow.localUri, SyncStatus.CLOUD_ONLY)
-                    }
-                }
-            }
-            // No explicit reload — the edit{} above triggers observeHiddenPhotos()'s
-            // combine to re-emit, which re-resolves the items list from the freshly
-            // persisted set. The previous in-place-filter / stale-cell race is gone
-            // because the recompute walks the persisted set every time.
         }
     }
 
@@ -453,6 +556,20 @@ class HiddenAlbumViewModel @Inject constructor(
         _uiState.value = _uiState.value.copy(selectedUris = emptySet(), selectedCloudLinkIds = emptySet())
     }
 
+    /** Select every photo the grid lists, across both groups, or clear the selection when it already
+     *  holds them all. The same one control the other grids put in their selection header. */
+    fun toggleSelectAll() {
+        val state = _uiState.value
+        _uiState.value = if (state.allSelected) {
+            state.copy(selectedUris = emptySet(), selectedCloudLinkIds = emptySet())
+        } else {
+            state.copy(
+                selectedUris = state.items.map { it.uri }.toSet(),
+                selectedCloudLinkIds = state.hiddenCloudPhotos.map { it.linkId }.toSet(),
+            )
+        }
+    }
+
     /**
      * Unhide every selected photo (device vault copies + individually-hidden cloud photos), then drop
      * the selection. Each per-photo path ([unhidePhoto] / [unhideCloudPhoto]) is idempotent on its
@@ -467,5 +584,43 @@ class HiddenAlbumViewModel @Inject constructor(
         uris.forEach { unhidePhoto(it) }
         cloudLinkIds.forEach { unhideCloudPhoto(it) }
         clearSelection()
+    }
+
+    /**
+     * Destroy every selected vault photo, bytes and records together.
+     *
+     * The hide removed the device original, so the vault copy is the whole photo and this cannot be
+     * undone — which is why the screen confirms first. [HiddenVaultRestorer.deletePhoto] is the one
+     * deleter, shared with the viewer, so a photo destroyed from here leaves exactly as little
+     * behind as one destroyed a page at a time.
+     *
+     * Only the device half of the selection is touched: a hidden cloud photo is a filter over a file
+     * that is still on Drive, so nothing here would be deleting it. The selection is dropped up
+     * front so the grid stops offering actions on photos already on their way out, and a photo that
+     * would not go says so with a count.
+     */
+    fun deleteSelectedVaulted() {
+        val uris = _uiState.value.selectedUris
+        if (uris.isEmpty()) return
+        clearSelection()
+        viewModelScope.launch {
+            var failed = 0
+            uris.forEach { uri ->
+                val gone = try {
+                    hiddenVaultRestorer.deletePhoto(uri)
+                } catch (e: Exception) {
+                    if (e is kotlinx.coroutines.CancellationException) throw e
+                    false
+                }
+                if (!gone) failed++
+            }
+            if (failed > 0) {
+                _uiState.value = _uiState.value.copy(
+                    error = context.resources.getQuantityString(
+                        R.plurals.hidden_delete_failed_some, failed, failed,
+                    ),
+                )
+            }
+        }
     }
 }

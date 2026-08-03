@@ -51,6 +51,18 @@ class SelectionState<K> {
     /** Replace the whole selection — the drag-to-select sweep paints the swept range through here. */
     fun set(keys: Set<K>) { _selected.value = keys }
 
+    /**
+     * Swap every selected key for [transform]'s answer, leaving membership as it stands.
+     *
+     * For a screen that selects whole items rather than ids: an action that changes the photos it
+     * ran on hands the changed copies back through here, so the selection describes them as they
+     * now are without the user having to re-pick them. Insertion order is kept, and anything
+     * selected while the action ran passes through [transform] like the rest.
+     */
+    fun mapEach(transform: (K) -> K) {
+        _selected.update { current -> current.mapTo(LinkedHashSet(current.size), transform) }
+    }
+
     /** Leave selection mode. */
     fun clear() { _selected.value = emptySet() }
 }

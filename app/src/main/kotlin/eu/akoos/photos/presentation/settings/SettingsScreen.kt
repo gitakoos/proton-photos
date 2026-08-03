@@ -175,6 +175,7 @@ fun SettingsScreen(
     onAccountClick: () -> Unit = {},
     onCheckForUpdatesClick: () -> Unit = {},
     onWhatsNewClick: () -> Unit = {},
+    onNewsClick: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -231,9 +232,17 @@ fun SettingsScreen(
             val perfSnapshot = eu.akoos.photos.util.PerfDiagnostics.snapshot(context)
             val perfBuffer = if (eu.akoos.photos.util.PerfDiagnostics.isEmpty()) ""
                 else eu.akoos.photos.util.PerfDiagnostics.dump()
+            // Whether the hidden vault's index, its files on disk and its pending hides agree, read
+            // when this chooser opened. Counts and byte totals only, like every section beside it, so
+            // it answers "is this vault consistent" without naming a single photo or folder.
+            val vault = state.vaultDiagnostics
             val body = buildString {
                 append("Performance:\n").append(perfSnapshot)
                 if (perfBuffer.isNotBlank()) append('\n').append(perfBuffer)
+                if (vault.isNotBlank()) {
+                    if (isNotEmpty()) append("\n\n")
+                    append("Vault:\n").append(vault)
+                }
                 if (sync.isNotBlank()) {
                     if (isNotEmpty()) append("\n\n")
                     append("Sync:\n").append(sync)
@@ -293,19 +302,6 @@ fun SettingsScreen(
                 }
             },
         )
-    }
-
-    // System delete dialog for "Free up space now" on Android 11+
-    val freeUpPermissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.StartIntentSenderForResult()
-    ) { result ->
-        if (result.resultCode == Activity.RESULT_OK) viewModel.onFreeUpPermissionGranted()
-        else viewModel.clearFreeUpIntent()
-    }
-    LaunchedEffect(state.freeUpPendingIntent) {
-        state.freeUpPendingIntent?.let { pi ->
-            freeUpPermissionLauncher.launch(IntentSenderRequest.Builder(pi.intentSender).build())
-        }
     }
 
     // Enabling the screenshot quick-action bar needs the draw-over-other-apps grant. When it is
@@ -569,23 +565,26 @@ fun SettingsScreen(
                     onClick = onAppearanceClick,
                 )
                 RowDivider()
-                // Manual update check, taps fire a forced (cache-bypassing) GitHub
-                // Releases query. The orchestrator surfaces the result either through
-                // the UpdatePromptDialog (new version) or a Toast (no update / network
-                // flake). The current versionName lives in the row description so the
-                // user can sanity-check what they're on without opening About.
                 NavRow(
-                    label = stringResource(R.string.update_check_settings_row),
-                    description = stringResource(
-                        R.string.update_check_settings_summary,
-                        BuildConfig.VERSION_NAME,
-                    ),
-                    onClick = onCheckForUpdatesClick,
+                    label = stringResource(R.string.settings_copy_diagnostics),
+                    description = stringResource(R.string.settings_copy_diagnostics_desc),
+                    onClick = {
+                        // The vault snapshot is read on demand, so ask for it as the chooser opens
+                        // rather than keeping a directory walk live behind every settings change.
+                        viewModel.refreshVaultDiagnostics()
+                        showDiagnosticsChooser = true
+                    },
                 )
-                RowDivider()
-                // Sits next to the update check because both answer a version question. Without
-                // this row the post-update screen is reachable exactly once, so tapping past it
-                // loses the highlights for good.
+            }
+            }
+
+            Spacer(Modifier.height(20.dp))
+
+            // ── About ──────────────────────────────────────────────────────────
+            // App identity, what's new, news, help, and the update check the version
+            // answers for, gathered as their own section rather than trailing the settings.
+            CollapsibleSection(label = stringResource(R.string.settings_section_about)) {
+            SettingsCard {
                 NavRow(
                     label = stringResource(R.string.whats_new_title),
                     description = stringResource(R.string.whats_new_history_desc),
@@ -593,9 +592,9 @@ fun SettingsScreen(
                 )
                 RowDivider()
                 NavRow(
-                    label = stringResource(R.string.about_title),
-                    description = stringResource(R.string.settings_about_desc),
-                    onClick = onAboutClick,
+                    label = stringResource(R.string.news_title),
+                    description = stringResource(R.string.news_settings_desc),
+                    onClick = onNewsClick,
                 )
                 RowDivider()
                 NavRow(
@@ -605,9 +604,18 @@ fun SettingsScreen(
                 )
                 RowDivider()
                 NavRow(
-                    label = stringResource(R.string.settings_copy_diagnostics),
-                    description = stringResource(R.string.settings_copy_diagnostics_desc),
-                    onClick = { showDiagnosticsChooser = true },
+                    label = stringResource(R.string.about_title),
+                    description = stringResource(R.string.settings_about_desc),
+                    onClick = onAboutClick,
+                )
+                RowDivider()
+                NavRow(
+                    label = stringResource(R.string.update_check_settings_row),
+                    description = stringResource(
+                        R.string.update_check_settings_summary,
+                        BuildConfig.VERSION_NAME,
+                    ),
+                    onClick = onCheckForUpdatesClick,
                 )
             }
             }
@@ -884,21 +892,11 @@ fun BackupNetworkSettingsScreen(
 fun StorageSettingsScreen(
     onBack: () -> Unit,
     onOpenTrash: (cloud: Boolean) -> Unit = {},
+    onFreeUpSpace: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val colors = AppColors.current
-    val freeUpPermissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.StartIntentSenderForResult()
-    ) { result ->
-        if (result.resultCode == Activity.RESULT_OK) viewModel.onFreeUpPermissionGranted()
-        else viewModel.clearFreeUpIntent()
-    }
-    LaunchedEffect(state.freeUpPendingIntent) {
-        state.freeUpPendingIntent?.let { pi ->
-            freeUpPermissionLauncher.launch(IntentSenderRequest.Builder(pi.intentSender).build())
-        }
-    }
     LaunchedEffect(Unit) { viewModel.refreshLocalStorage() }
 
     SettingsSubPageScaffold(title = stringResource(R.string.settings_storage_section), onBack = onBack) {
@@ -926,8 +924,7 @@ fun StorageSettingsScreen(
         Spacer(Modifier.height(8.dp))
         StorageContent(
             state = state,
-            isFreeingUp = state.isFreeingUp,
-            onFreeUp = { viewModel.freeUpNow() },
+            onFreeUp = onFreeUpSpace,
             onClearCache = { viewModel.clearAppCache() },
             onClearOffline = { viewModel.clearOfflineStorage() },
             onOpenTrash = onOpenTrash,
@@ -1595,7 +1592,6 @@ private val storageCardHeight = 134.dp
 @Composable
 private fun StorageContent(
     state: SettingsUiState,
-    isFreeingUp: Boolean = false,
     onFreeUp: () -> Unit = {},
     onClearCache: () -> Unit = {},
     onClearOffline: () -> Unit = {},
@@ -1664,7 +1660,7 @@ private fun StorageContent(
                 label = stringResource(R.string.settings_storage_device),
                 value = formatBytes(state.deviceFreeBytes),
                 detail = stringResource(R.string.settings_storage_device_free, formatBytes(state.deviceFreeBytes), formatBytes(deviceTotal)),
-                action = { StorageFreeUpAction(isFreeingUp = isFreeingUp, onFreeUp = onFreeUp) },
+                action = { StorageFreeUpAction(onFreeUp = onFreeUp) },
             )
             else -> StorageTrashCard(
                 label = stringResource(R.string.settings_recently_deleted),
@@ -1857,35 +1853,18 @@ private fun StorageClearAction(
     }
 }
 
-/** Reclaims on-device space used by already-backed-up copies; a short note explains it and a confirm
- *  guards it. The whole control is centered under the device gauge. */
+/** Opens the Free up space screen. The reclaim itself no longer starts from here: it permanently
+ *  deletes the device copy of potentially thousands of photos, and a confirm sheet asking about a
+ *  number is a weaker thing to agree to than the list of photos that screen shows first. The whole
+ *  control is centered under the device gauge. */
 @Composable
-private fun StorageFreeUpAction(isFreeingUp: Boolean, onFreeUp: () -> Unit) {
-    val colors = AppColors.current
-    var showConfirm by remember { mutableStateOf(false) }
-    if (isFreeingUp) {
-        Box(modifier = Modifier.size(58.dp), contentAlignment = Alignment.Center) {
-            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = colors.accent)
-        }
-    } else {
-        StorageActionSquare(
-            label = stringResource(R.string.settings_storage_free_up),
-            destructive = true,
-            enabled = true,
-            onClick = { showConfirm = true },
-        )
-    }
-    if (showConfirm) {
-        ConfirmDialog(
-            title = stringResource(R.string.settings_free_up_confirm_title),
-            message = stringResource(R.string.settings_free_up_confirm_message),
-            confirmLabel = stringResource(R.string.settings_free_up_action),
-            dismissLabel = stringResource(R.string.cancel),
-            onConfirm = { showConfirm = false; onFreeUp() },
-            onDismiss = { showConfirm = false },
-            destructive = true,
-        )
-    }
+private fun StorageFreeUpAction(onFreeUp: () -> Unit) {
+    StorageActionSquare(
+        label = stringResource(R.string.settings_storage_free_up),
+        destructive = true,
+        enabled = true,
+        onClick = onFreeUp,
+    )
 }
 
 @Composable

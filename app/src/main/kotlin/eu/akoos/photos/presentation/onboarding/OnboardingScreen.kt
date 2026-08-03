@@ -134,7 +134,7 @@ class OnboardingViewModel @Inject constructor(
      * Called from the permission-result callback.
      */
     fun onMediaPermissionChanged() {
-        localMediaRepo.notifyPermissionChanged()
+        localMediaRepo.notifyMediaChanged()
     }
 
     /**

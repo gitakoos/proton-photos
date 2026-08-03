@@ -199,13 +199,6 @@ fun TimelineLayoutScreen(
                 onCheckedChange = settingsViewModel::setSeamlessGrid,
             )
             RowDivider()
-            ToggleRow(
-                label = stringResource(R.string.settings_show_selection_labels),
-                description = stringResource(R.string.settings_show_selection_labels_desc),
-                checked = settings.showSelectionLabels,
-                onCheckedChange = settingsViewModel::setShowSelectionLabels,
-            )
-            RowDivider()
             // "On this day" memories carousel on the Photos tab — display toggle, default on.
             ToggleRow(
                 label = stringResource(R.string.gallery_on_this_day),

@@ -230,7 +230,7 @@ class CloudTrashService @Inject constructor(
                     val current = if (existing.tagsCsv.isEmpty()) emptySet()
                                   else existing.tagsCsv.split(',').mapNotNull { it.toIntOrNull() }.toSet()
                     val updated = if (favorite) current + 0 else current - 0
-                    photoListingDao.upsertAll(listOf(existing.copy(tagsCsv = updated.joinToString(","))))
+                    photoListingDao.upsertAll(listOf(existing.copy(tagsCsv = updated.sorted().joinToString(","))))
                 }
                 Log.d(TAG, "setCloudFavorite: linkId=${photo.linkId} favorite=$favorite OK")
                 true
@@ -522,34 +522,43 @@ class CloudTrashService @Inject constructor(
             // with a null NodeHashKey because the batch endpoint omitted the Folder DTO, which is
             // what makes the hash key below available on the first attempt.
             val rootLinkKeyBytes = shareService.getRootLinkKeyBytes(userId)
-                ?: error("Root link key unavailable")
+                ?: renameUnavailable("root link key unavailable")
             val rootLinkArmored = shareService.rootLinkArmoredKey()
-                ?: error("Root link armored key unavailable")
+                ?: renameUnavailable("root link armored key unavailable")
             val rootNodeHashKey = shareService.rootNodeHashKeyBytes()
-                ?: error("Root NodeHashKey unavailable")
+                ?: renameUnavailable("root NodeHashKey unavailable")
             val shareId = photo.shareId.ifEmpty { shareService.shareId().orEmpty() }
-            if (shareId.isEmpty()) error("Photos shareId unavailable")
+            if (shareId.isEmpty()) renameUnavailable("photos shareId unavailable")
 
             val detail = linkDetailHelpers
                 .batchFetchLinkDetails(userId, volumeId, listOf(photo.linkId))[photo.linkId]
-                ?: error("Photo not found on Drive")
+                ?: renameUnavailable("photo not found on Drive")
             val parent = renameParentFor(detail.link.parentLinkId, shareService.photosRootLinkId())
-            if (parent != RenameParent.PHOTOS_ROOT) error("This photo cannot be renamed in place")
+            if (parent != RenameParent.PHOTOS_ROOT) renameUnavailable("photo is not parented to the photos root")
 
             // OriginalHash is recomputed from the photo's own decrypted name rather than echoed
             // back from the server's Hash, so it lands in the same hash-space as newHash below. A
             // stored Hash computed under a different key answers a different question, and the
             // server rejects the pair as out of date.
-            val currentEncryptedName = detail.link.name ?: error("Photo has no encrypted name")
+            val currentEncryptedName = detail.link.name ?: renameUnavailable("photo has no encrypted name")
             val currentPlainName = cryptoHelper.decryptLinkName(currentEncryptedName, rootLinkKeyBytes)
-                ?: error("Could not read the photo's current name")
+                ?: renameUnavailable("current name could not be read")
             val originalHash = cryptoHelper.computeNameHash(currentPlainName, rootNodeHashKey)
 
             val rootPublicKey = cryptoHelper.withCryptoLock {
                 cryptoContext.pgpCrypto.getPublicKey(rootLinkArmored)
             }
             val signingKey = cryptoHelper.getAddressSigningKey(userId)
-            val newEncryptedName = cryptoHelper.encryptName(trimmed, rootPublicKey, signingKey.unlockedKeyBytes)
+            // The new name rides the CURRENT name's session key, recovered with the same root key
+            // that just read the old one. A link Name's session key is what any share of that link
+            // hands its recipients, so it has to outlive every rename (#88).
+            val newEncryptedName = cryptoHelper.renameNamePreservingSessionKey(
+                oldNameArmored = currentEncryptedName,
+                oldDecryptKeyBytes = rootLinkKeyBytes,
+                newPlaintextName = trimmed,
+                parentPublicKeyArmored = rootPublicKey,
+                signerKeyBytes = signingKey.unlockedKeyBytes,
+            )
             val newHash = cryptoHelper.computeNameHash(trimmed, rootNodeHashKey)
 
             suspend fun send(withOriginalHash: String) {
@@ -655,4 +664,17 @@ class CloudTrashService @Inject constructor(
         )
         uploadService.uploadFile(userId, item, hash, fileUri)
     }
+}
+
+/**
+ * Rename cannot go ahead, for a reason only a log can use.
+ *
+ * These messages are written here in English and the rename sheet renders whatever message it is
+ * given, so throwing them with text put untranslated developer strings in front of every user. The
+ * throw carries no message, which is what makes the sheet fall back to its own translated line, and
+ * [why] goes to the log where a bug report can still pick it up.
+ */
+private fun renameUnavailable(why: String): Nothing {
+    Log.w(TAG, "rename unavailable: $why")
+    throw IllegalStateException()
 }

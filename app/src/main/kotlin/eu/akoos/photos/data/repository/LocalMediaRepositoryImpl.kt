@@ -56,7 +56,13 @@ import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.entity.LocalMediaItem
 import eu.akoos.photos.domain.repository.LocalMediaRepository
-import eu.akoos.photos.util.DownloadDateOverride
+import eu.akoos.photos.util.CaptureDateOverride
+import eu.akoos.photos.util.HiddenCaptureTime
+import eu.akoos.photos.util.LocalTagPrune
+import eu.akoos.photos.util.FolderCoverMap
+import eu.akoos.photos.util.MediaScanCoverage
+import eu.akoos.photos.util.forEachSqlChunk
+import eu.akoos.photos.util.mimeFromPath
 import eu.akoos.photos.worker.SyncWorker
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -70,14 +76,15 @@ class LocalMediaRepositoryImpl @Inject constructor(
 
     // Manual refresh trigger merged with the MediaStore ContentObserver. Permission grants do
     // not fire onChange, so without this the gallery would stay empty after first grant until
-    // the user restarts the app.
+    // the user restarts the app. A change to a side store the scan reads rides the same trigger,
+    // the provider having no event for it either.
     private val refreshTrigger = MutableSharedFlow<Unit>(
         replay = 0,
         extraBufferCapacity = 1,
         onBufferOverflow = BufferOverflow.DROP_OLDEST,
     )
 
-    override fun notifyPermissionChanged() {
+    override fun notifyMediaChanged() {
         refreshTrigger.tryEmit(Unit)
     }
 
@@ -204,24 +211,19 @@ class LocalMediaRepositoryImpl @Inject constructor(
         if (parsedUri.scheme == "file") {
             val file = parsedUri.path?.let { java.io.File(it) } ?: return@withContext null
             if (!file.exists()) return@withContext null
-            val ext = file.extension.lowercase()
-            val mime = when (ext) {
-                "jpg", "jpeg" -> "image/jpeg"
-                "png" -> "image/png"
-                "heic", "heif" -> "image/heic"
-                "webp" -> "image/webp"
-                "gif" -> "image/gif"
-                "mp4", "m4v" -> "video/mp4"
-                "mov" -> "video/quicktime"
-                "webm" -> "video/webm"
-                "mkv" -> "video/x-matroska"
-                "avi" -> "video/x-msvideo"
-                else -> ""
-            }
+            // The same extension-to-type map every write against an app-private file reads, so what a
+            // screen offers for a vaulted photo and what the write then does with it cannot disagree.
+            val mime = mimeFromPath(file.name)
             return@withContext LocalMediaItem(
                 uri         = uri,
-                dateTaken   = file.lastModified(),
-                displayName = file.name,
+                // The capture time the vault recorded in the name, which is the only place it
+                // survives (see [HiddenCaptureTime]). The file's modified time is the moment the
+                // copy was written, so it stands in only for an entry whose name records nothing.
+                dateTaken   = HiddenCaptureTime.parse(file.name) ?: file.lastModified(),
+                // Without the capture time the vault keeps in the name: that suffix is the vault's own
+                // bookkeeping, and a rename field prefilled with it puts it back into the name the user
+                // ends up with.
+                displayName = HiddenCaptureTime.strip(file.name),
                 mimeType    = mime,
                 sizeBytes   = file.length(),
                 bucketName  = "Hidden",
@@ -264,6 +266,55 @@ class LocalMediaRepositoryImpl @Inject constructor(
         }
     }
 
+    override suspend fun queryByBucket(bucketName: String): List<LocalMediaItem> =
+        withContext(Dispatchers.IO) {
+            if (bucketName.isBlank()) return@withContext emptyList()
+            if (!checkMediaPermission()) return@withContext emptyList()
+
+            val projection = arrayOf(
+                MediaStore.MediaColumns._ID,
+                MediaStore.MediaColumns.DATE_TAKEN,
+                MediaStore.MediaColumns.DATE_ADDED,
+                MediaStore.MediaColumns.DISPLAY_NAME,
+                MediaStore.MediaColumns.MIME_TYPE,
+                MediaStore.MediaColumns.SIZE,
+                MediaStore.Images.Media.BUCKET_DISPLAY_NAME,
+                MediaStore.MediaColumns.WIDTH,
+                MediaStore.MediaColumns.HEIGHT,
+                MediaStore.MediaColumns.DURATION,
+            )
+            // The bucket is bound as an argument rather than spliced into the selection, so a folder
+            // named with a quote is matched rather than breaking the statement. IS_PENDING is held to
+            // finished rows: a file still mid-write has no bytes to act on yet.
+            val selection = "${MediaStore.Images.Media.BUCKET_DISPLAY_NAME} = ? AND " +
+                "${MediaStore.MediaColumns.IS_PENDING} = 0"
+            val args = arrayOf(bucketName)
+            // Capture-date overrides, the same map the full scan applies, so a folder read here dates
+            // its photos exactly as the timeline does. Only read, never pruned: proving a row deleted
+            // needs the whole device, which is precisely what this query does not look at.
+            val dateOverrides: Map<String, CaptureDateOverride.Entry> = CaptureDateOverride.parse(
+                runCatching { context.settingsDataStore.data.first() }.getOrNull()
+                    ?.get(SettingsKeys.DOWNLOAD_DATE_OVERRIDES),
+            )
+
+            val result = mutableListOf<LocalMediaItem>()
+            for (uri in listOf(
+                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+            )) {
+                try {
+                    context.contentResolver.query(uri, projection, selection, args, null)?.use { cursor ->
+                        while (cursor.moveToNext()) {
+                            result += cursor.toLocalMediaItem(baseUri = uri, dateOverrides = dateOverrides)
+                        }
+                    }
+                } catch (e: Exception) {
+                    if (e is kotlinx.coroutines.CancellationException) throw e
+                }
+            }
+            result.sortedByDescending { it.dateTaken }
+        }
+
     private suspend fun queryAllMedia(): List<LocalMediaItem> = withContext(Dispatchers.IO) {
         if (!checkMediaPermission()) return@withContext emptyList()
 
@@ -276,12 +327,21 @@ class LocalMediaRepositoryImpl @Inject constructor(
         val tagCache: Map<String, LocalTagEntity> =
             runCatching { localTagDao.getAll().associateBy { it.uri } }.getOrDefault(emptyMap())
 
-        // Capture-date overrides for downloads whose MediaStore DATE_TAKEN could not be persisted
-        // (a PNG/WebP the provider refuses; see SettingsKeys.DOWNLOAD_DATE_OVERRIDES). Loaded once per
-        // scan and applied per row when the column reads 0; pruned below once the live uris are known.
-        val dateOverrides: Map<String, Long> = runCatching {
-            DownloadDateOverride.parse(context.settingsDataStore.data.first()[SettingsKeys.DOWNLOAD_DATE_OVERRIDES])
-        }.getOrNull() ?: emptyMap()
+        // One snapshot of the store for the two uri-keyed preferences this scan prunes, so a large
+        // library pays for a single read. A read failure degrades to "nothing stored", which prunes
+        // nothing rather than pruning wrongly.
+        val scanPrefs = runCatching { context.settingsDataStore.data.first() }.getOrNull()
+
+        // Capture-date overrides for files whose MediaStore DATE_TAKEN is missing or wrong (a PNG/WebP
+        // the provider refuses; see SettingsKeys.DOWNLOAD_DATE_OVERRIDES). Applied per row ahead of
+        // the column; pruned below once the live uris are known.
+        val dateOverrides: Map<String, CaptureDateOverride.Entry> =
+            CaptureDateOverride.parse(scanPrefs?.get(SettingsKeys.DOWNLOAD_DATE_OVERRIDES))
+
+        // Device-folder covers the user pinned, keyed by bucket name. Read here only to be pruned:
+        // the folder card and the folder hero resolve their own cover from the same preference.
+        val pinnedFolderCovers: Map<String, String> =
+            FolderCoverMap.parse(scanPrefs?.get(SettingsKeys.FOLDER_COVER_URI_MAP))
 
         val projection = arrayOf(
             MediaStore.MediaColumns._ID,
@@ -306,6 +366,12 @@ class LocalMediaRepositoryImpl @Inject constructor(
         val selection = "${MediaStore.MediaColumns.IS_PENDING} <= 1"
         val sortOrder = "${MediaStore.MediaColumns.DATE_TAKEN} DESC, ${MediaStore.MediaColumns.DATE_ADDED} DESC"
 
+        // The collection roots this scan actually enumerated. A root joins the list only once its
+        // cursor has been drained, so a denied permission (images and videos are separate grants from
+        // Android 13) or a provider failure leaves it out, so the tag prune below knows those rows
+        // are unproven rather than deleted.
+        val scannedRoots = mutableListOf<String>()
+
         for (uri in listOf(
             MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
             MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
@@ -317,25 +383,67 @@ class LocalMediaRepositoryImpl @Inject constructor(
                             baseUri = uri, tagCache = tagCache, dateOverrides = dateOverrides,
                         )
                     }
+                    scannedRoots += uri.toString()
                 }
             } catch (e: Exception) {
                 // Skip inaccessible URIs
             }
         }
 
-        // Prune override entries whose file is gone, so the map can't grow without bound. Only open the
-        // DataStore edit when a stale entry actually exists.
-        if (dateOverrides.isNotEmpty()) {
-            val liveUris = result.mapTo(HashSet()) { it.uri }
-            if (dateOverrides.keys.any { it !in liveUris }) {
-                runCatching {
-                    context.settingsDataStore.edit { prefs ->
-                        val current = prefs[SettingsKeys.DOWNLOAD_DATE_OVERRIDES] ?: emptySet()
-                        DownloadDateOverride.prune(current, liveUris)?.let {
-                            prefs[SettingsKeys.DOWNLOAD_DATE_OVERRIDES] = it
-                        }
+        // Every uri-keyed side store below needs this scan's live uris to spot a row whose file is
+        // gone. Built once and shared, and skipped entirely when no store holds anything, so a
+        // large library does not pay for a set nothing reads.
+        val liveUris: Set<String> =
+            if (dateOverrides.isEmpty() && tagCache.isEmpty() && pinnedFolderCovers.isEmpty()) emptySet()
+            else result.mapTo(HashSet(result.size)) { it.uri }
+
+        // Prune override entries whose file is gone, so the map can't grow without bound — but only
+        // where THIS scan proves the file is gone, which is the rule in [MediaScanCoverage]. An entry
+        // is the only place a downloaded PNG or WebP keeps its capture date (#34), so a scan that
+        // failed outright, or that never got past the images collection on a videos-denied device,
+        // must leave what it could not see alone. Only open the DataStore edit when something
+        // qualifies.
+        val staleOverrideUris = MediaScanCoverage.provenDeleted(dateOverrides.keys, liveUris, scannedRoots)
+        if (staleOverrideUris.isNotEmpty()) {
+            runCatching {
+                context.settingsDataStore.edit { prefs ->
+                    val current = prefs[SettingsKeys.DOWNLOAD_DATE_OVERRIDES] ?: emptySet()
+                    CaptureDateOverride.dropUris(current, staleOverrideUris.toSet())?.let {
+                        prefs[SettingsKeys.DOWNLOAD_DATE_OVERRIDES] = it
                     }
                 }
+            }
+        }
+
+        // Same rule for the pinned device-folder covers: a cover whose photo this scan proves is gone
+        // names nothing, so the entry goes and the folder falls back to its newest photo. A photo
+        // merely moved out of its folder is still live, so its entry stays and only the fallback at
+        // the read sites hides it — which is what keeps a move from discarding a deliberate choice.
+        val stalePinnedCovers = MediaScanCoverage.provenDeleted(pinnedFolderCovers.values, liveUris, scannedRoots)
+        if (stalePinnedCovers.isNotEmpty()) {
+            runCatching {
+                context.settingsDataStore.edit { prefs ->
+                    val current = prefs[SettingsKeys.FOLDER_COVER_URI_MAP] ?: emptySet()
+                    FolderCoverMap.dropUris(current, stalePinnedCovers.toSet())?.let {
+                        prefs[SettingsKeys.FOLDER_COVER_URI_MAP] = it
+                    }
+                }
+            }
+        }
+
+        // Same for the category-tag cache, which otherwise keeps a row per file the device ever held.
+        // It adds a guard of its own on top of the shared rule; see [LocalTagPrune]. The row set is the
+        // one already read above, so this adds no query. The delete is chunked because a long-lived
+        // library can strand more uris than SQLite will bind in one statement. A failure only means the
+        // table stays large for now, and the next scan retries.
+        if (tagCache.isNotEmpty()) {
+            val staleTagUris = LocalTagPrune.staleUris(
+                cachedUris = tagCache.keys,
+                liveUris = liveUris,
+                scannedRoots = scannedRoots,
+            ) { tagCache[it]?.userTagsCsv.orEmpty() }
+            if (staleTagUris.isNotEmpty()) {
+                runCatching { staleTagUris.forEachSqlChunk { localTagDao.deleteByUris(it) } }
             }
         }
 
@@ -397,7 +505,7 @@ class LocalMediaRepositoryImpl @Inject constructor(
     private fun android.database.Cursor.toLocalMediaItem(
         baseUri: Uri? = null,
         tagCache: Map<String, LocalTagEntity> = emptyMap(),
-        dateOverrides: Map<String, Long> = emptyMap(),
+        dateOverrides: Map<String, CaptureDateOverride.Entry> = emptyMap(),
     ): LocalMediaItem {
         val idCol        = getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
         val dateTakenCol = getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_TAKEN)
@@ -417,11 +525,13 @@ class LocalMediaRepositoryImpl @Inject constructor(
         val uriString    = contentUri.toString()
         val rawDateTaken = getLong(dateTakenCol)
         val dateAdded    = getLong(dateAddedCol)
-        // DATE_TAKEN is authoritative when MediaStore set it. When it left the column 0 (e.g. a
-        // downloaded PNG, whose DATE_TAKEN write MediaStore refuses), a download may have recorded the
-        // real capture date against this uri — prefer that over the file's added date so the photo
-        // keeps its true date even after its cloud twin is deleted.
-        val dateTaken    = DownloadDateOverride.resolveDateTaken(rawDateTaken, dateOverrides[uriString], dateAdded)
+        // A recorded override is read first: it exists only where the stored date was established to be
+        // missing or wrong (a downloaded PNG whose DATE_TAKEN write MediaStore refuses, or a file whose
+        // column disagrees with its own EXIF), so it is the better value wherever it is present. The
+        // column comes next, and the file's added time is the last resort.
+        val dateTaken    = CaptureDateOverride.resolveDateTaken(
+            rawDateTaken, dateOverrides[uriString]?.captureMs, dateAdded,
+        )
         val dateModified = if (dateModCol >= 0) getLong(dateModCol) else 0L
         val sizeBytes    = getLong(sizeCol)
 
@@ -446,10 +556,17 @@ class LocalMediaRepositoryImpl @Inject constructor(
         // A cache entry counts only while the file is unchanged: same DATE_MODIFIED AND same
         // size. Any drift means the file was replaced (edited, re-saved) so its old tags are
         // discarded and re-detection happens out of band via the tag scheduler.
-        val cachedTags = tagCache[uriString]
+        val cacheEntry = tagCache[uriString]
+        val cachedTags = cacheEntry
             ?.takeIf { it.dateModified == dateModified && it.sizeBytes == sizeBytes }
             ?.tags()
             ?: emptySet()
+        // The user's own choice rides the same row, so it costs no extra read. It deliberately
+        // skips the freshness gate above: that key belongs to the detection, and a row written for
+        // a file the scanner has not reached yet carries zeros there, which match no live
+        // MediaStore row. Gating the choice on it would hide every category picked ahead of a scan,
+        // and re-hide it each time the file changes, though the choice is still the user's.
+        val userTags = cacheEntry?.userTags() ?: emptySet()
 
         return LocalMediaItem(
             uri         = uriString,
@@ -463,6 +580,7 @@ class LocalMediaRepositoryImpl @Inject constructor(
             duration    = if (durationCol >= 0) getLong(durationCol) else 0L,
             dateModified = dateModified,
             tags        = cachedTags,
+            userTags    = userTags,
             dateTakenIsExplicit = rawDateTaken > 0 || uriString in dateOverrides,
         )
     }

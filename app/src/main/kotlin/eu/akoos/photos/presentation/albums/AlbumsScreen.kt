@@ -49,6 +49,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -58,25 +59,37 @@ import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowDownward
+import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.FileDownload
+import androidx.compose.material.icons.filled.HideImage
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.outlined.Collections
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.SheetState
+import androidx.compose.material3.rememberModalBottomSheetState
+import eu.akoos.photos.presentation.common.ActionSheetRow
+import eu.akoos.photos.presentation.common.ActionSheetSectionHeading
 import eu.akoos.photos.presentation.common.ConfirmDialog
+import eu.akoos.photos.presentation.common.EditFieldSheet
 import eu.akoos.photos.presentation.common.IconBubble
 import eu.akoos.photos.presentation.common.ScrollScrubber
-import eu.akoos.photos.presentation.theme.ErrorColor
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -103,6 +116,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -119,6 +133,8 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.usecase.moveInArrangement
+import eu.akoos.photos.presentation.folders.DeviceFolderActionsSheet
+import eu.akoos.photos.presentation.folders.DeviceFolderOpenAction
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import eu.akoos.photos.R
@@ -129,7 +145,6 @@ import eu.akoos.photos.presentation.theme.FgDim
 import eu.akoos.photos.presentation.theme.FgMute
 import eu.akoos.photos.presentation.theme.FgPrimary
 import eu.akoos.photos.presentation.theme.Line2
-import eu.akoos.photos.presentation.theme.PillBg
 import eu.akoos.photos.presentation.theme.PillBgOpaque
 import eu.akoos.photos.presentation.theme.PillBorder
 
@@ -218,7 +233,23 @@ fun AlbumsScreen(
     topPadding: Dp = 0.dp,
     gridState: LazyGridState = rememberLazyGridState(),
     onAlbumClick: (Album) -> Unit = {},
+    /** Opens an album the user owns with its share drawer already up, from the long-press sheet.
+     *  Sharing is bound to the album screen's own state, so the quick action routes there rather
+     *  than mounting a second copy of that flow on the grid. */
+    onAlbumShareClick: (Album) -> Unit = {},
+    /** Opens an album to carry out one action on arrival, from the long-press sheet. The three rows
+     *  that need the album's members route there rather than resolving a whole album's worth of
+     *  links on this grid, and the album screen already carries the confirmation, the progress and
+     *  the cancel each of them reports through. */
+    onAlbumActionClick: (Album, AlbumOpenAction) -> Unit = { _, _ -> },
     onDeviceFolderClick: (bucketName: String) -> Unit = {},
+    /** Opens a device folder to carry out one action on arrival, from the long-press sheet. The two
+     *  actions that need the folder's photos route there rather than pulling a whole library's worth
+     *  of items into this grid. */
+    onDeviceFolderActionClick: (bucketName: String, action: DeviceFolderOpenAction) -> Unit = { _, _ -> },
+    /** Takes a device folder's card off this grid and moves its photos into the vault, where the user
+     *  pressed. The host runs it and shows its progress, so hiding a folder goes nowhere. */
+    onHideDeviceFolder: (bucketName: String) -> Unit = {},
     onMemoriesClick: () -> Unit = {},
     /** Increments each time the Albums-tab header "New album" pill is tapped; opens the create
      *  dialog. The in-grid New album row opens it directly, so 0 (no external trigger) is fine. */
@@ -275,7 +306,13 @@ fun AlbumsScreen(
     // Cloud-album long-press surfaces a Rename + Delete bottom sheet. Holding the in-flight
     // Album object directly so we can read the current name + linkId without a second lookup.
     var cloudAlbumSheetFor by remember { mutableStateOf<Album?>(null) }
+    val cloudAlbumSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var cloudAlbumRenameFor by remember { mutableStateOf<Album?>(null) }
+
+    // A device-folder card answers the same long press, opening the drawer the folder's own screen
+    // carries so its preferences and its order are reachable from the grid too.
+    var deviceFolderSheetFor by remember { mutableStateOf<DeviceFolder?>(null) }
+    val deviceFolderSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     /** Collect an [AlbumActionResult] flow once and snackbar the outcome. */
     suspend fun handleAlbumActionFlow(
@@ -313,6 +350,9 @@ fun AlbumsScreen(
     } else {
         state.visibleCloudAlbums
     }
+    // Folders whose card the user hid are off the grid, exactly as a hidden cloud album is. The
+    // folder itself is untouched and its photos stay in the timeline; only the card goes.
+    val deviceFolders = state.visibleDeviceFolders
     LaunchedEffect(reorderMode) {
         arrangedIds = if (reorderMode) albums.map { it.linkId } else emptyList()
     }
@@ -426,7 +466,7 @@ fun AlbumsScreen(
 
                 // Nothing matches the active filter → centred empty state.
                 !(displayFilter != eu.akoos.photos.presentation.gallery.AlbumDisplayFilter.Local && albums.isNotEmpty()) &&
-                    !(displayFilter != eu.akoos.photos.presentation.gallery.AlbumDisplayFilter.Cloud && state.deviceFolders.isNotEmpty()) ->
+                    !(displayFilter != eu.akoos.photos.presentation.gallery.AlbumDisplayFilter.Cloud && deviceFolders.isNotEmpty()) ->
                     Column(
                         modifier = Modifier
                             .align(Alignment.Center)
@@ -542,8 +582,22 @@ fun AlbumsScreen(
                                                         }
                                                     },
                                                     onDragCancel = {
-                                                        draggedAlbumId = null
-                                                        dragOffset = Offset.Zero
+                                                        // The reorder lands as the pointer moves, so a
+                                                        // cancelled gesture has already changed what the
+                                                        // user sees. Saving matches the screen; skipping
+                                                        // it left the card in its new slot until the next
+                                                        // repaint quietly put it back.
+                                                        //
+                                                        // Guarded like onDragEnd: this also fires when the
+                                                        // card simply leaves the grid, and scrolling while
+                                                        // arranging is expected. Unguarded it saved for a
+                                                        // card nobody dragged, which switches the album
+                                                        // sort to Custom behind the user's back.
+                                                        if (draggedAlbumId == album.linkId) {
+                                                            draggedAlbumId = null
+                                                            dragOffset = Offset.Zero
+                                                            saveArrangement()
+                                                        }
                                                     },
                                                 ) { change, drag ->
                                                     change.consume()
@@ -558,7 +612,7 @@ fun AlbumsScreen(
                         }
                         if (displayFilter != eu.akoos.photos.presentation.gallery.AlbumDisplayFilter.Cloud) {
                             items(
-                                state.deviceFolders,
+                                deviceFolders,
                                 key = { "devfolder_${it.name}" },
                             ) { folder ->
                                 UnifiedAlbumCard(
@@ -569,6 +623,7 @@ fun AlbumsScreen(
                                     ),
                                     isDeviceFolder = true,
                                     onClick = { onDeviceFolderClick(folder.name) },
+                                    onLongClick = { deviceFolderSheetFor = folder },
                                 )
                             }
                         }
@@ -673,13 +728,14 @@ fun AlbumsScreen(
         var albumName by remember { mutableStateOf("") }
         ModalBottomSheet(
             onDismissRequest = { showCreateDialog = false; albumName = "" },
-            containerColor = AppColors.current.cardBg,
+            containerColor = Bg2,
             scrimColor = Color.Black.copy(alpha = 0.5f),
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 24.dp)
+                    .navigationBarsPadding()
+                    .padding(horizontal = 20.dp)
                     .padding(bottom = 36.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
@@ -728,86 +784,85 @@ fun AlbumsScreen(
     }
 
     // ── Cloud-album long-press action sheet ──────────────────────────────────
-    // Rename + Delete sheet — delete maps to the existing albumToDelete confirm path,
-    // rename opens the dialog below which calls renameCloudAlbum via the action-flow helper.
+    // Share hands the album to the host, which opens it with its share drawer up. Delete maps to the
+    // existing albumToDelete confirm path, and rename opens the sheet below which calls
+    // renameCloudAlbum via the action-flow helper. The three rows that run on the album's members
+    // hand it over with an intent instead, for the album screen to carry out on arrival.
     cloudAlbumSheetFor?.let { album ->
         CloudAlbumActionSheet(
             album = album,
+            sheetState = cloudAlbumSheetState,
+            sortMode = state.albumPhotoSortMode,
+            isHiddenFromTimeline = AlbumTimelineHide.isExcluded(state.timelineExcludedAlbumIds, album.linkId),
             onDismiss = { cloudAlbumSheetFor = null },
-            onRename = {
-                cloudAlbumSheetFor = null
-                cloudAlbumRenameFor = album
-            },
-            onHide = {
-                cloudAlbumSheetFor = null
-                viewModel.hideAlbum(album.linkId)
-            },
-            onReorder = {
-                cloudAlbumSheetFor = null
-                reorderMode = true
-            },
-            onDelete = {
-                cloudAlbumSheetFor = null
-                albumToDelete = album
-            },
+            onShare = { onAlbumShareClick(album) },
+            onRename = { cloudAlbumRenameFor = album },
+            onToggleHiddenFromTimeline = { viewModel.toggleAlbumHiddenFromTimeline(album.linkId) },
+            onHide = { viewModel.hideAlbum(album.linkId) },
+            onReorder = { reorderMode = true },
+            onDelete = { albumToDelete = album },
+            onSortSelected = viewModel::setAlbumPhotoSortMode,
+            onOpenAction = { action -> onAlbumActionClick(album, action) },
         )
     }
 
-    // ── Cloud-album rename dialog ────────────────────────────────────────────
-    cloudAlbumRenameFor?.let { album ->
-        var newName by remember(album.linkId) { mutableStateOf(album.name) }
-        // Resolved here (composable scope) so the scope.launch lambdas below — which run off
-        // the composition — can format it without calling stringResource in a non-composable.
-        val renamedToTemplate = stringResource(R.string.albums_renamed_to)
-        AlertDialog(
-            onDismissRequest = { cloudAlbumRenameFor = null },
-            containerColor = AppColors.current.cardBg,
-            titleContentColor = AppColors.current.fgPrimary,
-            title = { Text(stringResource(R.string.album_rename), fontWeight = FontWeight.SemiBold) },
-            text = {
-                OutlinedTextField(
-                    value = newName,
-                    onValueChange = { newName = it },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                    keyboardActions = KeyboardActions(onDone = {
-                        val target = newName.trim()
-                        cloudAlbumRenameFor = null
-                        scope.launch {
-                            handleAlbumActionFlow(
-                                actionFlow = viewModel.renameCloudAlbum(album.linkId, album.name, target),
-                                doneMessage = renamedToTemplate.format(target),
-                            )
-                        }
-                    }),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = AppColors.current.fgPrimary,
-                        unfocusedTextColor = AppColors.current.fgPrimary,
-                        cursorColor = Accent,
-                        focusedBorderColor = Accent,
-                        unfocusedBorderColor = AppColors.current.fgDim,
-                    ),
-                    modifier = Modifier.fillMaxWidth(),
+    // ── Device-folder long-press action sheet ────────────────────────────────
+    // The folder screen's own drawer, offering the same rows. The grid holds a cover and a count per
+    // bucket, not a photo list, so the rows that need the whole folder in hand — the back-up and the
+    // slideshow, which want the player too — hand the folder to its own screen with the action to
+    // carry out on arrival. The hide stays here: it resolves the one bucket it acts on and reports
+    // through the host's progress pill, so taking a card off this grid never leaves it. The rest are
+    // the per-folder preferences and the sort direction, each writing the same key the folder screen
+    // and Settings write.
+    deviceFolderSheetFor?.let { folder ->
+        DeviceFolderActionsSheet(
+            sheetState = deviceFolderSheetState,
+            folderName = folder.name,
+            isMirroredAsAlbum = folder.name in state.folderPrefs.mirroredAsAlbum,
+            isExcludedFromBackup = folder.name in state.folderPrefs.excludedFromBackup,
+            isHiddenFromTimeline = folder.name in state.folderPrefs.hiddenFromTimeline,
+            // A card on this grid stands for photos that are on the device, so its hide row always
+            // puts something away and is never already done — even where the vault holds more of the
+            // same folder from an earlier hide.
+            isHiddenCard = false,
+            sortMode = state.folderPrefs.sortMode,
+            onDismiss = { deviceFolderSheetFor = null },
+            onBackUp = { asMirror ->
+                onDeviceFolderActionClick(
+                    folder.name,
+                    if (asMirror) DeviceFolderOpenAction.BackUpAndMirror
+                    else DeviceFolderOpenAction.BackUpToTimeline,
                 )
             },
-            confirmButton = {
-                TextButton(
-                    enabled = newName.isNotBlank() && newName.trim() != album.name,
-                    onClick = {
-                        val target = newName.trim()
-                        cloudAlbumRenameFor = null
-                        scope.launch {
-                            handleAlbumActionFlow(
-                                actionFlow = viewModel.renameCloudAlbum(album.linkId, album.name, target),
-                                doneMessage = renamedToTemplate.format(target),
-                            )
-                        }
-                    },
-                ) { Text(stringResource(R.string.album_rename_confirm), color = Accent, fontWeight = FontWeight.SemiBold) }
-            },
-            dismissButton = {
-                TextButton(onClick = { cloudAlbumRenameFor = null }) {
-                    Text(stringResource(R.string.cancel), color = AppColors.current.fgDim)
+            onSlideshow = { onDeviceFolderActionClick(folder.name, DeviceFolderOpenAction.Slideshow) },
+            onToggleMirrorAsAlbum = { viewModel.toggleFolderMirrorAsAlbum(folder.name) },
+            onToggleExcludedFromBackup = { viewModel.toggleFolderExcludedFromBackup(folder.name) },
+            onToggleHiddenFromTimeline = { viewModel.toggleFolderHiddenFromTimeline(folder.name) },
+            onToggleHiddenCard = { onHideDeviceFolder(folder.name) },
+            onSortSelected = viewModel::setDeviceFolderSortMode,
+        )
+    }
+
+    // ── Cloud-album rename sheet ─────────────────────────────────────────────
+    cloudAlbumRenameFor?.let { album ->
+        // Resolved here (composable scope) so the scope.launch lambda below — which runs off
+        // the composition — can format it without calling stringResource in a non-composable.
+        val renamedToTemplate = stringResource(R.string.albums_renamed_to)
+        EditFieldSheet(
+            title = stringResource(R.string.album_rename),
+            hint = stringResource(R.string.albums_create_album_hint),
+            initialValue = album.name,
+            singleLine = true,
+            confirmLabel = stringResource(R.string.album_rename_confirm),
+            canConfirm = { AlbumRenameInput.isAcceptable(it, album.name) },
+            onDismiss = { cloudAlbumRenameFor = null },
+            onSave = { entered ->
+                val target = entered.trim()
+                scope.launch {
+                    handleAlbumActionFlow(
+                        actionFlow = viewModel.renameCloudAlbum(album.linkId, album.name, target),
+                        doneMessage = renamedToTemplate.format(target),
+                    )
                 }
             },
         )
@@ -816,97 +871,204 @@ fun AlbumsScreen(
 }
 
 /**
- * Bottom sheet that opens on long-press of a cloud album card. Rows: Rename, Hide, Reorder, Delete.
+ * Bottom sheet that opens on long-press of a cloud album card. It offers what the album's own drawer
+ * offers, so the shortest route to an album's actions is not the poorer one: add photos, share,
+ * download all, slideshow, rename, hide, reorder, sort, delete.
+ *
+ * Sections follow the app's action-sheet taxonomy: what runs on the album's photos, then the album's
+ * settings, then the sort, then what cannot be undone below a rule. The sort direction is one global
+ * choice every album shares, so [sortMode] is the direction in force rather than this album's own.
+ *
+ * Who is looking decides several of them: share, download, rename and delete belong to the owner,
+ * matching what the album's own drawer offers a guest, so a shared album shows what is still the
+ * guest's to make. Hide is one of those: it writes a client-side id set, so a guest hiding a shared
+ * album takes the card out of their own grid and touches neither Drive nor the owner. Keeping the
+ * album's photos out of the main feed is the weaker choice beside it, on its own id set: the card
+ * stays on the grid and the photos stay in search, on the map, in the calendar and in every picker,
+ * so it carries a tick and reverses on a second tap. Adding follows
+ * the album's write grant rather than ownership, which is what lets an editor contribute. Reorder is
+ * the odd one out: it acts on the grid rather than on this album, and is here because the press that
+ * opens this sheet is the same press a rearrangement starts from.
+ *
+ * The three [AlbumOpenAction] rows leave through [onOpenAction] instead of acting here: each of them
+ * runs on the album's members, which this grid never holds, and each reports through a confirmation,
+ * a progress pill or a picker that belongs to the album screen. An empty album drops the two that
+ * would have nothing to work on and keeps the one that fills it.
+ *
  * Cloud rename is wired through `AlbumsViewModel.renameCloudAlbum` which round-trips through
  * `DrivePhotoRepository.renameAlbum`. Hide is client-side only via `AlbumsViewModel.hideAlbum`.
- * Reorder is the odd one out: it acts on the grid rather than on this album, and is here because
- * the press that opens this sheet is the same press a rearrangement starts from.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun CloudAlbumActionSheet(
     album: Album,
+    sheetState: SheetState,
+    sortMode: AlbumPhotoSortMode,
+    /** True while this album's photos are kept out of the main feed. About the photos, which
+     *  [onHide] is not: that one takes the album itself out of every list. */
+    isHiddenFromTimeline: Boolean,
     onDismiss: () -> Unit,
+    onShare: () -> Unit,
     onRename: () -> Unit,
+    onToggleHiddenFromTimeline: () -> Unit,
     onHide: () -> Unit,
     onReorder: () -> Unit,
     onDelete: () -> Unit,
+    onSortSelected: (AlbumPhotoSortMode) -> Unit,
+    onOpenAction: (AlbumOpenAction) -> Unit,
 ) {
     val colors = AppColors.current
+    val scope = rememberCoroutineScope()
+    // Slide the drawer away before the action lands, so the rename sheet or the delete confirmation
+    // never opens behind a sheet that is still on screen.
+    fun close(action: () -> Unit) {
+        scope.launch { sheetState.hide() }.invokeOnCompletion {
+            onDismiss()
+            action()
+        }
+    }
+
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        containerColor = colors.cardBg,
+        sheetState = sheetState,
+        containerColor = colors.bg2,
         scrimColor = Color.Black.copy(alpha = 0.5f),
     ) {
+        // Height-capped + scroll so a short device never clips the last row.
+        val maxSheetHeight = (LocalConfiguration.current.screenHeightDp * 0.8f).dp
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .heightIn(max = maxSheetHeight)
+                .verticalScroll(rememberScrollState())
                 .navigationBarsPadding()
                 .padding(horizontal = 20.dp)
                 .padding(bottom = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
+            // Gaps are the explicit spacers alone, the same 8dp between rows and 20dp above a
+            // heading its two sibling drawers keep.
             Text(
                 "\"${album.name}\"",
                 color = colors.fgPrimary,
-                fontSize = 17.sp,
+                fontSize = 18.sp,
                 fontWeight = FontWeight.SemiBold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(top = 8.dp, bottom = 4.dp),
+                modifier = Modifier.padding(top = 8.dp, bottom = 16.dp),
             )
-            Spacer(Modifier.height(16.dp))
-            AlbumActionRow(
-                icon = Icons.Default.Edit,
-                label = stringResource(R.string.album_rename),
-                tint = Accent,
-                onClick = onRename,
-            )
-            Spacer(Modifier.height(8.dp))
-            AlbumActionRow(
-                icon = Icons.Default.VisibilityOff,
-                label = stringResource(R.string.albums_hide_album),
-                tint = Accent,
-                onClick = onHide,
-            )
-            Spacer(Modifier.height(8.dp))
-            AlbumActionRow(
-                icon = Icons.Default.DragHandle,
-                label = stringResource(R.string.albums_reorder),
-                tint = Accent,
-                onClick = onReorder,
-            )
-            Spacer(Modifier.height(8.dp))
-            AlbumActionRow(
-                icon = Icons.Default.DeleteOutline,
-                label = stringResource(R.string.delete_button_permanently),
-                tint = ErrorColor,
-                onClick = onDelete,
-            )
-        }
-    }
-}
 
-@Composable
-private fun AlbumActionRow(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    label: String,
-    tint: Color,
-    onClick: () -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(PillBg)
-            .border(0.5.dp, PillBorder, RoundedCornerShape(12.dp))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Icon(icon, null, tint = tint, modifier = Modifier.size(20.dp))
-        Text(label, color = AppColors.current.fgPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+            // A guest's drawer on an album they can neither add to nor play holds nothing that runs
+            // on the photos, and drops this group rather than heading an empty one.
+            val hasPhotoActions =
+                album.canAddPhotos || !album.isSharedWithMe || album.photoCount > 0
+            if (hasPhotoActions) {
+                ActionSheetSectionHeading(
+                    stringResource(R.string.action_sheet_actions_heading),
+                    first = true,
+                )
+                if (album.canAddPhotos) {
+                    ActionSheetRow(
+                        icon = Icons.Default.Add,
+                        title = stringResource(R.string.album_add_photos),
+                        onClick = { close { onOpenAction(AlbumOpenAction.AddPhotos) } },
+                    )
+                }
+                if (!album.isSharedWithMe) {
+                    if (album.canAddPhotos) Spacer(Modifier.height(8.dp))
+                    // Ticked once the album is shared, the same mark the album's own drawer carries.
+                    ActionSheetRow(
+                        icon = Icons.Default.Share,
+                        title = stringResource(R.string.albums_share_button),
+                        onClick = { close(onShare) },
+                        showCheck = album.isShared,
+                    )
+                    // A guest's copy of an album is saved from the Shared tab, which owns that flow
+                    // and its wording, so this stays the owner's plain download.
+                    if (album.photoCount > 0) {
+                        Spacer(Modifier.height(8.dp))
+                        ActionSheetRow(
+                            icon = Icons.Default.FileDownload,
+                            title = stringResource(R.string.albums_download_all),
+                            onClick = { close { onOpenAction(AlbumOpenAction.DownloadAll) } },
+                        )
+                    }
+                }
+                if (album.photoCount > 0) {
+                    if (album.canAddPhotos || !album.isSharedWithMe) Spacer(Modifier.height(8.dp))
+                    ActionSheetRow(
+                        icon = Icons.Default.PlayArrow,
+                        title = stringResource(R.string.viewer_play_slideshow),
+                        onClick = { close { onOpenAction(AlbumOpenAction.Slideshow) } },
+                    )
+                }
+            }
+
+            // Hide and reorder are on every card, so this group is never empty.
+            ActionSheetSectionHeading(
+                stringResource(R.string.action_sheet_settings_heading),
+                first = !hasPhotoActions,
+            )
+            if (!album.isSharedWithMe) {
+                ActionSheetRow(
+                    icon = Icons.Default.Edit,
+                    title = stringResource(R.string.album_rename),
+                    onClick = { close(onRename) },
+                )
+                Spacer(Modifier.height(8.dp))
+            }
+            // The weaker of the two hides, and the one that carries a tick: it writes the same
+            // per-album key the Settings picker does, so the state is the current one wherever it
+            // was set. The row below is the stronger action and stays a one-way choice.
+            ActionSheetRow(
+                icon = Icons.Default.HideImage,
+                title = stringResource(R.string.device_folder_hide_from_timeline),
+                onClick = { close(onToggleHiddenFromTimeline) },
+                showCheck = isHiddenFromTimeline,
+            )
+            Spacer(Modifier.height(8.dp))
+            ActionSheetRow(
+                icon = Icons.Default.VisibilityOff,
+                title = stringResource(R.string.albums_hide_album),
+                onClick = { close(onHide) },
+            )
+            Spacer(Modifier.height(8.dp))
+            ActionSheetRow(
+                icon = Icons.Default.DragHandle,
+                title = stringResource(R.string.albums_reorder),
+                onClick = { close(onReorder) },
+            )
+
+            ActionSheetSectionHeading(stringResource(R.string.albums_sort_heading))
+            AlbumPhotoSortMode.entries.forEachIndexed { index, mode ->
+                if (index > 0) Spacer(Modifier.height(8.dp))
+                ActionSheetRow(
+                    icon = when (mode) {
+                        AlbumPhotoSortMode.NewestFirst -> Icons.Default.ArrowDownward
+                        AlbumPhotoSortMode.OldestFirst -> Icons.Default.ArrowUpward
+                    },
+                    title = stringResource(
+                        when (mode) {
+                            AlbumPhotoSortMode.NewestFirst -> R.string.sort_newest_first
+                            AlbumPhotoSortMode.OldestFirst -> R.string.sort_oldest_first
+                        },
+                    ),
+                    onClick = { close { onSortSelected(mode) } },
+                    showCheck = mode == sortMode,
+                )
+            }
+
+            if (!album.isSharedWithMe) {
+                // Deleting takes the album off Drive, so it keeps the rule above it and the red
+                // treatment it carries everywhere else.
+                HorizontalDivider(color = colors.line2, modifier = Modifier.padding(vertical = 16.dp))
+                ActionSheetRow(
+                    icon = Icons.Default.DeleteOutline,
+                    title = stringResource(R.string.delete_button_permanently),
+                    onClick = { close(onDelete) },
+                    destructive = true,
+                )
+            }
+        }
     }
 }
 

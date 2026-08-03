@@ -467,6 +467,53 @@ class AppDatabaseMigrationTest {
     }
 
     @Test
+    fun migrate_v20_to_v21_addsUserTagsCsvColumn_withEmptyDefault_preservesDetections() {
+        // The fixture comes from the real migration that created local_tag rather than hand-written
+        // SQL, so it cannot drift from the schema MIGRATION_20_21 has to alter.
+        Migrations.MIGRATION_8_9.migrate(db)
+        db.execSQL(
+            """
+            INSERT INTO local_tag (uri, dateModified, sizeBytes, tagsCsv, scannedAt)
+            VALUES ('content://media/external/images/media/1', 1700, 2048, '1,4', 9000),
+                   ('content://media/external/images/media/2', 1800, 4096, '', 9100)
+            """.trimIndent()
+        )
+
+        Migrations.MIGRATION_20_21.migrate(db)
+
+        // Every detection survives, and neither row claims a choice nobody made. Empty is the only
+        // honest state here: the column beside it holds what a detector guessed, so a backfill from
+        // it would dress that guess up as a decision the user never took.
+        db.query("SELECT uri, dateModified, sizeBytes, tagsCsv, scannedAt, userTagsCsv FROM local_tag ORDER BY uri")
+            .use { cur ->
+                assertTrue("expected the seeded rows to survive the migration", cur.moveToFirst())
+                assertEquals("content://media/external/images/media/1", cur.getString(0))
+                assertEquals(1700L, cur.getLong(1))
+                assertEquals(2048L, cur.getLong(2))
+                assertEquals("the detected tags are untouched", "1,4", cur.getString(3))
+                assertEquals(9000L, cur.getLong(4))
+                assertEquals("userTagsCsv must default to empty string", "", cur.getString(5))
+
+                assertTrue(cur.moveToNext())
+                assertEquals("content://media/external/images/media/2", cur.getString(0))
+                assertEquals("a row that detected nothing has no user choice either", "", cur.getString(5))
+            }
+
+        // The new column is writable, and writing it leaves the detection columns exactly as they are.
+        db.execSQL(
+            "UPDATE local_tag SET userTagsCsv = '2,8' WHERE uri = 'content://media/external/images/media/1'"
+        )
+        db.query(
+            "SELECT tagsCsv, scannedAt, userTagsCsv FROM local_tag WHERE uri = 'content://media/external/images/media/1'"
+        ).use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals("1,4", cur.getString(0))
+            assertEquals(9000L, cur.getLong(1))
+            assertEquals("2,8", cur.getString(2))
+        }
+    }
+
+    @Test
     fun migrate_v2_through_v4_chain_appliesBothMigrations() {
         // Seed a pure v2 row.
         db.execSQL(

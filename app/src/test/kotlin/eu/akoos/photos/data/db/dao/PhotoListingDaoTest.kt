@@ -245,6 +245,45 @@ class PhotoListingDaoTest {
     }
 
     @Test
+    fun `observeOwnStreamPickerRows returns stream photos newest first and skips a direct album child`() = runTest {
+        // The widget picker's pool, held to the same own-stream rule: a photo that lives only inside
+        // an album someone shared is never offered as widget content, and the order is the query's.
+        dao.upsertAll(listOf(
+            entity("ordinary", captureTime = 300L),
+            ownAlbumEntity("in-my-album", captureTime = 200L),
+            contributedEntity("contributed", captureTime = 100L),
+            sharedAlbumEntity("shared"),
+        ))
+
+        val rows = dao.observeOwnStreamPickerRows("user1").first()
+
+        assertEquals(listOf("ordinary", "in-my-album"), rows.map { it.linkId })
+    }
+
+    @Test
+    fun `observeOwnStreamPickerRows carries the decrypted thumbnail url`() = runTest {
+        // The one column the timeline projection drops and this one must not: the picker has no primed
+        // in-memory store to read an already-decrypted thumbnail from.
+        dao.upsertAll(listOf(
+            entity("warm").copy(thumbnailUrl = "file:///cache/thumb_warm.jpg"),
+            entity("cold", captureTime = 100L),
+        ))
+
+        val rows = dao.observeOwnStreamPickerRows("user1").first()
+
+        assertEquals("file:///cache/thumb_warm.jpg", rows.first { it.linkId == "warm" }.thumbnailUrl)
+        assertNull(rows.first { it.linkId == "cold" }.thumbnailUrl)
+    }
+
+    @Test
+    fun `observeOwnStreamPickerRows filters by userId`() = runTest {
+        dao.upsertAll(listOf(entity("link1", "user1"), entity("link2", "user2")))
+
+        assertEquals(listOf("link1"), dao.observeOwnStreamPickerRows("user1").first().map { it.linkId })
+        assertEquals(listOf("link2"), dao.observeOwnStreamPickerRows("user2").first().map { it.linkId })
+    }
+
+    @Test
     fun `observeOwnStream is unchanged when the album membership edges are gone`() = runTest {
         // The regression this column exists for. While the rule was "parent is an album that has at
         // least one membership edge", an album with no cached edges named no album at all, and every

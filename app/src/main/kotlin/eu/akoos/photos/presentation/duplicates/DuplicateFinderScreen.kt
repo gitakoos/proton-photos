@@ -494,7 +494,21 @@ private fun DuplicateGroupCard(
         AlertDialog(
             onDismissRequest = { showConfirm = false },
             title = { Text(stringResource(R.string.duplicates_confirm_title)) },
-            text = { Text(stringResource(R.string.duplicates_confirm_message)) },
+            text = {
+                // A backed-up photo in the cloud section carries its device file with it, because
+                // leaving that file behind would only have the next backup upload it again and put
+                // the duplicate straight back. The user is told so here rather than finding out from
+                // an empty spot in their gallery.
+                val takesDeviceCopyToo = group.items.any {
+                    it.stableId in removeIds && it is GalleryItem.Synced
+                }
+                Text(
+                    stringResource(
+                        if (takesDeviceCopyToo) R.string.duplicates_confirm_message_synced
+                        else R.string.duplicates_confirm_message
+                    )
+                )
+            },
             confirmButton = {
                 TextButton(onClick = {
                     showConfirm = false

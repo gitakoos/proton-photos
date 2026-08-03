@@ -42,11 +42,13 @@ import eu.akoos.photos.presentation.settings.components.ToggleRow
 import eu.akoos.photos.presentation.theme.AppColors
 
 /**
- * Opt-out switches for the three notification categories the app posts: the persistent
- * "Photo backup" foreground-service notification, album download progress, and the
- * delete-after-backup reminder. Every switch starts ON (the keys default to shown) so a
- * user only ever turns a notification off here, never has to turn one on to keep current
- * behaviour.
+ * Opt-out switches for the notification categories the app posts: the persistent "Photo backup"
+ * foreground-service notification, album download progress, the delete-after-backup reminder, and
+ * the new-version notice. Every switch starts ON (the keys default to shown) so a user only ever
+ * turns a notification off here, never has to turn one on to keep current behaviour.
+ *
+ * The last one reaches past the notification: it also arms the periodic check that finds the new
+ * version in the first place, so turning it off stops the background work rather than muting it.
  */
 @Composable
 fun NotificationSettingsScreen(
@@ -85,6 +87,13 @@ fun NotificationSettingsScreen(
                 description = stringResource(R.string.notifications_delete_reminder_desc),
                 checked = state.deleteReminder,
                 onCheckedChange = viewModel::setDeleteReminder,
+            )
+            RowDivider()
+            ToggleRow(
+                label = stringResource(R.string.notifications_update_available),
+                description = stringResource(R.string.notifications_update_available_desc),
+                checked = state.updateAvailable,
+                onCheckedChange = viewModel::setUpdateAvailable,
             )
         }
 

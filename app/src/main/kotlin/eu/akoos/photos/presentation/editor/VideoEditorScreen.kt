@@ -36,6 +36,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.systemGestureExclusion
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -123,10 +124,10 @@ import eu.akoos.photos.presentation.common.rememberVideoFilmstripFrames
 import eu.akoos.photos.presentation.editor.components.SaveOptionRow
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.Bg0
+import eu.akoos.photos.presentation.theme.Bg2
 import eu.akoos.photos.presentation.theme.FgDim
 import eu.akoos.photos.presentation.theme.FgMute
 import eu.akoos.photos.presentation.theme.FgPrimary
-import eu.akoos.photos.presentation.theme.PanelBg
 import eu.akoos.photos.presentation.theme.PanelChip
 import eu.akoos.photos.presentation.theme.TrackBg
 import eu.akoos.photos.presentation.util.formatVideoTime
@@ -202,24 +203,9 @@ fun VideoEditorScreen(
     // during composition leaves the ModalBottomSheet half-dismissed and the user has to
     // re-tap save. Firing the effect after composition lets the sheet animate out as the
     // screen pops normally.
-    //
-    // Gate on pendingDeleteIntent: if the VM surfaced an OS delete-consent dialog
-    // (Synced + Overwrite-fallback-Copy case), wait for it to resolve before navigating
-    // so the system prompt isn't built while the screen pops out from under it.
-    androidx.compose.runtime.LaunchedEffect(state.saveResult, state.pendingDeleteIntent) {
-        if (state.pendingDeleteIntent != null) return@LaunchedEffect
+    androidx.compose.runtime.LaunchedEffect(state.saveResult) {
         when (state.saveResult) {
             is VideoSaveResult.Success -> {
-                showSaveSheet = false
-                vm.consumeSaveResult()
-                onSaved()
-            }
-            is VideoSaveResult.SuccessAsCopy -> {
-                android.widget.Toast.makeText(
-                    context,
-                    context.getString(R.string.editor_saved_as_copy_toast),
-                    android.widget.Toast.LENGTH_LONG,
-                ).show()
                 showSaveSheet = false
                 vm.consumeSaveResult()
                 onSaved()
@@ -256,37 +242,6 @@ fun VideoEditorScreen(
             ).show()
             vm.consumeSavedAsCopy()
         }
-    }
-
-    // System consent dialog for overwriting foreign MediaStore URIs — same pattern as
-    // PhotoEditorScreen. The video VM surfaces a PendingIntent the first time an
-    // Overwrite on a camera-roll item throws SecurityException; we launch it and feed
-    // the user's choice back into onWritePermission{Granted,Denied}.
-    val writePermissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
-        androidx.activity.result.contract.ActivityResultContracts.StartIntentSenderForResult(),
-    ) { result ->
-        if (result.resultCode == android.app.Activity.RESULT_OK) vm.onWritePermissionGranted()
-        else vm.onWritePermissionDenied()
-    }
-    androidx.compose.runtime.LaunchedEffect(state.pendingWriteIntent) {
-        val pi = state.pendingWriteIntent ?: return@LaunchedEffect
-        writePermissionLauncher.launch(
-            androidx.activity.result.IntentSenderRequest.Builder(pi.intentSender).build()
-        )
-    }
-
-    // OS consent dialog for deleting the original device file after a Synced + Overwrite
-    // fallback-to-Copy. The VM surfaces createDeleteRequest's PendingIntent; on either
-    // Allow or Deny the system has actioned the choice by the callback, so we just clear
-    // the pending state and let the saveResult Effect proceed.
-    val deletePermissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
-        androidx.activity.result.contract.ActivityResultContracts.StartIntentSenderForResult(),
-    ) { _ -> vm.onDeletePermissionResolved() }
-    androidx.compose.runtime.LaunchedEffect(state.pendingDeleteIntent) {
-        val pi = state.pendingDeleteIntent ?: return@LaunchedEffect
-        deletePermissionLauncher.launch(
-            androidx.activity.result.IntentSenderRequest.Builder(pi.intentSender).build()
-        )
     }
 
     // Hoisted ExoPlayer at the SCREEN level so it survives tab swaps. The previous
@@ -590,7 +545,7 @@ fun VideoEditorScreen(
         ModalBottomSheet(
             onDismissRequest = { if (!state.isSaving) showSaveSheet = false },
             sheetState = saveSheetState,
-            containerColor = PanelBg,
+            containerColor = Bg2,
             scrimColor = Color.Black.copy(alpha = 0.5f),
         ) {
             VideoSaveSheet(
@@ -599,7 +554,7 @@ fun VideoEditorScreen(
                 stage = state.saveStage,
                 isCloud = cloudPhoto != null,
                 hasCloudCounterpart = hasCloudCounterpart,
-                onPicked = { mode -> vm.save(mode) },
+                onPicked = { vm.save() },
                 onCancel = { if (!state.isSaving) showSaveSheet = false },
             )
         }
@@ -1051,6 +1006,10 @@ private fun RangeTrimSlider(
         modifier = Modifier
             .fillMaxWidth()
             .height(36.dp)
+            // The end thumbs sit within a few dp of the display, where the system's edge back
+            // gesture would claim the touch first. A 36dp row is far inside the platform's
+            // per-edge budget, so the whole track can stand aside at once.
+            .systemGestureExclusion()
             .onSizeChanged { widthPx = it.width.toFloat() }
             .pointerInput(durationMs) {
                 detectDragGestures(
@@ -1273,6 +1232,9 @@ private fun VideoFilmstripTrimmer(
             .height(stripHeight)
             .clip(RoundedCornerShape(10.dp))
             .background(TrackBg)
+            // Same reason as the range slider: the two edge bars reach the display's gesture
+            // strips, and a 64dp strip is cheap to exclude whole.
+            .systemGestureExclusion()
             .onSizeChanged { canvasWidthPx = it.width.toFloat().coerceAtLeast(1f) }
             // Key on `durationMs` only — including the trim values here would restart
             // the gesture pipeline on every drag step (the user types a tiny drag →
@@ -1383,14 +1345,18 @@ private fun VideoSaveSheet(
     stage: VideoSaveStage,
     isCloud: Boolean,
     hasCloudCounterpart: Boolean,
-    onPicked: (VideoSaveMode) -> Unit,
+    onPicked: () -> Unit,
     onCancel: () -> Unit,
 ) {
     // Synced video = device-source + cloud counterpart. The edit fans out to both sides
     // on save, so the subtitle mentions both instead of the device-only phrasing.
     val isSynced = !isCloud && hasCloudCounterpart
     Column(
-        Modifier.fillMaxWidth().padding(horizontal = 22.dp).padding(bottom = 24.dp),
+        Modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
+            .padding(horizontal = 20.dp)
+            .padding(bottom = 24.dp),
     ) {
         Text(
             stringResource(R.string.editor_save_edits),
@@ -1460,12 +1426,11 @@ private fun VideoSaveSheet(
                 )
             }
         } else {
-            // Per user request: videos only support Save-as-Copy. The Overwrite path
-            // for video involves either MediaStore consent for foreign URIs (device
-            // case) or trashing the cloud original after a re-encode upload — both
-            // surfaced as failure modes (read-error/SSL retries, half-saved Drive
-            // entries) that left the user unsure whether the original survived. Copy
-            // is unambiguous: the source is never touched, the edit lands next to it.
+            // Videos save as a copy only. Writing back over the source meant either MediaStore
+            // consent for foreign URIs (device case) or trashing the cloud original after a
+            // re-encode upload, both of which surfaced failure modes (read-error/SSL retries,
+            // half-saved Drive entries) that left the user unsure whether the original survived.
+            // A copy is unambiguous: the source is never touched, the edit lands next to it.
             SaveOptionRow(
                 icon = Icons.Default.ContentCopy,
                 title = stringResource(R.string.video_editor_save_copy),
@@ -1476,7 +1441,7 @@ private fun VideoSaveSheet(
                         else     -> R.string.editor_save_copy_subtitle_device
                     }
                 ),
-                onClick = { onPicked(VideoSaveMode.Copy) },
+                onClick = onPicked,
             )
         }
         Spacer(Modifier.height(18.dp))

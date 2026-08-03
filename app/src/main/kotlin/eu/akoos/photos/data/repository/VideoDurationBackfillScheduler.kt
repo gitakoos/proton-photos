@@ -175,7 +175,7 @@ class VideoDurationBackfillScheduler @Inject constructor(
      * still running is a no-op through [albumPasses].
      */
     fun populateSharedAlbumContext(userId: UserId, ctx: AlbumCryptoChain.SharingContext) {
-        sharedAlbumKeyStore.put(ctx)
+        sharedAlbumKeyStore.put(userId, ctx)
         if (!albumPasses.add(ctx.albumLinkId)) return
         scope.launch {
             try {

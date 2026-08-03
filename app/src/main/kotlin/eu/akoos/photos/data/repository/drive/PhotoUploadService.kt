@@ -50,6 +50,8 @@ import eu.akoos.photos.data.api.DriveApiService
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.util.PhotoTagDetector
+import eu.akoos.photos.util.UploadPhotoTags
+import eu.akoos.photos.util.UserPhotoTags
 import eu.akoos.photos.data.api.dto.BlockUploadInfoDto
 import eu.akoos.photos.data.api.dto.CommitBlockDto
 import eu.akoos.photos.data.api.dto.CommitRevisionRequest
@@ -61,8 +63,10 @@ import eu.akoos.photos.data.api.dto.ThumbnailUploadInfoDto
 import eu.akoos.photos.data.api.dto.UploadBlockRequest
 import eu.akoos.photos.data.api.dto.VerifierDto
 import eu.akoos.photos.data.crypto.DriveCryptoHelper
+import eu.akoos.photos.data.db.dao.LocalTagDao
 import eu.akoos.photos.data.db.dao.PhotoListingDao
 import eu.akoos.photos.data.db.entity.PhotoListingEntity
+import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.LocalMediaItem
 import eu.akoos.photos.util.retryWithBackoff
 import kotlinx.coroutines.CancellationException
@@ -195,6 +199,11 @@ private suspend fun <T> retryUploadCall(block: suspend (attempt: Int) -> T): T =
  * [retryUploadCall]'s `shouldRetry` so the two decisions stay aligned.
  */
 private fun isRetryableUploadFailure(e: Throwable): Boolean {
+    // Ask the shared predicate first: it reads the HTTP status off the error itself, which is the
+    // only place it appears. The substring pass below never saw a 429 or a 503 raised through the
+    // API layer, so a rate-limited upload took the permanent-failure branch and threw away every
+    // block it had already encrypted.
+    if (eu.akoos.photos.util.isTransientApiError(e)) return true
     if (e is IOException) return true
     val msgs = generateSequence<Throwable>(e) { it.cause }
         .take(4)
@@ -232,9 +241,13 @@ class PhotoUploadService @Inject constructor(
     private val cryptoHelper: DriveCryptoHelper,
     private val cryptoContext: CryptoContext,
     private val photoListingDao: PhotoListingDao,
+    private val localTagDao: LocalTagDao,
     private val thumbnailUrlStore: ThumbnailUrlStore,
     private val shareService: PhotosShareService,
     private val recentUploadsTracker: RecentUploadsTracker,
+    // Injected lazily because CloudTrashService itself depends on this service: the favourite is
+    // carried by its setCloudFavorite, and a direct reference would close the graph into a cycle.
+    private val cloudTrashService: dagger.Lazy<CloudTrashService>,
     @ApplicationContext private val context: Context,
 ) {
     private val semaphore get() = shareService.networkSemaphore
@@ -279,8 +292,29 @@ class PhotoUploadService @Inject constructor(
             ).also { it.mkdirs() }
 
             // Proton photo category tags (Motion Photo, Panorama, Video, Raw, Screenshot) sent
-            // on the commit; without them the web can't file the photo or play a Live Photo.
-            val photoTags = PhotoTagDetector.detectTags(context, Uri.parse(item.uri), item.mimeType, item.displayName, item.sizeBytes)
+            // on the commit; without them the web can't file the photo or play a Live Photo. The
+            // categories the user picked for this device file join them here, so a choice made
+            // before the photo was backed up rides along with the backup. The size handed to the
+            // detector is the SOURCE file's, not item.sizeBytes: the latter measures the bytes being
+            // sent, which on the compress path is a temp copy, and the detector reads the source, so
+            // a shrunk photo would fall under its XMP floor and lose its motion / panorama tag.
+            val sourceUri = Uri.parse(item.uri)
+            val detectedTags = PhotoTagDetector.detectTags(
+                context,
+                sourceUri,
+                item.mimeType,
+                item.displayName,
+                sourceSizeBytes(sourceUri) ?: item.sizeBytes,
+            )
+            val chosenTags = try {
+                UserPhotoTags.decode(localTagDao.getUserTagsCsv(item.uri))
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                Log.w(TAG, "uploadFile: chosen categories unreadable for $logRef: ${e.message}")
+                emptySet()
+            }
+            val photoTags = UploadPhotoTags.mergeForCommit(detectedTags, chosenTags)
 
             // The finally block inspects the failure category (wipe vs preserve-for-resume), so
             // catch, categorise, then rethrow.
@@ -987,6 +1021,11 @@ class PhotoUploadService @Inject constructor(
                     sizeBytes    = item.sizeBytes,
                     revisionId   = revisionId,
                     thumbnailUrl = localThumbnailUrl,
+                    // Seed the committed categories so the photo keeps them the moment it turns
+                    // Synced. A backed-up photo reads its categories from this row, not from the
+                    // device-side choice, so leaving the column empty until the next cloud refresh
+                    // would blank the very categories this upload just carried up.
+                    tagsCsv      = photoTags.sorted().joinToString(","),
                     // Seed the video length straight from MediaStore (already milliseconds) so our own
                     // uploads show a duration pill immediately, without waiting for the xAttr backfill.
                     durationMs   = item.duration.takeIf { item.mimeType.startsWith("video/") && it > 0 },
@@ -996,6 +1035,23 @@ class PhotoUploadService @Inject constructor(
             // thumbnail immediately (e.g. after the device copy is deleted, turning a Synced photo
             // cloud-only), without waiting for a decrypt or an app relaunch to seed it from the DB.
             localThumbnailUrl?.let { thumbnailUrlStore.put(fileId, it) }
+            // The photo now has a Drive link, so a heart it was given while it lived only on the
+            // device has somewhere to go. Tag 0 travels on the favourite endpoint of its own and
+            // never inside the commit payload, so it is applied here instead of being merged into
+            // photoTags. NonCancellable, and swallowing its own failures, because the bytes are
+            // already committed: a heart that does not land is a missing heart on one photo, never a
+            // failed upload and never a second attempt at one.
+            withContext(NonCancellable) {
+                carryFavoriteToCloud(
+                    userId = userId,
+                    localUri = item.uri,
+                    item = item,
+                    fileId = fileId,
+                    shareId = shareId,
+                    volumeId = volumeId,
+                    revisionId = revisionId,
+                )
+            }
             Log.d(TAG, "uploadFile: completed fileId=$fileId, persisted to DB")
             // Success: wipe tempDir now that the bytes are committed to the CDN. Done
             // INSIDE the success branch (not a finally) so the failure branches below
@@ -1046,6 +1102,69 @@ class PhotoUploadService @Inject constructor(
                 throw e
             }
         }
+
+    /**
+     * Byte count of the file [uri] points at, taken straight off its descriptor.
+     * [android.content.res.AssetFileDescriptor.UNKNOWN_LENGTH] is -1, so the > 0 filter drops it
+     * along with an empty descriptor. Null when the source cannot be sized at all, which leaves the
+     * caller on the item's own figure.
+     */
+    private fun sourceSizeBytes(uri: Uri): Long? = runCatching {
+        context.contentResolver.openAssetFileDescriptor(uri, "r")?.use { it.length }
+    }.getOrNull()?.takeIf { it > 0L }
+
+    /**
+     * Applies the favourite the user gave [localUri] to the photo it was just uploaded as, through
+     * the same endpoint every other favourite goes through. A no-op when the file was never
+     * favourited, which is one DataStore read and no network.
+     *
+     * Runs after the commit and after the listing row exists, so the favourite lands on a photo that
+     * is already the user's and the local row it mirrors into is there to receive it. Every failure
+     * is logged and dropped: nothing here may disturb an upload that has already succeeded.
+     *
+     * The device-side entry comes out once the tag is on Drive, and only then. The photo is backed up
+     * now, so its heart is read off the tag alone and the entry answers for nothing; holding on to it
+     * until the tag is really there is what keeps a rejected write from losing the favourite outright.
+     */
+    private suspend fun carryFavoriteToCloud(
+        userId: UserId,
+        localUri: String,
+        item: LocalMediaItem,
+        fileId: String,
+        shareId: String,
+        volumeId: String,
+        revisionId: String,
+    ) {
+        try {
+            val favorites = context.settingsDataStore.data.first()[SettingsKeys.FAVORITE_IDS]
+                ?: emptySet()
+            if (localUri !in favorites) return
+            val ok = cloudTrashService.get().setCloudFavorite(
+                userId,
+                CloudPhoto(
+                    linkId       = fileId,
+                    shareId      = shareId,
+                    volumeId     = volumeId,
+                    captureTime  = item.dateTaken / 1000L,
+                    displayName  = item.displayName,
+                    mimeType     = item.mimeType,
+                    sizeBytes    = item.sizeBytes,
+                    thumbnailUrl = null,
+                    revisionId   = revisionId,
+                ),
+                favorite = true,
+            )
+            if (ok) {
+                context.settingsDataStore.edit { prefs ->
+                    val current = prefs[SettingsKeys.FAVORITE_IDS] ?: emptySet()
+                    if (localUri in current) prefs[SettingsKeys.FAVORITE_IDS] = current - localUri
+                }
+            }
+            Log.d(TAG, "uploadFile: favourite carried to fileId=$fileId ok=$ok")
+        } catch (e: Throwable) {
+            Log.w(TAG, "uploadFile: carrying the favourite to fileId=$fileId failed: ${e.message}")
+        }
+    }
 
     /** Serialises read-modify-write on the PENDING_ORPHAN_DELETES set so a concurrent enqueue
      *  (a second failed upload) and the retry-drain don't clobber each other's edits. */

@@ -14,7 +14,7 @@
     <string name="onboarding_recommended">Recomendado</string>
 
     <string name="onboarding_welcome_title">Bienvenido a Photos for Proton</string>
-    <string name="onboarding_welcome_subtitle">Tus fotos y vídeos, cifrados de extremo a extremo en Proton Drive. Vamos a ajustar algunas preferencias para que la app se adapte a cómo quieres usarla.</string>
+    <string name="onboarding_welcome_subtitle">Tus fotos y vídeos, cifrados de extremo a extremo en Proton Drive. Ajusta algunas preferencias para que la app se adapte a cómo quieres usarla.</string>
 
     <string name="onboarding_backup_title">Elige qué respaldar</string>
     <string name="onboarding_backup_subtitle">Lo puedes cambiar cuando quieras desde Ajustes.</string>
@@ -85,6 +85,10 @@
     <string name="gallery_cancel_selection">Cancelar selección</string>
     <string name="share_action">Compartir</string>
     <string name="share_chooser_title">Compartir con</string>
+    <string name="favorite_selection_partial">%1$d cambiadas, %2$d no se pudieron cambiar</string>
+    <string name="favorite_selection_failed">No se pudieron cambiar los favoritos</string>
+    <string name="share_selection_partial">%1$d compartidas, %2$d no se pudieron preparar</string>
+    <string name="share_selection_failed">No se pudieron preparar las fotos para compartir</string>
     <string name="share_preparing">Preparando…</string>
     <string name="share_viewer_sheet_title">Compartir foto</string>
     <string name="share_send_to_app">Compartir con otra app</string>
@@ -113,7 +117,6 @@
     <string name="share_link_local_only_note">Primero respalda esta foto para compartirla con un enlace público.</string>
     <string name="share_link_failed">No se pudo crear el enlace público</string>
     <string name="gallery_download_selected">Descargar selección</string>
-    <string name="gallery_delete_selected">Eliminar selección</string>
     <string name="gallery_download_done">%1$d fotos descargadas</string>
     <string name="gallery_download_done_singular">1 foto descargada</string>
     <string name="gallery_download_partial">%1$d descargadas, %2$d fallidas</string>
@@ -132,15 +135,20 @@
     <string name="gallery_add_to_album_local_note">Estas fotos se respaldarán primero y luego se añadirán al álbum.</string>
     <string name="gallery_no_albums_yet">Aún no hay álbumes. Crea uno arriba.</string>
     <string name="gallery_add_to_album_mixed_hint">No se puede crear un álbum con una mezcla de fotos del dispositivo y solo de la nube. Elige un solo tipo.</string>
-    <string name="gallery_add_to_album_partial">%1$d añadidas a %2$s, %3$d elemento(s) no se pudieron guardar (selección mixta)</string>
+    <plurals name="gallery_add_to_album_partial">
+        <item quantity="one">%1$d añadidas a %2$s, %3$d elemento no se pudo guardar (selección mixta)</item>
+        <item quantity="many">%1$d añadidas a %2$s, %3$d elementos no se pudieron guardar (selección mixta)</item>
+        <item quantity="other">%1$d añadidas a %2$s, %3$d elementos no se pudieron guardar (selección mixta)</item>
+    </plurals>
     <string name="gallery_strip_metadata">Quitar metadatos</string>
-    <string name="gallery_hide_selected">Ocultar selección</string>
-    <string name="more_label">Más</string>
     <string name="gallery_added_to_album">%1$d fotos añadidas a %2$s</string>
     <string name="gallery_add_to_album_added_and_queued">%1$d añadidas, %2$d más se añadirán tras la copia de seguridad</string>
     <string name="gallery_add_to_album_queued_only">%1$d se añadirán a %2$s tras la copia de seguridad</string>
     <string name="gallery_stripped_metadata">Metadatos eliminados de %1$d fotos</string>
     <string name="gallery_stripped_with_skipped">%1$d limpiadas, %2$d omitidas (ajenas)</string>
+    <string name="gallery_stripped_with_failed">%1$d limpiadas, %2$d fallidas</string>
+    <string name="gallery_stripped_with_skipped_and_failed">%1$d limpiadas, %2$d omitidas, %3$d fallidas</string>
+    <string name="gallery_strip_all_failed">No se pudieron limpiar los metadatos de %1$d fotos</string>
     <string name="strip_metadata_failed">No se pudieron eliminar los metadatos de este archivo.</string>
     <string name="gallery_filter_favorites">Favoritos</string>
     <string name="gallery_filter_hidden">Ocultos</string>
@@ -214,6 +222,16 @@
     <string name="settings_sign_out_desc">Finalizar la sesión en este dispositivo.</string>
     <string name="sign_out_dialog_title">¿Cerrar sesión?</string>
     <string name="sign_out_dialog_message">¿Seguro que quieres cerrar sesión en tu cuenta de Proton?</string>
+    <plurals name="sign_out_dialog_vault_warning">
+        <item quantity="one">Al cerrar sesión también se vacía la sección Fotos ocultas: %1$d foto se elimina de este dispositivo de forma definitiva.</item>
+        <item quantity="many">Al cerrar sesión también se vacía la sección Fotos ocultas: %1$d fotos se eliminan de este dispositivo de forma definitiva.</item>
+        <item quantity="other">Al cerrar sesión también se vacía la sección Fotos ocultas: %1$d fotos se eliminan de este dispositivo de forma definitiva.</item>
+    </plurals>
+    <plurals name="sign_out_dialog_vault_cloud">
+        <item quantity="one">%1$d de ellas también está en Proton Drive y se puede volver a descargar tras iniciar sesión de nuevo.</item>
+        <item quantity="many">%1$d de ellas también están en Proton Drive y se pueden volver a descargar tras iniciar sesión de nuevo.</item>
+        <item quantity="other">%1$d de ellas también están en Proton Drive y se pueden volver a descargar tras iniciar sesión de nuevo.</item>
+    </plurals>
     <string name="sign_out_dialog_confirm">Cerrar sesión</string>
     <string name="sign_out_dialog_cancel">Cancelar</string>
     <string name="settings_account_storage">Almacenamiento de Drive</string>
@@ -269,9 +287,17 @@
     <string name="trash_cloud_error">No se pudo cargar la papelera</string>
     <string name="trash_cloud_retry">Reintentar</string>
     <string name="trash_cloud_empty_confirm_title">¿Vaciar la papelera de la nube?</string>
-    <string name="trash_cloud_empty_confirm_message">Se eliminarán permanentemente %1$d foto(s) de Proton Drive. No se puede deshacer.</string>
+    <plurals name="trash_cloud_empty_confirm_message">
+        <item quantity="one">Se eliminará permanentemente %1$d foto de Proton Drive. No se puede deshacer.</item>
+        <item quantity="many">Se eliminarán permanentemente %1$d fotos de Proton Drive. No se puede deshacer.</item>
+        <item quantity="other">Se eliminarán permanentemente %1$d fotos de Proton Drive. No se puede deshacer.</item>
+    </plurals>
     <string name="trash_cloud_empty_confirm_action">Vaciar</string>
-    <string name="trash_cloud_restore_done">%1$d foto(s) restauradas</string>
+    <plurals name="trash_cloud_restore_done">
+        <item quantity="one">%1$d foto restaurada</item>
+        <item quantity="many">%1$d fotos restauradas</item>
+        <item quantity="other">%1$d fotos restauradas</item>
+    </plurals>
     <string name="trash_cloud_restore_partial">Se restauraron %1$d, %2$d no se pudieron restaurar</string>
     <string name="trash_cloud_restore_refresh_failed">Restauradas. Desliza hacia abajo en tu galería para actualizar</string>
     <string name="trash_cloud_restore_failed">No se pudo restaurar</string>
@@ -301,7 +327,7 @@
     <string name="settings_privacy_metadata">Privacidad y metadatos</string>
     <string name="settings_privacy_metadata_desc">Quitar GPS y campos EXIF opcionales de las subidas</string>
     <string name="settings_security">Seguridad</string>
-    <string name="settings_security_desc">Bloqueo de app, fotos ocultas</string>
+    <string name="settings_security_desc">Bloqueo de app, Fotos ocultas</string>
     <string name="settings_strip_metadata_upload">Quitar metadatos al subir</string>
     <string name="settings_strip_metadata_upload_desc">Quita la ubicación y los datos de la cámara de la copia que se sube. La copia en el teléfono los conserva salvo que actives el reflejo local de abajo. Añade campos de cámara, fecha y software en Personalizar.</string>
     <string name="settings_mirror_strip_local">Reflejar los cambios en los archivos locales</string>
@@ -322,7 +348,8 @@
     <string name="settings_strip_timestamp">Quitar marcas de tiempo</string>
     <string name="settings_strip_timestamp_desc">Eliminar fecha/hora del EXIF</string>
     <string name="settings_strip_software">Quitar info de software</string>
-    <string name="settings_strip_software_desc">Eliminar campos de software, artista y copyright</string>
+    <string name="settings_strip_software_desc">Eliminar campos de software, comentario, artista y copyright</string>
+    <string name="settings_strip_authorship">Quitar artista y copyright</string>
     <string name="settings_strip_format_note">Algunos formatos, como HEIC, no pueden almacenar cambios en los metadatos. Cuando la eliminación de metadatos está activada, la copia subida de una foto de este tipo se convierte a JPEG para que los datos seleccionados se eliminen realmente. La foto en tu dispositivo permanece sin cambios.</string>
     <string name="settings_compress_upload">Comprimir subidas</string>
     <string name="settings_compress_upload_desc">Sube una versión más ligera para ahorrar espacio. La copia en el teléfono se mantiene con calidad completa salvo que actives el reflejo local de abajo.</string>
@@ -349,6 +376,7 @@
     <string name="settings_clear_cache_on_close_desc">Borra las copias locales de las fotos en la nube vistas cuando la app pasa a segundo plano. Se vuelven a descargar al abrirla de nuevo.</string>
     <string name="settings_screenshot_overlay">Acciones rápidas de captura</string>
     <string name="settings_screenshot_overlay_desc">Muestra una pequeña barra de acciones sobre una captura nueva para poder editarla, compartirla, subirla a Drive o crear un enlace. En algunos teléfonos no se puede desactivar la barra de capturas del sistema, así que pueden aparecer las dos.</string>
+    <string name="screenshot_overlay_channel_desc">La notificación que se muestra mientras las acciones rápidas de captura están activas.</string>
     <string name="screenshot_overlay_deleted">Captura eliminada</string>
     <string name="screenshot_overlay_delete_failed">No se pudo eliminar la captura</string>
     <string name="screenshot_overlay_uploading">Subiendo...</string>
@@ -439,14 +467,17 @@
     <string name="editor_crop_free">Libre</string>
     <string name="hidden_photos_title">Fotos ocultas</string>
     <string name="hidden_albums_section">Álbumes ocultos</string>
+    <plurals name="hidden_loose_device_copies">
+        <item quantity="one">%1$d foto oculta sigue con su archivo en la galería del teléfono, donde otras aplicaciones la ven.</item>
+        <item quantity="other">%1$d fotos ocultas siguen con sus archivos en la galería del teléfono, donde otras aplicaciones las ven.</item>
+    </plurals>
+    <string name="hidden_folders_section">Carpetas ocultas</string>
     <string name="hidden_cloud_photos_section">Fotos ocultas en la nube</string>
     <string name="hidden_photos_auth_prompt">Autentícate para ver tus fotos ocultas</string>
     <string name="hidden_photos_unlock">Desbloquear</string>
     <string name="app_lock_authenticate_prompt">Autentícate para continuar</string>
-    <string name="hidden_no_device_lock_notice">Sin bloqueo de pantalla. La carpeta oculta no está protegida.</string>
-    <string name="hidden_auth_title">Fotos ocultas</string>
-    <string name="hidden_auth_description">Autentícate para ver tus fotos ocultas</string>
-    <string name="hide_cloud_copy_notice">Las fotos respaldadas permanecen en tu Proton Drive. Ocultarlas solo las quita de la galería de este dispositivo.</string>
+    <string name="hidden_no_device_lock_notice">Sin bloqueo de pantalla. La sección Fotos ocultas no está protegida.</string>
+    <string name="hide_cloud_copy_notice">No se ha quitado nada de Proton Drive. Las copias en la nube se quedan exactamente igual.</string>
     <string name="album_rename">Renombrar álbum</string>
     <string name="albums_hide_album">Ocultar álbum</string>
     <string name="albums_reorder">Reordenar álbumes</string>
@@ -534,7 +565,7 @@
     <string name="album_download_notification_title">Descargando %1$s</string>
     <string name="album_download_notification_progress">%1$d de %2$d</string>
     <string name="album_download_notification_cancel">Cancelar</string>
-    <string name="album_download_enqueued">Descargando en segundo plano, consulta las notificaciones</string>
+    <string name="download_started_background">Descargando en segundo plano, consulta el progreso en Actividad</string>
     <!-- Notificación de consentimiento de eliminación tras la copia -->
     <string name="delete_consent_channel_name">Limpieza de fotos</string>
     <string name="delete_consent_channel_desc">Solicita permiso para quitar de este dispositivo las fotos ya respaldadas.</string>
@@ -740,8 +771,7 @@
     <string name="viewer_menu_save_to_device">Guardar en el dispositivo</string>
     <string name="viewer_menu_details">Detalles</string>
     <string name="viewer_menu_delete">Eliminar</string>
-    <string name="viewer_menu_hide">Ocultar</string>
-    <string name="viewer_menu_unhide">Mostrar</string>
+    <string name="hide_confirm_action">Ocultar</string>
     <string name="viewer_hidden_label">Oculto en este dispositivo</string>
 
     <!-- Motion photo (Android JPEG with an embedded clip) playback in the viewer -->
@@ -812,7 +842,7 @@
     <string name="editor_save_cancelled">Guardado cancelado</string>
     <string name="editor_no_permission">Sin permiso para guardar</string>
     <string name="editor_save_failed">Error al guardar</string>
-    <string name="editor_invalid_video_uri">URI de vídeo no válida</string>
+    <string name="editor_invalid_video_uri">No se pudo abrir este vídeo</string>
     <string name="editor_video_metadata_failed">No se pudieron leer los metadatos del vídeo</string>
     <string name="editor_cloud_video_download_failed">Error al descargar el vídeo de la nube</string>
 
@@ -865,8 +895,6 @@
     <string name="update_check_failed">No se pudo buscar actualizaciones. Inténtalo más tarde.</string>
     <string name="update_permission_required">Permite instalar aplicaciones desconocidas en los ajustes del sistema.</string>
     <string name="update_verification_failed">No se pudo verificar la actualización, así que no se instaló. Inténtalo de nuevo.</string>
-    <string name="offline_banner_message">Estás sin conexión. Algunas funciones no estarán disponibles hasta que vuelvas a conectarte.</string>
-    <string name="offline_banner_dismiss_cd">Cerrar aviso</string>
     <string name="network_error_offline">Estás sin conexión. Inténtalo de nuevo cuando vuelvas a conectarte.</string>
     <string name="network_error_transient">Falló la conexión. Inténtalo más tarde.</string>
     <string name="cd_status_backed_up_device">Proton Drive y dispositivo</string>
@@ -892,7 +920,6 @@
     <string name="shared_save_success_fmt">%1$d fotos guardadas en tu biblioteca</string>
     <string name="shared_save_partial_fmt">%1$d de %2$d fotos guardadas en tu biblioteca</string>
     <string name="shared_save_progress_fmt">Guardando %1$d / %2$d en tu biblioteca…</string>
-    <string name="op_downloading_fmt">Descargando %1$d / %2$d</string>
     <string name="op_backing_up_fmt">Guardando %1$d / %2$d</string>
     <string name="op_sharing_fmt">Compartiendo %1$d / %2$d</string>
     <string name="op_adding_to_album">Añadiendo al álbum…</string>
@@ -912,23 +939,23 @@
     <string name="gallery_picker_drive_albums">Álbumes de Drive</string>
     <string name="album_card_folder_badge">Carpeta</string>
     <string name="albums_unhide_album">Mostrar álbum</string>
-    <string name="device_folders_title">Carpetas de este dispositivo</string>
-    <string name="device_folders_entry">Carpetas de este dispositivo</string>
     <string name="device_folders_section">Carpetas de este dispositivo</string>
-    <string name="albums_toggle_device_folders">Mostrar u ocultar carpetas del dispositivo</string>
     <string name="device_folders_empty">No hay carpetas en este dispositivo.</string>
-    <string name="device_folder_upload_action">Subir a Drive</string>
     <string name="device_folder_uploading_fmt">Subiendo %1$d a Drive</string>
     <string name="device_folder_already_backed_up">Ya está respaldado en Drive</string>
     <string name="device_folder_added_to_album">Añadido al álbum</string>
-    <string name="device_folder_backing_up_fmt">Respaldando %1$d / %2$d</string>
-    <string name="device_folder_backup_all">Respaldar carpeta</string>
-    <string name="device_folder_backup_choice_title">¿Respaldar esta carpeta?</string>
-    <string name="device_folder_backup_choice_body">Todas las fotos y vídeos de esta carpeta se respaldarán en Drive. También puedes reflejar la carpeta como un álbum.</string>
+    <string name="device_folder_hiding_fmt">Ocultando %1$d / %2$d</string>
+    <string name="device_folder_restoring_fmt">Mostrando %1$d / %2$d</string>
     <string name="device_folder_backup_timeline">Respaldar solo las fotos</string>
     <string name="device_folder_backup_timeline_sub">Sube una sola vez las fotos de esta carpeta a tu galería.</string>
     <string name="device_folder_backup_mirror">Crear también un álbum</string>
     <string name="device_folder_backup_mirror_sub">Sigue sincronizando: las fotos nuevas de esta carpeta también van al álbum.</string>
+    <string name="device_folder_mirror_as_album">Reflejar como álbum</string>
+    <string name="device_folder_exclude_from_backup">Excluir de la copia de seguridad</string>
+    <string name="device_folder_hide_from_timeline">Ocultar de la línea de tiempo</string>
+    <string name="device_folder_hide_card">Ocultar carpeta</string>
+    <string name="device_folder_hide_card_sub">Quita la carpeta de Álbumes y pasa sus fotos a Fotos ocultas, fuera de la galería del dispositivo, así que otras aplicaciones dejan de mostrarlas. Las copias en Proton Drive se quedan exactamente igual.</string>
+    <string name="device_folder_unhide">Mostrar carpeta</string>
     <string name="sync_folders_add_dialog_title">Añadir carpeta</string>
     <string name="sync_folders_add_row_title">Añadir carpeta por nombre</string>
     <string name="sync_folders_add_dialog_name_hint">Nombre de la carpeta</string>
@@ -943,11 +970,14 @@
     <string name="rename_sheet_option_copy_title">Guardar como copia</string>
     <string name="rename_sheet_option_copy_subtitle_cloud">Sube como una nueva foto. El original permanece en Drive.</string>
     <string name="rename_sheet_option_copy_subtitle_local">Crea un nuevo archivo en Pictures.</string>
+    <string name="rename_sheet_option_copy_subtitle_vault">Crea una segunda copia en Fotos ocultas.</string>
     <string name="save_to_library_confirm_title">Guardar en mi biblioteca</string>
     <string name="save_to_library_confirm_body_fmt">Se copiarán %1$d elementos a tu biblioteca. Aparecerán en tus Fotos en cuanto termine la copia.</string>
     <string name="save_to_library_action_cancel">Cancelar guardado</string>
     <string name="save_to_library_cancelled_fmt">Guardado cancelado en %1$d / %2$d</string>
     <string name="albums_more_actions">Más acciones</string>
+    <string name="action_sheet_actions_heading">Lo que puedes hacer</string>
+    <string name="action_sheet_settings_heading">Ajustes</string>
     <string name="leave_album">Salir del álbum</string>
     <string name="leave_album_confirm_title">¿Salir de este álbum?</string>
     <string name="leave_album_confirm_body">El álbum desaparecerá de tu biblioteca. La copia del propietario y el acceso de los demás se mantienen intactos. Podrás ser invitado de nuevo más adelante.</string>
@@ -967,6 +997,11 @@
     <string name="notifications_album_download_desc">Muestra el progreso y un resumen cuando descargas un álbum en tu dispositivo.</string>
     <string name="notifications_delete_reminder">Recordatorio de borrado tras la copia</string>
     <string name="notifications_delete_reminder_desc">Después de una copia de seguridad, recuérdame qué fotos se pueden quitar de este dispositivo de forma segura.</string>
+    <string name="notifications_update_available">Nueva versión disponible</string>
+    <string name="notifications_update_available_desc">Buscar una versión más reciente en segundo plano y avisar cuando se publique una. Con Wi-Fi la actualización se descarga por adelantado, así que instalarla es inmediato.</string>
+    <string name="update_channel_name">Actualizaciones de la app</string>
+    <string name="update_channel_desc">Avisa cuando hay una versión más reciente de la app.</string>
+    <string name="update_notification_text">Toca para instalar la versión %1$s.</string>
     <string name="settings_backup_how_section">Cómo se hace la copia</string>
     <string name="settings_theme_palette">Tema y paleta</string>
     <string name="settings_privacy_security">Privacidad y seguridad</string>
@@ -984,7 +1019,6 @@
     <string name="albums_sort_name">Nombre (A-Z)</string>
     <string name="albums_sort_activity">Última actividad</string>
     <string name="albums_sort_count">Número de fotos</string>
-    <string name="albums_toggle_cloud_albums">Mostrar u ocultar álbumes</string>
 
     <!-- Photo viewer details / metadata sheet -->
     <string name="viewer_meta_section_file_info">Información del archivo</string>
@@ -993,7 +1027,6 @@
     <string name="viewer_meta_section_datetime">Fecha y hora</string>
     <string name="viewer_meta_section_software">Software y autor</string>
     <string name="viewer_meta_section_image">Imagen</string>
-    <string name="viewer_meta_full">Metadatos completos</string>
     <string name="viewer_meta_row_file">Archivo</string>
     <string name="viewer_meta_row_date">Fecha</string>
     <string name="viewer_meta_row_size">Tamaño</string>
@@ -1019,10 +1052,10 @@
     <string name="viewer_meta_row_altitude">Altitud</string>
     <string name="viewer_meta_row_taken">Tomada</string>
     <string name="viewer_meta_row_modified">Modificada</string>
+    <string name="viewer_meta_row_description">Descripción</string>
     <string name="viewer_meta_row_software">Software</string>
     <string name="viewer_meta_row_artist">Autor</string>
     <string name="viewer_meta_row_copyright">Derechos de autor</string>
-    <string name="viewer_meta_row_dimensions">Dimensiones</string>
     <string name="viewer_meta_row_orientation">Orientación</string>
     <string name="viewer_meta_flash_fired">Disparado</string>
     <string name="viewer_meta_flash_none">Sin flash</string>
@@ -1037,13 +1070,14 @@
     <string name="viewer_meta_source_cloud">Solo Proton Drive</string>
     <string name="viewer_meta_strip">Quitar</string>
     <string name="viewer_meta_strip_all">Quitar todos los metadatos privados</string>
-    <string name="viewer_meta_strip_all_desc">Elimina el GPS, la información de la cámara y los campos de software de este archivo</string>
+    <string name="viewer_meta_strip_all_desc">Elimina el GPS, la información de la cámara y los campos de software, artista y copyright de este archivo</string>
     <string name="viewer_meta_strip_confirm_title">¿Quitar metadatos?</string>
     <string name="viewer_meta_strip_confirm_message">Esto eliminará permanentemente %1$s del archivo en tu dispositivo. No se puede deshacer.</string>
     <string name="viewer_meta_strip_what_gps">ubicación GPS</string>
     <string name="viewer_meta_strip_what_camera">información de la cámara</string>
     <string name="viewer_meta_strip_what_timestamps">marcas de tiempo</string>
     <string name="viewer_meta_strip_what_software">información de software</string>
+    <string name="viewer_meta_strip_what_authorship">artista y copyright</string>
 
     <!-- Viewer delete sheet + add-to-album sheet -->
     <string name="viewer_delete_title_local">¿Eliminar la foto?</string>
@@ -1051,6 +1085,8 @@
     <string name="viewer_delete_title_cloud">¿Eliminar de Proton Drive?</string>
     <string name="viewer_delete_local_body">Esto moverá la foto a la carpeta «Eliminados recientemente» de tu dispositivo.</string>
     <string name="viewer_delete_move_to_trash">Mover a la papelera</string>
+    <string name="viewer_delete_vault_body">Al eliminar, la copia oculta desaparece de este dispositivo para siempre. La copia en Proton Drive, si la hay, se queda igual.</string>
+    <string name="viewer_delete_vault_failed">No se pudo eliminar la foto</string>
     <string name="viewer_add_to_album_title">Añadir al álbum</string>
     <string name="viewer_add_to_album_empty">Aún no hay álbumes. Crea uno desde la pestaña Álbumes.</string>
     <string name="viewer_drive_albums_header">ÁLBUMES DE DRIVE</string>
@@ -1061,15 +1097,29 @@
     <string name="viewer_downloading_pct">Descargando %1$d%%</string>
     <string name="viewer_downloading">Descargando…</string>
     <string name="viewer_loading">Cargando…</string>
+    <string name="viewer_text_working">Leyendo el texto…</string>
+    <string name="viewer_text_selectable">Mantén pulsado para seleccionar texto</string>
+    <string name="viewer_text_none">No se ha encontrado texto en esta foto.</string>
+    <string name="viewer_text_needs_full_size">Para leer el texto hace falta la foto a tamaño completo. Descárgala primero.</string>
+    <string name="viewer_text_not_image">El texto solo se puede leer de fotos.</string>
+    <string name="viewer_text_unavailable">No se ha podido abrir esta foto.</string>
+    <string name="viewer_text_too_large">Esta foto es demasiado grande para leer texto ahora mismo.</string>
+    <string name="viewer_text_preparing">Preparando el modelo de texto…</string>
+    <string name="viewer_text_downloading">Descargando el modelo de texto…</string>
+    <string name="viewer_text_detecting">Buscando texto…</string>
+    <string name="viewer_text_model_title">¿Descargar el modelo de texto?</string>
+    <string name="viewer_text_model_body">Leer el texto de una foto necesita una descarga única de %1$s. Después funciona en este dispositivo y la foto no se envía a ninguna parte.</string>
+    <string name="viewer_text_model_failed">No se ha podido descargar el modelo de texto.</string>
 
     <!-- Viewer snackbar / error fallbacks -->
     <string name="viewer_unknown_error">error desconocido</string>
     <string name="viewer_not_signed_in">No has iniciado sesión</string>
     <string name="viewer_not_logged_in">No has iniciado sesión</string>
     <string name="viewer_delete_drive_failed">No se pudo eliminar de Drive</string>
-    <string name="viewer_hide_failed">No se pudo mover el archivo a Ocultos</string>
+    <string name="viewer_hide_failed">No se pudo mover la foto a Fotos ocultas</string>
     <string name="viewer_name_empty">El nombre no puede estar vacío</string>
     <string name="viewer_rename_failed">Error al cambiar el nombre</string>
+    <string name="viewer_rename_name_taken">Otra foto oculta ya tiene ese nombre</string>
     <string name="viewer_load_albums_failed">No se pudieron cargar los álbumes: %1$s</string>
     <string name="viewer_remove_from_album_failed">Error al quitar del álbum: %1$s</string>
     <string name="viewer_set_cover_failed">Error al establecer la portada: %1$s</string>
@@ -1091,7 +1141,6 @@
 
     <!-- Gallery snackbar / error fallbacks -->
     <string name="gallery_error_title">Error</string>
-    <string name="gallery_no_local_to_hide">No hay fotos locales para ocultar</string>
     <string name="gallery_undo">Deshacer</string>
     <plurals name="gallery_hidden_snackbar">
         <item quantity="one">1 oculta</item>
@@ -1105,8 +1154,9 @@
         <item quantity="one">1 eliminada del álbum</item>
         <item quantity="other">%d eliminadas del álbum</item>
     </plurals>
-    <string name="gallery_copy_to_hidden_failed">No se pudo copiar a Ocultos</string>
-    <string name="gallery_move_to_hidden_failed">No se pudo mover a Ocultos</string>
+    <string name="gallery_copy_to_hidden_failed">No se pudo copiar a Fotos ocultas</string>
+    <string name="gallery_move_to_hidden_failed">No se pudo mover a Fotos ocultas</string>
+    <string name="gallery_hide_needs_free_space">Ocultar copia cada foto antes de quitar el original, así que necesita espacio. Libera %1$s e inténtalo de nuevo.</string>
     <plurals name="gallery_hide_partial_failed">
         <item quantity="one">Ocultada, pero no se pudo ocultar 1 foto</item>
         <item quantity="other">Ocultadas, pero no se pudieron ocultar %d fotos</item>
@@ -1185,8 +1235,25 @@
     <string name="settings_sync_failed">Error de sincronización</string>
     <string name="settings_sync_failed_reconcile">No se pudo comprobar qué falta por respaldar</string>
     <string name="settings_sync_failed_upload">No se pudieron subir las fotos</string>
-    <string name="settings_freed_photos">%1$d foto(s) liberadas del dispositivo</string>
+    <plurals name="settings_freed_photos">
+        <item quantity="one">%1$d foto liberada del dispositivo</item>
+        <item quantity="many">%1$d fotos liberadas del dispositivo</item>
+        <item quantity="other">%1$d fotos liberadas del dispositivo</item>
+    </plurals>
     <string name="settings_free_up_none">No hay fotos respaldadas en caché local para eliminar</string>
+    <string name="free_up_checking">Comprobando qué se puede liberar…</string>
+    <string name="free_up_verifying">Comprobando con Drive que cada copia está a salvo…</string>
+    <string name="free_up_explainer">Cada foto de abajo tiene una copia en Drive. Solo se elimina la copia de este dispositivo.</string>
+    <string name="free_up_progress">%1$d de %2$d liberadas</string>
+    <string name="free_up_leaving_stops">Salir de esta pantalla detiene la limpieza. Lo ya liberado sigue liberado.</string>
+    <plurals name="free_up_summary">
+        <item quantity="one">%1$d foto, %2$s por liberar</item>
+        <item quantity="other">%1$d fotos, %2$s por liberar</item>
+    </plurals>
+    <plurals name="free_up_confirm">
+        <item quantity="one">¿Eliminar la copia local de %1$d foto y liberar %2$s? Seguirá en Drive.</item>
+        <item quantity="other">¿Eliminar la copia local de %1$d fotos y liberar %2$s? Seguirán en Drive.</item>
+    </plurals>
     <string name="settings_free_up_error">No se pudo liberar espacio: %1$s</string>
 
     <!-- Upload status labels (Sync progress panel) -->
@@ -1197,6 +1264,7 @@
     <string name="upload_status_failed">Error</string>
     <string name="sync_deferred_waiting_wifi">Esperando Wi-Fi</string>
     <string name="sync_deferred_preparing">Preparando la copia de seguridad…</string>
+    <string name="sync_deferred_storage_full">Proton Drive está lleno. La copia de seguridad se detuvo hasta que se libere espacio.</string>
 
     <!-- Shared albums error snackbars -->
     <string name="shared_decline_failed">Error al rechazar: %1$s</string>
@@ -1205,7 +1273,35 @@
 
     <!-- Hidden photos empty state -->
     <string name="hidden_empty_title">No hay fotos ocultas</string>
-    <string name="hidden_empty_subtitle">Mantén pulsada una foto en la galería y elige \"Ocultar\"</string>
+    <string name="hidden_empty_subtitle">Mantén pulsada una foto en la galería y muévela aquí</string>
+    <string name="hidden_restore_failed">No se ha podido mostrar esta foto. Sigue oculta.</string>
+    <plurals name="hidden_restore_failed_some">
+        <item quantity="one">No se ha podido mostrar %1$d foto. Sigue oculta.</item>
+        <item quantity="many">No se han podido mostrar %1$d fotos. Siguen ocultas.</item>
+        <item quantity="other">No se han podido mostrar %1$d fotos. Siguen ocultas.</item>
+    </plurals>
+    <string name="hide_confirm_title">¿Ocultar la selección?</string>
+    <plurals name="hide_confirm_vault">
+        <item quantity="one">%1$d foto pasa a Fotos ocultas y sale de la galería del dispositivo, así que otras aplicaciones dejan de mostrarla.</item>
+        <item quantity="many">%1$d fotos pasan a Fotos ocultas y salen de la galería del dispositivo, así que otras aplicaciones dejan de mostrarlas.</item>
+        <item quantity="other">%1$d fotos pasan a Fotos ocultas y salen de la galería del dispositivo, así que otras aplicaciones dejan de mostrarlas.</item>
+    </plurals>
+    <plurals name="hide_confirm_cloud_copy">
+        <item quantity="one">La copia en Proton Drive de %1$d foto se queda igual, y al recuperarla la foto vuelve a enlazarse con esa copia.</item>
+        <item quantity="many">Las copias en Proton Drive de %1$d fotos se quedan igual, y al recuperarlas las fotos vuelven a enlazarse con esas copias.</item>
+        <item quantity="other">Las copias en Proton Drive de %1$d fotos se quedan igual, y al recuperarlas las fotos vuelven a enlazarse con esas copias.</item>
+    </plurals>
+    <plurals name="hide_confirm_cloud_only">
+        <item quantity="one">%1$d foto está solo en Proton Drive, así que no hay nada que mover en el teléfono. Se oculta dentro de esta aplicación.</item>
+        <item quantity="many">%1$d fotos están solo en Proton Drive, así que no hay nada que mover en el teléfono. Se ocultan dentro de esta aplicación.</item>
+        <item quantity="other">%1$d fotos están solo en Proton Drive, así que no hay nada que mover en el teléfono. Se ocultan dentro de esta aplicación.</item>
+    </plurals>
+    <string name="hide_confirm_counting">Comprobando qué hay en esta carpeta.</string>
+    <string name="hidden_delete_selected_body">Al eliminar, las copias ocultas desaparecen de este dispositivo para siempre. Las copias en Proton Drive se quedan igual.</string>
+    <plurals name="hidden_delete_failed_some">
+        <item quantity="one">No se pudo eliminar %1$d foto. Sigue oculta.</item>
+        <item quantity="other">No se pudieron eliminar %1$d fotos. Siguen ocultas.</item>
+    </plurals>
 
     <!-- Densest-layout performance heads-up -->
     <string name="dense_grid_warning_title">Vista más compacta</string>
@@ -1254,6 +1350,7 @@
     <string name="duplicates_delete_selected">Eliminar seleccionadas: %1$d</string>
     <string name="duplicates_confirm_title">¿Eliminar duplicados?</string>
     <string name="duplicates_confirm_message">Las copias marcadas se eliminan. Las demás se quedan.</string>
+    <string name="duplicates_confirm_message_synced">Las copias marcadas se eliminan de este dispositivo y de la nube. El resto se queda.</string>
     <string name="duplicates_confirm_delete">Eliminar</string>
     <string name="duplicates_delete_failed">No se pudo eliminar de Drive. Inténtalo de nuevo.</string>
     <string name="duplicates_section_similar">Fotos similares</string>
@@ -1265,10 +1362,10 @@
     <string name="whats_new_done">Entendido</string>
     <string name="whats_new_open">Abrir</string>
     <string name="whats_new_hide_title">Ocultar fotos y álbumes</string>
-    <string name="whats_new_hide_intro">Oculta lo que no quieras en tu línea de tiempo y recupéralo cuando quieras desde Fotos ocultas. Lo que ocurre depende de la insignia de la foto:</string>
-    <string name="whats_new_hide_device">Solo en este teléfono: se mueve fuera de tu dispositivo a una zona privada y bloqueada de la aplicación, de modo que ninguna otra aplicación puede verla.</string>
-    <string name="whats_new_hide_backed">Nube verde, en tu teléfono y con copia de seguridad: permanece en tu dispositivo, así que otras aplicaciones la siguen mostrando. Esta aplicación solo la oculta aquí, tras el bloqueo de Fotos ocultas; tu copia en la nube nunca se mueve, cambia ni elimina.</string>
-    <string name="whats_new_hide_cloud">Nube blanca, solo en la nube: esta aplicación solo la oculta aquí, tras el bloqueo de Fotos ocultas. Tu copia en la nube permanece exactamente igual, sin moverse, cambiar ni eliminarse nunca.</string>
+    <string name="whats_new_hide_intro">Oculta lo que no quieras en tu línea de tiempo y muéstralo de nuevo cuando quieras desde Fotos ocultas. Lo que ocurre depende de la insignia de la foto:</string>
+    <string name="whats_new_hide_device">Solo en este teléfono: pasa a Fotos ocultas, bloqueada dentro de la aplicación, y sale de la galería del dispositivo, de modo que ninguna otra aplicación puede verla.</string>
+    <string name="whats_new_hide_backed">Nube verde, en tu teléfono y con copia de seguridad: pasa a Fotos ocultas y sale de la galería del dispositivo, así que otras aplicaciones dejan de mostrarla. La copia en Proton Drive se queda exactamente igual, y al recuperarla la foto vuelve a enlazarse con esa misma copia.</string>
+    <string name="whats_new_hide_cloud">Nube blanca, solo en la nube: no hay nada que mover en el teléfono, así que se oculta aquí, tras el bloqueo de Fotos ocultas. La copia en Proton Drive se queda exactamente igual.</string>
     <string name="whats_new_hide_albums">También puedes ocultar un álbum entero de la nube, y todo es reversible.</string>
     <string name="whats_new_shared_add_title">Añadir a un álbum compartido</string>
     <string name="whats_new_shared_add_body">Cuando alguien comparte un álbum contigo y te deja editarlo, puedes añadir tus propias fotos y volver a quitarlas.</string>
@@ -1301,7 +1398,7 @@
     <string name="whats_new_crop_body">Elige 1:1, 4:3, 16:9 o la forma de la propia foto en el editor, y el marco la conserva mientras lo haces más pequeño.</string>
     <string name="whats_new_history_desc">Consulta las novedades de esta actualización y de las anteriores</string>
     <string name="whats_new_version">Versión %1$s</string>
-    <string name="whats_new_more_241">Además, las fotos eliminadas en otro dispositivo desaparecen aquí incluso con una biblioteca muy grande, cambiar el nombre ya no deja una copia y un nombre modificado en otro sitio llega hasta aquí.</string>
+    <string name="whats_new_more_241">Además, puedes cambiar la fecha de varias fotos a la vez, ocultar una carpeta entera del dispositivo, y las actualizaciones se instalan sin preguntar cada vez. Las fotos borradas en otro dispositivo desaparecen también aquí, incluso con una biblioteca grande, cambiar el nombre ya no deja una copia atrás, y la copia de seguridad, la ocultación, los duplicados y los álbumes compartidos son más estables.</string>
     <string name="whats_new_more_240">Además, los enlaces copiados quedan ocultos en la vista previa del portapapeles, los tamaños de archivo coinciden en todos los sitios donde aparecen, la liberación automática consulta con Drive antes de quitar una copia del teléfono, y los álbumes y las selecciones grandes aguantan mejor.</string>
     <string name="offline_card_subtitle">Fotos guardadas para ver sin conexión</string>
     <string name="duplicates_filter_identical">Idénticas</string>
@@ -1312,7 +1409,6 @@
     <string name="duplicates_badge_device">Dispositivo</string>
 
     <!-- Map attribution -->
-    <string name="map_osm_attribution" translatable="false">© OpenStreetMap contributors</string>
 
     <!-- Onboarding — all files access -->
     <string name="onboarding_all_files_title">Acceso a todos los archivos</string>
@@ -1351,21 +1447,22 @@
     <string name="album_download_all_confirm_body">Cada foto de este álbum se guardará en tu dispositivo.</string>
     <string name="album_set_cover_confirm_title">¿Establecer como portada del álbum?</string>
     <string name="album_set_cover_confirm_body">Esta foto pasa a ser la portada del álbum.</string>
+    <string name="device_folder_set_cover_confirm_title">¿Establecer como portada de la carpeta?</string>
+    <string name="device_folder_set_cover_confirm_body">Esta foto pasa a ser la portada de la carpeta.</string>
     <string name="album_remove_confirm_title">¿Quitar de este álbum?</string>
     <string name="album_remove_confirm_body">Esto solo quita la selección del álbum. Tus fotos permanecen en tu cronología.</string>
     <string name="action_remove">Quitar</string>
     <string name="gallery_add_to_album_queued">Las fotos se añadirán cuando termine su subida</string>
     <string name="share_role_can_view_desc">Puede ver el álbum y sus fotos.</string>
     <string name="share_role_can_edit_desc">Puede añadir y quitar fotos.</string>
-    <string name="settings_show_selection_labels">Etiquetas de botones</string>
-    <string name="settings_show_selection_labels_desc">Muestra una etiqueta breve bajo cada botón al seleccionar fotos, para que quede claro qué hace cada uno.</string>
+    <string name="sel_label_back_up">Respaldar</string>
     <string name="sel_label_download">Descargar</string>
     <string name="sel_label_delete">Eliminar</string>
-    <string name="sel_label_cover">Portada</string>
-    <string name="sel_label_offline">Sin conexión</string>
-    <string name="sel_label_album">Álbum</string>
-    <string name="sel_label_upload">Subir</string>
-    <string name="op_offline_fmt">Guardando sin conexión %1$d / %2$d</string>
+    <string name="sel_label_share">Compartir</string>
+    <string name="sel_label_hide">Mover a Fotos ocultas</string>
+    <string name="sel_label_unhide">Sacar de Fotos ocultas</string>
+    <string name="sel_show_actions">Mostrar acciones</string>
+    <string name="sel_hide_actions">Ocultar acciones</string>
     <string name="picker_filter_all">Todo</string>
     <string name="picker_filter_cloud">Nube</string>
     <string name="picker_filter_device">Dispositivo</string>
@@ -1387,6 +1484,7 @@
     <string name="activity_uploading">Subiendo</string>
     <string name="activity_pending">Pendiente de subir (%1$d)</string>
     <string name="activity_empty">No se está transfiriendo nada ahora mismo</string>
+    <string name="activity_waiting_battery">La copia de seguridad espera a la batería. Se reanuda cuando la carga vuelve a subir por encima del nivel bajo, para lo que no basta con conectar el cable.</string>
     <string name="activity_row_desc">Ver transferencias en curso y fotos pendientes de subir</string>
     <string name="activity_offline">Sin conexión</string>
     <string name="activity_photos">Fotos</string>
@@ -1403,4 +1501,80 @@
     <string name="activity_hist_download_named">%1$d descargadas de \"%2$s\"</string>
     <string name="activity_hist_offline">%1$d fotos guardadas sin conexión</string>
     <string name="activity_downloading">Descargando</string>
+
+    <!-- Metadata editor (#36): edit a photo's capture date and place. -->
+    <string name="metadata_editor_title">Editar metadatos</string>
+    <string name="metadata_editor_done">Hecho</string>
+    <string name="metadata_editor_change">Cambiar</string>
+    <string name="metadata_editor_saved">Guardado</string>
+    <string name="metadata_editor_write_failed">No se pudo guardar el cambio</string>
+    <string name="metadata_editor_saved_partial">Se guardaron %1$d, %2$d no se pudieron guardar</string>
+    <string name="metadata_editor_edit_metadata">Editar metadatos</string>
+    <string name="metadata_editor_date_label">Fecha de captura</string>
+    <string name="metadata_editor_source_device">Desde este dispositivo</string>
+    <string name="metadata_editor_source_cloud">Desde Proton Drive</string>
+    <string name="metadata_editor_next">Siguiente</string>
+    <string name="metadata_editor_set">Establecer</string>
+    <string name="metadata_editor_place_label">Lugar</string>
+    <string name="metadata_editor_place_none">Sin ubicación</string>
+    <string name="metadata_editor_place_choose_country">Elige un país</string>
+    <string name="metadata_editor_place_country_hint">Elegir solo un país coloca la foto en su centro.</string>
+    <string name="metadata_editor_place_search_city">Buscar una ciudad</string>
+    <string name="metadata_editor_place_remove">Quitar ubicación</string>
+    <string name="metadata_editor_country_search">Buscar países</string>
+    <string name="metadata_editor_note_cloud">Las fotos almacenadas en Proton Drive conservan la fecha y el lugar con los que se subieron y no se pueden cambiar aquí.</string>
+    <string name="metadata_editor_note_shared">Esta foto está en un álbum compartido contigo, por lo que su fecha y lugar son de solo lectura.</string>
+    <string name="metadata_editor_note_video_place">La ubicación no se puede cambiar en los vídeos.</string>
+    <string name="metadata_editor_note_place_format">La ubicación solo se puede guardar en fotos JPEG, PNG y WebP.</string>
+    <string name="metadata_editor_note_date_format">La fecha no se puede cambiar en las fotos con este formato.</string>
+    <string name="metadata_editor_bulk_date_label">Establecer una fecha para estas fotos</string>
+    <string name="metadata_editor_bulk_place_label">Establecer un lugar para estas fotos</string>
+    <string name="metadata_editor_bulk_apply_hint">Se aplica a cada foto seleccionada</string>
+    <string name="metadata_editor_bulk_summary">Editando %1$d fotos</string>
+    <string name="metadata_editor_bulk_summary_skipped">Editando %1$d, %2$d omitidas (respaldadas)</string>
+    <string name="metadata_editor_bulk_artist_label">Establecer el autor de estas fotos</string>
+    <string name="metadata_editor_bulk_copyright_label">Establecer los derechos de autor de estas fotos</string>
+    <string name="metadata_editor_text_none">Sin definir</string>
+    <string name="metadata_editor_text_stored_as">Se guardará como: %1$s</string>
+    <string name="metadata_editor_text_stored_none">Ninguno de estos caracteres se puede guardar en una foto, así que al guardar se vacía este campo.</string>
+    <string name="metadata_editor_note_text_format">La descripción, el autor y los derechos de autor solo se pueden guardar en fotos JPEG, PNG y WebP.</string>
+    <string name="metadata_editor_note_description_single">La descripción pertenece a una sola foto, así que solo se puede definir al editar una única foto.</string>
+    <string name="metadata_editor_date_mode_same">La misma fecha para todas</string>
+    <string name="metadata_editor_date_mode_shift">Desplazar</string>
+    <string name="metadata_editor_shift_label">Desplazar estas fotos en el tiempo</string>
+    <string name="metadata_editor_shift_hint">Elige cuándo se tomó realmente la foto más antigua. Las demás se mueven la misma cantidad, así que las distancias entre ellas se mantienen.</string>
+    <string name="metadata_editor_shift_picker_title">¿Cuándo se tomó la foto más antigua?</string>
+    <string name="metadata_editor_shift_range_current">Ahora: de %1$s a %2$s</string>
+    <string name="metadata_editor_shift_range_after">Tras el desplazamiento: de %1$s a %2$s</string>
+    <string name="metadata_editor_shift_too_late">Así la foto más reciente quedaría en el futuro. Elige una fecha u hora anterior.</string>
+    <plurals name="metadata_editor_shift_skipped">
+        <item quantity="one">%1$d foto no tiene fecha propia, así que el desplazamiento la deja donde está. Poner la misma fecha para todas sí llega a ella.</item>
+        <item quantity="many">%1$d fotos no tienen fecha propia, así que el desplazamiento las deja donde están. Poner la misma fecha para todas sí llega a ellas.</item>
+        <item quantity="other">%1$d fotos no tienen fecha propia, así que el desplazamiento las deja donde están. Poner la misma fecha para todas sí llega a ellas.</item>
+    </plurals>
+    <string name="settings_section_about">Acerca de</string>
+    <string name="news_title">Noticias</string>
+    <string name="news_settings_desc">Mensajes y novedades sobre la app</string>
+    <string name="news_show_title">Mostrar noticias</string>
+    <string name="news_show_desc">Un pequeño punto aparece cuando hay algo nuevo</string>
+    <string name="news_empty">Nada nuevo por ahora.</string>
+    <string name="news_read_more">Leer más</string>
+    <string name="news_feedback_heading">¿Preguntas o un error?</string>
+    <string name="news_feedback_body">Haz una pregunta o informa de un error.</string>
+    <string name="news_feedback_note">Esto abre el Discord oficial de la comunidad de Proton, donde se usa un pequeño hilo del foro para los comentarios. Photos for Proton no está afiliada con Proton.</string>
+    <string name="news_feedback_button">Enviar comentarios</string>
+    <string name="news_feedback_join">¿Nuevo en el Discord de Proton? Únete primero</string>
+    <string name="news_feedback_email">O escribe a %1$s</string>
+    <string name="whats_new_metadata_title">Editar los detalles de una foto</string>
+    <string name="whats_new_metadata_body">Define la fecha y el lugar de una foto y añade una descripción, para que una toma hecha con la hora mal ajustada o sin ubicación aparezca donde corresponde.</string>
+    <string name="whats_new_text_title">Copiar texto de una foto</string>
+    <string name="whats_new_text_body">Extrae el texto de una foto y cópialo, para no tener que teclear otra vez una nota, un cartel o un recibo.</string>
+    <string name="whats_new_hdr_title">Ultra HDR en calidad completa</string>
+    <string name="whats_new_hdr_body">Las fotos tomadas en Ultra HDR se muestran con todo su brillo y color en una pantalla compatible.</string>
+    <string name="whats_new_selection_title">Todas las acciones en un solo lugar</string>
+    <string name="whats_new_selection_body">Al seleccionar fotos se abre una barra con todo lo que puedes hacer con ellas, igual en la línea de tiempo, en los álbumes y en las carpetas.</string>
+    <string name="whats_new_freeup_review_title">Mira qué elimina la liberación de espacio</string>
+    <string name="whats_new_freeup_review_body">Antes de liberar espacio del dispositivo, una pantalla enumera las fotos que va a eliminar y el espacio que se recupera, para que nada se vaya sin que lo veas primero.</string>
+    <string name="whats_new_news_title">Noticias y comentarios</string>
+    <string name="whats_new_news_body">Una pantalla de noticias trae novedades sobre la app, y un botón te lleva directo a donde puedes enviar comentarios o informar de un error.</string>
 </resources>

@@ -31,7 +31,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.data.db.dao.PhotoLocationDao
 import eu.akoos.photos.data.db.entity.PhotoLocationEntity
-import eu.akoos.photos.data.repository.GpsBackfillScheduler
+import eu.akoos.photos.data.repository.LocalExifBackfillScheduler
 import eu.akoos.photos.data.repository.drive.ThumbnailUrlStore
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
@@ -64,7 +64,7 @@ class MapViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val accountManager: AccountManager,
     private val photoLocationDao: PhotoLocationDao,
-    private val gpsBackfillScheduler: GpsBackfillScheduler,
+    private val localExifBackfillScheduler: LocalExifBackfillScheduler,
     private val drivePhotoRepository: DrivePhotoRepository,
     private val getGalleryItems: GetGalleryItemsUseCase,
     private val thumbnailUrlStore: ThumbnailUrlStore,
@@ -144,12 +144,13 @@ class MapViewModel @Inject constructor(
     /**
      * On-device EXIF backfill — reads GPS from local photos, which needs the ACCESS_MEDIA_LOCATION
      * grant, so the screen calls this only once the permission is in hand. Writes `photo_location`
-     * keyed by content URI; self-collapsing across overlapping calls.
+     * keyed by content URI; self-collapsing across overlapping calls. The same walk also corrects a
+     * capture date the file's own EXIF disagrees with, which the map itself does not read.
      */
     fun startLocalBackfill() {
         viewModelScope.launch {
             val userId = accountManager.getPrimaryUserId().first() ?: return@launch
-            withContext(Dispatchers.IO) { gpsBackfillScheduler.backfillAll(userId) }
+            withContext(Dispatchers.IO) { localExifBackfillScheduler.backfillAll(userId) }
         }
     }
 

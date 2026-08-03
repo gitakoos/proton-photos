@@ -59,9 +59,22 @@ import androidx.datastore.preferences.core.edit
 import me.proton.core.accountmanager.domain.AccountManager
 import me.proton.core.user.domain.usecase.GetUser
 import eu.akoos.photos.R
+import eu.akoos.photos.data.hidden.HiddenCloudPhotos
+import eu.akoos.photos.data.hidden.HiddenFolderRecords
+import eu.akoos.photos.data.hidden.HiddenStorageManager
+import eu.akoos.photos.data.hidden.HiddenVaultDecisions
+import eu.akoos.photos.data.hidden.HiddenVaultDiagnostics
+import eu.akoos.photos.data.hidden.HiddenVaultJournal
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.presentation.common.FavoriteActionState
+import eu.akoos.photos.presentation.common.FavoriteWriter
 import eu.akoos.photos.presentation.common.buildDeleteUndoAction
+import eu.akoos.photos.presentation.common.buildHideUndoAction
+import eu.akoos.photos.presentation.common.favoriteTurnsOnForCloudPhotos
+import eu.akoos.photos.presentation.common.message
+import eu.akoos.photos.presentation.common.shareOutcome
+import eu.akoos.photos.presentation.util.formatBytes
 import eu.akoos.photos.presentation.viewer.PublicLinkState
 import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.GalleryItem
@@ -96,6 +109,13 @@ sealed class AlbumDownloadState {
     /** Handed off to [AlbumDownloadWorker]; the UI consumes this once to dismiss the overlay + snackbar. */
     data object Enqueued : AlbumDownloadState()
 }
+
+/**
+ * How a finished album download turned out. [AlbumDownloadState] has no terminal case on purpose,
+ * since the ring must vanish the moment the work leaves the queue, and a vanished ring reads the
+ * same whether everything saved or nothing did. The counts arrive separately, once per run.
+ */
+data class AlbumDownloadResult(val saved: Int, val failed: Int)
 
 /** Progress of a share-to-other-apps batch. [Working] advances per resolved photo — cloud-only
  *  album photos decrypt to a temp file first, so the share pill shows a determinate ring. */
@@ -149,12 +169,14 @@ data class AlbumDetailUiState(
     val shareState: AlbumShareState = AlbumShareState.Idle,
     /** linkId → local MediaStore URI for photos that have been downloaded to this device. */
     val localUriByLinkId: Map<String, String> = emptyMap(),
+    /** linkId → the member's device file as the merged library paired it. Holds only this album's
+     *  members, and only those the pairing resolved, so a uri in [localUriByLinkId] can still have
+     *  no entry here. Carries the name, size, folder and dimensions a uri alone cannot. */
+    val localItemByLinkId: Map<String, eu.akoos.photos.domain.entity.LocalMediaItem> = emptyMap(),
     /** Cloud linkIds pinned for offline; the grid draws a download badge on each matching photo. */
     val offlinePinIds: Set<String> = emptySet(),
-    /** Live progress of a "make available offline" batch: [offlinePinningDone] of [offlinePinningTotal]
-     *  full-res blobs fetched. [offlinePinningTotal] is 0 when no pin batch is running. */
-    val offlinePinningDone: Int = 0,
-    val offlinePinningTotal: Int = 0,
+    /** Progress of a batch favourite from the selection dock. */
+    val favoriteState: FavoriteActionState = FavoriteActionState.Idle,
     /** True while the multi-email Share-popup batch is in flight; gates the "Share" button + chip removals. */
     val isInvitingBatch: Boolean = false,
     /** Set after a [AlbumDetailViewModel.inviteUsers] batch completes; consumed once by the UI snackbar. */
@@ -177,6 +199,12 @@ data class AlbumDetailUiState(
     val isLeavingAlbum: Boolean = false,
     /** Set true on leave success so the screen pops back; the ViewModel never navigates on its own. */
     val leaveAlbumDone: Boolean = false,
+    /** Set true once the hide write lands, so the screen pops back off an album that has left the
+     *  grid. Same contract as [leaveAlbumDone]: the ViewModel never navigates on its own. */
+    val hideAlbumDone: Boolean = false,
+    /** True while this album's photos are kept out of the main feed. About the photos alone, which
+     *  [hideAlbumDone]'s action is not: that one takes the album out of every list. */
+    val isHiddenFromTimeline: Boolean = false,
     /** True when this is a shared-with-me album the sharer granted edit rights on. */
     val sharedAlbumIsEditable: Boolean = false,
 ) {
@@ -209,10 +237,14 @@ class AlbumDetailViewModel @Inject constructor(
     private val networkObserver: eu.akoos.photos.util.NetworkObserver,
     private val albumListEvents: eu.akoos.photos.util.AlbumListEventBus,
     private val deletePhotoUseCase: eu.akoos.photos.domain.usecase.DeletePhotoUseCase,
+    private val getGalleryItems: eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase,
     private val publicLink: eu.akoos.photos.presentation.common.PublicLinkController,
     private val offlineStore: eu.akoos.photos.data.offline.OfflineStorageManager,
     private val transferCenter: eu.akoos.photos.data.transfer.TransferCenter,
     private val undoController: eu.akoos.photos.presentation.common.UndoController,
+    private val hiddenStorage: HiddenStorageManager,
+    private val hiddenVaultJournal: HiddenVaultJournal,
+    private val favoriteWriter: FavoriteWriter,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(AlbumDetailUiState())
@@ -226,12 +258,44 @@ class AlbumDetailViewModel @Inject constructor(
     private val _offlineResult = MutableSharedFlow<Int>(replay = 0, extraBufferCapacity = 1)
     val offlineResult: SharedFlow<Int> = _offlineResult.asSharedFlow()
 
+    /**
+     * Fires when saving for offline actually begins downloading. Separate from [offlineResult] so
+     * the screen can say the work started: the running count lives on the Activity screen, and the
+     * un-pin branch is instant and local, so only the pinning branch has anything to announce.
+     */
+    private val _offlineStarted = MutableSharedFlow<Unit>(replay = 0, extraBufferCapacity = 1)
+    val offlineStarted: SharedFlow<Unit> = _offlineStarted.asSharedFlow()
+
+    /** Outcome of a finished album download, emitted once per run. See [AlbumDownloadResult]. */
+    private val _downloadResult = MutableSharedFlow<AlbumDownloadResult>(replay = 0, extraBufferCapacity = 1)
+    val downloadResult: SharedFlow<AlbumDownloadResult> = _downloadResult.asSharedFlow()
+
+    /**
+     * A download has been handed to the worker. An event rather than a UI-state value: the state is
+     * a conflated flow, and the work observer reports the queued entry in the same breath, so a
+     * transient "enqueued" value is routinely collapsed into the progress value that follows it and
+     * never reaches a collector.
+     */
+    private val _downloadStarted = MutableSharedFlow<Unit>(replay = 0, extraBufferCapacity = 1)
+    val downloadStarted: SharedFlow<Unit> = _downloadStarted.asSharedFlow()
+
     /** Cached primary userId — same rationale as GalleryViewModel.primaryUserId. */
     @Volatile private var primaryUserId: me.proton.core.domain.entity.UserId? = null
 
-    // captureTime DESC with linkId tie-breaker (matches AlbumService.photoOrder) so equal-captureTime
-    // bursts don't reshuffle between the observer's chunked emissions and the final server paint.
-    private val photoOrder = compareByDescending<CloudPhoto> { it.captureTimeMs }.thenBy { it.linkId }
+    /** Direction this album lists its members in, from the one global preference every album shares
+     *  (#85). Every place that builds the member list reads it: the list is rebuilt from a cache
+     *  read, a server list and a DB observe, and a direction applied to only some of them would be
+     *  undone by the next paint. */
+    private val photoSortMode = MutableStateFlow(AlbumPhotoSortMode.Default)
+
+    /** One run of the device-twin lookup: the member list it ran over, the twins it paired, and the
+     *  order those twins imply. [source] is kept so the result can be discarded if the member list
+     *  moved on while the pass was in flight. */
+    private data class TwinPass(
+        val source: List<CloudPhoto>,
+        val twins: Map<String, eu.akoos.photos.domain.entity.LocalMediaItem>,
+        val ordered: List<CloudPhoto>,
+    )
 
     /** Enqueue an on-demand thumbnail decrypt; deduped by linkId, no-op until primaryUserId lands. */
     fun requestThumbnailDecrypt(linkId: String) {
@@ -258,12 +322,77 @@ class AlbumDetailViewModel @Inject constructor(
                 _uiState.update { it.copy(localUriByLinkId = map) }
             }
         }
+        // Device files for this album's members, taken from the same merged library every other
+        // surface reads. The merge is the @Singleton GetGalleryItemsUseCase, so this adds no second
+        // full-library pass, and the map it yields is bounded by the album rather than the library.
+        // The order is recomputed here too: the twins settle after the photos do, and a member whose
+        // Drive captureTime is sub-floor only finds its real place once its twin is in hand.
+        viewModelScope.launch {
+            val userId = accountManager.getPrimaryUserId().first() ?: return@launch
+            combine(
+                getGalleryItems.invoke(userId),
+                // Re-reads only when the member list itself changes: a selection toggle or a progress
+                // tick copies the same list reference through, which this drops.
+                _uiState.map { it.photos }.distinctUntilChanged(),
+                // In the pass rather than read from the field, so a direction change mid-flight can
+                // never be overwritten by an order this pass computed before it.
+                photoSortMode,
+            ) { library, photos, mode ->
+                val twins = AlbumPhotoItems.twinsFor(photos, library)
+                TwinPass(photos, twins, AlbumPhotoItems.ordered(photos, twins, mode))
+            }
+                // A cold listing re-emits the merged library several times a second; an unchanged
+                // pass must not repaint the grid, so it never reaches the state at all.
+                .distinctUntilChanged()
+                .flowOn(Dispatchers.Default)
+                .catch { e ->
+                    if (e is kotlinx.coroutines.CancellationException) throw e
+                    Log.w("AlbumDetailVM", "album device twins unavailable: ${e.message}")
+                }
+                .collect { pass ->
+                    _uiState.update { state ->
+                        // A remove or delete landing while the pass ran replaced the member list, and
+                        // its result wins: taking the stale order back would re-paint what it dropped.
+                        // The twins still apply, and the next pass orders the survivors.
+                        if (state.photos !== pass.source) state.copy(localItemByLinkId = pass.twins)
+                        else state.copy(localItemByLinkId = pass.twins, photos = pass.ordered)
+                    }
+                }
+        }
+        // Newest-first or oldest-first, from the one global preference. Re-orders what is already on
+        // screen so the choice lands immediately instead of waiting for a reload, and holds the value
+        // the cache read, the server list and the DB observe each sort by.
+        viewModelScope.launch {
+            context.settingsDataStore.data
+                .map { AlbumPhotoSortMode.fromOrdinal(it[SettingsKeys.ALBUM_PHOTO_SORT_MODE]) }
+                .distinctUntilChanged()
+                .collect { mode ->
+                    photoSortMode.value = mode
+                    _uiState.update {
+                        it.copy(photos = AlbumPhotoItems.ordered(it.photos, it.localItemByLinkId, mode))
+                    }
+                }
+        }
         // Offline-pinned linkIds → per-cell offline badge. Same OFFLINE_PIN_IDS pref the timeline reads.
         viewModelScope.launch {
             context.settingsDataStore.data
                 .map { it[SettingsKeys.OFFLINE_PIN_IDS] ?: emptySet() }
                 .distinctUntilChanged()
                 .collect { ids -> _uiState.update { it.copy(offlinePinIds = ids) } }
+        }
+        // This album's own timeline exclusion, which the drawer ticks. Keyed on the album so the
+        // state follows a load, and resolved to the one Boolean here: the stored ids are a small set
+        // the timeline resolves to members itself, so nothing per-photo is built on this side.
+        viewModelScope.launch {
+            combine(
+                _uiState.map { it.albumLinkId }.distinctUntilChanged(),
+                context.settingsDataStore.data
+                    .map { it[SettingsKeys.TIMELINE_EXCLUDED_ALBUM_IDS] ?: emptySet() }
+                    .distinctUntilChanged(),
+            ) { linkId, excluded -> AlbumTimelineHide.isExcluded(excluded, linkId) }
+                .distinctUntilChanged()
+                .catch { emit(false) }
+                .collect { excluded -> _uiState.update { it.copy(isHiddenFromTimeline = excluded) } }
         }
         // Resolve the owner email once for the share-sheet "owner" row; failures are silent.
         viewModelScope.launch {
@@ -338,7 +467,16 @@ class AlbumDetailViewModel @Inject constructor(
                 // Drop individually-hidden members from the instant cache read too: without this a
                 // hidden cloud photo flashes back into the album until the reactive observe re-filters.
                 val hidden = hiddenMemberFilterFor(albumLinkId)
-                _uiState.update { it.copy(isLoading = false, photos = cached.filterNot { p -> p.linkId in hidden }) }
+                _uiState.update { state ->
+                    state.copy(
+                        isLoading = false,
+                        photos = AlbumPhotoItems.ordered(
+                            cached.filterNot { p -> p.linkId in hidden },
+                            state.localItemByLinkId,
+                            photoSortMode.value,
+                        ),
+                    )
+                }
             }
 
             if (!networkObserver.isOnline.value) {
@@ -378,12 +516,18 @@ class AlbumDetailViewModel @Inject constructor(
                             val existingById = state.photos.associateBy { it.linkId }
                             state.copy(
                                 isLoading = false,
-                                photos = photos.filterNot { it.linkId in hiddenNow }.map { server ->
-                                    val cached = existingById[server.linkId] ?: return@map server
-                                    server.copy(
-                                        thumbnailUrl = server.thumbnailUrl ?: cached.thumbnailUrl,
-                                    )
-                                },
+                                // Re-ordered here too: the server list is raw-captureTime order, so a
+                                // sub-floor member would jump back to the tail on the final paint.
+                                photos = AlbumPhotoItems.ordered(
+                                    photos.filterNot { it.linkId in hiddenNow }.map { server ->
+                                        val cached = existingById[server.linkId] ?: return@map server
+                                        server.copy(
+                                            thumbnailUrl = server.thumbnailUrl ?: cached.thumbnailUrl,
+                                        )
+                                    },
+                                    state.localItemByLinkId,
+                                    photoSortMode.value,
+                                ),
                             )
                         }
                     },
@@ -460,9 +604,11 @@ class AlbumDetailViewModel @Inject constructor(
                 }
                 .collect { (dbRows, hidden) ->
                 val byId = dbRows.associateBy { it.linkId }
-                val ordered = linkIds.mapNotNull { byId[it] }
-                    .filterNot { it.linkId in hidden }
-                    .sortedWith(photoOrder)
+                val ordered = AlbumPhotoItems.ordered(
+                    linkIds.mapNotNull { byId[it] }.filterNot { it.linkId in hidden },
+                    _uiState.value.localItemByLinkId,
+                    photoSortMode.value,
+                )
                 _uiState.update { state ->
                     val existingById = state.photos.associateBy { it.linkId }
                     // An empty pass doesn't mean empty album — could be between chunked upserts or a
@@ -582,6 +728,59 @@ class AlbumDetailViewModel @Inject constructor(
     fun setSelectedPhotos(linkIds: Set<String>) = _uiState.update { it.copy(selectedPhotos = linkIds) }
 
     /**
+     * Puts every selected album photo into the state [favoriteTurnsOnForCloudPhotos] picks for it: on
+     * if any of them is not a favourite yet, off once they all are.
+     *
+     * Every member is a Drive photo, so the heart is PhotoTag 0 and the write is the same one the
+     * timeline and the viewer make. The album's rows come from a one-shot listing rather than a live
+     * flow, so each photo that settles has its tag patched here and its cell's heart follows at once.
+     * The selection is kept, so a second press takes the first one back.
+     *
+     * Shared-with-me albums never get here: their photos are the owner's, on the owner's volume, and
+     * the same line already keeps hide, delete and cover off this surface.
+     */
+    fun toggleSelectedFavorite() {
+        val state = _uiState.value
+        if (state.isSharedWithMe) return
+        val selected = state.photos.filter { it.linkId in state.selectedPhotos }
+        if (selected.isEmpty() || state.favoriteState !is FavoriteActionState.Idle) return
+        val turnOn = favoriteTurnsOnForCloudPhotos(selected)
+        viewModelScope.launch {
+            _uiState.update { it.copy(favoriteState = FavoriteActionState.Working(0, selected.size)) }
+            val outcome = favoriteWriter.write(
+                items = selected.map { GalleryItem.CloudOnly(it) },
+                favorite = turnOn,
+                onProgress = { done ->
+                    _uiState.update {
+                        it.copy(favoriteState = FavoriteActionState.Working(done, selected.size))
+                    }
+                },
+                onSettled = { item ->
+                    val linkId = (item as? GalleryItem.CloudOnly)?.cloud?.linkId
+                    if (linkId != null) {
+                        _uiState.update { s ->
+                            s.copy(
+                                photos = s.photos.map { photo ->
+                                    if (photo.linkId != linkId) photo
+                                    else photo.copy(
+                                        tags = if (turnOn) photo.tags + 0 else photo.tags - 0,
+                                    )
+                                },
+                            )
+                        }
+                    }
+                },
+            )
+            _uiState.update {
+                it.copy(
+                    favoriteState = FavoriteActionState.Idle,
+                    error = outcome.message()?.resolve(context) ?: it.error,
+                )
+            }
+        }
+    }
+
+    /**
      * Pin or un-pin the selected album photos for offline viewing, mirroring the timeline's batch
      * toggle. If every selected photo is already offline it removes them (drops the pins + blobs, no
      * network); otherwise it downloads the full-res blob for the ones not yet pinned. The pin set is
@@ -621,9 +820,8 @@ class AlbumDetailViewModel @Inject constructor(
                 val current = prefs[SettingsKeys.OFFLINE_PIN_IDS] ?: emptySet()
                 prefs[SettingsKeys.OFFLINE_PIN_IDS] = current + linkIds
             }
-            _uiState.update {
-                it.copy(selectedPhotos = emptySet(), offlinePinningTotal = toPin.size, offlinePinningDone = 0)
-            }
+            _uiState.update { it.copy(selectedPhotos = emptySet()) }
+            _offlineStarted.emit(Unit)
             val userId = primaryUserId ?: accountManager.getPrimaryUserId().first()
             var succeeded = 0
             val failedLinkIds = mutableListOf<String>()
@@ -644,8 +842,8 @@ class AlbumDetailViewModel @Inject constructor(
                         Log.w("AlbumDetailVM", "offline pin failed: ${e.message}")
                         failedLinkIds += photo.linkId
                     }
-                    // Advance the progress pill once per attempt so it fills to the total either way.
-                    _uiState.update { it.copy(offlinePinningDone = it.offlinePinningDone + 1) }
+                    // Advance once per attempt so the Activity screen's row fills to the total
+                    // either way.
                     transferCenter.progress(transferId, succeeded + failedLinkIds.size)
                 }
             } finally {
@@ -659,7 +857,6 @@ class AlbumDetailViewModel @Inject constructor(
                 }
                 failedLinkIds.forEach { offlineStore.delete(it) }
             }
-            _uiState.update { it.copy(offlinePinningTotal = 0, offlinePinningDone = 0) }
             transferCenter.log(
                 eu.akoos.photos.data.transfer.TransferCenter.Kind.OFFLINE, succeeded, uris = savedPaths,
             )
@@ -673,23 +870,14 @@ class AlbumDetailViewModel @Inject constructor(
     private var pendingDeleteFromCloud: Boolean = false
 
     /** Resolve selected photos to [GalleryItem]s for delete: [GalleryItem.Synced] if a local twin exists, else CloudOnly. */
-    private fun selectedGalleryItems(): List<eu.akoos.photos.domain.entity.GalleryItem> {
+    private fun selectedGalleryItems(): List<GalleryItem> {
         val state = _uiState.value
         val byId = state.photos.associateBy { it.linkId }
         return state.selectedPhotos.mapNotNull { linkId ->
             val photo = byId[linkId] ?: return@mapNotNull null
-            val uri = state.localUriByLinkId[linkId]
-            if (uri != null) eu.akoos.photos.domain.entity.GalleryItem.Synced(
-                photo,
-                eu.akoos.photos.domain.entity.LocalMediaItem(
-                    uri = uri,
-                    dateTaken = photo.captureTimeMs,
-                    displayName = "",
-                    mimeType = photo.mimeType,
-                    sizeBytes = 0L,
-                    bucketName = null,
-                ),
-            ) else eu.akoos.photos.domain.entity.GalleryItem.CloudOnly(photo)
+            AlbumPhotoItems.galleryItem(
+                photo, state.localItemByLinkId[linkId], state.localUriByLinkId[linkId],
+            )
         }
     }
 
@@ -759,38 +947,194 @@ class AlbumDetailViewModel @Inject constructor(
     fun clearHideCloudNotice() = _uiState.update { it.copy(hideCloudNoticePending = false) }
 
     /**
-     * Hide the selected album members, matching the timeline / search / device-folder hide. Every album
-     * member is a cloud photo, so hide is always a client-side filter: each member's cloud linkId is
-     * added to [SettingsKeys.HIDDEN_CLOUD_PHOTO_IDS]. A Synced member keeps its device file in place, so
-     * the shared merge filter drops it from every surface and unhide re-includes it with no re-pairing.
-     * Hidden members drop from the grid via [finishHide], and the reactive hidden filter keeps them out
-     * across refreshes. Nothing on Drive changes.
+     * The two halves the current selection's hide would act on, for the confirmation that fronts it.
+     *
+     * The same routing [hideSelected] follows, read from the same selection, so the sheet describes
+     * exactly what the Hide button is about to do rather than what hiding does in general.
+     */
+    fun hideSplitForSelection(): HiddenFolderRecords.HideSplit =
+        HiddenFolderRecords.hideSplit(selectedGalleryItems())
+
+    /** Private vault URIs of a hide whose intent is journalled and whose system delete has not
+     *  confirmed yet. Published into HIDDEN_PHOTO_URIS once it does, discarded if it is cancelled. */
+    private var pendingHidePrivateUris: List<String> = emptyList()
+
+    /** The client-side half of the same in-flight hide, held so the Undo offered once the delete
+     *  confirms reverses the whole hide rather than only the photos that were vaulted. */
+    private var pendingHideCloudLinkIds: List<String> = emptyList()
+
+    /** How many device files that hide could not copy into the vault. Carried to whichever commit
+     *  path lands so the count is reported once the hide is actually done. */
+    private var pendingHideFailures = 0
+
+    /**
+     * Hide the selected album members, running the very body the timeline, search and device-folder
+     * hides run.
+     *
+     * A member that is also on this device is a photo like any other: its device file moves into the
+     * app-private vault and its MediaStore original is removed, so the file leaves every other
+     * gallery app on the phone rather than merely leaving this app's listings. Its cloud linkId
+     * travels into the vault with it, which is what lets the reveal re-pair it to the Drive copy
+     * instead of uploading a second one. A member that lives only on Drive has no file to move and
+     * hides by its linkId alone.
+     *
+     * The intent is journalled BEFORE the delete and confirmed after it, so an interruption between
+     * the two leaves a repairable record instead of bytes nothing refers to — see [HiddenVaultJournal].
+     * Hidden members drop from the grid via [finishHide], and the reactive hidden filter keeps them
+     * out across refreshes. Nothing on Drive changes.
      */
     fun hideSelected() {
         if (_uiState.value.isSharedWithMe) return
         val items = selectedGalleryItems()
         if (items.isEmpty()) return
         val hiddenLinkIds = _uiState.value.selectedPhotos.toList()
-        // Every album member is a cloud photo (synced or cloud-only), so hide is always a client-side
-        // filter: add each member's cloud linkId to the hidden set. A synced member keeps its device
-        // file in place, and the shared merge filter drops it from every surface; unhide re-includes it
-        // with no re-pairing of the device copy. Nothing on Drive changes.
-        val cloudFilterIds = items.mapNotNull {
-            when (it) {
-                is GalleryItem.Synced    -> it.cloud.linkId
-                is GalleryItem.CloudOnly -> it.cloud.linkId
-                is GalleryItem.LocalOnly -> null
-            }
-        }
+        val split = HiddenFolderRecords.hideSplit(items)
+        val vaultable = split.vaultable
         viewModelScope.launch {
             _uiState.update { it.copy(isDeletingPhotos = true, busyOp = AlbumBusyOp.Hiding) }
-            if (cloudFilterIds.isNotEmpty()) {
-                context.settingsDataStore.edit { prefs ->
-                    val existing = prefs[SettingsKeys.HIDDEN_CLOUD_PHOTO_IDS] ?: emptySet()
-                    prefs[SettingsKeys.HIDDEN_CLOUD_PHOTO_IDS] = existing + cloudFilterIds
+            HiddenVaultDiagnostics.hideStarted(split)
+            HiddenCloudPhotos.hide(context, split.cloudLinkIds)
+            pendingHideCloudLinkIds = split.cloudLinkIds
+            pendingHideFailures = 0
+            if (vaultable.isEmpty()) {
+                // Nothing on this device to move, so the client-side hide above is the whole
+                // operation and it is already done. The Undo bar is raised for it exactly as it is
+                // for a vaulting hide, so the same button stays reversible either way.
+                pendingHideCloudLinkIds = emptyList()
+                buildHideUndoAction(emptyList(), split.cloudLinkIds)?.let { undoController.offer(it) }
+                finishHide(hiddenLinkIds)
+                return@launch
+            }
+            // Refuse up front when the copies cannot fit, measured over the whole batch. A hide holds
+            // both the originals and the vault copies at once, so a volume that runs out mid-batch
+            // fails per file with nothing the user can act on.
+            val shortfall = hiddenVaultJournal.spaceShortfallBytes(vaultable.sumOf { it.sizeBytes })
+            if (shortfall > 0L) {
+                failHide(context.getString(R.string.gallery_hide_needs_free_space, formatBytes(shortfall)))
+                return@launch
+            }
+            // Copy each device file into app-private hidden storage, a backed-up photo stashing its
+            // cloud linkId so the reveal re-pairs by id. A file that could not be copied is counted
+            // rather than dropped: its photo stays visible, so a hide that reported plain success
+            // would be describing a state the user can see is not true.
+            val collected = mutableListOf<HiddenVaultJournal.Entry>()
+            var hideFailures = 0
+            for (target in vaultable) {
+                val local = target.local
+                val sourceFolder = withContext(Dispatchers.IO) {
+                    hiddenStorage.sourceFolderFor(local.uri, local.bucketName)
+                }
+                val privateUri = hiddenStorage.store(
+                    local.uri, local.displayName, local.mimeType, captureTimeMs = target.captureTimeMs,
+                )
+                if (privateUri != null) {
+                    collected += HiddenVaultJournal.Entry(
+                        privateUri = privateUri,
+                        sourceUri = local.uri,
+                        sourceFolder = sourceFolder,
+                        originalName = local.displayName,
+                        cloudLinkId = target.cloudLinkId,
+                    )
+                } else {
+                    hideFailures++
                 }
             }
-            finishHide(hiddenLinkIds)
+            HiddenVaultDiagnostics.copied(collected.size, hideFailures)
+            if (collected.isEmpty()) {
+                failHide(context.getString(R.string.gallery_copy_to_hidden_failed))
+                return@launch
+            }
+            // Record the intent BEFORE anything is deleted, so an interruption during the delete
+            // leaves a recoverable state rather than orphaned bytes.
+            if (!hiddenVaultJournal.journal(collected)) {
+                hiddenVaultJournal.discard(collected.map { it.privateUri })
+                failHide(context.getString(R.string.gallery_move_to_hidden_failed))
+                return@launch
+            }
+            pendingHidePrivateUris = collected.map { it.privateUri }
+            pendingHideFailures = hideFailures
+            // Delete the MediaStore originals of exactly what was copied. Narrowing to the copied
+            // files is what leaves a photo whose copy failed where the user can still see it: this
+            // delete is permanent, so passing the whole selection would take it nowhere.
+            val deleting = HiddenVaultDecisions.deletableOriginals(vaultable, collected)
+            val userId = accountManager.getPrimaryUserId().first() ?: run {
+                failHide(context.getString(R.string.viewer_not_signed_in))
+                return@launch
+            }
+            val result = runCatching {
+                deletePhotoUseCase(userId, deleting, freeUpSpace = true, deleteFromCloud = false, hide = true)
+            }.getOrElse { e ->
+                Log.e("AlbumDetailVM", "hideSelected failed", e)
+                failHide(context.getString(R.string.gallery_move_to_hidden_failed))
+                return@launch
+            }
+            when (result) {
+                is eu.akoos.photos.domain.usecase.DeletePhotoUseCase.Result.Success -> {
+                    HiddenVaultDiagnostics.originalsRemoved(deleting.size, neededConsent = false)
+                    // Snapshot both halves before commitPendingHide() clears the pending list, so
+                    // Undo reverses exactly the hide that just landed.
+                    val hideUris = pendingHidePrivateUris
+                    val hideCloudIds = pendingHideCloudLinkIds
+                    pendingHideCloudLinkIds = emptyList()
+                    commitPendingHide()
+                    buildHideUndoAction(hideUris, hideCloudIds)?.let { undoController.offer(it) }
+                    reportHideFailures()
+                    finishHide(hiddenLinkIds)
+                }
+                is eu.akoos.photos.domain.usecase.DeletePhotoUseCase.Result.NeedsMediaWritePermission -> {
+                    HiddenVaultDiagnostics.originalsAwaitingConsent(deleting.size)
+                    pendingPermissionResult = result
+                    pendingDeleteLinkIds = hiddenLinkIds
+                    pendingDeleteFromCloud = false
+                    _uiState.update { it.copy(isDeletingPhotos = false, pendingDeleteIntent = result.pendingIntent) }
+                }
+                is eu.akoos.photos.domain.usecase.DeletePhotoUseCase.Result.CloudDeleteFailed -> {
+                    failHide(context.getString(R.string.gallery_move_to_hidden_failed))
+                }
+            }
+        }
+    }
+
+    /** Say a hide could not finish and hand the selection back, so the bar never sits busy over a
+     *  photo that is still exactly where the user left it. Undoing whatever the attempt already
+     *  wrote is part of the same promise: the cloud-only half is hidden before the device half is
+     *  attempted, so a message alone would leave those photos gone from every listing. */
+    private fun failHide(message: String) {
+        rollbackPendingHide()
+        _uiState.update { it.copy(isDeletingPhotos = false, busyOp = AlbumBusyOp.None, error = message) }
+    }
+
+    /** Say how many photos a landed hide left behind, and only then: a photo whose copy failed is
+     *  still on the device, so a hide that reported plain success would contradict the grid. */
+    private fun reportHideFailures() {
+        val failures = pendingHideFailures
+        pendingHideFailures = 0
+        if (failures <= 0) return
+        _uiState.update {
+            it.copy(error = context.resources.getQuantityString(R.plurals.gallery_hide_partial_failed, failures, failures))
+        }
+    }
+
+    /** Publish the journalled hide now that the delete has confirmed. */
+    private suspend fun commitPendingHide() {
+        val uris = pendingHidePrivateUris
+        pendingHidePrivateUris = emptyList()
+        hiddenVaultJournal.confirm(uris)
+    }
+
+    /** Undo a hide that did not land: drop the copies and everything journalled for them, and put the
+     *  cloud-only half back in every listing. The originals are untouched, so the photos stay where
+     *  the user already sees them. */
+    private fun rollbackPendingHide() {
+        val uris = pendingHidePrivateUris
+        val cloudIds = pendingHideCloudLinkIds
+        pendingHidePrivateUris = emptyList()
+        pendingHideCloudLinkIds = emptyList()
+        pendingHideFailures = 0
+        if (uris.isEmpty() && cloudIds.isEmpty()) return
+        viewModelScope.launch {
+            if (uris.isNotEmpty()) hiddenVaultJournal.discard(uris)
+            HiddenCloudPhotos.reveal(context, cloudIds)
         }
     }
 
@@ -803,7 +1147,10 @@ class AlbumDetailViewModel @Inject constructor(
         _uiState.update { it.copy(pendingDeleteIntent = null) }
         viewModelScope.launch {
             val userId = accountManager.getPrimaryUserId().first()
-            if (userId != null) runCatching {
+            // The refusal comes back as an answer rather than an exception, so runCatching alone
+            // never saw it: the device file had gone, the Drive copy had not, and the screen said
+            // nothing at all. The timeline surface already reports this.
+            val cloudResult = if (userId != null) runCatching {
                 deletePhotoUseCase.completeAfterPermissionGranted(
                     userId = userId,
                     cloudLinkIds = pending.cloudLinkIds,
@@ -811,6 +1158,21 @@ class AlbumDetailViewModel @Inject constructor(
                     freeUpSpace = pending.freeUpSpace,
                     hide = pending.hide,
                 )
+            }.getOrNull() else null
+            if (cloudResult is eu.akoos.photos.domain.usecase.DeletePhotoUseCase.Result.CloudDeleteFailed) {
+                _uiState.update { it.copy(error = context.getString(R.string.viewer_delete_drive_failed)) }
+            }
+            if (pending.hide) {
+                // Snapshot both halves before commitPendingHide() clears them, then offer Undo for
+                // the whole hide rather than only the photos that were vaulted.
+                val hideUris = pendingHidePrivateUris
+                val hideCloudIds = pendingHideCloudLinkIds
+                pendingHideCloudLinkIds = emptyList()
+                commitPendingHide()
+                buildHideUndoAction(hideUris, hideCloudIds)?.let { undoController.offer(it) }
+                reportHideFailures()
+                finishHide(linkIds)
+                return@launch
             }
             // The system trash keeps the local files for ~30 days, so a confirmed delete is
             // reversible: localRecoverable = true.
@@ -820,10 +1182,13 @@ class AlbumDetailViewModel @Inject constructor(
         }
     }
 
-    /** User cancelled the system trash dialog, so drop the deferred cloud work. */
+    /** User cancelled the system trash dialog, so drop the deferred cloud work — and, for a hide,
+     *  the vault copies it had already written: the originals are untouched, so the photos stay
+     *  exactly where the user can still see them. */
     fun clearPendingDeleteIntent() {
         pendingPermissionResult = null
-        _uiState.update { it.copy(isDeletingPhotos = false, pendingDeleteIntent = null) }
+        rollbackPendingHide()
+        _uiState.update { it.copy(isDeletingPhotos = false, busyOp = AlbumBusyOp.None, pendingDeleteIntent = null) }
     }
 
     /** Drop the selected photos' album reference (they stay in Photos). Reuses [isDeletingPhotos] for the working state. */
@@ -969,6 +1334,19 @@ class AlbumDetailViewModel @Inject constructor(
 
     fun clearError() = _uiState.update { it.copy(error = null) }
 
+    /**
+     * What a just-created share needs beyond its id, so managing it works without leaving the album.
+     *
+     * The member list is server truth keyed by the share, and there is none to read until the share
+     * exists — the fetch here is what fills "Who has access" and what [disablePublicLink] reads to
+     * decide between dropping the URL and dropping the whole share. The album grid then re-pulls so
+     * its shared marker appears. Call only after the new id is in state: both reads take it from there.
+     */
+    private fun onShareCreated() {
+        loadInvitations()
+        albumListEvents.notifyChanged()
+    }
+
     fun createShareLink() {
         val albumLinkId = _uiState.value.albumLinkId.ifBlank { return }
         viewModelScope.launch {
@@ -976,11 +1354,17 @@ class AlbumDetailViewModel @Inject constructor(
             _uiState.update { it.copy(isSharing = true) }
             runCatching { driveRepo.createAlbumShareLink(userId, albumLinkId) }
                 .fold(
-                    onSuccess = { url ->
+                    onSuccess = { created ->
                         // Set both: shareLink (one-shot clipboard trigger) and publicShareUrl (persistent sheet state).
                         _uiState.update {
-                            it.copy(isSharing = false, shareLink = url, publicShareUrl = url)
+                            it.copy(
+                                isSharing = false,
+                                shareLink = created.url,
+                                publicShareUrl = created.url,
+                                shareId = AlbumShareIds.resolve(it.shareId, created.shareId),
+                            )
                         }
+                        onShareCreated()
                     },
                     onFailure = { e ->
                         Log.e("AlbumDetailVM", "createShareLink failed", e)
@@ -1011,9 +1395,16 @@ class AlbumDetailViewModel @Inject constructor(
             _uiState.update { it.copy(isTogglingPublicLink = true) }
             runCatching { driveRepo.createAlbumShareLink(userId, albumLinkId) }
                 .fold(
-                    onSuccess = { url ->
-                        Log.d("AlbumDetailVM", "createPublicLink: SUCCESS url=$url")
-                        _uiState.update { it.copy(isTogglingPublicLink = false, publicShareUrl = url) }
+                    onSuccess = { created ->
+                        Log.d("AlbumDetailVM", "createPublicLink: SUCCESS url=${created.url}")
+                        _uiState.update {
+                            it.copy(
+                                isTogglingPublicLink = false,
+                                publicShareUrl = created.url,
+                                shareId = AlbumShareIds.resolve(it.shareId, created.shareId),
+                            )
+                        }
+                        onShareCreated()
                     },
                     onFailure = { e ->
                         Log.e("AlbumDetailVM", "createPublicLink: FAILURE msg=${e.message}", e)
@@ -1128,27 +1519,10 @@ class AlbumDetailViewModel @Inject constructor(
         }
     }
 
-    fun inviteUser(email: String) {
-        val albumLinkId = _uiState.value.albumLinkId.ifBlank { return }
-        viewModelScope.launch {
-            val userId = accountManager.getPrimaryUserId().first() ?: return@launch
-            runCatching { driveRepo.inviteToAlbum(userId, albumLinkId, email) }
-                .fold(
-                    onSuccess = { _uiState.update { it.copy(error = null) } },
-                    onFailure = { e ->
-                        Log.e("AlbumDetailVM", "inviteUser failed", e)
-                        val friendly = friendlyNetworkError(e, networkObserver.isOnline.value, context)
-                        _uiState.update {
-                            it.copy(error = friendly ?: context.getString(R.string.share_invite_failed))
-                        }
-                    },
-                )
-        }
-    }
-
     /**
      * Bulk-invite emails: one [DrivePhotoRepository.inviteToAlbum] per email, then a summary in [inviteBatchResult].
-     * [message] and [permissions] have no backend setter yet — accepted for forward compat, dropped at the data layer.
+     * [permissions] is the role picked in the sheet (4 = viewer, 6 = editor) and rides on each invitation,
+     * so the pending rows below show what was actually granted. [message] has no backend setter yet.
      */
     fun inviteUsers(emails: List<String>, message: String, permissions: Int) {
         val albumLinkId = _uiState.value.albumLinkId.ifBlank { return }
@@ -1170,10 +1544,16 @@ class AlbumDetailViewModel @Inject constructor(
             }
             val failures = mutableListOf<Pair<String, String>>() // email → error message
             var successes = 0
+            // The share each invite lands on. The first invite to an unshared album mints it, so
+            // collecting it here is what lets this screen address the share it just made.
+            val reportedShareIds = mutableListOf<String?>()
             for (email in emails) {
-                runCatching { driveRepo.inviteToAlbum(userId, albumLinkId, email) }
+                runCatching { driveRepo.inviteToAlbum(userId, albumLinkId, email, permissions) }
                     .fold(
-                        onSuccess = { successes++ },
+                        onSuccess = { shareId ->
+                            successes++
+                            reportedShareIds.add(shareId)
+                        },
                         onFailure = { e ->
                             val friendly = friendlyNetworkError(e, networkObserver.isOnline.value, context)
                             // Trust our IllegalArgumentException messages verbatim (they include the email);
@@ -1194,10 +1574,11 @@ class AlbumDetailViewModel @Inject constructor(
                         successCount = successes,
                         failures = failures.toList(),
                     ),
+                    shareId = AlbumShareIds.resolveBatch(it.shareId, reportedShareIds),
                 )
             }
             // Refresh so the new pending rows appear in "Who has access" without re-opening the sheet.
-            if (successes > 0) loadInvitations()
+            if (successes > 0) onShareCreated()
         }
     }
 
@@ -1206,7 +1587,7 @@ class AlbumDetailViewModel @Inject constructor(
     fun clearShareLink() = _uiState.update { it.copy(shareLink = null) }
 
     fun downloadSelectedPhotos() {
-        // Downloads land in Pictures/<AlbumName>/; an empty (undecryptable) name falls back to Pictures/ root.
+        // Downloads land in DCIM/<AlbumName>/; an empty (undecryptable) name falls back to DCIM/Camera.
         val folderName = eu.akoos.photos.util.ProtonPhotosStorage.sanitize(_uiState.value.albumName)
         val selectedIds = _uiState.value.selectedPhotos
         val photos = _uiState.value.photos.filter { it.linkId in selectedIds }
@@ -1253,7 +1634,15 @@ class AlbumDetailViewModel @Inject constructor(
                     eu.akoos.photos.util.ShareIntentBuilder.buildSendIntent(context, uris, mime),
                 )
             }
-            _uiState.update { it.copy(shareState = AlbumShareState.Idle, selectedPhotos = emptySet()) }
+            // A photo that could not be resolved never reaches the chooser, so say how many did.
+            val shareMessage = shareOutcome(uris.size, selected.size - uris.size).message()
+            _uiState.update {
+                it.copy(
+                    shareState = AlbumShareState.Idle,
+                    selectedPhotos = emptySet(),
+                    error = shareMessage?.resolve(context),
+                )
+            }
         }
     }
 
@@ -1315,6 +1704,58 @@ class AlbumDetailViewModel @Inject constructor(
     /** Abort an in-flight save-to-library copy. Safe to call when none is running. */
     fun cancelSaveToLibrary() {
         driveRepo.cancelSaveSharedAlbumToOwnLibrary()
+    }
+
+    /**
+     * Hide this album client-side by adding its linkId to [SettingsKeys.HIDDEN_ALBUM_IDS], the same
+     * write the Albums grid's own hide makes. Nothing on Drive changes, so the album stays intact and
+     * returns on unhide.
+     *
+     * The pop-back signal goes up only once the write has landed. Popping first would clear this
+     * ViewModel, and with it the scope the edit is running in.
+     */
+    fun hideAlbum() {
+        val albumLinkId = _uiState.value.albumLinkId
+        if (albumLinkId.isBlank()) return
+        viewModelScope.launch {
+            runCatching {
+                context.settingsDataStore.edit { prefs ->
+                    val current = prefs[SettingsKeys.HIDDEN_ALBUM_IDS] ?: emptySet()
+                    prefs[SettingsKeys.HIDDEN_ALBUM_IDS] = current + albumLinkId
+                }
+            }.onSuccess {
+                _uiState.update { it.copy(hideAlbumDone = true) }
+            }.onFailure { e ->
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                Log.e("AlbumDetailVM", "hideAlbum failed", e)
+            }
+        }
+    }
+
+    /**
+     * Show or hide this album's photos in the main feed, the same key the Albums grid's drawer and
+     * the Settings picker write.
+     *
+     * Display only, so nothing to reconcile: the gallery observes the key and re-filters on the next
+     * emission. A separate set from [hideAlbum]'s, so this leaves the card on the grid, leaves the
+     * photos in search, on the map, in the calendar and in every picker, and leaves this screen open
+     * rather than popping back. Reading and writing inside the same edit keeps the flip atomic.
+     */
+    fun toggleHiddenFromTimeline() {
+        val albumLinkId = _uiState.value.albumLinkId
+        if (albumLinkId.isBlank()) return
+        viewModelScope.launch {
+            runCatching {
+                context.settingsDataStore.edit { prefs ->
+                    val current = prefs[SettingsKeys.TIMELINE_EXCLUDED_ALBUM_IDS] ?: emptySet()
+                    prefs[SettingsKeys.TIMELINE_EXCLUDED_ALBUM_IDS] =
+                        AlbumTimelineHide.toggled(current, albumLinkId)
+                }
+            }.onFailure { e ->
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                Log.e("AlbumDetailVM", "toggleHiddenFromTimeline failed", e)
+            }
+        }
     }
 
     /** Recipient-side "Leave album": resolve the user's membership + POST the delete, then signal a pop-back. */
@@ -1421,11 +1862,38 @@ class AlbumDetailViewModel @Inject constructor(
     // Mirror the background album download into downloadState; re-attaches to the unique-work entry on each VM open.
     init {
         viewModelScope.launch {
+            // Only a run this collector actually watched leaves a result. WorkManager keeps a
+            // finished entry, so re-opening the album re-delivers its terminal state, and reporting
+            // on that alone would announce a download the user already saw finish.
+            var sawRunning = false
             observeDownloadWorkInfo().collect { workInfo ->
                 // The requested count is the true denominator for a partial download; fall back to
                 // the album size only when no download has been requested this session.
                 val fallbackTotal = _uiState.value.downloadRequestedTotal
                     .takeIf { it > 0 } ?: _uiState.value.photos.size
+                when (workInfo?.state) {
+                    WorkInfo.State.RUNNING,
+                    WorkInfo.State.ENQUEUED,
+                    WorkInfo.State.BLOCKED -> sawRunning = true
+                    WorkInfo.State.SUCCEEDED -> if (sawRunning) {
+                        sawRunning = false
+                        val out = workInfo.outputData
+                        _downloadResult.emit(
+                            AlbumDownloadResult(
+                                saved = out.getInt(AlbumDownloadWorker.KEY_RESULT_SAVED, 0),
+                                failed = out.getInt(AlbumDownloadWorker.KEY_RESULT_FAILED, 0),
+                            ),
+                        )
+                    }
+                    // A failed run carries no counts, so everything it was asked for is reported
+                    // as failed. Cancellation is the user's own action and needs no report.
+                    WorkInfo.State.FAILED -> if (sawRunning) {
+                        sawRunning = false
+                        _downloadResult.emit(AlbumDownloadResult(saved = 0, failed = fallbackTotal))
+                    }
+                    WorkInfo.State.CANCELLED -> sawRunning = false
+                    null -> Unit
+                }
                 val next = when (workInfo?.state) {
                     WorkInfo.State.RUNNING -> AlbumDownloadState.Working(
                         workInfo.progress.getInt(AlbumDownloadWorker.KEY_PROGRESS_DONE, 0),
@@ -1512,6 +1980,7 @@ class AlbumDetailViewModel @Inject constructor(
                     selectedPhotos = if (clearSelectionOnEnqueue) emptySet() else it.selectedPhotos,
                 )
             }
+            _downloadStarted.emit(Unit)
         }
     }
 

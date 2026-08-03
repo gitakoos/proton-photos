@@ -32,6 +32,7 @@ import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.service.BackgroundSyncService
 import eu.akoos.photos.worker.SyncWorker
+import eu.akoos.photos.worker.UpdateCheckWorker
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -67,6 +68,9 @@ class NotificationSettingsViewModel @Inject constructor(
         val albumDownload: Boolean = true,
         /** "Photos ready to remove" reminder after a delete-after-backup run. */
         val deleteReminder: Boolean = true,
+        /** Periodic background release check plus the notification it posts. Opt-out, on by
+         *  default: an app that is rarely opened is the one that needs telling. */
+        val updateAvailable: Boolean = true,
     )
 
     private val _uiState = MutableStateFlow(UiState())
@@ -79,6 +83,7 @@ class NotificationSettingsViewModel @Inject constructor(
                 backupStatus = prefs[SettingsKeys.NOTIFY_BACKUP_STATUS] == true,
                 albumDownload = prefs[SettingsKeys.NOTIFY_ALBUM_DOWNLOAD] != false,
                 deleteReminder = prefs[SettingsKeys.NOTIFY_DELETE_REMINDER] != false,
+                updateAvailable = prefs[SettingsKeys.UPDATE_BACKGROUND_CHECK] != false,
             )
         }
     }
@@ -115,6 +120,24 @@ class NotificationSettingsViewModel @Inject constructor(
         _uiState.update { it.copy(deleteReminder = enabled) }
         viewModelScope.launch {
             context.settingsDataStore.edit { it[SettingsKeys.NOTIFY_DELETE_REMINDER] = enabled }
+        }
+    }
+
+    /**
+     * Persist the update-check opt-out AND bring the periodic work in line with it. Off cancels the
+     * request outright rather than leaving it enqueued to wake up and no-op, so opting out stops
+     * the wake-ups as well as the notification; on re-enqueues it. [UpdateCheckWorker.reconcile]
+     * reads the just-written flag, so it is the same single arming point [App] uses at startup.
+     */
+    fun setUpdateAvailable(enabled: Boolean) {
+        _uiState.update { it.copy(updateAvailable = enabled) }
+        viewModelScope.launch {
+            try {
+                context.settingsDataStore.edit { it[SettingsKeys.UPDATE_BACKGROUND_CHECK] = enabled }
+                UpdateCheckWorker.reconcile(context)
+            } catch (e: CancellationException) {
+                throw e
+            }
         }
     }
 }

@@ -289,7 +289,7 @@ class ReconcileSyncStateUseCase @Inject constructor(
         // a green "downloaded" indicator on a photo that no longer exists on this device.
         //
         // IMPORTANT: this check uses [allLocalItems] (every file MediaStore sees), NOT the
-        // backup-filtered [localItems]. A photo downloaded into `Pictures/Proton Photos/` is
+        // backup-filtered [localItems]. A photo downloaded into `DCIM/<AlbumName>/` is
         // still on the device even though that folder typically isn't in the backup selection
         // (the user doesn't want their downloads loop-uploaded). Using the filtered set would
         // demote every just-downloaded SyncState to CLOUD_ONLY on the next reconcile, breaking

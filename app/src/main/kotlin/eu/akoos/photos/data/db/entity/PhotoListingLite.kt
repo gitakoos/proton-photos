@@ -82,3 +82,20 @@ data class ThumbnailUrlSeed(
     val linkId: String,
     val thumbnailUrl: String?,
 )
+
+/**
+ * Two-column projection for [eu.akoos.photos.data.db.dao.PhotoListingDao.observeOwnStreamPickerRows]:
+ * one cell of the home-screen widget's photo picker, which keys on the link id and binds the already
+ * decrypted thumbnail, and reads nothing else off the row.
+ *
+ * Separate from [PhotoListingLite] because that projection deliberately omits thumbnailUrl for the
+ * timeline's re-emission behaviour, and the picker has no [eu.akoos.photos.data.repository.drive.ThumbnailUrlStore]
+ * primed to supply it from — the config screen is its own entry point and can open without the gallery
+ * ever having run. Separate from [ThumbnailUrlSeed] because that one answers which cached URLs are
+ * worth priming, not what a grid renders. A cell whose thumbnail is still null asks for a decrypt by
+ * link id, which is what keeps the per-row crypto material off this read entirely.
+ */
+data class PhotoPickerRow(
+    val linkId: String,
+    val thumbnailUrl: String?,
+)

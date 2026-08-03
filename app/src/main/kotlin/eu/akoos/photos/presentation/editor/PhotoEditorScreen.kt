@@ -116,15 +116,16 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.Bg0
+import eu.akoos.photos.presentation.theme.Bg2
 import eu.akoos.photos.presentation.theme.FgDim
 import eu.akoos.photos.presentation.theme.FgMute
 import eu.akoos.photos.presentation.theme.FgPrimary
-import eu.akoos.photos.presentation.theme.PanelBg
 import eu.akoos.photos.presentation.theme.PanelChip
 import eu.akoos.photos.presentation.theme.PillBg
 import eu.akoos.photos.presentation.theme.PillBgOpaque
 import eu.akoos.photos.presentation.theme.PillBorder
 import eu.akoos.photos.presentation.theme.TrackBg
+import eu.akoos.photos.util.fitImageInBox
 import kotlin.math.max
 import kotlin.math.min
 
@@ -553,7 +554,7 @@ fun PhotoEditorScreen(
         ModalBottomSheet(
             onDismissRequest = { showSaveSheet = false },
             sheetState = saveSheetState,
-            containerColor = PanelBg,
+            containerColor = Bg2,
             scrimColor = Color.Black.copy(alpha = 0.5f),
         ) {
             SaveSheet(
@@ -582,7 +583,11 @@ private fun SaveSheet(
     // device-side phrasing.
     val isSynced = !isCloud && hasCloudCounterpart
     Column(
-        Modifier.fillMaxWidth().padding(horizontal = 22.dp).padding(bottom = 24.dp),
+        Modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
+            .padding(horizontal = 20.dp)
+            .padding(bottom = 24.dp),
     ) {
         Text(
             stringResource(R.string.editor_save_edits),
@@ -787,7 +792,7 @@ private fun ImageWithRedactOverlay(
 
         if (redactActive) {
             val fit = remember(bitmap.width, bitmap.height, containerSize) {
-                fitRect(bitmap.width.toFloat(), bitmap.height.toFloat(),
+                fitImageInBox(bitmap.width.toFloat(), bitmap.height.toFloat(),
                     containerSize.width.toFloat().coerceAtLeast(1f),
                     containerSize.height.toFloat().coerceAtLeast(1f))
             }
@@ -801,8 +806,8 @@ private fun ImageWithRedactOverlay(
                             onDragEnd = {
                                 if (currentStrokeCanvas.isNotEmpty()) {
                                     val bmpPoints = currentStrokeCanvas.map { o ->
-                                        val bx = ((o.x - fit.offsetX) / fit.scale).coerceIn(0f, bitmap.width.toFloat())
-                                        val by = ((o.y - fit.offsetY) / fit.scale).coerceIn(0f, bitmap.height.toFloat())
+                                        val bx = fit.toImageX(o.x).coerceIn(0f, bitmap.width.toFloat())
+                                        val by = fit.toImageY(o.y).coerceIn(0f, bitmap.height.toFloat())
                                         PointF(bx, by)
                                     }
                                     val bmpBrush = (brushSizePx / fit.scale).coerceAtLeast(4f)
@@ -842,15 +847,6 @@ private fun ImageWithRedactOverlay(
 }
 
 private var currentRedactMode: RedactMode = RedactMode.Black
-
-internal data class FitRect(val scale: Float, val offsetX: Float, val offsetY: Float)
-
-internal fun fitRect(bmpW: Float, bmpH: Float, boxW: Float, boxH: Float): FitRect {
-    val scale = min(boxW / bmpW, boxH / bmpH)
-    val drawnW = bmpW * scale
-    val drawnH = bmpH * scale
-    return FitRect(scale, (boxW - drawnW) / 2f, (boxH - drawnH) / 2f)
-}
 
 // ─── Tool panels ────────────────────────────────────────────────────────────
 

@@ -37,6 +37,12 @@ interface SyncStateRepository {
     suspend fun updateStatusAndDeleteLocal(localUri: String, newStatus: SyncStatus)
     suspend fun getByUri(localUri: String): SyncState?
     suspend fun getByCloudId(cloudFileId: String): SyncState?
+
+    /** Which of [localUris] already have a cloud copy under [userId], keyed to the cloud linkId each
+     *  is paired to. Bounded by what is asked for, so a surface acting on one folder never reads the
+     *  whole table to classify it; the keys alone answer "is this device file backed up", and the
+     *  values are what a client-side hide filters by. */
+    suspend fun cloudPairedLinkIds(userId: UserId, localUris: List<String>): Map<String, String>
     /** Atomically flip a row from LOCAL_ONLY to UPLOADING; returns the rows changed (1 = claimed,
      *  0 = another pass got it first or it is no longer LOCAL_ONLY). */
     suspend fun claimForUpload(localUri: String): Int
@@ -44,8 +50,27 @@ interface SyncStateRepository {
     suspend fun resetStaleUploadingClaims()
     /** [userId]'s free-up-space candidates: only that account's rows, never another account's. */
     suspend fun getSyncedBefore(userId: UserId, timestampMs: Long): List<SyncState>
+
+    /** Every row of [userId]'s the hidden vault claims, the ones at [SyncStatus.HIDDEN]. A vault
+     *  holds a handful of photos beside a library of thousands, and the status is indexed, so the
+     *  read costs that handful. Account-scoped like every other selector here. */
+    suspend fun getVaulted(userId: UserId): List<SyncState>
+
+    /** The cloud ids [userId] has a live device-file row for (SYNCED, or LOCAL_ONLY still carrying a
+     *  pairing). A vaulted row whose cloud id is among these names a photo already back on the device
+     *  under another row, so its own HIDDEN marker is a leftover the sweep drops. */
+    suspend fun cloudIdsWithLivePairing(userId: UserId): Set<String>
+
+    /** Drop every HIDDEN row for [cloudFileId], so a reveal that re-paired the photo leaves no stale
+     *  marker on another row for the same cloud copy dropping it from every listing. */
+    suspend fun clearHiddenForCloudId(cloudFileId: String)
     /** Deletes LOCAL_ONLY entries whose URIs are no longer in-scope (excluded folders). */
     suspend fun deleteLocalOnlyByUris(localUris: List<String>)
+
+    /** Drop the row keyed by [localUri] outright. For a uri that names nothing on the device any
+     *  more and never will again, where leaving the row behind would put a second row on the cloud
+     *  copy it is paired to. */
+    suspend fun delete(localUri: String)
 
     /** Record an explicit upload intent on a row: mark it queued, why ([source], a
      *  [eu.akoos.photos.domain.entity.QueueSource] constant), and when ([at], epoch millis). */

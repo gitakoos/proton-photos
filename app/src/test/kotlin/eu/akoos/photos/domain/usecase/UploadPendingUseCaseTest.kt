@@ -41,6 +41,7 @@ import eu.akoos.photos.data.db.dao.UploadAlbumTargetDao
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.entity.LocalMediaItem
+import eu.akoos.photos.domain.entity.QueueSource
 import eu.akoos.photos.domain.entity.StorageFullException
 import eu.akoos.photos.domain.entity.SyncState
 import eu.akoos.photos.domain.entity.SyncStatus
@@ -111,6 +112,9 @@ class UploadPendingUseCaseTest {
         mockkStatic("eu.akoos.photos.data.preferences.SettingsDataStoreKt")
         every { context.settingsDataStore } returns mockDataStore
         every { mockDataStore.data } returns flowOf(mockPrefs)
+        // Auto-backup absent = ON, so the base fixture behaves as a normal running backup. The
+        // tests that turn it off stub this key themselves.
+        every { mockPrefs[SettingsKeys.AUTO_SYNC] } returns null
         // Non-empty folder set so the upload loop is not skipped.
         every { mockPrefs[SettingsKeys.SYNC_FOLDER_NAMES] } returns setOf("Camera")
         every { mockPrefs[SettingsKeys.BACKUP_EVERYTHING] } returns false
@@ -191,6 +195,91 @@ class UploadPendingUseCaseTest {
         sizeBytes = 1024L,
         bucketName = "Camera",
     )
+
+    @Test
+    fun `auto-backup off holds the rows the folder sweep queued`() = runTest {
+        // The switch says off while the folder selection stays exactly as it was, which is what makes
+        // this reachable at all: several triggers kick a run without consulting the switch, and the
+        // folder filter alone cannot tell "off" from "Camera is selected".
+        every { mockPrefsRef[SettingsKeys.AUTO_SYNC] } returns false
+        val states = listOf(
+            syncState("uri://1", SyncStatus.LOCAL_ONLY),
+            syncState("uri://2", SyncStatus.LOCAL_ONLY),
+        )
+        every { syncStateRepo.observeAll(userId) } returns flowOf(states)
+        coEvery { localRepo.queryByUri(any()) } returns localItem("uri://1")
+        coEvery { cloudRepo.uploadFile(userId, any(), any(), any(), any(), any()) } returns "cloud-id"
+
+        useCase(userId)
+
+        coVerify(exactly = 0) { cloudRepo.uploadFile(userId, any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `auto-backup off still uploads what the user asked for by hand`() = runTest {
+        // A manual "back up now", an album-add and an editor save are each an instruction about one
+        // photo. The switch is a statement about the folder sweep, so it must not silently cancel
+        // them: the user would press the button and watch nothing happen, with no error to explain it.
+        every { mockPrefsRef[SettingsKeys.AUTO_SYNC] } returns false
+        val states = listOf(
+            syncState("uri://swept", SyncStatus.LOCAL_ONLY),
+            syncState("uri://manual", SyncStatus.LOCAL_ONLY, queueSource = QueueSource.MANUAL),
+            syncState("uri://album", SyncStatus.LOCAL_ONLY, queueSource = QueueSource.ALBUM_ADD),
+            syncState("uri://edit", SyncStatus.LOCAL_ONLY, queueSource = QueueSource.EDITOR),
+        )
+        every { syncStateRepo.observeAll(userId) } returns flowOf(states)
+        coEvery { localRepo.queryByUri(any()) } answers { localItem(firstArg()) }
+        coEvery { cloudRepo.uploadFile(userId, any(), any(), any(), any(), any()) } returns "cloud-id"
+
+        useCase(userId)
+
+        coVerify(exactly = 3) { cloudRepo.uploadFile(userId, any(), any(), any(), any(), any()) }
+        coVerify(exactly = 0) { localRepo.queryByUri("uri://swept") }
+    }
+
+    @Test
+    fun `Sync now uploads once even with auto-backup off, and only once`() = runTest {
+        // Sync now is a one-tap action, not a setting, so it has to work while the switch is off.
+        // The flag is consumed by the batch it was set for: a later automatic trigger must go back to
+        // holding the sweep, or one tap would quietly re-enable backup for the rest of the session.
+        every { mockPrefsRef[SettingsKeys.AUTO_SYNC] } returns false
+        every { syncStateRepo.observeAll(userId) } returns
+            flowOf(listOf(syncState("uri://1", SyncStatus.LOCAL_ONLY)))
+        coEvery { localRepo.queryByUri(any()) } returns localItem("uri://1")
+        coEvery { cloudRepo.uploadFile(userId, any(), any(), any(), any(), any()) } returns "cloud-id"
+
+        useCase.requestManualRun()
+        useCase(userId)
+        coVerify(exactly = 1) { cloudRepo.uploadFile(userId, any(), any(), any(), any(), any()) }
+
+        // Second pass, nothing asked for: back to held.
+        useCase(userId)
+        coVerify(exactly = 1) { cloudRepo.uploadFile(userId, any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `a Sync now that defers for Wi-Fi still counts on the next run`() = runTest {
+        // The flag is consumed past the early returns, not alongside the other prefs. A tap that lands
+        // on a batch which defers (Wi-Fi-only on, no Wi-Fi) must not be spent on a run that uploaded
+        // nothing: the rows would then be held by the switch on every later trigger, which is the same
+        // silent nothing the flag exists to prevent.
+        every { mockPrefsRef[SettingsKeys.AUTO_SYNC] } returns false
+        every { mockPrefsRef[SettingsKeys.SYNC_WIFI_ONLY] } returns true
+        coEvery { networkObserver.currentlyOnWifi() } returns false
+        every { syncStateRepo.observeAll(userId) } returns
+            flowOf(listOf(syncState("uri://1", SyncStatus.LOCAL_ONLY)))
+        coEvery { localRepo.queryByUri(any()) } returns localItem("uri://1")
+        coEvery { cloudRepo.uploadFile(userId, any(), any(), any(), any(), any()) } returns "cloud-id"
+
+        useCase.requestManualRun()
+        useCase(userId)
+        coVerify(exactly = 0) { cloudRepo.uploadFile(userId, any(), any(), any(), any(), any()) }
+
+        // Wi-Fi is back. The tap is still owed, so this run honours it.
+        coEvery { networkObserver.currentlyOnWifi() } returns true
+        useCase(userId)
+        coVerify(exactly = 1) { cloudRepo.uploadFile(userId, any(), any(), any(), any(), any()) }
+    }
 
     @Test
     fun `only LOCAL_ONLY items are uploaded`() = runTest {

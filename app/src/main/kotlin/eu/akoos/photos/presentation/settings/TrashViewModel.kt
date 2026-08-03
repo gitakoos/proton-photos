@@ -250,7 +250,11 @@ class TrashViewModel @Inject constructor(
                             outcome.failedLinkIds.size,
                         )
                         outcome.galleryRefreshFailed -> context.getString(R.string.trash_cloud_restore_refresh_failed)
-                        else -> context.getString(R.string.trash_cloud_restore_done, outcome.restoredLinkIds.size)
+                        else -> context.resources.getQuantityString(
+                            R.plurals.trash_cloud_restore_done,
+                            outcome.restoredLinkIds.size,
+                            outcome.restoredLinkIds.size,
+                        )
                     }
                     _uiState.update { st ->
                         st.copy(cloud = st.cloud.copy(
@@ -312,14 +316,8 @@ class TrashViewModel @Inject constructor(
         }
     }
 
-    fun emptyAllCloud() = emptyCloudSelected()
-
     fun consumeCloudToast() {
         _uiState.update { it.copy(cloud = it.cloud.copy(toastMessage = null)) }
-    }
-
-    fun clearCloudError() {
-        _uiState.update { it.copy(cloud = it.cloud.copy(errorMessage = null)) }
     }
 
     /**

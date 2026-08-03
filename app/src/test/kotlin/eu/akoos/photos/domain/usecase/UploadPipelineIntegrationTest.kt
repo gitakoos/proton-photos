@@ -545,7 +545,10 @@ private class FakeDrivePhotoRepository : DrivePhotoRepository {
     override suspend fun refreshCloudPhotosIncremental(userId: UserId) {}
     override suspend fun loadAlbumsCached(): List<Album> = emptyList()
     override suspend fun loadSharedAddableAlbumsCached(): List<Album> = emptyList()
+    override suspend fun loadSharedWithMeAlbumsCached(): List<Album> = emptyList()
     override suspend fun prefetchAlbumsMembership(userId: UserId, albums: List<Album>) {}
+    override suspend fun prefetchSharedAlbumsMembership(userId: UserId, albums: List<Album>) {}
+    override suspend fun prefetchSharedAlbumCovers(userId: UserId, albums: List<Album>) {}
     override suspend fun getAlbumMemberships(userId: UserId): Map<String, String> = emptyMap()
     override suspend fun getAlbumIdsByPhoto(userId: UserId): Map<String, Set<String>> = emptyMap()
     override suspend fun loadAlbumChildren(userId: UserId, albumLinkId: String): List<AlbumChild> = emptyList()
@@ -589,12 +592,16 @@ private class FakeDrivePhotoRepository : DrivePhotoRepository {
         linkIds: List<String>,
     ): eu.akoos.photos.data.repository.drive.CloudDeleteOutcome =
         eu.akoos.photos.data.repository.drive.CloudDeleteOutcome(emptySet(), emptySet())
-    override suspend fun createAlbumShareLink(userId: UserId, albumLinkId: String): String = ""
+    override suspend fun createAlbumShareLink(
+        userId: UserId,
+        albumLinkId: String,
+    ): eu.akoos.photos.domain.entity.AlbumShareLink =
+        eu.akoos.photos.domain.entity.AlbumShareLink(url = "", shareId = "")
     override suspend fun createPhotoShareLink(userId: UserId, photoLinkId: String): String = ""
     override suspend fun getPhotoShareLink(userId: UserId, photoLinkId: String): String? = null
     override suspend fun revokePhotoShareLink(userId: UserId, photoLinkId: String) {}
     override suspend fun setPhotoLinkPassword(userId: UserId, photoLinkId: String, password: String?): String = ""
-    override suspend fun inviteToAlbum(userId: UserId, albumLinkId: String, email: String) {}
+    override suspend fun inviteToAlbum(userId: UserId, albumLinkId: String, email: String, permissions: Int): String = ""
     override suspend fun saveSharedAlbumToOwnLibrary(
         userId: UserId,
         sharingShareId: String,
@@ -638,6 +645,7 @@ private class FakeDrivePhotoRepository : DrivePhotoRepository {
     override fun backfillThumbnails(userId: UserId) {}
     override suspend fun backfillCloudGps(userId: UserId) {}
     override suspend fun backfillVideoDurations(userId: UserId) {}
+    override suspend fun backfillLocalExif(userId: UserId) {}
 }
 
 /**
@@ -654,9 +662,11 @@ private class FakeLocalMediaRepository : LocalMediaRepository {
 
     override fun observeLocalMedia(): Flow<List<LocalMediaItem>> = items.asStateFlow()
     override suspend fun queryByUri(uri: String): LocalMediaItem? = items.value.firstOrNull { it.uri == uri }
+    override suspend fun queryByBucket(bucketName: String): List<LocalMediaItem> =
+        items.value.filter { it.bucketName == bucketName }
     override suspend fun sha1(uri: String): String? = null
 
     override fun observeTrashedMedia(): Flow<List<LocalMediaItem>> = MutableStateFlow(emptyList())
     override fun hasMediaPermission(): Flow<Boolean> = MutableStateFlow(true)
-    override fun notifyPermissionChanged() {}
+    override fun notifyMediaChanged() {}
 }

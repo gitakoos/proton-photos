@@ -68,7 +68,9 @@ import eu.akoos.photos.domain.entity.DriveNotFoundException
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.util.flatMapSqlChunks
 import eu.akoos.photos.util.forEachSqlChunk
+import eu.akoos.photos.util.isBatteryLow
 import java.io.File
+import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -83,6 +85,98 @@ private const val ALBUM_LINK_BATCH_MAX = 10
  *  many unrelated validation failures also return. */
 private const val ALBUM_DELETE_DATA_LOSS_CODE = 200302
 
+/**
+ * How many shared-with-me albums one membership prefetch pass may walk. Every page it asks for lands
+ * on the album OWNER's volume and counts against their limits, so the pass stays near the head of the
+ * Shared grid — the albums a tap is most likely to open — rather than sweeping the whole list.
+ */
+private const val MAX_SHARED_MEMBERSHIP_PREFETCH = 8
+
+/**
+ * The volume an album's children listing has to be asked on.
+ *
+ * An album someone else shared lives on the OWNER's volume and carries it on the row, so asking this
+ * user's own volume for it names a collection that is not there. Everything they own records no
+ * volume of its own and answers on [ownVolumeId]. A blank counts as absent, since a cached row can
+ * carry one from a listing that had no volume to record.
+ *
+ * Pure values → no DI, no DB, no network.
+ */
+internal fun albumChildrenVolumeId(album: Album, ownVolumeId: String?): String? =
+    album.volumeId?.takeIf { it.isNotBlank() } ?: ownVolumeId
+
+/**
+ * Whether an album still owes a membership walk.
+ *
+ * [reportedPhotoCount] is Drive's own count for the album. The owned listing always carries it; the
+ * shared-with-me listing does not, since the rows its backup-feed half builds report 0 whatever the
+ * album holds, and nothing on the row says which half built it. Measuring against a count that may
+ * be a placeholder would re-walk another user's volume on every reload of the tab, so [countIsKnown]
+ * false answers from the rows alone — any cached membership is enough for the first paint this
+ * prefetch serves, and opening the album refreshes it in full.
+ *
+ * Pure values → no DI, no DB, no network.
+ */
+internal fun needsMembershipPrefetch(
+    cachedCount: Int,
+    reportedPhotoCount: Int,
+    countIsKnown: Boolean,
+): Boolean = when {
+    cachedCount <= 0 -> true
+    countIsKnown -> cachedCount != reportedPhotoCount
+    else -> false
+}
+
+/**
+ * The shared-with-me albums a membership prefetch pass may spend requests on, in the order the grid
+ * draws them.
+ *
+ * The share and the owner's volume are what a cross-volume children listing needs to run at all, so
+ * a row missing either has no path in. [attempted] carries the albums this process already walked,
+ * which is what moves the budget down the list on the next pass instead of re-asking the same
+ * albums every time the tab reloads. A process restart is the reset.
+ *
+ * Pure lists → no DI, no DB, no network.
+ */
+internal fun sharedMembershipPrefetchTargets(
+    albums: List<Album>,
+    cap: Int,
+    attempted: Set<String> = emptySet(),
+): List<Album> {
+    if (cap <= 0) return emptyList()
+    return albums.asSequence()
+        .filter { it.sharingShareId != null && !it.volumeId.isNullOrBlank() }
+        .filter { it.linkId !in attempted }
+        .distinctBy { it.linkId }
+        .take(cap)
+        .toList()
+}
+
+/** How a shared-album prefetch pass ended for one album. */
+internal enum class PrefetchOutcome {
+    /** The album's work reached its end, or the pass found none left to do for it. */
+    COMPLETED,
+
+    /** The album answered in a way another pass in this process would answer the same. */
+    FAILED,
+
+    /** The pass unwound before it reached an answer, so the album is still unknown. */
+    CANCELLED,
+}
+
+/**
+ * Whether an album's pass spends its once-per-process prefetch budget.
+ *
+ * The budget is what keeps an album that will never resolve — a share handing nothing over, a cover
+ * with no thumbnail behind it — costing its OWNER one round trip per process instead of one per open
+ * of the Shared tab, so a definitive failure still spends it. A pass cut short spends nothing: the
+ * tab fires both prefetches into a job that leaving the tab cancels, and counting that as an answer
+ * strands the album's tile blank and its grid un-enumerable offline until the process restarts.
+ *
+ * Pure values → no DI, no DB, no network.
+ */
+internal fun burnsPrefetchBudget(outcome: PrefetchOutcome): Boolean =
+    outcome != PrefetchOutcome.CANCELLED
 
 /**
  * Album CRUD + album-photo loading + add-to-album. Reads cached photo entities through
@@ -414,7 +508,12 @@ class AlbumService @Inject constructor(
             cloudAlbumDao.upsertAll(entities)
             // Drop rows for albums the server no longer reports, so deletions made on Drive
             // Web don't linger in the local grid after the next successful refresh.
-            cloudAlbumDao.deleteWhereNotIn(albums.map { it.linkId })
+            // An empty list is not evidence that the user has none: a refresh whose feeds all
+            // failed reports the same empty result, and SQLite reads `NOT IN ()` as true for every
+            // row, so the prune would clear the whole cache on a bad network. Pruning only against
+            // a non-empty answer costs a stale row until the next refresh that actually read
+            // something, which is the cheaper of the two mistakes.
+            if (albums.isNotEmpty()) cloudAlbumDao.deleteWhereNotIn(albums.map { it.linkId })
         }.onFailure { e ->
             Log.w(TAG, "loadAlbums: cache persist failed (${e.message}) — in-memory result still returned")
         }
@@ -453,25 +552,23 @@ class AlbumService @Inject constructor(
     }
 
     /**
-     * Cached albums someone else shared with this user and that this user may add photos to.
+     * Every cached album someone else shared with this user, whatever rights they hold on it.
      *
-     * Read straight from the cache with no network call: the add-to-album picker opens on a tap and
-     * cannot wait on the shared-with-me walk, which is a bootstrap per share. The rows are refreshed
-     * whenever the Shared tab loads. Covers are left alone because the picker renders a name list.
+     * Read straight from the cache with no network call: the Shared tab and the add-to-album picker
+     * both open on a tap and cannot wait on the shared-with-me walk, which is a bootstrap per share.
+     * The rows are refreshed whenever that walk runs. Album-scale and free of crypto material — the
+     * `cloud_albums` row is a name and a few ids.
      *
-     * Filtered to what the user can actually contribute to, so a viewer-only album never appears as
-     * a destination that would fail on tap.
+     * Covers are rehydrated the way the owned list's are: the entity never persists an expiring CDN
+     * URL, so without this the cards draw blank.
      */
-    suspend fun loadSharedAddableAlbumsCached(): List<Album> = withContext(Dispatchers.IO) {
+    suspend fun loadSharedWithMeAlbumsCached(): List<Album> = withContext(Dispatchers.IO) {
         runCatching {
             val thumbnailCacheDir = File(context.cacheDir, "thumbnails")
             val hiddenCoverIds = runCatching { observeHiddenAlbumMemberLinkIds().first() }.getOrNull().orEmpty()
             cloudAlbumDao.getSharedWithMe()
                 .map { it.toDomain() }
-                .filter { it.canAddPhotos }
                 .map { album ->
-                    // Same cover rehydration the owned list gets: the entity never persists an
-                    // expiring CDN URL, so without this the picker draws these rows blank.
                     album.copy(
                         coverThumbnailUrl = resolveVisibleCoverThumbnail(
                             album.linkId, album.coverLinkId, false, hiddenCoverIds, thumbnailCacheDir,
@@ -479,10 +576,20 @@ class AlbumService @Inject constructor(
                     )
                 }
         }.getOrElse { e ->
-            Log.w(TAG, "loadSharedAddableAlbumsCached: failed (${e.message}), returning empty")
+            Log.w(TAG, "loadSharedWithMeAlbumsCached: failed (${e.message}), returning empty")
             emptyList()
         }
     }
+
+    /**
+     * The share of [loadSharedWithMeAlbumsCached] this user may add photos to, for the add-to-album
+     * picker.
+     *
+     * Filtered to what the user can actually contribute to, so a viewer-only album never appears as
+     * a destination that would fail on tap.
+     */
+    suspend fun loadSharedAddableAlbumsCached(): List<Album> =
+        loadSharedWithMeAlbumsCached().filter { it.canAddPhotos }
 
     /**
      * Resolve an album's display cover thumbnail, skipping any hidden photo. Uses the server cover
@@ -571,16 +678,85 @@ class AlbumService @Inject constructor(
      * Throttled through the existing [shareService.networkSemaphore] so it shares
      * concurrency budget with the rest of the app's Drive traffic. Failures per album
      * are swallowed individually so one broken album doesn't poison the rest.
+     *
+     * For the albums this user owns. The ones someone else shared go through
+     * [prefetchSharedAlbumsMembership], which is bounded far more tightly.
      */
     suspend fun prefetchAlbumsMembership(userId: UserId, albums: List<Album>): Unit = withContext(Dispatchers.IO) {
         if (albums.isEmpty()) return@withContext
-        val volumeId = runCatching { shareService.getVolumeId(userId) }.getOrNull() ?: return@withContext
+        val ownVolumeId = runCatching { shareService.getVolumeId(userId) }.getOrNull() ?: return@withContext
+        walkAlbumsMembership(userId, albums, ownVolumeId, countIsKnown = true)
+    }
+
+    /**
+     * Shared albums this process already ran a membership walk to an answer for. An album the share
+     * will not enumerate would otherwise cost its owner a request on every open of the Shared tab for
+     * the same nothing, and one that walked fine has no second thing to learn. An album whose walk was
+     * cancelled reached no answer and stays out, so the next pass picks it up. A process restart is
+     * the reset.
+     */
+    private val sharedMembershipPrefetchAttempted = ConcurrentHashMap.newKeySet<String>()
+
+    /**
+     * The same membership rows, for the albums someone else shared with this user.
+     *
+     * Separate from [prefetchAlbumsMembership] because the traffic is charged to the album's OWNER
+     * rather than to the caller: capped at [MAX_SHARED_MEMBERSHIP_PREFETCH] albums per pass, one
+     * album at a time, each album once per process, and skipped outright on a low battery. Nothing
+     * periodic calls it — the Shared tab does, once its own refresh has landed.
+     *
+     * Edge rows only, which is the half that costs nothing to decrypt: the walk asks the owner's
+     * volume for link ids and writes them, and the photos themselves stay untouched until the album
+     * is opened.
+     */
+    suspend fun prefetchSharedAlbumsMembership(userId: UserId, albums: List<Album>): Unit = withContext(Dispatchers.IO) {
+        val targets = sharedMembershipPrefetchTargets(
+            albums, MAX_SHARED_MEMBERSHIP_PREFETCH, sharedMembershipPrefetchAttempted,
+        )
+        if (targets.isEmpty()) return@withContext
+        if (context.isBatteryLow()) {
+            Log.d(TAG, "prefetchSharedAlbumsMembership: battery low — skipping ${targets.size} album(s)")
+            return@withContext
+        }
+        // Every target carries the owner's volume, so there is no own-volume fallback to resolve. The
+        // budget is spent per album as that album settles, so a pass the user cancels by leaving the
+        // tab leaves the albums it never reached available to the next one.
+        walkAlbumsMembership(userId, targets, ownVolumeId = null, countIsKnown = false) { linkId, outcome ->
+            if (burnsPrefetchBudget(outcome)) sharedMembershipPrefetchAttempted.add(linkId)
+        }
+    }
+
+    /**
+     * The walk both prefetches run: per album, ask the volume that album lives on for its child link
+     * ids and replace that album's edge rows with them.
+     *
+     * [onAlbumSettled] reports each album the walk reached an answer for. The owned prefetch passes
+     * none — it keeps no budget — so only the shared caller pays any attention. A cancellation unwinds
+     * out of here without reporting, which is [PrefetchOutcome.CANCELLED] as the caller sees it.
+     */
+    private suspend fun walkAlbumsMembership(
+        userId: UserId,
+        albums: List<Album>,
+        ownVolumeId: String?,
+        countIsKnown: Boolean,
+        onAlbumSettled: ((linkId: String, outcome: PrefetchOutcome) -> Unit)? = null,
+    ) {
         val manager = apiProvider.get<DriveApiService>(userId)
         for (album in albums) {
-            // Freshness gate — if we already have a membership-row count matching the
-            // album's photoCount we trust it. Cheap O(1) DAO call vs a fresh pagination.
+            val volumeId = albumChildrenVolumeId(album, ownVolumeId)
+            if (volumeId == null) {
+                // Neither the row nor the caller names a volume, and neither gains one by being asked
+                // again.
+                onAlbumSettled?.invoke(album.linkId, PrefetchOutcome.FAILED)
+                continue
+            }
+            // Freshness gate — a cheap O(1) DAO call rather than a fresh pagination.
             val cachedCount = runCatching { albumPhotoMembershipDao.getPhotoLinkIds(album.linkId).size }.getOrDefault(-1)
-            if (cachedCount > 0 && cachedCount == album.photoCount) continue
+            if (!needsMembershipPrefetch(cachedCount, album.photoCount, countIsKnown)) {
+                // Cached rows already cover the album, so this pass owes it nothing.
+                onAlbumSettled?.invoke(album.linkId, PrefetchOutcome.COMPLETED)
+                continue
+            }
             try {
                 val linkIds = mutableListOf<String>()
                 var anchor: String? = null
@@ -592,9 +768,11 @@ class AlbumService @Inject constructor(
                     anchor = if (resp.more) resp.anchorId else null
                 } while (anchor != null)
                 albumPhotoMembershipDao.replaceAllForAlbum(album.linkId, linkIds.distinct())
+                onAlbumSettled?.invoke(album.linkId, PrefetchOutcome.COMPLETED)
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
-                Log.w(TAG, "prefetchAlbumsMembership: ${album.linkId} failed (${e.message}) — continuing")
+                Log.w(TAG, "membership prefetch: ${album.linkId} failed (${e.message}) — continuing")
+                onAlbumSettled?.invoke(album.linkId, PrefetchOutcome.FAILED)
             }
         }
     }
@@ -906,7 +1084,7 @@ class AlbumService @Inject constructor(
             // The store is what every other reader of this album asks, notably the full-resolution
             // download, whose own link fetch sees a null parent for these photos and so has nothing
             // to resolve the album from on its own.
-            sharedAlbumKeyStore.put(sharingContext)
+            sharedAlbumKeyStore.put(userId, sharingContext)
             thumbnailDecryptScheduler.populateSharedAlbumContext(sharingContext)
         } else if (albumKeyBytes != null) {
             thumbnailDecryptScheduler.populateParentKeys(mapOf(albumLinkId to albumKeyBytes))
@@ -1383,10 +1561,24 @@ class AlbumService @Inject constructor(
         //    the UI snackbar and downstream cache writes match reality.
         val rejectedByLink = mutableMapOf<String, String>() // linkId → error
         albumDataEntries.chunked(ALBUM_LINK_BATCH_MAX).forEach { chunk ->
-            val resp = semaphore.withPermit {
-                manager.invoke {
-                    addPhotosToAlbum(volumeId, albumLinkId, AddAlbumMultipleRequest(chunk))
-                }.valueOrThrow
+            // A throw here used to unwind the whole call, so chunks that had already landed were
+            // discarded along with it and the caller reported nothing added while the album held
+            // half the selection. Recording the chunk as rejected keeps the earlier ones and tells
+            // the user which photos still need a retry.
+            val resp = try {
+                semaphore.withPermit {
+                    manager.invoke {
+                        addPhotosToAlbum(volumeId, albumLinkId, AddAlbumMultipleRequest(chunk))
+                    }.valueOrThrow
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "addPhotosToAlbum: batch of ${chunk.size} failed: ${e.message}")
+                for (entry in chunk) {
+                    rejectedByLink[entry.linkId] = e.message ?: "request failed"
+                }
+                return@forEach
             }
             for (entry in resp.responses) {
                 if (entry.response.code != 1000) {
@@ -1612,9 +1804,17 @@ class AlbumService @Inject constructor(
             ?: error("renameAlbum: failed to decrypt current album name")
         val originalHash = cryptoHelper.computeNameHash(currentPlainName, rootNodeHashKey)
 
-        // Encrypt + sign the new name; HMAC for the lookup hash; signing email goes in metadata.
+        // Encrypt + sign the new name under the CURRENT name's session key; HMAC for the lookup
+        // hash; signing email goes in metadata. Every share of this album holds a NameKeyPacket
+        // bound to that session key, so a fresh one would blind every recipient (#88).
         val signingKey = cryptoHelper.getAddressSigningKey(userId)
-        val newEncryptedName = cryptoHelper.encryptName(trimmed, rootPublicKey, signingKey.unlockedKeyBytes)
+        val newEncryptedName = cryptoHelper.renameNamePreservingSessionKey(
+            oldNameArmored = currentEncryptedName,
+            oldDecryptKeyBytes = rootLinkKeyBytes,
+            newPlaintextName = trimmed,
+            parentPublicKeyArmored = rootPublicKey,
+            signerKeyBytes = signingKey.unlockedKeyBytes,
+        )
         val newHash = cryptoHelper.computeNameHash(trimmed, rootNodeHashKey)
 
         semaphore.withPermit {

@@ -42,12 +42,12 @@ import eu.akoos.photos.data.repository.PhotoLocationResolver
 import eu.akoos.photos.data.repository.drive.LinkDetailHelpers
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.SyncStateRepository
-import eu.akoos.photos.util.DownloadDateOverride
+import eu.akoos.photos.util.CaptureDateOverride
 import eu.akoos.photos.util.ExifHelper
 import eu.akoos.photos.util.Mp4CreationTime
+import eu.akoos.photos.util.isExifWritableImageMime
 import java.io.File
 import java.io.IOException
-import java.util.Locale
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -65,10 +65,6 @@ private const val TAG = "DownloadPhotos"
  *  the CDN block fetches carry their own retry/backoff, so a handful of photos in flight stays
  *  well within Drive's limits. This is the dominant limiter for large-album downloads. */
 private const val DOWNLOAD_PARALLELISM = 6
-
-/** Image MIME types ExifInterface can reliably WRITE via saveAttributes. Other formats (HEIC,
- *  video) keep only the MediaStore column date. */
-private val EXIF_WRITABLE_MIMES = setOf("image/jpeg", "image/png", "image/webp")
 
 @Singleton
 class DownloadPhotosUseCase @Inject constructor(
@@ -126,7 +122,7 @@ class DownloadPhotosUseCase @Inject constructor(
     /**
      * Downloads cloud photos into the per-photo folder. Caller passes [folderName] as the
      * fallback used when a photo isn't in [folderByLinkId] — empty string means "save into
-     * Pictures/ (or Movies/) root, no subfolder".
+     * DCIM/Camera, no per-album subfolder".
      *
      * Already-on-device photos are recognised globally (across all MediaStore folders) so
      * the same file is never downloaded twice; SyncState is linked to the existing URI.
@@ -177,11 +173,17 @@ class DownloadPhotosUseCase @Inject constructor(
                                 gps = resolveGpsForExif(userId, photo),
                             )
                             file.delete()
+                            // A null uri means the file was never written: MediaStore refused the
+                            // insert, or the copy failed part-way, which on a full volume is the
+                            // common case. Counting it as done reported a photo saved that is not on
+                            // the device, so a batch that ran out of space still read as complete.
                             if (savedUri != null) {
                                 linkSyncState(userId, savedUri, photo)
                                 onSaved(savedUri.toString())
+                                done.incrementAndGet()
+                            } else {
+                                failed.incrementAndGet()
                             }
-                            done.incrementAndGet()
                             Log.d(TAG, "Downloaded ${photo.displayName} → ${folder.ifEmpty { "<root>" }}")
                         }
                     } catch (e: Exception) {
@@ -238,7 +240,7 @@ class DownloadPhotosUseCase @Inject constructor(
                             Log.d(TAG, "Already on device, skipped: ${photo.displayName}")
                         } else {
                             // Per-photo override beats the default folder. Album-bound photos land in
-                            // Pictures/<AlbumName>/; non-album photos in Pictures/ root (folder = "").
+                            // DCIM/<AlbumName>/; non-album photos in DCIM/Camera (folder = "").
                             val folder = folderByLinkId[photo.linkId] ?: folderName
                             val file = cloudRepo.downloadFullResPhoto(
                                 userId, photo,
@@ -250,11 +252,17 @@ class DownloadPhotosUseCase @Inject constructor(
                                 gps = resolveGpsForExif(userId, photo),
                             )
                             file.delete()
+                            // A null uri means the file was never written: MediaStore refused the
+                            // insert, or the copy failed part-way, which on a full volume is the
+                            // common case. Counting it as done reported a photo saved that is not on
+                            // the device, so a batch that ran out of space still read as complete.
                             if (savedUri != null) {
                                 linkSyncState(userId, savedUri, photo)
                                 onSaved(savedUri.toString())
+                                done.incrementAndGet()
+                            } else {
+                                failed.incrementAndGet()
                             }
-                            done.incrementAndGet()
                         }
                     } catch (e: Exception) {
                         if (e is kotlinx.coroutines.CancellationException) throw e
@@ -306,7 +314,7 @@ class DownloadPhotosUseCase @Inject constructor(
      * volume — not just under [folder]. Reason: a photo the user took on this device originally
      * lives in `DCIM/Camera/` (or wherever the camera app saved it). When we download the cloud
      * copy of the same photo, the user expects us to recognise the existing local file and skip
-     * the download, not create a duplicate under `Pictures/Proton Photos/`.
+     * the download, not create a duplicate under the download folder.
      *
      * Match key is `(DISPLAY_NAME, SIZE)`: the displayName alone collides too easily (`IMG_0001.jpg`
      * is common across folders); the size pair pins it to bytes-of-the-same-photo. We can't use
@@ -560,16 +568,21 @@ class DownloadPhotosUseCase @Inject constructor(
             // correctly (see SettingsKeys.DOWNLOAD_DATE_OVERRIDES + LocalMediaRepositoryImpl). Reading the
             // column back to decide keeps JPEGs (where it sticks) from ever bloating the map.
             if (dateTakenMs != null && dateTakenMs > 0L) {
-                val storedDateTaken = runCatching {
+                // Both columns come off ONE read-back: DATE_TAKEN says whether an entry is needed at
+                // all, and DATE_MODIFIED anchors that entry to the row it was written from, so the
+                // EXIF walk can tell this file from the same file after a later edit elsewhere.
+                val stored = runCatching {
                     context.contentResolver.query(
-                        uri, arrayOf(MediaStore.MediaColumns.DATE_TAKEN), null, null, null,
-                    )?.use { c -> if (c.moveToFirst()) c.getLong(0) else 0L }
-                }.getOrNull() ?: 0L
-                if (DownloadDateOverride.shouldRecord(dateTakenMs, storedDateTaken)) {
+                        uri,
+                        arrayOf(MediaStore.MediaColumns.DATE_TAKEN, MediaStore.MediaColumns.DATE_MODIFIED),
+                        null, null, null,
+                    )?.use { c -> if (c.moveToFirst()) c.getLong(0) to c.getLong(1) else null }
+                }.getOrNull()
+                if (CaptureDateOverride.shouldRecord(dateTakenMs, stored?.first ?: 0L)) {
                     context.settingsDataStore.edit { prefs ->
                         val current = prefs[SettingsKeys.DOWNLOAD_DATE_OVERRIDES] ?: emptySet()
                         prefs[SettingsKeys.DOWNLOAD_DATE_OVERRIDES] =
-                            current + DownloadDateOverride.encode(uri.toString(), dateTakenMs)
+                            current + CaptureDateOverride.encode(uri.toString(), dateTakenMs, stored?.second)
                     }
                 }
             }
@@ -613,10 +626,5 @@ class DownloadPhotosUseCase @Inject constructor(
          *  image mime. Never true without coordinates, so a location is never invented. Pure. */
         internal fun shouldWriteExifGps(mimeType: String, hasCoordinates: Boolean): Boolean =
             hasCoordinates && isExifWritableImageMime(mimeType)
-
-        /** A container whose EXIF ExifInterface can WRITE (see [EXIF_WRITABLE_MIMES]). Case- and
-         *  parameter-insensitive, so `image/JPEG` and `image/jpeg; codecs=…` normalise to the base type. */
-        private fun isExifWritableImageMime(mimeType: String): Boolean =
-            mimeType.substringBefore(';').trim().lowercase(Locale.ROOT) in EXIF_WRITABLE_MIMES
     }
 }

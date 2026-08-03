@@ -438,7 +438,7 @@ fun TrashScreen(
         val n = if (state.cloud.isSelectionMode) state.cloud.selectedCount else state.cloud.items.size
         ConfirmDialog(
             title = stringResource(R.string.trash_cloud_empty_confirm_title),
-            message = stringResource(R.string.trash_cloud_empty_confirm_message, n),
+            message = pluralStringResource(R.plurals.trash_cloud_empty_confirm_message, n, n),
             confirmLabel = stringResource(R.string.trash_cloud_empty_confirm_action),
             dismissLabel = stringResource(R.string.cancel),
             onConfirm = {

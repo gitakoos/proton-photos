@@ -42,10 +42,10 @@ import java.io.File
  * [ExifHelper.readMetadata]. The androidx `ExifInterface` is a self-contained Java decoder/encoder
  * with no native dependency, so it runs under Robolectric on a real on-disk JPEG.
  *
- * The strategy: write a 1×1 baseline JPEG, tag it with the four field GROUPS (GPS / camera /
- * timestamp / software), strip a chosen subset into a temp file via the production helper, then
- * read the temp back and assert ONLY the configured groups were removed and every other group
- * survived. A `file://` URI is used so Robolectric's ContentResolver opens the bytes for real.
+ * The strategy: write a 1×1 baseline JPEG, tag it with the five field GROUPS (GPS / camera /
+ * timestamp / software / authorship), strip a chosen subset into a temp file via the production
+ * helper, then read the temp back and assert ONLY the configured groups were removed and every other
+ * group survived. A `file://` URI is used so Robolectric's ContentResolver opens the bytes for real.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -101,7 +101,7 @@ class ExifHelperTest {
         context = ApplicationProvider.getApplicationContext()
         sourceFile = File.createTempFile("exif_src_", ".jpg", context.cacheDir)
         sourceFile.writeBytes(jpegBytes)
-        // Tag all four field groups so each strip subset has something to remove AND something to keep.
+        // Tag all five field groups so each strip subset has something to remove AND something to keep.
         val exif = ExifInterface(sourceFile.absolutePath)
         // GPS group
         exif.setLatLong(47.4979, 19.0402) // Budapest
@@ -116,7 +116,9 @@ class ExifHelperTest {
         exif.setAttribute(ExifInterface.TAG_DATETIME_ORIGINAL, "2023:01:15 10:30:00")
         // Software group
         exif.setAttribute(ExifInterface.TAG_SOFTWARE, "TestSoftware")
+        // Authorship group
         exif.setAttribute(ExifInterface.TAG_ARTIST, "TestArtist")
+        exif.setAttribute(ExifInterface.TAG_COPYRIGHT, "TestCopyright")
         exif.saveAttributes()
     }
 
@@ -127,12 +129,14 @@ class ExifHelperTest {
     // ─── precondition: the source carries every tag group ─────────────────────
 
     @Test
-    fun `source jpeg has all four field groups before stripping`() {
+    fun `source jpeg has all five field groups before stripping`() {
         val meta = ExifHelper.readMetadata(context, sourceUri())
         assertNotNull("GPS lat should be readable", meta.gpsLatitude)
         assertEquals("TestModel", meta.model)
         assertEquals("2023:01:15 10:30:00", meta.dateTimeOriginal)
         assertEquals("TestSoftware", meta.software)
+        assertEquals("TestArtist", meta.artist)
+        assertEquals("TestCopyright", meta.copyright)
     }
 
     // ─── strip GPS only ───────────────────────────────────────────────────────
@@ -150,6 +154,7 @@ class ExifHelperTest {
         assertEquals("TestModel", exif.getAttribute(ExifInterface.TAG_MODEL))
         assertEquals("2023:01:15 10:30:00", exif.getAttribute(ExifInterface.TAG_DATETIME_ORIGINAL))
         assertEquals("TestSoftware", exif.getAttribute(ExifInterface.TAG_SOFTWARE))
+        assertEquals("TestArtist", exif.getAttribute(ExifInterface.TAG_ARTIST))
         out.delete()
     }
 
@@ -164,10 +169,11 @@ class ExifHelperTest {
         assertNull(exif.getAttribute(ExifInterface.TAG_MAKE))
         assertNull(exif.getAttribute(ExifInterface.TAG_MODEL))
         assertNull(exif.getAttribute(ExifInterface.TAG_F_NUMBER))
-        // GPS + timestamp + software survive.
+        // GPS + timestamp + software + authorship survive.
         assertNotNull(exif.latLong)
         assertEquals("2023:01:15 10:30:00", exif.getAttribute(ExifInterface.TAG_DATETIME_ORIGINAL))
         assertEquals("TestSoftware", exif.getAttribute(ExifInterface.TAG_SOFTWARE))
+        assertEquals("TestArtist", exif.getAttribute(ExifInterface.TAG_ARTIST))
         out.delete()
     }
 
@@ -184,22 +190,70 @@ class ExifHelperTest {
         assertNotNull(exif.latLong)
         assertEquals("TestModel", exif.getAttribute(ExifInterface.TAG_MODEL))
         assertEquals("TestSoftware", exif.getAttribute(ExifInterface.TAG_SOFTWARE))
+        assertEquals("TestArtist", exif.getAttribute(ExifInterface.TAG_ARTIST))
         out.delete()
     }
 
     // ─── strip software only ──────────────────────────────────────────────────
 
+    /**
+     * The software flag owns the editing-tool tags ONLY. Artist and copyright hang off their own
+     * flag, so a caller that removes the tool a photo passed through leaves the credit on it: the
+     * name survives unless the caller asks for it to go.
+     */
     @Test
-    fun `stripping software info removes software and artist but keeps the rest`() {
+    fun `stripping software info removes software but leaves artist and copyright`() {
         val out = ExifHelper.stripToTempFile(
             context, sourceUri(), MetadataStripConfig(stripSoftwareInfo = true),
         )!!
         val exif = readBack(out)
         assertNull(exif.getAttribute(ExifInterface.TAG_SOFTWARE))
-        assertNull(exif.getAttribute(ExifInterface.TAG_ARTIST))
+        assertEquals("TestArtist", exif.getAttribute(ExifInterface.TAG_ARTIST))
+        assertEquals("TestCopyright", exif.getAttribute(ExifInterface.TAG_COPYRIGHT))
         assertNotNull(exif.latLong)
         assertEquals("TestModel", exif.getAttribute(ExifInterface.TAG_MODEL))
         assertEquals("2023:01:15 10:30:00", exif.getAttribute(ExifInterface.TAG_DATETIME_ORIGINAL))
+        out.delete()
+    }
+
+    // ─── strip authorship only ────────────────────────────────────────────────
+
+    /**
+     * The mirror image: the authorship flag alone takes artist and copyright and nothing else, so
+     * the tool that wrote the file (and every other group) stays readable.
+     */
+    @Test
+    fun `stripping authorship removes artist and copyright but keeps the rest`() {
+        val out = ExifHelper.stripToTempFile(
+            context, sourceUri(), MetadataStripConfig(stripAuthorship = true),
+        )!!
+        val exif = readBack(out)
+        assertNull(exif.getAttribute(ExifInterface.TAG_ARTIST))
+        assertNull(exif.getAttribute(ExifInterface.TAG_COPYRIGHT))
+        assertEquals("TestSoftware", exif.getAttribute(ExifInterface.TAG_SOFTWARE))
+        assertNotNull(exif.latLong)
+        assertEquals("TestModel", exif.getAttribute(ExifInterface.TAG_MODEL))
+        assertEquals("2023:01:15 10:30:00", exif.getAttribute(ExifInterface.TAG_DATETIME_ORIGINAL))
+        out.delete()
+    }
+
+    /**
+     * The two flags together remove exactly what the pair covers, which is the field set the upload
+     * path asks for: it maps its one software preference onto both flags.
+     */
+    @Test
+    fun `stripping software and authorship together removes software, artist and copyright`() {
+        val out = ExifHelper.stripToTempFile(
+            context,
+            sourceUri(),
+            MetadataStripConfig(stripSoftwareInfo = true, stripAuthorship = true),
+        )!!
+        val exif = readBack(out)
+        assertNull(exif.getAttribute(ExifInterface.TAG_SOFTWARE))
+        assertNull(exif.getAttribute(ExifInterface.TAG_ARTIST))
+        assertNull(exif.getAttribute(ExifInterface.TAG_COPYRIGHT))
+        assertNotNull(exif.latLong)
+        assertEquals("TestModel", exif.getAttribute(ExifInterface.TAG_MODEL))
         out.delete()
     }
 
@@ -215,6 +269,7 @@ class ExifHelperTest {
                 stripCameraInfo = true,
                 stripTimestamp = true,
                 stripSoftwareInfo = true,
+                stripAuthorship = true,
             ),
         )!!
         val exif = readBack(out)
@@ -222,6 +277,8 @@ class ExifHelperTest {
         assertNull(exif.getAttribute(ExifInterface.TAG_MODEL))
         assertNull(exif.getAttribute(ExifInterface.TAG_DATETIME_ORIGINAL))
         assertNull(exif.getAttribute(ExifInterface.TAG_SOFTWARE))
+        assertNull(exif.getAttribute(ExifInterface.TAG_ARTIST))
+        assertNull(exif.getAttribute(ExifInterface.TAG_COPYRIGHT))
         out.delete()
     }
 
@@ -238,6 +295,7 @@ class ExifHelperTest {
         assertTrue(MetadataStripConfig().isNoOp)
         assertTrue(!MetadataStripConfig(stripGps = true).isNoOp)
         assertTrue(!MetadataStripConfig(stripSoftwareInfo = true).isNoOp)
+        assertTrue(!MetadataStripConfig(stripAuthorship = true).isNoOp)
     }
 
     // ─── temp cleanup when the EXIF write fails after the copy ────────────────

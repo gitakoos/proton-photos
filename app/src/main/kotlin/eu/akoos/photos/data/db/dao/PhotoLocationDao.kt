@@ -47,4 +47,16 @@ interface PhotoLocationDao {
      *  the details sheet to show a cloud-only photo's place without re-decrypting its XAttr. */
     @Query("SELECT * FROM photo_location WHERE userId = :userId AND id = :id LIMIT 1")
     suspend fun getById(userId: String, id: String): PhotoLocationEntity?
+
+    /**
+     * Drops the stored fixes of [ids], the invalidation a place edit needs: the row is what
+     * [observeForUser] plots and what [idsForUser] makes the backfill skip, so a photo whose file now
+     * carries different coordinates has to lose its row before anything re-reads it. Scoped by user
+     * exactly as the reads are, so one account's edit never clears another's row.
+     *
+     * Callers slice [ids] with [eu.akoos.photos.util.forEachSqlChunk]: one host variable per element,
+     * against a per-statement cap a whole multi-select can exceed.
+     */
+    @Query("DELETE FROM photo_location WHERE userId = :userId AND id IN (:ids)")
+    suspend fun deleteByIds(userId: String, ids: List<String>)
 }

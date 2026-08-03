@@ -249,6 +249,7 @@ internal fun AvatarButton(
     hasActiveDownload: Boolean = false,
     isOffline: Boolean = false,
     updateAvailable: Boolean = false,
+    newsUnread: Boolean = false,
     onClick: () -> Unit,
     onUpdateClick: () -> Unit = onClick,
     onUploadClick: () -> Unit = onClick,
@@ -451,6 +452,17 @@ internal fun AvatarButton(
                     contentDescription = null,
                     tint = FgDim,
                     modifier = Modifier.size(8.dp),
+                )
+            }
+            // Unread-news dot. A quiet mark at the opposite corner from the gear, drawn on its own so
+            // it never touches the pill's sync/transfer/update precedence beside the avatar.
+            if (newsUnread) {
+                Box(
+                    modifier = Modifier
+                        .size(10.dp)
+                        .align(Alignment.TopEnd)
+                        .background(Accent2, CircleShape)
+                        .border(1.5.dp, Bg2, CircleShape),
                 )
             }
         }

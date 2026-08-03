@@ -209,10 +209,34 @@ fun AccountScreen(
                 }
             }
         }
-        if (showSignOutDialog) {
+        // Signing out empties the hidden vault, and a hide takes the device copy with it, so the vault
+        // file is the last one on the phone. This confirmation is the last chance to reveal them,
+        // which is why it names how many there are — and why it waits on the count being measured
+        // rather than opening on the zero that stands in until then.
+        //
+        // The photos that kept a Drive copy are named separately, because for them the wipe costs the
+        // device bytes alone: signing back in downloads them again. Saying only the total would put a
+        // photo the user can get back and one they cannot behind the same sentence.
+        if (showSignOutDialog && state.vaultedCountSettled) {
+            val vaultWarning = if (state.vaultedPhotoCount > 0) {
+                val total = androidx.compose.ui.res.pluralStringResource(
+                    R.plurals.sign_out_dialog_vault_warning,
+                    state.vaultedPhotoCount,
+                    state.vaultedPhotoCount,
+                )
+                val recoverable = if (state.vaultedCloudBackedCount > 0) {
+                    " " + androidx.compose.ui.res.pluralStringResource(
+                        R.plurals.sign_out_dialog_vault_cloud,
+                        state.vaultedCloudBackedCount,
+                        state.vaultedCloudBackedCount,
+                    )
+                } else ""
+                "\n\n" + total + recoverable
+            } else ""
+            val signOutMessage = stringResource(R.string.sign_out_dialog_message) + vaultWarning
             ConfirmDialog(
                 title = stringResource(R.string.sign_out_dialog_title),
-                message = stringResource(R.string.sign_out_dialog_message),
+                message = signOutMessage,
                 confirmLabel = stringResource(R.string.sign_out_dialog_confirm),
                 dismissLabel = stringResource(R.string.sign_out_dialog_cancel),
                 onConfirm = {

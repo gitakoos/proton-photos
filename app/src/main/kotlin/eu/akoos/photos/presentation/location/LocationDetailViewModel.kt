@@ -50,7 +50,10 @@ import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.usecase.DownloadPhotosUseCase
 import eu.akoos.photos.domain.usecase.ForceUploadLocalUrisUseCase
 import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
+import eu.akoos.photos.presentation.common.message
+import eu.akoos.photos.presentation.common.shareOutcome
 import eu.akoos.photos.util.OfflineGeocoder
+import eu.akoos.photos.util.ProtonPhotosStorage
 import eu.akoos.photos.util.friendlyNetworkError
 import eu.akoos.photos.util.sanitizeErrorMessage
 import javax.inject.Inject
@@ -60,6 +63,9 @@ sealed class LocationOpState {
     data object Idle : LocationOpState()
     data class Working(val done: Int, val total: Int) : LocationOpState()
 }
+
+/** One-shot outcome of the multi-download, surfaced to the screen's snackbar. */
+data class LocationDownloadResult(val succeeded: Int, val failed: Int)
 
 /** One-shot outcome of "Save as album", surfaced to the screen's snackbar. */
 data class SaveAsAlbumResult(
@@ -76,6 +82,8 @@ data class LocationDetailUiState(
     /** Selection key set — local uri for local-backed items, cloud linkId for cloud-only. */
     val selectedKeys: Set<String> = emptySet(),
     val downloadState: LocationOpState = LocationOpState.Idle,
+    /** How the last multi-download ended; consumed once by the screen's snackbar. */
+    val downloadResult: LocationDownloadResult? = null,
     val shareState: LocationOpState = LocationOpState.Idle,
     /** True while the "Save as album" round-trip is in flight. */
     val isSavingAsAlbum: Boolean = false,
@@ -214,7 +222,13 @@ class LocationDetailViewModel @Inject constructor(
 
     // ── Download selected ──────────────────────────────────────────────────────
 
-    /** Download the selected photos to the device, mirroring the gallery's multi-download. */
+    /**
+     * Download the selected photos to the device, mirroring the gallery's multi-download.
+     *
+     * The count that landed is published for the screen's snackbar, and a run that threw reports as
+     * a whole-batch failure rather than ending in silence: the photos are not on the device either
+     * way, so the user has to hear the same thing about both.
+     */
     fun downloadSelected() {
         val items = selectedGalleryItems()
         if (items.isEmpty()) return
@@ -227,7 +241,7 @@ class LocationDetailViewModel @Inject constructor(
             val transferId = transferCenter.start(
                 eu.akoos.photos.data.transfer.TransferCenter.Kind.DOWNLOAD, items.size,
             )
-            try {
+            val outcome = try {
                 runCatching {
                     downloadPhotos.downloadGalleryItems(
                         userId, items,
@@ -239,13 +253,29 @@ class LocationDetailViewModel @Inject constructor(
                             it.copy(downloadState = LocationOpState.Working(progress.done, progress.total))
                         }
                     }
-                }
+                }.fold(
+                    onSuccess = { LocationDownloadResult(it.done - it.failed, it.failed) },
+                    onFailure = { e ->
+                        if (e is kotlinx.coroutines.CancellationException) throw e
+                        android.util.Log.w("LocationDetailVM", "download failed: ${e.message}")
+                        LocationDownloadResult(0, items.size)
+                    },
+                )
             } finally {
                 transferCenter.finish(transferId)
             }
-            _uiState.update { it.copy(downloadState = LocationOpState.Idle, selectedKeys = emptySet()) }
+            _uiState.update {
+                it.copy(
+                    downloadState = LocationOpState.Idle,
+                    downloadResult = outcome,
+                    selectedKeys = emptySet(),
+                )
+            }
         }
     }
+
+    /** Drop the download outcome once the screen has shown it. */
+    fun clearDownloadResult() = _uiState.update { it.copy(downloadResult = null) }
 
     // ── Share selected ──────────────────────────────────────────────────────────
 
@@ -287,7 +317,15 @@ class LocationDetailViewModel @Inject constructor(
                     eu.akoos.photos.util.ShareIntentBuilder.buildSendIntent(context, uris, mime),
                 )
             }
-            _uiState.update { it.copy(shareState = LocationOpState.Idle, selectedKeys = emptySet()) }
+            // A photo that could not be resolved never reaches the chooser, so say how many did.
+            val shareMessage = shareOutcome(uris.size, items.size - uris.size).message()
+            _uiState.update {
+                it.copy(
+                    shareState = LocationOpState.Idle,
+                    selectedKeys = emptySet(),
+                    error = shareMessage?.resolve(context),
+                )
+            }
         }
     }
 
@@ -300,12 +338,42 @@ class LocationDetailViewModel @Inject constructor(
      */
     fun addSelectedToAlbum(albumLinkId: String, onResult: (joined: Int, queued: Int) -> Unit) {
         val items = selectedGalleryItems()
-        if (items.isEmpty()) return
+        if (items.isEmpty()) return onResult(0, 0)
         viewModelScope.launch {
-            val userId = accountManager.getPrimaryUserId().first() ?: return@launch
+            val userId = accountManager.getPrimaryUserId().first() ?: return@launch onResult(0, 0)
             val (joined, queued) = addItemsToAlbum(userId, albumLinkId, items)
             _uiState.update { it.copy(selectedKeys = emptySet()) }
             onResult(joined, queued)
+        }
+    }
+
+    /**
+     * Create a cloud album named [name] and add the selection to it, the two steps the picker's
+     * "New album" row stands for. Reports the same (joined, queued) pair the add to an existing
+     * album does, plus the reason when the album could not be created. Distinct from [saveAsAlbum],
+     * which names itself after the place and takes every photo in it.
+     */
+    fun createAlbumThenAddSelected(
+        name: String,
+        onResult: (joined: Int, queued: Int, error: String?) -> Unit,
+    ) {
+        val trimmed = ProtonPhotosStorage.sanitize(name)
+        if (trimmed.isEmpty()) return onResult(0, 0, context.getString(R.string.albums_name_empty))
+        val items = selectedGalleryItems()
+        if (items.isEmpty()) return onResult(0, 0, null)
+        viewModelScope.launch {
+            val userId = accountManager.getPrimaryUserId().first()
+                ?: return@launch onResult(0, 0, context.getString(R.string.viewer_not_signed_in))
+            val albumLinkId = runCatching { driveRepo.createDriveAlbum(userId, trimmed).linkId }
+                .getOrElse { e ->
+                    if (e is kotlinx.coroutines.CancellationException) throw e
+                    val friendly = friendlyNetworkError(e, true, context)
+                    onResult(0, 0, friendly ?: sanitizeErrorMessage(e.message))
+                    return@launch
+                }
+            val (joined, queued) = addItemsToAlbum(userId, albumLinkId, items)
+            _uiState.update { it.copy(selectedKeys = emptySet()) }
+            onResult(joined, queued, null)
         }
     }
 

@@ -52,6 +52,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.BatteryAlert
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Close
@@ -173,6 +174,36 @@ fun ActivityScreen(
                 // uploading come first, then the ones still waiting; each drops out as it finishes.
                 val activeUploads = state.uploadEvents.filter {
                     it.status == UploadEventStatus.Uploading || it.status == UploadEventStatus.Encrypting
+                }
+                // Why nothing is moving, above the queue rather than below it. The upload workers
+                // require the battery not to be low, so under that floor the system never starts
+                // them and no progress is reported at all: this screen is where the photos are
+                // visibly waiting, so it is where the reason belongs.
+                if (state.backupHeldByBattery) {
+                    item(span = { GridItemSpan(maxLineSpan) }) {
+                        Column {
+                            SettingsCard {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+                                ) {
+                                    Icon(
+                                        Icons.Filled.BatteryAlert,
+                                        contentDescription = null,
+                                        tint = colors.fgMute,
+                                        modifier = Modifier.size(18.dp),
+                                    )
+                                    Spacer(Modifier.width(12.dp))
+                                    Text(
+                                        stringResource(R.string.activity_waiting_battery),
+                                        color = colors.fgDim,
+                                        fontSize = 13.sp,
+                                    )
+                                }
+                            }
+                            Spacer(Modifier.height(16.dp))
+                        }
+                    }
                 }
                 if (activeUploads.isNotEmpty() || queuedUris.isNotEmpty() || state.uploadTransfers.isNotEmpty()) {
                     item(span = { GridItemSpan(maxLineSpan) }) {

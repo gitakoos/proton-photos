@@ -23,6 +23,7 @@
 package eu.akoos.photos.presentation.editor
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -452,5 +453,248 @@ class CropGeometryTest {
                 }
             }
         }
+    }
+
+    // ---- which handle a touch grabs ----
+
+    /** A round slop keeps the two reaches readable: 100px outward, 75px inward. */
+    private val slop = 100f
+
+    private fun pick(
+        box: CropBox,
+        x: Float,
+        y: Float,
+        scale: Float = 1f,
+        offsetX: Float = 0f,
+        offsetY: Float = 0f,
+    ): CropHandle? = pickCropHandle(box, scale, offsetX, offsetY, x, y, slop)
+
+    /** Roomy enough that the per-axis span clamp never bites: 0.3 of either span is over 75. */
+    private val wide = CropBox(0, 0, 1000, 800)
+
+    @Test
+    fun each_of_the_eight_handles_answers_a_touch_that_lands_on_it() {
+        assertEquals(CropHandle.TopLeft, pick(wide, 0f, 0f))
+        assertEquals(CropHandle.TopRight, pick(wide, 1000f, 0f))
+        assertEquals(CropHandle.BottomLeft, pick(wide, 0f, 800f))
+        assertEquals(CropHandle.BottomRight, pick(wide, 1000f, 800f))
+        assertEquals(CropHandle.Top, pick(wide, 500f, 0f))
+        assertEquals(CropHandle.Bottom, pick(wide, 500f, 800f))
+        assertEquals(CropHandle.Left, pick(wide, 0f, 400f))
+        assertEquals(CropHandle.Right, pick(wide, 1000f, 400f))
+    }
+
+    @Test
+    fun a_touch_a_full_slop_outside_an_edge_still_grabs_that_edge() {
+        assertEquals(CropHandle.Left, pick(wide, -100f, 400f))
+        assertEquals(CropHandle.Right, pick(wide, 1100f, 400f))
+        assertEquals(CropHandle.Top, pick(wide, 500f, -100f))
+        assertEquals(CropHandle.Bottom, pick(wide, 500f, 900f))
+    }
+
+    @Test
+    fun a_touch_past_the_outward_slop_is_not_a_crop_gesture() {
+        assertNull(pick(wide, -101f, 400f))
+        assertNull(pick(wide, 500f, -101f))
+        assertNull(pick(wide, 1200f, 900f))
+    }
+
+    @Test
+    fun the_inward_reach_carries_three_quarters_of_the_slop_into_the_rect() {
+        assertEquals(CropHandle.Left, pick(wide, 74f, 400f))
+        assertEquals(CropHandle.Inside, pick(wide, 76f, 400f))
+        assertEquals(CropHandle.Top, pick(wide, 500f, 74f))
+        assertEquals(CropHandle.Inside, pick(wide, 500f, 76f))
+        assertEquals(CropHandle.Right, pick(wide, 926f, 400f))
+        assertEquals(CropHandle.Bottom, pick(wide, 500f, 726f))
+    }
+
+    @Test
+    fun a_resize_can_start_far_enough_inside_to_clear_the_system_edge_strip() {
+        // 60px in is past the widest system back-gesture strip and must still resize, not pan.
+        assertEquals(CropHandle.Left, pick(wide, 60f, 400f))
+        assertEquals(CropHandle.TopLeft, pick(wide, 60f, 60f))
+    }
+
+    @Test
+    fun a_corner_wins_over_the_two_edges_it_shares() {
+        assertEquals(CropHandle.TopLeft, pick(wide, 10f, 10f))
+        assertEquals(CropHandle.TopRight, pick(wide, 990f, 10f))
+        assertEquals(CropHandle.BottomLeft, pick(wide, 10f, 790f))
+        assertEquals(CropHandle.BottomRight, pick(wide, 990f, 790f))
+        // Near one edge only, so no corner is in play.
+        assertEquals(CropHandle.Left, pick(wide, 10f, 400f))
+        assertEquals(CropHandle.Top, pick(wide, 500f, 10f))
+    }
+
+    @Test
+    fun a_touch_well_inside_the_rect_pans_instead_of_resizing() {
+        assertEquals(CropHandle.Inside, pick(wide, 500f, 400f))
+        assertEquals(CropHandle.Inside, pick(wide, 200f, 200f))
+        assertEquals(CropHandle.Inside, pick(wide, 800f, 600f))
+    }
+
+    @Test
+    fun the_inward_buffer_never_swallows_a_small_rect() {
+        // 100x80 on screen: the inward reach clamps to 30 and 24, not the 75 the slop asks for.
+        val small = CropBox(0, 0, 100, 80)
+        assertEquals(CropHandle.Inside, pick(small, 50f, 40f))
+        assertEquals(CropHandle.TopLeft, pick(small, 0f, 0f))
+        assertEquals(CropHandle.BottomRight, pick(small, 100f, 80f))
+        assertEquals(CropHandle.Top, pick(small, 50f, 0f))
+        assertEquals(CropHandle.Left, pick(small, 0f, 40f))
+    }
+
+    @Test
+    fun every_rect_keeps_an_interior_the_handles_do_not_claim() {
+        val spans = listOf(1, 2, 3, 5, 8, 13, 40, 100, 377, 1000)
+        for (w in spans) {
+            for (h in spans) {
+                val box = CropBox(0, 0, w, h)
+                assertEquals(
+                    "centre of a ${w}x$h rect must stay pannable",
+                    CropHandle.Inside,
+                    pick(box, w / 2f, h / 2f),
+                )
+            }
+        }
+    }
+
+    @Test
+    fun an_extreme_sliver_offers_both_long_edges_and_still_has_a_middle() {
+        val flat = CropBox(0, 0, 1000, 40)
+        assertEquals(CropHandle.Top, pick(flat, 500f, 0f))
+        assertEquals(CropHandle.Bottom, pick(flat, 500f, 40f))
+        assertEquals(CropHandle.Inside, pick(flat, 500f, 20f))
+
+        val tall = CropBox(0, 0, 40, 1000)
+        assertEquals(CropHandle.Left, pick(tall, 0f, 500f))
+        assertEquals(CropHandle.Right, pick(tall, 40f, 500f))
+        assertEquals(CropHandle.Inside, pick(tall, 20f, 500f))
+    }
+
+    // ---- where the system's edge gesture has to stand aside ----
+
+    /** Width of the crop container on screen, and the strip the system reserves down each side. */
+    private val containerW = 1000f
+    private val gestureInset = 40f
+
+    private fun exclusions(
+        left: Float,
+        top: Float,
+        right: Float,
+        bottom: Float,
+        leftInset: Float = gestureInset,
+        rightInset: Float = gestureInset,
+    ): List<CropExclusionRect> = cropGestureExclusions(
+        leftPx = left,
+        topPx = top,
+        rightPx = right,
+        bottomPx = bottom,
+        containerWidthPx = containerW,
+        leftInsetPx = leftInset,
+        rightInsetPx = rightInset,
+        slopPx = slop,
+    )
+
+    @Test
+    fun a_rect_clear_of_both_edges_asks_the_system_for_nothing() {
+        assertEquals(emptyList<CropExclusionRect>(), exclusions(300f, 100f, 700f, 900f))
+    }
+
+    @Test
+    fun a_rect_against_the_left_edge_covers_its_three_left_handles_only() {
+        val rects = exclusions(8f, 100f, 700f, 900f)
+        assertEquals(3, rects.size)
+        // Top corner, mid-edge, bottom corner — all on the rect's left edge, none on its right.
+        assertEquals(listOf(100f, 500f, 900f), rects.map { (it.top + it.bottom) / 2f })
+        assertTrue("all on the left edge", rects.all { (it.left + it.right) / 2f == 8f })
+    }
+
+    @Test
+    fun a_rect_against_the_right_edge_covers_its_three_right_handles_only() {
+        val rects = exclusions(300f, 100f, 992f, 900f)
+        assertEquals(3, rects.size)
+        assertEquals(listOf(100f, 500f, 900f), rects.map { (it.top + it.bottom) / 2f })
+        assertTrue("all on the right edge", rects.all { (it.left + it.right) / 2f == 992f })
+    }
+
+    @Test
+    fun a_full_width_rect_covers_both_sides_at_once() {
+        val rects = exclusions(0f, 0f, containerW, 800f)
+        assertEquals(6, rects.size)
+        assertEquals(3, rects.count { (it.left + it.right) / 2f == 0f })
+        assertEquals(3, rects.count { (it.left + it.right) / 2f == containerW })
+    }
+
+    @Test
+    fun each_rect_is_the_grab_area_centred_on_its_handle() {
+        val rects = exclusions(8f, 100f, 700f, 900f)
+        assertEquals(CropExclusionRect(-42f, 50f, 58f, 150f), rects[0])
+        assertEquals(CropExclusionRect(-42f, 450f, 58f, 550f), rects[1])
+        assertEquals(CropExclusionRect(-42f, 850f, 58f, 950f), rects[2])
+        assertTrue("sized to the grab area", rects.all { it.width == slop && it.height == slop })
+    }
+
+    @Test
+    fun a_handle_whose_grab_area_stops_short_of_the_strip_is_left_alone() {
+        // The left handle's grab area reaches 40px in from x=90, exactly touching the strip.
+        assertEquals(3, exclusions(89f, 100f, 700f, 900f).size)
+        assertEquals(0, exclusions(90f, 100f, 700f, 900f).size)
+        // Mirrored on the right: the strip starts at 960, so a handle at 911 still reaches it.
+        assertEquals(3, exclusions(300f, 100f, 911f, 900f).size)
+        assertEquals(0, exclusions(300f, 100f, 910f, 900f).size)
+    }
+
+    @Test
+    fun a_navigation_mode_without_an_edge_gesture_is_never_asked_to_yield() {
+        assertEquals(emptyList<CropExclusionRect>(), exclusions(0f, 0f, containerW, 800f, 0f, 0f))
+    }
+
+    @Test
+    fun each_side_is_decided_on_its_own() {
+        // Only the left strip exists (a landscape display with the gesture on one side).
+        val rects = exclusions(0f, 0f, containerW, 800f, leftInset = gestureInset, rightInset = 0f)
+        assertEquals(3, rects.size)
+        assertTrue("left side only", rects.all { (it.left + it.right) / 2f == 0f })
+    }
+
+    @Test
+    fun three_handles_a_side_is_the_most_the_platform_budget_allows() {
+        assertTrue(
+            "3 x $CROP_HANDLE_TOUCH_SLOP_DP dp must fit in $SYSTEM_GESTURE_EXCLUSION_BUDGET_DP dp",
+            3 * CROP_HANDLE_TOUCH_SLOP_DP <= SYSTEM_GESTURE_EXCLUSION_BUDGET_DP,
+        )
+        assertTrue(
+            "a fourth handle a side would go over the ceiling",
+            4 * CROP_HANDLE_TOUCH_SLOP_DP > SYSTEM_GESTURE_EXCLUSION_BUDGET_DP,
+        )
+    }
+
+    @Test
+    fun a_side_never_asks_for_more_vertical_run_than_the_platform_grants() {
+        val density = 3f // xxhdpi, where the dp figures turn into the largest pixel numbers
+        val slopPx = CROP_HANDLE_TOUCH_SLOP_DP * density
+        val budgetPx = SYSTEM_GESTURE_EXCLUSION_BUDGET_DP * density
+        // A full-height rect on the left edge spreads the three exclusions as far apart as they go.
+        val rects = cropGestureExclusions(
+            leftPx = 0f, topPx = 0f, rightPx = 900f, bottomPx = 2400f,
+            containerWidthPx = 1080f, leftInsetPx = 60f, rightInsetPx = 0f, slopPx = slopPx,
+        )
+        assertEquals(3, rects.size)
+        val run = rects.map { it.height }.sum()
+        assertTrue("$run px of exclusions against a $budgetPx px budget", run <= budgetPx)
+    }
+
+    @Test
+    fun the_picker_measures_on_screen_rather_than_in_image_pixels() {
+        // A 100x100 crop drawn at 4x, letterboxed to (50, 20): on screen it spans 400x400.
+        val box = CropBox(0, 0, 100, 100)
+        assertEquals(CropHandle.TopLeft, pick(box, 50f, 20f, scale = 4f, offsetX = 50f, offsetY = 20f))
+        assertEquals(CropHandle.BottomRight, pick(box, 450f, 420f, scale = 4f, offsetX = 50f, offsetY = 20f))
+        assertEquals(CropHandle.Inside, pick(box, 250f, 220f, scale = 4f, offsetX = 50f, offsetY = 20f))
+        assertEquals(CropHandle.Left, pick(box, 60f, 220f, scale = 4f, offsetX = 50f, offsetY = 20f))
+        // The image-space centre lands on the drawn top-left corner, not in the middle.
+        assertEquals(CropHandle.TopLeft, pick(box, 50f, 50f, scale = 4f, offsetX = 50f, offsetY = 20f))
     }
 }

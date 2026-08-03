@@ -36,6 +36,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -72,11 +73,14 @@ import me.proton.core.accountmanager.presentation.onUserKeyCheckFailed
 import me.proton.core.auth.presentation.AuthOrchestrator
 import eu.akoos.photos.data.api.FORCE_UPDATE_REQUIRED
 import eu.akoos.photos.data.preferences.LanguagePrefsBoot
+import eu.akoos.photos.data.updater.InstallOutcome
+import eu.akoos.photos.data.updater.InstallSessionEvents
 import eu.akoos.photos.data.updater.UpdateInstaller
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.data.preferences.syncEffectivelyEnabled
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
+import eu.akoos.photos.domain.repository.NewsRepository
 import eu.akoos.photos.domain.usecase.PendingDeleteNotificationUseCase
 import eu.akoos.photos.presentation.common.ConfirmDialog
 import eu.akoos.photos.presentation.settings.FreeUpInterval
@@ -113,6 +117,8 @@ class MainActivity : AppCompatActivity() {
     @Inject lateinit var pendingDeleteNotif: PendingDeleteNotificationUseCase
     @Inject lateinit var updateOrchestrator: UpdateOrchestrator
     @Inject lateinit var updateInstaller: UpdateInstaller
+    @Inject lateinit var installSessionEvents: InstallSessionEvents
+    @Inject lateinit var newsRepository: NewsRepository
 
     private var isLocked by mutableStateOf(false)
     private var lockEnabled = false
@@ -160,12 +166,28 @@ class MainActivity : AppCompatActivity() {
             .onSessionForceLogout {
                 lifecycleScope.launch { accountManager.disableAccount(it.userId) }
             }
-            .onAccountDisabled {
+            // initialState = false is load-bearing. The default replays the state on every
+            // subscription, and the app only ever disables an account rather than removing it, so the
+            // disabled row lives on and this block ran again on each Activity creation: a cold start,
+            // a process death, or the system flipping to dark mode. Almost nothing below is scoped to
+            // the account named here, so those repeats landed on whoever was signed in by then, down
+            // to emptying the hidden area, whose copy is the only one a device-only photo has.
+            .onAccountDisabled(initialState = false) {
                 // Every sign-out path converges here (explicit sign-out, force-logout, 2FA /
                 // key-check failures). Wipe this account's cached rows, plaintext key material and
                 // decrypted thumbnails so a revoked or re-authed session leaves nothing resident.
                 // NavGraph already routes to login once isLoggedIn = false.
-                lifecycleScope.launch { runCatching { driveRepo.clearCacheForSignOut(it.userId) } }
+                // The stored state goes with them. The comment above is right that every path
+                // converges here, but only the cached rows and key material were being cleared: the
+                // folder selection, album mapping, hidden folder names and queued Drive cleanups are
+                // preferences, and they stayed for whoever signed in next.
+                lifecycleScope.launch {
+                    runCatching { driveRepo.clearCacheForSignOut(it.userId) }
+                    runCatching {
+                        eu.akoos.photos.data.preferences.AccountScopedPreferences
+                            .clear(this@MainActivity, it.userId)
+                    }
+                }
             }
             .onUserKeyCheckFailed { /* corrupt user key — best to just disable and re-login */ }
             .onUserAddressKeyCheckFailed { /* same */ }
@@ -378,9 +400,20 @@ class MainActivity : AppCompatActivity() {
         val installLauncher = rememberLauncherForActivityResult(
             ActivityResultContracts.StartActivityForResult()
         ) {
-            val file = updateOrchestrator.pendingInstallFile()
-            if (file != null && updateInstaller.canInstall()) {
-                runCatching { startActivity(updateInstaller.buildInstallIntent(file)) }
+            if (updateOrchestrator.pendingInstallFile() != null && updateInstaller.canInstall()) {
+                startPendingInstall()
+            }
+        }
+        // Terminal result of a committed install session. A confirmation screen is launched from
+        // here (an Activity already has a task); a failed session drops to the legacy intent.
+        LaunchedEffect(Unit) {
+            installSessionEvents.outcomes.collect { outcome ->
+                when (outcome) {
+                    is InstallOutcome.PendingUserAction ->
+                        runCatching { startActivity(outcome.intent) }
+                    is InstallOutcome.Failed -> launchLegacyInstall()
+                    else -> Unit
+                }
             }
         }
         current?.let { state ->
@@ -390,14 +423,13 @@ class MainActivity : AppCompatActivity() {
                     when (state) {
                         is UpdatePromptState.Available -> updateOrchestrator.confirmUpdate(scope)
                         is UpdatePromptState.InstallReady -> {
-                            val file = updateOrchestrator.pendingInstallFile()
-                            if (file != null) {
+                            if (updateOrchestrator.pendingInstallFile() != null) {
                                 if (!updateInstaller.canInstall()) {
                                     runCatching {
                                         installLauncher.launch(updateInstaller.buildPermissionRequestIntent())
                                     }
                                 } else {
-                                    runCatching { startActivity(updateInstaller.buildInstallIntent(file)) }
+                                    startPendingInstall()
                                 }
                             }
                         }
@@ -407,6 +439,24 @@ class MainActivity : AppCompatActivity() {
                 onDismiss = { updateOrchestrator.dismiss(scope) },
             )
         }
+    }
+
+    /**
+     * Runs the staged update through the silent install session. A refused install (wrong signer,
+     * not newer) already shows its own dialog error, so only a plumbing failure falls back.
+     */
+    private fun startPendingInstall() {
+        when (val outcome = updateOrchestrator.installPending()) {
+            is InstallOutcome.Failed -> launchLegacyInstall()
+            is InstallOutcome.PendingUserAction -> runCatching { startActivity(outcome.intent) }
+            else -> Unit
+        }
+    }
+
+    /** Last resort: hand the APK to the system installer through the FileProvider intent. */
+    private fun launchLegacyInstall() {
+        val file = updateOrchestrator.pendingInstallFile() ?: return
+        runCatching { startActivity(updateInstaller.buildInstallIntent(file)) }
     }
 
     /**
@@ -545,11 +595,18 @@ class MainActivity : AppCompatActivity() {
                 // Silent — onResume must never crash; the next refresh or SyncWorker tick retries.
             }
         }
-        // Silent in-app update check. The repository caches the result for 24h, so this is a no-op
+        // Silent in-app update check. The repository caches the result for 4h, so this is a no-op
         // on most resumes; when a newer GitHub release exists it surfaces the update dialog (and,
-        // after "Not now", the dismissable gallery banner) through UpdateOrchestrator.
+        // after "Not now", the dismissable gallery banner) through UpdateOrchestrator. This is the
+        // foreground half only: UpdateCheckWorker runs the same check on its own schedule so a
+        // release still gets noticed while the app is closed.
         lifecycleScope.launch {
             runCatching { updateOrchestrator.runSilentCheck() }
+        }
+        // Refresh the news feed on the same resume, so the unread dot is current the moment the user
+        // is looking. A no-op when news is switched off, and a dropped network keeps the last feed.
+        lifecycleScope.launch {
+            runCatching { newsRepository.refresh() }
         }
     }
 

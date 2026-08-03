@@ -41,7 +41,7 @@ import android.os.Environment
  */
 object ProtonPhotosStorage {
     /** Kept for migration / legacy detection of pre-flat-layout files. New writes don't
-     *  use it as a path segment any more — see DEFAULT_PICTURES below. */
+     *  use it as a path segment any more — see [DEFAULT_PICTURES] below. */
     const val ROOT_NAME = "Proton Photos"
 
     /** Default destination for loose image downloads, copies, edits and screenshots: DCIM/Camera.

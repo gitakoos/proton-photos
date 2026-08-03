@@ -36,6 +36,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import me.proton.core.accountmanager.domain.AccountManager
+import me.proton.core.domain.entity.UserId
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.entity.PendingInvitation
@@ -47,6 +48,13 @@ import eu.akoos.photos.util.sanitizeErrorMessage
 import javax.inject.Inject
 
 private const val TAG = "SharedVM"
+
+/**
+ * How long the shared-album prefetch waits after the tab's refresh lands, matching the delay the
+ * owned albums' own deferred prefetch takes for the same reason: foreground decrypts and the network
+ * semaphore go to what the user is looking at first.
+ */
+private const val SHARED_PREFETCH_DELAY_MS = 5_000L
 
 data class SharedUiState(
     val isLoading: Boolean = true,
@@ -79,6 +87,61 @@ data class SharedUiState(
     val displayedAlbums: List<Album> get() = when (filter) {
         SharedFilter.SharedByMe -> sharedByMe
         SharedFilter.SharedWithMe -> sharedWithMe
+    }
+}
+
+/**
+ * Whether the Shared tab's cache read left anything on screen.
+ *
+ * False is what still owes a skeleton, so the skeleton appears only on a device that has never
+ * listed a share — not on every open. Both sections count, because one refresh feeds both filters
+ * and the grid decides per filter whether it has rows to draw.
+ *
+ * An owned album counts only when it is shared: the tab lists what this user shared out, not
+ * everything they own.
+ *
+ * Pure lists → no DI, no DB, no network.
+ */
+internal fun sharedTabHasCachedContent(
+    cachedOwnAlbums: List<Album>,
+    cachedSharedWithMeAlbums: List<Album>,
+): Boolean = cachedSharedWithMeAlbums.isNotEmpty() || cachedOwnAlbums.any { it.isShared }
+
+/**
+ * The message a failed Shared-tab refresh is allowed to surface.
+ *
+ * Null on the two failures the user is already told about another way: a list painted from cache is
+ * still there to read, and a network drop is what the offline banner and the avatar dot explain.
+ * Anything else — an auth or crypto fault with nothing on screen — has no other reporter, so it
+ * reaches the error sheet.
+ *
+ * Pure values → no DI, no context.
+ */
+internal fun sharedRefreshError(
+    hasPaintedContent: Boolean,
+    isNetworkFailure: Boolean,
+    message: String,
+): String? = when {
+    hasPaintedContent -> null
+    isNetworkFailure -> null
+    else -> message
+}
+
+/**
+ * The shared list with the covers a prefetch pass has since resolved filled in.
+ *
+ * Only the blank tiles change. [resolved] is a cache read taken after the fetch, so letting it write
+ * over a cover already on screen would swap one working image for another and repaint for nothing.
+ * Rows are neither added nor dropped either, so a grid the user is looking at cannot shift under them
+ * on the strength of a background pass.
+ *
+ * Pure values → no DI, no DB, no network.
+ */
+internal fun mergeResolvedCovers(current: List<Album>, resolved: Map<String, String>): List<Album> {
+    if (resolved.isEmpty()) return current
+    return current.map { album ->
+        if (!album.coverThumbnailUrl.isNullOrBlank()) album
+        else resolved[album.linkId]?.let { album.copy(coverThumbnailUrl = it) } ?: album
     }
 }
 
@@ -251,13 +314,31 @@ class SharedViewModel @Inject constructor(
     }
 
     private fun loadSharedAlbums() {
-        if (!networkObserver.isOnline.value) {
-            _uiState.update { it.copy(isLoading = false) }
-            return
-        }
         viewModelScope.launch {
-            val userId = accountManager.getPrimaryUserId().first() ?: return@launch
-            _uiState.update { it.copy(isLoading = true, error = null) }
+            _uiState.update { it.copy(error = null) }
+            // Phase 1: instant cache read so the tab paints on open, airplane-mode starts included.
+            // An empty read leaves whatever is on screen alone, so a refresh never blanks the grid.
+            val cachedOwn = runCatching { driveRepo.loadAlbumsCached() }.getOrNull().orEmpty()
+            val cachedSharedWithMe = runCatching { driveRepo.loadSharedWithMeAlbumsCached() }.getOrNull().orEmpty()
+            val painted = sharedTabHasCachedContent(cachedOwn, cachedSharedWithMe)
+            _uiState.update { state ->
+                state.copy(
+                    isLoading = !painted,
+                    allAlbums = cachedOwn.ifEmpty { state.allAlbums },
+                    sharedWithMeAlbums = cachedSharedWithMe.ifEmpty { state.sharedWithMeAlbums },
+                )
+            }
+
+            // Phase 2: network refresh, online only — else the painted cache stands.
+            if (!networkObserver.isOnline.value) {
+                _uiState.update { it.copy(isLoading = false) }
+                return@launch
+            }
+            val userId = accountManager.getPrimaryUserId().first() ?: run {
+                _uiState.update { it.copy(isLoading = false) }
+                return@launch
+            }
+            refreshOwnAlbums(userId)
             // supervisorScope is required because plain async {} children that fail
             // propagate the exception to the parent scope BEFORE await() resumes — the
             // runCatching never gets a chance to catch the rethrown ApiException.
@@ -265,14 +346,12 @@ class SharedViewModel @Inject constructor(
             // to escape this block to the top of the launch.
             runCatching {
                 kotlinx.coroutines.supervisorScope {
-                    val sharedByMeDeferred = async { driveRepo.loadAlbums(userId) }
                     val sharedWithMeDeferred = async { driveRepo.loadSharedWithMeAlbums(userId) }
                     val pendingDeferred = async { runCatching { driveRepo.loadPendingInvitations(userId) }.getOrElse { emptyList() } }
                     // Shared-by-me photos tolerate their own failure: a hiccup on the shares
                     // feed must not blank the albums section, so it resolves to an empty list.
                     val sharedPhotosDeferred = async { runCatching { driveRepo.loadSharedByMePhotos(userId) }.getOrElse { emptyList() } }
                     SharedLoad(
-                        albums = sharedByMeDeferred.await(),
                         sharedWithMe = sharedWithMeDeferred.await(),
                         pending = pendingDeferred.await(),
                         sharedPhotos = sharedPhotosDeferred.await(),
@@ -282,23 +361,25 @@ class SharedViewModel @Inject constructor(
                 onSuccess = { load ->
                     _uiState.update { it.copy(
                         isLoading = false,
-                        allAlbums = load.albums,
                         sharedWithMeAlbums = load.sharedWithMe,
                         pendingInvitations = load.pending,
                         sharedByMePhotos = load.sharedPhotos,
                     ) }
                     observeSharedPhotoThumbnails(load.sharedPhotos.map { it.linkId })
+                    prefetchSharedAlbums(userId, load.sharedWithMe)
                 },
                 onFailure = { e ->
-                    // Network drop → keep error null so the offline banner + the avatar
-                    // dot tell the user why nothing showed up. Non-network exceptions
-                    // (auth, crypto) still surface a sanitized message in the error sheet.
-                    val friendly = friendlyNetworkError(e, networkObserver.isOnline.value, context)
+                    // Every list already on screen stays: a refresh that failed knows nothing that
+                    // would justify clearing what the cache painted.
+                    val isNetworkFailure = friendlyNetworkError(e, networkObserver.isOnline.value, context) != null
                     _uiState.update {
                         it.copy(
                             isLoading = false,
-                            error = if (friendly != null) null
-                                else context.getString(R.string.shared_load_failed, sanitizeErrorMessage(e.message)),
+                            error = sharedRefreshError(
+                                hasPaintedContent = painted,
+                                isNetworkFailure = isNetworkFailure,
+                                message = context.getString(R.string.shared_load_failed, sanitizeErrorMessage(e.message)),
+                            ),
                         )
                     }
                 },
@@ -306,9 +387,73 @@ class SharedViewModel @Inject constructor(
         }
     }
 
+    private var ownAlbumsRefreshJob: kotlinx.coroutines.Job? = null
+
+    /**
+     * The user's own albums, refreshed alongside the tab rather than ahead of it.
+     *
+     * This tab reads that list for one thing only: which of the user's albums are shared BY them.
+     * The refresh behind it lists every album and prefetches a cover for each, which is a poor thing
+     * to hold a paint on, so the first paint comes from [DrivePhotoRepository.loadAlbumsCached] and
+     * this converges behind it. A failure leaves the cached list in place.
+     *
+     * One pass at a time: the tab reloads on every share-state change, and stacking full album
+     * walks on that would cost far more than the answer is worth.
+     */
+    private fun refreshOwnAlbums(userId: UserId) {
+        if (ownAlbumsRefreshJob?.isActive == true) return
+        ownAlbumsRefreshJob = viewModelScope.launch {
+            runCatching { driveRepo.loadAlbums(userId) }
+                .onSuccess { albums -> _uiState.update { it.copy(allAlbums = albums) } }
+                .onFailure { e ->
+                    if (e is kotlinx.coroutines.CancellationException) throw e
+                    Log.w(TAG, "own album refresh failed: ${e.message}")
+                }
+        }
+    }
+
+    private var sharedPrefetchJob: kotlinx.coroutines.Job? = null
+
+    /**
+     * What a shared album needs to be worth looking at before it is opened: the cover its tile draws,
+     * and the membership rows its grid enumerates from.
+     *
+     * Off the critical path on purpose: the walk this follows was taken off it so the tab paints from
+     * cache, and the fetches are on another user's volume and through the same crypto gate the visible
+     * grid decrypts on. The delay hands the refresh the user is waiting for, and whatever is on
+     * screen, first claim on both. A cache-only re-read after the covers is what puts them on a tab
+     * the user never left; it adds and removes no rows.
+     *
+     * The covers go first because they are the half the user can see from here. The membership pass
+     * behind them is what an album-open reads instead of waiting on a round trip, and both are
+     * bounded per pass by the repository, since every request is charged to the album's owner.
+     *
+     * One pass at a time, since the tab reloads on resume and on every share-state change.
+     */
+    private fun prefetchSharedAlbums(userId: UserId, albums: List<Album>) {
+        if (sharedPrefetchJob?.isActive == true) return
+        sharedPrefetchJob = viewModelScope.launch {
+            kotlinx.coroutines.delay(SHARED_PREFETCH_DELAY_MS)
+            runCatching { driveRepo.prefetchSharedAlbumCovers(userId, albums) }
+                .onFailure { e ->
+                    if (e is kotlinx.coroutines.CancellationException) throw e
+                    Log.w(TAG, "shared cover prefetch failed: ${e.message}")
+                }
+            val resolved = runCatching { driveRepo.loadSharedWithMeAlbumsCached() }
+                .getOrNull().orEmpty()
+                .mapNotNull { album -> album.coverThumbnailUrl?.takeIf { it.isNotBlank() }?.let { album.linkId to it } }
+                .toMap()
+            _uiState.update { it.copy(sharedWithMeAlbums = mergeResolvedCovers(it.sharedWithMeAlbums, resolved)) }
+            runCatching { driveRepo.prefetchSharedAlbumsMembership(userId, albums) }
+                .onFailure { e ->
+                    if (e is kotlinx.coroutines.CancellationException) throw e
+                    Log.w(TAG, "shared membership prefetch failed: ${e.message}")
+                }
+        }
+    }
+
     /** Bundle for the parallel shared-tab load so the success branch reads one object. */
     private data class SharedLoad(
-        val albums: List<Album>,
         val sharedWithMe: List<Album>,
         val pending: List<PendingInvitation>,
         val sharedPhotos: List<SharedPhoto>,

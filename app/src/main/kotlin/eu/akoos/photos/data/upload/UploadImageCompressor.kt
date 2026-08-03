@@ -244,6 +244,57 @@ object UploadImageCompressor {
     }
 
     /**
+     * Pure decision: must the image compressor be SKIPPED for this upload because the bytes carry an
+     * Ultra HDR gain map? An Ultra HDR still is an SDR JPEG with the gain map appended as a second
+     * image; this compressor decodes the primary frame and re-encodes a plain JPEG, which drops that
+     * second image and with it the HDR rendition. So one is never compressed and its bytes upload as
+     * they are, exactly like the motion-photo skip.
+     *
+     * [hasGainMap] is queried LAST, after [compressOnUpload] and the image [mimeType], so the header
+     * probe it performs never runs for an upload that would not be compressed anyway. Side-effect-free
+     * apart from that caller-supplied probe, so a plain JVM test pins it with no Android and no file.
+     */
+    fun skipsCompressionForGainMap(
+        mimeType: String,
+        compressOnUpload: Boolean,
+        hasGainMap: () -> Boolean = { false },
+    ): Boolean {
+        if (!compressOnUpload || !isImageMime(mimeType)) return false
+        return hasGainMap()
+    }
+
+    /**
+     * Pure decision: may a strip-on-upload try the gain-map-preserving route for these bytes? True only
+     * when [stripOnUpload] is on, [sdkInt] is at or above the API that exposes `Bitmap.hasGainmap`,
+     * [mimeType] is an image, and [hasGainMap] confirms a gain map. Cheap conditions first, so the probe
+     * never runs for an upload that could not take the route.
+     *
+     * The API floor is the whole point: that route rebuilds the file from a split, and rebuilt bytes may
+     * only ship once the platform decoder has confirmed they still decode WITH their gain map. Below that
+     * API no such confirmation exists, so the ordinary strip runs and the HDR rendition is lost. Privacy
+     * outranks the gain map throughout: this gate only decides whether the attempt is worth making, and
+     * the attempt itself falls back to the ordinary strip on any doubt.
+     */
+    fun attemptsGainMapPreservingStrip(
+        mimeType: String,
+        stripOnUpload: Boolean,
+        sdkInt: Int,
+        hasGainMap: () -> Boolean = { false },
+    ): Boolean {
+        if (!stripOnUpload || sdkInt < GAIN_MAP_VERIFY_MIN_SDK) return false
+        if (!isImageMime(mimeType)) return false
+        return hasGainMap()
+    }
+
+    /** True when [mimeType] names an image, tolerating case and a `;` parameter suffix. */
+    private fun isImageMime(mimeType: String): Boolean =
+        mimeType.substringBefore(';').trim().lowercase(Locale.ROOT).startsWith("image/")
+
+    /** A gain map can only be VERIFIED where `Bitmap.hasGainmap` exists (API 34). Held as a plain int so
+     *  the gate stays a pure value decision the caller drives with its own SDK level. */
+    private const val GAIN_MAP_VERIFY_MIN_SDK = 34
+
+    /**
      * Transcodes the image at [sourceUri] to a full-resolution, high-quality JPEG temp holding only
      * the EXIF groups [stripConfig] permits, for a source whose container ExifInterface cannot rewrite
      * in place (see [needsStripTranscode]). Decodes the source, bakes its EXIF orientation into the

@@ -47,7 +47,6 @@ data class GalleryUiState(
     val isRefreshing: Boolean = false,
     val permissionState: PermissionState = PermissionState.NotRequested,
     val error: String? = null,
-    val storageFullEvent: Boolean = false,
     val userInitial: String = "",
     val contentFilter: ContentFilter = ContentFilter(),
     val cloudUsedBytes: Long = 0L,
@@ -67,6 +66,9 @@ data class GalleryUiState(
     val multiShareState: MultiShareState = MultiShareState.Idle,
     val addToAlbumState: AddToAlbumState = AddToAlbumState.Idle,
     val multiStripState: MultiStripState = MultiStripState.Idle,
+    /** Progress of a batch favourite from the selection dock. */
+    val favoriteState: eu.akoos.photos.presentation.common.FavoriteActionState =
+        eu.akoos.photos.presentation.common.FavoriteActionState.Idle,
     /** Android 10+ write-permission dialog for stripping foreign files; the granted retry strips
      *  the deferred URIs. */
     val pendingStripIntent: android.app.PendingIntent? = null,
@@ -121,10 +123,12 @@ sealed class MultiDownloadState {
 }
 
 /** [Working] tracks how many cloud-only items have finished decrypting (determinate progress);
- *  the terminal chooser launch is a one-shot intent, not a state. */
+ *  the terminal chooser launch is a one-shot intent, not a state. [Done] carries how the batch
+ *  ended so a photo that never made it into the chooser is reported instead of dropped. */
 sealed class MultiShareState {
     data object Idle : MultiShareState()
     data class  Working(val done: Int, val total: Int) : MultiShareState()
+    data class  Done(val shared: Int, val failed: Int) : MultiShareState()
 }
 
 sealed class AddToAlbumState {

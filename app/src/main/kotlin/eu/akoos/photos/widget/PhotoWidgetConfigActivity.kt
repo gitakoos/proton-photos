@@ -196,7 +196,7 @@ private fun WidgetConfigScreen(
     onAlbum: (String) -> Unit,
     onCloudSelection: (List<String>) -> Unit,
     onCloudAlbum: (String) -> Unit,
-    onRequestCloudThumb: (eu.akoos.photos.data.db.entity.PhotoListingEntity) -> Unit,
+    onRequestCloudThumb: (String) -> Unit,
     onSave: () -> Unit,
     onCancel: () -> Unit,
 ) {
@@ -396,9 +396,14 @@ private fun WidgetConfigScreen(
                                 CircularProgressIndicator(color = colors.accent, strokeWidth = 2.dp)
                             }
                         } else if (state.cloudPhotos.isEmpty()) {
-                            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                            Box(
+                                Modifier.weight(1f).fillMaxWidth().padding(horizontal = 32.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                // A stream that gave up says so; an unreadable library must not read
+                                // as an empty one.
                                 Text(
-                                    stringResource(R.string.widget_no_cloud_photos),
+                                    state.cloudError ?: stringResource(R.string.widget_no_cloud_photos),
                                     color = colors.fgMute, fontSize = 14.sp,
                                 )
                             }
@@ -453,7 +458,7 @@ private fun WidgetConfigScreen(
                                                 modifier = Modifier.fillMaxSize(),
                                             )
                                         } else {
-                                            LaunchedEffect(photo.linkId) { onRequestCloudThumb(photo) }
+                                            LaunchedEffect(photo.linkId) { onRequestCloudThumb(photo.linkId) }
                                         }
                                         if (isSelected) {
                                             Box(

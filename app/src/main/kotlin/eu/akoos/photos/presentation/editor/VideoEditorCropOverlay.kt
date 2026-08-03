@@ -59,8 +59,8 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import eu.akoos.photos.R
 import eu.akoos.photos.presentation.theme.Accent
-import kotlin.math.max
-import kotlin.math.min
+import eu.akoos.photos.util.FitBox
+import eu.akoos.photos.util.fitImageInBox
 
 // ─── Video preview (ExoPlayer) ───────────────────────────────────────────────
 
@@ -179,8 +179,8 @@ internal fun VideoPreview(
 // ─── Crop overlay ────────────────────────────────────────────────────────────
 
 /**
- * Renders the source video's first frame as a bitmap and overlays four draggable
- * corner handles. The user's crop rect lives in source-pixel coordinates; we convert
+ * Renders the source video's first frame as a bitmap and overlays draggable corner
+ * brackets and side markers. The user's crop rect lives in source-pixel coordinates; we convert
  * between screen space and source space using a fit-rect (letterbox-aware).
  *
  * Gestures: a drag starts by picking the closest handle; subsequent moves drag that
@@ -314,21 +314,36 @@ private fun CropHandleCanvas(
     val pendingState = androidx.compose.runtime.rememberUpdatedState(pending)
     Box(modifier = Modifier.fillMaxSize().onSizeChanged { containerSize = it }) {
         val fit = remember(srcW, srcH, containerSize) {
-            fitRectFor(srcW.toFloat(), srcH.toFloat(),
+            fitImageInBox(srcW.toFloat(), srcH.toFloat(),
                 containerSize.width.toFloat().coerceAtLeast(1f),
                 containerSize.height.toFloat().coerceAtLeast(1f))
         }
+        val screenRect = fit.toScreen(
+            FitBox(
+                pending.left.toFloat(), pending.top.toFloat(),
+                pending.right.toFloat(), pending.bottom.toFloat(),
+            ),
+        )
 
         val density = LocalDensity.current
-        val handleRadiusPx = with(density) { 14.dp.toPx() }
-        // Kept tight so corners get picked only when the touch sits close to an edge.
-        // The edge-buffer logic in pickClosestHandle does the heavy lifting — corner
-        // candidates only arise when the touch is near TWO adjacent edges. Touches
-        // anywhere else inside the rect translate the rect bodily, which fixes the
-        // "can drag horizontally but not vertically on portrait" bug.
-        val touchRadiusPx = with(density) { 48.dp.toPx() }
+        // The grab area is deliberately larger than the drawn marker; see the slop constant.
+        val touchRadiusPx = with(density) { CROP_HANDLE_TOUCH_SLOP_DP.dp.toPx() }
 
         val accent = Accent
+
+        // Declared before the Canvas so the Canvas is drawn last and hit-tested first; these
+        // carry no pointer input either way.
+        if (containerSize.width > 0) {
+            CropGestureExclusions(
+                leftPx = screenRect.left,
+                topPx = screenRect.top,
+                rightPx = screenRect.right,
+                bottomPx = screenRect.bottom,
+                containerWidthPx = containerSize.width.toFloat(),
+                slopPx = touchRadiusPx,
+            )
+        }
+
         Canvas(
             modifier = Modifier
                 .fillMaxSize()
@@ -338,17 +353,25 @@ private fun CropHandleCanvas(
                     // translate the rect; we remember the touch's source-pixel offset
                     // from the rect's top-left so the translation stays anchored to the
                     // finger position instead of snapping the corner under it.
-                    var grabbedHandle: Handle? = null
+                    var grabbedHandle: CropHandle? = null
                     var insideOffsetSrcX = 0
                     var insideOffsetSrcY = 0
                     detectDragGestures(
                         onDragStart = { offset ->
                             val p = pendingState.value
-                            grabbedHandle = pickClosestHandle(p, fit, offset, touchRadiusPx)
-                            if (grabbedHandle == Handle.Inside) {
-                                val srcX = ((offset.x - fit.offsetX) / fit.scale)
+                            grabbedHandle = pickCropHandle(
+                                box = p.toCropBox(),
+                                scale = fit.scale,
+                                offsetX = fit.offsetX,
+                                offsetY = fit.offsetY,
+                                pointX = offset.x,
+                                pointY = offset.y,
+                                touchSlopPx = touchRadiusPx,
+                            )
+                            if (grabbedHandle == CropHandle.Inside) {
+                                val srcX = fit.toImageX(offset.x)
                                     .coerceIn(0f, srcW.toFloat()).toInt()
-                                val srcY = ((offset.y - fit.offsetY) / fit.scale)
+                                val srcY = fit.toImageY(offset.y)
                                     .coerceIn(0f, srcH.toFloat()).toInt()
                                 insideOffsetSrcX = srcX - p.left
                                 insideOffsetSrcY = srcY - p.top
@@ -359,49 +382,49 @@ private fun CropHandleCanvas(
                             // Read the LIVE rect each frame (not the captured one) so a resize/move
                             // builds on the current crop instead of snapping back to the original.
                             val p = pendingState.value
-                            val srcX = ((change.position.x - fit.offsetX) / fit.scale)
+                            val srcX = fit.toImageX(change.position.x)
                                 .coerceIn(0f, srcW.toFloat()).toInt()
-                            val srcY = ((change.position.y - fit.offsetY) / fit.scale)
+                            val srcY = fit.toImageY(change.position.y)
                                 .coerceIn(0f, srcH.toFloat()).toInt()
                             val minSize = 32 // pixels — keep handles spread apart
                             val newRect = when (h) {
-                                Handle.TopLeft -> AndroidRect(
+                                CropHandle.TopLeft -> AndroidRect(
                                     srcX.coerceAtMost(p.right - minSize),
                                     srcY.coerceAtMost(p.bottom - minSize),
                                     p.right, p.bottom,
                                 )
-                                Handle.TopRight -> AndroidRect(
+                                CropHandle.TopRight -> AndroidRect(
                                     p.left,
                                     srcY.coerceAtMost(p.bottom - minSize),
                                     srcX.coerceAtLeast(p.left + minSize),
                                     p.bottom,
                                 )
-                                Handle.BottomLeft -> AndroidRect(
+                                CropHandle.BottomLeft -> AndroidRect(
                                     srcX.coerceAtMost(p.right - minSize),
                                     p.top,
                                     p.right,
                                     srcY.coerceAtLeast(p.top + minSize),
                                 )
-                                Handle.BottomRight -> AndroidRect(
+                                CropHandle.BottomRight -> AndroidRect(
                                     p.left,
                                     p.top,
                                     srcX.coerceAtLeast(p.left + minSize),
                                     srcY.coerceAtLeast(p.top + minSize),
                                 )
                                 // Edge grabs — drag one side, the other three stay put.
-                                Handle.Top -> AndroidRect(
+                                CropHandle.Top -> AndroidRect(
                                     p.left, srcY.coerceAtMost(p.bottom - minSize), p.right, p.bottom,
                                 )
-                                Handle.Bottom -> AndroidRect(
+                                CropHandle.Bottom -> AndroidRect(
                                     p.left, p.top, p.right, srcY.coerceAtLeast(p.top + minSize),
                                 )
-                                Handle.Left -> AndroidRect(
+                                CropHandle.Left -> AndroidRect(
                                     srcX.coerceAtMost(p.right - minSize), p.top, p.right, p.bottom,
                                 )
-                                Handle.Right -> AndroidRect(
+                                CropHandle.Right -> AndroidRect(
                                     p.left, p.top, srcX.coerceAtLeast(p.left + minSize), p.bottom,
                                 )
-                                Handle.Inside -> {
+                                CropHandle.Inside -> {
                                     // Bodily translate the rect — preserve W×H, clamp
                                     // to source bounds so the rect doesn't leave the
                                     // frame on either axis.
@@ -423,10 +446,10 @@ private fun CropHandleCanvas(
                 },
         ) {
             // Crop rect in screen coords
-            val l = fit.offsetX + pending.left * fit.scale
-            val t = fit.offsetY + pending.top * fit.scale
-            val r = fit.offsetX + pending.right * fit.scale
-            val b = fit.offsetY + pending.bottom * fit.scale
+            val l = screenRect.left
+            val t = screenRect.top
+            val r = screenRect.right
+            val b = screenRect.bottom
 
             // Semi-opaque mask outside the crop
             val maskColor = Color.Black.copy(alpha = 0.55f)
@@ -440,97 +463,14 @@ private fun CropHandleCanvas(
             drawRect(maskColor, topLeft = Offset(r, t), size = GSize(size.width - r, b - t))
 
             // Border around the crop
-            val strokeWidthPx = 2f * density.density
+            val strokeWidthPx = CROP_FRAME_STROKE_DP.dp.toPx()
             drawLine(accent, Offset(l, t), Offset(r, t), strokeWidth = strokeWidthPx)
             drawLine(accent, Offset(r, t), Offset(r, b), strokeWidth = strokeWidthPx)
             drawLine(accent, Offset(r, b), Offset(l, b), strokeWidth = strokeWidthPx)
             drawLine(accent, Offset(l, b), Offset(l, t), strokeWidth = strokeWidthPx)
 
-            // Corner squares (white, accent border)
-            for ((cx, cy) in listOf(l to t, r to t, l to b, r to b)) {
-                drawRect(
-                    color = Color.White,
-                    topLeft = Offset(cx - handleRadiusPx / 2f, cy - handleRadiusPx / 2f),
-                    size = GSize(handleRadiusPx, handleRadiusPx),
-                )
-                drawRect(
-                    color = accent,
-                    topLeft = Offset(cx - handleRadiusPx / 2f, cy - handleRadiusPx / 2f),
-                    size = GSize(handleRadiusPx, handleRadiusPx),
-                    style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.5f * density.density),
-                )
-            }
+            drawCropMarkers(l, t, r, b)
         }
     }
 }
 
-private enum class Handle { TopLeft, TopRight, BottomLeft, BottomRight, Top, Bottom, Left, Right, Inside }
-
-/**
- * Edge-buffer handle picker. A touch is assigned to a corner ONLY when it sits within a
- * tight buffer (`edgeBufferPx`) of two adjacent edges of the rect — top+left, top+right,
- * bottom+left, bottom+right. Touches well inside the rect become Inside (translate).
- * Touches well outside the rect return null.
- *
- * The old "closest corner within touchRadius" heuristic broke on portrait crops because
- * every touch above the rect's vertical midpoint fell closer to a top corner than the
- * bottom — claiming the gesture for resize and giving the user the perception that
- * vertical drags did nothing.
- */
-private fun pickClosestHandle(
-    rect: AndroidRect,
-    fit: VideoFit,
-    point: Offset,
-    touchRadiusPx: Float,
-): Handle? {
-    val l = fit.offsetX + rect.left * fit.scale
-    val t = fit.offsetY + rect.top * fit.scale
-    val r = fit.offsetX + rect.right * fit.scale
-    val b = fit.offsetY + rect.bottom * fit.scale
-    // Edge buffer is tighter than the slop — corner zone shouldn't gobble the whole
-    // rect on small/portrait crops. 0.45× gives roughly 16dp of corner reach at the
-    // 36dp slop, which is still a comfortable fingertip target.
-    val edgeBufferPx = touchRadiusPx * 0.45f
-    val nearTop = (point.y - t) in -touchRadiusPx..edgeBufferPx
-    val nearBottom = (b - point.y) in -touchRadiusPx..edgeBufferPx
-    val nearLeft = (point.x - l) in -touchRadiusPx..edgeBufferPx
-    val nearRight = (r - point.x) in -touchRadiusPx..edgeBufferPx
-
-    val corner = when {
-        nearTop && nearLeft -> Handle.TopLeft
-        nearTop && nearRight -> Handle.TopRight
-        nearBottom && nearLeft -> Handle.BottomLeft
-        nearBottom && nearRight -> Handle.BottomRight
-        else -> null
-    }
-    if (corner != null) return corner
-
-    // Single edges — grab a side by its line: near that edge AND within the other axis's span.
-    val withinX = point.x in (l - touchRadiusPx)..(r + touchRadiusPx)
-    val withinY = point.y in (t - touchRadiusPx)..(b + touchRadiusPx)
-    val edge = when {
-        nearTop && withinX -> Handle.Top
-        nearBottom && withinX -> Handle.Bottom
-        nearLeft && withinY -> Handle.Left
-        nearRight && withinY -> Handle.Right
-        else -> null
-    }
-    if (edge != null) return edge
-
-    // Inside the rect (with a small grace margin) → translate.
-    return if (withinX && withinY) Handle.Inside else null
-}
-
-/**
- * Letterbox transform from source-pixel coords into the container's drawing area.
- * Kept private to this file under a unique name so it doesn't collide with the
- * identically-named helper in PhotoEditorScreen.
- */
-private data class VideoFit(val scale: Float, val offsetX: Float, val offsetY: Float)
-
-private fun fitRectFor(srcW: Float, srcH: Float, boxW: Float, boxH: Float): VideoFit {
-    val scale = min(boxW / srcW, boxH / srcH)
-    val drawnW = srcW * scale
-    val drawnH = srcH * scale
-    return VideoFit(scale, (boxW - drawnW) / 2f, (boxH - drawnH) / 2f)
-}

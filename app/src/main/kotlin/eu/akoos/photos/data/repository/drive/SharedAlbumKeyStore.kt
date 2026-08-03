@@ -66,7 +66,14 @@ class SharedAlbumKeyStore @Inject constructor(
     private val albumCryptoChain: AlbumCryptoChain,
     private val shareService: PhotosShareService,
 ) {
+    /**
+     * Keyed by user AND album, not album alone. This is a [Singleton] holding decrypted share and
+     * album key bytes, so an entry seeded while one account was signed in must never answer for
+     * another: a linkId is unique on its own volume, not across accounts.
+     */
     private val contexts = ConcurrentHashMap<String, AlbumCryptoChain.SharingContext>()
+
+    private fun cacheKey(userId: UserId, albumLinkId: String) = "${userId.id}|$albumLinkId"
 
     /** Serialises the bootstrap so a burst of photos from one album resolves the share once rather
      *  than once per photo. Held across the round trips on purpose: the cache re-check inside means
@@ -74,8 +81,17 @@ class SharedAlbumKeyStore @Inject constructor(
     private val bootstrapLock = Mutex()
 
     /** Register the bundle an album open decrypted. Pure memory, so a load path can call it inline. */
-    fun put(ctx: AlbumCryptoChain.SharingContext) {
-        contexts[ctx.albumLinkId] = ctx
+    fun put(userId: UserId, ctx: AlbumCryptoChain.SharingContext) {
+        contexts[cacheKey(userId, ctx.albumLinkId)] = ctx
+    }
+
+    /**
+     * Drop every cached bundle. Called on sign-out, where the point is that no decrypted share or
+     * album key survives the account it belongs to: the process can outlive the session, and these
+     * bytes are held in a [Singleton] that nothing else empties.
+     */
+    fun clear() {
+        contexts.clear()
     }
 
     /**
@@ -86,9 +102,10 @@ class SharedAlbumKeyStore @Inject constructor(
      * a null as "stay on the owner path" in both cases.
      */
     suspend fun contextFor(userId: UserId, albumLinkId: String): AlbumCryptoChain.SharingContext? {
-        contexts[albumLinkId]?.let { return it }
+        val key = cacheKey(userId, albumLinkId)
+        contexts[key]?.let { return it }
         return bootstrapLock.withLock {
-            contexts[albumLinkId] ?: bootstrap(userId, albumLinkId)?.also { contexts[albumLinkId] = it }
+            contexts[key] ?: bootstrap(userId, albumLinkId)?.also { contexts[key] = it }
         }
     }
 

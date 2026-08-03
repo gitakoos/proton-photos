@@ -672,7 +672,7 @@ private fun SharedWithMeAlbumActionSheet(
     val colors = AppColors.current
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        containerColor = colors.cardBg,
+        containerColor = colors.bg2,
         scrimColor = Color.Black.copy(alpha = 0.5f),
     ) {
         Column(

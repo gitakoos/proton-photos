@@ -252,11 +252,12 @@ fun DayDetailScreen(
     // Description edit sheet. Save commits to Room via the existing VM setter; cancel just
     // dismisses without persisting.
     if (editingDescription) {
-        eu.akoos.photos.presentation.calendar.components.EditFieldSheet(
+        eu.akoos.photos.presentation.common.EditFieldSheet(
             title = stringResource(R.string.day_detail_edit_description_title),
             initialValue = descriptionInput,
             hint = stringResource(R.string.day_detail_description_hint),
             singleLine = false,
+            confirmLabel = stringResource(R.string.day_detail_save),
             onDismiss = { editingDescription = false },
             onSave = { v ->
                 descriptionInput = v

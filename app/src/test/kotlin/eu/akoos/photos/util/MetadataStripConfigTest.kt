@@ -32,7 +32,7 @@ import org.junit.Test
  * writable JPEG and rebuilds its EXIF from scratch, so this group-level allow-list is what actually
  * closes the strip leak for every source format (including one whose container cannot be rewritten in
  * place). Each flag maps to exactly one group and a stripped group must be absent from the result. No
- * Android, no Context, no ExifInterface, no Robolectric: plain JVM assertions on the four booleans.
+ * Android, no Context, no ExifInterface, no Robolectric: plain JVM assertions on the five booleans.
  */
 class MetadataStripConfigTest {
 
@@ -44,6 +44,7 @@ class MetadataStripConfigTest {
                 ExifMetadataGroup.CAMERA,
                 ExifMetadataGroup.TIMESTAMP,
                 ExifMetadataGroup.SOFTWARE,
+                ExifMetadataGroup.AUTHORSHIP,
             ),
             MetadataStripConfig().allowedCopyGroups(),
         )
@@ -52,7 +53,12 @@ class MetadataStripConfigTest {
     @Test
     fun `stripping GPS only drops the GPS group`() {
         assertEquals(
-            setOf(ExifMetadataGroup.CAMERA, ExifMetadataGroup.TIMESTAMP, ExifMetadataGroup.SOFTWARE),
+            setOf(
+                ExifMetadataGroup.CAMERA,
+                ExifMetadataGroup.TIMESTAMP,
+                ExifMetadataGroup.SOFTWARE,
+                ExifMetadataGroup.AUTHORSHIP,
+            ),
             MetadataStripConfig(stripGps = true).allowedCopyGroups(),
         )
     }
@@ -60,7 +66,12 @@ class MetadataStripConfigTest {
     @Test
     fun `stripping camera info only drops the camera group`() {
         assertEquals(
-            setOf(ExifMetadataGroup.GPS, ExifMetadataGroup.TIMESTAMP, ExifMetadataGroup.SOFTWARE),
+            setOf(
+                ExifMetadataGroup.GPS,
+                ExifMetadataGroup.TIMESTAMP,
+                ExifMetadataGroup.SOFTWARE,
+                ExifMetadataGroup.AUTHORSHIP,
+            ),
             MetadataStripConfig(stripCameraInfo = true).allowedCopyGroups(),
         )
     }
@@ -68,7 +79,12 @@ class MetadataStripConfigTest {
     @Test
     fun `stripping timestamp only drops the timestamp group`() {
         assertEquals(
-            setOf(ExifMetadataGroup.GPS, ExifMetadataGroup.CAMERA, ExifMetadataGroup.SOFTWARE),
+            setOf(
+                ExifMetadataGroup.GPS,
+                ExifMetadataGroup.CAMERA,
+                ExifMetadataGroup.SOFTWARE,
+                ExifMetadataGroup.AUTHORSHIP,
+            ),
             MetadataStripConfig(stripTimestamp = true).allowedCopyGroups(),
         )
     }
@@ -76,8 +92,26 @@ class MetadataStripConfigTest {
     @Test
     fun `stripping software info only drops the software group`() {
         assertEquals(
-            setOf(ExifMetadataGroup.GPS, ExifMetadataGroup.CAMERA, ExifMetadataGroup.TIMESTAMP),
+            setOf(
+                ExifMetadataGroup.GPS,
+                ExifMetadataGroup.CAMERA,
+                ExifMetadataGroup.TIMESTAMP,
+                ExifMetadataGroup.AUTHORSHIP,
+            ),
             MetadataStripConfig(stripSoftwareInfo = true).allowedCopyGroups(),
+        )
+    }
+
+    @Test
+    fun `stripping authorship only drops the authorship group`() {
+        assertEquals(
+            setOf(
+                ExifMetadataGroup.GPS,
+                ExifMetadataGroup.CAMERA,
+                ExifMetadataGroup.TIMESTAMP,
+                ExifMetadataGroup.SOFTWARE,
+            ),
+            MetadataStripConfig(stripAuthorship = true).allowedCopyGroups(),
         )
     }
 
@@ -90,6 +124,7 @@ class MetadataStripConfigTest {
                 stripCameraInfo = true,
                 stripTimestamp = true,
                 stripSoftwareInfo = true,
+                stripAuthorship = true,
             ).allowedCopyGroups(),
         )
     }

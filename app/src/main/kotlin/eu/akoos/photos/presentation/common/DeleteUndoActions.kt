@@ -79,8 +79,16 @@ fun buildDeleteUndoAction(
  * exactly those files back in MediaStore. A hide vaults only on-device copies (a cloud-only item has no
  * local file and is dropped before anything is stored), and it moves the bytes into the vault before it
  * removes the MediaStore entry, so the restore does not depend on the Android 11+ system trash the way a
- * delete does: any non-empty vault set is offerable on every surface. Pure: no Context, no
- * ContentResolver, no coroutines.
+ * delete does: any non-empty vault set is offerable on every surface.
+ *
+ * [cloudLinkIds] are the backed-up and cloud-only photos the same hide filtered out client-side. They
+ * cost one preference write to reverse and nothing on Drive was touched, so they are always offerable
+ * too, and carrying them here is what makes the Hide button behave the same way whichever kind of photo
+ * it was pressed on. Pure: no Context, no ContentResolver, no coroutines.
  */
-fun buildHideUndoAction(hiddenUris: List<String>): UndoAction.Hide? =
-    if (hiddenUris.isEmpty()) null else UndoAction.Hide(hiddenUris)
+fun buildHideUndoAction(
+    hiddenUris: List<String>,
+    cloudLinkIds: List<String> = emptyList(),
+): UndoAction.Hide? =
+    if (hiddenUris.isEmpty() && cloudLinkIds.isEmpty()) null
+    else UndoAction.Hide(hiddenUris, cloudLinkIds)

@@ -28,6 +28,7 @@ import eu.akoos.photos.domain.entity.LocalMediaItem
 import eu.akoos.photos.domain.entity.SyncStatus
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -174,6 +175,20 @@ class DeletePhotoUseCaseTest {
     }
 
     @Test
+    fun `a local-only row lands on LOCAL_ONLY whichever way it got there`() {
+        // Its whole corner of the table, since a photo with no cloud copy has no other state to be in:
+        // no pairing to keep, and nothing on Drive a hide could leave behind.
+        for (freeUpSpace in listOf(true, false)) {
+            for (hide in listOf(true, false)) {
+                assertEquals(
+                    SyncStatus.LOCAL_ONLY,
+                    DeletePhotoUseCase.postDeleteSyncStatus(localOnly("uri://local-only"), freeUpSpace, hide),
+                )
+            }
+        }
+    }
+
+    @Test
     fun `a synced row becomes HIDDEN on a hide flow even while freeing space`() {
         assertEquals(
             SyncStatus.HIDDEN,
@@ -183,6 +198,21 @@ class DeletePhotoUseCaseTest {
             SyncStatus.HIDDEN,
             DeletePhotoUseCase.postDeleteSyncStatus(synced("link", "uri://synced"), freeUpSpace = false, hide = true),
         )
+    }
+
+    @Test
+    fun `a vaulted synced row lands on HIDDEN and on nothing else`() {
+        // The whole point of the state: a SYNCED row whose local path is absent from the device
+        // gallery is destroyed by the reconcile pass, and a CLOUD_ONLY one presents a vaulted photo as
+        // if it were only on Drive. HIDDEN is what both passes skip.
+        for (freeUpSpace in listOf(true, false)) {
+            val status = DeletePhotoUseCase.postDeleteSyncStatus(
+                synced("link", "uri://synced"), freeUpSpace, hide = true,
+            )
+            assertEquals(SyncStatus.HIDDEN, status)
+            assertNotEquals(SyncStatus.SYNCED, status)
+            assertNotEquals(SyncStatus.CLOUD_ONLY, status)
+        }
     }
 
     @Test

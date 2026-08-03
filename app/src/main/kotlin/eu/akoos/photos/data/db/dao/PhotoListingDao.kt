@@ -30,6 +30,7 @@ import androidx.room.Upsert
 import kotlinx.coroutines.flow.Flow
 import eu.akoos.photos.data.db.entity.PhotoListingEntity
 import eu.akoos.photos.data.db.entity.PhotoListingLite
+import eu.akoos.photos.data.db.entity.PhotoPickerRow
 import eu.akoos.photos.data.db.entity.ThumbnailUrlSeed
 
 @Dao
@@ -82,6 +83,23 @@ interface PhotoListingDao {
     )
     fun observeOwnStreamLite(userId: String): Flow<List<PhotoListingLite>>
 
+    /**
+     * The home-screen widget picker's grid: own-stream photos newest first, as the link id and the
+     * already-decrypted thumbnail URL the cell binds.
+     *
+     * Same `isChildOfAlbum = 0` rule as [observeOwnStream], which is what keeps a photo from an album
+     * someone shared with this user out of the pool a widget can cycle through. Its own named
+     * projection rather than a widened [observeOwnStreamLite]: that one's exact column set is
+     * load-bearing for the timeline feed's memory behaviour, and the picker needs a column it drops.
+     * ORDER BY carries the newest-first order the picker shows, so a large library is never copied
+     * into a second sorted list on every emission.
+     */
+    @Query(
+        "SELECT linkId, thumbnailUrl FROM photo_listing WHERE userId = :userId AND " +
+            "isChildOfAlbum = 0 ORDER BY captureTime DESC",
+    )
+    fun observeOwnStreamPickerRows(userId: String): Flow<List<PhotoPickerRow>>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(entities: List<PhotoListingEntity>)
 
@@ -92,18 +110,12 @@ interface PhotoListingDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertStubsIgnore(rows: List<PhotoListingEntity>)
 
-    /** Stub rows that carry no detail blob yet (a stub a failed detail batch never completed). Keyed
-     *  on an empty revisionId, which a fully-built row always resolves — so a RAW / odd-extension
-     *  photo whose mimeType is legitimately empty is NOT mistaken for a stub and re-fetched forever.
-     *  Used to backfill just the gap on a later pass instead of re-walking the whole library.
-     *  linkId-only projection: both callers only need the ids, and a light single-window result
-     *  avoids the multi-window CursorWindow refill that a full-row read can fail on when it races
-     *  a concurrent delete write (the trash-during-sync crash). */
-    @Query("SELECT linkId FROM photo_listing WHERE userId = :userId AND revisionId = ''")
-    suspend fun getIncompleteRowLinkIds(userId: String): List<String>
-
-    /** Incomplete stub rows as the light display projection (no crypto blobs), for the backfill pass
-     *  that rebuilds each stub's wire fields. Same single-window safety as [getIncompleteRowLinkIds].
+    /** Incomplete stub rows (a stub a failed detail batch never completed) as the light display
+     *  projection, for the backfill pass that rebuilds each stub's wire fields. Keyed on an empty
+     *  revisionId, which a fully-built row always resolves — so a RAW / odd-extension photo whose
+     *  mimeType is legitimately empty is NOT mistaken for a stub and re-fetched forever. A light
+     *  single-window result avoids the multi-window CursorWindow refill that a full-row read can
+     *  fail on when it races a concurrent delete write (the trash-during-sync crash).
      *  thumbnailUrl is not selected, the backfill only reads the wire fields (capture time, content
      *  hash, tags) to rebuild the stub, and the projection dropped the column (see observeOwnStreamLite). */
     @Query(
@@ -135,6 +147,13 @@ interface PhotoListingDao {
 
     @Query("SELECT * FROM photo_listing WHERE linkId = :linkId LIMIT 1")
     suspend fun getByLinkId(linkId: String): PhotoListingEntity?
+
+    /** The server tag ids the library currently holds for one photo, as the stored CSV, or null when
+     *  it holds no row for that link. Single-column projection, so asking one photo's tags never
+     *  materialises the row's crypto blobs. Every tag write mirrors into this column, which makes it
+     *  the local answer for a tag without a network round-trip. */
+    @Query("SELECT tagsCsv FROM photo_listing WHERE linkId = :linkId LIMIT 1")
+    suspend fun getTagsCsv(linkId: String): String?
 
     /** Returns all linkIds currently stored for a user. Used by the smart-merge refresh strategy. */
     @Query("SELECT linkId FROM photo_listing WHERE userId = :userId")
@@ -191,11 +210,6 @@ interface PhotoListingDao {
      *  [linkIds] and restate this ORDER BY when merging the slices back together. */
     @Query("SELECT * FROM photo_listing WHERE linkId IN (:linkIds) ORDER BY captureTime DESC")
     fun observeByLinkIds(linkIds: List<String>): Flow<List<PhotoListingEntity>>
-
-    /** Cached photos for an album, for instant album-detail paint. Needs a populated parentLinkId —
-     *  pre-v4→v5 legacy rows lack it and still need a network refresh on first open. */
-    @Query("SELECT * FROM photo_listing WHERE parentLinkId = :albumLinkId ORDER BY captureTime DESC")
-    suspend fun getByParentLinkId(albumLinkId: String): List<PhotoListingEntity>
 
     /** Writes JUST the thumbnailUrl — a full-row upsert would race a concurrent metadata refresh
      *  and could overwrite the freshly-decrypted URL with a stale null. */

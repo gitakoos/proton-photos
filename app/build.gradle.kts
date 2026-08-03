@@ -41,8 +41,8 @@ android {
         // versionCode bumped per release tag — keep monotonically increasing.
         // versionName mirrors the GitHub release tag (e.g. v2.0.0 → "2.0.0") so the About
         // screen and the published APK report the same version the user downloaded.
-        versionCode = 261
-        versionName = "2.4.1-test3"
+        versionCode = 262
+        versionName = "2.4.1-test4"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -261,7 +261,7 @@ dependencies {
     implementation("androidx.appcompat:appcompat:1.7.0")
 
     // EXIF reading/writing
-    implementation("androidx.exifinterface:exifinterface:1.3.7")
+    implementation(libs.exifinterface)
 
     // Biometric authentication (hidden album)
     implementation("androidx.biometric:biometric:1.1.0")
@@ -276,10 +276,12 @@ dependencies {
     // Map view — OpenStreetMap tiles, no Google Play Services
     implementation(libs.osmdroid.android)
 
-    // On-device ML: ONNX Runtime for magic search (CLIP). Fully local inference.
-    // Debug-only for now: the proof-of-concept lives in src/debug; kept out of release
-    // builds until the feature is productionised so it adds nothing to the shipped APK.
-    debugImplementation(libs.onnxruntime.android)
+    // On-device ML: ONNX Runtime. Fully local inference, no network at run time.
+    // Ships in release builds because the viewer's read-the-text-on-a-photo gesture runs the
+    // text-detection model through it (eu.akoos.photos.data.ocr). The native libraries cost
+    // ~10 MB per ABI, which per-ABI splits keep off every device but its own arch. The CLIP
+    // proof-of-concept in src/debug uses the same dependency.
+    implementation(libs.onnxruntime.android)
 
     // Coroutines
     implementation(libs.coroutines.android)

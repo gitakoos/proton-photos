@@ -123,10 +123,39 @@ internal data class PhotoCellInputs(
     val typeBadgeCdRes: Int?,
 )
 
+/**
+ * Whether [item] carries the favourite heart.
+ *
+ * A photo that lives only on the device answers from [favoriteIds], the device-side set keyed by its
+ * MediaStore uri, because nothing else records the answer for it. A backed-up photo answers from
+ * Drive PhotoTag 0 alone: the heart writes straight to Drive and another client can change it there
+ * too, so a device-side copy of the answer would keep showing a favourite the server has already
+ * dropped. That is the ordering [CategorizeItem] uses for the categories, and the favourite is one
+ * of those tags in the same place.
+ *
+ * [liveCloudTags] is the tag set the local library holds for the photo right now, for a caller that
+ * can read it. Null means "use the set the item carries", which is what a caller whose items come
+ * straight from the library flow already has.
+ */
+internal fun isItemFavorite(
+    item: GalleryItem,
+    favoriteIds: Set<String>,
+    liveCloudTags: Set<Int>? = null,
+): Boolean = when (item) {
+    is GalleryItem.LocalOnly -> item.local.uri in favoriteIds
+    is GalleryItem.Synced    -> 0 in (liveCloudTags ?: item.cloud.tags)
+    is GalleryItem.CloudOnly -> 0 in (liveCloudTags ?: item.cloud.tags)
+}
+
 /** Resolve a [GalleryItem] to [PhotoCellInputs]. The category look-ups run once here rather than
  *  repeatedly inside the cell. [downloadedCloudLinkIds] upgrades a downloaded CloudOnly tile to the
- *  green synced badge; [favoriteIds] adds the heart; [offlinePinIds] adds the offline badge to a
- *  CloudOnly tile pinned for offline. All default empty for surfaces that don't track them.
+ *  green synced badge; [favoriteIds] adds the heart on a device-only tile (a backed-up one reads its
+ *  Drive tag, see [isItemFavorite]); [offlinePinIds] adds the offline badge to a CloudOnly tile
+ *  pinned for offline. All default empty for surfaces that don't track them.
+ *
+ *  [pairedVaultUris] raises the same green badge on a vaulted tile whose photo kept a Drive copy; the
+ *  vault's own records are the only thing that can still say so, since vaulting removes the MediaStore
+ *  row that made the photo a Synced item.
  *
  *  [cloudThumbnailUrl] is the freshly-decrypted `file://` URL for this cell's cloud row, resolved from
  *  ThumbnailUrlStore in the caller's item scope. The timeline projection no longer carries the URL on
@@ -138,6 +167,7 @@ internal fun photoCellInputsFor(
     downloadedCloudLinkIds: Set<String> = emptySet(),
     offlinePinIds: Set<String> = emptySet(),
     cloudThumbnailUrl: String? = null,
+    pairedVaultUris: Set<String> = emptySet(),
 ): PhotoCellInputs {
     val cloudId = when (item) {
         is GalleryItem.CloudOnly -> item.cloud.linkId
@@ -152,6 +182,10 @@ internal fun photoCellInputsFor(
         is GalleryItem.CloudOnly -> cloudThumbnailUrl ?: item.cloud.thumbnailUrl
     }
     val isDownloaded = cloudId != null && cloudId in downloadedCloudLinkIds
+    // A vaulted photo has no MediaStore row, so it reaches a grid as LocalOnly whether or not it was
+    // backed up, and its own type cannot say which. The vault's cloud-id records can, and a Drive copy
+    // the hide left untouched is exactly what the green cloud means everywhere else.
+    val isPairedVaultPhoto = item is GalleryItem.LocalOnly && item.local.uri in pairedVaultUris
     val mime = when (item) {
         is GalleryItem.LocalOnly -> item.local.mimeType
         is GalleryItem.Synced    -> item.local.mimeType
@@ -183,8 +217,9 @@ internal fun photoCellInputsFor(
         durationMs     = durationMs,
         isPlaceholder  = imageData == null && item is GalleryItem.CloudOnly,
         showCloudBadge  = item is GalleryItem.CloudOnly && !isDownloaded,
-        showSyncedBadge = item is GalleryItem.Synced || (item is GalleryItem.CloudOnly && isDownloaded),
-        isFavorite     = favoriteKey in favoriteIds || 0 in cats,
+        showSyncedBadge = item is GalleryItem.Synced ||
+            (item is GalleryItem.CloudOnly && isDownloaded) || isPairedVaultPhoto,
+        isFavorite     = isItemFavorite(item, favoriteIds),
         isOffline      = item is GalleryItem.CloudOnly && cloudId != null && cloudId in offlinePinIds,
         typeBadgeRes   = when {
             // Videos are already marked by the center play icon, so no separate video badge here.
@@ -431,7 +466,8 @@ internal fun PhotoCell(
         //   CloudOnly  = white cloud (only in Drive — not on device)
         // A CloudOnly cell upgrades to the green badge once its linkId has a SYNCED local copy:
         // the user downloaded it but the static item snapshot still reads CloudOnly. Mirrors the
-        // same upgrade the photo viewer applies.
+        // same upgrade the photo viewer applies. A vaulted LocalOnly tile upgrades the same way when
+        // the vault records a Drive copy for it.
         when {
             showSyncedBadge -> SyncedCloudBadge()
             showCloudBadge  -> CloudBadge()
@@ -587,9 +623,12 @@ private fun BoxScope.CloudBadge() {
     }
 }
 
-/** Green cloud — backed up to Drive AND still on this device. Safe to remove from device. */
+/** Green cloud — backed up to Drive AND still on this device. Safe to remove from device.
+ *  Internal rather than private so the Free up space screen marks its photos with the very same
+ *  badge: that screen asks the user to confirm each photo has a Drive copy before its device copy is
+ *  deleted, and a second badge that merely looked alike could drift from this one. */
 @Composable
-private fun BoxScope.SyncedCloudBadge() {
+internal fun BoxScope.SyncedCloudBadge() {
     Box(
         modifier = Modifier
             .align(Alignment.BottomEnd)

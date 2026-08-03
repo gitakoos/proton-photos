@@ -44,6 +44,12 @@
     -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!--
+        Android 12+ counterpart to REQUEST_INSTALL_PACKAGES: lets the app's own
+        PackageInstaller session ask for USER_ACTION_NOT_REQUIRED, so an in-app update
+        applies without the system confirmation screen. Only ever used for a self-update.
+    -->
+    <uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION" />
 
     <application
         android:name=".App"
@@ -174,6 +180,16 @@
             </intent-filter>
         </receiver>
 
+        <!--
+            Status callback of the in-app update's PackageInstaller session. Not exported and
+            carries no intent-filter: the system reaches it only through the explicit
+            PendingIntent the session was committed with.
+        -->
+        <receiver
+            android:name=".data.updater.InstallStatusReceiver"
+            android:exported="false"
+            android:enabled="true" />
+
         <!-- ── Photo Widget ──────────────────────────────────────────────── -->
         <receiver
             android:name=".widget.PhotoWidgetReceiver"
@@ -218,10 +234,12 @@
         </provider>
 
         <!--
-            Dedicated FileProvider for the share sheet. A cloud-only photo has no MediaStore
-            URI, so sharing it decrypts the full-res bytes to cacheDir/fullres/ and exposes
-            that single subfolder here. Kept separate from the updater provider above so each
-            authority advertises the minimal set of paths it actually needs.
+            Dedicated FileProvider for the share sheet. Neither photo it serves has a MediaStore
+            URI: a cloud-only one is decrypted to cacheDir/fullres/, and a vaulted one is the
+            app-private file itself, so those two subfolders are exposed here. The provider is not
+            exported, so each is only ever reachable through the single read grant a share attaches
+            to the one URI it sends. Kept separate from the updater provider above so each authority
+            advertises the minimal set of paths it actually needs.
         -->
         <provider
             android:name=".util.ShareFileProvider"

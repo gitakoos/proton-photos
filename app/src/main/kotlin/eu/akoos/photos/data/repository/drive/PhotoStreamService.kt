@@ -128,6 +128,33 @@ private const val STREAM_RESUME_MAX_MS: Long = 180_000L
 // keeps it fast while easing the burst that trips Proton's rate-limit on large libraries.
 private const val LISTING_PAGE_DELAY_MS: Long = 400L
 
+private const val SERIALIZATION_PATH_MARKER = "at path: "
+private const val SERIALIZATION_INPUT_MARKER = "JSON input:"
+private const val SERIALIZATION_PATH_MAX = 80
+
+/**
+ * The two parts of a serialization failure that name code rather than data: the exception type and
+ * the `at path: $.Field` trailer kotlinx.serialization appends, which is built from DTO field names
+ * and array indices and so pinpoints which photo field tripped the parse.
+ *
+ * Nothing else survives, because the rest of the message is not safe for a dump a tester pastes into
+ * a public issue: a decoding failure appends a raw `JSON input:` excerpt of the body that failed,
+ * and a Drive listing page carries link ids, share ids and encrypted names. The excerpt is cut off
+ * before the trailer is looked for, so a body that happens to contain the trailer's own text cannot
+ * supply the path either.
+ */
+internal fun serializationFailureDetail(cause: Throwable): String {
+    val type = cause.javaClass.simpleName
+    val head = cause.message.orEmpty().substringBefore(SERIALIZATION_INPUT_MARKER)
+    val markerAt = head.indexOf(SERIALIZATION_PATH_MARKER)
+    if (markerAt < 0) return type
+    val path = head.substring(markerAt + SERIALIZATION_PATH_MARKER.length)
+        .takeWhile { !it.isWhitespace() }
+        .take(SERIALIZATION_PATH_MAX)
+    // Only kotlinx's own path expression is kept; anything else after the marker is free text.
+    return if (path.startsWith('$')) "$type at $path" else type
+}
+
 /** Privacy-safe one-line description of a listing error for the diagnostics buffer: exception type,
  *  the ProtonCore error variant, the HTTP status, and the Retry-After (seconds) when present. Never
  *  the message body, ids, or any account data. */
@@ -138,11 +165,11 @@ private fun listingErrorDetail(e: Throwable): String {
         append(e.javaClass.simpleName)
         if (apiError != null) append('/').append(apiError.javaClass.simpleName)
         if (http != null) append("/http=").append(http.httpCode)
-        // A Parse error's cause (a SerializationException) names the DTO field that didn't match —
-        // log a truncated form (field name, no values) so a tester log pinpoints which photo field
-        // tripped the listing parse.
-        (apiError as? me.proton.core.network.domain.ApiResult.Error.Parse)?.cause?.message?.let {
-            append("/cause=").append(it.replace('\n', ' ').take(160))
+        // A Parse error's cause (a SerializationException) names the DTO field that didn't match, so
+        // a tester log pinpoints which photo field tripped the listing parse. Only the exception type
+        // and that field path go in; the rest of the message carries an excerpt of the page body.
+        (apiError as? me.proton.core.network.domain.ApiResult.Error.Parse)?.cause?.let {
+            append("/cause=").append(serializationFailureDetail(it))
         }
         val ra = http?.retryAfter?.inWholeSeconds
         if (ra != null && ra > 0) append("/retryAfter=").append(ra).append('s')
@@ -798,7 +825,13 @@ class PhotoStreamService @Inject constructor(
                 val unaccountedFor = runCatching { listingSweepSnapshotDao.getGeneration(userId.id, activeVolumeId) }
                     .getOrElse {
                         Log.w(TAG, "refreshCloudPhotos: sweep set read failed, skipping stale-entry cleanup this pass: ${it.message}")
-                        eu.akoos.photos.util.SyncDiagnostics.log("sweep skipped: candidate set read failed (${it.message})")
+                        // Redacted for the diagnostics buffer: a SQLite failure message commonly
+                        // quotes the statement and its bound arguments, which here are the user id
+                        // and the volume id.
+                        eu.akoos.photos.util.SyncDiagnostics.log(
+                            "sweep skipped: candidate set read failed " +
+                                "(${it.javaClass.simpleName}: ${eu.akoos.photos.util.sanitizeErrorMessage(it.message)})"
+                        )
                         null
                     }
                 if (unaccountedFor != null) {

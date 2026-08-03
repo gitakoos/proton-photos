@@ -28,6 +28,8 @@ import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import me.proton.core.domain.entity.UserId
 import eu.akoos.photos.domain.entity.SyncState
 import eu.akoos.photos.domain.entity.SyncStatus
@@ -48,22 +50,51 @@ class FreeUpSpaceUseCase @Inject constructor(
     }
 
     /**
+     * Exactly the rows [invoke] would act on, for a caller that has to show the user what is about to
+     * leave their device before it does. Sharing one query is the point: a list drawn from a second,
+     * similar-looking filter could name a photo the sweep spares, or spare one the sweep takes, and
+     * the screen would be a promise about a different set than the one that runs.
+     *
+     * Every row is `SYNCED`, so every photo in it has a Drive copy. That is what makes the backed-up
+     * badge on each cell a check the user can make rather than a decoration.
+     */
+    suspend fun candidates(
+        userId: UserId,
+        olderThanMs: Long,
+        protectDownloaded: Boolean = false,
+    ): List<SyncState> = withContext(Dispatchers.IO) {
+        syncStateRepo.getSyncedBefore(userId, olderThanMs)
+            .filter { isEligibleForReclamation(it, olderThanMs, protectDownloaded) }
+    }
+
+    /**
      * [protectDownloaded] keeps copies the user put on the device on purpose (a download, or a delete
      * they undid) out of the sweep. The automatic schedule passes true; the manual "free up space"
      * button leaves it false, so a deliberate tap still reclaims every backed-up copy as before.
+     *
+     * [onProgress] is called with (done, total) as the sweep advances, so a caller can show movement
+     * over a run that takes minutes on a large library. It is called from the IO context this runs on.
+     *
+     * The body runs on [Dispatchers.IO] rather than the caller's context. `ContentResolver.delete` is
+     * a blocking binder call and there is one per photo, so on a library of thousands the loop owns
+     * whatever thread it is given for minutes. Called from a ViewModel that is exactly the main
+     * thread: the deletes still land, while the UI cannot repaint, which reads as a spinner that
+     * never stops. The scheduled run never showed it because a CoroutineWorker is already off-main.
      */
     suspend operator fun invoke(
         userId: UserId,
         olderThanMs: Long,
         protectDownloaded: Boolean = false,
-    ): FreeUpResult {
-        val candidates = syncStateRepo.getSyncedBefore(userId, olderThanMs)
-            .filter { isEligibleForReclamation(it, olderThanMs, protectDownloaded) }
+        onProgress: (done: Int, total: Int) -> Unit = { _, _ -> },
+    ): FreeUpResult = withContext(Dispatchers.IO) {
+        val candidates = candidates(userId, olderThanMs, protectDownloaded)
 
         var freed = 0
         val needsDialog = mutableListOf<Pair<String, Uri>>()  // localUri → contentUri
+        val total = candidates.size
+        onProgress(0, total)
 
-        for (state in candidates) {
+        for ((index, state) in candidates.withIndex()) {
             val contentUri = Uri.parse(state.localUri)
             try {
                 val deleted = context.contentResolver.delete(contentUri, null, null)
@@ -80,6 +111,10 @@ class FreeUpSpaceUseCase @Inject constructor(
                 // SecurityException / RecoverableSecurityException on Android 11+
                 needsDialog += state.localUri to contentUri
             }
+            // Each photo is committed on its own, so a run the user walks away from keeps everything
+            // it already reclaimed; the next open lists what is left and picks up from there.
+            val done = index + 1
+            if (done % PROGRESS_STEP == 0 || done == total) onProgress(done, total)
         }
 
         if (needsDialog.isNotEmpty() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -88,13 +123,17 @@ class FreeUpSpaceUseCase @Inject constructor(
             val pi = runCatching {
                 MediaStore.createDeleteRequest(context.contentResolver, needsDialog.map { it.second })
             }.getOrNull()
-            if (pi != null) return FreeUpResult.NeedsPermission(pi, needsDialog.map { it.first })
+            if (pi != null) return@withContext FreeUpResult.NeedsPermission(pi, needsDialog.map { it.first })
         }
 
-        return FreeUpResult.Done(freed)
+        FreeUpResult.Done(freed)
     }
 
     companion object {
+        /** How many photos pass between progress reports. One report per photo would repaint the
+         *  screen thousands of times for a number the user reads as it moves. */
+        private const val PROGRESS_STEP = 20
+
         /**
          * Whether free-up-space may reclaim the device copy behind [state]: true only for a photo
          * whose cloud copy is confirmed, i.e. a SYNCED row carrying a real backedUpAtMs stamp that

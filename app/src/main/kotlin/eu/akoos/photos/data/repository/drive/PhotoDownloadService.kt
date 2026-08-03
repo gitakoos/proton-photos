@@ -102,6 +102,23 @@ class PhotoDownloadService @Inject constructor(
     private val inFlightWarnThreshold = 64
 
     /**
+     * Drop every decrypted full-resolution copy and every upload resume dir.
+     *
+     * Both hold the signed-out account's plaintext: `fullres` the photos themselves, each `upload_*`
+     * a manifest carrying that file's session key. Neither is partitioned by user and neither is
+     * aged out on the sign-out path, so without this the previous account's readable bytes stayed on
+     * disk for whoever holds the phone next.
+     */
+    fun clearDecryptedCaches() {
+        runCatching { java.io.File(context.cacheDir, "fullres").deleteRecursively() }
+        runCatching {
+            context.cacheDir.listFiles()
+                ?.filter { it.isDirectory && it.name.startsWith("upload_") }
+                ?.forEach { it.deleteRecursively() }
+        }
+    }
+
+    /**
      * Downloads the full-resolution bytes for [photo] into the on-disk cache.
      *
      * [onProgress] (optional) receives `(doneBytes, totalBytes)` while blocks decrypt. Callback
@@ -479,11 +496,14 @@ class PhotoDownloadService @Inject constructor(
         // For freshly downloaded blocks we have the encrypted SHA-256 in [freshHashes].
         // For resumed blocks the encrypted bytes are gone, so we fill the corresponding
         // slots from the sidecar (written after a previous run's manifest verification
-        // succeeded). When NO sidecar is present from an older app version we fall back
-        // to the legacy skip-with-warning behaviour — the original download path still
-        // verifies the full manifest, so a corrupted block can only sneak past on a
-        // mid-download interruption straddling the version bump, and even then the dec
-        // bytes themselves were produced by the authenticated PGP decrypt.
+        // succeeded). Without a sidecar the hashes simply are not there to compare, so
+        // that case skips with a warning; the dec bytes themselves still came out of the
+        // authenticated PGP decrypt.
+        //
+        // Three outcomes, and which one applies is decided BEFORE the comparison: skip when
+        // the hashes are unavailable, skip when another account signed the revision (their
+        // signature does not verify against our keys and never will), and otherwise compare
+        // and refuse the bytes on a mismatch.
         val manifestSig = revisionResp.revision.manifestSignature
         val signerEmail = revisionResp.revision.signatureAddress
         var manifestVerified = false
@@ -492,6 +512,16 @@ class PhotoDownloadService @Inject constructor(
                 resumedBlockEncryptedHashes.size == resumedBytes.size
             if (!canVerify) {
                 Log.w(TAG, "VERIFY_SKIP manifest linkId=${photo.linkId} signer=$signerEmail (resumed ${resumedBytes.size}/${blocks.size} blocks, sidecar missing/partial — encrypted hashes unavailable)")
+            } else if (
+                // Our keys only answer for what our own addresses signed. A photo in an album another
+                // user shared carries THEIR signature, and this is the same method that downloads it,
+                // so a mismatch there says nothing about the bytes and must not fail the download.
+                // Deciding by signer is also what lets a real mismatch be fatal below: without it, the
+                // only way to keep shared albums working was to let every failure through.
+                signerEmail.isNullOrBlank() ||
+                signerEmail.lowercase() !in cryptoHelper.getOwnEmailAddresses(userId)
+            ) {
+                Log.d(TAG, "VERIFY_SKIP manifest linkId=${photo.linkId} signer=$signerEmail (signed by another account, not verifiable with our keys)")
             } else {
                 val ownPublicKeys = cryptoHelper.getOwnPublicKeysArmored(userId)
                 if (ownPublicKeys.isNotEmpty()) {
@@ -524,18 +554,17 @@ class PhotoDownloadService @Inject constructor(
                     val ok = cryptoHelper.verifyDetachedSignature(manifestBytes, manifestSig, ownPublicKeys)
                     if (!ok) {
                         Log.w(TAG, "VERIFY_FAIL manifest linkId=${photo.linkId} signer=$signerEmail (downloaded ${freshHashes.size} fresh + ${resumedBlockEncryptedHashes.size} resumed blocks, ${thumbnailHashBytes.size} thumb hashes prepended)")
-                        // If the verification combined sidecar data with fresh fetches and
-                        // still failed, the sidecar entries are the prime suspect (CDN bytes
-                        // are freshly hashed so they can't be the lie). Wipe sidecar + all
-                        // dec_*.bin so the next call drops into a clean full re-fetch path
-                        // — by spec, an unreconcilable mismatch falls back to a full
-                        // re-download and re-verification on the subsequent attempt.
-                        if (resumedBlockEncryptedHashes.isNotEmpty()) {
-                            blockHashSidecar(cacheDir, photo.linkId).delete()
-                            for (b in blocks) blockDecFile(cacheDir, photo.linkId, b.index).delete()
-                            Log.w(TAG, "downloadFullResPhoto: ${photo.linkId} — wiped sidecar + dec cache after verify-fail; next call will re-fetch from scratch")
-                            error("Manifest verification failed on resumed download for ${photo.linkId}")
-                        }
+                        // Our own signature over our own bytes did not match, so these bytes are not
+                        // the ones that were uploaded. Refuse them: the concat + atomic rename below
+                        // publishes whatever reaches it, and a check that only logs is not a check.
+                        // Wipe the sidecar and every dec_*.bin first, so the retry starts from a
+                        // clean full re-fetch rather than re-reading the same suspect cache. This is
+                        // fatal whether or not any block was resumed: a fresh download is the common
+                        // case, and it is the one where nothing else has verified the bytes.
+                        blockHashSidecar(cacheDir, photo.linkId).delete()
+                        for (b in blocks) blockDecFile(cacheDir, photo.linkId, b.index).delete()
+                        Log.w(TAG, "downloadFullResPhoto: ${photo.linkId} — wiped sidecar + dec cache after verify-fail; next call will re-fetch from scratch")
+                        error("Manifest verification failed for ${photo.linkId}")
                     } else {
                         manifestVerified = true
                     }

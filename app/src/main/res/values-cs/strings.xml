@@ -13,7 +13,7 @@
     <string name="onboarding_recommended">Doporučeno</string>
 
     <string name="onboarding_welcome_title">Vítejte v Photos for Proton</string>
-    <string name="onboarding_welcome_subtitle">Vaše fotky a videa, koncově šifrované na Proton Drive. Nastavme pár předvoleb, aby aplikace odpovídala tomu, jak ji chcete používat.</string>
+    <string name="onboarding_welcome_subtitle">Vaše fotky a videa, koncově šifrované na Proton Drive. Nastavte pár předvoleb, aby aplikace odpovídala tomu, jak ji chcete používat.</string>
 
     <string name="onboarding_backup_title">Vyberte, co zálohovat</string>
     <string name="onboarding_backup_subtitle">Kdykoli to můžete změnit v Nastavení.</string>
@@ -157,26 +157,69 @@
     <string name="editor_save_cancelled">Ukládání zrušeno</string>
     <string name="editor_no_permission">Bez oprávnění k uložení</string>
     <string name="editor_save_failed">Uložení se nezdařilo</string>
-    <string name="editor_invalid_video_uri">Neplatná URI videa</string>
+    <string name="editor_invalid_video_uri">Toto video se nepodařilo otevřít</string>
     <string name="editor_video_metadata_failed">Metadata videa se nepodařilo načíst</string>
     <string name="editor_cloud_video_download_failed">Stažení cloudového videa se nezdařilo</string>
 
     <!-- Hidden album screen, previously hardcoded English. -->
     <string name="hidden_photos_title">Skryté fotky</string>
     <string name="hidden_albums_section">Skrytá alba</string>
+    <plurals name="hidden_loose_device_copies">
+        <item quantity="one">%1$d skrytá fotka má stále soubor v galerii telefonu, kde ji vidí jiné aplikace.</item>
+        <item quantity="few">%1$d skryté fotky mají stále soubory v galerii telefonu, kde je vidí jiné aplikace.</item>
+        <item quantity="many">%1$d skryté fotky má stále soubory v galerii telefonu, kde je vidí jiné aplikace.</item>
+        <item quantity="other">%1$d skrytých fotek má stále soubory v galerii telefonu, kde je vidí jiné aplikace.</item>
+    </plurals>
+    <string name="hidden_folders_section">Skryté složky</string>
     <string name="hidden_cloud_photos_section">Skryté fotky v cloudu</string>
     <string name="hidden_photos_auth_prompt">Ověřte se, abyste viděli své skryté fotky</string>
     <string name="hidden_photos_unlock">Odemknout</string>
     <string name="app_lock_authenticate_prompt">Ověřte se pro pokračování</string>
-    <string name="hidden_no_device_lock_notice">Není nastaven zámek zařízení. Trezor není chráněn.</string>
-    <string name="hidden_auth_title">Skryté fotky</string>
-    <string name="hidden_auth_description">Ověřte se, abyste viděli své skryté fotky</string>
-    <string name="hide_cloud_copy_notice">Zálohované fotky zůstanou na vašem Proton Drive. Skrytí je pouze odebere z galerie tohoto zařízení.</string>
+    <string name="hidden_no_device_lock_notice">Není nastaven zámek zařízení. Skryté fotky nejsou chráněné.</string>
+    <string name="hide_cloud_copy_notice">Z Proton Drive se nic neodstranilo. Kopie v cloudu zůstávají přesně takové, jaké jsou.</string>
     <string name="hidden_empty_title">Žádné skryté fotky</string>
-    <string name="hidden_empty_subtitle">Podržte fotku v galerii a zvolte \"Skrýt\"</string>
+    <string name="hidden_empty_subtitle">Podržte fotku v galerii a přesuňte ji sem</string>
+    <string name="hidden_restore_failed">Skrytí této fotky se nepodařilo zrušit. Zůstává skrytá.</string>
+    <plurals name="hidden_restore_failed_some">
+        <item quantity="one">U %1$d fotky se nepodařilo zrušit skrytí. Zůstává skrytá.</item>
+        <item quantity="few">U %1$d fotek se nepodařilo zrušit skrytí. Zůstávají skryté.</item>
+        <item quantity="many">U %1$d fotky se nepodařilo zrušit skrytí. Zůstávají skryté.</item>
+        <item quantity="other">U %1$d fotek se nepodařilo zrušit skrytí. Zůstávají skryté.</item>
+    </plurals>
+    <string name="hide_confirm_title">Skrýt vybrané?</string>
+    <plurals name="hide_confirm_vault">
+        <item quantity="one">%1$d fotka se přesune do Skrytých fotek a zmizí z galerie zařízení, takže ji ostatní aplikace přestanou zobrazovat.</item>
+        <item quantity="few">%1$d fotky se přesunou do Skrytých fotek a zmizí z galerie zařízení, takže je ostatní aplikace přestanou zobrazovat.</item>
+        <item quantity="many">%1$d fotky se přesunou do Skrytých fotek a zmizí z galerie zařízení, takže je ostatní aplikace přestanou zobrazovat.</item>
+        <item quantity="other">%1$d fotek se přesune do Skrytých fotek a zmizí z galerie zařízení, takže je ostatní aplikace přestanou zobrazovat.</item>
+    </plurals>
+    <plurals name="hide_confirm_cloud_copy">
+        <item quantity="one">Kopie %1$d fotky na Proton Drive zůstane, jaká je, a při vrácení zpět se fotka na tuto kopii znovu naváže.</item>
+        <item quantity="few">Kopie %1$d fotek na Proton Drive zůstanou, jaké jsou, a při vrácení zpět se fotky na tyto kopie znovu navážou.</item>
+        <item quantity="many">Kopie %1$d fotek na Proton Drive zůstanou, jaké jsou, a při vrácení zpět se fotky na tyto kopie znovu navážou.</item>
+        <item quantity="other">Kopie %1$d fotek na Proton Drive zůstanou, jaké jsou, a při vrácení zpět se fotky na tyto kopie znovu navážou.</item>
+    </plurals>
+    <plurals name="hide_confirm_cloud_only">
+        <item quantity="one">%1$d fotka je jen na Proton Drive, takže v telefonu není co přesouvat. Skryje se uvnitř této aplikace.</item>
+        <item quantity="few">%1$d fotky jsou jen na Proton Drive, takže v telefonu není co přesouvat. Skryjí se uvnitř této aplikace.</item>
+        <item quantity="many">%1$d fotky jsou jen na Proton Drive, takže v telefonu není co přesouvat. Skryjí se uvnitř této aplikace.</item>
+        <item quantity="other">%1$d fotek je jen na Proton Drive, takže v telefonu není co přesouvat. Skryjí se uvnitř této aplikace.</item>
+    </plurals>
+    <string name="hide_confirm_counting">Zjišťuje se, co je v této složce.</string>
+    <string name="hidden_delete_selected_body">Smazáním se skryté kopie z tohoto zařízení nenávratně odstraní. Případné kopie na Proton Drive zůstanou, jaké jsou.</string>
+    <plurals name="hidden_delete_failed_some">
+        <item quantity="one">Nepodařilo se smazat %1$d fotku. Zůstává skrytá.</item>
+        <item quantity="few">Nepodařilo se smazat %1$d fotky. Zůstávají skryté.</item>
+        <item quantity="many">Nepodařilo se smazat %1$d fotky. Zůstávají skryté.</item>
+        <item quantity="other">Nepodařilo se smazat %1$d fotek. Zůstávají skryté.</item>
+    </plurals>
     <string name="gallery_cancel_selection">Zrušit výběr</string>
     <string name="share_action">Sdílet</string>
     <string name="share_chooser_title">Sdílet přes</string>
+    <string name="favorite_selection_partial">Změněno %1$d, %2$d se nepodařilo změnit</string>
+    <string name="favorite_selection_failed">Oblíbené se nepodařilo změnit</string>
+    <string name="share_selection_partial">Sdíleno %1$d, %2$d se nepodařilo připravit</string>
+    <string name="share_selection_failed">Fotky se nepodařilo připravit ke sdílení</string>
     <string name="share_preparing">Příprava…</string>
     <string name="share_viewer_sheet_title">Sdílet fotku</string>
     <string name="share_send_to_app">Odeslat do jiné aplikace</string>
@@ -205,7 +248,6 @@
     <string name="share_password_failed">Heslo se nepodařilo aktualizovat</string>
     <string name="share_retry">Zkusit znovu</string>
     <string name="gallery_download_selected">Stáhnout vybrané</string>
-    <string name="gallery_delete_selected">Smazat vybrané</string>
     <string name="gallery_download_done">Staženo %1$d fotek</string>
     <string name="gallery_download_done_singular">Stažena 1 fotka</string>
     <string name="gallery_download_partial">Staženo %1$d, selhalo %2$d</string>
@@ -224,15 +266,21 @@
     <string name="gallery_add_to_album_local_note">Tyto fotky se nejprve zazálohují a poté se přidají do alba.</string>
     <string name="gallery_no_albums_yet">Zatím žádná alba. Vytvořte jedno výše.</string>
     <string name="gallery_add_to_album_mixed_hint">Smíšený výběr ze zařízení a jen z cloudu nelze do alba vložit čistě. Vyberte jeden typ.</string>
-    <string name="gallery_add_to_album_partial">Přidáno %1$d do %2$s, %3$d položek nešlo uložit (smíšený výběr)</string>
+    <plurals name="gallery_add_to_album_partial">
+        <item quantity="one">Přidáno %1$d do %2$s, %3$d položku nešlo uložit (smíšený výběr)</item>
+        <item quantity="few">Přidáno %1$d do %2$s, %3$d položky nešlo uložit (smíšený výběr)</item>
+        <item quantity="many">Přidáno %1$d do %2$s, %3$d položky nešlo uložit (smíšený výběr)</item>
+        <item quantity="other">Přidáno %1$d do %2$s, %3$d položek nešlo uložit (smíšený výběr)</item>
+    </plurals>
     <string name="gallery_strip_metadata">Odstranit metadata</string>
-    <string name="gallery_hide_selected">Skrýt vybrané</string>
-    <string name="more_label">Více</string>
     <string name="gallery_added_to_album">Přidáno %1$d fotek do %2$s</string>
     <string name="gallery_add_to_album_added_and_queued">Přidáno %1$d, dalších %2$d se přidá po záloze</string>
     <string name="gallery_add_to_album_queued_only">%1$d se přidá do %2$s po záloze</string>
     <string name="gallery_stripped_metadata">Odstraněna metadata z %1$d fotek</string>
     <string name="gallery_stripped_with_skipped">Odstraněno %1$d, přeskočeno %2$d (cizí)</string>
+    <string name="gallery_stripped_with_failed">Odstraněno %1$d, u %2$d se nezdařilo</string>
+    <string name="gallery_stripped_with_skipped_and_failed">Odstraněno %1$d, přeskočeno %2$d, u %3$d se nezdařilo</string>
+    <string name="gallery_strip_all_failed">Metadata se nepodařilo odstranit u %1$d fotek</string>
     <string name="strip_metadata_failed">Z tohoto souboru se nepodařilo odstranit metadata.</string>
     <string name="gallery_filter_favorites">Oblíbené</string>
     <string name="gallery_filter_hidden">Skryté</string>
@@ -248,7 +296,6 @@
     <string name="gallery_filter_photos">Fotky</string>
     <!-- Gallery snackbar / error fallbacks (raw exception text stays in the log) -->
     <string name="gallery_error_title">Chyba</string>
-    <string name="gallery_no_local_to_hide">Žádné místní fotky ke skrytí</string>
     <string name="gallery_undo">Zpět</string>
     <plurals name="gallery_hidden_snackbar">
         <item quantity="one">1 skryto</item>
@@ -268,8 +315,9 @@
         <item quantity="many">%d odebráno z alba</item>
         <item quantity="other">%d odebráno z alba</item>
     </plurals>
-    <string name="gallery_copy_to_hidden_failed">Nepodařilo se zkopírovat do Skrytých</string>
-    <string name="gallery_move_to_hidden_failed">Nepodařilo se přesunout do Skrytých</string>
+    <string name="gallery_copy_to_hidden_failed">Nepodařilo se zkopírovat do Skrytých fotek</string>
+    <string name="gallery_move_to_hidden_failed">Nepodařilo se přesunout do Skrytých fotek</string>
+    <string name="gallery_hide_needs_free_space">Skrytí každou fotku nejdřív zkopíruje a až poté odstraní originál, takže potřebuje místo. Uvolněte %1$s a zkuste to znovu.</string>
     <plurals name="gallery_hide_partial_failed">
         <item quantity="one">Skryto, ale 1 fotku nešlo skrýt</item>
         <item quantity="few">Skryto, ale %d fotky nešlo skrýt</item>
@@ -365,6 +413,18 @@
     <string name="settings_sign_out_desc">Ukončit toto sezení na tomto zařízení.</string>
     <string name="sign_out_dialog_title">Odhlásit se?</string>
     <string name="sign_out_dialog_message">Opravdu se chcete odhlásit ze svého účtu Proton?</string>
+    <plurals name="sign_out_dialog_vault_warning">
+        <item quantity="one">Odhlášení také vyprázdní Skryté fotky: %1$d fotka se z tohoto zařízení nenávratně smaže.</item>
+        <item quantity="few">Odhlášení také vyprázdní Skryté fotky: %1$d fotky se z tohoto zařízení nenávratně smažou.</item>
+        <item quantity="many">Odhlášení také vyprázdní Skryté fotky: %1$d fotky se z tohoto zařízení nenávratně smaže.</item>
+        <item quantity="other">Odhlášení také vyprázdní Skryté fotky: %1$d fotek se z tohoto zařízení nenávratně smaže.</item>
+    </plurals>
+    <plurals name="sign_out_dialog_vault_cloud">
+        <item quantity="one">%1$d z nich je i na Proton Drive a po opětovném přihlášení se dá znovu stáhnout.</item>
+        <item quantity="few">%1$d z nich jsou i na Proton Drive a po opětovném přihlášení se dají znovu stáhnout.</item>
+        <item quantity="many">%1$d z nich jsou i na Proton Drive a po opětovném přihlášení se dají znovu stáhnout.</item>
+        <item quantity="other">%1$d z nich je i na Proton Drive a po opětovném přihlášení se dají znovu stáhnout.</item>
+    </plurals>
     <string name="sign_out_dialog_confirm">Odhlásit se</string>
     <string name="sign_out_dialog_cancel">Zrušit</string>
     <string name="settings_account_storage">Úložiště Drive</string>
@@ -420,9 +480,19 @@
     <string name="trash_cloud_error">Koš v cloudu se nepodařilo načíst</string>
     <string name="trash_cloud_retry">Zkusit znovu</string>
     <string name="trash_cloud_empty_confirm_title">Vyprázdnit koš v cloudu?</string>
-    <string name="trash_cloud_empty_confirm_message">%1$d fotek bude trvale odebráno z Proton Drive. Tuto akci nelze vrátit zpět.</string>
+    <plurals name="trash_cloud_empty_confirm_message">
+        <item quantity="one">%1$d fotka bude trvale odebrána z Proton Drive. Tuto akci nelze vrátit zpět.</item>
+        <item quantity="few">%1$d fotky budou trvale odebrány z Proton Drive. Tuto akci nelze vrátit zpět.</item>
+        <item quantity="many">%1$d fotky bude trvale odebráno z Proton Drive. Tuto akci nelze vrátit zpět.</item>
+        <item quantity="other">%1$d fotek bude trvale odebráno z Proton Drive. Tuto akci nelze vrátit zpět.</item>
+    </plurals>
     <string name="trash_cloud_empty_confirm_action">Vyprázdnit</string>
-    <string name="trash_cloud_restore_done">Obnoveno %1$d fotek</string>
+    <plurals name="trash_cloud_restore_done">
+        <item quantity="one">Obnovena %1$d fotka</item>
+        <item quantity="few">Obnoveny %1$d fotky</item>
+        <item quantity="many">Obnoveno %1$d fotky</item>
+        <item quantity="other">Obnoveno %1$d fotek</item>
+    </plurals>
     <string name="trash_cloud_restore_partial">Obnoveno %1$d, %2$d nešlo obnovit</string>
     <string name="trash_cloud_restore_refresh_failed">Obnoveno. Tažením dolů v galerii obnovte</string>
     <string name="trash_cloud_restore_failed">Obnovení se nezdařilo</string>
@@ -480,7 +550,7 @@
     <string name="settings_privacy_metadata">Soukromí a metadata</string>
     <string name="settings_privacy_metadata_desc">Odstranit z nahrávek GPS a volitelná pole EXIF</string>
     <string name="settings_security">Zabezpečení</string>
-    <string name="settings_security_desc">Zámek aplikace, skryté fotky</string>
+    <string name="settings_security_desc">Zámek aplikace, Skryté fotky</string>
     <string name="settings_strip_metadata_upload">Odstranit metadata při nahrávání</string>
     <string name="settings_strip_metadata_upload_desc">Odebere polohu a údaje o fotoaparátu z nahrané kopie. Kopie v telefonu si je ponechá, pokud není zapnuté místní zrcadlení níže. Pole fotoaparátu, časové razítko a software přidejte v sekci Přizpůsobit.</string>
     <string name="settings_mirror_strip_local">Zrcadlit změny do místních souborů</string>
@@ -503,7 +573,8 @@
     <string name="settings_strip_timestamp">Odstranit časová razítka</string>
     <string name="settings_strip_timestamp_desc">Odstranit datum/čas pořízení z EXIF</string>
     <string name="settings_strip_software">Odstranit informace o softwaru</string>
-    <string name="settings_strip_software_desc">Odstranit pole software, autor a autorská práva</string>
+    <string name="settings_strip_software_desc">Odstranit pole software, komentář, autor a autorská práva</string>
+    <string name="settings_strip_authorship">Odstranit autora a autorská práva</string>
     <string name="settings_strip_format_note">Některé formáty, například HEIC, nemohou uložit změny metadat. Když je odstraňování metadat zapnuté, nahraná kopie takové fotografie se převede do formátu JPEG, aby se vybraná data skutečně odstranila. Fotografie ve vašem zařízení zůstane beze změny.</string>
     <string name="settings_compress_upload">Komprimovat nahrávané soubory</string>
     <string name="settings_compress_upload_desc">Nahraje lehčí verzi pro úsporu místa. Kopie v telefonu zůstane v plné kvalitě, pokud není zapnuté místní zrcadlení níže.</string>
@@ -530,6 +601,7 @@
     <string name="settings_clear_cache_on_close_desc">Při zavření aplikace vymazat z mezipaměti zobrazené cloudové fotky</string>
     <string name="settings_screenshot_overlay">Rychlé akce snímku obrazovky</string>
     <string name="settings_screenshot_overlay_desc">Zobrazí malý panel akcí nad novým snímkem obrazovky, abyste jej mohli upravit, sdílet, nahrát na Drive nebo z něj vytvořit odkaz. V některých telefonech nelze vestavěný panel snímků obrazovky vypnout, takže se mohou zobrazit oba.</string>
+    <string name="screenshot_overlay_channel_desc">Oznámení zobrazené během běhu rychlých akcí pro snímky obrazovky.</string>
     <string name="screenshot_overlay_deleted">Snímek obrazovky smazán</string>
     <string name="screenshot_overlay_delete_failed">Snímek obrazovky se nepodařilo smazat</string>
     <string name="screenshot_overlay_uploading">Nahrávání...</string>
@@ -680,7 +752,7 @@
     <string name="album_download_notification_title">Stahování %1$s</string>
     <string name="album_download_notification_progress">%1$d z %2$d</string>
     <string name="album_download_notification_cancel">Zrušit</string>
-    <string name="album_download_enqueued">Stahuje se na pozadí, sledujte oznámení</string>
+    <string name="download_started_background">Stahuje se na pozadí, průběh najdete v Aktivitě</string>
     <string name="albums_share_button">Sdílet album</string>
     <string name="album_link_copied">Odkaz zkopírován do schránky</string>
     <!-- Album create/rename/delete snackbar fallbacks (raw exception text stays in the log) -->
@@ -794,7 +866,6 @@
     <string name="map_card_calendar_subtitle">Vaše fotky v zobrazení kalendáře</string>
     <string name="map_search_places">Hledat místa</string>
     <string name="map_search_no_places">Zatím žádná místa</string>
-    <string name="map_osm_attribution" translatable="false">© OpenStreetMap contributors</string>
 
     <!-- Location detail -->
     <string name="location_save_as_album">Uložit jako album</string>
@@ -920,8 +991,7 @@
     <string name="viewer_menu_save_to_device">Uložit do zařízení</string>
     <string name="viewer_menu_details">Podrobnosti</string>
     <string name="viewer_menu_delete">Smazat</string>
-    <string name="viewer_menu_hide">Skrýt</string>
-    <string name="viewer_menu_unhide">Zrušit skrytí</string>
+    <string name="hide_confirm_action">Skrýt</string>
     <string name="viewer_hidden_label">Skryto v tomto zařízení</string>
 
     <!-- Motion photo (Android JPEG with an embedded clip) playback in the viewer -->
@@ -983,8 +1053,6 @@
     <string name="update_check_failed">Nepodařilo se zkontrolovat aktualizace. Zkuste to později.</string>
     <string name="update_permission_required">Pro aktualizaci povolte v nastavení systému instalaci neznámých aplikací.</string>
     <string name="update_verification_failed">Aktualizaci se nepodařilo ověřit, proto nebyla nainstalována. Zkuste to prosím znovu.</string>
-    <string name="offline_banner_message">Jste offline. Některé funkce nebudou fungovat, dokud se znovu nepřipojíte.</string>
-    <string name="offline_banner_dismiss_cd">Zavřít upozornění o offline režimu</string>
     <string name="network_error_offline">Jste offline. Zkuste to znovu, až se připojíte.</string>
     <string name="network_error_transient">Připojení selhalo. Zkuste to později.</string>
     <string name="cd_status_backed_up_device">Proton Drive a zařízení</string>
@@ -1014,7 +1082,6 @@
     <string name="shared_save_partial_fmt">Uloženo %1$d z %2$d fotek do vaší knihovny</string>
     <string name="shared_save_progress_fmt">Ukládání %1$d / %2$d do vaší knihovny…</string>
     <!-- Shared progress-pill labels (OperationProgressPill) — keep the "Verb %1$d / %2$d" shape consistent. -->
-    <string name="op_downloading_fmt">Stahování %1$d / %2$d</string>
     <string name="op_backing_up_fmt">Zálohování %1$d / %2$d</string>
     <string name="op_sharing_fmt">Sdílení %1$d / %2$d</string>
     <string name="op_adding_to_album">Přidávání do alba…</string>
@@ -1034,12 +1101,8 @@
     <string name="gallery_picker_drive_albums">Alba na Drive</string>
     <string name="album_card_folder_badge">Složka</string>
     <string name="albums_unhide_album">Zrušit skrytí alba</string>
-    <string name="device_folders_title">Složky v tomto zařízení</string>
-    <string name="device_folders_entry">Složky v tomto zařízení</string>
     <string name="device_folders_section">Složky v tomto zařízení</string>
-    <string name="albums_toggle_device_folders">Zobrazit nebo skrýt složky zařízení</string>
     <string name="device_folders_empty">Žádné složky v tomto zařízení.</string>
-    <string name="device_folder_upload_action">Nahrát na Drive</string>
     <string name="device_folder_uploading_fmt">Nahrávání %1$d na Drive</string>
     <string name="device_folder_already_backed_up">Již zálohováno na Drive</string>
     <string name="backup_started">Zálohování na Drive</string>
@@ -1047,14 +1110,18 @@
     <string name="upload_confirm_message">Zálohovat %1$d vybraných na váš Proton Drive?</string>
     <string name="upload_action_short">Nahrát</string>
     <string name="device_folder_added_to_album">Přidáno do alba</string>
-    <string name="device_folder_backing_up_fmt">Zálohování %1$d / %2$d</string>
-    <string name="device_folder_backup_all">Zálohovat složku</string>
-    <string name="device_folder_backup_choice_title">Zálohovat tuto složku?</string>
-    <string name="device_folder_backup_choice_body">Každá fotka a video v této složce budou zálohovány na Drive. Složku můžete také zrcadlit jako album.</string>
+    <string name="device_folder_hiding_fmt">Skrývání %1$d / %2$d</string>
+    <string name="device_folder_restoring_fmt">Rušení skrytí %1$d / %2$d</string>
     <string name="device_folder_backup_timeline">Zálohovat jen fotky</string>
     <string name="device_folder_backup_timeline_sub">Jednorázové nahrání zdejších fotek na vaši časovou osu.</string>
     <string name="device_folder_backup_mirror">Vytvořit také album</string>
     <string name="device_folder_backup_mirror_sub">Zůstává synchronizováno. Nové fotky v této složce se přidají i do alba.</string>
+    <string name="device_folder_mirror_as_album">Zrcadlit jako album</string>
+    <string name="device_folder_exclude_from_backup">Vyloučit ze zálohování</string>
+    <string name="device_folder_hide_from_timeline">Skrýt z časové osy</string>
+    <string name="device_folder_hide_card">Skrýt složku</string>
+    <string name="device_folder_hide_card_sub">Odebere složku z Alb a přesune její fotky do Skrytých fotek, pryč z galerie zařízení, takže je ostatní aplikace přestanou zobrazovat. Případné kopie na Proton Drive zůstanou přesně takové, jaké jsou.</string>
+    <string name="device_folder_unhide">Zrušit skrytí složky</string>
     <string name="sync_folders_add_dialog_title">Přidat složku</string>
     <string name="sync_folders_add_row_title">Přidat složku podle názvu</string>
     <string name="sync_folders_add_dialog_name_hint">Název složky</string>
@@ -1078,8 +1145,30 @@
     <string name="settings_sync_failed">Synchronizace se nezdařila</string>
     <string name="settings_sync_failed_reconcile">Nepodařilo se zjistit, co je třeba zálohovat</string>
     <string name="settings_sync_failed_upload">Fotky se nepodařilo nahrát</string>
-    <string name="settings_freed_photos">Uvolněno %1$d fotek ze zařízení</string>
+    <plurals name="settings_freed_photos">
+        <item quantity="one">Uvolněna %1$d fotka ze zařízení</item>
+        <item quantity="few">Uvolněny %1$d fotky ze zařízení</item>
+        <item quantity="many">Uvolněno %1$d fotky ze zařízení</item>
+        <item quantity="other">Uvolněno %1$d fotek ze zařízení</item>
+    </plurals>
     <string name="settings_free_up_none">Žádné místně uložené zálohované fotky k odebrání</string>
+    <string name="free_up_checking">Kontrola, co lze uvolnit…</string>
+    <string name="free_up_verifying">Ověřování na Drive, že každá kopie je v bezpečí…</string>
+    <string name="free_up_explainer">Každá fotka níže má kopii na Drive. Maže se jen kopie v tomto zařízení.</string>
+    <string name="free_up_progress">Uvolněno %1$d z %2$d</string>
+    <string name="free_up_leaving_stops">Opuštění této obrazovky úklid zastaví. Co už je uvolněné, uvolněné zůstane.</string>
+    <plurals name="free_up_summary">
+        <item quantity="one">%1$d fotka, %2$s k uvolnění</item>
+        <item quantity="few">%1$d fotky, %2$s k uvolnění</item>
+        <item quantity="many">%1$d fotky, %2$s k uvolnění</item>
+        <item quantity="other">%1$d fotek, %2$s k uvolnění</item>
+    </plurals>
+    <plurals name="free_up_confirm">
+        <item quantity="one">Smazat kopii %1$d fotky v zařízení a uvolnit %2$s? Na Drive zůstane.</item>
+        <item quantity="few">Smazat kopie %1$d fotek v zařízení a uvolnit %2$s? Na Drive zůstanou.</item>
+        <item quantity="many">Smazat kopie %1$d fotky v zařízení a uvolnit %2$s? Na Drive zůstanou.</item>
+        <item quantity="other">Smazat kopie %1$d fotek v zařízení a uvolnit %2$s? Na Drive zůstanou.</item>
+    </plurals>
     <string name="settings_free_up_error">Nepodařilo se uvolnit místo: %1$s</string>
     <!-- Upload status labels (Sync progress panel) -->
     <string name="upload_status_uploading">Nahrávání…</string>
@@ -1089,6 +1178,7 @@
     <string name="upload_status_failed">Selhalo</string>
     <string name="sync_deferred_waiting_wifi">Čekání na Wi-Fi</string>
     <string name="sync_deferred_preparing">Příprava zálohy…</string>
+    <string name="sync_deferred_storage_full">Proton Drive je plný. Zálohování je pozastaveno, dokud se neuvolní místo.</string>
     <string name="rename_sheet_title">Přejmenovat soubor</string>
     <string name="rename_sheet_subtitle_cloud">Vyberte, jak nový název použít u vaší cloudové fotky.</string>
     <string name="rename_sheet_subtitle_local">Vyberte, jak nový název použít v tomto zařízení.</string>
@@ -1100,11 +1190,14 @@
     <string name="rename_sheet_option_copy_title">Uložit jako kopii</string>
     <string name="rename_sheet_option_copy_subtitle_cloud">Nahraje se jako nová fotka. Originál zůstane na Drive.</string>
     <string name="rename_sheet_option_copy_subtitle_local">Vytvoří nový soubor v Pictures.</string>
+    <string name="rename_sheet_option_copy_subtitle_vault">Vytvoří druhou kopii ve Skrytých fotkách.</string>
     <string name="save_to_library_confirm_title">Uložit do mé knihovny</string>
     <string name="save_to_library_confirm_body_fmt">Kopírování %1$d položek do vaší knihovny. Objeví se ve vašich fotkách, jakmile se kopírování dokončí.</string>
     <string name="save_to_library_action_cancel">Zrušit ukládání</string>
     <string name="save_to_library_cancelled_fmt">Ukládání zrušeno u %1$d / %2$d</string>
     <string name="albums_more_actions">Další akce</string>
+    <string name="action_sheet_actions_heading">Co můžete udělat</string>
+    <string name="action_sheet_settings_heading">Nastavení</string>
     <string name="leave_album">Opustit album</string>
     <string name="leave_album_confirm_title">Opustit toto album?</string>
     <string name="leave_album_confirm_body">Album zmizí z vaší knihovny. Kopie vlastníka i přístup všech ostatních zůstanou nedotčeny. Později můžete být pozváni zpět.</string>
@@ -1126,6 +1219,11 @@
     <string name="notifications_album_download_desc">Zobrazovat průběh a souhrn při stahování alba do vašeho zařízení.</string>
     <string name="notifications_delete_reminder">Připomínka mazání po záloze</string>
     <string name="notifications_delete_reminder_desc">Po záloze mi připomeň, které fotky lze bezpečně odebrat z tohoto zařízení.</string>
+    <string name="notifications_update_available">Nová verze k dispozici</string>
+    <string name="notifications_update_available_desc">Hledat novější verzi na pozadí a poslat oznámení, jakmile nějaká vyjde. Na Wi-Fi se aktualizace stáhne předem, takže instalace proběhne okamžitě.</string>
+    <string name="update_channel_name">Aktualizace aplikace</string>
+    <string name="update_channel_desc">Oznámí, když je k dispozici novější verze aplikace.</string>
+    <string name="update_notification_text">Klepnutím nainstalujete verzi %1$s.</string>
     <string name="settings_backup_how_section">Jak zálohování probíhá</string>
     <string name="settings_theme_palette">Motiv a paleta</string>
     <string name="settings_privacy_security">Soukromí a zabezpečení</string>
@@ -1143,7 +1241,6 @@
     <string name="albums_sort_name">Název (A-Z)</string>
     <string name="albums_sort_activity">Poslední aktivita</string>
     <string name="albums_sort_count">Počet fotek</string>
-    <string name="albums_toggle_cloud_albums">Zobrazit nebo skrýt alba</string>
 
     <!-- Photo viewer details / metadata sheet -->
     <string name="viewer_meta_section_file_info">Informace o souboru</string>
@@ -1152,7 +1249,6 @@
     <string name="viewer_meta_section_datetime">Datum a čas</string>
     <string name="viewer_meta_section_software">Software a autor</string>
     <string name="viewer_meta_section_image">Obrázek</string>
-    <string name="viewer_meta_full">Úplná metadata</string>
     <string name="viewer_meta_row_file">Soubor</string>
     <string name="viewer_meta_row_date">Datum</string>
     <string name="viewer_meta_row_size">Velikost</string>
@@ -1178,10 +1274,10 @@
     <string name="viewer_meta_row_altitude">Nadmořská výška</string>
     <string name="viewer_meta_row_taken">Pořízeno</string>
     <string name="viewer_meta_row_modified">Změněno</string>
+    <string name="viewer_meta_row_description">Popis</string>
     <string name="viewer_meta_row_software">Software</string>
     <string name="viewer_meta_row_artist">Autor</string>
     <string name="viewer_meta_row_copyright">Autorská práva</string>
-    <string name="viewer_meta_row_dimensions">Rozměry</string>
     <string name="viewer_meta_row_orientation">Orientace</string>
     <string name="viewer_meta_flash_fired">Použit</string>
     <string name="viewer_meta_flash_none">Bez blesku</string>
@@ -1196,13 +1292,14 @@
     <string name="viewer_meta_source_cloud">Jen Proton Drive</string>
     <string name="viewer_meta_strip">Odstranit</string>
     <string name="viewer_meta_strip_all">Odstranit všechna soukromá metadata</string>
-    <string name="viewer_meta_strip_all_desc">Odstraní z tohoto souboru GPS, informace o fotoaparátu a pole softwaru</string>
+    <string name="viewer_meta_strip_all_desc">Odstraní z tohoto souboru GPS, informace o fotoaparátu, pole softwaru, autora a autorská práva</string>
     <string name="viewer_meta_strip_confirm_title">Odstranit metadata?</string>
     <string name="viewer_meta_strip_confirm_message">Tímto se ze souboru ve vašem zařízení trvale odstraní %1$s. Tuto akci nelze vrátit zpět.</string>
     <string name="viewer_meta_strip_what_gps">poloha GPS</string>
     <string name="viewer_meta_strip_what_camera">informace o fotoaparátu</string>
     <string name="viewer_meta_strip_what_timestamps">časová razítka</string>
     <string name="viewer_meta_strip_what_software">informace o softwaru</string>
+    <string name="viewer_meta_strip_what_authorship">autor a autorská práva</string>
 
     <!-- Viewer delete sheet + add-to-album sheet -->
     <string name="viewer_delete_title_local">Smazat fotku?</string>
@@ -1210,6 +1307,8 @@
     <string name="viewer_delete_title_cloud">Smazat z Proton Drive?</string>
     <string name="viewer_delete_local_body">Tímto se fotka přesune do složky Nedávno smazané ve vašem zařízení.</string>
     <string name="viewer_delete_move_to_trash">Přesunout do koše</string>
+    <string name="viewer_delete_vault_body">Smazáním se skrytá kopie z tohoto zařízení nenávratně odstraní. Případná kopie na Proton Drive zůstane, jaká je.</string>
+    <string name="viewer_delete_vault_failed">Fotku se nepodařilo smazat</string>
     <string name="viewer_add_to_album_title">Přidat do alba</string>
     <string name="viewer_add_to_album_empty">Zatím žádná alba. Vytvořte jedno v záložce Alba.</string>
     <string name="viewer_drive_albums_header">ALBA NA DRIVE</string>
@@ -1220,15 +1319,29 @@
     <string name="viewer_downloading_pct">Stahování %1$d %%</string>
     <string name="viewer_downloading">Stahování…</string>
     <string name="viewer_loading">Načítání…</string>
+    <string name="viewer_text_working">Načítání textu…</string>
+    <string name="viewer_text_selectable">Podržením vyberete text</string>
+    <string name="viewer_text_none">Na této fotce nebyl nalezen žádný text.</string>
+    <string name="viewer_text_needs_full_size">Ke čtení textu je potřeba fotka v plné velikosti. Nejprve ji stáhněte.</string>
+    <string name="viewer_text_not_image">Text lze číst jen z fotek.</string>
+    <string name="viewer_text_unavailable">Tuto fotku se nepodařilo otevřít.</string>
+    <string name="viewer_text_too_large">Tato fotka je příliš velká, než aby z ní šlo teď číst text.</string>
+    <string name="viewer_text_preparing">Připravuje se model textu…</string>
+    <string name="viewer_text_downloading">Stahuje se model textu…</string>
+    <string name="viewer_text_detecting">Hledá se text…</string>
+    <string name="viewer_text_model_title">Stáhnout model textu?</string>
+    <string name="viewer_text_model_body">Čtení textu z fotky vyžaduje jednorázové stažení %1$s. Potom běží přímo v tomto zařízení a fotka se nikam neodesílá.</string>
+    <string name="viewer_text_model_failed">Model textu se nepodařilo stáhnout.</string>
 
     <!-- Viewer snackbar / error fallbacks (raw exception text stays in the log) -->
     <string name="viewer_unknown_error">neznámá chyba</string>
     <string name="viewer_not_signed_in">Nepřihlášeno</string>
     <string name="viewer_not_logged_in">Nepřihlášeno</string>
     <string name="viewer_delete_drive_failed">Nepodařilo se smazat z Drive</string>
-    <string name="viewer_hide_failed">Soubor se nepodařilo přesunout do Skrytých</string>
+    <string name="viewer_hide_failed">Fotku se nepodařilo přesunout do Skrytých fotek</string>
     <string name="viewer_name_empty">Název nesmí být prázdný</string>
     <string name="viewer_rename_failed">Přejmenování se nezdařilo</string>
+    <string name="viewer_rename_name_taken">Jiná skrytá fotka už má tento název</string>
     <string name="viewer_load_albums_failed">Nepodařilo se načíst alba: %1$s</string>
     <string name="viewer_remove_from_album_failed">Odebrání z alba se nezdařilo: %1$s</string>
     <string name="viewer_set_cover_failed">Nastavení obalu se nezdařilo: %1$s</string>
@@ -1291,6 +1404,7 @@
     <string name="duplicates_delete_selected">Odstranit vybrané: %1$d</string>
     <string name="duplicates_confirm_title">Odstranit duplikáty?</string>
     <string name="duplicates_confirm_message">Zaškrtnuté kopie budou odstraněny. Ostatní zůstanou.</string>
+    <string name="duplicates_confirm_message_synced">Zaškrtnuté kopie se smažou z tohoto zařízení i z cloudu. Ostatní zůstanou.</string>
     <string name="duplicates_confirm_delete">Odstranit</string>
     <string name="duplicates_delete_failed">Odstranění z Drive se nezdařilo. Zkuste to znovu.</string>
     <string name="duplicates_section_similar">Podobné fotky</string>
@@ -1302,11 +1416,11 @@
     <string name="whats_new_done">Rozumím</string>
     <string name="whats_new_open">Otevřít</string>
     <string name="whats_new_hide_title">Skrýt fotky a alba</string>
-    <string name="whats_new_hide_intro">Skryj cokoli, co nechceš na časové ose, a kdykoli to vrať zpět ze Skrytých fotek. Co se stane, závisí na označení fotky:</string>
-    <string name="whats_new_hide_device">Jen v tomto telefonu: přesune se z tvého zařízení do soukromé, zamčené části aplikace, takže ji už žádná jiná aplikace nevidí.</string>
-    <string name="whats_new_hide_backed">Zelený mrak, v telefonu a zálohováno: zůstává ve tvém zařízení, takže ji ostatní aplikace dál zobrazují. Tato aplikace ji skryje jen tady, za zámkem Skrytých fotek; tvoje kopie v cloudu se nikdy nepřesune, nezmění ani nesmaže.</string>
-    <string name="whats_new_hide_cloud">Bílý mrak, jen v cloudu: tato aplikace ji skryje jen tady, za zámkem Skrytých fotek. Tvoje kopie v cloudu zůstane přesně taková, jaká je, a nikdy se nepřesune, nezmění ani nesmaže.</string>
-    <string name="whats_new_hide_albums">Skrýt můžeš i celé album v cloudu a všechno jde vrátit zpět.</string>
+    <string name="whats_new_hide_intro">Skryj cokoli, co nechceš na časové ose, a skrytí kdykoli zruš ve Skrytých fotkách. Co se stane, závisí na označení fotky:</string>
+    <string name="whats_new_hide_device">Jen v tomto telefonu: přesune se do Skrytých fotek, zamčených uvnitř aplikace, a zmizí z galerie zařízení, takže ji už žádná jiná aplikace nevidí.</string>
+    <string name="whats_new_hide_backed">Zelený mrak, v telefonu a zálohováno: přesune se do Skrytých fotek a zmizí z galerie zařízení, takže ji ostatní aplikace přestanou zobrazovat. Kopie na Proton Drive zůstane přesně taková, jaká je, a při vrácení zpět se fotka na tuto kopii znovu naváže.</string>
+    <string name="whats_new_hide_cloud">Bílý mrak, jen v cloudu: v telefonu není co přesouvat, takže se skryje tady, za zámkem Skrytých fotek. Kopie na Proton Drive zůstane přesně taková, jaká je.</string>
+    <string name="whats_new_hide_albums">Skrýt můžeš i celé album v cloudu a skrytí jde vždy zrušit.</string>
     <string name="whats_new_shared_add_title">Přidat do sdíleného alba</string>
     <string name="whats_new_shared_add_body">Když s tebou někdo sdílí album a povolí ti úpravy, můžeš do něj přidat vlastní fotky a zase je odebrat.</string>
     <string name="whats_new_viewer_place_title">Nezapomene, kde jsi</string>
@@ -1338,7 +1452,7 @@
     <string name="whats_new_crop_body">V editoru zvolte 1:1, 4:3, 16:9 nebo tvar samotné fotky a rámeček si ho zachová i při zmenšování.</string>
     <string name="whats_new_history_desc">Přečtěte si novinky z této i dřívějších aktualizací</string>
     <string name="whats_new_version">Verze %1$s</string>
-    <string name="whats_new_more_241">Navíc fotky smazané na jiném zařízení zmizí i zde i u velmi rozsáhlé knihovny, přejmenování už nenechává kopii a jméno změněné jinde dorazí i sem.</string>
+    <string name="whats_new_more_241">Navíc můžeš posunout datum několika fotek najednou, skrýt celou složku v zařízení a aktualizace se instalují bez opakovaného dotazu. Fotky smazané na jiném zařízení teď zmizí i tady, a to i u velké knihovny, přejmenování už po sobě nenechává kopii a zálohování, skrývání, duplicity i sdílená alba jsou stabilnější.</string>
     <string name="whats_new_more_240">K tomu zkopírované odkazy zůstávají skryté v náhledu schránky, velikosti souborů se všude shodují, automatické uvolňování místa si před odebráním kopie z telefonu ověří Drive a velká alba i rozsáhlé výběry drží pohromadě lépe.</string>
     <string name="offline_card_subtitle">Fotky uložené pro offline prohlížení</string>
     <string name="duplicates_filter_identical">Stejné</string>
@@ -1385,21 +1499,22 @@
     <string name="album_download_all_confirm_body">Každá fotka v tomto albu se uloží do vašeho zařízení.</string>
     <string name="album_set_cover_confirm_title">Nastavit jako obal alba?</string>
     <string name="album_set_cover_confirm_body">Tato fotka se stane obalem alba.</string>
+    <string name="device_folder_set_cover_confirm_title">Nastavit jako obal složky?</string>
+    <string name="device_folder_set_cover_confirm_body">Tato fotka se stane obalem složky.</string>
     <string name="album_remove_confirm_title">Odebrat z tohoto alba?</string>
     <string name="album_remove_confirm_body">Toto odebere z alba pouze výběr. Vaše fotky zůstanou na časové ose.</string>
     <string name="action_remove">Odebrat</string>
     <string name="gallery_add_to_album_queued">Fotky se přidají po dokončení nahrávání</string>
     <string name="share_role_can_view_desc">Může prohlížet album a jeho fotky.</string>
     <string name="share_role_can_edit_desc">Může přidávat a odebírat fotky.</string>
-    <string name="settings_show_selection_labels">Popisky tlačítek</string>
-    <string name="settings_show_selection_labels_desc">Zobrazí pod každým tlačítkem krátký popisek, když vyberete fotky, aby bylo jasné, co které dělá.</string>
+    <string name="sel_label_back_up">Zálohovat</string>
     <string name="sel_label_download">Stáhnout</string>
     <string name="sel_label_delete">Smazat</string>
-    <string name="sel_label_cover">Obal</string>
-    <string name="sel_label_offline">Offline</string>
-    <string name="sel_label_album">Album</string>
-    <string name="sel_label_upload">Nahrát</string>
-    <string name="op_offline_fmt">Ukládání offline %1$d / %2$d</string>
+    <string name="sel_label_share">Sdílet</string>
+    <string name="sel_label_hide">Přesunout do Skrytých fotek</string>
+    <string name="sel_label_unhide">Přesunout ze Skrytých fotek</string>
+    <string name="sel_show_actions">Zobrazit akce</string>
+    <string name="sel_hide_actions">Skrýt akce</string>
     <string name="picker_filter_all">Vše</string>
     <string name="picker_filter_cloud">Cloud</string>
     <string name="picker_filter_device">Zařízení</string>
@@ -1421,6 +1536,7 @@
     <string name="activity_uploading">Nahrávání</string>
     <string name="activity_pending">Čeká na nahrání (%1$d)</string>
     <string name="activity_empty">Právě se nic nepřenáší</string>
+    <string name="activity_waiting_battery">Záloha čeká na baterii. Bude pokračovat, až se nabití vrátí nad nízkou úroveň, k čemuž samotné připojení nabíječky nestačí.</string>
     <string name="activity_row_desc">Zobrazit probíhající přenosy a fotky čekající na nahrání</string>
     <string name="activity_offline">Offline</string>
     <string name="activity_photos">Fotky</string>
@@ -1437,4 +1553,81 @@
     <string name="activity_hist_download_named">Staženo %1$d z alba \"%2$s\"</string>
     <string name="activity_hist_offline">Uloženo %1$d fotek offline</string>
     <string name="activity_downloading">Stahování</string>
+
+    <!-- Metadata editor (#36): edit a photo's capture date and place. -->
+    <string name="metadata_editor_title">Upravit metadata</string>
+    <string name="metadata_editor_done">Hotovo</string>
+    <string name="metadata_editor_change">Změnit</string>
+    <string name="metadata_editor_saved">Uloženo</string>
+    <string name="metadata_editor_write_failed">Změnu se nepodařilo uložit</string>
+    <string name="metadata_editor_saved_partial">Uloženo %1$d, %2$d nešlo uložit</string>
+    <string name="metadata_editor_edit_metadata">Upravit metadata</string>
+    <string name="metadata_editor_date_label">Datum pořízení</string>
+    <string name="metadata_editor_source_device">Z tohoto zařízení</string>
+    <string name="metadata_editor_source_cloud">Z Proton Drive</string>
+    <string name="metadata_editor_next">Další</string>
+    <string name="metadata_editor_set">Nastavit</string>
+    <string name="metadata_editor_place_label">Místo</string>
+    <string name="metadata_editor_place_none">Bez polohy</string>
+    <string name="metadata_editor_place_choose_country">Vyberte zemi</string>
+    <string name="metadata_editor_place_country_hint">Výběr jen země umístí fotku do jejího středu.</string>
+    <string name="metadata_editor_place_search_city">Hledat město</string>
+    <string name="metadata_editor_place_remove">Odebrat polohu</string>
+    <string name="metadata_editor_country_search">Hledat země</string>
+    <string name="metadata_editor_note_cloud">Fotky uložené na Proton Drive si ponechají datum a místo, se kterými byly nahrány, a zde je nelze změnit.</string>
+    <string name="metadata_editor_note_shared">Tato fotka je v albu sdíleném s vámi, takže její datum a místo jsou jen pro čtení.</string>
+    <string name="metadata_editor_note_video_place">U videí nelze polohu změnit.</string>
+    <string name="metadata_editor_note_place_format">Polohu lze uložit jen do fotek JPEG, PNG a WebP.</string>
+    <string name="metadata_editor_note_date_format">U fotek v tomto formátu nelze datum změnit.</string>
+    <string name="metadata_editor_bulk_date_label">Nastavit datum pro tyto fotky</string>
+    <string name="metadata_editor_bulk_place_label">Nastavit místo pro tyto fotky</string>
+    <string name="metadata_editor_bulk_apply_hint">Použije se na každou vybranou fotku</string>
+    <string name="metadata_editor_bulk_summary">Úprava %1$d fotek</string>
+    <string name="metadata_editor_bulk_summary_skipped">Úprava %1$d, %2$d přeskočeno (zálohováno)</string>
+    <string name="metadata_editor_bulk_artist_label">Nastavit autora pro tyto fotky</string>
+    <string name="metadata_editor_bulk_copyright_label">Nastavit autorská práva pro tyto fotky</string>
+    <string name="metadata_editor_text_none">Nenastaveno</string>
+    <string name="metadata_editor_text_stored_as">Uloží se jako: %1$s</string>
+    <string name="metadata_editor_text_stored_none">Žádný z těchto znaků nelze ve fotce uložit, uložení proto toto pole vymaže.</string>
+    <string name="metadata_editor_note_text_format">Popis, autora a autorská práva lze uložit jen do fotek JPEG, PNG a WebP.</string>
+    <string name="metadata_editor_note_description_single">Popis patří k jedné fotce, proto ho lze nastavit jen při úpravě jediné fotky.</string>
+    <string name="metadata_editor_date_mode_same">Stejné datum pro všechny</string>
+    <string name="metadata_editor_date_mode_shift">Posun</string>
+    <string name="metadata_editor_shift_label">Posunout tyto fotky v čase</string>
+    <string name="metadata_editor_shift_hint">Vyberte, kdy byla nejstarší fotka doopravdy pořízena. Všechny ostatní se posunou o stejnou dobu, takže rozestupy mezi nimi zůstanou.</string>
+    <string name="metadata_editor_shift_picker_title">Kdy byla nejstarší fotka pořízena?</string>
+    <string name="metadata_editor_shift_range_current">Nyní: %1$s až %2$s</string>
+    <string name="metadata_editor_shift_range_after">Po posunu: %1$s až %2$s</string>
+    <string name="metadata_editor_shift_too_late">Nejnovější fotka by se tím dostala do budoucnosti. Vyberte dřívější datum nebo čas.</string>
+    <plurals name="metadata_editor_shift_skipped">
+        <item quantity="one">%1$d fotka nemá vlastní datum, posun ji proto nechá být. Nastavení stejného data pro všechny se k ní ale dostane.</item>
+        <item quantity="few">%1$d fotky nemají vlastní datum, posun je proto nechá být. Nastavení stejného data pro všechny se k nim ale dostane.</item>
+        <item quantity="many">%1$d fotek nemá vlastní datum, posun je proto nechá být. Nastavení stejného data pro všechny se k nim ale dostane.</item>
+        <item quantity="other">%1$d fotek nemá vlastní datum, posun je proto nechá být. Nastavení stejného data pro všechny se k nim ale dostane.</item>
+    </plurals>
+    <string name="settings_section_about">O aplikaci</string>
+    <string name="news_title">Aktuality</string>
+    <string name="news_settings_desc">Zprávy a novinky o aplikaci</string>
+    <string name="news_show_title">Zobrazovat aktuality</string>
+    <string name="news_show_desc">Malá tečka se objeví, když je něco nového</string>
+    <string name="news_empty">Zatím nic nového.</string>
+    <string name="news_read_more">Číst více</string>
+    <string name="news_feedback_heading">Dotazy nebo chyba?</string>
+    <string name="news_feedback_body">Zeptej se, nebo nahlas chybu.</string>
+    <string name="news_feedback_note">Otevře oficiální Discord komunity Proton, kde se pro zpětnou vazbu používá malé vlákno na fóru. Photos for Proton není spojena se společností Proton.</string>
+    <string name="news_feedback_button">Odeslat zpětnou vazbu</string>
+    <string name="news_feedback_join">Ještě nejsi na Proton Discord serveru? Nejdřív se přidej</string>
+    <string name="news_feedback_email">Nebo napiš e-mail na %1$s</string>
+    <string name="whats_new_metadata_title">Upravit údaje fotky</string>
+    <string name="whats_new_metadata_body">Nastav fotce datum a místo a přidej popis, aby snímek pořízený se špatně nastavenými hodinami nebo bez polohy skončil tam, kam patří.</string>
+    <string name="whats_new_text_title">Kopírovat text z fotky</string>
+    <string name="whats_new_text_body">Vyber text ve fotce a zkopíruj ho, abys poznámku, ceduli nebo účtenku nemusel znovu přepisovat.</string>
+    <string name="whats_new_hdr_title">Ultra HDR v plné kvalitě</string>
+    <string name="whats_new_hdr_body">Fotky pořízené v Ultra HDR se zobrazí v plném jasu a barvách na obrazovce, která to podporuje.</string>
+    <string name="whats_new_selection_title">Všechny akce na jednom místě</string>
+    <string name="whats_new_selection_body">Výběr fotek otevře jeden panel se vším, co s nimi můžeš udělat, stejně na časové ose, v albech i ve složkách.</string>
+    <string name="whats_new_freeup_review_title">Podívej se, co uvolnění místa odstraní</string>
+    <string name="whats_new_freeup_review_body">Než uvolníš místo v zařízení, obrazovka vypíše fotky, které odstraní, a kolik místa se tím uvolní, takže nic nezmizí, aniž bys to nejdřív viděl.</string>
+    <string name="whats_new_news_title">Aktuality a zpětná vazba</string>
+    <string name="whats_new_news_body">Obrazovka Aktuality přináší novinky o aplikaci a tlačítko tě zavede rovnou tam, kde můžeš poslat zpětnou vazbu nebo nahlásit chybu.</string>
 </resources>

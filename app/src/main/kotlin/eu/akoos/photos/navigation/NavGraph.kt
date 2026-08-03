@@ -51,6 +51,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import android.content.Context
 import androidx.compose.ui.platform.LocalContext
+import eu.akoos.photos.presentation.util.findActivity
 import eu.akoos.photos.BuildConfig
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.SharingStarted
@@ -71,6 +72,7 @@ import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.entity.LocalMediaItem
 import androidx.compose.runtime.mutableIntStateOf
 import eu.akoos.photos.presentation.albums.AlbumDetailScreen
+import eu.akoos.photos.presentation.albums.AlbumOpenAction
 import eu.akoos.photos.presentation.albums.AlbumPhotoPickerScreen
 import eu.akoos.photos.presentation.auth.SignInScreen
 import eu.akoos.photos.presentation.calendar.CalendarScreen
@@ -78,12 +80,14 @@ import eu.akoos.photos.presentation.calendar.DayDetailScreen
 import eu.akoos.photos.presentation.editor.PhotoEditorScreen
 import eu.akoos.photos.presentation.editor.VideoEditorScreen
 import eu.akoos.photos.presentation.folders.DeviceFolderDetailScreen
+import eu.akoos.photos.presentation.folders.DeviceFolderOpenAction
 import eu.akoos.photos.presentation.gallery.GalleryScreen
 import eu.akoos.photos.presentation.hidden.HiddenAlbumScreen
 import eu.akoos.photos.presentation.offline.OfflinePhotosScreen
 import eu.akoos.photos.presentation.memories.MemoriesScreen
 import eu.akoos.photos.presentation.memories.MemoryCategory
 import eu.akoos.photos.presentation.memories.MemoryCategoryScreen
+import eu.akoos.photos.presentation.metadata.MetadataEditorScreen
 import eu.akoos.photos.presentation.onboarding.OnboardingScreen
 import eu.akoos.photos.presentation.settings.AboutScreen
 import eu.akoos.photos.presentation.settings.AccountScreen
@@ -108,6 +112,7 @@ import eu.akoos.photos.presentation.map.MapScreen
 import eu.akoos.photos.presentation.search.SearchScreen
 import eu.akoos.photos.presentation.settings.TrashScreen
 import eu.akoos.photos.presentation.viewer.PhotoViewerScreen
+import eu.akoos.photos.presentation.news.NewsScreen
 import eu.akoos.photos.presentation.whatsnew.WhatsNewHistoryScreen
 import eu.akoos.photos.presentation.whatsnew.WhatsNewScreen
 import javax.inject.Inject
@@ -138,6 +143,7 @@ sealed class Screen(val route: String) {
     data object BackupBehavior : Screen("backup_behavior")
     data object BackupNetwork : Screen("backup_network")
     data object StorageSettings : Screen("storage_settings")
+    data object FreeUpSpace : Screen("free_up_space")
     data object PrivacySettings : Screen("privacy_settings")
     data object SecuritySettings : Screen("security_settings")
     data object PrivacySecuritySettings : Screen("privacy_security_settings")
@@ -153,6 +159,7 @@ sealed class Screen(val route: String) {
     data object HiddenAlbum : Screen("hidden_album")
     data object Offline : Screen("offline_photos")
     data object PhotoEditor : Screen("photo_editor")
+    data object MetadataEditor : Screen("metadata_editor")
     data object Loading : Screen("loading")
     data object Login : Screen("login")
     data object About : Screen("about")
@@ -163,6 +170,7 @@ sealed class Screen(val route: String) {
 
     /** The update history list, and one release read from it. */
     data object WhatsNewHistory : Screen("whats_new_history")
+    data object News : Screen("news")
 
     data object WhatsNewRelease : Screen("whats_new_release/{version}") {
         fun route(version: String) = "whats_new_release/$version"
@@ -188,6 +196,20 @@ sealed class Screen(val route: String) {
 }
 
 enum class StartupRoute { Unknown, NotLoggedIn, NeedsOnboarding, Ready }
+
+/**
+ * What the metadata editor is bound to, handed over in nav scope because a [GalleryItem] can't be
+ * serialized into a nav argument. The photos and their read-only state travel as one value, so the
+ * editor always shows the state of the navigation that opened it: a call site that supplies items
+ * has to state their read-only state in the same expression, and no earlier navigation can leave a
+ * flag behind for the next one to pick up.
+ */
+private data class MetadataEditorRequest(
+    val items: List<GalleryItem>,
+    /** True only for a photo reached through an album shared with the user, where every field is
+     *  read-only and the screen shows its shared-album note in place of the controls. */
+    val isReadOnlyAlbum: Boolean,
+)
 
 @HiltViewModel
 class NavViewModel @Inject constructor(
@@ -272,20 +294,58 @@ fun NavGraph(
     // FLAG_SECURE and full-res hidden photos stay out of screenshots and the recent-apps preview.
     var viewerSecure by remember { mutableStateOf(false) }
     var selectedAlbum by remember { mutableStateOf<Album?>(null) }
+    // True when the album was opened to be shared rather than browsed, so the album screen raises its
+    // share drawer on arrival. Cleared the moment that screen acts on it, so a return from the viewer
+    // does not raise the drawer a second time.
+    var albumOpenedToShare by remember { mutableStateOf(false) }
+    // Set when the album was opened to be downloaded, played or added to rather than browsed, so the
+    // album screen carries that action out on arrival. Cleared the moment that screen acts on it, so
+    // a return from the viewer does not start a second download.
+    var albumOpenAction by remember { mutableStateOf<AlbumOpenAction?>(null) }
     // Cloud linkIds already in the album being added to — handed from AlbumDetail at picker-open
     // time so the picker pre-filters them out (no re-adding duplicates).
     var pickerExcludeLinkIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     // True when the viewer was opened from an album detail (not from the main gallery).
     // Suppresses the per-photo "Save to device" button — the album has its own "Download all".
     var viewerFromAlbum by remember { mutableStateOf(false) }
+    // True when the entry point asked for a slideshow rather than a single photo, so the viewer
+    // opens already playing. Cleared on the way out, like viewerSecure, so an ordinary photo tap
+    // afterwards opens still.
+    var viewerAutoplay by remember { mutableStateOf(false) }
 
     // Selected item handed to the editor. Carries local URI + display name OR a CloudPhoto.
     var editorItem by remember { mutableStateOf<GalleryItem?>(null) }
+
+    // What the metadata (date + place) editor is bound to: one photo from the viewer, or a whole
+    // multi-select from the grid. Same nav-scope hand-off as the photo editor above, with the
+    // read-only state carried alongside the items so it is always written by the navigation that
+    // opens the editor.
+    var metadataEditorRequest by remember { mutableStateOf<MetadataEditorRequest?>(null) }
 
     // Captured from the MainActivity-owned request once we reach the Ready startup state.
     // Held in Nav scope so the PhotoEditor composable can read it without piping the value
     // through every screen on the back stack.
     var pendingExternalEdit by remember { mutableStateOf<ExternalEditRequest?>(null) }
+
+    /**
+     * Leave the viewer or the editor: step back if there is anywhere to step back to, and otherwise
+     * end the activity.
+     *
+     * The fallback is what an external open needs. A photo handed over by another app opens with
+     * nothing of ours underneath it, so `popBackStack` finds no entry, answers false and does
+     * nothing; without the finish the close button would be dead and only the system back would
+     * work. Ending the activity there is what returns the user to the app that sent them, which is
+     * where a back press from a handed-over photo belongs.
+     *
+     * For an ordinary in-app open there is always an entry below, so this is exactly `popBackStack`
+     * and nothing changes. One rule covers both rather than each exit having to know which kind of
+     * open it is closing.
+     */
+    val navContext = LocalContext.current
+    val hostActivity = remember(navContext) { navContext.findActivity() }
+    val leaveOverlayScreen: () -> Unit = {
+        if (!navController.popBackStack()) hostActivity?.finish()
+    }
 
     // ISO date string (yyyy-MM-dd) handed from Calendar to DayDetail. Held here so the
     // composable-level rememberSaveable inside DayDetailScreen isn't the source of truth
@@ -293,6 +353,13 @@ fun NavGraph(
     var selectedDayDate by remember { mutableStateOf<String?>(null) }
     // The device folder (MediaStore bucket name) the user tapped on the device-folder browser.
     var selectedDeviceFolder by remember { mutableStateOf<String?>(null) }
+    // Set when the folder was opened to be backed up or played rather than browsed, so the folder
+    // screen carries that action out on arrival. Cleared the moment that screen acts on it, so a
+    // return from the viewer does not start the slideshow a second time.
+    var deviceFolderOpenAction by remember { mutableStateOf<DeviceFolderOpenAction?>(null) }
+    // Which card opened that folder. A folder the vault holds only part of has one on the Albums grid
+    // and one in the vault, holding disjoint photos, so the screen has to be told which it is showing.
+    var deviceFolderFromVault by remember { mutableStateOf(false) }
 
     // One-shot latch for the post-update "What's new" gate. Flipped the first time the Gallery
     // route mounts so the version check + navigate fires at most once per process, even if the
@@ -344,10 +411,13 @@ fun NavGraph(
         onExternalEditConsumed()
     }
 
-    // External deep route: once the startup gate clears (Ready) and a request is pending,
-    // push the right destination on top of Gallery. Gallery stays on the back stack so a
-    // back press from viewer/editor lands the user on their gallery rather than dropping
-    // them out of the app. Branch:
+    // External deep route: once the startup gate clears (Ready) and a request is pending, make the
+    // right destination the ONLY entry on the back stack, clearing the Gallery the startup route
+    // just put there. A photo handed over by another app is that app's photo, so a back press
+    // belongs to whoever sent it; leaving Gallery underneath made the first back land in our own
+    // timeline and only the second return to the caller. Nothing further is needed to get there:
+    // the activity declares no launchMode, so it runs inside the calling task, and emptying our own
+    // stack is the whole of it. Branch:
     //   - ACTION_VIEW (system "Open with" chooser, file managers, gallery apps) → push
     //     the photo viewer with a synthetic single-item list wrapping the foreign URI.
     //   - ACTION_EDIT ("Edit with" chooser, edit affordances in other apps) → push the
@@ -377,14 +447,18 @@ fun NavGraph(
             selectedViewerIndex = 0
             selectedViewerHiddenLinkIds = emptySet()
             viewerFromAlbum = false
-            navController.navigate(Screen.Viewer.route)
+            navController.navigate(Screen.Viewer.route) {
+                popUpTo(navController.graph.id) { inclusive = true }
+            }
             // Viewer reads its data from `selectedViewerItems`, not pendingExternalEdit,
             // so we can drop the request right here. Doing so keeps the LaunchedEffect
             // from re-firing on a future recomposition that happens to land before the
             // viewer is fully on the back stack.
             pendingExternalEdit = null
         } else {
-            navController.navigate(Screen.PhotoEditor.route)
+            navController.navigate(Screen.PhotoEditor.route) {
+                popUpTo(navController.graph.id) { inclusive = true }
+            }
         }
     }
 
@@ -429,9 +503,10 @@ fun NavGraph(
         }
 
         composable(Screen.WhatsNew.route) {
-            // The screen marks the version seen internally (markSeen) before invoking onDone, so
-            // every exit path settles the gate. Done/back simply pop back to the gallery the
-            // screen sits on top of.
+            // The screen marks the version seen internally (markSeen) before invoking onDone, on
+            // the button, the arrow and its own BackHandler, so every exit settles the gate. Without
+            // that handler a system back popped this composable here instead, leaving the version
+            // unseen and the screen due again on the next launch.
             WhatsNewScreen(onDone = { navController.popBackStack() })
         }
 
@@ -440,6 +515,10 @@ fun NavGraph(
                 onBack = { navController.popBackStack() },
                 onOpenRelease = { version -> navController.navigate(Screen.WhatsNewRelease.route(version)) },
             )
+        }
+
+        composable(Screen.News.route) {
+            NewsScreen(onBack = { navController.popBackStack() })
         }
 
         composable(
@@ -485,10 +564,32 @@ fun NavGraph(
                 },
                 onAlbumClick = { album ->
                     selectedAlbum = album
+                    albumOpenedToShare = false
+                    albumOpenAction = null
+                    navController.navigate(Screen.AlbumDetail.route)
+                },
+                onAlbumShareClick = { album ->
+                    selectedAlbum = album
+                    albumOpenedToShare = true
+                    albumOpenAction = null
+                    navController.navigate(Screen.AlbumDetail.route)
+                },
+                onAlbumActionClick = { album, action ->
+                    selectedAlbum = album
+                    albumOpenedToShare = false
+                    albumOpenAction = action
                     navController.navigate(Screen.AlbumDetail.route)
                 },
                 onDeviceFolderClick = { bucketName ->
                     selectedDeviceFolder = bucketName
+                    deviceFolderOpenAction = null
+                    deviceFolderFromVault = false
+                    navController.navigate(Screen.DeviceFolderDetail.route)
+                },
+                onDeviceFolderActionClick = { bucketName, action ->
+                    selectedDeviceFolder = bucketName
+                    deviceFolderOpenAction = action
+                    deviceFolderFromVault = false
                     navController.navigate(Screen.DeviceFolderDetail.route)
                 },
                 onSettingsClick = { navController.navigate(Screen.Settings.route) },
@@ -499,6 +600,12 @@ fun NavGraph(
                 onCalendarClick = { navController.navigate(Screen.Calendar.route) },
                 onMemoriesClick = { navController.navigate(Screen.Memories.route) },
                 onOpenTimelineFilter = { navController.navigate(Screen.TimelineFilter.route) },
+                onEditMetadata = { selection ->
+                    // A timeline selection is the user's own library, never an album someone shared
+                    // with them, so the editor's own per-item rules decide what is writable.
+                    metadataEditorRequest = MetadataEditorRequest(selection, isReadOnlyAlbum = false)
+                    navController.navigate(Screen.MetadataEditor.route)
+                },
                 pendingWidgetPhotoUri = widgetPhotoUri,
                 onPendingWidgetPhotoConsumed = onWidgetPhotoConsumed,
             )
@@ -597,6 +704,9 @@ fun NavGraph(
             // When the viewer was opened from an album, propagate the album linkId to the
             // viewer + editor so edited/renamed copies land back in the same album.
             val sourceAlbumLinkId = if (viewerFromAlbum) selectedAlbum?.linkId else null
+            // A non-null `sharedByEmail` on the album means the user is a guest on someone else's
+            // album. Held as one value so every screen the viewer opens is handed the same answer.
+            val readOnlyAlbum = viewerFromAlbum && selectedAlbum?.sharedByEmail != null
             // Editor writes a timestamp to this entry's savedStateHandle on save; we observe
             // it so the viewer can force a re-load when we pop back into it.
             val editedAt by backStackEntry.savedStateHandle
@@ -607,15 +717,15 @@ fun NavGraph(
                 initialIndex = selectedViewerIndex,
                 onBack = { settledKey ->
                     viewerSecure = false
+                    viewerAutoplay = false
                     viewerReturnKey.value = settledKey
-                    navController.popBackStack()
+                    leaveOverlayScreen()
                 },
                 sourceAlbumLinkId = sourceAlbumLinkId,
-                // A non-null `sharedByEmail` on the album means the user is a guest
-                // on someone else's album — every mutating affordance in the viewer
-                // (delete / set-as-cover / favorite / rename / add-to-album / edit)
-                // collapses into a no-op + hides itself behind this flag.
-                isReadOnlyAlbum = viewerFromAlbum && selectedAlbum?.sharedByEmail != null,
+                // Every mutating affordance in the viewer (delete / set-as-cover / favorite /
+                // rename / add-to-album / edit) collapses into a no-op + hides itself behind
+                // this flag.
+                isReadOnlyAlbum = readOnlyAlbum,
                 // Taking a photo out of an album is an edit, so it follows the same right as
                 // adding rather than plain ownership. That makes it a separate question from
                 // isReadOnlyAlbum: an editor on a shared album may remove, and is exactly the
@@ -624,9 +734,14 @@ fun NavGraph(
                 editedAt = editedAt,
                 hiddenCloudLinkIds = selectedViewerHiddenLinkIds,
                 secure = viewerSecure,
+                startSlideshow = viewerAutoplay,
                 onEditItem = { item ->
                     editorItem = item
                     navController.navigate(Screen.PhotoEditor.route)
+                },
+                onEditMetadata = { item ->
+                    metadataEditorRequest = MetadataEditorRequest(listOf(item), readOnlyAlbum)
+                    navController.navigate(Screen.MetadataEditor.route)
                 },
             )
         }
@@ -636,7 +751,7 @@ fun NavGraph(
             if (external != null) {
                 // External entry: route to the appropriate editor based on the request's mime
                 // type. Save flow inside the editor always lands as a new copy under
-                // Pictures/Photos for Proton (never overwrites the foreign URI).
+                // DCIM/Camera (never overwrites the foreign URI).
                 //
                 // We deliberately do NOT clear pendingExternalEdit inside onBack / onSaved.
                 // Doing so triggers a recomposition that hits the editorItem == null branch
@@ -651,8 +766,8 @@ fun NavGraph(
                         localDisplayName = external.displayName,
                         localMimeType    = external.mimeType,
                         externalRequest  = external,
-                        onBack           = { navController.popBackStack() },
-                        onSaved          = { navController.popBackStack() },
+                        onBack           = leaveOverlayScreen,
+                        onSaved          = leaveOverlayScreen,
                     )
                 } else {
                     PhotoEditorScreen(
@@ -664,8 +779,8 @@ fun NavGraph(
                         cloudPhoto        = null,
                         sourceAlbumLinkId = null,
                         externalRequest   = external,
-                        onBack            = { navController.popBackStack() },
-                        onSaved           = { navController.popBackStack() },
+                        onBack            = leaveOverlayScreen,
+                        onSaved           = leaveOverlayScreen,
                     )
                 }
                 androidx.compose.runtime.DisposableEffect(Unit) {
@@ -809,6 +924,21 @@ fun NavGraph(
             }
         }
 
+        composable(Screen.MetadataEditor.route) {
+            val request = metadataEditorRequest
+            if (request == null || request.items.isEmpty()) {
+                navController.popBackStack()
+            } else {
+                MetadataEditorScreen(
+                    items = request.items,
+                    // Mirrors the viewer's guest gate: a photo in an album shared with the user is
+                    // fully read-only, so the editor surfaces its date + place without controls.
+                    isReadOnlyAlbum = request.isReadOnlyAlbum,
+                    onBack = { navController.popBackStack() },
+                )
+            }
+        }
+
         composable(Screen.AlbumDetail.route) {
             val album = selectedAlbum
             if (album != null) {
@@ -819,6 +949,10 @@ fun NavGraph(
                     sharedByEmail = album.sharedByEmail,
                     volumeId = album.volumeId,
                     coverThumbnailUrl = album.coverThumbnailUrl,
+                    openShareSheet = albumOpenedToShare,
+                    onShareSheetRequestConsumed = { albumOpenedToShare = false },
+                    openAction = albumOpenAction,
+                    onOpenActionConsumed = { albumOpenAction = null },
                     onPhotoClick = { items, index ->
                         // Items arrive already typed (Synced when a local copy exists, else
                         // CloudOnly) so the viewer's delete sheet offers the right options.
@@ -829,6 +963,16 @@ fun NavGraph(
                         // was populated.
                         selectedViewerHiddenLinkIds = emptySet()
                         viewerFromAlbum = true
+                        navController.navigate(Screen.Viewer.route)
+                    },
+                    onSlideshowClick = { items ->
+                        // Same viewer, same album context — it just opens on the first photo with
+                        // the slideshow already running.
+                        selectedViewerItems = items
+                        selectedViewerIndex = 0
+                        selectedViewerHiddenLinkIds = emptySet()
+                        viewerFromAlbum = true
+                        viewerAutoplay = true
                         navController.navigate(Screen.Viewer.route)
                     },
                     onAddPhotosClick = { currentLinkIds ->
@@ -872,6 +1016,7 @@ fun NavGraph(
                 onLanguageClick           = { navController.navigate(Screen.LanguageSettings.route) },
                 onAboutClick              = { navController.navigate(Screen.About.route) },
                 onWhatsNewClick           = { navController.navigate(Screen.WhatsNewHistory.route) },
+                onNewsClick               = { navController.navigate(Screen.News.route) },
                 onFaqClick                = { navController.navigate(Screen.Faq.route) },
                 onAccountClick            = { navController.navigate(Screen.Account.route) },
                 onCheckForUpdatesClick    = onCheckForUpdates,
@@ -988,8 +1133,15 @@ fun NavGraph(
 
         composable(Screen.StorageSettings.route) {
             eu.akoos.photos.presentation.settings.StorageSettingsScreen(
-                onBack      = { navController.popBackStack() },
-                onOpenTrash = { cloud -> navController.navigate("trash?tab=" + if (cloud) "cloud" else "device") },
+                onBack       = { navController.popBackStack() },
+                onOpenTrash  = { cloud -> navController.navigate("trash?tab=" + if (cloud) "cloud" else "device") },
+                onFreeUpSpace = { navController.navigate(Screen.FreeUpSpace.route) },
+            )
+        }
+
+        composable(Screen.FreeUpSpace.route) {
+            eu.akoos.photos.presentation.settings.FreeUpSpaceScreen(
+                onBack = { navController.popBackStack() },
             )
         }
 
@@ -1031,6 +1183,15 @@ fun NavGraph(
                     selectedAlbum = album
                     navController.navigate(Screen.AlbumDetail.route)
                 },
+                onOpenFolder = { bucketName ->
+                    // The same route the Albums grid opens a folder with. A hidden folder card is
+                    // still a folder, so it opens on its own screen rather than a reduced view — on
+                    // the vault's side of it, which is what this card counts and covers.
+                    selectedDeviceFolder = bucketName
+                    deviceFolderOpenAction = null
+                    deviceFolderFromVault = true
+                    navController.navigate(Screen.DeviceFolderDetail.route)
+                },
                 onPhotoClick = { items, index ->
                     // Pass the entire hidden list to the viewer so the user can swipe between
                     // hidden photos like in the main gallery. Each item is wrapped as a
@@ -1039,6 +1200,7 @@ fun NavGraph(
                     selectedViewerItems = items.map { eu.akoos.photos.domain.entity.GalleryItem.LocalOnly(it) }
                     selectedViewerIndex = index
                     selectedViewerHiddenLinkIds = emptySet()
+                    viewerFromAlbum = false
                     viewerSecure = true
                     navController.navigate(Screen.Viewer.route)
                 },
@@ -1083,11 +1245,37 @@ fun NavGraph(
             } else {
                 DeviceFolderDetailScreen(
                     bucketName = bucketName,
+                    openAction = deviceFolderOpenAction,
+                    onOpenActionConsumed = { deviceFolderOpenAction = null },
+                    fromVault = deviceFolderFromVault,
                     onPhotoClick = { items, index ->
                         selectedViewerItems = items
                         selectedViewerIndex = index
                         selectedViewerHiddenLinkIds = emptySet()
                         viewerFromAlbum = false
+                        // A folder reached from the Hidden area lists vaulted photos, so its viewer
+                        // gets the same FLAG_SECURE window the vault grid's own viewer gets. The flag
+                        // has to be set on both branches: it survives across navigations, so leaving
+                        // it alone would hand a hidden photo whichever value the last viewer used.
+                        viewerSecure = deviceFolderFromVault
+                        navController.navigate(Screen.Viewer.route)
+                    },
+                    onEditMetadata = { selection ->
+                        // A device folder holds the user's own files, never an album someone shared
+                        // with them, so the editor's own per-item rules decide what is writable.
+                        metadataEditorRequest = MetadataEditorRequest(selection, isReadOnlyAlbum = false)
+                        navController.navigate(Screen.MetadataEditor.route)
+                    },
+                    onSlideshowClick = { folderItems ->
+                        // Same viewer a photo tap opens, on the first photo of the folder's current
+                        // order with the slideshow already running. viewerFromAlbum stays false: the
+                        // photos are the user's own device files, not an album's members.
+                        selectedViewerItems = folderItems
+                        selectedViewerIndex = 0
+                        selectedViewerHiddenLinkIds = emptySet()
+                        viewerFromAlbum = false
+                        viewerAutoplay = true
+                        viewerSecure = deviceFolderFromVault
                         navController.navigate(Screen.Viewer.route)
                     },
                     onBack = { navController.popBackStack() },
@@ -1178,6 +1366,12 @@ fun NavGraph(
                     }
                 },
                 onOpenOffline = { navController.navigate(Screen.Offline.route) },
+                onEditMetadata = { selection ->
+                    // Search runs over the user's own library, never an album someone shared with
+                    // them, so the editor's own per-item rules decide what is writable.
+                    metadataEditorRequest = MetadataEditorRequest(selection, isReadOnlyAlbum = false)
+                    navController.navigate(Screen.MetadataEditor.route)
+                },
             )
         }
 
@@ -1263,6 +1457,18 @@ private fun UndoSnackbarHost(
             )
         }
         if (result == SnackbarResult.ActionPerformed) undoBarViewModel.undo() else undoBarViewModel.dismiss()
+    }
+
+    // The restore runs after the bar is gone, so a photo that could not come back has no other way
+    // to be reported. Collected here rather than per screen: the undo outlives the screen that
+    // raised it, and this host is the one surface that is always up.
+    LaunchedEffect(Unit) {
+        undoBarViewModel.undoFailed.collect { failed ->
+            if (failed <= 0) return@collect
+            hostState.showSnackbar(
+                context.resources.getQuantityString(R.plurals.hidden_restore_failed_some, failed, failed),
+            )
+        }
     }
 
     ThemedSnackbarHost(hostState, modifier = modifier)

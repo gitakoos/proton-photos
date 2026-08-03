@@ -99,6 +99,151 @@ internal fun centeredCrop(srcW: Int, srcH: Int, aspect: Float): CropBox {
 }
 
 /**
+ * Grab slop around a crop handle, in dp. Far wider than the drawn marker on purpose: a fingertip
+ * covers roughly 38dp, so a hit area the size of the marker misses most touches and the gesture
+ * falls through to pan-inside. Shared by the photo and video overlays so a handle feels the same
+ * in both.
+ */
+internal const val CROP_HANDLE_TOUCH_SLOP_DP = 56f
+
+/**
+ * How far INSIDE the rect a handle still answers, as a fraction of the slop. Generous (~42dp at
+ * the 56dp slop) so a resize can be started well clear of the screen edge, where the system's own
+ * back gesture claims the touch first.
+ */
+private const val CROP_HANDLE_INWARD_FACTOR = 0.75f
+
+/**
+ * Ceiling on that inward reach per axis, as a fraction of the rect's own span. Two opposite
+ * buffers then cover at most 60% of an axis, so even a tiny rect keeps a central block that
+ * belongs to no handle and pan-inside stays reachable.
+ */
+private const val CROP_HANDLE_INWARD_MAX_SPAN_FRACTION = 0.3f
+
+/**
+ * Which crop handle a touch grabs, measured in screen pixels.
+ *
+ * [box] is the crop rect in image-pixel space; [scale] / [offsetX] / [offsetY] are the letterbox
+ * fit that puts it on screen, and [pointX] / [pointY] are the touch in that same screen space.
+ *
+ * A touch reaches a full [touchSlopPx] OUTSIDE an edge and a clamped fraction of it INSIDE. The
+ * two reaches differ because outside the rect there is nothing else to hit, while inside it the
+ * pan-inside gesture has to keep some room. Corners win over edges, and a corner needs the touch
+ * near TWO adjacent edges: a nearest-corner rule instead claims every touch in a portrait crop's
+ * top half, so vertical drags appear to do nothing. Anything further in translates the rect
+ * ([CropHandle.Inside]); anything further out is not a crop gesture (null).
+ */
+internal fun pickCropHandle(
+    box: CropBox,
+    scale: Float,
+    offsetX: Float,
+    offsetY: Float,
+    pointX: Float,
+    pointY: Float,
+    touchSlopPx: Float,
+): CropHandle? {
+    val l = offsetX + box.left * scale
+    val t = offsetY + box.top * scale
+    val r = offsetX + box.right * scale
+    val b = offsetY + box.bottom * scale
+
+    val inward = touchSlopPx * CROP_HANDLE_INWARD_FACTOR
+    val inwardX = min(inward, (r - l) * CROP_HANDLE_INWARD_MAX_SPAN_FRACTION)
+    val inwardY = min(inward, (b - t) * CROP_HANDLE_INWARD_MAX_SPAN_FRACTION)
+
+    val nearTop = (pointY - t) in -touchSlopPx..inwardY
+    val nearBottom = (b - pointY) in -touchSlopPx..inwardY
+    val nearLeft = (pointX - l) in -touchSlopPx..inwardX
+    val nearRight = (r - pointX) in -touchSlopPx..inwardX
+
+    val corner = when {
+        nearTop && nearLeft -> CropHandle.TopLeft
+        nearTop && nearRight -> CropHandle.TopRight
+        nearBottom && nearLeft -> CropHandle.BottomLeft
+        nearBottom && nearRight -> CropHandle.BottomRight
+        else -> null
+    }
+    if (corner != null) return corner
+
+    // Single edges — grab a side by its line: near that edge AND within the other axis's span.
+    val withinX = pointX in (l - touchSlopPx)..(r + touchSlopPx)
+    val withinY = pointY in (t - touchSlopPx)..(b + touchSlopPx)
+    val edge = when {
+        nearTop && withinX -> CropHandle.Top
+        nearBottom && withinX -> CropHandle.Bottom
+        nearLeft && withinY -> CropHandle.Left
+        nearRight && withinY -> CropHandle.Right
+        else -> null
+    }
+    if (edge != null) return edge
+
+    return if (withinX && withinY) CropHandle.Inside else null
+}
+
+/**
+ * How tall a run of gesture exclusions the platform honours per screen edge, in dp.
+ * `View.setSystemGestureExclusionRects` drops the surplus without a word, so the overlay has to
+ * fit inside it rather than hand over one tall strip.
+ */
+internal const val SYSTEM_GESTURE_EXCLUSION_BUDGET_DP = 200f
+
+/** One square of screen the system's edge gesture must leave alone, in crop-container pixels. */
+internal data class CropExclusionRect(
+    val left: Float,
+    val top: Float,
+    val right: Float,
+    val bottom: Float,
+) {
+    val width: Float get() = right - left
+    val height: Float get() = bottom - top
+}
+
+/**
+ * Where the crop overlay needs the system to yield its edge gesture, in the same screen-pixel
+ * space [pickCropHandle] measures in.
+ *
+ * A handle inside the strip the system reserves for the edge back gesture cannot be grabbed at
+ * all: the swipe is claimed before the overlay ever sees a touch. Only the three handles on the
+ * rect's left edge and the three on its right edge compete with a left/right swipe, so the top and
+ * bottom edges are left out, and a side is claimed only while its grab area actually reaches into
+ * that strip. A rect parked mid-screen therefore asks for nothing, which keeps back reachable
+ * everywhere it does not have to yield.
+ *
+ * [leftInsetPx] / [rightInsetPx] are the widths of those strips measured inwards from the
+ * container's own edges. A container held a few dp off the display edge makes the test marginally
+ * generous, which costs at most one exclusion nobody needed. A zero inset means the navigation
+ * mode has no edge gesture to yield, so nothing is emitted.
+ *
+ * Budget: three handles a side, each a [CROP_HANDLE_TOUCH_SLOP_DP] grab area tall, is
+ * 3 x 56 = 168dp against the 200dp of [SYSTEM_GESTURE_EXCLUSION_BUDGET_DP]. A fourth handle a
+ * side (224dp), or a slop past 66dp, puts the run over the ceiling and the platform starts
+ * dropping rects silently.
+ */
+internal fun cropGestureExclusions(
+    leftPx: Float,
+    topPx: Float,
+    rightPx: Float,
+    bottomPx: Float,
+    containerWidthPx: Float,
+    leftInsetPx: Float,
+    rightInsetPx: Float,
+    slopPx: Float,
+): List<CropExclusionRect> {
+    if (slopPx <= 0f) return emptyList()
+    val half = slopPx / 2f
+    // The three grabs a vertical edge offers: its top corner, its middle, its bottom corner.
+    val centresY = listOf(topPx, (topPx + bottomPx) / 2f, bottomPx)
+    val rects = ArrayList<CropExclusionRect>(6)
+    if (leftInsetPx > 0f && leftPx - half < leftInsetPx) {
+        centresY.mapTo(rects) { cy -> CropExclusionRect(leftPx - half, cy - half, leftPx + half, cy + half) }
+    }
+    if (rightInsetPx > 0f && rightPx + half > containerWidthPx - rightInsetPx) {
+        centresY.mapTo(rects) { cy -> CropExclusionRect(rightPx - half, cy - half, rightPx + half, cy + half) }
+    }
+    return rects
+}
+
+/**
  * One resize decision for the crop overlay, in bitmap-pixel space.
  *
  * [bx] / [by] is the finger in bitmap coordinates, already clamped to the bitmap by the

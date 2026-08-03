@@ -46,7 +46,6 @@ data class SettingsUiState(
     val syncError: String? = null,
     val autoFreeUp: Boolean = false,
     val freeUpInterval: FreeUpInterval = FreeUpInterval.OneMonth,
-    val isFreeingUp: Boolean = false,
     val deviceStorageBytes: Long = 0L,
     // ── Local storage scopes (visibility-only, no quota write-backs) ──────────
     /** Total bytes on the device data partition (StatFs.totalBytes). */
@@ -86,6 +85,23 @@ data class SettingsUiState(
     /** True until the backed-up / pending counts first compute — gates a shimmer over the
      *  count values so a cold start shows a skeleton instead of "None" / 0. */
     val countsLoading: Boolean = true,
+    /** Photos the hidden vault holds files for. Sign-out empties the vault, so the confirmation has
+     *  to name the number. */
+    val vaultedPhotoCount: Int = 0,
+    /** How many of [vaultedPhotoCount] still have a Proton Drive copy, which is the difference
+     *  between a photo that can be downloaded again after signing back in and one whose only bytes
+     *  the sign-out destroys. The confirmation names both, so the user knows which is which before
+     *  agreeing to it. */
+    val vaultedCloudBackedCount: Int = 0,
+    /** False until [vaultedPhotoCount] has been measured against the vault directory. The sign-out
+     *  confirmation waits on it, so the number it names is the settled one rather than a zero that
+     *  changes a moment after the user has read it. */
+    val vaultedCountSettled: Boolean = false,
+    /** Numbers-only picture of the vault for the shared diagnostics: index, blobs on disk, the two
+     *  directions those can disagree in, pairings, pending hides, folders and size. Refreshed when the
+     *  diagnostics chooser opens, since the vault classes are injected singletons the screen itself
+     *  cannot reach. Blank until then, which leaves the section out of the bundle. */
+    val vaultDiagnostics: String = "",
     val language: String = "system",
     // Metadata stripping. Defaults match the engine readers (which use `?: false`) so the toggles
     // never render ON for a frame while the upload pipeline actually treats them as OFF.
@@ -127,14 +143,10 @@ data class SettingsUiState(
     /** Opt-in: when true, a foreground watcher shows a quick-action bar over a freshly
      *  taken screenshot. Off by default; requires the draw-over-other-apps permission. */
     val screenshotOverlayEnabled: Boolean = false,
-    /** When true, the main Photos timeline hides every photo already filed into an
-     *  album. Off by default. The Albums + Shared tabs are unaffected. */
-    val hidePhotosInAlbums: Boolean = false,
     /** When true, the Photos timeline shows a floating month/year label while scrolling.
      *  Off by default. */
     val showScrollDate: Boolean = false,
     /** When true, selection-mode action buttons show a text label beneath the icon. On by default. */
-    val showSelectionLabels: Boolean = true,
     /** When true, the Photos timeline runs oldest-first (newest at the bottom). Off by default. */
     val reverseTimelineOrder: Boolean = false,
     /** When true, the Photos timeline uses a staggered (masonry) grid that keeps each photo's
@@ -143,10 +155,6 @@ data class SettingsUiState(
     /** When true, the Photos timeline is edge-to-edge: no side padding, square corners, a hair-thin
      *  gap. Off by default: the padded, rounded tiles stay the baseline. */
     val seamlessGrid: Boolean = false,
-    /** Albums-tab filter default as an AlbumDisplayFilter ordinal (0 = All, 1 = Cloud, 2 = Local). */
-    val albumsDefaultFilter: Int = 0,
-    /** When true, the Albums tab opens on the last-used filter instead of [albumsDefaultFilter]. */
-    val albumsRememberLastFilter: Boolean = false,
     // Trash
     val trashedCount: Int = 0,
     /** Drive (cloud) trash count. `null` = unknown — UI then falls back to the
@@ -159,7 +167,6 @@ data class SettingsUiState(
      *  fetched (or just signed out)". */
     val lastCloudTrashFetchMs: Long = 0L,
     // Free-up space: non-null when system delete dialog should be launched
-    val freeUpPendingIntent: android.app.PendingIntent? = null,
     // ── Per-file upload progress (Sync card progress bar + expandable list) ────
     /** 1-based count of completed (or attempted) uploads in the current batch. */
     val uploadDoneCount: Int = 0,

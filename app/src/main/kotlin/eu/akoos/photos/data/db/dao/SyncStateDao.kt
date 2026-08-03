@@ -39,6 +39,13 @@ data class LocalHashRow(
     val localHash: String,
 )
 
+/** Lean projection: a local uri and the cloud photo it is paired to. The query that fills it keeps
+ *  only rows that have a cloud copy, so every row carries an id a client-side hide can filter by. */
+data class CloudPairRow(
+    val localUri: String,
+    val cloudFileId: String,
+)
+
 @Dao
 interface SyncStateDao {
 
@@ -132,6 +139,13 @@ interface SyncStateDao {
     @Query("SELECT * FROM sync_state WHERE cloudFileId = :cloudFileId LIMIT 1")
     suspend fun getByCloudId(cloudFileId: String): SyncStateEntity?
 
+    /** Which of [localUris] this account already has a cloud copy of, and the cloud photo each is
+     *  paired to. Answers "is this device file backed up, and by which cloud photo" for a bounded set
+     *  of files without reading the whole table, so a caller acting on one folder pays for that
+     *  folder. Bind [localUris] in chunks; SQLite caps host variables. */
+    @Query("SELECT localUri, cloudFileId FROM sync_state WHERE userId = :userId AND cloudFileId IS NOT NULL AND localUri IN (:localUris)")
+    suspend fun cloudPairs(userId: String, localUris: List<String>): List<CloudPairRow>
+
     /**
      * Atomically claim a row for upload: flip it to [uploading] only while it is still [localOnly],
      * returning the number of rows changed. Two upload passes running in parallel (the one-shot and
@@ -165,6 +179,24 @@ interface SyncStateDao {
     // another signed-in account.
     @Query("SELECT * FROM sync_state WHERE userId = :userId AND status = 'SYNCED' AND backedUpAtMs IS NOT NULL AND backedUpAtMs < :timestampMs")
     suspend fun getSyncedBefore(userId: String, timestampMs: Long): List<SyncStateEntity>
+
+    /** Every row [userId] holds at the vaulted status, the photos the hidden vault claims. The table
+     *  is indexed on status and a vault holds a handful of photos beside a library of thousands, so
+     *  this reads that handful rather than the library. Backs the startup sweep that returns a
+     *  vaulted row to a live status when the device still holds its file. */
+    @Query("SELECT * FROM sync_state WHERE userId = :userId AND status = 'HIDDEN'")
+    suspend fun getVaulted(userId: String): List<SyncStateEntity>
+
+    /** The cloud ids [userId] holds a live device-file row for: a SYNCED copy on the device, or a
+     *  LOCAL_ONLY row still carrying its pairing. A vaulted row whose cloudFileId is in this set names
+     *  a photo already back on the device under another row, so its own HIDDEN marker is a leftover
+     *  that only keeps the Drive copy filtered. Backs the sweep's strand check. */
+    @Query(
+        "SELECT DISTINCT cloudFileId FROM sync_state " +
+            "WHERE userId = :userId AND cloudFileId IS NOT NULL AND cloudFileId != '' " +
+            "AND status IN ('SYNCED', 'LOCAL_ONLY')"
+    )
+    suspend fun cloudIdsWithLivePairing(userId: String): List<String>
 
     /** Record an explicit upload intent on a row: mark it queued, why ([source], a QueueSource
      *  constant), and when ([at], epoch millis). Does not touch status; a queued row can be
@@ -219,6 +251,14 @@ interface SyncStateDao {
 
     @Query("DELETE FROM sync_state WHERE localUri = :localUri")
     suspend fun delete(localUri: String)
+
+    /** Drop every row still at HIDDEN for [cloudFileId]. A reveal re-pairs a photo by writing the
+     *  live SYNCED row on the restored uri, but the table can hold more than one row for one cloud
+     *  copy, and any HIDDEN one left behind goes on dropping that copy from every listing. Keyed on
+     *  the cloud id the pairing is carried by, so no stale marker outlives the reveal whichever row
+     *  [getByCloudId] happened to return. The re-paired row is SYNCED, so this never touches it. */
+    @Query("DELETE FROM sync_state WHERE cloudFileId = :cloudFileId AND status = 'HIDDEN'")
+    suspend fun deleteHiddenForCloudId(cloudFileId: String)
 
     @Query("DELETE FROM sync_state WHERE localUri IN (:localUris) AND status = 'LOCAL_ONLY'")
     suspend fun deleteLocalOnlyByUris(localUris: List<String>)

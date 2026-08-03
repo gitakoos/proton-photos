@@ -211,6 +211,8 @@ internal fun ViewerBubble(onClick: () -> Unit, content: @Composable () -> Unit) 
 internal fun RenameDialog(
     currentName: String,
     isCloud: Boolean,
+    /** Whether the photo lives in the vault, where a copy stays hidden instead of landing in the camera folder. */
+    isVaulted: Boolean,
     isWorking: Boolean,
     errorMessage: String?,
     onDismiss: () -> Unit,
@@ -276,8 +278,11 @@ internal fun RenameDialog(
             )
             RenameOptionButton(
                 title = stringResource(R.string.rename_sheet_option_copy_title),
-                subtitle = if (isCloud) stringResource(R.string.rename_sheet_option_copy_subtitle_cloud)
-                    else stringResource(R.string.rename_sheet_option_copy_subtitle_local),
+                subtitle = when {
+                    isCloud -> stringResource(R.string.rename_sheet_option_copy_subtitle_cloud)
+                    isVaulted -> stringResource(R.string.rename_sheet_option_copy_subtitle_vault)
+                    else -> stringResource(R.string.rename_sheet_option_copy_subtitle_local)
+                },
                 accent = false,
                 enabled = canSubmit,
                 onClick = { onConfirm(trimmed, /* replaceOriginal = */ false) },
@@ -337,10 +342,15 @@ internal fun DeleteConfirmSheet(
     item: GalleryItem,
     onDismiss: () -> Unit,
     onDelete: (freeUpSpace: Boolean, deleteFromCloud: Boolean) -> Unit,
+    /** True when the photo's only copy is the vault file. There is no device trash behind it and no
+     *  cloud copy to fall back on, so the one choice offered says exactly that. Only a device-only
+     *  photo can be vaulted, so it changes nothing for the other two. */
+    isVaulted: Boolean = false,
 ) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .navigationBarsPadding()
             .padding(horizontal = 20.dp)
             .padding(bottom = 40.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -357,11 +367,19 @@ internal fun DeleteConfirmSheet(
         when (item) {
             is GalleryItem.LocalOnly -> {
                 Text(
-                    stringResource(R.string.viewer_delete_local_body),
+                    stringResource(
+                        if (isVaulted) R.string.viewer_delete_vault_body
+                        else R.string.viewer_delete_local_body,
+                    ),
                     color = FgDim, fontSize = 14.sp,
                 )
                 Spacer(Modifier.height(4.dp))
-                DeleteButton(stringResource(R.string.viewer_delete_move_to_trash)) { onDelete(true, false) }
+                DeleteButton(
+                    stringResource(
+                        if (isVaulted) R.string.delete_button_permanently
+                        else R.string.viewer_delete_move_to_trash,
+                    ),
+                ) { onDelete(true, false) }
             }
 
             is GalleryItem.Synced -> {

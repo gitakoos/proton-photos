@@ -51,17 +51,23 @@ object PhotoTagDetector {
      * the persisted cache when this moves, so every on-device file is re-detected with the new
      * logic without a manual cache wipe. An unchanged version leaves the cache reads as-is.
      */
-    const val DETECTOR_VERSION = 1
+    const val DETECTOR_VERSION = 2
 
-    /** XMP markers that identify an Android Motion Photo (Samsung / Google embed an MP4). */
-    private const val MARKER_MOTION_PHOTO = "Camera:MotionPhoto"
-    private const val MARKER_MICRO_VIDEO = "MicroVideo"
     /** XMP namespace marker for a Google Photo Sphere / panorama. */
     private const val MARKER_GPANO = "GPano:"
-    /** Motion Photo flag `(GCamera:)MotionPhoto="1"` and the Container-directory
-     *  `Item:Semantic="MotionPhoto"` form. Matching the viewer's detector here keeps the grid
-     *  badge in agreement with what actually plays (Samsung's Google-compatible XMP uses these). */
+    /**
+     * The three forms an Android Motion Photo announces itself in, each read for its VALUE rather
+     * than for the bare attribute name: `(GCamera:)MotionPhoto="1"`, the legacy
+     * `(GCamera:)MicroVideo="1"`, and the Container-directory `Item:Semantic="MotionPhoto"`.
+     *
+     * The value is what decides. A camera that can take motion photos writes the attribute on every
+     * shot and sets it to 0 when motion is off, and writes `MotionPhotoVersion` beside it either
+     * way, so matching the attribute name alone marks a plain still as a motion photo. The name
+     * boundary matters for the same reason: `MicroVideoOffset` and `MotionPhotoVersion` both start
+     * with a marker name and neither says the file holds a video, which the `=` here excludes.
+     */
     private val MOTION_FLAG_REGEX = Regex("""(?:GCamera:)?MotionPhoto\s*=\s*["']?1""")
+    private val MICRO_VIDEO_REGEX = Regex("""(?:GCamera:)?MicroVideo\s*=\s*["']?1""")
     private val SEMANTIC_MOTION_REGEX = Regex("""Semantic\s*=\s*["']MotionPhoto["']""")
 
     /**
@@ -116,9 +122,8 @@ object PhotoTagDetector {
         if (sizeBytes > XMP_SCAN_MIN_BYTES && mime.startsWith("image/")) {
             val xmp = readXmpPrefix(context, uri)
             if (xmp != null) {
-                val hasMotion = xmp.contains(MARKER_MOTION_PHOTO) ||
-                    xmp.contains(MARKER_MICRO_VIDEO) ||
-                    MOTION_FLAG_REGEX.containsMatchIn(xmp) ||
+                val hasMotion = MOTION_FLAG_REGEX.containsMatchIn(xmp) ||
+                    MICRO_VIDEO_REGEX.containsMatchIn(xmp) ||
                     SEMANTIC_MOTION_REGEX.containsMatchIn(xmp)
                 if (hasMotion) tags += 4
                 if (xmp.contains(MARKER_GPANO)) tags += 8

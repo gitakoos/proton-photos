@@ -387,10 +387,11 @@ class DuplicateFinderViewModel @Inject constructor(
      * @param keepIds [GalleryItem.stableId] of the copies the user chose to keep.
      */
     fun deleteExtras(group: FindDuplicatesUseCase.DuplicateGroup, keepIds: Set<String>) {
-        // Invariant #2: refuse to delete when nothing would be kept.
-        if (keepIds.isEmpty()) return
-        // Also skip anything already deleted this session, so a stale/dead cell can't be re-actioned.
-        val toDelete = group.items.filter { it.stableId !in keepIds && it.stableId !in recentlyDeleted.value }
+        val toDelete = DuplicateDeletion.deletableExtras(
+            groupIds = group.items.map { it.stableId },
+            keepIds = keepIds,
+            alreadyDeleted = recentlyDeleted.value,
+        ).let { ids -> group.items.filter { it.stableId in ids } }
         if (toDelete.isEmpty()) return
 
         viewModelScope.launch {
@@ -401,8 +402,8 @@ class DuplicateFinderViewModel @Inject constructor(
                 Log.d(TAG, "deleteExtras: group=${group.items.size}, keep=${keepIds.size}, toDelete=${toDelete.size}")
                 // Remove every copy each chosen duplicate actually has: a LocalOnly loses its device
                 // file, a CloudOnly its Drive copy, a Synced photo BOTH. The use case only acts on the
-                // copies an item has, so both flags are safe for any mix, and keepIds (checked above)
-                // guarantees at least one copy of the group survives.
+                // copies an item has, so both flags are safe for any mix, and the keeper check above
+                // guarantees at least one copy of the group is still there afterwards.
                 val result = deletePhotoUseCase(
                     userId = userId,
                     items = toDelete,
@@ -441,13 +442,30 @@ class DuplicateFinderViewModel @Inject constructor(
         viewModelScope.launch {
             val userId = primaryUserId ?: runCatching { accountManager.getPrimaryUserId().first() }.getOrNull() ?: return@launch
             try {
-                deletePhotoUseCase.completeAfterPermissionGranted(
+                // This reports a refused Drive delete by RETURNING it, the same way the first attempt
+                // does, so ignoring the answer recorded the copies as gone while the Drive half was
+                // still there: the card left the screen, the quota did not move, and nothing said so.
+                // Mirrors the branches the pre-dialog path already takes.
+                val result = deletePhotoUseCase.completeAfterPermissionGranted(
                     userId = userId,
                     cloudLinkIds = pending.cloudLinkIds,
                     items = pending.itemsBeingDeleted,
                     freeUpSpace = pending.freeUpSpace,
                 )
-                markDeleted(pending.itemsBeingDeleted)
+                when (result) {
+                    is DeletePhotoUseCase.Result.Success -> markDeleted(pending.itemsBeingDeleted)
+                    is DeletePhotoUseCase.Result.CloudDeleteFailed -> {
+                        // The system already carried out the device delete before handing back
+                        // here, so this copy IS gone from the phone even though Drive kept its own.
+                        // It has to be recorded as deleted for exactly that reason: left out, the
+                        // rule guarding the last copy would still count it as the one being kept,
+                        // and the other copy could then go from both places with none left behind.
+                        markDeleted(pending.itemsBeingDeleted)
+                        _uiState.update { it.copy(errorMessage = "drive") }
+                    }
+                    is DeletePhotoUseCase.Result.NeedsMediaWritePermission ->
+                        _uiState.update { it.copy(errorMessage = "delete") }
+                }
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 Log.e(TAG, "completeAfterPermissionGranted failed for ${pending.itemsBeingDeleted.size} item(s)", e)

@@ -284,15 +284,6 @@ data class DeleteLinksRequest(
 
 typealias TrashLinksRequest = DeleteLinksRequest
 
-// Photos-only trash response (may 404 — see VolumeTrashResponse for the full-trash path).
-@Serializable
-data class PhotoTrashResponse(
-    @SerialName("Photos") val photos: List<PhotoLinkDto> = emptyList(),
-    @SerialName("More") val more: Boolean = false,
-    @SerialName("AnchorID") val anchorId: String? = null,
-    @SerialName("Code") val code: Int,
-)
-
 // Full Drive trash (all types), grouped by ShareID with bare LinkIDs only — metadata (mime,
 // thumbnails, crypto material) must be hydrated via a follow-up link-detail fetch. Empty Trash
 // list signals the end of pagination.
@@ -943,12 +934,6 @@ data class CreateShareResponse(
     )
 }
 
-@Serializable
-data class CreateLinkShareResponse(
-    @SerialName("Code") val code: Int,
-    @SerialName("ShareID") val shareId: String? = null,
-)
-
 /**
  * Mint a public share-URL. The backend rejects the request if ANY of the SRP/password fields below
  * is omitted — they drive the random-URL-password scheme a recipient uses to unlock without an account.
@@ -1033,17 +1018,6 @@ data class CreateShareUrlResponse(
 data class ShareUrlsResponse(
     @SerialName("Code") val code: Int,
     @SerialName("ShareURLs") val shareUrls: List<ShareUrlDto> = emptyList(),
-)
-
-@Serializable
-data class InviteeDto(
-    @SerialName("Email") val email: String,
-    @SerialName("Permissions") val permissions: Int = 4,
-)
-
-@Serializable
-data class ShareInvitationRequest(
-    @SerialName("Invitees") val invitees: List<InviteeDto>,
 )
 
 /** Carries a re-encrypted KeyPacket + detached signature so only the invitee can derive the share key. */

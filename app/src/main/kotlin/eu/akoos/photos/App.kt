@@ -51,6 +51,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import eu.akoos.photos.data.image.UltraHdrDecoder
 import eu.akoos.photos.data.preferences.LanguagePrefsBoot
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.ThemePrefsBoot
@@ -59,6 +60,7 @@ import eu.akoos.photos.data.preferences.syncEffectivelyEnabled
 import eu.akoos.photos.worker.AlbumDownloadWorker
 import eu.akoos.photos.worker.CachePruneWorker
 import eu.akoos.photos.worker.SyncWorker
+import eu.akoos.photos.worker.UpdateCheckWorker
 import javax.inject.Inject
 
 @HiltAndroidApp
@@ -137,6 +139,7 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
         // Periodic sweeper for the "process killed for days, cache still on disk" gap the cold-start
         // prune above can't reach.
         CachePruneWorker.schedule(WorkManager.getInstance(this))
+        scheduleUpdateCheck()
         seedAlbumOptInFromBucketMap()
         importPendingAlbumAdds()
         recoverMirrorOverwrites()
@@ -224,6 +227,17 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
                 ?.processName
         }
         return procName == packageName
+    }
+
+    /**
+     * Arms (or cancels) the periodic release check against its setting. Reads DataStore, so it runs
+     * off the startup path; the schedule is unique work, so re-running it every launch keeps one
+     * registration rather than stacking them.
+     */
+    private fun scheduleUpdateCheck() {
+        appScope.launch {
+            runCatching { UpdateCheckWorker.reconcile(this@App) }
+        }
     }
 
     /**
@@ -487,6 +501,12 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
     // capped well under the largeHeap 25% default, which balloons past 400 MB and made scrolling laggy.
     override fun newImageLoader(): ImageLoader = ImageLoader.Builder(this)
         .components {
+            // First in line from the API that can attach a gain map at all, and even there it claims
+            // a load only when that load opted in and the bytes actually carry one. Every other load
+            // falls straight through to the decoders below and decodes identically.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                add(UltraHdrDecoder.Factory())
+            }
             add(VideoFrameDecoder.Factory())
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 add(coil.decode.ImageDecoderDecoder.Factory())

@@ -26,9 +26,6 @@ import android.app.KeyguardManager
 import androidx.activity.compose.BackHandler
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -38,6 +35,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.aspectRatio
@@ -58,10 +56,12 @@ import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.LockOpen
+import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Icon
@@ -71,9 +71,12 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import eu.akoos.photos.R
 import eu.akoos.photos.presentation.common.CloudPhotoCell
+import eu.akoos.photos.presentation.common.ConfirmSheet
 import eu.akoos.photos.presentation.common.IconBubble
 import eu.akoos.photos.presentation.common.ReturnToViewerPhoto
 import eu.akoos.photos.presentation.common.SecureScreenEffect
+import eu.akoos.photos.presentation.common.SelectionAction
+import eu.akoos.photos.presentation.common.SelectionDrawer
 import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -104,10 +107,12 @@ import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.entity.LocalMediaItem
 import eu.akoos.photos.presentation.albums.AlbumCloudBadge
+import eu.akoos.photos.presentation.albums.DeviceFolder
 import eu.akoos.photos.presentation.albums.UnifiedAlbumCard
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.Bg0
 import eu.akoos.photos.presentation.theme.Bg2
+import eu.akoos.photos.presentation.theme.ErrorColor
 import eu.akoos.photos.presentation.theme.FgDim
 import eu.akoos.photos.presentation.theme.FgMute
 import eu.akoos.photos.presentation.theme.FgPrimary
@@ -121,11 +126,13 @@ fun HiddenAlbumScreen(
     onPhotoClick: (items: List<LocalMediaItem>, index: Int) -> Unit = { _, _ -> },
     onCloudPhotoClick: (items: List<GalleryItem>, index: Int) -> Unit = { _, _ -> },
     onOpenAlbum: (Album) -> Unit = {},
+    onOpenFolder: (bucketName: String) -> Unit = {},
     viewModel: HiddenAlbumViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
+    var showDeleteConfirm by remember { mutableStateOf(false) }
 
     SecureScreenEffect()
 
@@ -267,14 +274,18 @@ fun HiddenAlbumScreen(
         } else {
             // Content — authenticated. Overlay layout, matching the Offline screen and the
             // duplicate finder: the grid fills and scrolls under a floating pill header, and the
-            // bulk action sits in a bottom dock. The grid's top content padding clears the header.
+            // bulk actions sit in the shared selection drawer. The grid's top content padding
+            // clears the header.
             val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
             val contentTopPad = floatingHeaderContentTopPadding()
             val cols = eu.akoos.photos.presentation.gallery.rememberDefaultGridColumns()
             val seamless = eu.akoos.photos.presentation.gallery.rememberSeamlessGrid()
+            // Held above the branch so the selection drawer can watch the same scroll the photo
+            // grid reports, and so the vault keeps its place when the list fills in.
+            val gridState = rememberLazyGridState()
             when {
-                state.isLoading && state.hiddenAlbums.isEmpty() && state.items.isEmpty() &&
-                    state.hiddenCloudPhotos.isEmpty() -> LazyVerticalGrid(
+                state.isLoading && state.hiddenAlbums.isEmpty() && state.hiddenFolders.isEmpty() &&
+                    state.items.isEmpty() && state.hiddenCloudPhotos.isEmpty() -> LazyVerticalGrid(
                     columns = GridCells.Fixed(cols),
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(
@@ -293,8 +304,8 @@ fun HiddenAlbumScreen(
                         )
                     }
                 }
-                state.hiddenAlbums.isEmpty() && state.items.isEmpty() &&
-                    state.hiddenCloudPhotos.isEmpty() -> Box(
+                state.hiddenAlbums.isEmpty() && state.hiddenFolders.isEmpty() &&
+                    state.items.isEmpty() && state.hiddenCloudPhotos.isEmpty() -> Box(
                     Modifier.fillMaxSize().padding(top = contentTopPad),
                     contentAlignment = Alignment.Center,
                 ) {
@@ -313,7 +324,6 @@ fun HiddenAlbumScreen(
                     }
                 }
                 else -> {
-                    val gridState = rememberLazyGridState()
                     // Drag-to-select: long-press a cell then sweep a range (shares the timeline
                     // gesture). The hit-test reads the grid's own viewportStartOffset, so the large top
                     // content padding under the floating header is handled without a manual offset.
@@ -345,16 +355,25 @@ fun HiddenAlbumScreen(
                         onSelectionChange = viewModel::setSelectionFromKeys,
                         tapGuard = tapGuard,
                     )
-                    // Land back on the photo the viewer closed on. The album block leads the grid
-                    // ahead of every photo, then the cloud group and the device group each carry one
-                    // header. An empty cloud group is dropped rather than passed through: its header
-                    // is only emitted alongside it, and counting a phantom one would push the device
-                    // photos a slot out. The two groups hand the viewer different lists (CloudOnly
-                    // for the cloud photos, LocalOnly for the device ones), so each is reduced here
-                    // to the key it reports back.
-                    val returnLeadingSlots = remember(state.hiddenAlbums) {
-                        if (state.hiddenAlbums.isEmpty()) 0
-                        else 1 + state.hiddenAlbums.chunked(2).size
+                    // Land back on the photo the viewer closed on. The album block and the folder
+                    // block lead the grid ahead of every photo, then the cloud group and the device
+                    // group each carry one header. An empty card block is dropped rather than passed
+                    // through: its header is only emitted alongside it, and counting a phantom one
+                    // would push the device photos a slot out. The two groups hand the viewer
+                    // different lists (CloudOnly for the cloud photos, LocalOnly for the device
+                    // ones), so each is reduced here to the key it reports back.
+                    val returnLeadingSlots = remember(
+                        state.hiddenAlbums, state.hiddenFolders, state.looseDeviceCopyLinkIds,
+                    ) {
+                        // The notice is emitted above the albums, so it holds a slot of its own here.
+                        // Every full-span row ahead of the photos has to be counted or the return
+                        // lands the grid one row off for each one that is not.
+                        val noticeSlots = if (state.looseDeviceCopyLinkIds.isEmpty()) 0 else 1
+                        val albumSlots =
+                            if (state.hiddenAlbums.isEmpty()) 0 else 1 + state.hiddenAlbums.chunked(2).size
+                        val folderSlots =
+                            if (state.hiddenFolders.isEmpty()) 0 else 1 + state.hiddenFolders.chunked(2).size
+                        noticeSlots + albumSlots + folderSlots
                     }
                     val returnGroups = remember(state.hiddenCloudPhotos, state.items) {
                         val devicePhotos = state.items.map { it.uri }
@@ -362,9 +381,10 @@ fun HiddenAlbumScreen(
                         else listOf(state.hiddenCloudPhotos.map { it.linkId }, devicePhotos)
                     }
                     // The device group's sub-heading is emitted only when a group sits above it, so
-                    // "one header each" holds exactly when there are cloud photos or albums to lead.
-                    val returnHasHeaders =
-                        state.hiddenCloudPhotos.isNotEmpty() || state.hiddenAlbums.isNotEmpty()
+                    // "one header each" holds exactly when there are cloud photos, albums or folders
+                    // to lead.
+                    val returnHasHeaders = state.hiddenCloudPhotos.isNotEmpty() ||
+                        state.hiddenAlbums.isNotEmpty() || state.hiddenFolders.isNotEmpty()
                     ReturnToViewerPhoto(
                         gridState = gridState,
                         groups = returnGroups,
@@ -385,6 +405,39 @@ fun HiddenAlbumScreen(
                         verticalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 4.dp),
                         modifier = Modifier.fillMaxSize().then(dragMod),
                     ) {
+                        // Photos hidden before the vault covered backed-up ones keep their device
+                        // file in the phone's gallery, so they are hidden here and visible in every
+                        // other gallery app. Both kinds sit in this grid looking identical, which is
+                        // the one thing worth saying out loud on a screen whose whole promise is that
+                        // what it holds is out of sight.
+                        if (state.looseDeviceCopyLinkIds.isNotEmpty()) {
+                            item(span = { GridItemSpan(maxLineSpan) }, key = "loose_device_copies") {
+                                Row(
+                                    verticalAlignment = Alignment.Top,
+                                    modifier = Modifier
+                                        .padding(horizontal = 8.dp, vertical = 10.dp)
+                                        .background(PillBg, RoundedCornerShape(12.dp))
+                                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                                ) {
+                                    Icon(
+                                        Icons.Filled.Info,
+                                        contentDescription = null,
+                                        tint = FgMute,
+                                        modifier = Modifier.size(18.dp),
+                                    )
+                                    Spacer(Modifier.width(12.dp))
+                                    Text(
+                                        pluralStringResource(
+                                            R.plurals.hidden_loose_device_copies,
+                                            state.looseDeviceCopyLinkIds.size,
+                                            state.looseDeviceCopyLinkIds.size,
+                                        ),
+                                        color = FgDim,
+                                        fontSize = 12.5.sp,
+                                    )
+                                }
+                            }
+                        }
                         // Hidden cloud albums lead the grid as full-span rows above the photos.
                         // Their keys aren't in keyToIndex, so the drag-select gesture skips them.
                         if (state.hiddenAlbums.isNotEmpty()) {
@@ -418,12 +471,48 @@ fun HiddenAlbumScreen(
                                 }
                             }
                         }
+                        // Device folders whose card is off the Albums grid, in their own labelled
+                        // block below the albums. These are the same cards that grid draws, and each
+                        // one holds the folder's own vaulted photos, which is why they are not in the
+                        // flat group below. Their keys aren't in keyToIndex either, so the
+                        // drag-select skips them the same way.
+                        if (state.hiddenFolders.isNotEmpty()) {
+                            item(span = { GridItemSpan(maxLineSpan) }, key = "hidden_folders_header") {
+                                Text(
+                                    stringResource(R.string.hidden_folders_section),
+                                    color = FgPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
+                                )
+                            }
+                            items(
+                                state.hiddenFolders.chunked(2),
+                                span = { GridItemSpan(maxLineSpan) },
+                                key = { row -> "hidden_folder_row_" + row.joinToString("_") { it.name } },
+                            ) { row ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                ) {
+                                    row.forEach { folder ->
+                                        HiddenFolderCard(
+                                            folder = folder,
+                                            onOpen = { onOpenFolder(folder.name) },
+                                            onUnhide = { viewModel.unhideFolder(folder.name) },
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                    }
+                                    if (row.size == 1) Spacer(Modifier.weight(1f))
+                                }
+                            }
+                        }
                         // Individually-hidden cloud photos as their own labelled group. Each cell
                         // decrypts its thumbnail on demand (CloudPhotoCell queues the decrypt on
                         // compose, cancels on dispose) and reads the decrypted url from the shared
                         // thumbnail store. Their keys are in keyToIndex, so the grid drag-select picks
                         // them exactly like the device tiles; tapping opens the viewer, and a long-press
-                        // (or a tap in selection mode) selects for a batch reveal from the bottom dock.
+                        // (or a tap in selection mode) selects for a batch reveal from the drawer.
                         if (state.hiddenCloudPhotos.isNotEmpty()) {
                             item(span = { GridItemSpan(maxLineSpan) }, key = "hidden_cloud_photos_header") {
                                 Text(
@@ -459,7 +548,10 @@ fun HiddenAlbumScreen(
                         // A short "Hidden Photos" sub-heading only when a cloud group sits above the
                         // device photos, so the device grid reads as its own group.
                         if (state.items.isNotEmpty() &&
-                            (state.hiddenAlbums.isNotEmpty() || state.hiddenCloudPhotos.isNotEmpty())
+                            (
+                                state.hiddenAlbums.isNotEmpty() || state.hiddenFolders.isNotEmpty() ||
+                                    state.hiddenCloudPhotos.isNotEmpty()
+                                )
                         ) {
                             item(span = { GridItemSpan(maxLineSpan) }, key = "hidden_photos_header") {
                                 Text(
@@ -489,75 +581,119 @@ fun HiddenAlbumScreen(
                 }
             }
 
-            // Top header — a cancel + count pill while selecting, else the floating pill title.
-            if (state.isSelectionMode) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .statusBarsPadding()
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    IconBubble(
-                        icon = Icons.Default.Close,
-                        contentDescription = stringResource(R.string.gallery_cancel_selection),
-                        onClick = { viewModel.clearSelection() },
-                        diameter = 40.dp,
-                        iconSize = 20.dp,
-                        background = PillBg,
-                        borderColor = PillBorder,
-                        tint = FgPrimary,
-                    )
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(999.dp))
-                            .background(PillBg)
-                            .border(0.5.dp, PillBorder, RoundedCornerShape(999.dp))
-                            .padding(horizontal = 14.dp, vertical = 8.dp),
-                    ) {
-                        Text(
-                            pluralStringResource(R.plurals.count_photos_plural, state.selectedCount, state.selectedCount),
-                            color = FgPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
-                        )
-                    }
-                }
-            } else {
-                // Floating pill header (matches Search / Map / the duplicate finder).
+            // Floating pill header (matches Search / Map / the duplicate finder). Hidden while
+            // selecting, so the screen belongs to the selection alone and its back arrow cannot
+            // leave the vault mid-selection.
+            if (!state.isSelectionMode) {
                 eu.akoos.photos.presentation.memories.FloatingMemoriesHeader(
                     title = stringResource(R.string.hidden_photos_title),
                     onBack = onBack,
                 )
             }
 
-            // Bottom action dock — the one bulk action here is unhide, shown with its label.
-            AnimatedVisibility(
-                visible = state.isSelectionMode && state.selectedCount > 0,
-                enter = fadeIn(),
-                exit = fadeOut(),
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .navigationBarsPadding()
-                    .padding(bottom = 24.dp),
+            // The strip carries exactly what the grid holds selected, in the order the grid lists
+            // it: the hidden cloud photos first, then the vaulted device ones, so a sweep across
+            // both groups reads here the way it looked there.
+            val selectedItems = remember(
+                state.hiddenCloudPhotos, state.items,
+                state.selectedCloudLinkIds, state.selectedUris,
             ) {
-                Row(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(999.dp))
-                        .background(PillBgOpaque)
-                        .border(0.5.dp, PillBorder, RoundedCornerShape(999.dp))
-                        .clickable { viewModel.unhideSelected() }
-                        .padding(horizontal = 18.dp, vertical = 12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(Icons.Default.Visibility, null, tint = Accent, modifier = Modifier.size(20.dp))
-                    Text(
-                        stringResource(R.string.viewer_menu_unhide),
-                        color = Accent, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+                buildList<GalleryItem> {
+                    state.hiddenCloudPhotos.forEach {
+                        if (it.linkId in state.selectedCloudLinkIds) add(GalleryItem.CloudOnly(it))
+                    }
+                    state.items.forEach {
+                        if (it.uri in state.selectedUris) add(GalleryItem.LocalOnly(it))
+                    }
+                }
+            }
+            val hiddenSelectionActions = buildList {
+                // Takes in both groups at once: every device tile and every hidden cloud one.
+                add(
+                    SelectionAction(
+                        icon = Icons.Default.SelectAll,
+                        label = stringResource(
+                            if (state.allSelected) R.string.gallery_deselect_all else R.string.select_all,
+                        ),
+                        onClick = { viewModel.toggleSelectAll() },
+                    )
+                )
+                // Put the selection back where it came from, in the wording every other surface's
+                // reveal row carries.
+                add(
+                    SelectionAction(
+                        icon = Icons.Default.Visibility,
+                        label = stringResource(R.string.sel_label_unhide),
+                        onClick = { viewModel.unhideSelected() },
+                    )
+                )
+                // Delete acts on the device tiles alone: a hidden cloud photo is a filter over a
+                // file that is still on Drive, so there is nothing here to destroy for it.
+                if (state.selectedUris.isNotEmpty()) {
+                    add(
+                        SelectionAction(
+                            icon = Icons.Default.DeleteOutline,
+                            label = stringResource(R.string.sel_label_delete),
+                            tint = ErrorColor,
+                            onClick = { showDeleteConfirm = true },
+                        )
                     )
                 }
             }
+            // Selection drawer: the shared surface every multi-select uses, so the vault's bulk
+            // actions sit in one list, in the order every other surface lists them.
+            SelectionDrawer(
+                visible = state.isSelectionMode,
+                items = selectedItems,
+                actions = hiddenSelectionActions,
+                onDismiss = { viewModel.clearSelection() },
+                // Scrolling the vault grid collapses the drawer, so reaching past it to carry on
+                // through the photos needs no deliberate pull or tap first.
+                contentScrolling = gridState.isScrollInProgress,
+            // The vault's own cells decode fresh and cache nothing, so a hidden photo cannot be
+            // rebuilt from a cache by its uri. The strip carries the same photos and holds the line.
+            cacheThumbnails = false,
+                modifier = Modifier.align(Alignment.BottomCenter),
+            )
+
+            // Confirm before destroying vault copies. The hide took the device original with it, so
+            // there is no trash and no second copy to fall back on, and the sheet says so plainly.
+            if (showDeleteConfirm && state.selectedUris.isNotEmpty()) {
+                val deleteCount = state.selectedUris.size
+                ConfirmSheet(
+                    title = pluralStringResource(
+                        R.plurals.trash_delete_forever_title, deleteCount, deleteCount,
+                    ),
+                    message = stringResource(R.string.hidden_delete_selected_body),
+                    confirmLabel = stringResource(R.string.trash_delete_forever_confirm),
+                    dismissLabel = stringResource(R.string.cancel),
+                    onConfirm = {
+                        showDeleteConfirm = false
+                        viewModel.deleteSelectedVaulted()
+                    },
+                    onDismiss = { showDeleteConfirm = false },
+                )
+            }
         }
+
+        // Progress of a folder being returned to the device, in the same pill every other screen
+        // uses for bulk work. A folder can hold thousands, so the count is watchable and the cancel
+        // travels with it — what is already back stays back, and the rest stays in the vault. A
+        // restore outlives the vault locking behind it, so the count is withheld until it is open
+        // again rather than telling the lock screen how much is in there.
+        val restoringTpl = stringResource(R.string.device_folder_restoring_fmt)
+        eu.akoos.photos.presentation.common.OperationProgressPill(
+            progress = state.folderRestore?.takeIf { state.isAuthenticated }?.let { fr ->
+                eu.akoos.photos.presentation.common.OperationProgress(
+                    fr.done, fr.total, restoringTpl.format(fr.done, fr.total),
+                )
+            },
+            onCancel = viewModel::cancelFolderRestore,
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .statusBarsPadding()
+                .padding(top = 8.dp),
+        )
 
         eu.akoos.photos.presentation.common.ThemedSnackbarHost(
             snackbarHostState,
@@ -671,7 +807,7 @@ private fun HiddenPhotoCell(
  * request/cancel wiring plus the shared thumbnail store, so nothing is decrypted up front. Tap-only:
  * the grid-level drag-select owns the long-press, so it behaves exactly like the device hidden tiles.
  * Tapping opens the viewer over the whole hidden-cloud list; a long-press (or a tap in selection mode)
- * selects the photo for a batch reveal from the bottom dock.
+ * selects the photo for a batch reveal from the selection drawer.
  */
 @Composable
 private fun HiddenCloudPhotoCell(
@@ -737,6 +873,43 @@ private fun HiddenAlbumCard(
     }
 }
 
+/**
+ * A hidden device-folder card. Tapping it opens the folder, which the hide leaves fully working:
+ * only its card is off the Albums grid. The corner bubble puts that card back, and a long-press does
+ * the same as a secondary path, matching [HiddenAlbumCard] exactly.
+ */
+@Composable
+private fun HiddenFolderCard(
+    folder: DeviceFolder,
+    onOpen: () -> Unit,
+    onUnhide: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(modifier = modifier) {
+        UnifiedAlbumCard(
+            coverModel = folder.coverUri?.let(android.net.Uri::parse),
+            title = folder.name,
+            metaText = pluralStringResource(
+                R.plurals.count_photos_plural, folder.itemCount, folder.itemCount,
+            ),
+            isDeviceFolder = true,
+            onClick = onOpen,
+            onLongClick = onUnhide,
+        )
+        IconBubble(
+            icon = Icons.Default.Visibility,
+            contentDescription = stringResource(R.string.device_folder_unhide),
+            onClick = onUnhide,
+            diameter = 32.dp,
+            iconSize = 17.dp,
+            background = PillBgOpaque,
+            borderColor = PillBorder,
+            tint = Accent,
+            modifier = Modifier.align(Alignment.TopEnd).padding(6.dp),
+        )
+    }
+}
+
 private fun showBiometricPrompt(
     activity: FragmentActivity,
     onSuccess: () -> Unit,
@@ -781,8 +954,8 @@ private fun showBiometricPrompt(
     // retry or back out.
     runCatching {
         val builder = BiometricPrompt.PromptInfo.Builder()
-            .setTitle(activity.getString(R.string.hidden_auth_title))
-            .setDescription(activity.getString(R.string.hidden_auth_description))
+            .setTitle(activity.getString(R.string.hidden_photos_title))
+            .setDescription(activity.getString(R.string.hidden_photos_auth_prompt))
         // BIOMETRIC_STRONG | DEVICE_CREDENTIAL is rejected by PromptInfo.build() on
         // API 28-29 — the combined-authenticators API only exists from 30. The
         // deprecated setDeviceCredentialAllowed is the supported pre-30 mechanism

@@ -139,6 +139,8 @@ fun LocationDetailSheet(
     var showSaveAsAlbumConfirm by remember { mutableStateOf(false) }
     var showAddToAlbumSheet by remember { mutableStateOf(false) }
     val addToAlbumSheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    // The picker's own "New album" row, which names an album and then adds the selection to it.
+    var showCreateAlbumInline by remember { mutableStateOf(false) }
     var showPhotoShareSheet by remember { mutableStateOf(false) }
     val photoShareSheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
@@ -156,6 +158,28 @@ fun LocationDetailSheet(
             snackbarHostState.showSnackbar(it)
             viewModel.clearError()
         }
+    }
+
+    // How the multi-download ended, worded exactly as the timeline and search surfaces word theirs.
+    val downloadDoneFmt = stringResource(R.string.gallery_download_done)
+    val downloadDoneSingular = stringResource(R.string.gallery_download_done_singular)
+    val downloadPartialFmt = stringResource(R.string.gallery_download_partial)
+    // Same as the gallery: say so the moment the download starts, since the running count lives on
+    // the Activity screen. Keyed on the transition into Working, not on the progress itself.
+    val downloadStarted = state.downloadState is LocationOpState.Working
+    val downloadStartedMsg = stringResource(R.string.download_started_background)
+    LaunchedEffect(downloadStarted) {
+        if (downloadStarted) snackbarHostState.showSnackbar(downloadStartedMsg)
+    }
+    LaunchedEffect(state.downloadResult) {
+        val r = state.downloadResult ?: return@LaunchedEffect
+        val msg = when {
+            r.failed > 0 -> downloadPartialFmt.format(r.succeeded, r.failed)
+            r.succeeded == 1 -> downloadDoneSingular
+            else -> downloadDoneFmt.format(r.succeeded)
+        }
+        snackbarHostState.showSnackbar(msg)
+        viewModel.clearDownloadResult()
     }
 
     val savedAsAlbumFmt = stringResource(R.string.location_saved_as_album_fmt)
@@ -256,7 +280,6 @@ fun LocationDetailSheet(
                     coverModel = coverModel,
                     title = state.placeName,
                     photoCountText = countLabel,
-                    canRename = false,
                     titleActions = if (state.items.isNotEmpty()) {
                         {
                             // Create a Drive album from this place — a progress ring while the
@@ -542,22 +565,16 @@ fun LocationDetailSheet(
             )
         }
 
-        // Unified progress pill — one surface for the multi-download and multi-share, matching the
-        // album and device-folder bulk actions. Offset below the selection bar while selecting.
-        val downloadingTpl = stringResource(R.string.op_downloading_fmt)
+        // Progress pill for the multi-share, matching the album and device-folder bulk actions.
+        // Offset below the selection bar while selecting. The download is not here: it registers
+        // with the TransferCenter, so the Activity screen reports it, and the dock's own download
+        // button carries a ring for as long as it runs.
         val sharingTpl = stringResource(R.string.op_sharing_fmt)
-        val dlState = state.downloadState
         val shState = state.shareState
-        val opProgress = when {
-            dlState is LocationOpState.Working ->
-                eu.akoos.photos.presentation.common.OperationProgress(
-                    dlState.done, dlState.total, downloadingTpl.format(dlState.done, dlState.total),
-                )
-            shState is LocationOpState.Working ->
-                eu.akoos.photos.presentation.common.OperationProgress(
-                    shState.done, shState.total, sharingTpl.format(shState.done, shState.total),
-                )
-            else -> null
+        val opProgress = (shState as? LocationOpState.Working)?.let {
+            eu.akoos.photos.presentation.common.OperationProgress(
+                it.done, it.total, sharingTpl.format(it.done, it.total),
+            )
         }
         eu.akoos.photos.presentation.common.OperationProgressPill(
             progress = opProgress,
@@ -603,16 +620,38 @@ fun LocationDetailSheet(
             selectedItems = addItems,
             cloudAlbums = albums,
             sheetState = addToAlbumSheetState,
-            onCreateNew = { showAddToAlbumSheet = false },
+            onCreateNew = {
+                showAddToAlbumSheet = false
+                showCreateAlbumInline = true
+            },
             onCloudAlbumSelected = { album ->
                 showAddToAlbumSheet = false
-                viewModel.addSelectedToAlbum(album.linkId) { _, _ ->
-                    scope.launch {
-                        snackbarHostState.showSnackbar(addCtx.getString(R.string.device_folder_added_to_album))
-                    }
+                viewModel.addSelectedToAlbum(album.linkId) { joined, queued ->
+                    val msg = if (joined > 0 || queued > 0) R.string.device_folder_added_to_album
+                        else R.string.album_picker_empty
+                    scope.launch { snackbarHostState.showSnackbar(addCtx.getString(msg)) }
                 }
             },
             onDismiss = { showAddToAlbumSheet = false },
+        )
+    }
+
+    // Name a brand-new album for the selection, then create it and add the photos to it — the same
+    // two steps the timeline's picker runs, so the row means the same thing on both.
+    if (showCreateAlbumInline) {
+        val createCtx = LocalContext.current
+        eu.akoos.photos.presentation.gallery.GalleryNewAlbumDialog(
+            onDismiss = { showCreateAlbumInline = false },
+            onCreate = { name ->
+                showCreateAlbumInline = false
+                viewModel.createAlbumThenAddSelected(name) { joined, queued, error ->
+                    val msg = error ?: createCtx.getString(
+                        if (joined > 0 || queued > 0) R.string.device_folder_added_to_album
+                        else R.string.album_picker_empty,
+                    )
+                    scope.launch { snackbarHostState.showSnackbar(msg) }
+                }
+            },
         )
     }
 

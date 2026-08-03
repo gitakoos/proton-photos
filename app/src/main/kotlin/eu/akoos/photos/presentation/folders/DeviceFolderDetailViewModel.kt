@@ -28,6 +28,7 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import androidx.datastore.preferences.core.edit
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -36,6 +37,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -44,10 +46,28 @@ import kotlinx.coroutines.launch
 import me.proton.core.accountmanager.domain.AccountManager
 import me.proton.core.domain.entity.UserId
 import eu.akoos.photos.data.preferences.SettingsKeys
+import eu.akoos.photos.data.hidden.HiddenCloudPhotos
+import eu.akoos.photos.data.hidden.HiddenFolderProgress
+import eu.akoos.photos.data.hidden.HiddenFolderRecords
+import eu.akoos.photos.data.hidden.HiddenVaultDecisions
+import eu.akoos.photos.data.hidden.HiddenVaultDiagnostics
+import eu.akoos.photos.data.hidden.HiddenVaultJournal
+import eu.akoos.photos.data.hidden.HiddenVaultRecords
+import eu.akoos.photos.data.hidden.HiddenVaultRestorer
+import eu.akoos.photos.presentation.util.formatBytes
+import eu.akoos.photos.util.FolderCoverMap
 import eu.akoos.photos.util.MetadataStripConfig
+import eu.akoos.photos.util.ProtonPhotosStorage
 import eu.akoos.photos.util.ExifHelper
 import eu.akoos.photos.util.StripResult
+import eu.akoos.photos.presentation.albums.AlbumPhotoSortMode
+import eu.akoos.photos.presentation.common.FavoriteActionState
 import eu.akoos.photos.presentation.common.MultiStripState
+import eu.akoos.photos.presentation.common.PhotoSortOrder
+import eu.akoos.photos.presentation.common.favoriteTurnsOn
+import eu.akoos.photos.presentation.common.StripOutcome
+import eu.akoos.photos.presentation.common.message
+import eu.akoos.photos.presentation.common.stripOutcome
 import android.provider.MediaStore
 import android.os.Build
 import kotlinx.coroutines.withContext
@@ -56,13 +76,16 @@ import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
+import eu.akoos.photos.domain.repository.LocalMediaRepository
 import eu.akoos.photos.domain.usecase.DeletePhotoUseCase
 import eu.akoos.photos.domain.usecase.ForceUploadLocalUrisUseCase
 import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
+import eu.akoos.photos.domain.usecase.InvalidateStrippedLocationsUseCase
 import eu.akoos.photos.presentation.common.SelectionState
 import eu.akoos.photos.presentation.common.UndoController
 import eu.akoos.photos.presentation.common.buildDeleteUndoAction
 import eu.akoos.photos.presentation.common.buildHideUndoAction
+import eu.akoos.photos.presentation.common.withFavoriteSettled
 import eu.akoos.photos.presentation.viewer.PublicLinkState
 import eu.akoos.photos.R
 import javax.inject.Inject
@@ -77,16 +100,34 @@ class DeviceFolderDetailViewModel @Inject constructor(
     private val getGalleryItems: GetGalleryItemsUseCase,
     private val accountManager: AccountManager,
     private val forceUploadLocalUris: ForceUploadLocalUrisUseCase,
+    private val invalidateStrippedLocations: InvalidateStrippedLocationsUseCase,
     private val deletePhotoUseCase: DeletePhotoUseCase,
     private val hiddenStorage: eu.akoos.photos.data.hidden.HiddenStorageManager,
+    private val hiddenVaultJournal: HiddenVaultJournal,
+    private val hiddenVaultRestorer: HiddenVaultRestorer,
+    private val localMediaRepo: LocalMediaRepository,
     private val driveRepo: DrivePhotoRepository,
     private val publicLink: eu.akoos.photos.presentation.common.PublicLinkController,
     private val upload: eu.akoos.photos.domain.usecase.UploadPendingUseCase,
     private val undoController: UndoController,
+    private val favoriteWriter: eu.akoos.photos.presentation.common.FavoriteWriter,
 ) : ViewModel() {
 
     private val _items = MutableStateFlow<List<GalleryItem>>(emptyList())
     val items: StateFlow<List<GalleryItem>> = _items.asStateFlow()
+
+    /** Which of [items] are in the vault rather than on the device. They show and open like the rest,
+     *  but there is no device file behind them, so every action that needs one is offered on the
+     *  others alone and these are revealed instead. */
+    private val _vaultedUris = MutableStateFlow<Set<String>>(emptySet())
+    val vaultedUris: StateFlow<Set<String>> = _vaultedUris.asStateFlow()
+
+    /** The vaulted photos on this screen that still have a Drive copy, so their tiles carry the same
+     *  green cloud the timeline puts on a backed-up photo. Vaulting takes the MediaStore row away, so
+     *  the photo reaches the grid as a device-only item and only the vault's records can still say a
+     *  Drive copy is there. */
+    private val _pairedVaultUris = MutableStateFlow<Set<String>>(emptySet())
+    val pairedVaultUris: StateFlow<Set<String>> = _pairedVaultUris.asStateFlow()
 
     /** Cloud albums the selection can be added to. Seeded once from the local DB cache so the
      *  "Add to album" picker has albums to show without a network round-trip. */
@@ -103,12 +144,276 @@ class DeviceFolderDetailViewModel @Inject constructor(
         .map { it[SettingsKeys.OFFLINE_PIN_IDS] ?: emptySet() }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
 
+    /** The device-side favourite set: the per-cell heart, and which way the dock's button goes. */
+    val favoriteIds: StateFlow<Set<String>> =
+        favoriteWriter.favoriteIds.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
+
+    private val _favoriteState = MutableStateFlow<FavoriteActionState>(FavoriteActionState.Idle)
+    val favoriteState: StateFlow<FavoriteActionState> = _favoriteState.asStateFlow()
+
+    /** Why a batch favourite did not reach every photo it was pressed for, for the screen's snackbar. */
+    private val _favoriteFailure = MutableSharedFlow<String>(extraBufferCapacity = 1)
+    val favoriteFailure: SharedFlow<String> = _favoriteFailure.asSharedFlow()
+
+    /**
+     * Puts every selected photo into the state [favoriteTurnsOn] picks for it: on if any of them is
+     * not a favourite yet, off once they all are.
+     *
+     * The selection is kept rather than cleared, so a second press takes the first one back and the
+     * button flipping is the confirmation. The folder's rows are a one-shot load, so each photo the
+     * write settled has its tag re-stated here ([withFavoriteSettled]) and both the cell's heart and
+     * the direction of the next press follow the write. A photo Drive refused is left as it is.
+     */
+    fun toggleSelectedFavorite() {
+        val selected = selection.value
+        val items = _items.value.filter { itemUriOf(it) in selected }
+        if (items.isEmpty() || _favoriteState.value !is FavoriteActionState.Idle) return
+        val turnOn = favoriteTurnsOn(items, favoriteIds.value)
+        viewModelScope.launch {
+            _favoriteState.value = FavoriteActionState.Working(0, items.size)
+            val settledIds = HashSet<String>(items.size)
+            // The button is guarded on this state, so anything that leaves it Working leaves the
+            // button dead for the rest of the session. A write reaching the network can throw, and
+            // in a plain launch that also takes the process down, so the release is unconditional.
+            val outcome = try {
+                favoriteWriter.write(
+                    items = items,
+                    favorite = turnOn,
+                    onProgress = { done ->
+                        _favoriteState.value = FavoriteActionState.Working(done, items.size)
+                    },
+                    onSettled = { settledIds += it.stableId },
+                )
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                null
+            } finally {
+                // One pass over the folder once the batch is done rather than one per photo, which
+                // on a large folder would be a full rebuild per settled write.
+                if (settledIds.isNotEmpty()) {
+                    _items.update { rows -> rows.map { withFavoriteSettled(it, settledIds, turnOn) } }
+                }
+                _favoriteState.value = FavoriteActionState.Idle
+            } ?: return@launch
+            outcome.message()?.let { _favoriteFailure.tryEmit(it.resolve(context)) }
+        }
+    }
+
+    /** The key this screen selects a photo by: its device uri. A cloud-only row has none and is
+     *  never selectable here. */
+    private fun itemUriOf(item: GalleryItem): String? = when (item) {
+        is GalleryItem.LocalOnly -> item.local.uri
+        is GalleryItem.Synced    -> item.local.uri
+        is GalleryItem.CloudOnly -> null
+    }
+
     private var primaryUserId: UserId? = null
-    private var bucketName: String = ""
+
+    /** The folder this screen is showing, as a flow so the per-folder preference states can key on it. */
+    private val bucketName = MutableStateFlow("")
+
+    /**
+     * True where this screen was opened from the vault's card for the folder rather than from the
+     * Albums grid's, which is what decides everything the two sides disagree on: the photo list, and
+     * whether the drawer's hide row reveals or hides.
+     *
+     * The folder's own hidden state cannot decide it. A folder the vault holds only part of has a
+     * card on each side at once, and both would read that state as true.
+     */
+    private val openedFromVault = MutableStateFlow(false)
+
+    /** True while this folder's photos also join a matching Drive album as they upload. */
+    val isMirroredAsAlbum: StateFlow<Boolean> = folderFlag(SettingsKeys.ALBUM_OPT_IN_FOLDER_NAMES)
+
+    /** True while this folder is carved out of "Back up everything". */
+    val isExcludedFromBackup: StateFlow<Boolean> = folderFlag(SettingsKeys.EXCLUDED_FOLDER_NAMES)
+
+    /** True while this folder's photos are kept out of the main timeline (display only). */
+    val isHiddenFromTimeline: StateFlow<Boolean> = folderFlag(SettingsKeys.TIMELINE_EXCLUDED_FOLDER_NAMES)
+
+    /** True while the photos this screen lists are the vault's, which is also when the drawer's hide
+     *  row reveals them. False on the device side even for a folder the vault holds photos from, so
+     *  a row that would put more away never shows as already done. The weaker [isHiddenFromTimeline]
+     *  only keeps a folder's photos out of the main feed. */
+    val isHiddenCard: StateFlow<Boolean> =
+        combine(folderFlag(SettingsKeys.HIDDEN_FOLDER_NAMES), openedFromVault) { hidden, fromVault ->
+            hidden && fromVault
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    /** Direction this folder lists its photos in, read straight from preferences so a change lands
+     *  on the grid without a reload. Shares the album's type: the choice is the same two directions
+     *  over the same capture time, and a second enum would fork the labels and icons with it. */
+    private val sortModeFlow = context.settingsDataStore.data
+        .map { AlbumPhotoSortMode.fromOrdinal(it[SettingsKeys.DEVICE_FOLDER_PHOTO_SORT_MODE]) }
+
+    /** The same value for the actions sheet, which only has to say which direction is ticked. */
+    val sortMode: StateFlow<AlbumPhotoSortMode> = sortModeFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), AlbumPhotoSortMode.Default)
+
+    /** Persist a direction. Every folder shares the one choice, matching how the album stores its. */
+    fun setSortMode(mode: AlbumPhotoSortMode) {
+        viewModelScope.launch {
+            context.settingsDataStore.edit { it[SettingsKeys.DEVICE_FOLDER_PHOTO_SORT_MODE] = mode.ordinal }
+        }
+    }
+
+    /** The photo this folder's cover is pinned to, or null while it follows the first photo of the
+     *  current order. The hero still falls back when the pinned photo is not among the folder's
+     *  current items. */
+    val pinnedCoverUri: StateFlow<String?> =
+        combine(context.settingsDataStore.data, bucketName) { prefs, name ->
+            if (name.isEmpty()) null
+            else FolderCoverMap.parse(prefs[SettingsKeys.FOLDER_COVER_URI_MAP])[name]
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    /** Pin the single selected photo as this folder's cover and drop the selection. Mirrors the
+     *  album's cover action, but the choice lives in a preference: a device folder is a MediaStore
+     *  bucket, which carries nothing of its own to store a cover on.
+     *
+     *  [FolderCoverSelection] answers which photo qualifies, so a hidden one is refused here as well
+     *  as on the row that offers the action. */
+    fun setSelectedAsFolderCover(onDone: () -> Unit) {
+        val name = bucketName.value
+        val uri = FolderCoverSelection.pinnable(selection.flow.value, _vaultedUris.value)
+        if (name.isEmpty() || uri.isNullOrEmpty()) return
+        viewModelScope.launch {
+            runCatching {
+                context.settingsDataStore.edit { p ->
+                    p[SettingsKeys.FOLDER_COVER_URI_MAP] =
+                        FolderCoverMap.withCover(p[SettingsKeys.FOLDER_COVER_URI_MAP] ?: emptySet(), name, uri)
+                }
+            }.onSuccess {
+                selection.clear()
+                onDone()
+            }
+        }
+    }
+
+    /** Whether the current folder's name is in [key]'s set. Every per-folder preference keys on the
+     *  bucket name, matching the Settings pickers. */
+    private fun folderFlag(
+        key: androidx.datastore.preferences.core.Preferences.Key<Set<String>>,
+    ): StateFlow<Boolean> = combine(context.settingsDataStore.data, bucketName) { prefs, name ->
+        name.isNotEmpty() && name in (prefs[key] ?: emptySet())
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    /** The one writer for this screen's per-folder preference sets. [enable] null flips the stored
+     *  state; reading and writing inside the same edit keeps a flip atomic. */
+    private suspend fun setFolderFlag(
+        key: androidx.datastore.preferences.core.Preferences.Key<Set<String>>,
+        enable: Boolean?,
+    ) {
+        val name = bucketName.value
+        if (name.isEmpty()) return
+        context.settingsDataStore.edit { p ->
+            val current = p[key] ?: emptySet()
+            val on = enable ?: (name !in current)
+            p[key] = if (on) current + name else current - name
+        }
+    }
+
+    /** Opt this folder in or out of also surfacing as a Drive album. */
+    fun toggleMirrorAsAlbum() {
+        viewModelScope.launch { setFolderFlag(SettingsKeys.ALBUM_OPT_IN_FOLDER_NAMES, enable = null) }
+    }
+
+    /** Carve this folder out of "Back up everything", or put it back in. */
+    fun toggleExcludedFromBackup() {
+        viewModelScope.launch {
+            setFolderFlag(SettingsKeys.EXCLUDED_FOLDER_NAMES, enable = null)
+            // Same follow-up the Settings picker runs: a fresh reconcile drops rows that just landed
+            // in the excluded set before an in-flight sync pass can upload them.
+            val wifiOnly = context.settingsDataStore.data.first()[SettingsKeys.SYNC_WIFI_ONLY] != false
+            eu.akoos.photos.worker.SyncWorker.runNow(context, wifiOnly)
+        }
+    }
+
+    /** Show or hide this folder's photos in the main timeline. Display only, so nothing to reconcile —
+     *  the gallery observes the key and re-filters on the next emission. */
+    fun toggleHiddenFromTimeline() {
+        viewModelScope.launch {
+            setFolderFlag(SettingsKeys.TIMELINE_EXCLUDED_FOLDER_NAMES, enable = null)
+        }
+    }
+
+    /**
+     * Put this screen's photos into the vault, or take them back out of it. A folder the vault holds
+     * entirely has no card on the Albums grid left to open, so it is genuinely put away rather than
+     * merely unlisted.
+     *
+     * Which direction runs follows [openedFromVault] — the side the user came in from — rather than
+     * the folder's stored hidden state, which is true of both sides at once for a folder the vault
+     * holds only part of. The device side therefore goes on offering the hide for photos taken since
+     * an earlier one, and joins them to the folder already in the vault: the name is a set member, so
+     * storing it again is the same folder rather than a second one, and the copies land beside what
+     * is already there. Only device-only photos are vaulted; synced and cloud-only ones stay filters,
+     * which is the routing every hide surface follows.
+     *
+     * The folder's name is recorded BEFORE the first copy and cleared AFTER the last restore, so a
+     * photo in the vault always belongs to a folder that is listed as hidden. A hide the user stops
+     * part-way therefore leaves a folder that is hidden, holds what was already copied, and still
+     * shows the rest on the device — never a set of vaulted photos with no folder to reach them by.
+     */
+    fun toggleHiddenCard() {
+        if (folderVaultJob?.isActive == true) return
+        val name = bucketName.value
+        if (name.isEmpty()) return
+        val reveal = openedFromVault.value
+        stopFolderVault.set(false)
+        folderVaultJob = viewModelScope.launch {
+            try {
+                if (reveal) {
+                    val failed = hiddenVaultRestorer.restoreFolder(
+                        bucketName = name,
+                        onProgress = { done, total ->
+                            _folderVault.value = HiddenFolderProgress(done, total, restoring = true)
+                        },
+                        shouldStop = { stopFolderVault.get() },
+                    )
+                    if (failed > 0) {
+                        _hideFailure.tryEmit(
+                            context.resources.getQuantityString(
+                                R.plurals.hidden_restore_failed_some, failed, failed,
+                            ),
+                        )
+                    }
+                    return@launch
+                }
+                // The targets are what this screen is showing, which on the device side is the
+                // folder's live photos: exactly the ones an earlier hide did not take. The items are
+                // already merged, so each one's own type routes it and no pairing lookup is needed.
+                val split = HiddenFolderRecords.folderHideSplit(
+                    items = _items.value,
+                    bucketName = name,
+                )
+                // The flag goes in before the copies start so a fully-vaulted folder still has a
+                // name to show. That makes it one more thing a failed hide has to give back, so the
+                // name is held until the hide is known to have landed.
+                pendingHideFolderName = name
+                setFolderFlag(SettingsKeys.HIDDEN_FOLDER_NAMES, enable = true)
+                if (!split.isEmpty) runHide(split, reportProgress = true)
+            } finally {
+                _folderVault.value = null
+            }
+        }
+    }
+
+    /** Stop a folder hide or restore between photos. Cooperative: the file in transit finishes, and
+     *  a hide that stops still journals and deletes the originals of everything already copied, so
+     *  those photos are in the vault rather than copied for nothing. */
+    fun cancelFolderVault() {
+        stopFolderVault.set(true)
+    }
 
     /** One-shot system-share intents emitted to the screen, which launches the chooser. */
     private val _shareIntent = MutableSharedFlow<android.content.Intent>(extraBufferCapacity = 1)
     val shareIntent: SharedFlow<android.content.Intent> = _shareIntent.asSharedFlow()
+
+    /** Why a hide refused to start, for the screen's snackbar. A hide that cannot fit on the volume,
+     *  or cannot record what it is about to delete, has to say so rather than end in silence. */
+    private val _hideFailure = MutableSharedFlow<String>(extraBufferCapacity = 1)
+    val hideFailure: SharedFlow<String> = _hideFailure.asSharedFlow()
 
     /** Live progress of an in-flight folder back-up. */
     data class BackupProgress(val done: Int, val total: Int)
@@ -116,6 +421,22 @@ class DeviceFolderDetailViewModel @Inject constructor(
     /** URIs queued by the most recent back-up action. Drives [backupProgress]; cleared when every
      *  queued photo has finished uploading (or when the screen leaves). */
     private val _backupTarget = MutableStateFlow<Set<String>>(emptySet())
+
+    /** done/total of a folder moving in or out of the vault, or null when none is. Drives the same
+     *  progress pill the back-up uses, so the two long folder operations report the same way. */
+    private val _folderVault = MutableStateFlow<HiddenFolderProgress?>(null)
+    val folderVault: StateFlow<HiddenFolderProgress?> = _folderVault.asStateFlow()
+
+    /** The running folder hide or restore, so a second tap cannot start a parallel one. */
+    private var folderVaultJob: Job? = null
+
+    /** The collector feeding [items], so a second [load] replaces it instead of running beside it and
+     *  publishing the two sides of the folder in turn. */
+    private var loadJob: Job? = null
+
+    /** Raised by [cancelFolderVault] and polled between photos. A flag rather than a job cancel, so
+     *  a stopped hide still records and deletes the originals of everything it already copied. */
+    private val stopFolderVault = java.util.concurrent.atomic.AtomicBoolean(false)
 
     /** done/total for the active back-up (null when idle). A queued photo counts done once its row flips to Synced. */
     val backupProgress: StateFlow<BackupProgress?> = combine(_items, _backupTarget) { items, target ->
@@ -143,31 +464,105 @@ class DeviceFolderDetailViewModel @Inject constructor(
         _backupTarget.value = emptySet()
     }
 
-    fun load(bucketName: String) {
-        this.bucketName = bucketName
+    /**
+     * Show [bucketName]. [fromVault] is which card opened this screen, and therefore which of the
+     * folder's two sides it answers for — see [openedFromVault].
+     */
+    fun load(bucketName: String, fromVault: Boolean = false) {
+        this.bucketName.value = bucketName
+        this.openedFromVault.value = fromVault
         loadAlbums()
-        viewModelScope.launch {
+        loadJob?.cancel()
+        loadJob = viewModelScope.launch {
             val userId = accountManager.getPrimaryUserId().first() ?: return@launch
-            val hiddenUrisFlow = context.settingsDataStore.data.map {
-                it[SettingsKeys.HIDDEN_PHOTO_URIS] ?: emptySet()
-            }
-            combine(getGalleryItems.invoke(userId), hiddenUrisFlow) { all, hiddenUris ->
-                all.mapNotNull { item ->
+            val vaultFlow = context.settingsDataStore.data
+                .map { prefs ->
+                    VaultRecords(
+                        vaultedUris = prefs[SettingsKeys.HIDDEN_PHOTO_URIS] ?: emptySet(),
+                        sourceFolders = prefs[SettingsKeys.HIDDEN_URI_SOURCE_FOLDER_MAP] ?: emptySet(),
+                        originalNames = prefs[SettingsKeys.HIDDEN_URI_ORIGINAL_NAME_MAP] ?: emptySet(),
+                        pairedUris = HiddenVaultRecords.pairedUris(
+                            prefs[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] ?: emptySet(),
+                        ),
+                        isFolderHidden = bucketName in (prefs[SettingsKeys.HIDDEN_FOLDER_NAMES] ?: emptySet()),
+                    )
+                }
+                .distinctUntilChanged()
+            combine(
+                getGalleryItems.invoke(userId),
+                vaultFlow,
+                sortModeFlow,
+            ) { all, vault, sort ->
+                val visible = all.mapNotNull { item ->
                     val (uri, bucket) = when (item) {
                         is GalleryItem.LocalOnly -> item.local.uri to item.local.bucketName
                         is GalleryItem.Synced -> item.local.uri to item.local.bucketName
                         is GalleryItem.CloudOnly -> return@mapNotNull null
                     }
-                    if (bucket != bucketName || uri in hiddenUris) return@mapNotNull null
+                    if (bucket != bucketName || uri in vault.vaultedUris) return@mapNotNull null
                     item
-                }.sortedByDescending {
-                    when (it) {
-                        is GalleryItem.LocalOnly -> it.local.dateTaken
-                        is GalleryItem.Synced -> it.local.dateTaken
-                        is GalleryItem.CloudOnly -> 0L
-                    }
                 }
-            }.collect { _items.value = it }
+                // Only the vault side resolves the vault records: on the device side that costs a
+                // lookup per record for photos the screen does not list.
+                val showsVault = fromVault && vault.isFolderHidden
+                val vaulted = if (showsVault) vaultedItemsOf(bucketName, vault) else emptyList()
+                // Ordered on captureTimeMs, the value the screen's month headers and the scrubber
+                // read. A synced photo's device DATE_TAKEN can differ from its Drive capture time —
+                // a downloaded file is dated at download — so ordering on the raw device date would
+                // file such a photo under a heading it sorts nowhere near.
+                val ordered = PhotoSortOrder.ordered(
+                    HiddenFolderRecords.folderPhotos(visible, vaulted, showsVault),
+                    newestFirst = sort == AlbumPhotoSortMode.NewestFirst,
+                )
+                val vaultedUris = vaulted.mapTo(mutableSetOf()) { it.local.uri }
+                // Narrowed to what this screen lists, so the badge set stays the size of one folder
+                // rather than of the whole vault.
+                Triple(ordered, vaultedUris, vaultedUris intersect vault.pairedUris)
+            }.collect { (ordered, vaultedUris, pairedUris) ->
+                _vaultedUris.value = vaultedUris
+                _pairedVaultUris.value = pairedUris
+                _items.value = ordered
+            }
+        }
+    }
+
+    /** The vault records this screen reads a folder's contents from, snapshotted together so one
+     *  emission carries a consistent view of the sets and of the folder's own hidden state — read
+     *  apart, they could describe a hidden folder's contents with the folder still listed as open. */
+    private data class VaultRecords(
+        val vaultedUris: Set<String>,
+        val sourceFolders: Set<String>,
+        val originalNames: Set<String>,
+        val pairedUris: Set<String>,
+        val isFolderHidden: Boolean,
+    )
+
+    /**
+     * The photos of [bucketName] that live in the vault rather than on the device.
+     *
+     * A hidden folder has no MediaStore row left carrying its bucket name, so the gallery feed the
+     * list above is built from cannot see a single one of them. Reading them from the vault's own
+     * records is what keeps a fully-vaulted folder openable, and it is the same source the folder's
+     * card counts from, so the two always agree on what the folder holds.
+     *
+     * Each vault file lives under a private code, so the name recorded at hide time is put back on it
+     * and the bucket is restored, which is what lets the rest of the screen treat these as the
+     * folder's photos.
+     */
+    private suspend fun vaultedItemsOf(bucketName: String, vault: VaultRecords): List<GalleryItem.LocalOnly> {
+        val uris = HiddenFolderRecords
+            .vaultedByBucket(vault.sourceFolders, vault.vaultedUris)[bucketName]
+            .orEmpty()
+        if (uris.isEmpty()) return emptyList()
+        return uris.mapNotNull { uri ->
+            val item = localMediaRepo.queryByUri(uri) ?: return@mapNotNull null
+            val original = vault.originalNames.firstOrNull { it.startsWith("$uri|") }?.substringAfter('|')
+            GalleryItem.LocalOnly(
+                item.copy(
+                    bucketName = bucketName,
+                    displayName = if (original.isNullOrBlank()) item.displayName else original,
+                ),
+            )
         }
     }
 
@@ -191,32 +586,73 @@ class DeviceFolderDetailViewModel @Inject constructor(
     /**
      * Add the selection to album [albumLinkId]: cloud-backed selections join now; LocalOnly ones are
      * queued to upload and join after. Reports (joined now, queued for after) for the snackbar.
+     *
+     * A selection with nothing to add — every photo in it is in the vault, so none has a file to
+     * upload — still reports, as (0, 0). The caller asked a question and gets an answer either way.
      */
     fun addSelectedToAlbum(albumLinkId: String, onResult: (joined: Int, queued: Int) -> Unit) {
-        val userId = primaryUserId ?: return
+        val userId = primaryUserId ?: return onResult(0, 0)
         val items = selectedGalleryItems()
-        if (items.isEmpty()) return
+        if (items.isEmpty()) return onResult(0, 0)
         viewModelScope.launch {
-            val cloudLinkIds = items.mapNotNull { item ->
-                when (item) {
-                    is GalleryItem.Synced    -> item.cloud.linkId
-                    is GalleryItem.CloudOnly -> item.cloud.linkId
-                    is GalleryItem.LocalOnly -> null
-                }
-            }
-            val localUris = items.mapNotNull { (it as? GalleryItem.LocalOnly)?.local?.uri }
-
-            val joined = if (cloudLinkIds.isNotEmpty()) {
-                runCatching { driveRepo.addPhotosToAlbum(userId, albumLinkId, cloudLinkIds) }
-                    .getOrNull()?.succeededLinkIds?.size ?: 0
-            } else 0
-            val queued = if (localUris.isNotEmpty()) {
-                forceUploadLocalUris.queueForAlbum(userId, albumLinkId, localUris)
-            } else 0
-
+            val (joined, queued) = addItemsToAlbum(userId, albumLinkId, items)
             selection.clear()
             onResult(joined, queued)
         }
+    }
+
+    /**
+     * Create a cloud album named [name] and add the selection to it, the two steps the picker's
+     * "New album" row stands for. Reports the same (joined, queued) pair the add to an existing
+     * album does, plus the reason when the album could not be created.
+     */
+    fun createAlbumThenAddSelected(
+        name: String,
+        onResult: (joined: Int, queued: Int, error: String?) -> Unit,
+    ) {
+        val trimmed = ProtonPhotosStorage.sanitize(name)
+        if (trimmed.isEmpty()) return onResult(0, 0, context.getString(R.string.albums_name_empty))
+        val userId = primaryUserId ?: return onResult(0, 0, context.getString(R.string.viewer_not_signed_in))
+        val items = selectedGalleryItems()
+        if (items.isEmpty()) return onResult(0, 0, null)
+        viewModelScope.launch {
+            val albumLinkId = try {
+                driveRepo.createDriveAlbum(userId, trimmed).linkId
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                onResult(0, 0, context.getString(R.string.gallery_create_album_failed, e.message ?: ""))
+                return@launch
+            }
+            val (joined, queued) = addItemsToAlbum(userId, albumLinkId, items)
+            selection.clear()
+            onResult(joined, queued, null)
+        }
+    }
+
+    /** The one add body both album routes share: cloud-backed photos join now, device-only ones are
+     *  queued to upload and join after. Returns (joined now, queued for after). */
+    private suspend fun addItemsToAlbum(
+        userId: UserId,
+        albumLinkId: String,
+        items: List<GalleryItem>,
+    ): Pair<Int, Int> {
+        val cloudLinkIds = items.mapNotNull { item ->
+            when (item) {
+                is GalleryItem.Synced    -> item.cloud.linkId
+                is GalleryItem.CloudOnly -> item.cloud.linkId
+                is GalleryItem.LocalOnly -> null
+            }
+        }
+        val localUris = items.mapNotNull { (it as? GalleryItem.LocalOnly)?.local?.uri }
+
+        val joined = if (cloudLinkIds.isNotEmpty()) {
+            runCatching { driveRepo.addPhotosToAlbum(userId, albumLinkId, cloudLinkIds) }
+                .getOrNull()?.succeededLinkIds?.size ?: 0
+        } else 0
+        val queued = if (localUris.isNotEmpty()) {
+            forceUploadLocalUris.queueForAlbum(userId, albumLinkId, localUris)
+        } else 0
+        return joined to queued
     }
 
     /** Outcome of an upload action, so the screen can word its snackbar. */
@@ -225,7 +661,7 @@ class DeviceFolderDetailViewModel @Inject constructor(
     /** Back up every selected LocalOnly photo; already-synced selections are skipped (reported as alreadyBackedUp). */
     fun uploadSelected(onResult: (UploadOutcome) -> Unit) {
         val userId = primaryUserId ?: return
-        val selected = selection.value
+        val selected = selectedDeviceUris()
         if (selected.isEmpty()) return
         viewModelScope.launch {
             // Only LocalOnly items upload; Synced selections are counted as already-backed-up.
@@ -254,16 +690,16 @@ class DeviceFolderDetailViewModel @Inject constructor(
 
     /** Share the selection to other apps. Device-folder items are local files, so no download step. */
     fun shareSelected() {
-        val sel = selection.value
+        val sel = selectedDeviceUris()
         if (sel.isEmpty()) return
-        shareUris(sel.toList())
+        shareUris(sel)
         selection.clear()
     }
 
     /** Share specific device photos (by local uri) to other apps — used by the per-cell long-press menu. */
     fun shareUris(uris: List<String>) {
         if (uris.isEmpty()) return
-        val uriSet = uris.toSet()
+        val uriSet = uris.toSet() - _vaultedUris.value
         val items = _items.value.filter { localUriOf(it) in uriSet }
         val parsed = items.mapNotNull { localUriOf(it)?.let(android.net.Uri::parse) }
         if (parsed.isEmpty()) return
@@ -290,22 +726,6 @@ class DeviceFolderDetailViewModel @Inject constructor(
 
     fun currentPublicLinkUrl(): String? = publicLink.currentUrl()
 
-    /** Back up specific device photos (by local uri) — used by the per-cell long-press menu. */
-    fun backUpUris(uris: List<String>, onResult: (UploadOutcome) -> Unit) {
-        val userId = primaryUserId ?: return
-        if (uris.isEmpty()) return
-        viewModelScope.launch {
-            val syncedUris = _items.value
-                .filterIsInstance<GalleryItem.Synced>()
-                .map { it.local.uri }
-                .toSet()
-            val toUpload = uris.filter { it !in syncedUris }
-            val alreadyBackedUp = uris.size - toUpload.size
-            val queued = if (toUpload.isNotEmpty()) forceUploadLocalUris.forceUpload(userId, toUpload) else 0
-            onResult(UploadOutcome(queued = queued, alreadyBackedUp = alreadyBackedUp))
-        }
-    }
-
     /**
      * Back up every photo in this folder. [asMirror] adds the folder to the album-mirror opt-in set first,
      * so uploads also join a matching Drive album; otherwise they just back up to the timeline.
@@ -313,17 +733,13 @@ class DeviceFolderDetailViewModel @Inject constructor(
     fun backUpAll(asMirror: Boolean, onResult: (UploadOutcome) -> Unit) {
         val userId = primaryUserId ?: return
         viewModelScope.launch {
-            if (asMirror && bucketName.isNotEmpty()) {
-                context.settingsDataStore.edit { p ->
-                    val current = p[SettingsKeys.ALBUM_OPT_IN_FOLDER_NAMES] ?: emptySet()
-                    p[SettingsKeys.ALBUM_OPT_IN_FOLDER_NAMES] = current + bucketName
-                }
-            }
+            if (asMirror) setFolderFlag(SettingsKeys.ALBUM_OPT_IN_FOLDER_NAMES, enable = true)
             val syncedUris = _items.value
                 .filterIsInstance<GalleryItem.Synced>()
                 .map { it.local.uri }
                 .toSet()
-            val allLocal = _items.value.mapNotNull { localUriOf(it) }
+            // Vaulted photos are deliberately off Drive's radar, so a folder-wide back-up skips them.
+            val allLocal = _items.value.mapNotNull { localUriOf(it) } - _vaultedUris.value
             val toUpload = allLocal.filter { it !in syncedUris }
             val alreadyBackedUp = allLocal.size - toUpload.size
             if (toUpload.isNotEmpty()) _backupTarget.value = toUpload.toSet()
@@ -343,26 +759,42 @@ class DeviceFolderDetailViewModel @Inject constructor(
     /** Deferred cloud-delete work, held while the system trash dialog is up. */
     private var pendingPermissionResult: DeletePhotoUseCase.Result.NeedsMediaWritePermission? = null
 
-    /** Private vault URIs created by a hide that is waiting on the system delete dialog. Committed to
-     *  HIDDEN_PHOTO_URIS once the delete confirms, rolled back if it is cancelled. */
+    /** Private vault URIs of a hide whose intent is journalled and whose system delete has not
+     *  confirmed yet. Published into HIDDEN_PHOTO_URIS once it does, discarded if it is cancelled. */
     private var pendingHidePrivateUris: List<String> = emptyList()
 
-    /** "privateUri|sourceFolder" entries aligned with [pendingHidePrivateUris], persisted into
-     *  HIDDEN_URI_SOURCE_FOLDER_MAP on commit so unhide can return each file to its origin folder. */
-    private var pendingHideSourceFolders: List<String> = emptyList()
-
-    /** "privateUri|originalName" entries aligned with [pendingHidePrivateUris], persisted into
-     *  HIDDEN_URI_ORIGINAL_NAME_MAP on commit so unhide can restore the original filename. */
-    private var pendingHideOriginalNames: List<String> = emptyList()
-
-    /** "privateUri|cloudLinkId" entries for the synced photos in the batch, persisted into
-     *  [SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] on commit so unhide can transplant the existing
-     *  SyncState row onto the restored URI instead of re-uploading a duplicate Drive entry. */
-    private var pendingHideCloudIds: List<String> = emptyList()
-
+    /** The selected photos that still have a device file. A vaulted one is a copy in app-private
+     *  storage with no MediaStore row, so there is nothing for a delete, a hide, an album add or a
+     *  metadata write to act on until it is revealed. */
     private fun selectedGalleryItems(): List<GalleryItem> {
         val sel = selection.value
-        return _items.value.filter { localUriOf(it) in sel }
+        val vaulted = _vaultedUris.value
+        return _items.value.filter { localUriOf(it) in sel && localUriOf(it) !in vaulted }
+    }
+
+    /** The selected uris that still have a device file, for the actions that take uris rather than
+     *  items. */
+    private fun selectedDeviceUris(): List<String> = (selection.value - _vaultedUris.value).toList()
+
+    /**
+     * Return every selected vaulted photo to the device.
+     *
+     * [HiddenVaultRestorer] owns the round trip, so a photo revealed from inside its folder comes back
+     * with the same name, place and cloud pairing it would from the vault screen, and the folder stops
+     * being hidden once the vault holds nothing more of it.
+     */
+    fun unhideSelected() {
+        val uris = selection.value.filter { it in _vaultedUris.value }
+        if (uris.isEmpty()) return
+        selection.clear()
+        viewModelScope.launch {
+            val failed = hiddenVaultRestorer.restoreAll(uris)
+            if (failed > 0) {
+                _hideFailure.tryEmit(
+                    context.resources.getQuantityString(R.plurals.hidden_restore_failed_some, failed, failed),
+                )
+            }
+        }
     }
 
     /**
@@ -398,137 +830,233 @@ class DeviceFolderDetailViewModel @Inject constructor(
 
     /**
      * Move the selected photos into the app's Hidden vault or hide them client-side, the same flow the
-     * timeline uses ([GalleryViewModel.hideSelected]). A device-backed photo (device-only or synced) is
+     * timeline uses ([GalleryViewModel.hideSelected]). A photo with a device file, backed up or not, is
      * copied into app-private storage and routed through [DeletePhotoUseCase] with `freeUpSpace=true,
-     * deleteFromCloud=false, hide=true` so the MediaStore original is removed (one system-delete dialog on
-     * Android 11+); a synced photo also stashes its cloud linkId so unhide can re-pair by id. A cloud-only
-     * photo has no device file, so it hides client-side by linkId. The Drive copy is never touched.
+     * deleteFromCloud=false, hide=true` so the MediaStore original is removed (one system-delete dialog
+     * on Android 11+). A cloud-only photo has no device file and hides by linkId; the Drive copy is
+     * never touched either way.
+     *
+     * The intent is journalled BEFORE that delete and confirmed after it, so an interruption between
+     * the two leaves a repairable record instead of bytes nothing refers to — see [HiddenVaultJournal].
+     * A selection is short enough to watch behind the blocking sheet, so it reports no progress of
+     * its own; [toggleHiddenCard] runs the same body with progress for a whole folder.
      */
     fun hideSelected() {
         val items = selectedGalleryItems()
         if (items.isEmpty()) return
-        // Only device-only photos move into the vault. A synced (green) photo keeps its device file
-        // in place and hides client-side by its cloud linkId, exactly like a cloud-only photo, so the
-        // shared merge filter drops it everywhere and unhide re-includes it with no re-pairing.
-        val vaultable = items.filterIsInstance<GalleryItem.LocalOnly>()
-        val cloudFilterIds = items.mapNotNull {
-            when (it) {
-                is GalleryItem.Synced    -> it.cloud.linkId
-                is GalleryItem.CloudOnly -> it.cloud.linkId
-                is GalleryItem.LocalOnly -> null
-            }
-        }
         viewModelScope.launch {
             _isDeleting.value = true
             try {
-                // Client-side hide for the synced + cloud-only members: add their linkIds to the
-                // hidden set so they drop from every listing. Nothing on Drive changes.
-                if (cloudFilterIds.isNotEmpty()) {
-                    context.settingsDataStore.edit { prefs ->
-                        val existing = prefs[SettingsKeys.HIDDEN_CLOUD_PHOTO_IDS] ?: emptySet()
-                        prefs[SettingsKeys.HIDDEN_CLOUD_PHOTO_IDS] = existing + cloudFilterIds
-                    }
-                }
-                if (vaultable.isEmpty()) {
-                    // Pure cloud-only selection: the client-side hide above is the whole operation.
-                    selection.clear()
-                    return@launch
-                }
-                // Step 1: copy each device file into app-private hidden storage. A synced photo also
-                // stashes its cloud linkId so unhide can re-pair by id instead of re-uploading.
-                val collected = mutableListOf<String>()
-                val folderEntries = mutableListOf<String>()
-                val nameEntries = mutableListOf<String>()
-                val cloudIdEntries = mutableListOf<String>()
-                for (item in vaultable) {
-                    val local = when (item) {
-                        is GalleryItem.LocalOnly -> item.local
-                        is GalleryItem.Synced    -> item.local
-                        else                     -> continue
-                    }
-                    val cloudLinkId = (item as? GalleryItem.Synced)?.cloud?.linkId
-                    val sourceFolder = hiddenStorage.sourceFolderFor(local.uri, local.bucketName)
-                    val privateUri = hiddenStorage.store(
-                        local.uri, local.displayName, local.mimeType, captureTimeMs = local.dateTaken,
-                    )
-                    // A null privateUri means store() failed; it already logged a privacy-safe reason.
-                    if (privateUri != null) {
-                        collected += privateUri
-                        if (!sourceFolder.isNullOrBlank()) folderEntries += "$privateUri|$sourceFolder"
-                        if (local.displayName.isNotBlank()) nameEntries += "$privateUri|${local.displayName}"
-                        if (cloudLinkId != null) cloudIdEntries += "$privateUri|$cloudLinkId"
-                    }
-                }
-                if (collected.isEmpty()) return@launch
-                pendingHidePrivateUris = collected
-                pendingHideSourceFolders = folderEntries
-                pendingHideOriginalNames = nameEntries
-                pendingHideCloudIds = cloudIdEntries
-
-                // Step 2: delete the MediaStore originals (one system-delete dialog on Android 11+).
-                val userId = accountManager.getPrimaryUserId().first() ?: run {
-                    rollbackPendingHide()
-                    return@launch
-                }
-                when (val result = deletePhotoUseCase(userId, vaultable, freeUpSpace = true, deleteFromCloud = false, hide = true)) {
-                    is DeletePhotoUseCase.Result.Success -> {
-                        // Snapshot before commitPendingHide() clears the pending list, so Undo restores
-                        // exactly the vault URIs that were just committed.
-                        val hideUris = pendingHidePrivateUris
-                        commitPendingHide()
-                        buildHideUndoAction(hideUris)?.let { undoController.offer(it) }
-                        selection.clear()
-                    }
-                    is DeletePhotoUseCase.Result.NeedsMediaWritePermission -> {
-                        pendingPermissionResult = result
-                        _pendingDeleteIntent.value = result.pendingIntent
-                    }
-                    is DeletePhotoUseCase.Result.CloudDeleteFailed -> rollbackPendingHide()
-                }
+                runHide(HiddenFolderRecords.hideSplit(items), reportProgress = false)
             } finally {
                 _isDeleting.value = false
             }
         }
     }
 
-    /** Persist the pending hide URIs into HIDDEN_PHOTO_URIS so they survive a restart and the load()
-     *  filter keeps them out of the folder. */
-    private suspend fun commitPendingHide() {
-        val uris = pendingHidePrivateUris
-        val folderEntries = pendingHideSourceFolders
-        val nameEntries = pendingHideOriginalNames
-        val cloudIdEntries = pendingHideCloudIds
-        pendingHidePrivateUris = emptyList()
-        pendingHideSourceFolders = emptyList()
-        pendingHideOriginalNames = emptyList()
-        pendingHideCloudIds = emptyList()
-        if (uris.isEmpty()) return
-        context.settingsDataStore.edit { prefs ->
-            val current = prefs[SettingsKeys.HIDDEN_PHOTO_URIS] ?: emptySet()
-            prefs[SettingsKeys.HIDDEN_PHOTO_URIS] = current + uris
-            if (folderEntries.isNotEmpty()) {
-                val folders = prefs[SettingsKeys.HIDDEN_URI_SOURCE_FOLDER_MAP] ?: emptySet()
-                prefs[SettingsKeys.HIDDEN_URI_SOURCE_FOLDER_MAP] = folders + folderEntries
+    /**
+     * The two halves the current selection's hide would act on, for the confirmation that fronts it.
+     *
+     * The very split [hideSelected] runs on, read from the same selection, so the sheet describes
+     * exactly what the Hide button is about to do rather than what hiding does in general.
+     */
+    fun hideSplitForSelection(): HiddenFolderRecords.HideSplit =
+        HiddenFolderRecords.hideSplit(selectedGalleryItems())
+
+    /**
+     * The same two halves for a hide of the whole folder, for the confirmation the folder drawer's
+     * Hide row raises.
+     *
+     * Read off exactly what [toggleHiddenCard] routes: this screen's own photos. A folder opened
+     * from the vault side is being unhidden rather than hidden, so the drawer asks this only on the
+     * device side.
+     */
+    fun folderHideSplitPreview(): HiddenFolderRecords.HideSplit = HiddenFolderRecords.folderHideSplit(
+        items = _items.value,
+        bucketName = bucketName.value,
+    )
+
+    /**
+     * The one hide body every entry point on this screen runs, whether it was handed a selection or
+     * the whole folder.
+     *
+     * [split] carries both halves of the hide, decided by [HiddenFolderRecords] so no caller routes
+     * a photo its own way: every photo with a device file moves into the vault, and the cloud-only
+     * ones, which have no file to move, hide by their cloud linkId. Acting on both is what makes the
+     * hide cover everything the user asked for.
+     *
+     * [reportProgress] publishes done/total into [folderVault] and polls the stop flag between
+     * copies, which is what makes a folder of thousands watchable and stoppable. A stop is honoured
+     * only during the copies: what has already been copied still goes through the journal and the
+     * delete, so those photos end up in the vault rather than copied for nothing, and everything
+     * after the stop is left untouched on the device.
+     */
+    private suspend fun runHide(split: HiddenFolderRecords.HideSplit, reportProgress: Boolean) {
+        val vaultable = split.vaultable
+        HiddenVaultDiagnostics.hideStarted(split)
+        // Client-side hide for the cloud-only members: add their linkIds to the hidden set so the
+        // shared merge filter drops them everywhere. They have no device file at all and nothing on
+        // Drive changes, so unhide re-includes them with no re-pairing.
+        HiddenCloudPhotos.hide(context, split.cloudLinkIds)
+        pendingHideCloudLinkIds = split.cloudLinkIds
+        pendingHideFailures = 0
+        if (vaultable.isEmpty()) {
+            // Nothing to copy, so the client-side hide above is the whole operation and it is
+            // already done: finish cleanly rather than raising a count that would never move. The
+            // Undo bar is raised for it exactly as it is for a vaulting hide, so the same button
+            // stays reversible whichever kind of photo it was pressed on.
+            // The cloud-only half is the whole hide here and it landed, so the folder stays
+            // hidden and its pending name is released rather than rolled back. Left set, it
+            // outlives this hide on a long-lived screen and the next rollback for anything
+            // else reads it as its own, revealing a folder the user never asked to reveal.
+            pendingHideCloudLinkIds = emptyList()
+            pendingHideFolderName = null
+            buildHideUndoAction(emptyList(), split.cloudLinkIds)?.let { undoController.offer(it) }
+            selection.clear()
+            return
+        }
+        // Step 1: refuse up front when the copies cannot fit, measured over the WHOLE batch. A hide
+        // holds both the originals and the vault copies at once, so a volume that runs out mid-batch
+        // fails per file with nothing the user can act on — and for a folder it would already have
+        // deleted the originals of everything copied before that point.
+        val shortfall = hiddenVaultJournal.spaceShortfallBytes(vaultable.sumOf { it.sizeBytes })
+        if (shortfall > 0L) {
+            rollbackPendingHide()
+            _hideFailure.tryEmit(
+                context.getString(R.string.gallery_hide_needs_free_space, formatBytes(shortfall)),
+            )
+            return
+        }
+        // Step 2: copy each device file into app-private hidden storage. A backed-up photo also
+        // stashes its cloud linkId so the reveal re-pairs by id instead of re-uploading.
+        val collected = mutableListOf<HiddenVaultJournal.Entry>()
+        var hideFailures = 0
+        if (reportProgress) _folderVault.value = HiddenFolderProgress(0, vaultable.size, restoring = false)
+        for (target in vaultable) {
+            if (reportProgress && stopFolderVault.get()) break
+            val local = target.local
+            val sourceFolder = hiddenStorage.sourceFolderFor(local.uri, local.bucketName)
+            val privateUri = hiddenStorage.store(
+                local.uri, local.displayName, local.mimeType, captureTimeMs = target.captureTimeMs,
+            )
+            if (privateUri != null) {
+                collected += HiddenVaultJournal.Entry(
+                    privateUri = privateUri,
+                    sourceUri = local.uri,
+                    sourceFolder = sourceFolder,
+                    originalName = local.displayName,
+                    cloudLinkId = target.cloudLinkId,
+                )
+            } else {
+                // store() already logged the reason (privacy-safe, no file name). The photo stays
+                // visible, so it is counted rather than dropped: a hide that reported plain success
+                // would be describing a state the user can see is not true.
+                hideFailures++
             }
-            if (nameEntries.isNotEmpty()) {
-                val names = prefs[SettingsKeys.HIDDEN_URI_ORIGINAL_NAME_MAP] ?: emptySet()
-                prefs[SettingsKeys.HIDDEN_URI_ORIGINAL_NAME_MAP] = names + nameEntries
+            if (reportProgress) {
+                _folderVault.value = HiddenFolderProgress(collected.size, vaultable.size, restoring = false)
             }
-            if (cloudIdEntries.isNotEmpty()) {
-                val cloudIds = prefs[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] ?: emptySet()
-                prefs[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] = cloudIds + cloudIdEntries
+        }
+        HiddenVaultDiagnostics.copied(collected.size, hideFailures)
+        if (collected.isEmpty()) {
+            rollbackPendingHide()
+            _hideFailure.tryEmit(context.getString(R.string.gallery_copy_to_hidden_failed))
+            return
+        }
+        // Step 3: record the intent BEFORE anything is deleted, so an interruption during the
+        // delete leaves a recoverable state rather than orphaned bytes.
+        if (!hiddenVaultJournal.journal(collected)) {
+            hiddenVaultJournal.discard(collected.map { it.privateUri })
+            rollbackPendingHide()
+            _hideFailure.tryEmit(context.getString(R.string.gallery_move_to_hidden_failed))
+            return
+        }
+        pendingHidePrivateUris = collected.map { it.privateUri }
+        pendingHideFailures = hideFailures
+
+        // Step 4: delete the MediaStore originals of exactly what was copied (one system-delete
+        // dialog on Android 11+). A stopped copy pass narrows this to its own prefix, which is what
+        // leaves the photos it never reached where the user can still see them.
+        val deleting = HiddenVaultDecisions.deletableOriginals(vaultable, collected)
+        val userId = accountManager.getPrimaryUserId().first() ?: run {
+            rollbackPendingHide()
+            return
+        }
+        when (val result = deletePhotoUseCase(userId, deleting, freeUpSpace = true, deleteFromCloud = false, hide = true)) {
+            is DeletePhotoUseCase.Result.Success -> {
+                HiddenVaultDiagnostics.originalsRemoved(deleting.size, neededConsent = false)
+                // Snapshot both halves before commitPendingHide() clears the pending list, so Undo
+                // reverses exactly the hide that just landed.
+                val hideUris = pendingHidePrivateUris
+                val hideCloudIds = pendingHideCloudLinkIds
+                pendingHideCloudLinkIds = emptyList()
+                commitPendingHide()
+                buildHideUndoAction(hideUris, hideCloudIds)?.let { undoController.offer(it) }
+                reportHideFailures()
+                selection.clear()
             }
+            is DeletePhotoUseCase.Result.NeedsMediaWritePermission -> {
+                HiddenVaultDiagnostics.originalsAwaitingConsent(deleting.size)
+                pendingPermissionResult = result
+                _pendingDeleteIntent.value = result.pendingIntent
+            }
+            is DeletePhotoUseCase.Result.CloudDeleteFailed -> rollbackPendingHide()
         }
     }
 
-    /** Discard private copies that were created but never committed (error or cancelled delete). */
-    private fun rollbackPendingHide() {
+    /** Publish the journalled hide into HIDDEN_PHOTO_URIS now that the delete has confirmed, so it
+     *  survives a restart and the load() filter keeps it out of the folder. */
+    private suspend fun commitPendingHide() {
         val uris = pendingHidePrivateUris
         pendingHidePrivateUris = emptyList()
-        pendingHideSourceFolders = emptyList()
-        pendingHideOriginalNames = emptyList()
-        pendingHideCloudIds = emptyList()
-        for (u in uris) hiddenStorage.delete(u)
+        // The hide landed, so the folder keeps the flag this run wrote.
+        pendingHideFolderName = null
+        hiddenVaultJournal.confirm(uris)
+    }
+
+    /** The client-side half of an in-flight hide, held so the Undo offered once the delete confirms
+     *  reverses the whole hide rather than only the photos that were vaulted. */
+    private var pendingHideCloudLinkIds: List<String> = emptyList()
+
+    /** How many device files that hide could not copy into the vault. Carried to whichever commit
+     *  path lands so the count is reported once the hide is actually done. */
+    private var pendingHideFailures = 0
+
+    /** Say how many photos a landed hide left behind, and only then: a photo whose copy failed is
+     *  still on the device, so a hide that reported plain success would contradict the grid. */
+    private fun reportHideFailures() {
+        val failures = pendingHideFailures
+        pendingHideFailures = 0
+        if (failures <= 0) return
+        _hideFailure.tryEmit(
+            context.resources.getQuantityString(R.plurals.gallery_hide_partial_failed, failures, failures),
+        )
+    }
+
+    /** Undo a hide that did not land (error or cancelled dialog): discard the private copies and
+     *  everything journalled for them, and put the cloud-only half back in every listing. Those ids
+     *  are written before the device half is even attempted, so leaving them set is what made a
+     *  refused hide still take photos away. The originals are untouched. */
+    /** The folder a running hide flagged as hidden, cleared once that hide has landed. Null when no
+     *  folder hide is in flight, which is every selection hide. */
+    private var pendingHideFolderName: String? = null
+
+    private fun rollbackPendingHide() {
+        val uris = pendingHidePrivateUris
+        val cloudIds = pendingHideCloudLinkIds
+        val folderName = pendingHideFolderName
+        pendingHidePrivateUris = emptyList()
+        pendingHideCloudLinkIds = emptyList()
+        pendingHideFolderName = null
+        pendingHideFailures = 0
+        if (uris.isEmpty() && cloudIds.isEmpty() && folderName == null) return
+        viewModelScope.launch {
+            if (uris.isNotEmpty()) hiddenVaultJournal.discard(uris)
+            HiddenCloudPhotos.reveal(context, cloudIds)
+            // Nothing was vaulted, so a folder left flagged would list in the vault holding no
+            // photos while its card is gone from Albums, with no way back except revealing it.
+            if (folderName != null) setFolderFlag(SettingsKeys.HIDDEN_FOLDER_NAMES, enable = false)
+        }
     }
 
     /** Run the deferred cloud delete once the system trash dialog is confirmed, then clear. A hide
@@ -541,18 +1069,27 @@ class DeviceFolderDetailViewModel @Inject constructor(
             if (pending != null) {
                 val userId = accountManager.getPrimaryUserId().first()
                 if (userId != null) {
-                    deletePhotoUseCase.completeAfterPermissionGranted(
+                    // The refusal comes back as an answer rather than an exception, so it was
+                    // being dropped: the device file had gone, the Drive copy had not, and the
+                    // screen said nothing at all. The timeline surface already reports this.
+                    val cloudResult = deletePhotoUseCase.completeAfterPermissionGranted(
                         userId = userId,
                         cloudLinkIds = pending.cloudLinkIds,
                         items = pending.itemsBeingDeleted,
                         freeUpSpace = pending.freeUpSpace,
                         hide = pending.hide,
                     )
+                    if (cloudResult is DeletePhotoUseCase.Result.CloudDeleteFailed) {
+                        _hideFailure.tryEmit(context.getString(R.string.viewer_delete_drive_failed))
+                    }
                     if (pending.hide) {
-                        // Snapshot before commitPendingHide() clears the pending list, then offer Undo.
+                        // Snapshot both halves before commitPendingHide() clears them, then offer Undo.
                         val hideUris = pendingHidePrivateUris
+                        val hideCloudIds = pendingHideCloudLinkIds
+                        pendingHideCloudLinkIds = emptyList()
                         commitPendingHide()
-                        buildHideUndoAction(hideUris)?.let { undoController.offer(it) }
+                        buildHideUndoAction(hideUris, hideCloudIds)?.let { undoController.offer(it) }
+                        reportHideFailures()
                     } else {
                         // The system trash keeps the local files for ~30 days, so a confirmed delete is
                         // reversible: localRecoverable = true.
@@ -570,7 +1107,8 @@ class DeviceFolderDetailViewModel @Inject constructor(
         }
     }
 
-    /** User cancelled the system trash dialog — drop the deferred cloud work and any pending vault copies. */
+    /** User cancelled the system trash dialog — drop the deferred cloud work and any pending vault
+     *  copies. The originals are untouched, so the photos stay where the user already sees them. */
     fun clearPendingDeleteIntent() {
         pendingPermissionResult = null
         _pendingDeleteIntent.value = null
@@ -590,26 +1128,14 @@ class DeviceFolderDetailViewModel @Inject constructor(
     private var pendingStripUris: List<String> = emptyList()
     private var pendingStripStripped = 0
     private var pendingStripSkipped = 0
+    private var pendingStripFailed = 0
 
-    fun stripMetadataSelected() {
-        val uris = selection.value.toList()
-        if (uris.isEmpty()) return
+    fun stripMetadataSelected(config: MetadataStripConfig) {
+        val uris = selectedDeviceUris()
+        if (uris.isEmpty() || config.isNoOp) return
         viewModelScope.launch {
             _multiStripState.value = MultiStripState.Working
-            val prefs = context.settingsDataStore.data.first()
-            val config = MetadataStripConfig(
-                stripGps          = prefs[SettingsKeys.STRIP_GPS] == true,
-                stripCameraInfo   = prefs[SettingsKeys.STRIP_CAMERA_INFO] == true,
-                stripTimestamp    = prefs[SettingsKeys.STRIP_TIMESTAMP] == true,
-                stripSoftwareInfo = prefs[SettingsKeys.STRIP_SOFTWARE_INFO] == true,
-            )
-            if (config.isNoOp) {
-                _multiStripState.value = MultiStripState.Failed(
-                    context.getString(R.string.gallery_enable_metadata_category),
-                )
-                return@launch
-            }
-            runStripPass(config, uris, baseStripped = 0, baseSkipped = 0)
+            runStripPass(config, uris, baseStripped = 0, baseSkipped = 0, baseFailed = 0)
         }
     }
 
@@ -618,27 +1144,34 @@ class DeviceFolderDetailViewModel @Inject constructor(
         uris: List<String>,
         baseStripped: Int,
         baseSkipped: Int,
+        baseFailed: Int,
     ) {
         val needsPermission = mutableListOf<String>()
-        val (stripped, failed) = withContext(Dispatchers.IO) {
-            var ok = 0
+        // The URIs that took the strip, not just a count: each one is a live MediaStore file whose
+        // stored GPS fix a location strip makes stale. A deferred URI keeps its fix until the retry
+        // pass strips it and lands here itself.
+        val strippedUris = mutableListOf<String>()
+        val failed = withContext(Dispatchers.IO) {
             var failedCount = 0
             for (uri in uris) {
                 when (ExifHelper.stripFieldsInPlace(context, uri, config)) {
-                    is StripResult.Stripped        -> ok++
+                    is StripResult.Stripped        -> strippedUris += uri
                     is StripResult.NeedsPermission  -> needsPermission += uri
                     is StripResult.Failed          -> failedCount++
                 }
             }
-            ok to failedCount
+            failedCount
         }
-        val totalStripped = baseStripped + stripped
-        val totalSkipped  = baseSkipped + failed
+        invalidateStrippedLocations(config, strippedUris)
+        val totalStripped = baseStripped + strippedUris.size
+        val totalSkipped  = baseSkipped
+        val totalFailed   = baseFailed + failed
         if (needsPermission.isNotEmpty() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             pendingStripConfig   = config
             pendingStripUris     = needsPermission
             pendingStripStripped = totalStripped
             pendingStripSkipped  = totalSkipped
+            pendingStripFailed   = totalFailed
             _pendingStripIntent.value = MediaStore.createWriteRequest(
                 context.contentResolver, needsPermission.map(android.net.Uri::parse),
             )
@@ -646,7 +1179,9 @@ class DeviceFolderDetailViewModel @Inject constructor(
             return
         }
         selection.clear()
-        _multiStripState.value = MultiStripState.Done(totalStripped, totalSkipped + needsPermission.size)
+        _multiStripState.value = terminalStripState(
+            totalStripped, totalSkipped + needsPermission.size, totalFailed,
+        )
     }
 
     fun onStripPermissionGranted() {
@@ -654,28 +1189,38 @@ class DeviceFolderDetailViewModel @Inject constructor(
         val uris = pendingStripUris
         val baseStripped = pendingStripStripped
         val baseSkipped = pendingStripSkipped
+        val baseFailed = pendingStripFailed
         clearPendingStripState()
         _pendingStripIntent.value = null
         viewModelScope.launch {
             _multiStripState.value = MultiStripState.Working
-            runStripPass(config, uris, baseStripped, baseSkipped)
+            runStripPass(config, uris, baseStripped, baseSkipped, baseFailed)
         }
     }
 
     fun clearPendingStripIntent() {
         val baseStripped = pendingStripStripped
         val deferred = pendingStripUris.size + pendingStripSkipped
+        val baseFailed = pendingStripFailed
         clearPendingStripState()
         _pendingStripIntent.value = null
         selection.clear()
-        _multiStripState.value = MultiStripState.Done(baseStripped, deferred)
+        _multiStripState.value = terminalStripState(baseStripped, deferred, baseFailed)
     }
+
+    /** A file the strip tried and could not write reads as a failure, not as a deliberate skip. */
+    private fun terminalStripState(stripped: Int, skipped: Int, failed: Int): MultiStripState =
+        when (val outcome = stripOutcome(stripped, skipped, failed)) {
+            is StripOutcome.Done -> MultiStripState.Done(outcome.stripped, outcome.skipped)
+            is StripOutcome.Failed -> MultiStripState.Failed(outcome.message().resolve(context))
+        }
 
     private fun clearPendingStripState() {
         pendingStripConfig = null
         pendingStripUris = emptyList()
         pendingStripStripped = 0
         pendingStripSkipped = 0
+        pendingStripFailed = 0
     }
 
     fun resetMultiStripState() {

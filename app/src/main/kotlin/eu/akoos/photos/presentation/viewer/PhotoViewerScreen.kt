@@ -24,6 +24,9 @@ package eu.akoos.photos.presentation.viewer
 
 import android.app.Activity
 import android.content.Intent
+import android.content.pm.ActivityInfo
+import android.graphics.drawable.BitmapDrawable
+import android.graphics.drawable.Drawable
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
@@ -75,7 +78,11 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -90,6 +97,8 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.BrokenImage
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.EditNote
+import androidx.compose.material.icons.filled.PrivacyTip
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MotionPhotosOn
@@ -118,6 +127,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.res.stringResource
 import eu.akoos.photos.R
 import eu.akoos.photos.presentation.common.ConfirmDialog
+import eu.akoos.photos.presentation.gallery.MetadataStripPickerDialog
 import eu.akoos.photos.presentation.common.SecureScreenEffect
 import eu.akoos.photos.presentation.common.UndoAction
 import androidx.compose.ui.Alignment
@@ -150,6 +160,10 @@ import androidx.compose.material.icons.filled.RemoveCircleOutline
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.outlined.OfflinePin
+import eu.akoos.photos.data.hidden.VaultMove
+import eu.akoos.photos.data.image.ULTRA_HDR_TAG
+import eu.akoos.photos.data.image.decodeUltraHdr
+import eu.akoos.photos.data.ocr.OcrModelPreparation
 import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.usecase.DeletePhotoUseCase
@@ -168,6 +182,7 @@ import eu.akoos.photos.presentation.theme.Line2
 import eu.akoos.photos.presentation.theme.PanelChip
 import eu.akoos.photos.presentation.theme.PillBg
 import eu.akoos.photos.presentation.theme.PillBorder
+import eu.akoos.photos.presentation.util.findActivity
 import eu.akoos.photos.presentation.util.formatVideoTime
 import eu.akoos.photos.util.MetadataStripConfig
 import eu.akoos.photos.util.PhotoMetadata
@@ -225,6 +240,37 @@ internal fun reconcileViewerItems(
     return if (resolved == snapshot) snapshot else resolved
 }
 
+/**
+ * [items] with every vaulted photo the vault has [moves]d pointed at the file's new path, under the
+ * name it now carries.
+ *
+ * A rename and a capture-date edit both move a vault file, because a vaulted photo keeps its name and
+ * its date IN that name. The uri is therefore not stable for these photos the way a MediaStore one is,
+ * and the reconciliation above cannot help: it re-resolves each item against the live timeline, which
+ * leaves vaulted photos out. Without this the page goes on naming a file that is gone, and every action
+ * offered from it — share, reveal, delete, another edit — lands on that dead path.
+ *
+ * Returns [items] unchanged when nothing on the page moved, keeping the stable list identity
+ * [reconcileViewerItems] goes out of its way to preserve.
+ */
+internal fun applyVaultMoves(
+    items: List<GalleryItem>,
+    moves: Map<String, VaultMove>,
+): List<GalleryItem> {
+    if (moves.isEmpty() || items.isEmpty()) return items
+    val moved = items.map { item ->
+        // A vaulted photo reaches the viewer as a device-only item whatever it was before it was
+        // hidden: vaulting takes its MediaStore row away, so nothing pairs it with a cloud half here.
+        // A cloud photo has no device file at all, and its own hide leaves that file where it is.
+        if (item !is GalleryItem.LocalOnly) return@map item
+        val move = moves[item.local.uri] ?: return@map item
+        GalleryItem.LocalOnly(
+            item.local.copy(uri = move.uri, displayName = move.displayName ?: item.local.displayName),
+        )
+    }
+    return if (moved == items) items else moved
+}
+
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun PhotoViewerScreen(
@@ -252,7 +298,13 @@ fun PhotoViewerScreen(
     /** Hidden-vault session: marks the viewer window FLAG_SECURE so full-res hidden photos stay
      *  out of screenshots and the recent-apps preview, like the vault grid itself. */
     secure: Boolean = false,
+    /** Opens straight into the slideshow, for an entry point that asked for one (an album's menu).
+     *  Only seeds the initial value — the play/pause pill owns it from there. */
+    startSlideshow: Boolean = false,
     onEditItem: (GalleryItem) -> Unit = {},
+    /** Opens the date + place metadata editor for the current item. Suppressed for a shared-with-me
+     *  album (the sheet hides the affordance), mirroring the rename gate. */
+    onEditMetadata: (GalleryItem) -> Unit = {},
     viewModel: PhotoViewerViewModel = hiltViewModel(),
 ) {
     if (items.isEmpty()) { onBack(null); return }
@@ -264,7 +316,13 @@ fun PhotoViewerScreen(
     // each snapshot item for its live version in place (same order + size), keeping items not in
     // the live merge as-is. See [reconcileViewerItems].
     val liveItems by viewModel.liveItems.collectAsStateWithLifecycle()
-    val reconciled = remember(items, liveItems) { reconcileViewerItems(items, liveItems) }
+    // A vaulted photo keeps its name and its date in its file name, so both edits MOVE the file and
+    // change the uri the snapshot holds it under. The live merge leaves vaulted photos out, so the
+    // vault reports its own moves and they are applied on top. See [applyVaultMoves].
+    val vaultMoves by viewModel.vaultMoves.collectAsStateWithLifecycle()
+    val reconciled = remember(items, liveItems, vaultMoves) {
+        applyVaultMoves(reconcileViewerItems(items, liveItems), vaultMoves)
+    }
     // Photos deleted from inside the viewer. The snapshot the caller handed us cannot shrink on its
     // own (reconciliation swaps items in place and deliberately keeps ones the live merge no longer
     // carries, since an album view legitimately holds photos the timeline does not), so a delete has
@@ -279,12 +337,13 @@ fun PhotoViewerScreen(
     }
     // Render off the reconciled list; every per-page lookup below reads from `items` so alias it.
     @Suppress("NAME_SHADOWING") val items = visible
-    // Changes whenever the set of dropped photos does. Each per-page effect below keys on the page
-    // INDEX, and a removal deliberately leaves that index unchanged (the next photo takes over the
-    // deleted one's slot), so on its own it changes nothing those effects can see. Without this the
-    // viewer would keep the state it built for the photo that is gone: the successor would be drawn,
-    // but never loaded at full resolution, never zoomable, and a video would never start.
-    val pageGeneration = removedIds.size
+    // Changes whenever the set of dropped photos does, or a vaulted photo moves to a new path. Each
+    // per-page effect below keys on the page INDEX, and neither event changes that index: a removal
+    // deliberately leaves the next photo in the deleted one's slot, and a move leaves the same photo in
+    // its own. So on their own neither changes anything those effects can see, and the viewer would
+    // keep the state it built for a file that is no longer there: the photo would be drawn, but never
+    // loaded at full resolution, never zoomable, and a video would never start.
+    val pageGeneration = removedIds.size + vaultMoves.size
     // An undone delete or album removal puts its photo back where it was. Drop exactly the ids that
     // undo restored, so a photo deleted earlier in this session, whose own undo window has since
     // been taken over, stays gone.
@@ -335,6 +394,7 @@ fun PhotoViewerScreen(
     var meteredHintDismissed by remember { mutableStateOf(false) }
     val metadata by viewModel.metadata.collectAsStateWithLifecycle()
     val detailsPlace by viewModel.detailsPlace.collectAsStateWithLifecycle()
+    val detailsGps by viewModel.detailsGps.collectAsStateWithLifecycle()
     val detailsAlbums by viewModel.detailsAlbums.collectAsStateWithLifecycle()
     val cloudVideoMeta by viewModel.cloudVideoMeta.collectAsStateWithLifecycle()
     val cloudFullResSize by viewModel.cloudFullResSize.collectAsStateWithLifecycle()
@@ -355,6 +415,9 @@ fun PhotoViewerScreen(
     // Live cloud→device twin map: flips the bottom badge to "synced" once a download persists a
     // SyncState, which the static `items` snapshot can't reflect.
     val localUriByLinkId by viewModel.localUriByLinkId.collectAsStateWithLifecycle()
+    // Which vaulted photos kept a Drive copy, for the status badge on the info pill. A vaulted photo
+    // opens here as LocalOnly however it was reached, so its own type cannot answer this.
+    val pairedVaultUris by viewModel.pairedVaultUris.collectAsStateWithLifecycle()
 
     LaunchedEffect(pagerState.settledPage, pageGeneration) {
         val item = items.getOrNull(pagerState.settledPage)
@@ -364,6 +427,17 @@ fun PhotoViewerScreen(
             viewModel.checkIfHidden(item)
             viewModel.checkIfFavorite(item)
         }
+    }
+
+    // Whether the photo on screen is one the vault holds, and what that leaves it able to do. Read
+    // off the item itself rather than off the surface the viewer was opened from, so the answer is
+    // the same however the photo was reached. See [PhotoViewerVaultGate].
+    val gatedItem = items.getOrNull(pagerState.settledPage)
+    val isVaultedItem = remember(gatedItem) {
+        PhotoViewerVaultGate.vaultUriOf(gatedItem, viewModel::isVaultUri) != null
+    }
+    val outbound = remember(gatedItem, isVaultedItem) {
+        PhotoViewerVaultGate.outboundActions(gatedItem, isVaultedItem)
     }
 
     LaunchedEffect(Unit) { viewModel.loadAlbums() }
@@ -470,9 +544,16 @@ fun PhotoViewerScreen(
     var containerSize by remember { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
     // Pan distance accumulated past the image edge while zoomed; crossing the threshold pages.
     var edgeOverpan by remember { mutableFloatStateOf(0f) }
+    // The zoom and pan the page was sitting at when text mode took it over. Text mode moves the
+    // photo for its own reasons, so leaving it hands back what the user had rather than the
+    // fit the mode chose. Null whenever there is nothing owed back.
+    var textZoomBefore by remember { mutableStateOf<ViewerZoom?>(null) }
     LaunchedEffect(pagerState.settledPage, pageGeneration) { scale = 1f; offset = Offset.Zero; edgeOverpan = 0f }
 
     val transformState = rememberTransformableState { zoomChange, panChange, _ ->
+        // The user's own fingers on the photo outrank anything text mode set up: from here the page
+        // is theirs and there is no earlier zoom left to restore.
+        textZoomBefore = null
         scale = (scale * zoomChange).coerceIn(1f, 6f)
         if (scale > 1f) {
             // graphicsLayer scales around center, so the reachable pan is ±(viewport*(scale-1)/2).
@@ -547,6 +628,185 @@ fun PhotoViewerScreen(
     // Route the system/gesture back through the same teardown so a hardware back doesn't leave the
     // playing surface to linger through the pop fade either.
     androidx.activity.compose.BackHandler(enabled = !exiting) { startExit() }
+
+    // ── Read the text on the photo ────────────────────────────────────────────
+    var textState by remember { mutableStateOf<ViewerTextState>(ViewerTextState.Idle) }
+    var textJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    // Whether the user has any of the read words picked out, filled in by the selectable layer. A tap
+    // means one thing while something is picked and another while nothing is, and the two are told
+    // apart by what is actually selected rather than by counting taps, so a photo the user has
+    // selected nothing in still leaves on the first one.
+    val textSelection = remember { ViewerTextSelection() }
+    // Handing the container its focus back is what the platform itself treats as the end of a
+    // selection: the handles and the floating toolbar go with it, and the words stay up.
+    val textFocus = androidx.compose.ui.platform.LocalFocusManager.current
+    // Registered after the exit handler above on purpose: back dispatch runs handlers in reverse
+    // registration order, so this one gets first refusal while highlights are up and back still
+    // closes the viewer at every other moment.
+    androidx.activity.compose.BackHandler(enabled = textState !is ViewerTextState.Idle) {
+        textJob?.cancel()
+        textJob = null
+        textState = ViewerTextState.Idle
+    }
+    // Highlights belong to the photo they were read from, so a swipe drops them and any read still
+    // in flight with them.
+    LaunchedEffect(pagerState.settledPage, pageGeneration) {
+        textJob?.cancel()
+        textJob = null
+        textState = ViewerTextState.Idle
+        // A page change puts the page back at fit-to-screen on its own, so there is no earlier zoom
+        // left to give back and nothing to animate towards.
+        textZoomBefore = null
+    }
+    val textRecognizer = rememberTextRecognizer()
+    val showingText = textState as? ViewerTextState.Showing
+    // Raised when the detection model is not on the device yet: the fetch is several megabytes and
+    // is never started without an answer.
+    var askForTextModel by remember { mutableStateOf(false) }
+    val textContext = LocalContext.current
+    val textHaptics = androidx.compose.ui.platform.LocalHapticFeedback.current
+    val textNoneMsg = stringResource(R.string.viewer_text_none)
+    val textNeedsFullSizeMsg = stringResource(R.string.viewer_text_needs_full_size)
+    val textNotImageMsg = stringResource(R.string.viewer_text_not_image)
+    val textUnavailableMsg = stringResource(R.string.viewer_text_unavailable)
+    val textTooLargeMsg = stringResource(R.string.viewer_text_too_large)
+    val textModelFailedMsg = stringResource(R.string.viewer_text_model_failed)
+    // What the bars actually take on this device, asked of the platform rather than assumed: a
+    // cutout, a three-button navigation bar and a gesture pill all give different answers, and the
+    // squeeze is only exact if it is the device's own numbers.
+    val textInsets = WindowInsets.systemBars.union(WindowInsets.displayCutout)
+    val textInsetDensity = LocalDensity.current
+    val textInsetDirection = androidx.compose.ui.platform.LocalLayoutDirection.current
+    val textInsetLeft = textInsets.getLeft(textInsetDensity, textInsetDirection).toFloat()
+    val textInsetTop = textInsets.getTop(textInsetDensity).toFloat()
+    val textInsetRight = textInsets.getRight(textInsetDensity, textInsetDirection).toFloat()
+    // The mode pill sits at the foot of the page on top of the navigation bar, so the squeeze has to
+    // give up its band too. Without it the pill covers the photo's last line, which on a screenshot
+    // is exactly the text the squeeze exists to bring into view.
+    val textInsetBottom = textInsets.getBottom(textInsetDensity).toFloat() +
+        with(textInsetDensity) { ViewerTextPillReserve.toPx() }
+    // A viewer page runs edge to edge, so at fit-to-screen the top line of a screenshot sits behind
+    // the status bar and its bottom behind the gesture area. Entering text mode squeezes the photo
+    // into what the bars leave alone so every run the reader found can actually be read, and leaving
+    // walks the page back to whatever zoom and pan the user had before it.
+    LaunchedEffect(showingText) {
+        // Every way out of text mode passes through here, and the layer that owns the answer is on
+        // its way off screen, so this is where a stale pick is dropped.
+        if (showingText == null) textSelection.active = false
+        val live = { ViewerZoom(scale, offset.x, offset.y) }
+        val onFrame: (ViewerZoom) -> Unit = { zoom ->
+            scale = zoom.scale
+            offset = Offset(zoom.offsetX, zoom.offsetY)
+        }
+        if (showingText != null) {
+            if (containerSize.width <= 0 || containerSize.height <= 0) return@LaunchedEffect
+            textZoomBefore = live()
+            animateViewerZoom(
+                from = live(),
+                to = fitPhotoInsideInsets(
+                    imageWidth = showingText.imageWidth,
+                    imageHeight = showingText.imageHeight,
+                    containerW = containerSize.width.toFloat(),
+                    containerH = containerSize.height.toFloat(),
+                    insetLeft = textInsetLeft,
+                    insetTop = textInsetTop,
+                    insetRight = textInsetRight,
+                    insetBottom = textInsetBottom,
+                ),
+                onFrame = onFrame,
+            )
+        } else {
+            val restore = textZoomBefore ?: return@LaunchedEffect
+            textZoomBefore = null
+            animateViewerZoom(from = live(), to = restore, onFrame = onFrame)
+        }
+    }
+    val readTextOnPhoto = {
+        val settled = items.getOrNull(pagerState.settledPage)
+        val settledLinkId = when (settled) {
+            is GalleryItem.CloudOnly -> settled.cloud.linkId
+            is GalleryItem.Synced    -> settled.cloud.linkId
+            else -> null
+        }
+        // A panorama and an inline motion clip each put their own frame on screen under their own
+        // placement, so the fit the overlay works from would not be the one the user is looking at.
+        // A photo the device hide keeps behind a blur is not one to lift words off either.
+        val blocked = isPanoramaMode ||
+            motionVideoFile != null ||
+            (settledLinkId != null && settledLinkId in hiddenCloudLinkIds)
+        if (!blocked) {
+            textHaptics.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+            textJob?.cancel()
+            textJob = scope.launch {
+                // The models come first, and only once per install. Their own stages on the pill: a
+                // twenty megabyte fetch announced as "reading" looks like a hung read.
+                textState = ViewerTextState.Working(ViewerTextStage.PreparingModel)
+                val prepared = textRecognizer.prepare {
+                    textState = ViewerTextState.Working(ViewerTextStage.DownloadingModel)
+                }
+                if (prepared != OcrModelPreparation.Ready) {
+                    textState = ViewerTextState.Idle
+                    if (prepared == OcrModelPreparation.NeedsConsent) {
+                        askForTextModel = true
+                    } else {
+                        snackbarHostState.showSnackbar(textModelFailedMsg)
+                    }
+                    return@launch
+                }
+                textState = ViewerTextState.Working(ViewerTextStage.Detecting)
+                val failure = try {
+                    when (val pixels = ViewerPixels.capture(textContext, state)) {
+                        is ViewerPixels.Ok -> {
+                            // Read before the recycle below: a recycled bitmap refuses to report its
+                            // own size, and the blocks mean nothing without the frame they index.
+                            val frameW = pixels.width
+                            val frameH = pixels.height
+                            val found = try {
+                                textRecognizer.recognize(pixels.bitmap) { stage ->
+                                    textState = ViewerTextState.Working(stage.asViewerStage())
+                                }
+                            } finally {
+                                // A 4096px frame as ARGB_8888 is tens of megabytes, on top of the
+                                // full-res bitmap and the cached neighbours this viewer already
+                                // holds. Nothing needs it once the blocks are out.
+                                pixels.bitmap.recycle()
+                            }
+                            if (found.isEmpty()) {
+                                textNoneMsg
+                            } else {
+                                textState = ViewerTextState.Showing(found, frameW, frameH)
+                                null
+                            }
+                        }
+                        ViewerPixels.NoFullResolution -> textNeedsFullSizeMsg
+                        ViewerPixels.NotAnImage -> textNotImageMsg
+                        ViewerPixels.Unavailable -> textUnavailableMsg
+                        ViewerPixels.OutOfMemory -> textTooLargeMsg
+                    }
+                } catch (_: OutOfMemoryError) {
+                    textTooLargeMsg
+                }
+                if (failure != null) {
+                    textState = ViewerTextState.Idle
+                    snackbarHostState.showSnackbar(failure)
+                }
+            }
+        }
+    }
+    if (askForTextModel) {
+        ViewerTextModelDialog(
+            downloadBytes = textRecognizer.downloadBytes,
+            onConfirm = {
+                askForTextModel = false
+                // The recognizer takes the answer before it is written to storage, so the read this
+                // starts cannot outrun the write and ask a second time.
+                textRecognizer.allowModelDownload()
+                readTextOnPhoto()
+            },
+            onDismiss = { askForTextModel = false },
+        )
+    }
+
     // Latches true the first time ExoPlayer reports it's actually playing on this page,
     // so the loading badge keeps showing through download + prepare + first-paint and
     // then disappears for good (ordinary pause/resume after that doesn't bring it back).
@@ -586,12 +846,19 @@ fun PhotoViewerScreen(
     }
 
     // Slideshow play/pause — saved across rotation so the user doesn't lose their state.
-    var isPlaying by rememberSaveable { mutableStateOf(false) }
+    var isPlaying by rememberSaveable { mutableStateOf(startSlideshow) }
 
     // Overlay visibility: tap image to toggle. Deliberately NOT reset on page change —
     // once the user hides the chrome they stay in immersive browsing across swipes
     // until they tap again.
     var showOverlays by remember { mutableStateOf(true) }
+
+    // Reading the text on a photo is a focused mode, so the bars step out of the way for it: the
+    // photo runs on behind them, which is exactly where a highlight near the edge would otherwise
+    // land, and a filmstrip competes with the words the user asked to see. Derived from the same
+    // flag the tap gesture toggles rather than written into it, so leaving text mode gives back
+    // whatever the user had before it.
+    val showChrome = showOverlays && textState !is ViewerTextState.Showing
 
     // Pause if the user single-taps anywhere on a photo (the same gesture that
     // toggles chrome). We do this by observing [showOverlays] — when it flips from
@@ -652,6 +919,7 @@ fun PhotoViewerScreen(
     }
 
     var showMetadata by remember { mutableStateOf(false) }
+    var showStripPicker by remember { mutableStateOf(false) }
     var showRenameDialog by remember { mutableStateOf(false) }
     val renameState by viewModel.renameState.collectAsStateWithLifecycle()
     val metadataSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -684,8 +952,15 @@ fun PhotoViewerScreen(
     val deletePermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartIntentSenderForResult()
     ) { result ->
-        if (result.resultCode == Activity.RESULT_OK) viewModel.onDeletePermissionGranted()
-        else viewModel.resetDeleteState()
+        if (result.resultCode == Activity.RESULT_OK) {
+            viewModel.onDeletePermissionGranted()
+        } else {
+            // Declining leaves the photo where it was, so the id noted for its removal has to go
+            // with the decision. This lands on Idle, which the state handler passes over, so
+            // clearing it there would never happen and the next hide would take this photo instead.
+            pendingRemoval = null
+            viewModel.resetDeleteState()
+        }
     }
 
     // Android 10+ write-permission dialog launcher for stripping metadata from a
@@ -707,9 +982,13 @@ fun PhotoViewerScreen(
     LaunchedEffect(stripState) {
         val ss = stripState
         if (ss is PhotoViewerViewModel.StripState.NeedsPermission) {
-            stripPermissionLauncher.launch(
-                IntentSenderRequest.Builder(ss.pendingIntent.intentSender).build()
-            )
+            // An OEM that throws on the system sender, or a sender already spent across a
+            // configuration change, would otherwise take the app down here.
+            runCatching {
+                stripPermissionLauncher.launch(
+                    IntentSenderRequest.Builder(ss.pendingIntent.intentSender).build()
+                )
+            }.onFailure { viewModel.resetStripState() }
         }
     }
 
@@ -740,9 +1019,11 @@ fun PhotoViewerScreen(
             }
             is PhotoViewerViewModel.DeleteState.NeedsPermission -> {
                 // Launch the Android system "Move to trash" dialog
-                deletePermissionLauncher.launch(
-                    IntentSenderRequest.Builder(ds.pendingIntent.intentSender).build()
-                )
+                runCatching {
+                    deletePermissionLauncher.launch(
+                        IntentSenderRequest.Builder(ds.pendingIntent.intentSender).build()
+                    )
+                }.onFailure { pendingRemoval = null; viewModel.resetDeleteState() }
             }
             is PhotoViewerViewModel.DeleteState.Failed -> {
                 // Surface the failure as a themed snackbar (same in-app pattern as the
@@ -751,6 +1032,10 @@ fun PhotoViewerScreen(
                 // case in particular ended up with a permanent Failed overlay that the
                 // user couldn't dismiss). The reset moves us back to Idle so the next
                 // user action can proceed.
+                // The photo is still there, so the id noted for its removal must go: hiding drives
+                // the same Done state without noting one of its own, and it would have read this
+                // stale id and taken the wrong photo out of the pager.
+                pendingRemoval = null
                 snackbarHostState.showSnackbar(ds.message)
                 viewModel.resetDeleteState()
             }
@@ -801,6 +1086,8 @@ fun PhotoViewerScreen(
         val currentScale  by rememberUpdatedState(scale)
         val metadataShown by rememberUpdatedState(showMetadata)
         val slideshowOn   by rememberUpdatedState(isPlaying)
+        val textShown     by rememberUpdatedState(textState)
+        val readText      by rememberUpdatedState(readTextOnPhoto)
 
         // ── Pager ──────────────────────────────────────────────────────────────
         HorizontalPager(
@@ -813,8 +1100,10 @@ fun PhotoViewerScreen(
             // on it.
             key = { page -> items.getOrNull(page)?.stableId ?: page },
             // Page-swipe is suppressed while zoomed (scale > 1f) and while panorama mode
-            // is active, so the panorama's own horizontal drag doesn't fight the pager.
-            userScrollEnabled = scale == 1f && !isPanoramaMode,
+            // is active, so the panorama's own horizontal drag doesn't fight the pager. Text mode
+            // squeezes the photo below fit-to-screen, which is still not zoomed in, so a swipe
+            // there pages and drops the highlights the way it always did.
+            userScrollEnabled = scale <= 1f && !isPanoramaMode,
         ) { page ->
             val item      = items.getOrNull(page)
             val isSettled = page == pagerState.settledPage
@@ -834,17 +1123,38 @@ fun PhotoViewerScreen(
                                     // Tap → toggle overlays. While the slideshow is running,
                                     // a tap pauses it and forces the chrome visible so the
                                     // user gets immediate feedback that auto-advance stopped.
+                                    // While recognised text is up a tap goes no further than text
+                                    // mode, so neither putting a pick down nor leaving also flips
+                                    // the chrome. Picking words out of the photo is a long press and
+                                    // a drag, never a tap, so nothing on screen wants one.
                                     onTap = {
-                                        if (slideshowOn) {
+                                        if (textShown is ViewerTextState.Showing) {
+                                            when (viewerTextTap(textSelection.active)) {
+                                                ViewerTextTap.ClearSelection -> textFocus.clearFocus()
+                                                ViewerTextTap.LeaveTextMode ->
+                                                    textState = ViewerTextState.Idle
+                                            }
+                                        } else if (slideshowOn) {
                                             isPlaying = false
                                             showOverlays = true
                                         } else {
                                             showOverlays = !showOverlays
                                         }
                                     },
+                                    // Long press → read the text on the photo. It hangs off the
+                                    // page's own detector, above the image, so it is not competing
+                                    // with the transform gestures the image itself carries. Once
+                                    // the words are up the long press belongs to the selectable
+                                    // layer over them, which sits nearer the finger and takes it
+                                    // first, so this stands aside.
+                                    onLongPress = {
+                                        if (textShown !is ViewerTextState.Showing) readText()
+                                    },
                                     // Double tap → zoom toward the tapped point; double tap
-                                    // again → reset to fit.
+                                    // again → reset to fit. Takes the page off text mode's hands
+                                    // the same way a pinch does.
                                     onDoubleTap = { tap ->
+                                        textZoomBefore = null
                                         if (currentScale > 1f) {
                                             scale = 1f
                                             offset = Offset.Zero
@@ -863,10 +1173,15 @@ fun PhotoViewerScreen(
                                     },
                                 )
                             }
-                            // Swipe up → open details (only when not zoomed)
+                            // Swipe up → open details (only when not zoomed). Stands down while
+                            // recognised text is up: dragging a selection upward past a word is
+                            // the ordinary way to take a line, and it must not throw the details
+                            // sheet over the photo the user is reading.
                             launch {
                                 detectVerticalDragGestures { _, dragAmount ->
-                                    if (currentScale <= 1f && !metadataShown && dragAmount < -40f) {
+                                    if (currentScale <= 1f && !metadataShown && dragAmount < -40f &&
+                                        textShown !is ViewerTextState.Showing
+                                    ) {
                                         showMetadata = true
                                         showOverlays = true
                                     }
@@ -1003,6 +1318,12 @@ fun PhotoViewerScreen(
                                         ImageRequest.Builder(imageContext)
                                             .data(s.model)
                                             .crossfade(true)
+                                            // The one request in the app that asks for the gain map
+                                            // to survive the decode. An HDR bitmap costs the base
+                                            // image plus a gain map plane, so it stays scoped to the
+                                            // photo actually filling the screen; the thumb underlay
+                                            // and the off-page render above keep the plain decode.
+                                            .decodeUltraHdr()
                                             .build()
                                     }
                                     // A corrupt or unsupported file gives Coil nothing to decode, so
@@ -1011,6 +1332,10 @@ fun PhotoViewerScreen(
                                     // broken-image glyph instead. Re-armed per item so each photo
                                     // starts clean.
                                     var fullResFailed by remember(currentItemKey) { mutableStateOf(false) }
+                                    // Whether the bitmap Coil just handed back carries a gain map,
+                                    // read off the decoded drawable rather than by re-opening the
+                                    // file. Re-armed per item so each photo decides for itself.
+                                    var fullResIsHdr by remember(currentItemKey) { mutableStateOf(false) }
                                     AsyncImage(
                                         model = fullResRequest,
                                         contentDescription = null,
@@ -1020,6 +1345,7 @@ fun PhotoViewerScreen(
                                                 is AsyncImagePainter.State.Success -> {
                                                     fullResPainted = true
                                                     fullResFailed = false
+                                                    fullResIsHdr = st.result.drawable.hasGainMap()
                                                 }
                                                 is AsyncImagePainter.State.Error -> fullResFailed = true
                                                 else -> Unit
@@ -1033,6 +1359,11 @@ fun PhotoViewerScreen(
                                                 translationX = offset.x, translationY = offset.y,
                                             ),
                                     )
+                                    // A gain map only means anything once the window itself asks
+                                    // for HDR. This effect lives inside the settled page's branch,
+                                    // so it follows the settled photo: paging away disposes it,
+                                    // and so does a back gesture or leaving the viewer at all.
+                                    HdrWindowColorMode(enabled = fullResIsHdr)
                                     if (fullResFailed) {
                                         // Centered over the viewer background, a touch larger than
                                         // the grid tile's placeholder but the same muted treatment.
@@ -1099,6 +1430,29 @@ fun PhotoViewerScreen(
                         is PhotoViewerViewModel.ViewerState.Error ->
                             if (stateMatchesPage) Text(s.message ?: stringResource(R.string.viewer_error_loading_photo), color = ErrorColor, fontSize = 14.sp)
                     }
+
+                    // Recognised text sits over the still, and ahead of the device-hide blur below,
+                    // so a hidden photo can never end up with readable words drawn on top of it.
+                    // The dim and the lit words first, then the invisible layer the platform's own
+                    // selection is taken from, which has to be nearest the finger to get the long
+                    // press before anything under it does. Carrying the pinch as well, because the
+                    // layer covers the picture and a gesture that stops at it would never reach the
+                    // image's own transform.
+                    if (showingText != null && stateMatchesPage) {
+                        val textTransform = viewerTransform(containerSize, scale, offset)
+                        ViewerTextOverlay(
+                            showing = showingText,
+                            transform = textTransform,
+                        )
+                        ViewerTextSelectionLayer(
+                            showing = showingText,
+                            transform = textTransform,
+                            selection = textSelection,
+                            modifier = Modifier
+                                .transformable(state = transformState, canPan = { scale > 1f }),
+                        )
+                    }
+                    (textState as? ViewerTextState.Working)?.let { ViewerTextProgress(it.stage) }
 
                     // Video-only download badge. Shown from "download starts" all the way
                     // through "ExoPlayer prepares + first frame paints" — anything in between
@@ -1227,7 +1581,7 @@ fun PhotoViewerScreen(
 
         // ── Top bar (fades with overlays) ─────────────────────────────────────
         AnimatedVisibility(
-            visible = showOverlays,
+            visible = showChrome,
             enter = fadeIn(),
             exit = fadeOut(),
             modifier = Modifier.align(Alignment.TopStart),
@@ -1270,12 +1624,17 @@ fun PhotoViewerScreen(
                     }
 
                     // Make available offline — cloud-only photos only. A Synced/LocalOnly item
-                    // already has its bytes on the device, so there's nothing to pin.
+                    // already has its bytes on the device, so there's nothing to pin. The label
+                    // names the press rather than the state, so a pinned photo announces the
+                    // removal the tap would do, the way the selection drawer's row does.
                     if (settledItem is GalleryItem.CloudOnly && !isReadOnlyAlbum) {
                         ViewerBubble(onClick = { viewModel.toggleOfflinePin(settledItem) }) {
                             Icon(
                                 if (isOffline) Icons.Filled.OfflinePin else Icons.Outlined.OfflinePin,
-                                stringResource(R.string.offline_make_available),
+                                stringResource(
+                                    if (isOffline) R.string.offline_remove
+                                    else R.string.offline_make_available,
+                                ),
                                 tint = if (isOffline) Accent else FgDim,
                                 modifier = Modifier.size(18.dp),
                             )
@@ -1290,8 +1649,9 @@ fun PhotoViewerScreen(
                     // could in theory pin someone else's photo into one of their own
                     // albums, but the underlying call needs cloud-side share access
                     // and our path doesn't bridge across the recipient/owner volume
-                    // boundary.
-                    if (settledItem != null && !isReadOnlyAlbum) {
+                    // boundary. A vaulted photo is left out too: a Drive album add uploads the
+                    // device-only file first, which is the one thing the vault exists to prevent.
+                    if (settledItem != null && !isReadOnlyAlbum && outbound.addToAlbum) {
                         ViewerBubble(onClick = { showAddToAlbumSheet = true }) {
                             if (isAddingToAlbum) {
                                 CircularProgressIndicator(color = Accent, strokeWidth = 2.dp,
@@ -1347,40 +1707,74 @@ fun PhotoViewerScreen(
                             containerColor = appColors.cardBg,
                             border = androidx.compose.foundation.BorderStroke(0.5.dp, appColors.pillBorder),
                         ) {
-                            // A photo inside an album someone else shared is not copied out to the
-                            // device from here; saving that album into your own library is the route
-                            // to a copy. Matches the album's own dock and the offline bubble above.
-                            if (settledItem is GalleryItem.CloudOnly && !isReadOnlyAlbum) {
-                                androidx.compose.material3.DropdownMenuItem(
-                                    text = { Text(stringResource(R.string.viewer_menu_save_to_device),
-                                        color = FgPrimary) },
-                                    leadingIcon = { Icon(Icons.Default.FileDownload, null,
-                                        tint = FgPrimary, modifier = Modifier.size(20.dp)) },
-                                    enabled = !isSavingToDevice,
-                                    onClick = {
-                                        menuExpanded = false
-                                        viewModel.downloadToDevice(settledItem)
-                                    },
-                                )
-                            }
-                            // "Back up to Drive" — force-upload a not-yet-backed-up local photo.
-                            // Only LocalOnly qualifies; Synced / CloudOnly are already on Drive.
-                            if (settledItem is GalleryItem.LocalOnly) {
-                                androidx.compose.material3.DropdownMenuItem(
-                                    text = { Text(stringResource(R.string.device_folder_upload_action),
-                                        color = FgPrimary) },
-                                    leadingIcon = { Icon(Icons.Default.CloudUpload, null,
-                                        tint = Accent, modifier = Modifier.size(20.dp)) },
-                                    onClick = {
-                                        menuExpanded = false
-                                        viewModel.backUpItem(settledItem)
-                                    },
-                                )
-                            }
-                            // Synced / CloudOnly carry a Drive linkId, LocalOnly does not, so both
+                            // Menu order runs from the most-reached actions to the destructive ones:
+                            // share, then the metadata cluster (details, edit, strip), then the album
+                            // and storage actions, then playback, and finally hide and delete at the
+                            // bottom where an accidental tap is least likely.
+
+                            // Synced / CloudOnly carry a Drive linkId, LocalOnly does not, so the
                             // album actions below need a cloud-backed item.
                             val isCloudItem = settledItem is GalleryItem.Synced ||
                                 settledItem is GalleryItem.CloudOnly
+
+                            // Share opens the unified share drawer (Send to another app, Share
+                            // with people, Public link) instead of jumping straight to the OS
+                            // sheet, and opening it kicks off the public-link lookup. A guest in
+                            // someone else's album keeps the item; the drawer itself narrows
+                            // which rows it offers there. Dropped entirely once the vault has
+                            // taken every row the drawer would have drawn.
+                            if (settledItem != null && outbound.anyShareRoute) {
+                                androidx.compose.material3.DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.share_action),
+                                        color = FgPrimary) },
+                                    leadingIcon = { Icon(Icons.Default.Share, null,
+                                        tint = Accent, modifier = Modifier.size(20.dp)) },
+                                    onClick = {
+                                        menuExpanded = false
+                                        viewModel.loadPublicLink(settledItem)
+                                        showShareSheet = true
+                                    },
+                                )
+                            }
+                            androidx.compose.material3.DropdownMenuItem(
+                                text = { Text(stringResource(R.string.viewer_menu_details),
+                                    color = FgPrimary) },
+                                leadingIcon = { Icon(Icons.Default.Info, null,
+                                    tint = Accent, modifier = Modifier.size(20.dp)) },
+                                onClick = {
+                                    menuExpanded = false
+                                    showMetadata = true
+                                },
+                            )
+                            // Edit the capture date and place. The editor itself shows a backed-up or
+                            // cloud photo read-only, so it is offered for any settled item outside a
+                            // shared-with-me album, matching the Details sheet's own edit row.
+                            if (settledItem != null && !isReadOnlyAlbum) {
+                                androidx.compose.material3.DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.metadata_editor_edit_metadata),
+                                        color = FgPrimary) },
+                                    leadingIcon = { Icon(Icons.Default.EditNote, null,
+                                        tint = Accent, modifier = Modifier.size(20.dp)) },
+                                    onClick = {
+                                        menuExpanded = false
+                                        settledItem?.let { onEditMetadata(it) }
+                                    },
+                                )
+                            }
+                            // Strip metadata needs the device bytes, so it is offered only for a photo
+                            // that is on this device (LocalOnly, or the local side of a Synced pair).
+                            if (settledItem is GalleryItem.LocalOnly || settledItem is GalleryItem.Synced) {
+                                androidx.compose.material3.DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.gallery_strip_metadata),
+                                        color = FgPrimary) },
+                                    leadingIcon = { Icon(Icons.Default.PrivacyTip, null,
+                                        tint = Accent, modifier = Modifier.size(20.dp)) },
+                                    onClick = {
+                                        menuExpanded = false
+                                        showStripPicker = true
+                                    },
+                                )
+                            }
                             // "Set as album cover" is offered only when the viewer was opened from
                             // an album. No-op when the user owns the album but the cover is
                             // unchanged, because setAlbumCover is idempotent server-side.
@@ -1400,65 +1794,6 @@ fun PhotoViewerScreen(
                                     },
                                 )
                             }
-                            // Hide is offered for any settled item: a device-backed photo moves into the
-                            // vault, a synced/cloud photo hides client-side by linkId. Unhide is offered
-                            // for any already-hidden item, device or cloud; [unhideItem] picks the reveal
-                            // path (drop the linkId, or restore the vaulted file) per item kind.
-                            //
-                            // Not offered inside someone else's album. Hiding is a filter over this
-                            // user's own library, so applying it to a photo that only exists in a
-                            // shared album writes a device-global entry that hides nothing the user
-                            // can see anyway. It reads as a moderation action it is not.
-                            if (settledItem != null && !isReadOnlyAlbum) {
-                                androidx.compose.material3.DropdownMenuItem(
-                                    text = { Text(stringResource(
-                                        if (isHidden) R.string.viewer_menu_unhide
-                                        else R.string.viewer_menu_hide,
-                                    ), color = FgPrimary) },
-                                    leadingIcon = { Icon(Icons.Default.VisibilityOff, null,
-                                        tint = if (isHidden) Accent else FgPrimary,
-                                        modifier = Modifier.size(20.dp)) },
-                                    onClick = {
-                                        menuExpanded = false
-                                        val item = settledItem ?: return@DropdownMenuItem
-                                        if (isHidden) {
-                                            viewModel.unhideItem(item)
-                                            // Same teardown as any other way out, so the video
-                                            // surface goes with it and the grid gets told where
-                                            // the user ended up.
-                                            startExit()
-                                        } else {
-                                            viewModel.hideItem(item)
-                                        }
-                                    },
-                                )
-                            }
-                            // Destroying someone else's photo is not a guest's call whatever album
-                            // rights they hold, and Drive rejects it, so a shared album offers no
-                            // delete. Taking the photo out of the album, below, is the editor's route.
-                            if (!isReadOnlyAlbum) {
-                                androidx.compose.material3.DropdownMenuItem(
-                                    text = { Text(stringResource(R.string.viewer_menu_delete),
-                                        color = ErrorColor) },
-                                    leadingIcon = { Icon(Icons.Default.DeleteOutline, null,
-                                        tint = ErrorColor, modifier = Modifier.size(20.dp)) },
-                                    enabled = !isDeleting,
-                                    onClick = {
-                                        menuExpanded = false
-                                        showDeleteSheet = true
-                                    },
-                                )
-                            }
-                            androidx.compose.material3.DropdownMenuItem(
-                                text = { Text(stringResource(R.string.viewer_menu_details),
-                                    color = FgPrimary) },
-                                leadingIcon = { Icon(Icons.Default.Info, null,
-                                    tint = FgPrimary, modifier = Modifier.size(20.dp)) },
-                                onClick = {
-                                    menuExpanded = false
-                                    showMetadata = true
-                                },
-                            )
                             // Taking the photo back out of the album it was opened from, the one
                             // route that does not mean backing out to the grid and long-pressing.
                             // Gated on the album's write grant rather than ownership, so an editor
@@ -1478,6 +1813,38 @@ fun PhotoViewerScreen(
                                     },
                                 )
                             }
+                            // A photo inside an album someone else shared is not copied out to the
+                            // device from here; saving that album into your own library is the route
+                            // to a copy. Matches the album's own dock and the offline bubble above.
+                            if (settledItem is GalleryItem.CloudOnly && !isReadOnlyAlbum) {
+                                androidx.compose.material3.DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.viewer_menu_save_to_device),
+                                        color = FgPrimary) },
+                                    leadingIcon = { Icon(Icons.Default.FileDownload, null,
+                                        tint = Accent, modifier = Modifier.size(20.dp)) },
+                                    enabled = !isSavingToDevice,
+                                    onClick = {
+                                        menuExpanded = false
+                                        viewModel.downloadToDevice(settledItem)
+                                    },
+                                )
+                            }
+                            // Back up: force-upload a not-yet-backed-up local photo. Only
+                            // LocalOnly qualifies; Synced / CloudOnly are already on Drive.
+                            // A vaulted photo never does: uploading it undoes the hide. Same
+                            // wording the selection drawers give the same action.
+                            if (settledItem is GalleryItem.LocalOnly && outbound.backUpToDrive) {
+                                androidx.compose.material3.DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.sel_label_back_up),
+                                        color = FgPrimary) },
+                                    leadingIcon = { Icon(Icons.Default.CloudUpload, null,
+                                        tint = Accent, modifier = Modifier.size(20.dp)) },
+                                    onClick = {
+                                        menuExpanded = false
+                                        viewModel.backUpItem(settledItem)
+                                    },
+                                )
+                            }
                             if (items.size > 1) {
                                 androidx.compose.material3.DropdownMenuItem(
                                     text = { Text(stringResource(
@@ -1487,7 +1854,7 @@ fun PhotoViewerScreen(
                                     leadingIcon = { Icon(
                                         if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
                                         null,
-                                        tint = if (isPlaying) Accent else FgPrimary,
+                                        tint = Accent,
                                         modifier = Modifier.size(20.dp),
                                     ) },
                                     onClick = {
@@ -1496,21 +1863,55 @@ fun PhotoViewerScreen(
                                     },
                                 )
                             }
-                            // Share opens the unified share drawer (Send to another app, Share
-                            // with people, Public link) instead of jumping straight to the OS
-                            // sheet, and opening it kicks off the public-link lookup. A guest in
-                            // someone else's album keeps the item; the drawer itself narrows
-                            // which rows it offers there.
-                            if (settledItem != null) {
+                            // Hide is offered for any settled item: a photo with a device file moves
+                            // into the vault, a cloud-only one hides client-side by linkId. Unhide is
+                            // offered for any already-hidden item, device or cloud; [unhideItem] picks
+                            // the reveal path (drop the linkId, or restore the vaulted file) per item
+                            // kind. Both rows name the destination rather than the bare verb, in the
+                            // wording the selection drawers carry, since what "hidden" costs a photo
+                            // is that it leaves the device gallery for Hidden Photos.
+                            //
+                            // Not offered inside someone else's album. Hiding is a filter over this
+                            // user's own library, so applying it to a photo that only exists in a
+                            // shared album writes a device-global entry that hides nothing the user
+                            // can see anyway. It reads as a moderation action it is not.
+                            if (settledItem != null && !isReadOnlyAlbum) {
                                 androidx.compose.material3.DropdownMenuItem(
-                                    text = { Text(stringResource(R.string.share_action),
-                                        color = FgPrimary) },
-                                    leadingIcon = { Icon(Icons.Default.Share, null,
-                                        tint = FgPrimary, modifier = Modifier.size(20.dp)) },
+                                    text = { Text(stringResource(
+                                        if (isHidden) R.string.sel_label_unhide
+                                        else R.string.sel_label_hide,
+                                    ), color = FgPrimary) },
+                                    leadingIcon = { Icon(Icons.Default.VisibilityOff, null,
+                                        tint = Accent,
+                                        modifier = Modifier.size(20.dp)) },
                                     onClick = {
                                         menuExpanded = false
-                                        viewModel.loadPublicLink(settledItem)
-                                        showShareSheet = true
+                                        val item = settledItem ?: return@DropdownMenuItem
+                                        if (isHidden) {
+                                            viewModel.unhideItem(item)
+                                            // Same teardown as any other way out, so the video
+                                            // surface goes with it and the grid gets told where
+                                            // the user ended up.
+                                            startExit()
+                                        } else {
+                                            viewModel.hideItem(item)
+                                        }
+                                    },
+                                )
+                            }
+                            // Destroying someone else's photo is not a guest's call whatever album
+                            // rights they hold, and Drive rejects it, so a shared album offers no
+                            // delete. Taking the photo out of the album, above, is the editor's route.
+                            if (!isReadOnlyAlbum) {
+                                androidx.compose.material3.DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.viewer_menu_delete),
+                                        color = ErrorColor) },
+                                    leadingIcon = { Icon(Icons.Default.DeleteOutline, null,
+                                        tint = ErrorColor, modifier = Modifier.size(20.dp)) },
+                                    enabled = !isDeleting,
+                                    onClick = {
+                                        menuExpanded = false
+                                        showDeleteSheet = true
                                     },
                                 )
                             }
@@ -1522,7 +1923,7 @@ fun PhotoViewerScreen(
 
         // ── Bottom section — hidden when overlays are off ────────────────────
         AnimatedVisibility(
-            visible = showOverlays,
+            visible = showChrome,
             modifier = Modifier.align(Alignment.BottomCenter),
             enter = fadeIn(),
             exit = fadeOut(),
@@ -1702,9 +2103,15 @@ fun PhotoViewerScreen(
                 // Upgrade a stale CloudOnly to "synced" once we know the cloud linkId is
                 // mirrored to a device file — happens after the user downloads it from this
                 // screen but the static `items` snapshot can't reflect it.
+                // A vaulted photo is upgraded the same way from the other side: vaulting removes the
+                // MediaStore row that made it a Synced item, so it opens here as LocalOnly however it
+                // was reached, and the vault's cloud-id records are the only thing left that can say
+                // its Drive copy is still there.
                 val effectiveSynced = currentItem is GalleryItem.Synced ||
                     (currentItem is GalleryItem.CloudOnly &&
-                        localUriByLinkId.containsKey(currentItem.cloud.linkId))
+                        localUriByLinkId.containsKey(currentItem.cloud.linkId)) ||
+                    (currentItem is GalleryItem.LocalOnly &&
+                        currentItem.local.uri in pairedVaultUris)
                 when {
                     effectiveSynced -> {
                         Icon(
@@ -1741,6 +2148,27 @@ fun PhotoViewerScreen(
         }
         } // AnimatedVisibility
 
+        // Text mode takes the viewer's own chrome down, so this is the only thing on screen that
+        // names the mode and the only control it needs; everything the user does with the words
+        // themselves is the platform's, off the selectable layer over the photo.
+        //
+        // Low and centred, where the viewer's other floating controls sit. The device's own
+        // selection toolbar goes above the words it belongs to whenever there is room, so the foot
+        // of the screen is the one band it rarely reaches for.
+        if (showingText != null) {
+            ViewerTextModePill(
+                onDismiss = {
+                    textJob?.cancel()
+                    textJob = null
+                    textState = ViewerTextState.Idle
+                },
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .navigationBarsPadding()
+                    .padding(horizontal = 24.dp, vertical = ViewerTextPillPadding),
+            )
+        }
+
         // Bottom-anchored themed snackbar — keeps add-to-album / set-as-cover
         // confirmations + delete-failure errors inside the app's visual language
         // instead of the OS Toast popup that ignored our theme + sat below the
@@ -1755,6 +2183,22 @@ fun PhotoViewerScreen(
     }
 
     // ── Metadata sheet ─────────────────────────────────────────────────────────
+    if (showStripPicker) {
+        val stripItem = items.getOrNull(pagerState.settledPage)
+        MetadataStripPickerDialog(
+            onConfirm = { config ->
+                showStripPicker = false
+                val uri = when (stripItem) {
+                    is GalleryItem.LocalOnly -> stripItem.local.uri
+                    is GalleryItem.Synced -> stripItem.local.uri
+                    else -> null
+                }
+                if (uri != null) viewModel.stripMetadataFromLocal(uri, config)
+            },
+            onDismiss = { showStripPicker = false },
+        )
+    }
+
     if (showMetadata) {
         val item = items.getOrNull(pagerState.settledPage)
         LaunchedEffect(item) {
@@ -1773,12 +2217,14 @@ fun PhotoViewerScreen(
                 item = item,
                 exif = metadata,
                 place = detailsPlace,
+                resolvedGps = detailsGps,
                 localFolder = detailsAlbums.localFolder,
                 cloudAlbums = detailsAlbums.cloudAlbums,
                 cloudVideoMeta = cloudVideoMeta,
                 isStripping = isStrippingMetadata,
                 cloudSizeFallback = cloudFullResSize,
                 photoTags = photoTags,
+                hasCloudCopy = item is GalleryItem.LocalOnly && item.local.uri in pairedVaultUris,
                 onToggleTag = { tagId, add -> item?.let { viewModel.setPhotoTag(it, tagId, add) } },
                 onStripFields = { config ->
                     val uri = when (item) {
@@ -1797,6 +2243,11 @@ fun PhotoViewerScreen(
                         showRenameDialog = true
                     }
                 },
+                // Edit date + place. Null on a shared-with-me album so the sheet hides the row,
+                // matching how the rest of the mutating affordances collapse for a guest.
+                onEditMetadata = if (isReadOnlyAlbum || item == null) null else {
+                    { showMetadata = false; onEditMetadata(item) }
+                },
             )
         }
     }
@@ -1813,6 +2264,7 @@ fun PhotoViewerScreen(
             RenameDialog(
                 currentName = currentName,
                 isCloud = item is GalleryItem.CloudOnly,
+                isVaulted = isVaultedItem,
                 isWorking = renameState is PhotoViewerViewModel.RenameState.Working,
                 errorMessage = (renameState as? PhotoViewerViewModel.RenameState.Failed)?.message,
                 onDismiss = {
@@ -1836,9 +2288,11 @@ fun PhotoViewerScreen(
             showRenameDialog = false
             viewModel.resetRenameState()
         } else if (rs is PhotoViewerViewModel.RenameState.NeedsPermission) {
-            renamePermissionLauncher.launch(
-                IntentSenderRequest.Builder(rs.pendingIntent.intentSender).build()
-            )
+            runCatching {
+                renamePermissionLauncher.launch(
+                    IntentSenderRequest.Builder(rs.pendingIntent.intentSender).build()
+                )
+            }.onFailure { viewModel.resetRenameState() }
         }
     }
 
@@ -1848,7 +2302,7 @@ fun PhotoViewerScreen(
         val currentPhotoAlbumIds by viewModel.currentPhotoAlbumIds.collectAsStateWithLifecycle()
         val hasCloud = settledItem is GalleryItem.Synced || settledItem is GalleryItem.CloudOnly
         // Refresh membership for the current photo every time the sheet opens — fast on cache
-        // hit (5-min TTL in AlbumService) and self-heals if the user removed the photo from an
+        // hit (20-min TTL in AlbumService) and self-heals if the user removed the photo from an
         // album on Drive web between sheet opens.
         LaunchedEffect(showAddToAlbumSheet, settledItem) {
             if (settledItem != null && hasCloud) viewModel.loadCurrentPhotoAlbumIds(settledItem)
@@ -1898,14 +2352,15 @@ fun PhotoViewerScreen(
         PhotoShareSheet(
             sheetState = shareSheetState,
             canCreateLink = canCreateLink,
-            localUploadEnabled = true,
+            localUploadEnabled = outbound.publicLink,
             // Inside an album someone else shared, only "Send to another app" survives: it moves
             // bytes the viewer can already see and grants nobody access to the album. Creating a
             // public link or inviting people publishes someone else's photo, which is the album
             // owner's call, and Drive refuses it from a guest. The album's own selection dock
-            // draws the same line.
-            showPublicLink = !isReadOnlyAlbum,
-            showShareWithPeople = !isReadOnlyAlbum,
+            // draws the same line. A vaulted photo comes down to the same one row for a different
+            // reason: both of the others upload it before they can share it at all.
+            showPublicLink = !isReadOnlyAlbum && outbound.publicLink,
+            showShareWithPeople = !isReadOnlyAlbum && outbound.shareWithPeople,
             onDismiss = { showShareSheet = false },
             onSendToApp = {
                 showShareSheet = false
@@ -1969,13 +2424,49 @@ fun PhotoViewerScreen(
                     onDismiss = { showDeleteSheet = false },
                     onDelete  = { freeUpSpace, deleteFromCloud ->
                         showDeleteSheet = false
-                        pendingRemoval = item.stableId.takeIf {
-                            DeletePhotoUseCase.removesFromGallery(item, freeUpSpace, deleteFromCloud)
+                        if (isVaultedItem) {
+                            // The vault file is the whole photo, so its delete always takes the
+                            // item off the screen and never has a cloud side to weigh.
+                            pendingRemoval = item.stableId
+                            viewModel.deleteVaultedItem(item)
+                        } else {
+                            pendingRemoval = item.stableId.takeIf {
+                                DeletePhotoUseCase.removesFromGallery(item, freeUpSpace, deleteFromCloud)
+                            }
+                            viewModel.deleteItem(item, freeUpSpace, deleteFromCloud)
                         }
-                        viewModel.deleteItem(item, freeUpSpace, deleteFromCloud)
                     },
+                    isVaulted = isVaultedItem,
                 )
             }
         }
+    }
+}
+
+/**
+ * True when this decoded drawable is a bitmap carrying an Ultra HDR gain map. Reads the result Coil
+ * already handed over, so nothing re-opens the file to answer it.
+ */
+private fun Drawable.hasGainMap(): Boolean =
+    Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE &&
+        (this as? BitmapDrawable)?.bitmap?.hasGainmap() == true
+
+/**
+ * Puts the hosting window into HDR while [enabled], and back to the default color mode the moment it
+ * is not. Without this a gain-map bitmap still renders SDR, since the window never asked for the
+ * extra headroom.
+ *
+ * The restore runs from `onDispose`, so every exit path is covered by construction: paging to a
+ * photo without a gain map, the back gesture, the system back, and the viewer leaving the tree.
+ */
+@Composable
+private fun HdrWindowColorMode(enabled: Boolean) {
+    val context = LocalContext.current
+    DisposableEffect(context, enabled) {
+        val window = context.findActivity()?.window
+        window?.colorMode =
+            if (enabled) ActivityInfo.COLOR_MODE_HDR else ActivityInfo.COLOR_MODE_DEFAULT
+        android.util.Log.d(ULTRA_HDR_TAG, "window color mode hdr=$enabled")
+        onDispose { window?.colorMode = ActivityInfo.COLOR_MODE_DEFAULT }
     }
 }

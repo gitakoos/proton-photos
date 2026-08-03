@@ -36,10 +36,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.width
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -61,18 +57,18 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.PhotoAlbum
+import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -97,15 +93,17 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.GalleryItem
-import eu.akoos.photos.presentation.common.anyHideable
 import eu.akoos.photos.presentation.common.ConfirmSheet
+import eu.akoos.photos.presentation.common.HideConfirmSheet
 import eu.akoos.photos.presentation.common.IconBubble
 import eu.akoos.photos.presentation.common.ReturnToViewerPhoto
-import eu.akoos.photos.presentation.common.SelectionBottomDock
-import eu.akoos.photos.presentation.common.SelectionDockItem
-import eu.akoos.photos.presentation.common.SelectionTopBar
-import eu.akoos.photos.presentation.common.SelectionTopButton
+import eu.akoos.photos.presentation.common.SecureScreenEffect
+import eu.akoos.photos.presentation.common.SelectionAction
+import eu.akoos.photos.presentation.common.SelectionDrawer
+import eu.akoos.photos.presentation.common.favoriteSelectionAction
+import eu.akoos.photos.presentation.common.favoriteTurnsOn
 import eu.akoos.photos.presentation.gallery.LocalThumbnailUrls
+import eu.akoos.photos.presentation.gallery.MetadataStripPickerDialog
 import eu.akoos.photos.presentation.gallery.PhotoCell
 import eu.akoos.photos.presentation.gallery.ScrollDateLabel
 import eu.akoos.photos.presentation.gallery.TimelineGrouping
@@ -116,13 +114,8 @@ import kotlinx.coroutines.flow.map
 import eu.akoos.photos.presentation.viewer.ManagePublicLinkSheet
 import eu.akoos.photos.presentation.viewer.PhotoShareSheet
 import eu.akoos.photos.presentation.gallery.photoCellInputsFor
-import eu.akoos.photos.presentation.theme.Accent
-import eu.akoos.photos.presentation.theme.AppColors
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PrivacyTip
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.foundation.BorderStroke
 import eu.akoos.photos.presentation.common.MultiStripState
 import eu.akoos.photos.presentation.theme.Bg0
 import eu.akoos.photos.presentation.theme.ErrorColor
@@ -144,15 +137,39 @@ import eu.akoos.photos.util.copySensitiveText
 fun DeviceFolderDetailScreen(
     bucketName: String,
     onPhotoClick: (items: List<GalleryItem>, index: Int) -> Unit,
+    /** Opens the date + place editor for the current selection, matching the timeline's entry. */
+    onEditMetadata: (items: List<GalleryItem>) -> Unit = {},
+    /** Opens the same viewer on the folder's first photo with its slideshow already running. */
+    onSlideshowClick: (List<GalleryItem>) -> Unit = {},
+    /** An action the Albums grid asked for on this folder, carried out once its photos are in hand.
+     *  Null on a plain open. */
+    openAction: DeviceFolderOpenAction? = null,
+    /** Hands [openAction] back the moment it runs, so it lands exactly once. */
+    onOpenActionConsumed: () -> Unit = {},
+    /** True where the vault's card for the folder opened this screen rather than the Albums grid's.
+     *  The two cards hold disjoint photos, so this is what says which of them is being looked at. */
+    fromVault: Boolean = false,
     onBack: () -> Unit,
     viewModel: DeviceFolderDetailViewModel = hiltViewModel(),
 ) {
-    LaunchedEffect(bucketName) { viewModel.load(bucketName) }
+    LaunchedEffect(bucketName, fromVault) { viewModel.load(bucketName, fromVault) }
+
+    // Reached from the vault, this screen's thumbnails are hidden photos, so it keeps itself out of
+    // screenshots and the recent-apps preview exactly as the vault grid does. The Albums grid's copy
+    // of the same folder holds photos that are on the device in plain sight, and stays capturable.
+    if (fromVault) SecureScreenEffect()
 
     val items by viewModel.items.collectAsStateWithLifecycle()
     val selectedUris by viewModel.selectedUris.collectAsStateWithLifecycle()
+    // The folder's vaulted photos. They sit in the grid with the rest, but nothing that needs a device
+    // file is offered on them — they are revealed instead.
+    val vaultedUris by viewModel.vaultedUris.collectAsStateWithLifecycle()
+    val pairedVaultUris by viewModel.pairedVaultUris.collectAsStateWithLifecycle()
     val offlinePinIds by viewModel.offlinePinIds.collectAsStateWithLifecycle()
+    val favoriteIds by viewModel.favoriteIds.collectAsStateWithLifecycle()
+    val favoriteState by viewModel.favoriteState.collectAsStateWithLifecycle()
     val backupProgress by viewModel.backupProgress.collectAsStateWithLifecycle()
+    val folderVault by viewModel.folderVault.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val gridState = rememberLazyGridState()
@@ -162,21 +179,70 @@ fun DeviceFolderDetailScreen(
     val showScrollDate by remember {
         folderCtx.settingsDataStore.data.map { it[SettingsKeys.SHOW_SCROLL_DATE] ?: false }
     }.collectAsState(initial = false)
-    // Text labels under the selection-mode action buttons; on by default, toggled in Settings.
-    val showSelectionLabels by remember {
-        folderCtx.settingsDataStore.data.map { it[SettingsKeys.SHOW_SELECTION_LABELS] ?: true }
-    }.collectAsState(initial = true)
     // Yields the pill while the scrubber bubble is being dragged so the two don't overlap.
     var scrubberDragging by remember { mutableStateOf(false) }
     val scrubberTopInset = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 56.dp
 
     val isSelectionMode = selectedUris.isNotEmpty()
+    // Leaving mid-hide would clear this ViewModel and cancel the copy loop outright, skipping the
+    // journal and the delete of the originals it had already copied: the very step the stop is a
+    // polled flag rather than a job cancel to protect. Back therefore raises that same flag, which
+    // ends the loop within a photo and lets the next press through.
+    BackHandler(enabled = folderVault != null) { viewModel.cancelFolderVault() }
     // In selection mode the back button cancels the selection instead of leaving the screen —
-    // mirrors the gallery and album-detail behaviour.
+    // mirrors the gallery and album-detail behaviour. Registered after the stop above, so a press
+    // while both apply clears the selection first (back dispatch runs handlers in reverse order).
     BackHandler(enabled = isSelectionMode) { viewModel.clearSelection() }
 
-    var showBackupDialog by remember { mutableStateOf(false) }
+    var showFolderOverflow by remember { mutableStateOf(false) }
+    val folderActionsSheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val isMirroredAsAlbum by viewModel.isMirroredAsAlbum.collectAsStateWithLifecycle()
+    val isExcludedFromBackup by viewModel.isExcludedFromBackup.collectAsStateWithLifecycle()
+    val isHiddenFromTimeline by viewModel.isHiddenFromTimeline.collectAsStateWithLifecycle()
+    val isHiddenCard by viewModel.isHiddenCard.collectAsStateWithLifecycle()
+    // Which direction the drawer's sort entries tick. The ViewModel reads the same preference for
+    // the order itself, so this only has to say which one is active.
+    val sortMode by viewModel.sortMode.collectAsStateWithLifecycle()
+
+    // Back up every photo here, speaking up only when there was nothing to send: a started back-up
+    // already shows in the progress pill. Shared by the drawer's rows and by a back-up the Albums
+    // grid asked for, so both report the same way.
+    val alreadyBackedUpMsg = stringResource(R.string.device_folder_already_backed_up)
+    fun backUpFolder(asMirror: Boolean) {
+        viewModel.backUpAll(asMirror) { outcome ->
+            if (outcome.queued == 0) scope.launch { snackbarHostState.showSnackbar(alreadyBackedUpMsg) }
+        }
+    }
+
+    // An action asked for from the Albums grid arrives as an intent rather than as a raised drawer:
+    // the grid opens this screen's own drawer, so raising it here would dismiss a sheet and put the
+    // identical one back up. Each action runs on the folder's photos, which land after the screen
+    // mounts, so the intent waits for them. The host's clear survives this screen being disposed and
+    // rebuilt on the way back from the viewer; the latch covers the frames before that clear is read.
+    var openActionRun by remember { mutableStateOf(false) }
+    LaunchedEffect(openAction, items.size) {
+        if (!DeviceFolderOpenIntent.shouldRun(openAction, items.size, openActionRun)) return@LaunchedEffect
+        openActionRun = true
+        onOpenActionConsumed()
+        when (openAction) {
+            DeviceFolderOpenAction.BackUpToTimeline -> backUpFolder(asMirror = false)
+            DeviceFolderOpenAction.BackUpAndMirror -> backUpFolder(asMirror = true)
+            DeviceFolderOpenAction.Slideshow -> onSlideshowClick(items)
+            null -> Unit
+        }
+    }
+
     var showUploadConfirm by remember { mutableStateOf(false) }
+    var showSetCoverConfirm by remember { mutableStateOf(false) }
+    // The hide split while its confirmation is up, null when none is. Holding the split rather than
+    // a flag is what lets the sheet describe the photos the tap was made on. The selection's hide and
+    // the whole folder's are separate taps, so each keeps its own.
+    var hideConfirmSplit by remember {
+        mutableStateOf<eu.akoos.photos.data.hidden.HiddenFolderRecords.HideSplit?>(null)
+    }
+    var folderHideConfirmSplit by remember {
+        mutableStateOf<eu.akoos.photos.data.hidden.HiddenFolderRecords.HideSplit?>(null)
+    }
     val shareCtx = androidx.compose.ui.platform.LocalContext.current
     val shareChooserTitle = stringResource(R.string.share_chooser_title)
     // The VM builds the system-share intent off the UI thread; the screen launches the chooser.
@@ -190,6 +256,16 @@ fun DeviceFolderDetailScreen(
     // behaviour (cloud-backed photos join now, local-only photos upload then join) stay identical.
     var showAddToAlbumSheet by remember { mutableStateOf(false) }
     val addToAlbumSheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    // The picker's own "New album" row, which names an album and then adds the selection to it.
+    var showCreateAlbumInline by remember { mutableStateOf(false) }
+    // What an album add landed on, said the same way whichever row started it. A run that reaches
+    // neither an album nor the upload queue says so rather than claiming an add that never happened.
+    val addedToAlbumMsg = stringResource(R.string.device_folder_added_to_album)
+    val nothingToAddMsg = stringResource(R.string.album_picker_empty)
+    fun showAddToAlbumOutcome(joined: Int, queued: Int, error: String?) {
+        val msg = error ?: if (joined > 0 || queued > 0) addedToAlbumMsg else nothingToAddMsg
+        scope.launch { snackbarHostState.showSnackbar(msg) }
+    }
     // Unified share drawer + manage-link sheet for the selection (Send to app / Public link).
     var showPhotoShareSheet by remember { mutableStateOf(false) }
     val photoShareSheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -206,7 +282,6 @@ fun DeviceFolderDetailScreen(
     val isDeleting by viewModel.isDeleting.collectAsStateWithLifecycle()
     val pendingStripIntent by viewModel.pendingStripIntent.collectAsStateWithLifecycle()
     val multiStripState by viewModel.multiStripState.collectAsStateWithLifecycle()
-    val moreColors = AppColors.current
     val deletePermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartIntentSenderForResult(),
     ) { result ->
@@ -249,6 +324,15 @@ fun DeviceFolderDetailScreen(
             else -> Unit
         }
     }
+    // A hide that refused to start says why; the message already reads for the user.
+    LaunchedEffect(Unit) {
+        viewModel.hideFailure.collect { snackbarHostState.showSnackbar(it) }
+    }
+    // A batch favourite that landed says nothing: the hearts and the drawer row already show it.
+    // Only a write Drive refused reaches here.
+    LaunchedEffect(Unit) {
+        viewModel.favoriteFailure.collect { snackbarHostState.showSnackbar(it) }
+    }
 
     // A multi-select delete blocks the screen behind a progress drawer so a second tap can't fire
     // into a half-finished delete.
@@ -257,12 +341,25 @@ fun DeviceFolderDetailScreen(
         if (isDeleting) eu.akoos.photos.presentation.common.OperationProgress(0, 0, opDeletingLabel, indeterminate = true) else null,
     )
 
-    // Cover = the newest item's image (the list is sorted newest-first). Device folders only
-    // ever hold local items, so the cover comes from the local URI; the cloud branch resolves the
-    // shared store URL for parity with the other detail heroes.
+    // Cover = the photo pinned for this folder, else the first item of the current sort order, the
+    // way the cloud album's hero falls back. A pinned photo the folder no longer holds — deleted,
+    // hidden, or moved out — falls back the same way rather than leaving the hero blank. Device
+    // folders only ever hold
+    // local items, so the cover comes from the local URI; the cloud branch resolves the shared store
+    // URL for parity with the other detail heroes.
     val thumbUrls = LocalThumbnailUrls.current.value
-    val coverModel: Any? = remember(items, thumbUrls) {
-        items.firstOrNull()?.let { item ->
+    val pinnedCoverUri by viewModel.pinnedCoverUri.collectAsStateWithLifecycle()
+    val coverModel: Any? = remember(items, thumbUrls, pinnedCoverUri) {
+        val pinned = pinnedCoverUri?.let { uri ->
+            items.firstOrNull { item ->
+                when (item) {
+                    is GalleryItem.LocalOnly -> item.local.uri == uri
+                    is GalleryItem.Synced -> item.local.uri == uri
+                    is GalleryItem.CloudOnly -> false
+                }
+            }
+        }
+        (pinned ?: items.firstOrNull())?.let { item ->
             when (item) {
                 is GalleryItem.LocalOnly -> Uri.parse(item.local.uri)
                 is GalleryItem.Synced -> Uri.parse(item.local.uri)
@@ -360,58 +457,30 @@ fun DeviceFolderDetailScreen(
                     coverModel = coverModel,
                     title = bucketName,
                     photoCountText = countLabel,
-                    canRename = false,
-                    titleActions = if (items.isNotEmpty()) {
-                        {
-                            // Back-up action mirrors the cloud-album download button: a progress
-                            // ring (with a cancel X beside it) while a back-up runs, otherwise the
-                            // upload glyph — so back-up and download read the same everywhere.
-                            val bp = backupProgress
-                            Box(
-                                modifier = Modifier
-                                    .size(40.dp)
-                                    .clip(CircleShape)
-                                    .background(PillBg, CircleShape)
-                                    .border(0.5.dp, PillBorder, CircleShape)
-                                    .clickable(enabled = bp == null) { showBackupDialog = true },
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                if (bp != null && bp.total > 0) {
-                                    CircularProgressIndicator(
-                                        progress = { bp.done.toFloat() / bp.total.toFloat() },
-                                        color = Accent, strokeWidth = 2.dp,
-                                        modifier = Modifier.size(20.dp),
-                                    )
-                                } else {
-                                    Icon(
-                                        Icons.Default.CloudUpload,
-                                        contentDescription = stringResource(R.string.device_folder_backup_all),
-                                        tint = Accent,
-                                        modifier = Modifier.size(20.dp),
-                                    )
-                                }
-                            }
-                            if (bp != null) {
-                                Spacer(Modifier.width(8.dp))
-                                Box(
-                                    modifier = Modifier
-                                        .size(40.dp)
-                                        .clip(CircleShape)
-                                        .background(PillBg, CircleShape)
-                                        .border(0.5.dp, PillBorder, CircleShape)
-                                        .clickable { viewModel.cancelBackup() },
-                                    contentAlignment = Alignment.Center,
-                                ) {
-                                    Icon(
-                                        Icons.Default.Close,
-                                        contentDescription = stringResource(R.string.cancel),
-                                        tint = ErrorColor,
-                                        modifier = Modifier.size(20.dp),
-                                    )
-                                }
-                            }
+                    titleActions = {
+                        // One control at rest, like the cloud album's. Backing up, mirroring as an
+                        // album, excluding from back-up and hiding from the timeline all live in the
+                        // drawer it opens; a running back-up's cancel rides the progress pill rather
+                        // than a header pill of its own. It stands on an empty folder too, where the
+                        // preferences are the only route to putting photos back in view; the drawer
+                        // drops the rows that need photos instead.
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(CircleShape)
+                                .background(PillBg, CircleShape)
+                                .border(0.5.dp, PillBorder, CircleShape)
+                                .clickable { showFolderOverflow = true },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                Icons.Default.MoreVert,
+                                contentDescription = stringResource(R.string.albums_more_actions),
+                                tint = FgPrimary,
+                                modifier = Modifier.size(18.dp),
+                            )
                         }
-                    } else null,
+                    },
                 )
                 }
             }
@@ -471,7 +540,14 @@ fun DeviceFolderDetailScreen(
                         // The old per-cell Select / Share / Back-up menu is gone; in selection mode the
                         // toolbar carries Share + Back up, so a long-press + the toolbar covers the same
                         // actions without the extra "Select" tap.
-                        val inputs = remember(item, offlinePinIds) { photoCellInputsFor(item, offlinePinIds = offlinePinIds) }
+                        val inputs = remember(item, favoriteIds, offlinePinIds, pairedVaultUris) {
+                            photoCellInputsFor(
+                                item,
+                                favoriteIds = favoriteIds,
+                                offlinePinIds = offlinePinIds,
+                                pairedVaultUris = pairedVaultUris,
+                            )
+                        }
                         PhotoCell(
                             imageData = inputs.imageData,
                             stableKey = inputs.stableKey,
@@ -539,12 +615,20 @@ fun DeviceFolderDetailScreen(
             )
         }
 
-        // Fixed back button — floats over the grid. Cancels selection while selecting.
+        // Fixed back button, floating over the grid. Cancels selection while selecting, and stops a
+        // running vault move the same cooperative way the system back does, so neither route out
+        // kills the copy loop half-way.
         IconBubble(
             icon = Icons.AutoMirrored.Filled.ArrowBack,
             contentDescription = if (isSelectionMode)
                 stringResource(R.string.gallery_cancel_selection) else stringResource(R.string.close),
-            onClick = { if (isSelectionMode) viewModel.clearSelection() else onBack() },
+            onClick = {
+                when {
+                    isSelectionMode -> viewModel.clearSelection()
+                    folderVault != null -> viewModel.cancelFolderVault()
+                    else -> onBack()
+                }
+            },
             modifier = Modifier
                 .align(Alignment.TopStart)
                 .statusBarsPadding()
@@ -556,152 +640,197 @@ fun DeviceFolderDetailScreen(
             tint = Color.White,
         )
 
-        // Selection-mode action bar — a single floating pill, matching the gallery and
-        // album-detail selection toolbars: cancel, a photo/video count, then the action
-        // pills (share to apps, back up to Drive).
-        if (isSelectionMode) {
-            val selectedItems = items.filter { item ->
-                val u = when (item) {
-                    is GalleryItem.LocalOnly -> item.local.uri
-                    is GalleryItem.Synced    -> item.local.uri
-                    is GalleryItem.CloudOnly -> null
-                }
-                u != null && u in selectedUris
+        // Selection drawer: the shared surface every multi-select uses, so a folder's bulk actions
+        // all sit in one list, in the order every other surface lists them.
+        // Both list-wide scans below answer nothing outside selection mode, so they are skipped
+        // there rather than walking a folder of thousands on every recomposition.
+        val selectedItems = if (!isSelectionMode) emptyList() else items.filter { item ->
+            val u = when (item) {
+                is GalleryItem.LocalOnly -> item.local.uri
+                is GalleryItem.Synced    -> item.local.uri
+                is GalleryItem.CloudOnly -> null
             }
-            val selectedVideos = selectedItems.count { item ->
-                val mime = when (item) {
-                    is GalleryItem.LocalOnly -> item.local.mimeType
-                    is GalleryItem.Synced    -> item.local.mimeType
-                    is GalleryItem.CloudOnly -> item.cloud.mimeType
-                }
-                mime.startsWith("video/")
+            u != null && u in selectedUris
+        }
+        // The half of the selection that still has a device file. Every action but the reveal
+        // works on a file, so each is offered on these alone and disappears for an all-vaulted
+        // selection rather than opening a sheet that would act on nothing.
+        val selectedDeviceItems = selectedItems.filter { item ->
+            when (item) {
+                is GalleryItem.LocalOnly -> item.local.uri !in vaultedUris
+                is GalleryItem.Synced -> item.local.uri !in vaultedUris
+                is GalleryItem.CloudOnly -> true
             }
-            val selectedPhotos = selectedItems.size - selectedVideos
-            val selPhotosText = pluralStringResource(R.plurals.count_photos_plural, selectedPhotos, selectedPhotos)
-            val selVideosText = pluralStringResource(R.plurals.count_videos_plural, selectedVideos, selectedVideos)
-            val selectionLabel = when {
-                selectedPhotos > 0 && selectedVideos > 0 -> "$selPhotosText, $selVideosText"
-                selectedVideos > 0 -> selVideosText
-                else -> selPhotosText
+        }
+        val anyVaultedSelected = selectedUris.any { it in vaultedUris }
+        // The photo a cover may be pinned to, or null when the selection names none. Shared with
+        // the confirmation and the write, so all three answer the same question.
+        val coverCandidate = FolderCoverSelection.pinnable(selectedUris, vaultedUris)
+        // Toggles every selectable photo in the folder (cloud-only entries have no uri and stay
+        // excluded): select all, or clear once everything selectable is selected.
+        val selectableUris = if (!isSelectionMode) emptyList() else items.mapNotNull { item ->
+            when (item) {
+                is GalleryItem.LocalOnly -> item.local.uri
+                is GalleryItem.Synced -> item.local.uri
+                is GalleryItem.CloudOnly -> null
             }
-            // Top selection bar — cancel + count + share + delete, matching the gallery and
-            // album selection headers.
-            SelectionTopBar(
-                onCancel = { viewModel.clearSelection() },
-                countText = selectionLabel,
-            ) {
-                // Toggles every selectable photo in the folder (cloud-only entries have no uri and
-                // stay excluded): select all, or clear once everything selectable is selected.
-                val selectableUris = items.mapNotNull { item ->
-                    when (item) {
-                        is GalleryItem.LocalOnly -> item.local.uri
-                        is GalleryItem.Synced -> item.local.uri
-                        is GalleryItem.CloudOnly -> null
-                    }
-                }
-                val allFolderSelected = selectableUris.isNotEmpty() &&
-                    selectedUris.size == selectableUris.size
-                SelectionTopButton(
+        }
+        val allFolderSelected = selectableUris.isNotEmpty() && selectedUris.size == selectableUris.size
+        val anyDeviceOnlySelected = selectedDeviceItems.any { it is GalleryItem.LocalOnly }
+        var showStripPicker by remember { mutableStateOf(false) }
+        val folderSelectionActions = buildList {
+            add(
+                SelectionAction(
                     icon = Icons.Default.SelectAll,
-                    contentDescription = stringResource(
+                    label = stringResource(
                         if (allFolderSelected) R.string.gallery_deselect_all else R.string.select_all,
                     ),
-                    active = allFolderSelected,
                     onClick = {
                         viewModel.setSelectedUris(if (allFolderSelected) emptySet() else selectableUris.toSet())
                     },
                 )
-                Spacer(Modifier.size(4.dp))
-                // Share selected to other apps — device files share their URI directly, no download.
-                SelectionTopButton(
-                    icon = Icons.Default.Share,
-                    contentDescription = stringResource(R.string.share_action),
-                    onClick = { showPhotoShareSheet = true },
-                )
-                // Hide selected: device-backed photos move into the app's Hidden vault, cloud-only
-                // photos hide client-side by linkId. Offered for any non-empty selection, mirroring
-                // the timeline's hide action.
-                val anyHideableSelected = anyHideable(selectedItems)
-                if (anyHideableSelected) {
-                    Spacer(Modifier.size(4.dp))
-                    SelectionTopButton(
-                        icon = Icons.Default.VisibilityOff,
-                        contentDescription = stringResource(R.string.gallery_hide_selected),
-                        enabled = !isDeleting,
-                        onClick = { viewModel.hideSelected() },
+            )
+            // Share selected to other apps - device files share their URI directly, no download.
+            if (selectedDeviceItems.isNotEmpty()) {
+                add(
+                    SelectionAction(
+                        icon = Icons.Default.Share,
+                        label = stringResource(R.string.sel_label_share),
+                        onClick = { showPhotoShareSheet = true },
                     )
-                }
-                Spacer(Modifier.size(4.dp))
-                // Delete selected — same sheet + system trash dialog as the gallery, with the option
-                // to also remove the Drive copy of any backed-up photos.
-                SelectionTopButton(
-                    icon = Icons.Default.DeleteOutline,
-                    contentDescription = stringResource(R.string.gallery_delete_selected),
-                    tint = ErrorColor,
-                    onClick = { showDeleteSheet = true },
                 )
             }
-
-            // Bottom action dock — secondary actions (add to album, back up), the same floating
-            // PillBgOpaque pill as the gallery and album selection docks.
-            SelectionBottomDock {
-                // Add selected to a cloud album — opens the gallery's picker sheet.
-                SelectionDockItem(
-                    icon = Icons.Default.PhotoAlbum,
-                    label = stringResource(R.string.sel_label_album),
-                    showLabel = showSelectionLabels,
-                    onClick = { showAddToAlbumSheet = true },
+            // Add selected to a cloud album - opens the gallery's picker sheet. An album add
+            // uploads the photo, so it is offered on the photos that still have a device file
+            // and disappears for an all-vaulted selection.
+            if (selectedDeviceItems.isNotEmpty()) {
+                add(
+                    SelectionAction(
+                        icon = Icons.Default.PhotoAlbum,
+                        label = stringResource(R.string.gallery_add_to_album),
+                        onClick = { showAddToAlbumSheet = true },
+                    )
                 )
-                // Back up selected to Drive. Shown only when the selection holds a device-only photo
-                // that still needs backing up; an all-Synced selection is already on Drive, so the
-                // action would upload nothing. A snackbar confirms either way since the progress
-                // pill alone is easy to miss.
-                if (selectedItems.any { it is GalleryItem.LocalOnly }) {
-                    SelectionDockItem(
+            }
+            // Favourite the selection. Offered on every selected photo, vaulted ones included:
+            // the heart is recorded per photo wherever the photo lives, and the viewer already
+            // offers it on a vaulted photo the same way.
+            add(
+                favoriteSelectionAction(
+                    turnsOn = remember(selectedItems, favoriteIds) {
+                        favoriteTurnsOn(selectedItems, favoriteIds)
+                    },
+                    state = favoriteState,
+                    onClick = { viewModel.toggleSelectedFavorite() },
+                )
+            )
+            // Back up selected to Drive. Shown only when the selection holds a device-only photo
+            // that still needs backing up; an all-Synced selection is already on Drive, so the
+            // action would upload nothing. A snackbar confirms either way since the progress
+            // pill alone is easy to miss.
+            if (anyDeviceOnlySelected) {
+                add(
+                    SelectionAction(
                         icon = Icons.Default.CloudUpload,
-                        label = stringResource(R.string.sel_label_upload),
-                        showLabel = showSelectionLabels,
+                        label = stringResource(R.string.sel_label_back_up),
                         onClick = { showUploadConfirm = true },
                     )
-                }
-                // Overflow with the metadata strip, shown only when every selected item is a
-                // device-only photo. A Synced photo keeps its Drive copy's EXIF, so stripping just
-                // the local file is a misleading half-strip; the timeline hides it the same way.
-                if (selectedItems.all { it is GalleryItem.LocalOnly }) {
-                    Box {
-                        var moreExpanded by remember { mutableStateOf(false) }
-                        SelectionDockItem(
-                            icon = Icons.Default.MoreVert,
-                            label = stringResource(R.string.more_label),
-                            showLabel = showSelectionLabels,
-                            onClick = { moreExpanded = true },
+                )
+            }
+            // Pin one photo as the folder's cover, the way a cloud album's list offers it. One
+            // photo is one cover, and a hidden photo is never the folder's public face, so it
+            // appears only on a single selection of a photo that is still on the device.
+            if (coverCandidate != null) {
+                add(
+                    SelectionAction(
+                        icon = Icons.Default.PhotoLibrary,
+                        label = stringResource(R.string.album_set_as_cover),
+                        onClick = { showSetCoverConfirm = true },
+                    )
+                )
+            }
+            // A folder of scanned photos is where wrong dates get fixed in bulk, so the date +
+            // place editor opens as soon as one selected item is device-only and the editor names
+            // the count it lands on.
+            if (anyDeviceOnlySelected) {
+                add(
+                    SelectionAction(
+                        icon = Icons.Default.EditNote,
+                        label = stringResource(R.string.metadata_editor_edit_metadata),
+                        onClick = { onEditMetadata(selectedDeviceItems) },
+                    )
+                )
+                // The strip stays behind an all-device-only selection: a Synced photo keeps its
+                // Drive copy's EXIF, so stripping just the local file is a misleading half-strip.
+                if (selectedDeviceItems.all { it is GalleryItem.LocalOnly }) {
+                    add(
+                        SelectionAction(
+                            icon = Icons.Default.PrivacyTip,
+                            label = stringResource(R.string.gallery_strip_metadata),
+                            onClick = { showStripPicker = true },
                         )
-                        DropdownMenu(
-                            expanded = moreExpanded,
-                            onDismissRequest = { moreExpanded = false },
-                            shape = RoundedCornerShape(18.dp),
-                            containerColor = moreColors.cardBg,
-                            border = BorderStroke(0.5.dp, moreColors.pillBorder),
-                        ) {
-                            DropdownMenuItem(
-                                text = {
-                                    Text(stringResource(R.string.gallery_strip_metadata), color = moreColors.fgPrimary)
-                                },
-                                leadingIcon = {
-                                    Icon(
-                                        Icons.Default.PrivacyTip, null,
-                                        tint = moreColors.fgPrimary, modifier = Modifier.size(20.dp),
-                                    )
-                                },
-                                onClick = {
-                                    moreExpanded = false
-                                    viewModel.stripMetadataSelected()
-                                },
-                            )
-                        }
-                    }
+                    )
                 }
             }
+            // Reveal selected: every vaulted photo in the selection returns to the device, and the
+            // folder stops being hidden once the vault holds nothing more of it.
+            if (anyVaultedSelected) {
+                add(
+                    SelectionAction(
+                        icon = Icons.Default.Visibility,
+                        label = stringResource(R.string.sel_label_unhide),
+                        onClick = { viewModel.unhideSelected() },
+                    )
+                )
+            }
+            // Hide selected: a photo that lives only on this device moves into the vault, one
+            // with a cloud copy is filtered by linkId. Mirrors the timeline's hide action.
+            if (selectedDeviceItems.isNotEmpty()) {
+                add(
+                    SelectionAction(
+                        icon = Icons.Default.VisibilityOff,
+                        label = stringResource(R.string.sel_label_hide),
+                        enabled = !isDeleting,
+                        // A hide ends in a permanent removal of the device originals it vaults, so it
+                        // is confirmed exactly as the delete beside it is. The split is read at the
+                        // tap, so the sheet names what THIS selection will have done to it.
+                        onClick = {
+                            hideConfirmSplit = viewModel.hideSplitForSelection().takeIf { !it.isEmpty }
+                        },
+                    )
+                )
+            }
+            // Delete selected - same sheet + system trash dialog as the gallery, with the option
+            // to also remove the Drive copy of any backed-up photos.
+            if (selectedDeviceItems.isNotEmpty()) {
+                add(
+                    SelectionAction(
+                        icon = Icons.Default.DeleteOutline,
+                        label = stringResource(R.string.sel_label_delete),
+                        tint = ErrorColor,
+                        onClick = { showDeleteSheet = true },
+                    )
+                )
+            }
+        }
+        SelectionDrawer(
+            visible = isSelectionMode,
+            items = selectedItems,
+            actions = folderSelectionActions,
+            onDismiss = { viewModel.clearSelection() },
+            // Scrolling the folder grid collapses the drawer, so reaching past it to carry on
+            // through the photos needs no deliberate pull or tap first.
+            contentScrolling = gridState.isScrollInProgress,
+            modifier = Modifier.align(Alignment.BottomCenter),
+        )
+        if (showStripPicker) {
+            MetadataStripPickerDialog(
+                onConfirm = {
+                    showStripPicker = false
+                    viewModel.stripMetadataSelected(it)
+                },
+                onDismiss = { showStripPicker = false },
+            )
         }
 
         // Bulk-delete sheet — reuses the gallery's dialog so the options (free up space / also
@@ -713,7 +842,7 @@ fun DeviceFolderDetailScreen(
                     is GalleryItem.Synced -> it.local.uri
                     is GalleryItem.CloudOnly -> null
                 }
-                u in selectedUris
+                u in selectedUris && u !in vaultedUris
             }.toSet()
             eu.akoos.photos.presentation.gallery.GalleryMultiDeleteDialog(
                 selectedItems = deleteItems,
@@ -765,29 +894,86 @@ fun DeviceFolderDetailScreen(
         }
 
         if (showAddToAlbumSheet && selectedUris.isNotEmpty()) {
-            val addCtx = androidx.compose.ui.platform.LocalContext.current
             val addItems = items.filter {
                 val u = when (it) {
                     is GalleryItem.LocalOnly -> it.local.uri
                     is GalleryItem.Synced -> it.local.uri
                     is GalleryItem.CloudOnly -> null
                 }
-                u in selectedUris
+                u in selectedUris && u !in vaultedUris
             }.toSet()
             eu.akoos.photos.presentation.gallery.GalleryAddToAlbumDialog(
                 selectedItems = addItems,
                 cloudAlbums = albums,
                 sheetState = addToAlbumSheetState,
-                onCreateNew = { showAddToAlbumSheet = false },
+                onCreateNew = {
+                    showAddToAlbumSheet = false
+                    showCreateAlbumInline = true
+                },
                 onCloudAlbumSelected = { album ->
                     showAddToAlbumSheet = false
-                    viewModel.addSelectedToAlbum(album.linkId) { _, _ ->
-                        scope.launch {
-                            snackbarHostState.showSnackbar(addCtx.getString(R.string.device_folder_added_to_album))
-                        }
+                    viewModel.addSelectedToAlbum(album.linkId) { joined, queued ->
+                        showAddToAlbumOutcome(joined, queued, error = null)
                     }
                 },
                 onDismiss = { showAddToAlbumSheet = false },
+            )
+        }
+
+        // Name a brand-new album for the selection, then create it and add the photos to it — the
+        // same two steps the timeline's picker runs, so the row means the same thing on both.
+        if (showCreateAlbumInline) {
+            eu.akoos.photos.presentation.gallery.GalleryNewAlbumDialog(
+                onDismiss = { showCreateAlbumInline = false },
+                onCreate = { name ->
+                    showCreateAlbumInline = false
+                    viewModel.createAlbumThenAddSelected(name) { joined, queued, error ->
+                        showAddToAlbumOutcome(joined, queued, error)
+                    }
+                },
+            )
+        }
+
+        // Hide confirmations — the shared sheet every hide surface raises, worded from the split the
+        // hide will really run on. The selection's and the whole folder's are separate taps.
+        hideConfirmSplit?.let { split ->
+            HideConfirmSheet(
+                split = split,
+                title = stringResource(R.string.hide_confirm_title),
+                onConfirm = {
+                    hideConfirmSplit = null
+                    viewModel.hideSelected()
+                },
+                onDismiss = { hideConfirmSplit = null },
+            )
+        }
+        folderHideConfirmSplit?.let { split ->
+            HideConfirmSheet(
+                split = split,
+                title = stringResource(R.string.device_folder_hide_card),
+                onConfirm = {
+                    folderHideConfirmSplit = null
+                    viewModel.toggleHiddenCard()
+                },
+                onDismiss = { folderHideConfirmSplit = null },
+            )
+        }
+
+        // Confirm before pinning the selected photo as this folder's cover, matching the album's.
+        if (showSetCoverConfirm && FolderCoverSelection.pinnable(selectedUris, vaultedUris) != null) {
+            val coverUpdatedMsg = stringResource(R.string.album_cover_updated)
+            ConfirmSheet(
+                title = stringResource(R.string.device_folder_set_cover_confirm_title),
+                message = stringResource(R.string.device_folder_set_cover_confirm_body),
+                confirmLabel = stringResource(R.string.album_set_as_cover),
+                dismissLabel = stringResource(R.string.cancel),
+                onConfirm = {
+                    showSetCoverConfirm = false
+                    viewModel.setSelectedAsFolderCover {
+                        scope.launch { snackbarHostState.showSnackbar(coverUpdatedMsg) }
+                    }
+                },
+                onDismiss = { showSetCoverConfirm = false },
             )
         }
 
@@ -813,63 +999,49 @@ fun DeviceFolderDetailScreen(
             )
         }
 
-        // "Back up folder" choice — upload every photo to the timeline, optionally also mirroring
-        // the folder as a Drive album. The snackbar reports how many were queued vs already backed up.
-        if (showBackupDialog) {
-            val ctx = androidx.compose.ui.platform.LocalContext.current
-            fun runBackup(asMirror: Boolean) {
-                showBackupDialog = false
-                viewModel.backUpAll(asMirror) { outcome ->
-                    // The progress pill covers a started back-up; only speak up when there was
-                    // nothing to do (everything already on Drive).
-                    if (outcome.queued == 0) scope.launch {
-                        snackbarHostState.showSnackbar(ctx.getString(R.string.device_folder_already_backed_up))
-                    }
-                }
+        // One pill for the folder's two long operations, the same surface every other screen uses
+        // for bulk work. A folder can hold thousands and both the back-up and the vault copy file by
+        // file, so the user watches the count and stops it from here rather than waiting on a
+        // blocked screen. [DeviceFolderProgress] picks which one is on show when both run, and the
+        // cancel branches mirror the progress branches, so the X always stops what is reported.
+        val backingUpTpl = stringResource(R.string.op_backing_up_fmt)
+        val hidingTpl = stringResource(R.string.device_folder_hiding_fmt)
+        val restoringTpl = stringResource(R.string.device_folder_restoring_fmt)
+        val folderOp = DeviceFolderProgress.operation(
+            vaultRunning = folderVault != null,
+            vaultRestoring = folderVault?.restoring == true,
+            backupRunning = backupProgress != null,
+        )
+        val folderOpProgress = when (folderOp) {
+            DeviceFolderOperation.Hiding, DeviceFolderOperation.Restoring -> folderVault?.let { fv ->
+                val tpl = if (fv.restoring) restoringTpl else hidingTpl
+                eu.akoos.photos.presentation.common.OperationProgress(
+                    fv.done, fv.total, tpl.format(fv.done, fv.total),
+                )
             }
-            AlertDialog(
-                onDismissRequest = { showBackupDialog = false },
-                containerColor = Bg0,
-                title = {
-                    Text(
-                        stringResource(R.string.device_folder_backup_choice_title),
-                        color = FgPrimary, fontWeight = FontWeight.SemiBold,
-                    )
-                },
-                text = {
-                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text(
-                            stringResource(R.string.device_folder_backup_choice_body),
-                            color = FgMute, fontSize = 13.sp,
-                        )
-                        // Two tappable option cards — the row itself is the action, so there is
-                        // no separate confirm button. "Album" mirrors the folder (keeps syncing);
-                        // "photos only" is a one-time timeline upload.
-                        BackupOptionRow(
-                            icon = Icons.Default.PhotoAlbum,
-                            title = stringResource(R.string.device_folder_backup_mirror),
-                            subtitle = stringResource(R.string.device_folder_backup_mirror_sub),
-                            onClick = { runBackup(asMirror = true) },
-                        )
-                        BackupOptionRow(
-                            icon = Icons.Default.CloudUpload,
-                            title = stringResource(R.string.device_folder_backup_timeline),
-                            subtitle = stringResource(R.string.device_folder_backup_timeline_sub),
-                            onClick = { runBackup(asMirror = false) },
-                        )
-                    }
-                },
-                confirmButton = {},
-                dismissButton = {
-                    TextButton(onClick = { showBackupDialog = false }) {
-                        Text(stringResource(R.string.cancel), color = FgMute)
-                    }
-                },
-            )
+            DeviceFolderOperation.BackingUp -> backupProgress?.let { bp ->
+                eu.akoos.photos.presentation.common.OperationProgress(
+                    bp.done, bp.total, backingUpTpl.format(bp.done, bp.total),
+                )
+            }
+            null -> null
         }
+        val folderOpCancel: (() -> Unit)? = when (folderOp) {
+            DeviceFolderOperation.Hiding, DeviceFolderOperation.Restoring -> viewModel::cancelFolderVault
+            DeviceFolderOperation.BackingUp -> viewModel::cancelBackup
+            null -> null
+        }
+        eu.akoos.photos.presentation.common.OperationProgressPill(
+            progress = folderOpProgress,
+            onCancel = folderOpCancel,
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .statusBarsPadding()
+                .padding(top = 8.dp),
+        )
 
-        // Jump-to-top pill — appears once scrolled down, hidden during selection so it never
-        // collides with the bottom action dock. Mirrors the cloud-album detail page.
+        // Jump-to-top pill: appears once scrolled down, hidden during selection so it never
+        // collides with the selection drawer. Mirrors the cloud-album detail page.
         AnimatedVisibility(
             visible = showScrollTop && !isSelectionMode,
             enter = fadeIn(),
@@ -896,40 +1068,39 @@ fun DeviceFolderDetailScreen(
             modifier = Modifier.align(Alignment.BottomCenter),
         )
     }
-}
 
-/**
- * One tappable choice row in the "Back up folder" dialog: an accent-tinted icon bubble, a title
- * and a one-line explanation. The whole row is the action — there is no separate confirm button.
- */
-@Composable
-private fun BackupOptionRow(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    title: String,
-    subtitle: String,
-    onClick: () -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .border(0.5.dp, PillBorder, RoundedCornerShape(12.dp))
-            .clickable(onClick = onClick)
-            .padding(12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(
-            modifier = Modifier
-                .size(36.dp)
-                .clip(CircleShape)
-                .background(PillBg),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(icon, contentDescription = null, tint = Accent, modifier = Modifier.size(20.dp))
-        }
-        Column(modifier = Modifier.padding(start = 12.dp).weight(1f)) {
-            Text(title, color = FgPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-            Text(subtitle, color = FgMute, fontSize = 12.sp)
-        }
+    // Folder drawer — back up (stream only, or also as an album) plus the per-folder preferences.
+    // An empty folder keeps the drawer and loses only the two rows with nothing to run on: its
+    // preferences are exactly what an emptied-by-a-filter folder needs, so gating the whole drawer
+    // on photos would put them out of reach from the one screen that is about this folder.
+    if (showFolderOverflow) {
+        val bp = backupProgress
+        val hasPhotos = items.isNotEmpty()
+        DeviceFolderActionsSheet(
+            sheetState = folderActionsSheetState,
+            backupBusy = bp != null,
+            backupFraction = bp?.takeIf { it.total > 0 }?.let { it.done.toFloat() / it.total },
+            isMirroredAsAlbum = isMirroredAsAlbum,
+            isExcludedFromBackup = isExcludedFromBackup,
+            isHiddenFromTimeline = isHiddenFromTimeline,
+            isHiddenCard = isHiddenCard,
+            sortMode = sortMode,
+            onDismiss = { showFolderOverflow = false },
+            onBackUp = if (hasPhotos) ({ asMirror -> backUpFolder(asMirror) }) else null,
+            onToggleMirrorAsAlbum = viewModel::toggleMirrorAsAlbum,
+            onToggleExcludedFromBackup = viewModel::toggleExcludedFromBackup,
+            onToggleHiddenFromTimeline = viewModel::toggleHiddenFromTimeline,
+            onToggleHiddenCard = {
+                // Only the hiding direction is confirmed: the same row reveals the folder when this
+                // screen was opened from the vault, and that puts photos back rather than away. A
+                // folder with nothing left to move is only marked hidden, so it needs no sheet.
+                val split = if (fromVault) null else viewModel.folderHideSplitPreview().takeIf { !it.isEmpty }
+                if (split == null) viewModel.toggleHiddenCard() else folderHideConfirmSplit = split
+            },
+            // Hands the folder to the viewer already playing, opening on the first photo of the
+            // current sort order.
+            onSlideshow = if (hasPhotos) ({ onSlideshowClick(items) }) else null,
+            onSortSelected = viewModel::setSortMode,
+        )
     }
 }

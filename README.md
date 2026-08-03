@@ -12,9 +12,10 @@
 
 <p align="center">
   <a href="https://github.com/gitakoos/proton-photos/releases/latest"><img src="https://img.shields.io/github/v/release/gitakoos/proton-photos?label=release&color=blue" alt="Release" /></a>
+  <a href="https://github.com/gitakoos/proton-photos/releases"><img src="https://img.shields.io/github/downloads/gitakoos/proton-photos/total?label=downloads&color=8B7CFF" alt="Downloads" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-green" alt="License" /></a>
   <img src="https://img.shields.io/badge/minSdk-26-orange" alt="Min SDK" />
-  <a href="https://photos.akoos.eu"><img src="https://img.shields.io/badge/website-photos.akoos.eu-8B7CFF" alt="Website" /></a>
+  <a href="https://www.photosforproton.eu"><img src="https://img.shields.io/badge/website-photosforproton.eu-8B7CFF" alt="Website" /></a>
 </p>
 
 <p align="center">
@@ -87,8 +88,9 @@ app/src/main/kotlin/eu/akoos/photos/
 │   ├── api/          Retrofit Drive API + DTOs
 │   ├── crypto/       DriveCryptoHelper (ProtonCore wrapper)
 │   ├── db/           Room DAOs / entities / migrations
-│   ├── repository/   incl. GpsBackfillScheduler + CloudGpsBackfillScheduler
-│   │   │             (geotag extraction for on-device + cloud photos)
+│   ├── repository/   incl. LocalExifBackfillScheduler + CloudGpsBackfillScheduler
+│   │   │             (geotag + capture-date recovery for on-device
+│   │   │             and cloud photos)
 │   │   └── drive/    Drive backend split per concern (Upload, Download,
 │   │                 Stream, Album, AlbumSharing, AlbumCryptoChain,
 │   │                 CloudTrash, ThumbnailDecryptScheduler, …)

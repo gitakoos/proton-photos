@@ -87,9 +87,11 @@ class DrivePhotoRepositoryImpl @Inject constructor(
     private val cloudTrashService: CloudTrashService,
     private val albumSharingService: AlbumSharingService,
     private val thumbnailScheduler: ThumbnailDecryptScheduler,
+    private val sharedAlbumKeyStore: eu.akoos.photos.data.repository.drive.SharedAlbumKeyStore,
     private val thumbnailUrlStore: ThumbnailUrlStore,
     private val cloudGpsBackfillScheduler: CloudGpsBackfillScheduler,
     private val videoDurationBackfillScheduler: VideoDurationBackfillScheduler,
+    private val localExifBackfillScheduler: LocalExifBackfillScheduler,
     private val photoListingDao: PhotoListingDao,
     private val listingSweepSnapshotDao: ListingSweepSnapshotDao,
     private val syncStateDao: SyncStateDao,
@@ -149,8 +151,14 @@ class DrivePhotoRepositoryImpl @Inject constructor(
     override suspend fun loadSharedAddableAlbumsCached(): List<Album> =
         albumService.loadSharedAddableAlbumsCached()
 
+    override suspend fun loadSharedWithMeAlbumsCached(): List<Album> =
+        albumService.loadSharedWithMeAlbumsCached()
+
     override suspend fun prefetchAlbumsMembership(userId: UserId, albums: List<Album>) =
         albumService.prefetchAlbumsMembership(userId, albums)
+
+    override suspend fun prefetchSharedAlbumsMembership(userId: UserId, albums: List<Album>) =
+        albumService.prefetchSharedAlbumsMembership(userId, albums)
 
     override suspend fun createDriveAlbum(userId: UserId, name: String): Album =
         albumService.createDriveAlbum(userId, name)
@@ -274,7 +282,10 @@ class DrivePhotoRepositoryImpl @Inject constructor(
     override suspend fun deleteFromCloudForever(userId: UserId, linkIds: List<String>) =
         cloudTrashService.deleteFromCloudForever(userId, linkIds)
 
-    override suspend fun createAlbumShareLink(userId: UserId, albumLinkId: String): String =
+    override suspend fun createAlbumShareLink(
+        userId: UserId,
+        albumLinkId: String,
+    ): eu.akoos.photos.domain.entity.AlbumShareLink =
         albumSharingService.createAlbumShareLink(userId, albumLinkId)
 
     override suspend fun createPhotoShareLink(userId: UserId, photoLinkId: String): String =
@@ -289,8 +300,12 @@ class DrivePhotoRepositoryImpl @Inject constructor(
     override suspend fun setPhotoLinkPassword(userId: UserId, photoLinkId: String, password: String?): String =
         albumSharingService.setPhotoLinkPassword(userId, photoLinkId, password)
 
-    override suspend fun inviteToAlbum(userId: UserId, albumLinkId: String, email: String) =
-        albumSharingService.inviteToAlbum(userId, albumLinkId, email)
+    override suspend fun inviteToAlbum(
+        userId: UserId,
+        albumLinkId: String,
+        email: String,
+        permissions: Int,
+    ): String = albumSharingService.inviteToAlbum(userId, albumLinkId, email, permissions)
 
     override suspend fun saveSharedAlbumToOwnLibrary(
         userId: UserId,
@@ -399,6 +414,9 @@ class DrivePhotoRepositoryImpl @Inject constructor(
     override suspend fun loadSharedWithMeAlbums(userId: UserId): List<Album> =
         albumSharingService.loadSharedWithMeAlbums(userId)
 
+    override suspend fun prefetchSharedAlbumCovers(userId: UserId, albums: List<Album>) =
+        albumSharingService.prefetchSharedAlbumCovers(userId, albums)
+
     override suspend fun loadSharedByMePhotos(userId: UserId): List<SharedPhoto> =
         albumSharingService.loadSharedByMePhotos(userId)
 
@@ -457,6 +475,10 @@ class DrivePhotoRepositoryImpl @Inject constructor(
         cryptoHelper.clearAllCaches()
         recentUploadsTracker.clearInMemory()
         thumbnailScheduler.clear()
+        // Decrypted share and album keys for albums other users shared with this one. Held in a
+        // Singleton that nothing else empties, so without this they outlive the session that could
+        // read them, in a process that can keep running long after the account is gone.
+        sharedAlbumKeyStore.clear()
         // Cancel any in-flight Save-to-my-library copy and reset its state to Idle so a
         // re-login by a different user doesn't pick up a stale Running banner against the
         // old account's album linkId. The Job is rooted in a Singleton-scoped SupervisorJob
@@ -492,6 +514,11 @@ class DrivePhotoRepositoryImpl @Inject constructor(
         // Wipe the background-transfer history. It holds album names, timestamps and device-URI
         // thumbnails of the previous session's uploads and downloads, kept in its own store that the
         // settings-key wipe does not reach, so the next signed-in user must not inherit it.
+        // Decrypted full-resolution copies and the upload resume dirs both hold this account's
+        // plaintext: `fullres` the photos themselves, each `upload_*` a manifest carrying the file's
+        // session key. Neither is user-partitioned and neither ages out on this path, so signing out
+        // left the previous account's readable bytes on disk for the next person to hold the phone.
+        runCatching { downloadService.clearDecryptedCaches() }
         runCatching { transferCenter.clearHistory() }
     }
 
@@ -541,5 +568,9 @@ class DrivePhotoRepositoryImpl @Inject constructor(
 
     override suspend fun backfillVideoDurations(userId: UserId) {
         videoDurationBackfillScheduler.backfillAll(userId)
+    }
+
+    override suspend fun backfillLocalExif(userId: UserId) {
+        localExifBackfillScheduler.backfillAll(userId)
     }
 }

@@ -116,7 +116,7 @@ internal fun ShareAlbumSheet(
 ) {
     var inviteEmail by remember { mutableStateOf("") }
     val pendingEmails = remember { mutableStateListOf<String>() }
-    // 6 (editor) matches the inviteToAlbum() default in the data layer.
+    // 6 (editor) is Drive's default role for an album invitation; the dropdown drops it to 4 (viewer).
     var newInvitePermissions by remember { mutableStateOf(6) }
 
     val trimmedEmail = inviteEmail.trim()
@@ -142,7 +142,7 @@ internal fun ShareAlbumSheet(
     ModalBottomSheet(
         onDismissRequest = { resetInputs(); onDismiss() },
         sheetState = sheetState,
-        containerColor = appColors.cardBg,
+        containerColor = appColors.bg2,
         scrimColor = Color.Black.copy(alpha = 0.5f),
     ) {
         Column(
@@ -764,7 +764,7 @@ internal fun SharedWithMeInfoSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = AppColors.current.cardBg,
+        containerColor = AppColors.current.bg2,
         scrimColor = Color.Black.copy(alpha = 0.5f),
     ) {
         Column(

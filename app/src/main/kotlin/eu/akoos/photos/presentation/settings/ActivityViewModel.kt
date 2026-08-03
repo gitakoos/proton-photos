@@ -44,6 +44,7 @@ import me.proton.core.accountmanager.domain.AccountManager
 import eu.akoos.photos.data.transfer.TransferCenter
 import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.domain.repository.SyncStateRepository
+import eu.akoos.photos.util.batteryLowFlow
 import eu.akoos.photos.util.retryOnDbTear
 import eu.akoos.photos.domain.usecase.UploadPendingUseCase
 import eu.akoos.photos.domain.usecase.UploadStatus
@@ -90,9 +91,27 @@ class ActivityViewModel @Inject constructor(
         val uploadStopped: Boolean = false,
         /** Persisted log of finished uploads/downloads for the History tab (newest first). */
         val history: List<TransferCenter.HistoryEntry> = emptyList(),
+        /** Whether the OS currently counts the battery as low (at or under its 15% floor). */
+        val batteryLow: Boolean = false,
     ) {
         val isUploading: Boolean get() = uploadTotal > 0 && uploadDone < uploadTotal
         val pendingCount: Int get() = pendingUris.size
+
+        /**
+         * Backup has work to do and the OS is holding it because the battery is low.
+         *
+         * The upload workers carry `setRequiresBatteryNotLow(true)`, so under the floor the system
+         * never starts them and the upload pipeline emits nothing at all. Without this the screen
+         * shows queued photos next to no activity and no reason, which reads as the app being stuck.
+         * The state is derived here rather than reported by the pipeline for exactly that reason:
+         * there is no run to report it.
+         *
+         * Narrow on purpose. A batch that is already running is not held, and a backup the user
+         * stopped is waiting on the user, not on the battery; naming the wrong cause in either case
+         * would send them to fix something that is not the problem.
+         */
+        val backupHeldByBattery: Boolean
+            get() = batteryLow && pendingUris.isNotEmpty() && !isUploading && !uploadStopped
         val hasActivity: Boolean
             get() = isUploading || uploadEvents.isNotEmpty() || downloads.isNotEmpty() ||
                 galleryDownloads.isNotEmpty() || offlineTransfers.isNotEmpty() ||
@@ -162,9 +181,18 @@ class ActivityViewModel @Inject constructor(
                     when (evt.status) {
                         // End of batch — clear the counters so the screen reads "nothing uploading",
                         // leaving only the pending list (if any).
-                        UploadStatus.Idle -> s.copy(uploadDone = 0, uploadTotal = 0, uploadEvents = emptyList())
+                        // A full Drive ends the batch exactly as Idle does, so it clears the same
+                        // counters. Leaving them stood the screen on "Backing up 3 of 40" with
+                        // nothing running, and since isUploading reads those counters, nothing after
+                        // it could resolve the state: the next batch merged into a list that was
+                        // never closed. Wi-Fi and listing deferrals hold their frame because they
+                        // resume on their own; this one waits on the user freeing space.
+                        UploadStatus.Idle,
+                        UploadStatus.StorageFull ->
+                            s.copy(uploadDone = 0, uploadTotal = 0, uploadEvents = emptyList())
                         // Deferral frames carry no per-file payload.
-                        UploadStatus.WaitingForWifi, UploadStatus.PreparingBackup -> s
+                        UploadStatus.WaitingForWifi,
+                        UploadStatus.PreparingBackup -> s
                         else -> {
                             val uiStatus = when (evt.status) {
                                 UploadStatus.Uploading -> UploadEventStatus.Uploading
@@ -213,6 +241,13 @@ class ActivityViewModel @Inject constructor(
                     .filter { it.status == SyncStatus.LOCAL_ONLY && it.queued }
                     .mapNotNull { it.localUri?.takeIf { u -> u.isNotBlank() } }
                 _uiState.update { it.copy(pendingUris = pending) }
+            }
+        }
+        // Battery state, live: the "waiting for battery" note has to clear the moment the phone goes
+        // on a charger, so a one-off read at screen open would leave a stale reason on screen.
+        viewModelScope.launch {
+            context.batteryLowFlow().collect { low ->
+                _uiState.update { it.copy(batteryLow = low) }
             }
         }
         // Album downloads run in AlbumDownloadWorker; every instance carries a shared tag, so one

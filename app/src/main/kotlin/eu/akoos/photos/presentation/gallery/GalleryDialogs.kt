@@ -113,6 +113,7 @@ internal fun GallerySharedEmailFilterDialog(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = Bg2,
+        scrimColor = Color.Black.copy(alpha = 0.5f),
     ) {
         Column(
             modifier = Modifier
@@ -194,6 +195,7 @@ internal fun GalleryMultiDeleteDialog(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = Bg2,
+        scrimColor = Color.Black.copy(alpha = 0.5f),
     ) {
         MultiDeleteSheet(
             selectedItems = selectedItems,
@@ -257,14 +259,14 @@ internal fun GalleryNewAlbumDialog(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = appColors.cardBg,
+        containerColor = Bg2,
         scrimColor = Color.Black.copy(alpha = 0.5f),
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .navigationBarsPadding()
-                .padding(horizontal = 24.dp)
+                .padding(horizontal = 20.dp)
                 .padding(bottom = 36.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
