@@ -25,7 +25,15 @@ package eu.akoos.photos.presentation.common
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.material3.AlertDialog
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.ui.graphics.Color
+import eu.akoos.photos.presentation.theme.Bg2
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -81,6 +89,7 @@ sealed class UpdatePromptState {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun UpdatePromptDialog(
     state: UpdatePromptState,
@@ -90,7 +99,7 @@ fun UpdatePromptDialog(
     val colors = AppColors.current
     val title = stringResource(R.string.update_available_title)
 
-    AlertDialog(
+    ModalBottomSheet(
         // A download is stopped from its own Cancel button rather than by a tap outside, so a stray
         // tap cannot throw away a part-downloaded APK.
         onDismissRequest = if (state is UpdatePromptState.Downloading) {
@@ -98,29 +107,29 @@ fun UpdatePromptDialog(
         } else {
             onDismiss
         },
-        containerColor    = colors.cardBg,
-        titleContentColor = colors.fgPrimary,
-        textContentColor  = colors.fgDim,
-        title = { Text(title, fontWeight = FontWeight.SemiBold) },
-        text = {
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = Bg2,
+        scrimColor = Color.Black.copy(alpha = 0.5f),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 32.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Text(title, color = colors.fgPrimary, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
             when (state) {
-                is UpdatePromptState.Available -> {
+                is UpdatePromptState.Available ->
                     Text(
-                        stringResource(
-                            R.string.update_available_message,
-                            state.versionName,
-                            state.sizeMb,
-                        ),
-                        color = colors.fgDim,
-                        fontSize = 13.sp,
+                        stringResource(R.string.update_available_message, state.versionName, state.sizeMb),
+                        color = colors.fgDim, fontSize = 14.sp,
                     )
-                }
-                is UpdatePromptState.Downloading -> {
+                is UpdatePromptState.Downloading ->
                     Column {
                         Text(
                             stringResource(R.string.update_downloading, state.progressPercent),
-                            color = colors.fgDim,
-                            fontSize = 13.sp,
+                            color = colors.fgDim, fontSize = 14.sp,
                         )
                         Spacer(Modifier.height(12.dp))
                         LinearProgressIndicator(
@@ -130,77 +139,33 @@ fun UpdatePromptDialog(
                             trackColor = colors.trackBg,
                         )
                     }
-                }
-                is UpdatePromptState.InstallReady -> {
-                    Text(
-                        stringResource(R.string.update_install_prompt),
-                        color = colors.fgDim,
-                        fontSize = 13.sp,
-                    )
-                }
+                is UpdatePromptState.InstallReady ->
+                    Text(stringResource(R.string.update_install_prompt), color = colors.fgDim, fontSize = 14.sp)
                 is UpdatePromptState.Error -> {
                     val body = when (state.errorKind) {
-                        UpdatePromptState.ErrorKind.NETWORK ->
-                            stringResource(R.string.update_check_failed)
-                        UpdatePromptState.ErrorKind.PERMISSION_DENIED ->
-                            stringResource(R.string.update_permission_required)
-                        UpdatePromptState.ErrorKind.VERIFICATION ->
-                            stringResource(R.string.update_verification_failed)
-                        UpdatePromptState.ErrorKind.ALREADY_CURRENT ->
-                            stringResource(R.string.update_no_update)
+                        UpdatePromptState.ErrorKind.NETWORK -> stringResource(R.string.update_check_failed)
+                        UpdatePromptState.ErrorKind.PERMISSION_DENIED -> stringResource(R.string.update_permission_required)
+                        UpdatePromptState.ErrorKind.VERIFICATION -> stringResource(R.string.update_verification_failed)
+                        UpdatePromptState.ErrorKind.ALREADY_CURRENT -> stringResource(R.string.update_no_update)
                     }
-                    Text(body, color = colors.fgDim, fontSize = 13.sp)
+                    Text(body, color = colors.fgDim, fontSize = 14.sp)
                 }
             }
-        },
-        confirmButton = {
-            when (state) {
-                is UpdatePromptState.Available,
-                is UpdatePromptState.InstallReady -> {
-                    TextButton(onClick = onUpdate) {
-                        Text(
-                            stringResource(R.string.update_action_update),
-                            color = colors.accent,
-                            fontWeight = FontWeight.SemiBold,
-                        )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                when (state) {
+                    is UpdatePromptState.Available, is UpdatePromptState.InstallReady -> {
+                        SecondaryButton(stringResource(R.string.update_action_later), onDismiss, modifier = Modifier.weight(1f))
+                        PrimaryButton(stringResource(R.string.update_action_update), onUpdate, modifier = Modifier.weight(1f))
                     }
-                }
-                is UpdatePromptState.Error -> {
-                    TextButton(onClick = onDismiss) {
-                        Text(
-                            stringResource(R.string.update_action_later),
-                            color = colors.fgDim,
-                        )
-                    }
-                }
-                is UpdatePromptState.Downloading -> Unit
-            }
-        },
-        dismissButton = when (state) {
-            is UpdatePromptState.Available,
-            is UpdatePromptState.InstallReady -> {
-                {
-                    TextButton(onClick = onDismiss) {
-                        Text(
-                            stringResource(R.string.update_action_later),
-                            color = colors.fgDim,
-                        )
-                    }
+                    is UpdatePromptState.Error ->
+                        PrimaryButton(stringResource(R.string.update_action_later), onDismiss, modifier = Modifier.weight(1f))
+                    is UpdatePromptState.Downloading ->
+                        SecondaryButton(stringResource(R.string.cancel), onDismiss, modifier = Modifier.weight(1f))
                 }
             }
-            // The download runs behind a modal, so without this the user is held for the whole APK.
-            // The dismiss already cancels the job and drops the partial file.
-            is UpdatePromptState.Downloading -> {
-                {
-                    TextButton(onClick = onDismiss) {
-                        Text(
-                            stringResource(R.string.cancel),
-                            color = colors.fgDim,
-                        )
-                    }
-                }
-            }
-            else -> null
-        },
-    )
+        }
+    }
 }

@@ -64,6 +64,9 @@ fun ConfirmSheet(
      *  agreed to, which keeps a confirmation from being given against a message that is not there
      *  yet. Cancel stays live throughout. */
     confirmEnabled: Boolean = true,
+    /** A destructive confirm (a delete, or a hide that permanently removes the device originals) shows
+     *  the red action instead of the accent one, so it reads like every other destructive confirm. */
+    destructive: Boolean = false,
 ) {
     val colors = AppColors.current
     ModalBottomSheet(
@@ -88,11 +91,19 @@ fun ConfirmSheet(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 SecondaryButton(dismissLabel, onDismiss, modifier = Modifier.weight(1f))
-                PrimaryButton(
-                    confirmLabel, onConfirm,
-                    modifier = Modifier.weight(1f),
-                    enabled = confirmEnabled,
-                )
+                if (destructive) {
+                    DestructiveButton(
+                        confirmLabel, onConfirm,
+                        modifier = Modifier.weight(1f),
+                        enabled = confirmEnabled,
+                    )
+                } else {
+                    PrimaryButton(
+                        confirmLabel, onConfirm,
+                        modifier = Modifier.weight(1f),
+                        enabled = confirmEnabled,
+                    )
+                }
             }
         }
     }
@@ -146,5 +157,6 @@ fun HideConfirmSheet(
         onConfirm = onConfirm,
         onDismiss = onDismiss,
         confirmEnabled = wording != null,
+        destructive = true,
     )
 }

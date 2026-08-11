@@ -22,6 +22,11 @@
 
 package eu.akoos.photos.presentation.common
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -50,6 +55,10 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.ui.res.stringResource
 import eu.akoos.photos.R
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -90,10 +99,19 @@ fun OperationProgressPill(
     modifier: Modifier = Modifier,
     onCancel: (() -> Unit)? = null,
 ) {
-    if (progress == null) return
-    val colors = AppColors.current
-    Row(
-        modifier = modifier
+    // Hold the last progress so the pill animates OUT when the work ends instead of vanishing.
+    var last by remember { mutableStateOf(progress) }
+    if (progress != null) last = progress
+    AnimatedVisibility(
+        visible = progress != null,
+        enter = fadeIn() + slideInVertically { -it },
+        exit = fadeOut() + slideOutVertically { -it },
+        modifier = modifier,
+    ) {
+        val progress = last ?: return@AnimatedVisibility
+        val colors = AppColors.current
+        Row(
+            modifier = Modifier
             .clip(RoundedCornerShape(20.dp))
             .background(colors.bg0.copy(alpha = 0.95f))
             .border(0.5.dp, colors.pillBorder, RoundedCornerShape(20.dp))
@@ -148,6 +166,7 @@ fun OperationProgressPill(
                 )
             }
         }
+    }
     }
 }
 

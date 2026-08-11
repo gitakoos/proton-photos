@@ -33,6 +33,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.app.AppCompatDelegate
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -77,6 +78,7 @@ import eu.akoos.photos.data.updater.InstallOutcome
 import eu.akoos.photos.data.updater.InstallSessionEvents
 import eu.akoos.photos.data.updater.UpdateInstaller
 import eu.akoos.photos.data.preferences.SettingsKeys
+import eu.akoos.photos.data.preferences.ThemePrefsBoot
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.data.preferences.syncEffectivelyEnabled
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
@@ -139,6 +141,11 @@ class MainActivity : AppCompatActivity() {
     private val resumeRefreshThresholdMs = 60L * 1000L
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Follow the real OS light/dark setting for THIS activity, so Compose's isSystemInDarkTheme()
+        // reports it truthfully under the "System" theme. The app-wide default stays NIGHT_YES
+        // (App.applyStoredThemeMode) to keep the XML ProtonCore login screens dark; this local
+        // override only affects MainActivity, whose every surface is themed by Compose.
+        delegate.setLocalNightMode(AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM)
         super.onCreate(savedInstanceState)
         authOrchestrator.register(this)
         enableEdgeToEdge()
@@ -312,7 +319,7 @@ class MainActivity : AppCompatActivity() {
                         }
                 }
             }
-            val themeKey by themeKeyFlow.collectAsState(initial = "dark")
+            val themeKey by themeKeyFlow.collectAsState(initial = ThemePrefsBoot.read(this@MainActivity))
             val themeMode = ThemeMode.fromKey(themeKey)
             val systemDark = isSystemInDarkTheme()
             val useDark = when (themeMode) {

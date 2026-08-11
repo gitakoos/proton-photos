@@ -118,11 +118,12 @@ private enum class PickerFilter { All, Cloud, Device }
 
 @Composable
 fun AlbumPhotoPickerScreen(
-    albumLinkId: String,
-    albumName: String,
-    excludeLinkIds: Set<String>,
+    albumLinkId: String = "",
+    albumName: String = "",
+    excludeLinkIds: Set<String> = emptySet(),
     onBack: () -> Unit,
-    onAdded: () -> Unit,
+    onAdded: () -> Unit = {},
+    onPick: ((List<GalleryItem>) -> Unit)? = null,
     viewModel: AlbumPhotoPickerViewModel = hiltViewModel(),
 ) {
     val appColors = AppColors.current
@@ -424,7 +425,13 @@ fun AlbumPhotoPickerScreen(
                 .clip(RoundedCornerShape(999.dp))
                 .background(if (canAdd) Accent else PillBg, RoundedCornerShape(999.dp))
                 .border(0.5.dp, PillBorder, RoundedCornerShape(999.dp))
-                .clickable(enabled = canAdd) { viewModel.addSelectedToAlbum(albumLinkId) }
+                .clickable(enabled = canAdd) {
+                    if (onPick != null) {
+                        onPick(allItems.filter { AlbumPhotoPickerViewModel.stableKeyOf(it) in selected })
+                    } else {
+                        viewModel.addSelectedToAlbum(albumLinkId)
+                    }
+                }
                 .padding(horizontal = 24.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),

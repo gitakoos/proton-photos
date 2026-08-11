@@ -46,6 +46,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.navigationBars
+import eu.akoos.photos.presentation.common.ConfirmDialog
 import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -58,16 +59,16 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.PhoneAndroid
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -154,6 +155,17 @@ fun DuplicateFinderScreen(
         var scope by rememberSaveable { mutableStateOf(DupScope.ALL) }
         val listState = rememberLazyListState()
 
+        // The per-group removal selection is hoisted here so the card and the full-screen review
+        // overlay edit ONE set per group. Keyed on the group's own member ids (see [duplicateGroupKey]):
+        // a pruned group's key no longer matches, so its selection re-seeds empty and can never name a
+        // copy the group no longer holds.
+        val groupSelections = remember { mutableStateMapOf<String, Set<String>>() }
+        // The group whose copies are open in the full-screen review, or null while it is closed.
+        var reviewGroup by remember { mutableStateOf<DuplicateGroup?>(null) }
+        // Full-res facts (uri, size, dimensions) for the cloud copy the review is showing, resolved on
+        // demand by the view model so the review can show the real image and its true size/resolution.
+        val cloudFullRes by viewModel.cloudFullRes.collectAsStateWithLifecycle()
+
         // Both filters narrow at RENDER time only: they pick which of the lists the view model has
         // already grouped to draw. Re-deriving groups per filter change would rebuild the whole
         // library in memory and blow the heap on large libraries, so never do that here.
@@ -214,15 +226,37 @@ fun DuplicateFinderScreen(
                     if (deviceGroups.isNotEmpty()) {
                         item("h-device") { SectionLabel(stringResource(R.string.duplicates_section_device)) }
                         items(deviceGroups, key = { "d-" + it.items.first().stableId }) { group ->
-                            DuplicateGroupCard(group, similar = false, state.isDeleting, viewModel::deleteExtras,
-                                onOpenViewer, viewModel::requestThumbnailDecrypt, viewModel::cancelThumbnailDecrypt)
+                            val key = duplicateGroupKey(group)
+                            DuplicateGroupCard(
+                                group = group,
+                                similar = false,
+                                isDeleting = state.isDeleting,
+                                selected = groupSelections[key].orEmpty(),
+                                onSelectionChange = { groupSelections[key] = it },
+                                onDeleteExtras = viewModel::deleteExtras,
+                                onOpenViewer = onOpenViewer,
+                                onOpenReview = { reviewGroup = group },
+                                requestDecrypt = viewModel::requestThumbnailDecrypt,
+                                cancelDecrypt = viewModel::cancelThumbnailDecrypt,
+                            )
                         }
                     }
                     if (cloudGroups.isNotEmpty()) {
                         item("h-cloud") { SectionLabel(stringResource(R.string.duplicates_section_cloud)) }
                         items(cloudGroups, key = { "c-" + it.items.first().stableId }) { group ->
-                            DuplicateGroupCard(group, similar = false, state.isDeleting, viewModel::deleteExtras,
-                                onOpenViewer, viewModel::requestThumbnailDecrypt, viewModel::cancelThumbnailDecrypt)
+                            val key = duplicateGroupKey(group)
+                            DuplicateGroupCard(
+                                group = group,
+                                similar = false,
+                                isDeleting = state.isDeleting,
+                                selected = groupSelections[key].orEmpty(),
+                                onSelectionChange = { groupSelections[key] = it },
+                                onDeleteExtras = viewModel::deleteExtras,
+                                onOpenViewer = onOpenViewer,
+                                onOpenReview = { reviewGroup = group },
+                                requestDecrypt = viewModel::requestThumbnailDecrypt,
+                                cancelDecrypt = viewModel::cancelThumbnailDecrypt,
+                            )
                         }
                     }
                 }
@@ -236,12 +270,34 @@ fun DuplicateFinderScreen(
                             )
                         }
                         items(similarDeviceGroups, key = { "sd-" + it.items.first().stableId }) { group ->
-                            DuplicateGroupCard(group, similar = true, state.isDeleting, viewModel::deleteExtras,
-                                onOpenViewer, viewModel::requestThumbnailDecrypt, viewModel::cancelThumbnailDecrypt)
+                            val key = duplicateGroupKey(group)
+                            DuplicateGroupCard(
+                                group = group,
+                                similar = true,
+                                isDeleting = state.isDeleting,
+                                selected = groupSelections[key].orEmpty(),
+                                onSelectionChange = { groupSelections[key] = it },
+                                onDeleteExtras = viewModel::deleteExtras,
+                                onOpenViewer = onOpenViewer,
+                                onOpenReview = { reviewGroup = group },
+                                requestDecrypt = viewModel::requestThumbnailDecrypt,
+                                cancelDecrypt = viewModel::cancelThumbnailDecrypt,
+                            )
                         }
                         items(similarCloudGroups, key = { "sc-" + it.items.first().stableId }) { group ->
-                            DuplicateGroupCard(group, similar = true, state.isDeleting, viewModel::deleteExtras,
-                                onOpenViewer, viewModel::requestThumbnailDecrypt, viewModel::cancelThumbnailDecrypt)
+                            val key = duplicateGroupKey(group)
+                            DuplicateGroupCard(
+                                group = group,
+                                similar = true,
+                                isDeleting = state.isDeleting,
+                                selected = groupSelections[key].orEmpty(),
+                                onSelectionChange = { groupSelections[key] = it },
+                                onDeleteExtras = viewModel::deleteExtras,
+                                onOpenViewer = onOpenViewer,
+                                onOpenReview = { reviewGroup = group },
+                                requestDecrypt = viewModel::requestThumbnailDecrypt,
+                                cancelDecrypt = viewModel::cancelThumbnailDecrypt,
+                            )
                         }
                     }
                     if (state.scanningSimilar) {
@@ -265,6 +321,27 @@ fun DuplicateFinderScreen(
             title = stringResource(R.string.duplicates_title),
             onBack = onBack,
         )
+
+        // Full-screen side-by-side review of one group's copies, drawn last so it covers the list and
+        // the header. It shares this group's hoisted selection, so a copy marked here is marked on the
+        // card too, and both delete through the same keep-set contract.
+        reviewGroup?.let { g ->
+            val reviewKey = duplicateGroupKey(g)
+            DuplicateGroupReview(
+                group = g,
+                selected = groupSelections[reviewKey].orEmpty(),
+                onSelectionChange = { groupSelections[reviewKey] = it },
+                isDeleting = state.isDeleting,
+                onDeleteExtras = viewModel::deleteExtras,
+                onClose = { reviewGroup = null },
+                requestDecrypt = viewModel::requestThumbnailDecrypt,
+                cancelDecrypt = viewModel::cancelThumbnailDecrypt,
+                cloudFullRes = cloudFullRes,
+                onRequestFullRes = { item ->
+                    (item as? GalleryItem.CloudOnly)?.let { viewModel.requestCloudFullRes(it.cloud) }
+                },
+            )
+        }
     }
 }
 
@@ -308,6 +385,12 @@ internal fun toggleDuplicateRemoval(current: Set<String>, id: String, allIds: Se
 /** The copies to KEEP, i.e. the ones left unticked. This complement is what the view model's delete
  *  contract takes; it refuses an empty keep set, which [toggleDuplicateRemoval] can never produce. */
 internal fun keepIdsForRemoval(allIds: Set<String>, removeIds: Set<String>): Set<String> = allIds - removeIds
+
+/** Stable key for a group's hoisted removal selection: its member ids joined in order. Membership
+ *  changing (a delete pruning a copy) changes the key, so the pruned group re-seeds its selection
+ *  empty rather than carrying a stale tick for a copy it no longer holds. */
+internal fun duplicateGroupKey(group: DuplicateGroup): String =
+    group.items.joinToString("|") { it.stableId }
 
 /** The two choice rows at the head of the list: which kind of duplicate to show, and which side of
  *  the library to show it from. */
@@ -413,28 +496,30 @@ private fun ScanningRow() {
 }
 
 /**
- * One duplicate group. Holds the multi-copy "remove" selection, which starts EMPTY: a copy is only
- * ever queued for deletion because it was picked here by hand. The action below can then only ever
- * delete a STRICT subset of the group, never all of it, because the card sends the view model the
- * complement (the keepers) and the button stays disabled while nothing is ticked. Both sets are
- * keyed on [group], so pruning a deleted copy re-seeds them together and the removal set can never
- * name a copy the group no longer holds.
+ * One duplicate group. The multi-copy "remove" selection is hoisted to the screen and handed in as
+ * [selected] / [onSelectionChange], so the full-screen review overlay edits the very same set. It
+ * starts EMPTY: a copy is only ever queued for deletion because it was picked by hand, here or in the
+ * review. The action below can then only ever delete a STRICT subset of the group, never all of it,
+ * because it sends the view model the complement (the keepers) and stays disabled while nothing is
+ * ticked. The selection's key follows the group's membership, so pruning a deleted copy re-seeds it and
+ * the removal set can never name a copy the group no longer holds.
  */
 @Composable
 private fun DuplicateGroupCard(
     group: DuplicateGroup,
     similar: Boolean,
     isDeleting: Boolean,
+    selected: Set<String>,
+    onSelectionChange: (Set<String>) -> Unit,
     onDeleteExtras: (DuplicateGroup, Set<String>) -> Unit,
     onOpenViewer: (items: List<GalleryItem>, index: Int) -> Unit,
+    onOpenReview: () -> Unit,
     requestDecrypt: (String) -> Unit,
     cancelDecrypt: (String) -> Unit,
 ) {
     val allIds = remember(group) { group.items.map { it.stableId }.toSet() }
-    // Nothing is ticked up front: a copy is only ever deleted because it was picked here by hand.
-    var removeIds by remember(group) { mutableStateOf(emptySet<String>()) }
     var showConfirm by remember(group) { mutableStateOf(false) }
-    val nothingToDelete = removeIds.isEmpty()
+    val nothingToDelete = selected.isEmpty()
 
     Column(
         modifier = Modifier
@@ -444,11 +529,31 @@ private fun DuplicateGroupCard(
             .padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Text(
-            if (similar) stringResource(R.string.duplicates_similar_count, group.items.size)
-            else stringResource(R.string.duplicates_copies, group.items.size),
-            color = FgPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium,
-        )
+        // Count on the left, a Details button on the right that opens the full-screen review of the
+        // same group so the copies can be compared large and side by side.
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                if (similar) stringResource(R.string.duplicates_similar_count, group.items.size)
+                else stringResource(R.string.duplicates_copies, group.items.size),
+                color = FgPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium,
+            )
+            Spacer(Modifier.weight(1f))
+            Row(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(20.dp))
+                    .border(0.5.dp, PillBorder, RoundedCornerShape(20.dp))
+                    .clickable(onClick = onOpenReview)
+                    .padding(horizontal = 12.dp, vertical = 5.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Icon(Icons.Default.Info, contentDescription = null, tint = Accent, modifier = Modifier.size(14.dp))
+                Text(
+                    stringResource(R.string.duplicates_details),
+                    color = Accent, fontSize = 13.sp, fontWeight = FontWeight.Medium,
+                )
+            }
+        }
         Text(stringResource(R.string.duplicates_pick_remove), color = FgMute, fontSize = 12.sp)
 
         Row(
@@ -458,10 +563,10 @@ private fun DuplicateGroupCard(
             group.items.forEachIndexed { index, item ->
                 DuplicateCopyThumb(
                     item = item,
-                    removing = item.stableId in removeIds,
+                    removing = item.stableId in selected,
                     onOpen = { onOpenViewer(group.items, index) },
                     onToggleRemove = {
-                        removeIds = toggleDuplicateRemoval(removeIds, item.stableId, allIds)
+                        onSelectionChange(toggleDuplicateRemoval(selected, item.stableId, allIds))
                     },
                     requestDecrypt = requestDecrypt,
                     cancelDecrypt = cancelDecrypt,
@@ -482,7 +587,7 @@ private fun DuplicateGroupCard(
         ) {
             Text(
                 if (nothingToDelete) stringResource(R.string.duplicates_confirm_delete)
-                else stringResource(R.string.duplicates_delete_selected, removeIds.size),
+                else stringResource(R.string.duplicates_delete_selected, selected.size),
                 color = if (canDelete) Accent else FgMute,
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Medium,
@@ -491,35 +596,26 @@ private fun DuplicateGroupCard(
     }
 
     if (showConfirm) {
-        AlertDialog(
-            onDismissRequest = { showConfirm = false },
-            title = { Text(stringResource(R.string.duplicates_confirm_title)) },
-            text = {
-                // A backed-up photo in the cloud section carries its device file with it, because
-                // leaving that file behind would only have the next backup upload it again and put
-                // the duplicate straight back. The user is told so here rather than finding out from
-                // an empty spot in their gallery.
-                val takesDeviceCopyToo = group.items.any {
-                    it.stableId in removeIds && it is GalleryItem.Synced
-                }
-                Text(
-                    stringResource(
-                        if (takesDeviceCopyToo) R.string.duplicates_confirm_message_synced
-                        else R.string.duplicates_confirm_message
-                    )
-                )
+        // A backed-up photo in the cloud section carries its device file with it, because leaving that
+        // file behind would only have the next backup upload it again and put the duplicate straight
+        // back. The user is told so here rather than finding out from an empty spot in their gallery.
+        val takesDeviceCopyToo = group.items.any {
+            it.stableId in selected && it is GalleryItem.Synced
+        }
+        ConfirmDialog(
+            title = stringResource(R.string.duplicates_confirm_title),
+            message = stringResource(
+                if (takesDeviceCopyToo) R.string.duplicates_confirm_message_synced
+                else R.string.duplicates_confirm_message
+            ),
+            confirmLabel = stringResource(R.string.duplicates_confirm_delete),
+            dismissLabel = stringResource(R.string.cancel),
+            onConfirm = {
+                showConfirm = false
+                onDeleteExtras(group, keepIdsForRemoval(allIds, selected))
             },
-            confirmButton = {
-                TextButton(onClick = {
-                    showConfirm = false
-                    onDeleteExtras(group, keepIdsForRemoval(allIds, removeIds))
-                }) { Text(stringResource(R.string.duplicates_confirm_delete), color = Accent) }
-            },
-            dismissButton = {
-                TextButton(onClick = { showConfirm = false }) {
-                    Text(stringResource(R.string.cancel), color = FgDim)
-                }
-            },
+            onDismiss = { showConfirm = false },
+            destructive = true,
         )
     }
 }
@@ -555,8 +651,8 @@ private fun DuplicateCopyThumb(
     val toggleCd = stringResource(if (removing) R.string.duplicates_keep else R.string.duplicates_remove)
     Box(
         modifier = Modifier
-            .width(116.dp)
-            .height(164.dp),
+            .width(140.dp)
+            .height(198.dp),
     ) {
         PhotoCell(
             imageData = inputs.imageData,
@@ -574,7 +670,7 @@ private fun DuplicateCopyThumb(
             isFavorite = false,
             isOffline = false,
             // Fill the taller review tile instead of PhotoCell's default 0.85 grid shape.
-            aspectRatioOverride = 116f / 164f,
+            aspectRatioOverride = 140f / 198f,
             typeBadgeRes = inputs.typeBadgeRes,
             typeBadgeCdRes = inputs.typeBadgeCdRes,
             // Fixed-size review tiles (not a column grid); keep the big-tile tier so every badge shows.

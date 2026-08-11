@@ -22,7 +22,6 @@
 
 package eu.akoos.photos.presentation.viewer
 
-import eu.akoos.photos.presentation.common.DestructiveButton
 
 import android.net.Uri
 import androidx.compose.foundation.background
@@ -366,20 +365,18 @@ internal fun DeleteConfirmSheet(
 
         when (item) {
             is GalleryItem.LocalOnly -> {
-                Text(
-                    stringResource(
-                        if (isVaulted) R.string.viewer_delete_vault_body
-                        else R.string.viewer_delete_local_body,
-                    ),
-                    color = FgDim, fontSize = 14.sp,
-                )
-                Spacer(Modifier.height(4.dp))
-                DeleteButton(
-                    stringResource(
+                DangerRow(
+                    title = stringResource(
                         if (isVaulted) R.string.delete_button_permanently
                         else R.string.viewer_delete_move_to_trash,
                     ),
-                ) { onDelete(true, false) }
+                    subtitle = stringResource(
+                        if (isVaulted) R.string.viewer_delete_vault_body
+                        else R.string.delete_multi_move_trash_desc,
+                    ),
+                    isDestructive = true,
+                    onClick = { onDelete(true, false) },
+                )
             }
 
             is GalleryItem.Synced -> {
@@ -407,15 +404,17 @@ internal fun DeleteConfirmSheet(
             }
 
             is GalleryItem.CloudOnly -> {
-                Text(
-                    stringResource(R.string.viewer_delete_subtitle_cloud_only),
-                    color = FgDim, fontSize = 14.sp,
+                DangerRow(
+                    title = stringResource(R.string.viewer_delete_move_to_drive_trash),
+                    subtitle = stringResource(R.string.delete_multi_drive_trash_desc),
+                    isDestructive = true,
+                    onClick = { onDelete(false, true) },
                 )
-                Spacer(Modifier.height(4.dp))
-                DeleteButton(stringResource(R.string.viewer_delete_move_to_drive_trash)) { onDelete(false, true) }
             }
         }
 
+        // Matches the gallery multi-delete sheet's cancel exactly (no border), so the two delete
+        // drawers read as the same control.
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -423,16 +422,11 @@ internal fun DeleteConfirmSheet(
                     CardBg,
                     androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
                 )
-                .border(
-                    0.5.dp,
-                    CardBorder,
-                    androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
-                )
                 .clickable(onClick = onDismiss)
                 .padding(vertical = 14.dp),
             contentAlignment = Alignment.Center,
         ) {
-            Text(stringResource(R.string.cancel), color = FgPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+            Text(stringResource(R.string.cancel), color = FgDim, fontSize = 15.sp, fontWeight = FontWeight.Medium)
         }
     }
 }
@@ -460,11 +454,6 @@ private fun DangerRow(
         Text(title, color = titleColor, fontSize = 15.sp, fontWeight = FontWeight.Medium)
         Text(subtitle, color = FgMute, fontSize = 12.sp)
     }
-}
-
-@Composable
-internal fun DeleteButton(label: String, onClick: () -> Unit) {
-    DestructiveButton(label = label, onClick = onClick, modifier = Modifier.fillMaxWidth())
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

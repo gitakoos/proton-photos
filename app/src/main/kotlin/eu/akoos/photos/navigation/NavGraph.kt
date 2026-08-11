@@ -25,6 +25,8 @@ package eu.akoos.photos.navigation
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -87,6 +89,7 @@ import eu.akoos.photos.presentation.offline.OfflinePhotosScreen
 import eu.akoos.photos.presentation.memories.MemoriesScreen
 import eu.akoos.photos.presentation.memories.MemoryCategory
 import eu.akoos.photos.presentation.memories.MemoryCategoryScreen
+import eu.akoos.photos.presentation.collage.CollageScreen
 import eu.akoos.photos.presentation.metadata.MetadataEditorScreen
 import eu.akoos.photos.presentation.onboarding.OnboardingScreen
 import eu.akoos.photos.presentation.settings.AboutScreen
@@ -160,6 +163,8 @@ sealed class Screen(val route: String) {
     data object Offline : Screen("offline_photos")
     data object PhotoEditor : Screen("photo_editor")
     data object MetadataEditor : Screen("metadata_editor")
+    data object Collage : Screen("collage")
+    data object CollagePhotoPicker : Screen("collage_photo_picker")
     data object Loading : Screen("loading")
     data object Login : Screen("login")
     data object About : Screen("about")
@@ -321,6 +326,11 @@ fun NavGraph(
     // read-only state carried alongside the items so it is always written by the navigation that
     // opens the editor.
     var metadataEditorRequest by remember { mutableStateOf<MetadataEditorRequest?>(null) }
+    // The photos handed to the collage editor, in nav scope because a GalleryItem list can't be a
+    // nav argument (same hand-off the metadata editor uses).
+    var collageItems by remember { mutableStateOf<List<GalleryItem>>(emptyList()) }
+    // Photos the in-app picker returned to add to the open collage.
+    var collagePicked by remember { mutableStateOf<List<GalleryItem>?>(null) }
 
     // Captured from the MainActivity-owned request once we reach the Ready startup state.
     // Held in Nav scope so the PhotoEditor composable can read it without piping the value
@@ -471,10 +481,13 @@ fun NavGraph(
         navController = navController,
         startDestination = Screen.Loading.route,
         modifier = Modifier.fillMaxSize().background(appColors.bg0),
-        enterTransition = { fadeIn(tween(180)) },
-        exitTransition = { fadeOut(tween(180)) },
-        popEnterTransition = { fadeIn(tween(180)) },
-        popExitTransition = { fadeOut(tween(180)) },
+        // A gentle directional shared-axis: the incoming screen fades in while sliding a short way from
+        // the forward edge, and back reverses it, so navigation reads as motion rather than a flat cut.
+        // The slide is small (a sixth of the width) so it also suits full-screen routes like the viewer.
+        enterTransition = { fadeIn(tween(220)) + slideInHorizontally(tween(220)) { it / 6 } },
+        exitTransition = { fadeOut(tween(220)) + slideOutHorizontally(tween(220)) { -it / 12 } },
+        popEnterTransition = { fadeIn(tween(220)) + slideInHorizontally(tween(220)) { -it / 12 } },
+        popExitTransition = { fadeOut(tween(220)) + slideOutHorizontally(tween(220)) { it / 6 } },
     ) {
         composable(Screen.Loading.route) {
             Box(Modifier.fillMaxSize().background(appColors.bg0), contentAlignment = Alignment.Center) {
@@ -605,6 +618,10 @@ fun NavGraph(
                     // with them, so the editor's own per-item rules decide what is writable.
                     metadataEditorRequest = MetadataEditorRequest(selection, isReadOnlyAlbum = false)
                     navController.navigate(Screen.MetadataEditor.route)
+                },
+                onCreateCollage = { selection ->
+                    collageItems = selection
+                    navController.navigate(Screen.Collage.route)
                 },
                 pendingWidgetPhotoUri = widgetPhotoUri,
                 onPendingWidgetPhotoConsumed = onWidgetPhotoConsumed,
@@ -937,6 +954,33 @@ fun NavGraph(
                     onBack = { navController.popBackStack() },
                 )
             }
+        }
+
+        composable(Screen.Collage.route) {
+            val items = collageItems
+            if (items.isEmpty()) {
+                navController.popBackStack()
+            } else {
+                CollageScreen(
+                    items = items,
+                    onClose = { navController.popBackStack() },
+                    onRequestAddPhotos = { navController.navigate(Screen.CollagePhotoPicker.route) },
+                    pendingAdd = collagePicked ?: emptyList(),
+                    onPendingAddConsumed = { collagePicked = null },
+                )
+            }
+        }
+
+        composable(Screen.CollagePhotoPicker.route) {
+            // The album picker in "return" mode: it hands the selected photos back to the collage
+            // instead of adding them to an album.
+            AlbumPhotoPickerScreen(
+                onBack = { navController.popBackStack() },
+                onPick = { picked ->
+                    collagePicked = picked
+                    navController.popBackStack()
+                },
+            )
         }
 
         composable(Screen.AlbumDetail.route) {

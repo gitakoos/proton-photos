@@ -178,6 +178,36 @@ object CaptureDateOverride {
     }
 
     /**
+     * Create or replace the override of each uri in [captureMsByUri] (ms > 0) with a fresh entry
+     * carrying [modifiedByUri]'s DATE_MODIFIED (seconds), so a file with no prior entry gains a durable
+     * one [isCurrent] keeps rather than one the next walk re-derives away. Every other entry is left
+     * as-is. Returns null when no positive-ms date was written, so the caller can skip a needless
+     * persist.
+     *
+     * Where [retarget] only MOVES an entry a file already holds, this writes one where none existed: a
+     * meme or a downloaded PNG carries no MediaStore DATE_TAKEN and no EXIF, so a date read off its own
+     * file name has nowhere durable to live until an entry is created for it. Recording the file's
+     * modified time is what keeps that fresh entry from reading as stale on the very next scan.
+     */
+    fun upsert(
+        entries: Set<String>,
+        captureMsByUri: Map<String, Long>,
+        modifiedByUri: Map<String, Long?>,
+    ): Set<String>? {
+        val out = entries.filterTo(HashSet()) { entry ->
+            val uri = split(entry)?.first
+            uri == null || uri !in captureMsByUri
+        }
+        var wrote = false
+        for ((uri, ms) in captureMsByUri) {
+            if (ms <= 0L) continue
+            out += encode(uri, ms, modifiedByUri[uri])
+            wrote = true
+        }
+        return if (wrote) out else null
+    }
+
+    /**
      * Drop the entries recorded for [uris], plus any entry that no longer parses, so the map stays
      * bounded. Returns null when nothing changed, so the caller can skip a needless persist.
      *

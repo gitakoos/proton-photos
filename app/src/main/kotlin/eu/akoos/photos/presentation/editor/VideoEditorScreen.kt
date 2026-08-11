@@ -29,13 +29,22 @@ import android.graphics.Rect as AndroidRect
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.systemGestureExclusion
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.layout.Arrangement
@@ -72,6 +81,7 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.filled.Crop
 import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -244,6 +254,27 @@ fun VideoEditorScreen(
         }
     }
 
+    // One-shot frame-grab feedback: a still was written to the gallery, or the grab failed.
+    androidx.compose.runtime.LaunchedEffect(state.frameGrabResult) {
+        when (val r = state.frameGrabResult) {
+            is FrameGrabResult.Success -> {
+                android.widget.Toast.makeText(
+                    context,
+                    context.getString(R.string.video_editor_frame_saved),
+                    android.widget.Toast.LENGTH_SHORT,
+                ).show()
+                vm.consumeFrameGrabResult()
+            }
+            is FrameGrabResult.Failed -> {
+                android.widget.Toast.makeText(
+                    context, r.message, android.widget.Toast.LENGTH_LONG,
+                ).show()
+                vm.consumeFrameGrabResult()
+            }
+            null -> Unit
+        }
+    }
+
     // Hoisted ExoPlayer at the SCREEN level so it survives tab swaps. The previous
     // version owned the player inside VideoPreview's remember(uri); the Crop tab unmounts
     // VideoPreview to show a static first-frame canvas, which fired the DisposableEffect's
@@ -404,6 +435,13 @@ fun VideoEditorScreen(
         VideoTopBar(
             title = state.displayName.ifBlank { "" },
             isSaving = state.isSaving,
+            canGrabFrame = hasSource && previewPlayer != null,
+            onFrameGrab = {
+                // currentPosition is ms; the retriever seeks in us. Reading it here (main thread)
+                // is cheap; the grab + JPEG write run off-thread in the VM.
+                val posUs = (previewPlayer?.currentPosition ?: 0L).coerceAtLeast(0L) * 1000L
+                vm.grabCurrentFrame(posUs)
+            },
             onBack = confirmedOnBack,
             onSave = { if (hasSource) showSaveSheet = true },
         )
@@ -479,16 +517,25 @@ fun VideoEditorScreen(
             Box(
                 Modifier.fillMaxWidth().padding(horizontal = 18.dp).wrapContentHeight(),
             ) {
-                when (activeTool) {
-                    VideoTool.Trim -> TrimPanel(
-                        state = state,
-                        vm = vm,
-                        previewPlayer = previewPlayer,
-                        thumbnails = filmstripThumbnails,
-                    )
-                    VideoTool.Crop -> CropPanel(state = state, vm = vm)
-                    VideoTool.Rotate -> RotatePanel(state = state, vm = vm)
-                    VideoTool.Audio -> AudioPanel(state = state, vm = vm, previewPlayer = previewPlayer)
+                AnimatedContent(
+                    targetState = activeTool,
+                    transitionSpec = {
+                        (fadeIn(tween(190)) + slideInVertically(tween(230)) { it / 5 }) togetherWith
+                            (fadeOut(tween(150)) + slideOutVertically(tween(190)) { it / 5 })
+                    },
+                    label = "videoPanel",
+                ) { tool ->
+                    when (tool) {
+                        VideoTool.Trim -> TrimPanel(
+                            state = state,
+                            vm = vm,
+                            previewPlayer = previewPlayer,
+                            thumbnails = filmstripThumbnails,
+                        )
+                        VideoTool.Crop -> CropPanel(state = state, vm = vm)
+                        VideoTool.Rotate -> RotatePanel(state = state, vm = vm)
+                        VideoTool.Audio -> AudioPanel(state = state, vm = vm, previewPlayer = previewPlayer)
+                    }
                 }
             }
 
@@ -567,6 +614,8 @@ fun VideoEditorScreen(
 private fun VideoTopBar(
     title: String,
     isSaving: Boolean,
+    canGrabFrame: Boolean,
+    onFrameGrab: () -> Unit,
     onBack: () -> Unit,
     onSave: () -> Unit,
 ) {
@@ -594,7 +643,23 @@ private fun VideoTopBar(
                 maxLines = 1,
             )
         }
-        VideoSavePill(isSaving = isSaving, onClick = onSave)
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            // Grab the current frame as a still JPEG. Only offered once a source is loaded so the
+            // retriever has bytes to seek.
+            if (canGrabFrame) {
+                IconBubble(onClick = onFrameGrab) {
+                    Icon(
+                        Icons.Default.PhotoCamera,
+                        stringResource(R.string.video_editor_grab_frame),
+                        tint = FgPrimary, modifier = Modifier.size(20.dp),
+                    )
+                }
+            }
+            VideoSavePill(isSaving = isSaving, onClick = onSave)
+        }
     }
 }
 
@@ -638,21 +703,29 @@ private fun IconBubble(onClick: () -> Unit, content: @Composable () -> Unit) {
 @Composable
 private fun VideoToolTab(tool: VideoTool, selected: Boolean, onClick: () -> Unit) {
     val label = LocalContext.current.getString(tool.labelRes)
+    // The selection fills in and the icon springs up a touch, so switching tools reads as a
+    // deliberate move rather than an instant swap.
+    val bgAlpha by animateFloatAsState(if (selected) 0.22f else 0f, tween(200), label = "video_tab_bg")
+    val tint by animateColorAsState(if (selected) Accent else FgDim, tween(200), label = "video_tab_tint")
+    val scale by animateFloatAsState(
+        if (selected) 1f else 0.88f,
+        spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
+        label = "video_tab_scale",
+    )
     Box(
         modifier = Modifier
             .size(44.dp)
-            .background(
-                if (selected) Accent.copy(alpha = 0.22f) else Color.Transparent,
-                CircleShape,
-            )
+            .background(Accent.copy(alpha = bgAlpha), CircleShape)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Icon(
             imageVector = tool.icon,
             contentDescription = label,
-            tint = if (selected) Accent else FgDim,
-            modifier = Modifier.size(22.dp),
+            tint = tint,
+            modifier = Modifier
+                .size(22.dp)
+                .graphicsLayer { scaleX = scale; scaleY = scale },
         )
     }
 }
@@ -787,32 +860,92 @@ private fun CropPanel(state: VideoEditorUiState, vm: VideoEditorViewModel) {
 
 @Composable
 private fun RotatePanel(state: VideoEditorUiState, vm: VideoEditorViewModel) {
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        // Scrolls horizontally so long translations keep each pill's natural width
-        // instead of squishing the row to fit.
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            EditorPill(
-                label = LocalContext.current.getString(R.string.video_editor_rotate),
-                icon = Icons.AutoMirrored.Filled.RotateRight,
-                selected = false,
-                onClick = { vm.rotate90Cw() },
+    val context = LocalContext.current
+    // One combined capsule (same recipe as the bottom tab dock) so the rotate action, the live
+    // degrees readout and reset read as a single control rather than scattered pills. Reset steps
+    // back to 0 through the existing rotate action, so no new pipeline path is introduced.
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(PillBgOpaque, RoundedCornerShape(999.dp))
+            .border(0.5.dp, PillBorder, RoundedCornerShape(999.dp))
+            .padding(4.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        VideoPillSegment(
+            label = context.getString(R.string.video_editor_rotate),
+            icon = Icons.AutoMirrored.Filled.RotateRight,
+            selected = false,
+            onClick = { vm.rotate90Cw() },
+            modifier = Modifier.weight(1f),
+        )
+        // Live degrees readout, decorative. Lights up in accent while the clip is rotated.
+        VideoPillSegment(
+            label = "${state.rotationDegrees}°",
+            icon = null,
+            selected = state.rotationDegrees != 0,
+            onClick = {},
+            clickable = false,
+        )
+        VideoPillSegment(
+            label = context.getString(R.string.filter_reset),
+            icon = Icons.Default.Restore,
+            selected = false,
+            onClick = { repeat(((360 - state.rotationDegrees) / 90) % 4) { vm.rotate90Cw() } },
+            enabled = state.rotationDegrees != 0,
+            modifier = Modifier.weight(1f),
+        )
+    }
+}
+
+/** One segment inside a combined sub-menu pill: an icon + label with a rounded accent fill when
+ *  selected, matching the bottom tab dock. Replicated locally because the photo editor's PillSegment
+ *  is file-private. Never wraps to a second line; pass clickable=false for a decorative readout. */
+@Composable
+private fun VideoPillSegment(
+    label: String,
+    icon: ImageVector?,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    clickable: Boolean = true,
+) {
+    val tint = when {
+        !enabled -> FgDim.copy(alpha = 0.4f)
+        selected -> Accent
+        else -> FgDim
+    }
+    val textColor = when {
+        !enabled -> FgDim.copy(alpha = 0.4f)
+        selected -> Accent
+        else -> FgPrimary
+    }
+    Row(
+        modifier = modifier
+            .height(40.dp)
+            .background(
+                if (selected) Accent.copy(alpha = 0.22f) else Color.Transparent,
+                RoundedCornerShape(999.dp),
             )
-            // Non-clickable degrees readout pill — same shape, no interaction.
-            EditorPill(
-                label = "${state.rotationDegrees}°",
-                icon = null,
-                selected = false,
-                onClick = {},
-                clickable = false,
-            )
+            .then(if (clickable) Modifier.clickable(enabled = enabled, onClick = onClick) else Modifier)
+            .padding(horizontal = 10.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (icon != null) {
+            Icon(icon, null, tint = tint, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(6.dp))
         }
+        Text(
+            label,
+            color = textColor,
+            fontSize = 12.5.sp,
+            fontWeight = FontWeight.Medium,
+            maxLines = 1,
+            softWrap = false,
+        )
     }
 }
 
@@ -844,7 +977,14 @@ private fun AudioPanel(state: VideoEditorUiState, vm: VideoEditorViewModel, prev
             label = context.getString(R.string.video_editor_audio_original),
             gain = state.originalAudioGain,
             onGainChange = vm::setOriginalAudioGain,
-            trailing = null,
+            trailing = {
+                // One-tap mute pins the gain to 0, keeping the save on the lossless stream-copy
+                // strip path. Un-mute restores the prior gain.
+                MuteToggle(
+                    muted = state.originalAudioGain <= 0.001f,
+                    onClick = { vm.toggleMute() },
+                )
+            },
         )
 
         // ── Row 2: overlay music — pick or show + volume + trim slider ──
@@ -966,6 +1106,42 @@ private fun AudioTrackRow(
                 activeTrackColor = Accent,
                 inactiveTrackColor = PanelChip,
             ),
+        )
+    }
+}
+
+/**
+ * Compact one-tap mute chip sitting in the source-audio row. Reads the pill/chip recipe: an accent
+ * fill with a VolumeOff icon when muted, the dim panel-chip with VolumeUp when the track is kept.
+ */
+@Composable
+private fun MuteToggle(muted: Boolean, onClick: () -> Unit) {
+    val context = LocalContext.current
+    Row(
+        modifier = Modifier
+            .height(28.dp)
+            .clip(RoundedCornerShape(999.dp))
+            .background(if (muted) Accent.copy(alpha = 0.22f) else PanelChip)
+            .then(
+                if (muted) Modifier.border(0.5.dp, Accent.copy(alpha = 0.45f), RoundedCornerShape(999.dp))
+                else Modifier
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
+    ) {
+        Icon(
+            if (muted) Icons.AutoMirrored.Filled.VolumeOff else Icons.AutoMirrored.Filled.VolumeUp,
+            contentDescription = context.getString(R.string.video_editor_mute),
+            tint = if (muted) Accent else FgDim,
+            modifier = Modifier.size(15.dp),
+        )
+        Text(
+            context.getString(R.string.video_editor_mute),
+            color = if (muted) Accent else FgPrimary,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Medium,
         )
     }
 }
@@ -1108,50 +1284,58 @@ private fun VideoEditorPlayPill(player: ExoPlayer) {
             )
         }
         // Speed control: collapsed pill shows current rate, tap expands into 4 chips.
-        if (!speedExpanded) {
-            Row(
-                modifier = Modifier
-                    .height(28.dp)
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(PanelChip)
-                    .clickable { speedExpanded = true }
-                    .padding(horizontal = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(formatSpeed(speed), color = FgPrimary, fontSize = 12.sp,
-                    fontWeight = FontWeight.Medium)
-            }
-        } else {
-            Row(
-                modifier = Modifier
-                    .height(28.dp)
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(PanelChip)
-                    .padding(horizontal = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(2.dp),
-            ) {
-                speedOptions.forEach { s ->
-                    val selected = s == speed
-                    androidx.compose.foundation.layout.Box(
-                        modifier = Modifier
-                            .height(22.dp)
-                            .clip(RoundedCornerShape(11.dp))
-                            .background(if (selected) Accent else androidx.compose.ui.graphics.Color.Transparent)
-                            .clickable {
-                                speed = s
-                                player.setPlaybackSpeed(s)
-                                speedExpanded = false
-                            }
-                            .padding(horizontal = 9.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            formatSpeed(s),
-                            color = if (selected) androidx.compose.ui.graphics.Color.White else FgPrimary,
-                            fontSize = 11.sp,
-                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
-                        )
+        // AnimatedContent crossfades the two states and springs the pill's width so the
+        // expansion grows and collapses smoothly instead of snapping.
+        AnimatedContent(
+            targetState = speedExpanded,
+            transitionSpec = { fadeIn(tween(150)) togetherWith fadeOut(tween(120)) },
+            label = "video_speed",
+        ) { expanded ->
+            if (!expanded) {
+                Row(
+                    modifier = Modifier
+                        .height(28.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(PanelChip)
+                        .clickable { speedExpanded = true }
+                        .padding(horizontal = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(formatSpeed(speed), color = FgPrimary, fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium)
+                }
+            } else {
+                Row(
+                    modifier = Modifier
+                        .height(28.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(PanelChip)
+                        .padding(horizontal = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    speedOptions.forEach { s ->
+                        val selected = s == speed
+                        androidx.compose.foundation.layout.Box(
+                            modifier = Modifier
+                                .height(22.dp)
+                                .clip(RoundedCornerShape(11.dp))
+                                .background(if (selected) Accent else androidx.compose.ui.graphics.Color.Transparent)
+                                .clickable {
+                                    speed = s
+                                    player.setPlaybackSpeed(s)
+                                    speedExpanded = false
+                                }
+                                .padding(horizontal = 9.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                formatSpeed(s),
+                                color = if (selected) androidx.compose.ui.graphics.Color.White else FgPrimary,
+                                fontSize = 11.sp,
+                                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                            )
+                        }
                     }
                 }
             }
@@ -1485,12 +1669,19 @@ private fun EditorPill(
 ) {
     // Palette-aware background — `PillBg` follows the user's theme tokens; the previous
     // `PanelChip` was a fixed dark color that ignored light theme / non-default palettes.
-    val bg = if (selected) Accent.copy(alpha = 0.18f) else PillBg
-    val fg = when {
-        !enabled -> FgDim.copy(alpha = 0.4f)
-        selected -> Accent
-        else -> FgPrimary
-    }
+    // Colours animate so selecting / enabling a pill eases in rather than flipping.
+    val bg by animateColorAsState(
+        if (selected) Accent.copy(alpha = 0.18f) else PillBg,
+        tween(200), label = "pill_bg",
+    )
+    val fg by animateColorAsState(
+        when {
+            !enabled -> FgDim.copy(alpha = 0.4f)
+            selected -> Accent
+            else -> FgPrimary
+        },
+        tween(200), label = "pill_fg",
+    )
     val borderMod = if (!selected) {
         Modifier.border(0.5.dp, PillBorder, RoundedCornerShape(999.dp))
     } else {

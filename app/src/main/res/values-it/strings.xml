@@ -242,7 +242,7 @@
     <string name="settings_account_link_drive_web_desc">Sfoglia foto e file su drive.proton.me.</string>
     <string name="cancel">Annulla</string>
     <string name="settings_language_system">Predefinita di sistema</string>
-    <string name="settings_sync_wifi_desc">Sospendi caricamento su rete mobile</string>
+    <string name="settings_sync_wifi_desc">Sospendi sincronizzazione su rete mobile</string>
     <string name="settings_fullres_wifi_only">Risoluzione piena solo con Wi-Fi</string>
     <string name="settings_fullres_wifi_only_desc">Scarica foto e video a piena risoluzione solo con Wi-Fi. Le miniature si caricano sempre.</string>
     <string name="viewer_wifi_for_full_quality">Collegati al Wi-Fi per la qualità piena</string>
@@ -1339,7 +1339,7 @@
     <string name="settings_diagnostics_copy_clipboard">Copia negli appunti</string>
     <!-- Duplicate finder -->
     <string name="settings_find_duplicates">Trova duplicati</string>
-    <string name="settings_find_duplicates_desc">Controlla ed elimina le copie identiche</string>
+    <string name="settings_find_duplicates_desc">Controlla ed elimina le copie identiche o simili</string>
     <string name="duplicates_title">Trova duplicati</string>
     <string name="duplicates_section_device">Su questo dispositivo</string>
     <string name="duplicates_section_cloud">Nel tuo cloud</string>
@@ -1576,4 +1576,83 @@
     <string name="whats_new_freeup_review_body">Prima di liberare spazio sul dispositivo, una schermata elenca le foto che verranno rimosse e lo spazio che recuperano, così non sparisce nulla senza che tu lo veda prima.</string>
     <string name="whats_new_news_title">Notizie e feedback</string>
     <string name="whats_new_news_body">Una schermata delle notizie porta gli aggiornamenti sull\'app, e un pulsante ti porta subito dove puoi inviare un feedback o segnalare un bug.</string>
+    <string name="duplicates_details">Dettagli</string>
+    <string name="metadata_editor_date_mode_filename">Dal nome file</string>
+    <string name="metadata_editor_filename_hint">Imposta la data di ogni foto in base alla data scritta nel nome del file.</string>
+    <string name="metadata_editor_filename_apply">Correggi le date</string>
+    <plurals name="metadata_editor_filename_count">
+        <item quantity="one">%1$d di %2$d foto selezionate ha una data nel nome</item>
+        <item quantity="other">%1$d di %2$d foto selezionate hanno una data nel nome</item>
+    </plurals>
+
+    <!-- Collage -->
+    <string name="collage_add">Aggiungi foto</string>
+    <string name="collage_aspect_original">Originale</string>
+    <string name="collage_bg_blur">Sfocatura</string>
+    <string name="collage_bg_color">Colore</string>
+    <string name="collage_create">Crea collage</string>
+    <string name="collage_discard">Eliminare il collage?</string>
+    <string name="collage_discard_confirm">Elimina</string>
+    <string name="collage_discard_msg">Il collage non verrà salvato.</string>
+    <string name="collage_done">Fatto</string>
+    <string name="collage_drop_remove">Rilascia per rimuovere dal collage</string>
+    <string name="collage_mode_collage">Collage</string>
+    <string name="collage_mode_photos">Foto</string>
+    <string name="collage_photos_hint">Tocca una foto per reinquadrarla, tieni premuto per scambiarla</string>
+    <string name="collage_remove">Rimuovi</string>
+    <string name="collage_save">Salva</string>
+    <string name="collage_save_confirm">Salvare questo collage?</string>
+    <string name="collage_save_failed">Impossibile salvare il collage</string>
+    <string name="collage_saved">Collage salvato</string>
+    <string name="collage_spacing">Spaziatura</string>
+    <string name="collage_swap">Scambia</string>
+    <string name="collage_swap_pick">Tocca una foto</string>
+    <string name="collage_tab_border">Bordo</string>
+    <string name="collage_tab_layout">Disposizione</string>
+    <string name="collage_tab_ratio">Proporzioni</string>
+    <string name="collage_title">Collage</string>
+    <string name="collage_trim_for_grid">Rimuovine %1$d per passare alla griglia</string>
+
+    <!-- Editor: adjust, colour, filters, geometry, text, export -->
+    <string name="editor_adj_fade">Sfumatura</string>
+    <string name="editor_adj_grain">Grana</string>
+    <string name="editor_adj_sharpen">Nitidezza</string>
+    <string name="editor_adj_vibrance">Vividezza</string>
+    <string name="editor_adj_vignette">Vignettatura</string>
+    <string name="editor_color_curves">Curve</string>
+    <string name="editor_color_hsl">HSL</string>
+    <string name="editor_compare_original">Originale</string>
+    <string name="editor_draw_width">Spessore</string>
+    <string name="editor_export_format">Formato</string>
+    <string name="editor_export_quality">Qualità %1$d</string>
+    <string name="editor_export_size">Dimensione</string>
+    <string name="editor_export_size_full">Piena</string>
+    <string name="editor_filter_chrome">Chrome</string>
+    <string name="editor_filter_dramatic">Dramatic</string>
+    <string name="editor_filter_fresh">Fresh</string>
+    <string name="editor_filter_matte">Matte</string>
+    <string name="editor_filter_noir">Noir</string>
+    <string name="editor_geo_reset">Ripristina</string>
+    <string name="editor_hsl_hue">Tonalità</string>
+    <string name="editor_hsl_light">Luminosità</string>
+    <string name="editor_hsl_sat">Saturazione</string>
+    <string name="editor_perspective_h">Orizzontale</string>
+    <string name="editor_perspective_v">Verticale</string>
+    <string name="editor_redact_brush">Dimensione pennello</string>
+    <string name="editor_straighten">Raddrizza</string>
+    <string name="editor_text_add">Aggiungi testo</string>
+    <string name="editor_text_delete">Elimina</string>
+    <string name="editor_text_edit">Modifica</string>
+    <string name="editor_text_hint">Aggiungi testo, poi trascinalo per spostarlo e pizzica per ridimensionarlo</string>
+    <string name="editor_text_resize_hint">Trascina per spostare, pizzica per ridimensionare</string>
+    <string name="editor_text_size">Dimensione</string>
+    <string name="editor_tool_color">Colore</string>
+    <string name="editor_tool_draw">Disegna</string>
+    <string name="editor_tool_text">Testo</string>
+
+    <!-- Video editor -->
+    <string name="video_editor_frame_failed">Impossibile salvare il fotogramma</string>
+    <string name="video_editor_frame_saved">Fotogramma salvato nella galleria</string>
+    <string name="video_editor_grab_frame">Cattura fotogramma</string>
+    <string name="video_editor_mute">Muto</string>
 </resources>

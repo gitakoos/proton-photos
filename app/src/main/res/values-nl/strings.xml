@@ -302,7 +302,7 @@
     <string name="settings_account_link_drive_web_desc">Bekijk je foto\'s en bestanden op drive.proton.me.</string>
     <string name="cancel">Annuleren</string>
     <string name="settings_language_system">Systeemstandaard</string>
-    <string name="settings_sync_wifi_desc">Upload pauzeren op mobiel netwerk</string>
+    <string name="settings_sync_wifi_desc">Synchronisatie pauzeren op mobiel netwerk</string>
     <string name="settings_fullres_wifi_only">Volle resolutie alleen via wifi</string>
     <string name="settings_fullres_wifi_only_desc">Download foto\'s en video\'s op volle resolutie uit de cloud alleen via wifi. Miniaturen laden altijd.</string>
     <string name="viewer_wifi_for_full_quality">Maak verbinding met wifi voor volle kwaliteit</string>
@@ -1333,7 +1333,7 @@
     <string name="settings_diagnostics_copy_clipboard">Naar klembord kopiëren</string>
     <!-- Duplicate finder -->
     <string name="settings_find_duplicates">Duplicaten zoeken</string>
-    <string name="settings_find_duplicates_desc">Identieke kopieën bekijken en verwijderen</string>
+    <string name="settings_find_duplicates_desc">Identieke of vergelijkbare kopieën bekijken en verwijderen</string>
     <string name="duplicates_title">Duplicaten zoeken</string>
     <string name="duplicates_section_device">Op dit apparaat</string>
     <string name="duplicates_section_cloud">In je cloud</string>
@@ -1573,4 +1573,83 @@
     <string name="whats_new_freeup_review_body">Voordat je apparaatruimte vrijmaakt, toont een scherm de foto\'s die worden verwijderd en de ruimte die dat oplevert, zodat er niets verdwijnt zonder dat je het eerst ziet.</string>
     <string name="whats_new_news_title">Nieuws en feedback</string>
     <string name="whats_new_news_body">Een nieuwsscherm brengt updates over de app, en een knop brengt je meteen naar waar je feedback kunt sturen of een bug kunt melden.</string>
+    <string name="duplicates_details">Details</string>
+    <string name="metadata_editor_date_mode_filename">Uit bestandsnaam</string>
+    <string name="metadata_editor_filename_hint">Stelt de datum van elke foto in op basis van de datum in de bestandsnaam.</string>
+    <string name="metadata_editor_filename_apply">Datums herstellen</string>
+    <plurals name="metadata_editor_filename_count">
+        <item quantity="one">%1$d van %2$d geselecteerde foto\'s heeft een datum in de naam</item>
+        <item quantity="other">%1$d van %2$d geselecteerde foto\'s hebben een datum in de naam</item>
+    </plurals>
+
+    <!-- Collage builder -->
+    <string name="collage_add">Foto\'s toevoegen</string>
+    <string name="collage_aspect_original">Origineel</string>
+    <string name="collage_bg_blur">Vervaging</string>
+    <string name="collage_bg_color">Kleur</string>
+    <string name="collage_create">Collage maken</string>
+    <string name="collage_discard">Collage weggooien?</string>
+    <string name="collage_discard_confirm">Weggooien</string>
+    <string name="collage_discard_msg">Je collage wordt niet opgeslagen.</string>
+    <string name="collage_done">Klaar</string>
+    <string name="collage_drop_remove">Loslaten om uit de collage te verwijderen</string>
+    <string name="collage_mode_collage">Collage</string>
+    <string name="collage_mode_photos">Foto\'s</string>
+    <string name="collage_photos_hint">Tik op een foto om aan te passen, houd ingedrukt om te verwisselen</string>
+    <string name="collage_remove">Verwijderen</string>
+    <string name="collage_save">Opslaan</string>
+    <string name="collage_save_confirm">Deze collage opslaan?</string>
+    <string name="collage_save_failed">Kon de collage niet opslaan</string>
+    <string name="collage_saved">Collage opgeslagen</string>
+    <string name="collage_spacing">Tussenruimte</string>
+    <string name="collage_swap">Verwisselen</string>
+    <string name="collage_swap_pick">Tik op een foto</string>
+    <string name="collage_tab_border">Rand</string>
+    <string name="collage_tab_layout">Indeling</string>
+    <string name="collage_tab_ratio">Verhouding</string>
+    <string name="collage_title">Collage</string>
+    <string name="collage_trim_for_grid">Verwijder %1$d om naar een rasterindeling over te schakelen</string>
+
+    <!-- Photo editor: adjustments, color, filters, geometry, draw/text tools, export -->
+    <string name="editor_adj_fade">Vervagen</string>
+    <string name="editor_adj_grain">Korrel</string>
+    <string name="editor_adj_sharpen">Verscherpen</string>
+    <string name="editor_adj_vibrance">Levendigheid</string>
+    <string name="editor_adj_vignette">Vignet</string>
+    <string name="editor_color_curves">Curven</string>
+    <string name="editor_color_hsl">HSL</string>
+    <string name="editor_compare_original">Origineel</string>
+    <string name="editor_draw_width">Breedte</string>
+    <string name="editor_export_format">Formaat</string>
+    <string name="editor_export_quality">Kwaliteit %1$d</string>
+    <string name="editor_export_size">Grootte</string>
+    <string name="editor_export_size_full">Volledig</string>
+    <string name="editor_filter_chrome">Chrome</string>
+    <string name="editor_filter_dramatic">Dramatic</string>
+    <string name="editor_filter_fresh">Fresh</string>
+    <string name="editor_filter_matte">Matte</string>
+    <string name="editor_filter_noir">Noir</string>
+    <string name="editor_geo_reset">Herstellen</string>
+    <string name="editor_hsl_hue">Tint</string>
+    <string name="editor_hsl_light">Helderheid</string>
+    <string name="editor_hsl_sat">Verzadiging</string>
+    <string name="editor_perspective_h">Horizontaal</string>
+    <string name="editor_perspective_v">Verticaal</string>
+    <string name="editor_redact_brush">Kwastgrootte</string>
+    <string name="editor_straighten">Rechttrekken</string>
+    <string name="editor_text_add">Tekst toevoegen</string>
+    <string name="editor_text_delete">Verwijderen</string>
+    <string name="editor_text_edit">Bewerken</string>
+    <string name="editor_text_hint">Voeg tekst toe en sleep om te verplaatsen, knijp om het formaat te wijzigen</string>
+    <string name="editor_text_resize_hint">Sleep om te verplaatsen, knijp om het formaat te wijzigen</string>
+    <string name="editor_text_size">Grootte</string>
+    <string name="editor_tool_color">Kleur</string>
+    <string name="editor_tool_draw">Tekenen</string>
+    <string name="editor_tool_text">Tekst</string>
+
+    <!-- Video editor -->
+    <string name="video_editor_frame_failed">Kon het frame niet opslaan</string>
+    <string name="video_editor_frame_saved">Frame opgeslagen in galerij</string>
+    <string name="video_editor_grab_frame">Frame vastleggen</string>
+    <string name="video_editor_mute">Dempen</string>
 </resources>

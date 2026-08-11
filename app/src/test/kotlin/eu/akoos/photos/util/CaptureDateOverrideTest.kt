@@ -449,4 +449,96 @@ class CaptureDateOverrideTest {
         assertNull(CaptureDateOverride.retarget(emptySet(), mapOf("content://png" to editedMs)))
         assertNull(CaptureDateOverride.retarget(entries, mapOf("content://png" to 0L)))
     }
+
+    // ── upsert: a date read off a filename gets a durable entry, even where none existed ──────────
+
+    private val filenameMs = 1_700_000_000_000L // a date parsed out of a file's own name
+    private val freshModified = 1_783_900_000L   // DATE_MODIFIED read back right after the write
+
+    @Test
+    fun `upsert creates an entry for a uri that had none`() {
+        // A downloaded PNG has no MediaStore date and no prior entry, so the map is the only place a
+        // filename date can live: upsert writes one from scratch, where retarget would add nothing.
+        val result = CaptureDateOverride.upsert(
+            entries = emptySet(),
+            captureMsByUri = mapOf("content://png" to filenameMs),
+            modifiedByUri = mapOf("content://png" to freshModified),
+        )
+        assertEquals(
+            mapOf("content://png" to CaptureDateOverride.Entry(filenameMs, freshModified)),
+            CaptureDateOverride.parse(result),
+        )
+    }
+
+    @Test
+    fun `upsert replaces an existing entry's date and modified time`() {
+        val entries = setOf(CaptureDateOverride.encode("content://png", captureMs, modifiedSeconds))
+        val result = CaptureDateOverride.upsert(
+            entries,
+            captureMsByUri = mapOf("content://png" to filenameMs),
+            modifiedByUri = mapOf("content://png" to freshModified),
+        )
+        assertEquals(
+            mapOf("content://png" to CaptureDateOverride.Entry(filenameMs, freshModified)),
+            CaptureDateOverride.parse(result),
+        )
+    }
+
+    @Test
+    fun `an upserted entry carries the modified time so the walk keeps it`() {
+        // The reason the fresh DATE_MODIFIED is written: isCurrent then holds the entry against the file
+        // instead of the next walk reading it as stale and re-deriving the download date over the edit.
+        val result = CaptureDateOverride.upsert(
+            entries = emptySet(),
+            captureMsByUri = mapOf("content://png" to filenameMs),
+            modifiedByUri = mapOf("content://png" to freshModified),
+        )
+        val entry = CaptureDateOverride.parse(result)["content://png"]!!
+        assertTrue(CaptureDateOverride.isCurrent(entry, freshModified))
+    }
+
+    @Test
+    fun `upsert skips a uri mapped to a non-positive date`() {
+        // A file with no readable filename date maps to nothing, so no invented entry pins it to a
+        // made-up date; only the file that has a real one is written.
+        val result = CaptureDateOverride.upsert(
+            entries = emptySet(),
+            captureMsByUri = mapOf("content://good" to filenameMs, "content://bad" to 0L),
+            modifiedByUri = mapOf("content://good" to freshModified, "content://bad" to freshModified),
+        )
+        assertEquals(
+            mapOf("content://good" to CaptureDateOverride.Entry(filenameMs, freshModified)),
+            CaptureDateOverride.parse(result),
+        )
+    }
+
+    @Test
+    fun `upsert leaves an unrelated entry untouched`() {
+        val other = CaptureDateOverride.encode("content://other", captureMs, modifiedSeconds)
+        val result = CaptureDateOverride.upsert(
+            setOf(other),
+            captureMsByUri = mapOf("content://png" to filenameMs),
+            modifiedByUri = mapOf("content://png" to null),
+        )
+        assertEquals(
+            mapOf(
+                "content://other" to CaptureDateOverride.Entry(captureMs, modifiedSeconds),
+                "content://png" to CaptureDateOverride.Entry(filenameMs, null),
+            ),
+            CaptureDateOverride.parse(result),
+        )
+    }
+
+    @Test
+    fun `upsert returns null when nothing positive is written`() {
+        // No positive date means no entry to persist, so the caller can skip the write entirely.
+        assertNull(
+            CaptureDateOverride.upsert(
+                entries = emptySet(),
+                captureMsByUri = mapOf("content://bad" to 0L),
+                modifiedByUri = emptyMap(),
+            ),
+        )
+        assertNull(CaptureDateOverride.upsert(emptySet(), emptyMap(), emptyMap()))
+    }
 }

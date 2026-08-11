@@ -24,6 +24,7 @@ package eu.akoos.photos.presentation.editor
 
 import android.content.ContentValues
 import android.content.Context
+import android.graphics.Bitmap
 import android.graphics.Rect
 import android.media.MediaExtractor
 import android.media.MediaFormat
@@ -107,11 +108,19 @@ data class VideoEditorUiState(
     val source: VideoEditorSource? = null,
     /** Latched after an [VideoEditorSource.External] save so the screen can show "Saved a copy". */
     val savedAsCopy: Boolean = false,
+    /** One-shot result of a still-frame grab, surfaced by the screen as a toast then consumed. */
+    val frameGrabResult: FrameGrabResult? = null,
 )
 
 sealed class VideoSaveResult {
     data class Success(val uri: Uri?) : VideoSaveResult()
     data class Failed(val message: String) : VideoSaveResult()
+}
+
+/** One-shot outcome of grabbing the current frame as a JPEG. */
+sealed class FrameGrabResult {
+    data class Success(val uri: Uri?) : FrameGrabResult()
+    data class Failed(val message: String) : FrameGrabResult()
 }
 
 /** Save phase, driving the bottom sheet's progress copy. */
@@ -580,6 +589,26 @@ class VideoEditorViewModel @Inject constructor(
         _state.update { it.copy(originalAudioGain = gain.coerceIn(0f, 1f)) }
     }
 
+    /** Remembered source-audio gain so un-mute restores what the slider held; defaults to full. */
+    private var gainBeforeMute: Float = 1f
+
+    /**
+     * One-tap source-audio mute. Muting pins the gain to exactly 0, which [save] routes through the
+     * lossless stream-copy strip (muxTrimmed with stripAudio), never a re-encode; un-mute restores the
+     * pre-mute gain, or full when the remembered value was itself a mute.
+     */
+    fun toggleMute() {
+        _state.update { s ->
+            if (s.originalAudioGain <= 0.001f) {
+                val restored = gainBeforeMute.coerceIn(0f, 1f).let { if (it <= 0.001f) 1f else it }
+                s.copy(originalAudioGain = restored)
+            } else {
+                gainBeforeMute = s.originalAudioGain
+                s.copy(originalAudioGain = 0f)
+            }
+        }
+    }
+
     /** Overlay-music loudness, same semantics as [setOriginalAudioGain]. When both gains
      *  are > 0 and an overlay is picked the save pipeline mixes the two PCM streams. */
     fun setMusicAudioGain(gain: Float) {
@@ -601,6 +630,11 @@ class VideoEditorViewModel @Inject constructor(
         _state.update { it.copy(saveResult = null, saveProgress = null) }
     }
 
+    /** Clears the one-shot frame-grab result once the screen has shown its toast. */
+    fun consumeFrameGrabResult() {
+        _state.update { it.copy(frameGrabResult = null) }
+    }
+
     /** Clears the [VideoEditorUiState.savedAsCopy] flag once the screen has shown the
      *  "Saved a copy" feedback, so a subsequent save doesn't re-fire the toast. */
     fun consumeSavedAsCopy() {
@@ -613,6 +647,75 @@ class VideoEditorViewModel @Inject constructor(
      *  state ensures the popup doesn't re-appear without a new failure. */
     fun clearError() {
         _state.update { it.copy(errorMessage = null) }
+    }
+
+    /**
+     * Grab the frame at [positionUs] from the source video and write it to the gallery as a JPEG.
+     * MediaMetadataRetriever reads the source at full resolution, so the still is not bounded by the
+     * 1080p preview decode. A bare JPEG compress carries no EXIF, so the still holds no location, the
+     * same guarantee the video exports give. An 8K frame can exhaust the heap; that surfaces the
+     * low-memory string rather than crashing.
+     */
+    fun grabCurrentFrame(positionUs: Long) {
+        val sourceUriStr = _state.value.sourceUri ?: return
+        val sourceDisplayName = _state.value.displayName
+        viewModelScope.launch(Dispatchers.IO) {
+            val retriever = MediaMetadataRetriever()
+            val result: FrameGrabResult = try {
+                retriever.setDataSource(context, Uri.parse(sourceUriStr))
+                val bitmap = retriever.getFrameAtTime(
+                    positionUs.coerceAtLeast(0L),
+                    MediaMetadataRetriever.OPTION_CLOSEST_SYNC,
+                ) ?: error("No frame at position")
+                val uri = try {
+                    insertFrameJpeg(bitmap, sourceDisplayName)
+                } finally {
+                    bitmap.recycle()
+                }
+                FrameGrabResult.Success(uri)
+            } catch (oom: OutOfMemoryError) {
+                FrameGrabResult.Failed(context.getString(R.string.editor_error_low_memory))
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                FrameGrabResult.Failed(context.getString(R.string.video_editor_frame_failed))
+            } finally {
+                runCatching { retriever.release() }
+            }
+            _state.update { it.copy(frameGrabResult = result) }
+        }
+    }
+
+    /**
+     * Writes [bitmap] into a fresh MediaStore image entry under DCIM/Camera. The compressed JPEG holds
+     * no EXIF, so no location travels with the still. Mirrors the editor's local-copy MediaStore dance.
+     */
+    private fun insertFrameJpeg(bitmap: Bitmap, sourceDisplayName: String): Uri? {
+        val now = System.currentTimeMillis()
+        val base = sourceDisplayName.substringBeforeLast('.', sourceDisplayName).ifBlank { "video" }
+        val ts = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.ROOT)
+            .format(java.util.Date(now))
+        val values = ContentValues().apply {
+            put(MediaStore.Images.Media.DISPLAY_NAME, "${base}_frame_$ts.jpg")
+            put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+            put(MediaStore.Images.Media.DATE_TAKEN, now)
+            put(MediaStore.Images.Media.DATE_MODIFIED, now / 1000L)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                put(MediaStore.Images.Media.RELATIVE_PATH, ProtonPhotosStorage.DEFAULT_PICTURES)
+                put(MediaStore.Images.Media.IS_PENDING, 1)
+            }
+        }
+        val uri = context.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+            ?: error("MediaStore insert failed")
+        context.contentResolver.openOutputStream(uri)?.use { out ->
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 95, out)
+        } ?: error("openOutputStream returned null for $uri")
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            values.clear()
+            values.put(MediaStore.Images.Media.IS_PENDING, 0)
+            context.contentResolver.update(uri, values, null, null)
+        }
+        runCatching { context.contentResolver.notifyChange(uri, null) }
+        return uri
     }
 
     /**

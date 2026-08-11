@@ -33,7 +33,14 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Collections
-import androidx.compose.material3.AlertDialog
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.ui.graphics.Color
+import eu.akoos.photos.presentation.theme.Bg2
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.Icon
@@ -60,6 +67,7 @@ import eu.akoos.photos.presentation.theme.AppColors
  * competing buttons. [onPersist] fires only when the box is ticked; otherwise [onDismiss] closes it
  * for the session and it can reappear later.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DenseGridWarningDialog(
     onDismiss: () -> Unit,
@@ -67,47 +75,49 @@ fun DenseGridWarningDialog(
 ) {
     val colors = AppColors.current
     var dontShowAgain by remember { mutableStateOf(false) }
-    AlertDialog(
+    ModalBottomSheet(
         onDismissRequest = onDismiss,
-        containerColor    = colors.cardBg,
-        iconContentColor  = colors.accent,
-        titleContentColor = colors.fgPrimary,
-        textContentColor  = colors.fgDim,
-        icon = { Icon(Icons.Default.Collections, contentDescription = null, modifier = Modifier.size(26.dp)) },
-        title = { Text(stringResource(R.string.dense_grid_warning_title), fontWeight = FontWeight.SemiBold) },
-        text = {
-            Column {
-                Text(stringResource(R.string.dense_grid_warning_message), color = colors.fgDim, fontSize = 13.sp)
-                Spacer(Modifier.height(16.dp))
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(8.dp))
-                        .clickable { dontShowAgain = !dontShowAgain },
-                ) {
-                    Checkbox(
-                        checked = dontShowAgain,
-                        onCheckedChange = { dontShowAgain = it },
-                        colors = CheckboxDefaults.colors(
-                            checkedColor   = colors.accent,
-                            uncheckedColor = colors.fgDim,
-                            checkmarkColor = colors.cardBg,
-                        ),
-                    )
-                    Spacer(Modifier.width(4.dp))
-                    Text(stringResource(R.string.dense_grid_warning_dismiss), color = colors.fgDim, fontSize = 13.sp)
-                }
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = Bg2,
+        scrimColor = Color.Black.copy(alpha = 0.5f),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 32.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Collections, contentDescription = null, tint = colors.accent, modifier = Modifier.size(24.dp))
+                Spacer(Modifier.width(10.dp))
+                Text(stringResource(R.string.dense_grid_warning_title), color = colors.fgPrimary, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
             }
-        },
-        confirmButton = {
-            TextButton(onClick = { if (dontShowAgain) onPersist() else onDismiss() }) {
-                Text(
-                    stringResource(R.string.err_dismiss_ok),
-                    color = colors.accent,
-                    fontWeight = FontWeight.SemiBold,
+            Text(stringResource(R.string.dense_grid_warning_message), color = colors.fgDim, fontSize = 14.sp)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable { dontShowAgain = !dontShowAgain },
+            ) {
+                Checkbox(
+                    checked = dontShowAgain,
+                    onCheckedChange = { dontShowAgain = it },
+                    colors = CheckboxDefaults.colors(
+                        checkedColor   = colors.accent,
+                        uncheckedColor = colors.fgDim,
+                        checkmarkColor = colors.cardBg,
+                    ),
                 )
+                Spacer(Modifier.width(4.dp))
+                Text(stringResource(R.string.dense_grid_warning_dismiss), color = colors.fgDim, fontSize = 13.sp)
             }
-        },
-    )
+            PrimaryButton(
+                stringResource(R.string.err_dismiss_ok),
+                { if (dontShowAgain) onPersist() else onDismiss() },
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
 }

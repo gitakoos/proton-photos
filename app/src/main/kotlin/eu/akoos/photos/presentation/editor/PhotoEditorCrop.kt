@@ -123,7 +123,12 @@ internal fun CropPanel(
                             val ratio = aspect.lockRatio(dispW, dispH)
                             onLockedAspectChange(aspect)
                             when {
-                                aspect == CropAspect.Free -> Unit
+                                // Free releases the lock AND clears any crop back to the full frame, so it
+                                // doubles as the reset (there is no separate reset chip).
+                                aspect == CropAspect.Free -> {
+                                    onPendingCropRectChange(android.graphics.Rect(0, 0, dispW, dispH))
+                                    vm.applyCrop(null)
+                                }
                                 aspect == CropAspect.Original -> {
                                     onPendingCropRectChange(android.graphics.Rect(0, 0, dispW, dispH))
                                     vm.applyCrop(null)
@@ -152,25 +157,6 @@ internal fun CropPanel(
                     )
                 }
             }
-        }
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            // Reset clears the committed crop, releases any lock, and snaps the pending rect
-            // back to full image. No Apply chip, because drags and ratio chips already commit
-            // live (see onCropRectCommit and the chip click above).
-            ActionChip(
-                label = androidx.compose.ui.res.stringResource(R.string.editor_crop_reset),
-                icon = Icons.Default.Restore,
-                enabled = true,
-                onClick = {
-                    onLockedAspectChange(CropAspect.Free)
-                    onPendingCropRectChange(android.graphics.Rect(0, 0, dispW, dispH))
-                    vm.applyCrop(null)
-                },
-                modifier = Modifier.weight(1f),
-            )
         }
     }
 }
@@ -465,17 +451,23 @@ internal fun CropPreview(
                 val rightPx = screenRect.right
                 val topPx = screenRect.top
                 val bottomPx = screenRect.bottom
+                // Image bounds in screen space: the dim mask stays INSIDE the photo, so the letterbox
+                // around it keeps the app background (matching every other tool) instead of going black.
+                val imgL = fit.toScreenX(0f)
+                val imgT = fit.toScreenY(0f)
+                val imgR = fit.toScreenX(bitmap.width.toFloat())
+                val imgB = fit.toScreenY(bitmap.height.toFloat())
+                val imgW = (imgR - imgL).coerceAtLeast(0f)
                 val maskColor = Color.Black.copy(alpha = 0.55f)
-                // Four dark rectangles around the crop rect — top / bottom / left / right.
-                // Cheaper and clearer than a PorterDuff masking dance for a static overlay.
-                drawRect(maskColor, topLeft = Offset(0f, 0f),
-                    size = GSize(size.width, topPx.coerceAtLeast(0f)))
-                drawRect(maskColor, topLeft = Offset(0f, bottomPx.coerceAtMost(size.height)),
-                    size = GSize(size.width, (size.height - bottomPx).coerceAtLeast(0f)))
-                drawRect(maskColor, topLeft = Offset(0f, topPx.coerceAtLeast(0f)),
-                    size = GSize(leftPx.coerceAtLeast(0f), (bottomPx - topPx).coerceAtLeast(0f)))
-                drawRect(maskColor, topLeft = Offset(rightPx.coerceAtMost(size.width), topPx.coerceAtLeast(0f)),
-                    size = GSize((size.width - rightPx).coerceAtLeast(0f), (bottomPx - topPx).coerceAtLeast(0f)))
+                // Four dark rectangles around the crop rect (top / bottom / left / right), clipped to the image.
+                drawRect(maskColor, topLeft = Offset(imgL, imgT),
+                    size = GSize(imgW, (topPx - imgT).coerceAtLeast(0f)))
+                drawRect(maskColor, topLeft = Offset(imgL, bottomPx.coerceAtMost(imgB)),
+                    size = GSize(imgW, (imgB - bottomPx).coerceAtLeast(0f)))
+                drawRect(maskColor, topLeft = Offset(imgL, topPx.coerceAtLeast(imgT)),
+                    size = GSize((leftPx - imgL).coerceAtLeast(0f), (bottomPx - topPx).coerceAtLeast(0f)))
+                drawRect(maskColor, topLeft = Offset(rightPx.coerceAtMost(imgR), topPx.coerceAtLeast(imgT)),
+                    size = GSize((imgR - rightPx).coerceAtLeast(0f), (bottomPx - topPx).coerceAtLeast(0f)))
 
                 // Border + rule-of-thirds gridlines.
                 drawRect(

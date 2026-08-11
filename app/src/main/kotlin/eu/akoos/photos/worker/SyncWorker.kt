@@ -61,6 +61,7 @@ import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.usecase.ReconcileSyncStateUseCase
 import eu.akoos.photos.domain.usecase.UploadPendingUseCase
 import eu.akoos.photos.domain.usecase.UploadStatus
+import eu.akoos.photos.util.NetworkObserver
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 
@@ -72,6 +73,7 @@ class SyncWorker @AssistedInject constructor(
     private val upload: UploadPendingUseCase,
     private val accountManager: AccountManager,
     private val cloudRepo: DrivePhotoRepository,
+    private val networkObserver: NetworkObserver,
 ) : CoroutineWorker(context, params) {
 
     /**
@@ -182,8 +184,17 @@ class SyncWorker @AssistedInject constructor(
 
     private suspend fun runSyncPass(userId: UserId, firstPass: Boolean): PassResult {
         try {
-            // Refresh cloud state first so deleted-cloud photos are removed from DB before reconcile.
-            cloudRepo.refreshCloudPhotosIncremental(userId)
+            // Wi-Fi-only covers the background cloud refresh, not just the upload below. The listing
+            // walk (and its short-cooldown full-refresh fallback when the listing is incomplete) is the
+            // largest background data cost, so on mobile with Wi-Fi-only on it is skipped, mirroring the
+            // upload guard in UploadPendingUseCase. Reconcile still runs (it works off the local DB) and
+            // the upload self-skips. The foreground refresh (pull-to-refresh / opening the app) is a
+            // separate call and stays unaffected, so a manual open still updates on mobile.
+            val wifiOnly = context.settingsDataStore.data.first()[SettingsKeys.SYNC_WIFI_ONLY] != false
+            if (!wifiOnly || networkObserver.currentlyOnWifi()) {
+                // Refresh cloud state first so deleted-cloud photos are removed from DB before reconcile.
+                cloudRepo.refreshCloudPhotosIncremental(userId)
+            }
             reconcile(userId).collect {}
             // Upload errors must NOT silently disappear — swallowing them gives a "success"
             // verdict even when nothing was uploaded, leaving a stale "last sync time" with no

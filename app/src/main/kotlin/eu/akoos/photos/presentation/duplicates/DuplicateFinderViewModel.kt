@@ -23,6 +23,8 @@
 package eu.akoos.photos.presentation.duplicates
 
 import android.util.Log
+import android.graphics.BitmapFactory
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -47,6 +49,7 @@ import eu.akoos.photos.data.db.dao.PerceptualHashDao
 import eu.akoos.photos.data.db.dao.PerceptualHashLite
 import eu.akoos.photos.data.db.dao.SyncStateDao
 import eu.akoos.photos.data.repository.drive.PerceptualHashScheduler
+import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.usecase.DeletePhotoUseCase
@@ -378,6 +381,45 @@ class DuplicateFinderViewModel @Inject constructor(
     fun cancelThumbnailDecrypt(linkId: String) {
         cloudRepo.cancelThumbnailDecrypt(linkId)
     }
+
+    /** Full-resolution facts for a cloud copy: the decrypted file uri plus its true byte size and pixel
+     *  dimensions. The photo listing carries none of these for the cloud volume, so the review resolves
+     *  them on demand for the copy on screen. */
+    data class CloudFullRes(val uri: String, val sizeBytes: Long, val width: Int, val height: Int)
+
+    private val _cloudFullRes = MutableStateFlow<Map<String, CloudFullRes>>(emptyMap())
+    val cloudFullRes: StateFlow<Map<String, CloudFullRes>> = _cloudFullRes.asStateFlow()
+    private val fullResInFlight = java.util.Collections.synchronizedSet(mutableSetOf<String>())
+
+    /** Downloads and decrypts one cloud copy's full-resolution file, then publishes its uri, size and
+     *  dimensions (bounds decoded without allocating the bitmap). Runs once per link and only for the
+     *  copy the review is showing, so an unopened group is never fetched. */
+    fun requestCloudFullRes(photo: CloudPhoto) {
+        val linkId = photo.linkId
+        // A cached entry whose decrypted temp was cleaned by the cache prune leaves a stale uri, so drop
+        // it and fetch again rather than hand back a path that no longer resolves (a black image).
+        val existing = _cloudFullRes.value[linkId]
+        if (existing != null) {
+            if (fullResFileExists(existing.uri)) return
+            _cloudFullRes.update { it - linkId }
+        }
+        if (!fullResInFlight.add(linkId)) return
+        val userId = primaryUserId ?: run { fullResInFlight.remove(linkId); return }
+        viewModelScope.launch(Dispatchers.IO) {
+            val info = runCatching {
+                val file = cloudRepo.downloadFullResPhoto(userId, photo)
+                val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                BitmapFactory.decodeFile(file.absolutePath, bounds)
+                CloudFullRes(Uri.fromFile(file).toString(), file.length(), bounds.outWidth, bounds.outHeight)
+            }.getOrNull()
+            if (info != null) _cloudFullRes.update { it + (linkId to info) }
+            fullResInFlight.remove(linkId)
+        }
+    }
+
+    /** Whether a resolved full-res file uri still points at a real file (the cache prune can remove it). */
+    private fun fullResFileExists(uri: String): Boolean =
+        runCatching { Uri.parse(uri).path?.let { java.io.File(it).exists() } == true }.getOrDefault(false)
 
     /**
      * Delete every copy of [group] EXCEPT the ones in [keepIds]. Enforces the two hard invariants:

@@ -63,6 +63,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
@@ -333,10 +334,17 @@ internal fun PhotoCell(
         else         -> false
     }
 
+    // A gentle inward scale on select (the photo eases back a touch to reveal the accent frame), only
+    // animating on the cells whose selection actually flips.
+    val cellScale by androidx.compose.animation.core.animateFloatAsState(
+        targetValue = if (selected) 0.92f else 1f,
+        label = "cellSelect",
+    )
     Box(
         modifier = Modifier
             // Slightly taller than a square so the corner badges cover less of the photo.
             .aspectRatio(aspectRatioOverride ?: 0.85f)
+            .graphicsLayer { scaleX = cellScale; scaleY = cellScale }
             .clip(RoundedCornerShape(cornerRadius))
             .background(Bg2)
             // The timeline owns long-press at the grid level (drag-to-select), so it passes no
@@ -580,7 +588,18 @@ internal fun PhotoCell(
                     .size(22.dp)
                     .align(Alignment.TopStart),
             ) {
-                if (selected) {
+                // Empty ring underneath; the filled check scales in over it on select.
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.3f), CircleShape)
+                        .border(1.5.dp, Color.White.copy(alpha = 0.8f), CircleShape),
+                )
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = selected,
+                    enter = androidx.compose.animation.scaleIn() + androidx.compose.animation.fadeIn(),
+                    exit = androidx.compose.animation.scaleOut() + androidx.compose.animation.fadeOut(),
+                ) {
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
@@ -590,13 +609,6 @@ internal fun PhotoCell(
                         Icon(Icons.Default.Check, stringResource(R.string.cd_status_selected),
                             tint = Color.White, modifier = Modifier.size(14.dp))
                     }
-                } else {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(Color.Black.copy(alpha = 0.3f), CircleShape)
-                            .border(1.5.dp, Color.White.copy(alpha = 0.8f), CircleShape),
-                    )
                 }
             }
         }

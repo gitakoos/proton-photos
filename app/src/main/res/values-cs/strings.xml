@@ -435,7 +435,7 @@
     <string name="settings_account_link_drive_web_desc">Procházejte své fotky a soubory na drive.proton.me.</string>
     <string name="cancel">Zrušit</string>
     <string name="settings_language_system">Výchozí systémový</string>
-    <string name="settings_sync_wifi_desc">Pozastavit nahrávání v mobilní síti</string>
+    <string name="settings_sync_wifi_desc">Pozastavit synchronizaci v mobilní síti</string>
     <string name="settings_fullres_wifi_only">Plné rozlišení jen přes Wi‑Fi</string>
     <string name="settings_fullres_wifi_only_desc">Stahovat cloudové fotky a videa v plném rozlišení jen přes Wi‑Fi. Náhledy se načítají vždy.</string>
     <string name="viewer_wifi_for_full_quality">Připojte se k Wi‑Fi pro plnou kvalitu</string>
@@ -1392,7 +1392,7 @@
     <string name="settings_diagnostics_copy_clipboard">Kopírovat do schránky</string>
     <!-- Duplicate finder -->
     <string name="settings_find_duplicates">Najít duplikáty</string>
-    <string name="settings_find_duplicates_desc">Zkontrolovat a odstranit identické kopie</string>
+    <string name="settings_find_duplicates_desc">Zkontrolovat a odstranit identické nebo podobné kopie</string>
     <string name="duplicates_title">Najít duplikáty</string>
     <string name="duplicates_section_device">V tomto zařízení</string>
     <string name="duplicates_section_cloud">Ve vašem cloudu</string>
@@ -1630,4 +1630,83 @@
     <string name="whats_new_freeup_review_body">Než uvolníš místo v zařízení, obrazovka vypíše fotky, které odstraní, a kolik místa se tím uvolní, takže nic nezmizí, aniž bys to nejdřív viděl.</string>
     <string name="whats_new_news_title">Aktuality a zpětná vazba</string>
     <string name="whats_new_news_body">Obrazovka Aktuality přináší novinky o aplikaci a tlačítko tě zavede rovnou tam, kde můžeš poslat zpětnou vazbu nebo nahlásit chybu.</string>
+    <string name="duplicates_details">Podrobnosti</string>
+    <string name="metadata_editor_date_mode_filename">Z názvu souboru</string>
+    <string name="metadata_editor_filename_hint">Nastaví datum každé fotky podle data zapsaného v jejím názvu souboru.</string>
+    <string name="metadata_editor_filename_apply">Opravit data</string>
+    <plurals name="metadata_editor_filename_count">
+        <item quantity="one">%1$d z %2$d vybraných fotek má datum v názvu</item>
+        <item quantity="few">%1$d z %2$d vybraných fotek má datum v názvu</item>
+        <item quantity="many">%1$d z %2$d vybraných fotek má datum v názvu</item>
+        <item quantity="other">%1$d z %2$d vybraných fotek má datum v názvu</item>
+    </plurals>
+
+    <!-- Collage maker -->
+    <string name="collage_add">Přidat fotky</string>
+    <string name="collage_aspect_original">Originál</string>
+    <string name="collage_bg_blur">Rozostření</string>
+    <string name="collage_bg_color">Barva</string>
+    <string name="collage_create">Vytvořit koláž</string>
+    <string name="collage_discard">Zahodit koláž?</string>
+    <string name="collage_discard_confirm">Zahodit</string>
+    <string name="collage_discard_msg">Koláž se neuloží.</string>
+    <string name="collage_done">Hotovo</string>
+    <string name="collage_drop_remove">Uvolněním odeberete z koláže</string>
+    <string name="collage_mode_collage">Koláž</string>
+    <string name="collage_mode_photos">Fotky</string>
+    <string name="collage_photos_hint">Klepnutím upravíte výřez, podržením prohodíte</string>
+    <string name="collage_remove">Odebrat</string>
+    <string name="collage_save">Uložit</string>
+    <string name="collage_save_confirm">Uložit tuto koláž?</string>
+    <string name="collage_save_failed">Koláž se nepodařilo uložit</string>
+    <string name="collage_saved">Koláž uložena</string>
+    <string name="collage_spacing">Mezery</string>
+    <string name="collage_swap">Prohodit</string>
+    <string name="collage_swap_pick">Klepněte na fotku</string>
+    <string name="collage_tab_border">Okraj</string>
+    <string name="collage_tab_layout">Rozvržení</string>
+    <string name="collage_tab_ratio">Poměr</string>
+    <string name="collage_title">Koláž</string>
+    <string name="collage_trim_for_grid">Odeberte %1$d pro přepnutí na mřížku</string>
+
+    <!-- Photo/video editor adjustments, filters and tools -->
+    <string name="editor_adj_fade">Vyblednutí</string>
+    <string name="editor_adj_grain">Zrnitost</string>
+    <string name="editor_adj_sharpen">Doostřit</string>
+    <string name="editor_adj_vibrance">Živost</string>
+    <string name="editor_adj_vignette">Vinětace</string>
+    <string name="editor_color_curves">Křivky</string>
+    <string name="editor_color_hsl">HSL</string>
+    <string name="editor_compare_original">Originál</string>
+    <string name="editor_draw_width">Šířka</string>
+    <string name="editor_export_format">Formát</string>
+    <string name="editor_export_quality">Kvalita %1$d</string>
+    <string name="editor_export_size">Velikost</string>
+    <string name="editor_export_size_full">Plná</string>
+    <string name="editor_filter_chrome">Chrome</string>
+    <string name="editor_filter_dramatic">Dramatic</string>
+    <string name="editor_filter_fresh">Fresh</string>
+    <string name="editor_filter_matte">Matte</string>
+    <string name="editor_filter_noir">Noir</string>
+    <string name="editor_geo_reset">Obnovit</string>
+    <string name="editor_hsl_hue">Odstín</string>
+    <string name="editor_hsl_light">Světlost</string>
+    <string name="editor_hsl_sat">Sytost</string>
+    <string name="editor_perspective_h">Vodorovně</string>
+    <string name="editor_perspective_v">Svisle</string>
+    <string name="editor_redact_brush">Velikost štětce</string>
+    <string name="editor_straighten">Narovnat</string>
+    <string name="editor_text_add">Přidat text</string>
+    <string name="editor_text_delete">Smazat</string>
+    <string name="editor_text_edit">Upravit</string>
+    <string name="editor_text_hint">Přidejte text, pak jej táhnutím přesuňte a sevřením prstů změňte velikost</string>
+    <string name="editor_text_resize_hint">Táhnutím přesunete, sevřením prstů změníte velikost</string>
+    <string name="editor_text_size">Velikost</string>
+    <string name="editor_tool_color">Barva</string>
+    <string name="editor_tool_draw">Kreslit</string>
+    <string name="editor_tool_text">Text</string>
+    <string name="video_editor_frame_failed">Snímek se nepodařilo uložit</string>
+    <string name="video_editor_frame_saved">Snímek uložen do galerie</string>
+    <string name="video_editor_grab_frame">Zachytit snímek</string>
+    <string name="video_editor_mute">Ztlumit</string>
 </resources>

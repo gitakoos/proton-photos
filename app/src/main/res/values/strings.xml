@@ -160,6 +160,13 @@
         <item quantity="one">%1$d photo has no date of its own, so a shift leaves it where it is. Setting the same date for all still reaches it.</item>
         <item quantity="other">%1$d photos have no date of their own, so a shift leaves them where they are. Setting the same date for all still reaches them.</item>
     </plurals>
+    <string name="metadata_editor_date_mode_filename">From filename</string>
+    <string name="metadata_editor_filename_hint">Sets each photo\'s date from the date written in its filename.</string>
+    <string name="metadata_editor_filename_apply">Fix dates</string>
+    <plurals name="metadata_editor_filename_count">
+        <item quantity="one">%1$d of %2$d selected photos has a date in its name</item>
+        <item quantity="other">%1$d of %2$d selected photos have a date in their name</item>
+    </plurals>
 
     <!-- Photo editor error strings, previously hardcoded Hungarian in PhotoEditorViewModel.
          Surfaced via state.errorMessage on the editor screen. -->
@@ -186,10 +193,30 @@
     <string name="editor_adj_saturation">Saturation</string>
     <string name="editor_adj_tone">Tone</string>
     <string name="editor_adj_temperature">Temperature</string>
+    <string name="editor_adj_vignette">Vignette</string>
+    <string name="editor_adj_fade">Fade</string>
+    <string name="editor_adj_vibrance">Vibrance</string>
+    <string name="editor_adj_sharpen">Sharpen</string>
+    <string name="editor_adj_grain">Grain</string>
     <!-- Photo editor tool tabs. Crop and Rotate reuse the video_editor_* equivalents. -->
     <string name="editor_tool_adjust">Adjust</string>
     <string name="editor_tool_filter">Filter</string>
     <string name="editor_tool_redact">Redact</string>
+    <string name="editor_tool_draw">Draw</string>
+    <string name="editor_draw_width">Width</string>
+    <string name="editor_tool_color">Color</string>
+    <string name="editor_color_curves">Curves</string>
+    <string name="editor_color_hsl">HSL</string>
+    <string name="editor_hsl_hue">Hue</string>
+    <string name="editor_hsl_sat">Saturation</string>
+    <string name="editor_hsl_light">Lightness</string>
+    <string name="editor_tool_text">Text</string>
+    <string name="editor_text_add">Add text</string>
+    <string name="editor_text_edit">Edit</string>
+    <string name="editor_text_delete">Delete</string>
+    <string name="editor_text_size">Size</string>
+    <string name="editor_text_hint">Add text, then drag it to move and pinch to resize</string>
+    <string name="editor_text_resize_hint">Drag to move, pinch to resize</string>
     <!-- Filter preset labels under the Filter tab. -->
     <string name="editor_filter_original">Original</string>
     <string name="editor_filter_bw">B&amp;W</string>
@@ -198,19 +225,35 @@
     <string name="editor_filter_vivid">Vivid</string>
     <string name="editor_filter_cool">Cool</string>
     <string name="editor_filter_warm">Warm</string>
+    <string name="editor_filter_noir">Noir</string>
+    <string name="editor_filter_chrome">Chrome</string>
+    <string name="editor_filter_matte">Matte</string>
+    <string name="editor_filter_dramatic">Dramatic</string>
+    <string name="editor_filter_fresh">Fresh</string>
     <!-- Redact tab. -->
     <string name="editor_redact_hint">Draw over faces or text to hide them</string>
     <string name="editor_redact_blackout">Black-out</string>
     <string name="editor_redact_pixelate">Pixelate</string>
     <string name="editor_redact_clear">Clear</string>
+    <string name="editor_redact_brush">Brush size</string>
+    <!-- Press-and-hold the preview to compare against the original. -->
+    <string name="editor_compare_original">Original</string>
     <!-- Rotate tab flip actions (Rotate reuses video_editor_rotate). -->
     <string name="editor_flip_h">Flip H</string>
     <string name="editor_flip_v">Flip V</string>
+    <string name="editor_straighten">Straighten</string>
+    <string name="editor_perspective_v">Vertical</string>
+    <string name="editor_perspective_h">Horizontal</string>
+    <string name="editor_geo_reset">Reset</string>
     <!-- Editor error popup titles. -->
     <string name="editor_error_title">Editor error</string>
     <string name="editor_error_title_video">Video editor error</string>
     <!-- Save sheet, shared between the photo and video editors where the copy matches. -->
     <string name="editor_save_edits">Save edits</string>
+    <string name="editor_export_format">Format</string>
+    <string name="editor_export_size">Size</string>
+    <string name="editor_export_size_full">Full</string>
+    <string name="editor_export_quality">Quality %1$d</string>
     <string name="editor_save_as_new_copy">Save as new copy</string>
     <string name="editor_save_sheet_cloud">Choose how to save the edited photo to your Drive.</string>
     <string name="editor_save_sheet_synced">Choose how to save the edited photo. Backed-up originals stay in Drive.</string>
@@ -517,7 +560,7 @@
     <string name="settings_account_link_drive_web_desc">Browse your photos and files at drive.proton.me.</string>
     <string name="cancel">Cancel</string>
     <string name="settings_language_system">System default</string>
-    <string name="settings_sync_wifi_desc">Pause upload on mobile network</string>
+    <string name="settings_sync_wifi_desc">Pause sync on mobile network</string>
     <string name="settings_fullres_wifi_only">Full-res over Wi‑Fi only</string>
     <string name="settings_fullres_wifi_only_desc">Download cloud full-res photos and videos on Wi‑Fi only. Thumbnails always load.</string>
     <string name="viewer_wifi_for_full_quality">Connect to Wi‑Fi for full quality</string>
@@ -1130,6 +1173,10 @@
     <string name="video_editor_encrypting">Encrypting…</string>
     <string name="video_editor_uploading">Uploading to Drive…</string>
     <string name="video_editor_audio_original">Original audio</string>
+    <string name="video_editor_mute">Mute</string>
+    <string name="video_editor_grab_frame">Grab frame</string>
+    <string name="video_editor_frame_saved">Frame saved to gallery</string>
+    <string name="video_editor_frame_failed">Could not save the frame</string>
     <string name="editor_discard_changes_title">Discard changes?</string>
     <string name="editor_discard_changes_message">Your unsaved edits will be lost.</string>
     <string name="editor_discard_changes_confirm">Discard</string>
@@ -1479,7 +1526,7 @@
 
     <!-- Duplicate finder -->
     <string name="settings_find_duplicates">Find duplicates</string>
-    <string name="settings_find_duplicates_desc">Review and remove identical copies</string>
+    <string name="settings_find_duplicates_desc">Review and remove identical or similar copies</string>
     <string name="duplicates_title">Find duplicates</string>
     <string name="duplicates_section_device">On this device</string>
     <string name="duplicates_section_cloud">In your cloud</string>
@@ -1500,6 +1547,7 @@
     <string name="duplicates_section_similar">Similar photos</string>
     <string name="duplicates_scanning">Scanning for similar photos…</string>
     <string name="duplicates_similar_hint">These look alike but may differ in file or metadata</string>
+    <string name="duplicates_details">Details</string>
 
     <!-- What's new -->
     <string name="whats_new_title">What\'s new</string>
@@ -1572,4 +1620,31 @@
     <string name="whats_new_more_240">Plus copied links stay hidden in the clipboard preview, file sizes match everywhere they appear, automatic free-up checks with Drive before removing a copy from your phone, and large albums and selections hold together better.</string>
     <string name="duplicates_filter_identical">Identical</string>
     <string name="duplicates_filter_similar">Similar</string>
+    <!-- Collage -->
+    <string name="collage_title">Collage</string>
+    <string name="collage_save">Save</string>
+    <string name="collage_aspect_original">Original</string>
+    <string name="collage_create">Create collage</string>
+    <string name="collage_add">Add photos</string>
+    <string name="collage_remove">Remove</string>
+    <string name="collage_swap">Swap</string>
+    <string name="collage_swap_pick">Tap a photo</string>
+    <string name="collage_done">Done</string>
+    <string name="collage_saved">Collage saved</string>
+    <string name="collage_save_failed">Couldn\'t save the collage</string>
+    <string name="collage_mode_collage">Collage</string>
+    <string name="collage_mode_photos">Photos</string>
+    <string name="collage_photos_hint">Tap a photo to reframe, hold to swap</string>
+    <string name="collage_spacing">Spacing</string>
+    <string name="collage_tab_layout">Layout</string>
+    <string name="collage_tab_ratio">Ratio</string>
+    <string name="collage_tab_border">Border</string>
+    <string name="collage_save_confirm">Save this collage?</string>
+    <string name="collage_discard">Discard collage?</string>
+    <string name="collage_discard_msg">Your collage won\'t be saved.</string>
+    <string name="collage_discard_confirm">Discard</string>
+    <string name="collage_bg_color">Color</string>
+    <string name="collage_bg_blur">Blur</string>
+    <string name="collage_drop_remove">Release to remove from the collage</string>
+    <string name="collage_trim_for_grid">Remove %1$d to switch to a grid layout</string>
 </resources>

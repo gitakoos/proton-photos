@@ -659,6 +659,8 @@ fun SettingsScreen(
             if (BuildConfig.DEBUG) {
                 Spacer(Modifier.height(20.dp))
                 LargeLibrarySimCard()
+                Spacer(Modifier.height(20.dp))
+                DebugDialogTestCard()
             }
         }
 
@@ -1907,7 +1909,88 @@ internal fun ProtonStorageRow(state: SettingsUiState) {
 
 // ── Shared composables ────────────────────────────────────────────────────────
 
-// ── Debug-only large-library simulator card ───────────────────────────────────
+// ── Debug-only preview drawers + large-library simulator ──────────────────────
+
+/** Debug-only preview buttons for the app's warning / confirm / error drawers, so each can be seen
+ *  and tuned without reproducing the real condition. Compiled out of release by the BuildConfig.DEBUG
+ *  guard at the only call site. English-only labels: a developer tool, never user-facing. */
+@Composable
+private fun DebugDialogTestCard() {
+    var showErrShort by remember { mutableStateOf(false) }
+    var showErrLong by remember { mutableStateOf(false) }
+    var showConfirm by remember { mutableStateOf(false) }
+    var showDestructive by remember { mutableStateOf(false) }
+    var showDenseGrid by remember { mutableStateOf(false) }
+    var showUpdate by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    SettingsCard {
+        NavRow("Test: error popup (short)", "Preview the error drawer") { showErrShort = true }
+        RowDivider()
+        NavRow("Test: error popup (long)", "Long message, Show more, Copy") { showErrLong = true }
+        RowDivider()
+        NavRow("Test: confirm dialog", "Neutral confirm drawer") { showConfirm = true }
+        RowDivider()
+        NavRow("Test: confirm dialog (destructive)", "Red confirm drawer") { showDestructive = true }
+        RowDivider()
+        NavRow("Test: dense grid warning", "Warning drawer with checkbox") { showDenseGrid = true }
+        RowDivider()
+        NavRow("Test: update prompt", "Update-available drawer") { showUpdate = true }
+        RowDivider()
+        NavRow("Test: toast", "Fire a sample toast") {
+            android.widget.Toast.makeText(context, "Test toast", android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
+    if (showErrShort) {
+        eu.akoos.photos.presentation.common.ErrorPopup(
+            title = "Test error",
+            message = "Something went wrong while doing the thing.",
+            onDismiss = { showErrShort = false },
+            onCopy = {},
+        )
+    }
+    if (showErrLong) {
+        eu.akoos.photos.presentation.common.ErrorPopup(
+            title = "Test error",
+            message = "Lorem ipsum dolor sit amet, consectetur adipiscing elit. ".repeat(12),
+            onDismiss = { showErrLong = false },
+            onCopy = {},
+        )
+    }
+    if (showConfirm) {
+        eu.akoos.photos.presentation.common.ConfirmDialog(
+            title = "Confirm test",
+            message = "Proceed with the test action?",
+            confirmLabel = "Confirm",
+            dismissLabel = "Cancel",
+            onConfirm = { showConfirm = false },
+            onDismiss = { showConfirm = false },
+        )
+    }
+    if (showDestructive) {
+        eu.akoos.photos.presentation.common.ConfirmDialog(
+            title = "Delete test",
+            message = "This cannot be undone.",
+            confirmLabel = "Delete",
+            dismissLabel = "Cancel",
+            onConfirm = { showDestructive = false },
+            onDismiss = { showDestructive = false },
+            destructive = true,
+        )
+    }
+    if (showDenseGrid) {
+        eu.akoos.photos.presentation.common.DenseGridWarningDialog(
+            onDismiss = { showDenseGrid = false },
+            onPersist = { showDenseGrid = false },
+        )
+    }
+    if (showUpdate) {
+        eu.akoos.photos.presentation.common.UpdatePromptDialog(
+            state = eu.akoos.photos.presentation.common.UpdatePromptState.Available(BuildConfig.VERSION_NAME, 42),
+            onUpdate = { showUpdate = false },
+            onDismiss = { showUpdate = false },
+        )
+    }
+}
 
 /**
  * DEBUG-only card to drive the [eu.akoos.photos.data.repository.drive.LargeLibrarySimulator].

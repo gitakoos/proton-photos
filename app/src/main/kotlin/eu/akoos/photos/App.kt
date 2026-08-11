@@ -361,7 +361,9 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
         // AppCompatDelegate night mode governs ProtonCore's login screens (they read uiMode via
         // isSystemInDarkTheme). Force NIGHT_YES except an explicit "light" pick — the palette is
         // dark-built and a "system" default made login appear light on light-system OEM phones.
-        // The in-app Compose ProtonPhotosTheme still honours the full system/dark/light choice.
+        // MainActivity overrides its own local night mode to FOLLOW_SYSTEM (see its onCreate), so the
+        // in-app Compose ProtonPhotosTheme honours the full system/dark/light choice; this default is
+        // only the fallback for the XML-based ProtonCore login activities.
         AppCompatDelegate.setDefaultNightMode(
             when (cached) {
                 "light" -> AppCompatDelegate.MODE_NIGHT_NO

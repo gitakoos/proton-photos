@@ -39,6 +39,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
@@ -71,11 +72,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateDpAsState
@@ -97,11 +101,17 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.util.lerp
+import kotlin.math.roundToInt
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import eu.akoos.photos.R
@@ -641,21 +651,24 @@ internal fun CategoryRail(
     ) {
         itemsIndexed(order, key = { _, f -> f.name }) { _, cat ->
             val selected = selectedFilter == cat
+            val chipBg by animateColorAsState(
+                if (selected) Accent.copy(alpha = 0.18f) else PillBg, label = "catChipBg")
+            val chipFg by animateColorAsState(if (selected) Accent else FgDim, label = "catChipFg")
             Row(
                 modifier = Modifier
                     .height(34.dp)
                     .clip(pillShape)
-                    .background(if (selected) Accent.copy(alpha = 0.18f) else PillBg, pillShape)
+                    .background(chipBg, pillShape)
                     .then(if (!selected) Modifier.border(0.5.dp, PillBorder, pillShape) else Modifier)
                     .clickable { onFilterSelected(if (selected) GalleryFilter.All else cat) }
                     .padding(horizontal = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                GalleryCategoryIcon(cat, tint = if (selected) Accent else FgDim)
+                GalleryCategoryIcon(cat, tint = chipFg)
                 Text(
                     categoryLabel(cat),
-                    color = if (selected) Accent else FgDim,
+                    color = chipFg,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Medium,
                 )
@@ -772,32 +785,42 @@ internal fun CategoryReorderList(modifier: Modifier = Modifier) {
 // ── Bottom dock ───────────────────────────────────────────────────────────────
 
 @Composable
-internal fun BottomDock(selectedTab: Int, onTabSelected: (Int) -> Unit) {
-    Row(
+internal fun BottomDock(position: Float, onTabSelected: (Int) -> Unit) {
+    val density = LocalDensity.current
+    // Each tab's measured left offset + size (labels differ in width), so the single highlight can slide
+    // to the selected one instead of the fill just snapping between tabs.
+    val tabX = remember { mutableStateListOf(0f, 0f, 0f) }
+    val tabW = remember { mutableStateListOf(0f, 0f, 0f) }
+    var tabH by remember { mutableFloatStateOf(0f) }
+    val selectedTab = position.roundToInt().coerceIn(0, 2)
+    // Drive the highlight off the pager's LIVE fractional position, interpolating between the two tabs it
+    // sits over, so it tracks a swiping finger the whole way (and a tap, which the pager animates) rather
+    // than only sliding once the page has settled.
+    val lower = position.toInt().coerceIn(0, 2)
+    val upper = (lower + 1).coerceAtMost(2)
+    val frac = (position - lower).coerceIn(0f, 1f)
+    val hlX = lerp(tabX[lower], tabX[upper], frac)
+    val hlW = lerp(tabW[lower], tabW[upper], frac)
+    Box(
         modifier = Modifier
             .background(PillBgOpaque, pillShape)
             .border(0.5.dp, PillBorder, pillShape)
             .padding(4.dp),
-        horizontalArrangement = Arrangement.spacedBy(2.dp),
     ) {
-        DockTab(
-            icon = Icons.Default.Photo,
-            label = stringResource(R.string.gallery_tab_photos),
-            selected = selectedTab == 0,
-            onClick = { onTabSelected(0) },
-        )
-        DockTab(
-            icon = Icons.Default.Collections,
-            label = stringResource(R.string.gallery_tab_albums),
-            selected = selectedTab == 1,
-            onClick = { onTabSelected(1) },
-        )
-        DockTab(
-            icon = Icons.Default.Share,
-            label = stringResource(R.string.gallery_tab_shared),
-            selected = selectedTab == 2,
-            onClick = { onTabSelected(2) },
-        )
+        // The sliding fill, drawn behind the tab row and animated to the active tab's bounds.
+        if (hlW > 0f && tabH > 0f) {
+            Box(
+                modifier = Modifier
+                    .offset { IntOffset(hlX.roundToInt(), 0) }
+                    .size(width = with(density) { hlW.toDp() }, height = with(density) { tabH.toDp() })
+                    .background(Accent.copy(alpha = 0.18f), RoundedCornerShape(999.dp)),
+            )
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+            DockTab(Icons.Default.Photo, stringResource(R.string.gallery_tab_photos), selectedTab == 0, { onTabSelected(0) }) { x, w, h -> tabX[0] = x; tabW[0] = w; tabH = h }
+            DockTab(Icons.Default.Collections, stringResource(R.string.gallery_tab_albums), selectedTab == 1, { onTabSelected(1) }) { x, w, h -> tabX[1] = x; tabW[1] = w; tabH = h }
+            DockTab(Icons.Default.Share, stringResource(R.string.gallery_tab_shared), selectedTab == 2, { onTabSelected(2) }) { x, w, h -> tabX[2] = x; tabW[2] = w; tabH = h }
+        }
     }
 }
 
@@ -807,16 +830,20 @@ private fun DockTab(
     label: String,
     selected: Boolean,
     onClick: () -> Unit,
+    onBounds: (x: Float, width: Float, height: Float) -> Unit,
 ) {
     // Compact padding + maxLines/softWrap=false so the labels never wrap onto two lines
     // on narrow screens (6.1"-class and smaller screens). The text shrinks to
     // ellipsis if a localised label is unusually long instead of breaking the pill.
+    // No own background: the shared sliding highlight in BottomDock fills the active tab. Just report
+    // this tab's position and size so the highlight can animate to it, and animate the icon/label colour.
+    val tabFg by animateColorAsState(if (selected) Accent else FgDim, label = "dockTabFg")
     Row(
         modifier = Modifier
-            .background(
-                if (selected) Accent.copy(alpha = 0.18f) else Color.Transparent,
-                RoundedCornerShape(999.dp),
-            )
+            .onGloballyPositioned { c ->
+                onBounds(c.positionInParent().x, c.size.width.toFloat(), c.size.height.toFloat())
+            }
+            .clip(RoundedCornerShape(999.dp))
             .clickable(onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -825,12 +852,12 @@ private fun DockTab(
         Icon(
             icon,
             contentDescription = null,
-            tint = if (selected) Accent else FgDim,
+            tint = tabFg,
             modifier = Modifier.size(16.dp),
         )
         Text(
             text = label,
-            color = if (selected) Accent else FgDim,
+            color = tabFg,
             fontSize = 12.5.sp,
             fontWeight = FontWeight.Bold,
             maxLines = 1,

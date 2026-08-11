@@ -34,7 +34,14 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ErrorOutline
-import androidx.compose.material3.AlertDialog
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.ui.graphics.Color
+import eu.akoos.photos.presentation.theme.Bg2
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -56,11 +63,11 @@ import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.ErrorColor
 
 /**
- * Unified error display for screens that previously used either snackbars (too brief
- * for multi-line backend errors) or inline red [Text] (no copy, no dismiss). Built on
- * Material 3 [AlertDialog] so it adopts the same elevation / scrim / focus trap as
- * [ConfirmDialog], and styled with the same `containerColor` + `TextButton` tokens
- * so they read as siblings in the design system.
+ * Unified error display for screens that would otherwise use either a snackbar (too brief
+ * for multi-line backend errors) or inline red [Text] (no copy, no dismiss). Built as a
+ * Material 3 [ModalBottomSheet] (a bottom drawer), the same surface as [ConfirmDialog] and
+ * the other confirmations, styled with the same container + button tokens so they read as
+ * siblings in the design system.
  *
  * Contract:
  *  - [message] is expected to already be passed through
@@ -78,6 +85,7 @@ import eu.akoos.photos.presentation.theme.ErrorColor
  *    runs after the write so the caller can show a "Copied" snackbar.
  *  - Dismiss button always last, matching M3's primary-action-rightmost convention.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ErrorPopup(
     title: String,
@@ -105,12 +113,19 @@ fun ErrorPopup(
         message
     }
 
-    AlertDialog(
+    ModalBottomSheet(
         onDismissRequest = onDismiss,
-        containerColor = colors.cardBg,
-        titleContentColor = colors.fgPrimary,
-        textContentColor = colors.fgDim,
-        title = {
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = Bg2,
+        scrimColor = Color.Black.copy(alpha = 0.5f),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 32.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
                     imageVector = Icons.Default.ErrorOutline,
@@ -119,20 +134,14 @@ fun ErrorPopup(
                     modifier = Modifier.size(20.dp),
                 )
                 Spacer(Modifier.width(10.dp))
-                Text(title, fontWeight = FontWeight.SemiBold)
+                Text(title, color = colors.fgPrimary, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
             }
-        },
-        text = {
             Column(
                 modifier = Modifier
                     .heightIn(max = 280.dp)
                     .verticalScroll(rememberScrollState()),
             ) {
-                Text(
-                    text = displayedMessage,
-                    color = colors.fgDim,
-                    fontSize = 13.sp,
-                )
+                Text(text = displayedMessage, color = colors.fgDim, fontSize = 14.sp)
                 if (isLong) {
                     Spacer(Modifier.size(8.dp))
                     TextButton(
@@ -149,41 +158,23 @@ fun ErrorPopup(
                     }
                 }
             }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) {
-                Text(resolvedDismissLabel, color = colors.accent, fontWeight = FontWeight.SemiBold)
-            }
-        },
-        dismissButton = {
-            // Optional action + copy buttons live in the dismissButton slot so M3 keeps
-            // the primary "OK" rightmost. The slot accepts a single composable, so we
-            // pack both into a Row when present.
             Row(
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                if (actionLabel != null && onAction != null) {
-                    TextButton(onClick = onAction) {
-                        Text(actionLabel, color = colors.accent, fontWeight = FontWeight.Medium)
-                    }
-                }
                 if (onCopy != null) {
-                    TextButton(onClick = {
-                        clipboard.setText(AnnotatedString(message))
-                        onCopy()
-                    }) {
-                        Icon(
-                            imageVector = Icons.Default.ContentCopy,
-                            contentDescription = null,
-                            tint = colors.fgDim,
-                            modifier = Modifier.size(14.dp),
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        Text(stringResource(R.string.err_copy), color = colors.fgDim)
-                    }
+                    SecondaryButton(
+                        stringResource(R.string.err_copy),
+                        { clipboard.setText(AnnotatedString(message)); onCopy() },
+                        modifier = Modifier.weight(1f),
+                        icon = Icons.Default.ContentCopy,
+                    )
                 }
+                if (actionLabel != null && onAction != null) {
+                    SecondaryButton(actionLabel, onAction, modifier = Modifier.weight(1f))
+                }
+                PrimaryButton(resolvedDismissLabel, onDismiss, modifier = Modifier.weight(1f))
             }
-        },
-    )
+        }
+    }
 }

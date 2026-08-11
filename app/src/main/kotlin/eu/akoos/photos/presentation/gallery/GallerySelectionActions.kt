@@ -34,6 +34,10 @@ import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.FileDownload
+import androidx.compose.material.icons.filled.GridView
+import eu.akoos.photos.presentation.collage.COLLAGE_MAX_PHOTOS
+import eu.akoos.photos.presentation.collage.COLLAGE_MIN_PHOTOS
+import eu.akoos.photos.presentation.collage.isVideo
 import androidx.compose.material.icons.filled.OfflinePin
 import androidx.compose.material.icons.filled.PhotoAlbum
 import androidx.compose.material.icons.filled.PrivacyTip
@@ -110,6 +114,7 @@ fun rememberGallerySelectionActions(
     onBackUp: () -> Unit,
     onStripMetadata: (MetadataStripConfig) -> Unit,
     onEditMetadata: () -> Unit,
+    onCreateCollage: () -> Unit,
 ): List<SelectionAction> {
     val sharing = multiShareState as? MultiShareState.Working
     val isAddingToAlbum = addToAlbumState is AddToAlbumState.Working
@@ -163,6 +168,17 @@ fun rememberGallerySelectionActions(
                 onClick = onToggleFavorite,
             )
         )
+        // Collage takes device or cloud PHOTOS (a video's full res is the whole file, so videos are
+        // skipped). Offered when the photo count is in 2..COLLAGE_MAX_PHOTOS.
+        if (selectedItems.count { !it.isVideo() } in COLLAGE_MIN_PHOTOS..COLLAGE_MAX_PHOTOS) {
+            add(
+                SelectionAction(
+                    icon = Icons.Default.GridView,
+                    label = stringResource(R.string.collage_create),
+                    onClick = onCreateCollage,
+                )
+            )
+        }
         // Back up the not-yet-uploaded (LocalOnly) photos in the selection.
         if (anyLocalOnly(selectedItems)) {
             add(

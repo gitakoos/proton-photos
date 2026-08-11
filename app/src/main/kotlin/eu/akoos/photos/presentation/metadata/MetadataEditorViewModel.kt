@@ -38,6 +38,7 @@ import eu.akoos.photos.data.hidden.HiddenVaultEditor
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.entity.GalleryItem
+import eu.akoos.photos.domain.repository.LocalMediaRepository
 import eu.akoos.photos.domain.usecase.ExifAsciiText
 import eu.akoos.photos.domain.usecase.MetadataWriteResult
 import eu.akoos.photos.domain.usecase.TextTagEdit
@@ -143,6 +144,10 @@ data class MetadataEditorUiState(
      *  date is not real enough to add a delta to. Separate from [skippedCount], which counts what
      *  this editor cannot write at all. */
     val dateShiftSkippedCount: Int = 0,
+    /** How many bound editable photos carry a capture date in their own file name, so the date field
+     *  can offer to fill each one from its name (memes, screenshots, downloads that arrived with no
+     *  EXIF). Zero hides that mode. */
+    val filenameDateCount: Int = 0,
     /** The descriptive text tags, each with its own value, stored value and lock. */
     val description: MetadataTextFieldState = MetadataTextFieldState(),
     val artist: MetadataTextFieldState = MetadataTextFieldState(),
@@ -243,6 +248,7 @@ class MetadataEditorViewModel @Inject constructor(
     private val photoLocationDao: PhotoLocationDao,
     private val hiddenStorage: HiddenStorageManager,
     private val hiddenVaultEditor: HiddenVaultEditor,
+    private val localMediaRepository: LocalMediaRepository,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(MetadataEditorUiState())
@@ -263,6 +269,11 @@ class MetadataEditorViewModel @Inject constructor(
 
     /** The same targets keyed by uri, so a write resolves its own base date with one lookup. */
     private var dateShiftBaseMs: Map<String, Long> = emptyMap()
+
+    /** Each editable device photo whose own file name records a capture date, keyed to the instant that
+     *  name encodes. What the "from filename" bulk date mode writes: each file gets the date read from
+     *  its own name, so a meme or a screenshot with no EXIF lands on its real day. */
+    private var filenameDateByUri: Map<String, Long> = emptyMap()
 
     /** The editable image files a place write lands on. Videos are held back: a video container has
      *  no EXIF GPS block to write, so a place edit skips them silently in a mixed selection. */
@@ -287,6 +298,10 @@ class MetadataEditorViewModel @Inject constructor(
         /** Every target moved by [deltaMs] from its own date, so the spacing between them survives.
          *  The instant each file receives is resolved per uri at write time. */
         data class DateShift(val deltaMs: Long) : PendingAction
+
+        /** Each target dated from the capture instant its own file name encodes, resolved per uri at
+         *  write time from [filenameDateByUri]. */
+        data object FilenameDate : PendingAction
 
         data class Location(val lat: Double, val lon: Double, val label: String) : PendingAction
         data object ClearLocation : PendingAction
@@ -341,6 +356,14 @@ class MetadataEditorViewModel @Inject constructor(
         dateShiftTargets = DateShift.targets(items, dateTargetUris.toSet())
         dateShiftBaseMs = dateShiftTargets.associate { it.uri to it.captureMs }
 
+        // Every editable photo whose own name records a date, PNG and WebP included: this mode exists
+        // for the meme, screenshot and download that reached the device with no EXIF, and the durable
+        // override a landed write records is what carries the date for the very images MediaStore
+        // refuses a DATE_TAKEN column. So the offer is not narrowed to the EXIF-writable set.
+        filenameDateByUri = editable.mapNotNull { li ->
+            FilenameDate.parse(li.local.displayName, System.currentTimeMillis())?.let { li.local.uri to it }
+        }.toMap()
+
         // A shared-with-me album outranks everything: both fields are read-only. With no editable item
         // every target is backed up / cloud, so both fields lock as CLOUD. Otherwise the date is editable
         // as long as one editable container durably takes it (an EXIF-writable image or any video); an
@@ -393,6 +416,7 @@ class MetadataEditorViewModel @Inject constructor(
             placeChosen = !bulk,
             dateShiftAvailable = dateLock == null && dateShiftTargets.size >= 2,
             dateShiftSkippedCount = dateTargetUris.size - dateShiftTargets.size,
+            filenameDateCount = filenameDateByUri.size,
             description = MetadataTextFieldState(lock = descriptionLock),
             artist = MetadataTextFieldState(lock = textLock, chosen = !bulk),
             copyright = MetadataTextFieldState(lock = textLock, chosen = !bulk),
@@ -484,6 +508,14 @@ class MetadataEditorViewModel @Inject constructor(
         val deltaMs = DateShift.deltaFor(span, earliestMs)
         if (deltaMs == 0L) return
         performBatch(PendingAction.DateShift(deltaMs), dateShiftTargets.map { it.uri })
+    }
+
+    /** Dates every editable photo whose file name records a capture date from that name, so a batch of
+     *  memes, screenshots or downloads that arrived with no EXIF each lands on its real day. No-op where
+     *  the date is locked or no bound photo carries a readable filename date. */
+    fun fixDatesFromName() {
+        if (_state.value.dateLock != null) return
+        performBatch(PendingAction.FilenameDate, filenameDateByUri.keys.toList())
     }
 
     /** Places every editable image at [code]'s country centroid, labelling it with the country name. */
@@ -620,6 +652,7 @@ class MetadataEditorViewModel @Inject constructor(
         placeTargetUris = placeTargetUris.follow()
         textTargetUris = textTargetUris.follow()
         pendingUris = pendingUris.follow()
+        filenameDateByUri = filenameDateByUri.mapKeys { moved[it.key] ?: it.key }
         dateShiftTargets = dateShiftTargets.map { target ->
             moved[target.uri]?.let { target.copy(uri = it) } ?: target
         }
@@ -643,6 +676,10 @@ class MetadataEditorViewModel @Inject constructor(
                 if (baseMs == null) MetadataWriteResult.Failed("no date to shift")
                 else writeMetadata.writeCaptureDate(uri, baseMs + action.deltaMs)
             }
+            // Each file takes the date its own name records, resolved per uri like the shift's base.
+            is PendingAction.FilenameDate ->
+                filenameDateByUri[uri]?.let { writeMetadata.writeCaptureDate(uri, it) }
+                    ?: MetadataWriteResult.Failed("no filename date")
             is PendingAction.Location -> writeMetadata.writeLocation(uri, action.lat, action.lon)
             PendingAction.ClearLocation -> writeMetadata.clearLocation(uri)
             // Only the edited tag is addressed; the other two stay exactly as the file holds them.
@@ -680,6 +717,7 @@ class MetadataEditorViewModel @Inject constructor(
         when (action) {
             is PendingAction.Date -> retargetDateOverrides(savedUris.associateWith { action.ms })
             is PendingAction.DateShift -> applyLandedShift(action.deltaMs, savedUris)
+            is PendingAction.FilenameDate -> applyLandedFilenameDates(savedUris)
             is PendingAction.Location, PendingAction.ClearLocation -> invalidateStoredLocations(savedUris)
             is PendingAction.Text -> Unit
         }
@@ -689,11 +727,15 @@ class MetadataEditorViewModel @Inject constructor(
         when (action) {
             is PendingAction.Date -> restampVaultedDates(savedUris) { action.ms }
             is PendingAction.DateShift -> restampVaultedDates(savedUris) { dateShiftBaseMs[it] }
+            is PendingAction.FilenameDate -> restampVaultedDates(savedUris) { filenameDateByUri[it] }
             is PendingAction.Location, PendingAction.ClearLocation, is PendingAction.Text -> Unit
         }
         _state.update {
             when (action) {
                 is PendingAction.Date -> it.copy(captureDateMs = action.ms, dateChosen = true)
+                // Each file took the date its own name held, so there is no single instant to show;
+                // marking the field chosen is what drops the bulk "not set" prompt.
+                is PendingAction.FilenameDate -> it.copy(dateChosen = true)
                 // The shown date follows the oldest photo, which is the one the picked instant named;
                 // in a partly landed batch that is wherever the selection now starts.
                 is PendingAction.DateShift -> {
@@ -762,6 +804,28 @@ class MetadataEditorViewModel @Inject constructor(
         dateShiftTargets = DateShift.shifted(dateShiftTargets, deltaMs, saved)
         dateShiftBaseMs = dateShiftTargets.associate { it.uri to it.captureMs }
         retargetDateOverrides(dateShiftBaseMs.filterKeys { it in saved })
+    }
+
+    /**
+     * Records a durable capture-date override for each file [savedUris] landed a filename date on. This
+     * is the leg that separates the mode from the absolute date: a meme or a downloaded PNG has no
+     * MediaStore DATE_TAKEN and no prior entry, so [CaptureDateOverride.retarget] would move nothing and
+     * the next scan would re-derive the download date over the write. [CaptureDateOverride.upsert]
+     * creates the entry instead, stamped with the file's fresh DATE_MODIFIED so it reads as current
+     * rather than being dropped on that same scan. A store failure leaves the landed write intact.
+     */
+    private suspend fun applyLandedFilenameDates(savedUris: List<String>) {
+        val captureMsByUri = savedUris.mapNotNull { u -> filenameDateByUri[u]?.let { u to it } }.toMap()
+        if (captureMsByUri.isEmpty()) return
+        val modifiedByUri = captureMsByUri.keys.associateWith { localMediaRepository.queryByUri(it)?.dateModified }
+        runCatching {
+            context.settingsDataStore.edit { prefs ->
+                val current = prefs[SettingsKeys.DOWNLOAD_DATE_OVERRIDES] ?: emptySet()
+                CaptureDateOverride.upsert(current, captureMsByUri, modifiedByUri)?.let {
+                    prefs[SettingsKeys.DOWNLOAD_DATE_OVERRIDES] = it
+                }
+            }
+        }
     }
 
     /** [this] carrying the span [dateShiftTargets] now cover, and the ceiling a pick may not cross

@@ -40,6 +40,8 @@ import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.heightIn
@@ -331,6 +333,7 @@ fun GalleryScreen(
     /** Opens the date + place editor for the current multi-selection. Gated to an all-device-only
      *  selection (matching the Strip action), so every handed item is editable. */
     onEditMetadata: (items: List<GalleryItem>) -> Unit = {},
+    onCreateCollage: (items: List<GalleryItem>) -> Unit = {},
     /** Non-null when the user tapped the home-screen photo widget. The screen waits for
      *  the items flow to populate, finds the matching item, and forwards to
      *  [onPhotoClick]. [onPendingWidgetPhotoConsumed] is invoked exactly once after
@@ -969,8 +972,18 @@ fun GalleryScreen(
                     modifier = Modifier.fillMaxSize(),
                     indicator = {}
                 ) {
-                    when {
-                        state.isLoading && state.filteredItems.isEmpty() ->
+                    // Coarse phase so the cross-fade fires only on a real skeleton/empty/content change,
+                    // never on scroll or a thumbnail update. The grid's scroll state is remembered
+                    // outside this block, so a fade never resets the position.
+                    val galleryPhase = when {
+                        state.isLoading && state.filteredItems.isEmpty() -> 0
+                        state.filteredItems.isEmpty() && state.items.isNotEmpty() -> 1
+                        state.filteredItems.isEmpty() -> 2
+                        else -> 3
+                    }
+                    Crossfade(targetState = galleryPhase, label = "galleryContent") { phase ->
+                    when (phase) {
+                        0 ->
                             // Skeleton placeholder grid — matches the 3-col PhotoGrid layout so
                             // there's no visual jump when real content arrives.
                             LazyVerticalGrid(
@@ -987,7 +1000,7 @@ fun GalleryScreen(
                                     )
                                 }
                             }
-                        state.filteredItems.isEmpty() && state.items.isNotEmpty() ->
+                        1 ->
                             // A category / content filter matched nothing. Show a neutral "no
                             // matches" line — NOT the "sync your photos" empty state, which wrongly
                             // implies the whole library is empty when it is only filtered. The
@@ -998,7 +1011,7 @@ fun GalleryScreen(
                                     .fillMaxSize()
                                     .padding(top = headerHeightDp),
                             )
-                        state.filteredItems.isEmpty() ->
+                        2 ->
                             EmptyState(
                                 title = stringResource(R.string.gallery_empty_title),
                                 subtitle = stringResource(R.string.gallery_empty_subtitle),
@@ -1042,6 +1055,7 @@ fun GalleryScreen(
                                 onDismissDenseGridWarning = viewModel::dismissDenseGridWarning,
                             )
                     }
+                    }
                 }
             }
             1 -> AlbumsScreen(
@@ -1074,8 +1088,8 @@ fun GalleryScreen(
         // rail) and the shorter Albums/Shared ones, so the shrink/grow is smooth instead of a snap.
         AnimatedVisibility(
             visible = showOverlays && !state.isSelectionMode,
-            enter = fadeIn(),
-            exit = fadeOut(),
+            enter = fadeIn() + slideInVertically { -it },
+            exit = fadeOut() + slideOutVertically { -it },
             modifier = Modifier.align(Alignment.TopCenter),
         ) {
             Box(modifier = Modifier.animateContentSize()) {
@@ -1161,6 +1175,7 @@ fun GalleryScreen(
             onBackUp = { showBackUpConfirm = true },
             onStripMetadata = viewModel::stripMetadataSelected,
             onEditMetadata = { onEditMetadata(state.selectedItems.toList()) },
+            onCreateCollage = { onCreateCollage(state.selectedItems.toList()) },
         )
         SelectionDrawer(
             visible = state.isSelectionMode,
@@ -1219,13 +1234,25 @@ fun GalleryScreen(
             uploadActive -> { { viewModel.cancelUpload() } }
             else -> null
         }
-        eu.akoos.photos.presentation.common.OperationProgressPill(
-            progress = galleryOpProgress,
-            onCancel = galleryOpCancel,
+        // Hold the last non-null progress so the pill can animate OUT cleanly when the work finishes,
+        // instead of vanishing the instant it goes null.
+        var lastOpProgress by remember { mutableStateOf(galleryOpProgress) }
+        if (galleryOpProgress != null) lastOpProgress = galleryOpProgress
+        // Rides the same scroll-hide signal as the header and dock, so it never sits orphaned over the
+        // grid once the rest of the chrome slides away (issue #98). Kept during selection mode.
+        AnimatedVisibility(
+            visible = showOverlays && galleryOpProgress != null,
+            enter = fadeIn() + slideInVertically { -it },
+            exit = fadeOut() + slideOutVertically { -it },
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .padding(top = if (headerHeightPx > 0) headerHeightDp + 4.dp else 8.dp),
-        )
+        ) {
+            eu.akoos.photos.presentation.common.OperationProgressPill(
+                progress = lastOpProgress,
+                onCancel = galleryOpCancel,
+            )
+        }
 
         // Foreground bulk actions (delete / hide / move to album) take over the screen with a
         // blocking drawer so a second destructive tap can't land on a half-finished one. Background
@@ -1244,15 +1271,16 @@ fun GalleryScreen(
         // ── BOTTOM DOCK ───────────────────────────────────────────────────────
         AnimatedVisibility(
             visible = showOverlays && !state.isSelectionMode,
-            enter = fadeIn(),
-            exit = fadeOut(),
+            enter = fadeIn() + slideInVertically { it },
+            exit = fadeOut() + slideOutVertically { it },
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .navigationBarsPadding()
                 .padding(bottom = 24.dp),
         ) {
             BottomDock(
-                selectedTab = pagerState.currentPage,
+                // The live fractional page position drives the sliding highlight, so it follows a swipe.
+                position = pagerState.currentPage + pagerState.currentPageOffsetFraction,
                 onTabSelected = { tab ->
                     // Always land at the visual top (item 0): re-tapping the active tab or switching
                     // to another both reset that tab's scroll, so a page never reopens half-scrolled
@@ -1748,18 +1776,22 @@ internal fun MultiDeleteSheet(
         }
 
         if (hasLocal) {
+            // Red only when this row IS the full delete (no cloud copy behind it), matching the viewer's
+            // single-photo delete. In a mixed selection it removes just the device side (the cloud copy
+            // stays), so it is a partial action -> neutral, and the red row is "everywhere" below.
+            val localPrimary = !hasCloud
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(colors.cardBg, RoundedCornerShape(12.dp))
-                    .border(0.5.dp, colors.cardBorder, RoundedCornerShape(12.dp))
+                    .background(if (localPrimary) DeleteTint else colors.cardBg, RoundedCornerShape(12.dp))
+                    .border(0.5.dp, if (localPrimary) ErrorColor.copy(alpha = 0.3f) else colors.cardBorder, RoundedCornerShape(12.dp))
                     .clickable { onDelete(true, false) }
                     .padding(horizontal = 16.dp, vertical = 14.dp),
             ) {
                 Text(
                     if (hasCloud) stringResource(R.string.delete_multi_remove_device)
                     else stringResource(R.string.delete_multi_move_trash),
-                    color = colors.fgPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium,
+                    color = if (localPrimary) ErrorColor else colors.fgPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium,
                 )
                 Text(
                     if (hasCloud) stringResource(R.string.delete_multi_remove_device_desc)
@@ -1777,14 +1809,14 @@ internal fun MultiDeleteSheet(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(colors.cardBg, RoundedCornerShape(12.dp))
-                    .border(0.5.dp, colors.cardBorder, RoundedCornerShape(12.dp))
+                    .background(DeleteTint, RoundedCornerShape(12.dp))
+                    .border(0.5.dp, ErrorColor.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
                     .clickable { onDelete(false, true) }
                     .padding(horizontal = 16.dp, vertical = 14.dp),
             ) {
                 Text(
                     stringResource(R.string.delete_multi_remove_cloud),
-                    color = colors.fgPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium,
+                    color = ErrorColor, fontSize = 15.sp, fontWeight = FontWeight.Medium,
                 )
                 Text(
                     stringResource(R.string.delete_multi_remove_cloud_desc),

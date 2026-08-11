@@ -239,7 +239,7 @@
     <string name="settings_account_link_drive_web_desc">Durchstöbere deine Fotos und Dateien auf drive.proton.me.</string>
     <string name="cancel">Abbrechen</string>
     <string name="settings_language_system">Systemstandard</string>
-    <string name="settings_sync_wifi_desc">Upload bei Mobilfunk pausieren</string>
+    <string name="settings_sync_wifi_desc">Synchronisierung bei Mobilfunk pausieren</string>
     <string name="settings_fullres_wifi_only">Volle Auflösung nur über WLAN</string>
     <string name="settings_fullres_wifi_only_desc">Cloud-Fotos und -Videos in voller Auflösung nur über WLAN laden. Vorschaubilder werden immer geladen.</string>
     <string name="viewer_wifi_for_full_quality">Mit WLAN verbinden für volle Qualität</string>
@@ -1315,7 +1315,7 @@
     <string name="settings_diagnostics_copy_clipboard">In Zwischenablage kopieren</string>
     <!-- Duplicate finder -->
     <string name="settings_find_duplicates">Duplikate finden</string>
-    <string name="settings_find_duplicates_desc">Identische Kopien prüfen und entfernen</string>
+    <string name="settings_find_duplicates_desc">Identische oder ähnliche Kopien prüfen und entfernen</string>
     <string name="duplicates_title">Duplikate finden</string>
     <string name="duplicates_section_device">Auf diesem Gerät</string>
     <string name="duplicates_section_cloud">In deiner Cloud</string>
@@ -1543,4 +1543,83 @@
     <string name="whats_new_freeup_review_body">Bevor Speicher auf dem Gerät freigegeben wird, zeigt ein Bildschirm die Fotos, die entfernt werden, und den Platz, den sie zurückgeben, sodass nichts verschwindet, ohne dass du es vorher siehst.</string>
     <string name="whats_new_news_title">News und Feedback</string>
     <string name="whats_new_news_body">Ein News-Bildschirm bringt Neuigkeiten zur App, und eine Schaltfläche führt dich direkt dorthin, wo du Feedback senden oder einen Fehler melden kannst.</string>
+    <string name="duplicates_details">Details</string>
+    <string name="metadata_editor_date_mode_filename">Aus Dateiname</string>
+    <string name="metadata_editor_filename_hint">Setzt das Datum jedes Fotos anhand des im Dateinamen enthaltenen Datums.</string>
+    <string name="metadata_editor_filename_apply">Daten korrigieren</string>
+    <plurals name="metadata_editor_filename_count">
+        <item quantity="one">%1$d von %2$d ausgewählten Fotos hat ein Datum im Namen</item>
+        <item quantity="other">%1$d von %2$d ausgewählten Fotos haben ein Datum im Namen</item>
+    </plurals>
+
+    <!-- Collage -->
+    <string name="collage_add">Fotos hinzufügen</string>
+    <string name="collage_aspect_original">Original</string>
+    <string name="collage_bg_blur">Unschärfe</string>
+    <string name="collage_bg_color">Farbe</string>
+    <string name="collage_create">Collage erstellen</string>
+    <string name="collage_discard">Collage verwerfen?</string>
+    <string name="collage_discard_confirm">Verwerfen</string>
+    <string name="collage_discard_msg">Deine Collage wird nicht gespeichert.</string>
+    <string name="collage_done">Fertig</string>
+    <string name="collage_drop_remove">Loslassen, um aus der Collage zu entfernen</string>
+    <string name="collage_mode_collage">Collage</string>
+    <string name="collage_mode_photos">Fotos</string>
+    <string name="collage_photos_hint">Foto antippen zum Anpassen, halten zum Tauschen</string>
+    <string name="collage_remove">Entfernen</string>
+    <string name="collage_save">Speichern</string>
+    <string name="collage_save_confirm">Diese Collage speichern?</string>
+    <string name="collage_save_failed">Collage konnte nicht gespeichert werden</string>
+    <string name="collage_saved">Collage gespeichert</string>
+    <string name="collage_spacing">Abstand</string>
+    <string name="collage_swap">Tauschen</string>
+    <string name="collage_swap_pick">Foto antippen</string>
+    <string name="collage_tab_border">Rand</string>
+    <string name="collage_tab_layout">Layout</string>
+    <string name="collage_tab_ratio">Seitenverhältnis</string>
+    <string name="collage_title">Collage</string>
+    <string name="collage_trim_for_grid">%1$d entfernen, um zum Rasterlayout zu wechseln</string>
+
+    <!-- Editor: adjust, color, filters, geometry, draw and text, export -->
+    <string name="editor_adj_fade">Verblassen</string>
+    <string name="editor_adj_grain">Körnung</string>
+    <string name="editor_adj_sharpen">Schärfen</string>
+    <string name="editor_adj_vibrance">Dynamik</string>
+    <string name="editor_adj_vignette">Vignette</string>
+    <string name="editor_color_curves">Kurven</string>
+    <string name="editor_color_hsl">HSL</string>
+    <string name="editor_compare_original">Original</string>
+    <string name="editor_draw_width">Stärke</string>
+    <string name="editor_export_format">Format</string>
+    <string name="editor_export_quality">Qualität %1$d</string>
+    <string name="editor_export_size">Größe</string>
+    <string name="editor_export_size_full">Voll</string>
+    <string name="editor_filter_chrome">Chrome</string>
+    <string name="editor_filter_dramatic">Dramatic</string>
+    <string name="editor_filter_fresh">Fresh</string>
+    <string name="editor_filter_matte">Matte</string>
+    <string name="editor_filter_noir">Noir</string>
+    <string name="editor_geo_reset">Zurücksetzen</string>
+    <string name="editor_hsl_hue">Farbton</string>
+    <string name="editor_hsl_light">Helligkeit</string>
+    <string name="editor_hsl_sat">Sättigung</string>
+    <string name="editor_perspective_h">Horizontal</string>
+    <string name="editor_perspective_v">Vertikal</string>
+    <string name="editor_redact_brush">Pinselgröße</string>
+    <string name="editor_straighten">Ausrichten</string>
+    <string name="editor_text_add">Text hinzufügen</string>
+    <string name="editor_text_delete">Löschen</string>
+    <string name="editor_text_edit">Bearbeiten</string>
+    <string name="editor_text_hint">Text hinzufügen, dann ziehen zum Verschieben und mit zwei Fingern skalieren</string>
+    <string name="editor_text_resize_hint">Ziehen zum Verschieben, mit zwei Fingern skalieren</string>
+    <string name="editor_text_size">Größe</string>
+    <string name="editor_tool_color">Farbe</string>
+    <string name="editor_tool_draw">Zeichnen</string>
+    <string name="editor_tool_text">Text</string>
+
+    <!-- Video editor -->
+    <string name="video_editor_frame_failed">Einzelbild konnte nicht gespeichert werden</string>
+    <string name="video_editor_frame_saved">Einzelbild in Galerie gespeichert</string>
+    <string name="video_editor_grab_frame">Einzelbild aufnehmen</string>
+    <string name="video_editor_mute">Stumm</string>
 </resources>

@@ -34,6 +34,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -107,6 +109,7 @@ import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.usecase.ExifAsciiText
 import eu.akoos.photos.presentation.common.IconBubble
+import eu.akoos.photos.presentation.common.PrimaryButton
 import eu.akoos.photos.presentation.common.ThemedSnackbarHost
 import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
 import eu.akoos.photos.presentation.gallery.FilterChip
@@ -210,6 +213,7 @@ fun MetadataEditorScreen(
                     state = state,
                     onPickDate = viewModel::setDate,
                     onShiftDates = viewModel::shiftDatesTo,
+                    onFixDatesFromName = viewModel::fixDatesFromName,
                 )
                 PlaceField(
                     state = state,
@@ -342,12 +346,13 @@ private fun MetadataThumbnailStrip(items: List<GalleryItem>, selectedIndex: Int)
 
 // ── Date field ───────────────────────────────────────────────────────────────
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 private fun DateField(
     state: MetadataEditorUiState,
     onPickDate: (Long) -> Unit,
     onShiftDates: (Long) -> Unit,
+    onFixDatesFromName: () -> Unit,
 ) {
     val context = LocalContext.current
     val colors = AppColors.current
@@ -355,11 +360,15 @@ private fun DateField(
     var showTimePicker by remember { mutableStateOf(false) }
     // The day chosen in the first step, carried into the time step before the combined value is written.
     var pickedDateUtcMs by remember { mutableStateOf<Long?>(null) }
-    // Which bulk date mode the user is on. A selection a shift can say nothing about never offers the
-    // switch, so there the absolute date stays the only mode and the card keeps its usual chrome.
+    // Which bulk date mode is active. A selection neither a shift nor a filename read can say anything
+    // about never offers the switch, so there the absolute date stays the only mode and the card keeps
+    // its usual chrome. The two extra modes are mutually exclusive: picking one clears the other.
     var shiftSelected by remember { mutableStateOf(false) }
+    var filenameSelected by remember { mutableStateOf(false) }
     val shiftOffered = state.bulk && state.dateShiftAvailable
     val shiftMode = shiftOffered && shiftSelected
+    val filenameOffered = state.bulk && state.filenameDateCount > 0
+    val filenameMode = filenameOffered && filenameSelected
     val shiftSpan = state.dateShiftSpan
     // The instant the user named for the OLDEST photo, dropped as soon as a write moves the span: the
     // range line then reads the photos' own dates again, so a batch that only partly landed shows where
@@ -379,26 +388,65 @@ private fun DateField(
                     else -> R.string.metadata_editor_date_label
                 },
             ),
-            editable = state.dateLock == null && !state.isSaving,
+            // In filename mode each file's date comes from its own name, so there is no picker to open;
+            // the Apply button below is the whole action.
+            editable = state.dateLock == null && !state.isSaving && !filenameMode,
             onEdit = { showDatePicker = true },
         )
-        // The two bulk date modes: one instant written over every photo, or one delta added to each
-        // photo's own date so the spacing between the shots survives the correction.
-        if (shiftOffered) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        // The bulk date modes: one instant written over every photo, one delta added to each photo's
+        // own date so the spacing between the shots survives, or the date each file's own name records.
+        if (shiftOffered || filenameOffered) {
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
                 FilterChip(
                     label = stringResource(R.string.metadata_editor_date_mode_same),
-                    selected = !shiftMode,
-                    onClick = { shiftSelected = false; shiftTooLate = false },
+                    selected = !shiftMode && !filenameMode,
+                    onClick = { shiftSelected = false; filenameSelected = false; shiftTooLate = false },
                 )
-                FilterChip(
-                    label = stringResource(R.string.metadata_editor_date_mode_shift),
-                    selected = shiftMode,
-                    onClick = { shiftSelected = true; shiftTooLate = false },
-                )
+                if (shiftOffered) {
+                    FilterChip(
+                        label = stringResource(R.string.metadata_editor_date_mode_shift),
+                        selected = shiftMode,
+                        onClick = { shiftSelected = true; filenameSelected = false; shiftTooLate = false },
+                    )
+                }
+                if (filenameOffered) {
+                    FilterChip(
+                        label = stringResource(R.string.metadata_editor_date_mode_filename),
+                        selected = filenameMode,
+                        onClick = { filenameSelected = true; shiftSelected = false; shiftTooLate = false },
+                    )
+                }
             }
         }
-        if (shiftMode && shiftSpan != null) {
+        if (filenameMode) {
+            Text(
+                text = stringResource(R.string.metadata_editor_filename_hint),
+                color = colors.fgMute,
+                fontSize = 13.sp,
+            )
+            // How many of the editable photos actually carry a name date; the rest keep their date.
+            Text(
+                text = pluralStringResource(
+                    R.plurals.metadata_editor_filename_count,
+                    state.filenameDateCount,
+                    state.filenameDateCount,
+                    state.editableCount,
+                ),
+                color = colors.fgPrimary,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Medium,
+            )
+            Spacer(Modifier.height(4.dp))
+            PrimaryButton(
+                label = stringResource(R.string.metadata_editor_filename_apply),
+                onClick = onFixDatesFromName,
+                enabled = !state.isSaving,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        } else if (shiftMode && shiftSpan != null) {
             Text(
                 text = stringResource(R.string.metadata_editor_shift_hint),
                 color = colors.fgMute,

@@ -22,34 +22,40 @@
 
 package eu.akoos.photos.presentation.common
 
-import androidx.compose.material3.AlertDialog
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import eu.akoos.photos.presentation.theme.AppColors
-import eu.akoos.photos.presentation.theme.ErrorColor
+import eu.akoos.photos.presentation.theme.Bg2
 
 /**
- * Single source of truth for simple confirmation dialogs across the app.
- *
- * Matches the styling the existing inline AlertDialogs converged on:
- *   - container = cardBg, title color = fgPrimary, text color = fgDim
- *   - title in normal weight (callers add SemiBold only where the original did)
- *   - body text at 13 sp
- *   - confirm + dismiss as plain TextButtons; confirm tinted red when destructive
+ * Single source of truth for simple confirmation dialogs across the app, shown as a bottom drawer (a
+ * [ModalBottomSheet]) rather than a centred dialog, so a confirm / warning / discard slides up from the
+ * edge and matches the app's other sheets. Every existing caller keeps working unchanged.
  *
  * Behavior knobs:
- *   - `message = null` → title-only dialog (e.g. force-update modal).
- *   - `dismissLabel = null` → show only the confirm button (non-dismissible flow).
- *   - `destructive = true` → confirm label rendered in [ErrorColor] with SemiBold
- *     weight, matching the existing "delete forever / sign out / discard" pattern.
+ *   - `message = null` → title-only.
+ *   - `dismissLabel = null` → show only the confirm button (a flow that must be answered).
+ *   - `destructive = true` → confirm rendered as the red [DestructiveButton] ("delete forever / sign
+ *     out / discard"), otherwise the accent [PrimaryButton]; cancel is the [SecondaryButton].
  *
- * For dialogs with custom content (text field, multi-step picker, etc.) keep
- * using the raw `AlertDialog` — this composable intentionally does not expose a
- * content slot to keep the call sites uniform.
+ * For dialogs with custom content (text field, multi-step picker, etc.) keep the raw component; this
+ * one intentionally has no content slot so the call sites stay uniform.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ConfirmDialog(
     title: String,
@@ -61,30 +67,36 @@ fun ConfirmDialog(
     destructive: Boolean = false,
 ) {
     val colors = AppColors.current
-    AlertDialog(
+    ModalBottomSheet(
         onDismissRequest = onDismiss,
-        containerColor    = colors.cardBg,
-        titleContentColor = colors.fgPrimary,
-        textContentColor  = colors.fgDim,
-        title = { Text(title, fontWeight = FontWeight.SemiBold) },
-        text = if (message != null) {
-            { Text(message, color = colors.fgDim, fontSize = 13.sp) }
-        } else null,
-        confirmButton = {
-            TextButton(onClick = onConfirm) {
-                Text(
-                    confirmLabel,
-                    color = if (destructive) ErrorColor else colors.accent,
-                    fontWeight = FontWeight.SemiBold,
-                )
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = Bg2,
+        scrimColor = Color.Black.copy(alpha = 0.5f),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 32.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Text(title, color = colors.fgPrimary, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+            if (message != null) {
+                Text(message, color = colors.fgDim, fontSize = 14.sp)
             }
-        },
-        dismissButton = if (dismissLabel != null) {
-            {
-                TextButton(onClick = onDismiss) {
-                    Text(dismissLabel, color = colors.fgDim)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                if (dismissLabel != null) {
+                    SecondaryButton(dismissLabel, onDismiss, modifier = Modifier.weight(1f))
+                }
+                if (destructive) {
+                    DestructiveButton(confirmLabel, onConfirm, modifier = Modifier.weight(1f), icon = null)
+                } else {
+                    PrimaryButton(confirmLabel, onConfirm, modifier = Modifier.weight(1f))
                 }
             }
-        } else null,
-    )
+        }
+    }
 }

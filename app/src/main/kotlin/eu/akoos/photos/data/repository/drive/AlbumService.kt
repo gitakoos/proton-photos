@@ -1561,10 +1561,10 @@ class AlbumService @Inject constructor(
         //    the UI snackbar and downstream cache writes match reality.
         val rejectedByLink = mutableMapOf<String, String>() // linkId → error
         albumDataEntries.chunked(ALBUM_LINK_BATCH_MAX).forEach { chunk ->
-            // A throw here used to unwind the whole call, so chunks that had already landed were
-            // discarded along with it and the caller reported nothing added while the album held
-            // half the selection. Recording the chunk as rejected keeps the earlier ones and tells
-            // the user which photos still need a retry.
+            // An uncaught throw here would unwind the whole call, discarding chunks that already
+            // landed so the caller reports nothing added while the album holds half the selection.
+            // Recording the chunk as rejected keeps the earlier ones and names which photos still
+            // need a retry.
             val resp = try {
                 semaphore.withPermit {
                     manager.invoke {

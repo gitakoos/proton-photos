@@ -257,7 +257,7 @@
     <string name="settings_account_link_drive_web_desc">Fotók és fájlok böngészése a drive.proton.me oldalon.</string>
     <string name="cancel">Mégse</string>
     <string name="settings_language_system">Rendszer alapértelmezett</string>
-    <string name="settings_sync_wifi_desc">Feltöltés szüneteltetése mobilhálózaton</string>
+    <string name="settings_sync_wifi_desc">Szinkronizálás szüneteltetése mobilhálózaton</string>
     <string name="settings_fullres_wifi_only">Teljes felbontás csak Wi‑Fi-n</string>
     <string name="settings_fullres_wifi_only_desc">Felhős teljes felbontású fotók és videók letöltése csak Wi‑Fi-n. Az előnézetek mindig betöltődnek.</string>
     <string name="viewer_wifi_for_full_quality">Csatlakozz Wi‑Fi-re a teljes minőséghez</string>
@@ -1340,7 +1340,7 @@
     <string name="settings_diagnostics_copy_clipboard">Másolás a vágólapra</string>
     <!-- Duplicate finder -->
     <string name="settings_find_duplicates">Duplikátumok keresése</string>
-    <string name="settings_find_duplicates_desc">Azonos másolatok átnézése és törlése</string>
+    <string name="settings_find_duplicates_desc">Azonos vagy hasonló másolatok átnézése és törlése</string>
     <string name="duplicates_title">Duplikátumok keresése</string>
     <string name="duplicates_section_device">Ezen az eszközön</string>
     <string name="duplicates_section_cloud">A felhőben</string>
@@ -1542,4 +1542,83 @@
     <string name="whats_new_freeup_review_body">Mielőtt helyet szabadítasz fel az eszközön, egy képernyő felsorolja az eltávolítandó fotókat és a visszanyert helyet, így semmi sem tűnik el anélkül, hogy előbb látnád.</string>
     <string name="whats_new_news_title">Hírek és visszajelzés</string>
     <string name="whats_new_news_body">A hírek képernyő az alkalmazás újdonságait hozza, egy gomb pedig egyenesen oda visz, ahol visszajelzést küldhetsz vagy hibát jelenthetsz.</string>
+    <string name="duplicates_details">Részletek</string>
+    <string name="metadata_editor_date_mode_filename">Fájlnévből</string>
+    <string name="metadata_editor_filename_hint">Minden fotó dátumát a fájlnevében szereplő dátumból állítja be.</string>
+    <string name="metadata_editor_filename_apply">Dátumok javítása</string>
+    <plurals name="metadata_editor_filename_count">
+        <item quantity="one">%2$d közül %1$d kijelölt fotó nevében van dátum</item>
+        <item quantity="other">%2$d közül %1$d kijelölt fotó nevében van dátum</item>
+    </plurals>
+
+    <!-- Collage -->
+    <string name="collage_add">Fotók hozzáadása</string>
+    <string name="collage_aspect_original">Eredeti</string>
+    <string name="collage_bg_blur">Elmosás</string>
+    <string name="collage_bg_color">Szín</string>
+    <string name="collage_create">Kollázs létrehozása</string>
+    <string name="collage_discard">Elveted a kollázst?</string>
+    <string name="collage_discard_confirm">Elvetés</string>
+    <string name="collage_discard_msg">A kollázs nem lesz elmentve.</string>
+    <string name="collage_done">Kész</string>
+    <string name="collage_drop_remove">Engedd el, hogy eltávolítsd a kollázsból</string>
+    <string name="collage_mode_collage">Kollázs</string>
+    <string name="collage_mode_photos">Fotók</string>
+    <string name="collage_photos_hint">Koppints egy fotóra az újrakeretezéshez, tartsd nyomva a cseréhez</string>
+    <string name="collage_remove">Eltávolítás</string>
+    <string name="collage_save">Mentés</string>
+    <string name="collage_save_confirm">Elmented ezt a kollázst?</string>
+    <string name="collage_save_failed">A kollázst nem sikerült menteni</string>
+    <string name="collage_saved">Kollázs elmentve</string>
+    <string name="collage_spacing">Térköz</string>
+    <string name="collage_swap">Csere</string>
+    <string name="collage_swap_pick">Koppints egy fotóra</string>
+    <string name="collage_tab_border">Szegély</string>
+    <string name="collage_tab_layout">Elrendezés</string>
+    <string name="collage_tab_ratio">Arány</string>
+    <string name="collage_title">Kollázs</string>
+    <string name="collage_trim_for_grid">Távolíts el %1$d elemet a rács elrendezéshez</string>
+
+    <!-- Editor: new adjustment, color, export, geometry, draw and text controls -->
+    <string name="editor_adj_fade">Fakítás</string>
+    <string name="editor_adj_grain">Szemcse</string>
+    <string name="editor_adj_sharpen">Élesítés</string>
+    <string name="editor_adj_vibrance">Élénkség</string>
+    <string name="editor_adj_vignette">Vignetta</string>
+    <string name="editor_color_curves">Görbék</string>
+    <string name="editor_color_hsl">HSL</string>
+    <string name="editor_compare_original">Eredeti</string>
+    <string name="editor_draw_width">Vastagság</string>
+    <string name="editor_export_format">Formátum</string>
+    <string name="editor_export_quality">Minőség %1$d</string>
+    <string name="editor_export_size">Méret</string>
+    <string name="editor_export_size_full">Teljes</string>
+    <string name="editor_filter_chrome">Chrome</string>
+    <string name="editor_filter_dramatic">Dramatic</string>
+    <string name="editor_filter_fresh">Fresh</string>
+    <string name="editor_filter_matte">Matte</string>
+    <string name="editor_filter_noir">Noir</string>
+    <string name="editor_geo_reset">Visszaállítás</string>
+    <string name="editor_hsl_hue">Színárnyalat</string>
+    <string name="editor_hsl_light">Fényesség</string>
+    <string name="editor_hsl_sat">Telítettség</string>
+    <string name="editor_perspective_h">Vízszintes</string>
+    <string name="editor_perspective_v">Függőleges</string>
+    <string name="editor_redact_brush">Ecsetméret</string>
+    <string name="editor_straighten">Kiegyenesítés</string>
+    <string name="editor_text_add">Szöveg hozzáadása</string>
+    <string name="editor_text_delete">Törlés</string>
+    <string name="editor_text_edit">Szerkesztés</string>
+    <string name="editor_text_hint">Adj hozzá szöveget, majd húzva mozgasd, csippentve átméretezd</string>
+    <string name="editor_text_resize_hint">Húzással mozgasd, csippentéssel átméretezd</string>
+    <string name="editor_text_size">Méret</string>
+    <string name="editor_tool_color">Szín</string>
+    <string name="editor_tool_draw">Rajz</string>
+    <string name="editor_tool_text">Szöveg</string>
+
+    <!-- Video editor -->
+    <string name="video_editor_frame_failed">A képkockát nem sikerült menteni</string>
+    <string name="video_editor_frame_saved">Képkocka mentve a galériába</string>
+    <string name="video_editor_grab_frame">Képkocka mentése</string>
+    <string name="video_editor_mute">Némítás</string>
 </resources>
