@@ -145,6 +145,13 @@ fun TimelineLayoutScreen(
                 checked = settings.gridRememberLast,
                 onCheckedChange = settingsViewModel::setGridRememberLast,
             )
+            RowDivider()
+            ToggleRow(
+                label = stringResource(R.string.settings_keep_scroll_tabs),
+                description = stringResource(R.string.settings_keep_scroll_tabs_desc),
+                checked = settings.keepScrollOnTabSwitch,
+                onCheckedChange = settingsViewModel::setKeepScrollOnTabSwitch,
+            )
         }
         Spacer(Modifier.height(16.dp))
         // Fixed default columns — greyed out while "remember last used" is on, since that

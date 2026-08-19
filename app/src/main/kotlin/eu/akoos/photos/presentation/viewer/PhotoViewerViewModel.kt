@@ -74,6 +74,7 @@ import eu.akoos.photos.data.hidden.HiddenVaultJournal
 import eu.akoos.photos.data.hidden.HiddenVaultRecords
 import eu.akoos.photos.data.hidden.HiddenVaultRestorer
 import eu.akoos.photos.presentation.util.formatBytes
+import eu.akoos.photos.data.ocr.OcrModelManager
 import eu.akoos.photos.data.offline.OfflineStorageManager
 import eu.akoos.photos.domain.usecase.DownloadPhotosUseCase
 import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
@@ -177,6 +178,9 @@ class PhotoViewerViewModel @Inject constructor(
     private val photoLocationDao: PhotoLocationDao,
     private val localTagDao: LocalTagDao,
     private val photoListingDao: PhotoListingDao,
+    private val faceDao: eu.akoos.photos.data.db.dao.FaceDao,
+    private val personDao: eu.akoos.photos.data.db.dao.PersonDao,
+    private val faceIndexingScheduler: eu.akoos.photos.data.face.FaceIndexingScheduler,
     private val getGalleryItems: GetGalleryItemsUseCase,
     private val invalidateStrippedLocations: InvalidateStrippedLocationsUseCase,
     private val undoController: UndoController,
@@ -557,6 +561,111 @@ class PhotoViewerViewModel @Inject constructor(
         .map { HiddenVaultRecords.pairedUris(it[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] ?: emptySet()) }
         .distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
+
+    /** Master AI-features gate (Settings, AI and machine learning). Off suppresses the Copy-text long
+     *  press so no text-detection model is ever fetched from the viewer. Observed, so a change made in
+     *  Settings is reflected the next time the viewer is opened. */
+    val aiFeaturesEnabled: StateFlow<Boolean> = context.settingsDataStore.data
+        .map { it[SettingsKeys.AI_FEATURES_ENABLED] ?: false }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    // Resolves the Copy-text opt-in fallback for a device that never touched the switch: whether the
+    // reader's models are already on disk. Non-suspend and cheap enough to answer inline.
+    private val ocrModelManager by lazy { OcrModelManager(context) }
+
+    /** Copy-text gate (Settings, AI and machine learning): the master switch AND the per-feature Copy
+     *  text opt-in, whose absent state falls back to the reader's models already being on disk so a user
+     *  who used Copy text before keeps it. Off keeps the long press to read inert, so no OCR model is
+     *  fetched from the viewer. Observed, so a Settings change is reflected the next time it is opened. */
+    val copyTextEnabled: StateFlow<Boolean> = context.settingsDataStore.data
+        .map {
+            it[SettingsKeys.AI_FEATURES_ENABLED] == true &&
+                (it[SettingsKeys.OCR_ENABLED] ?: ocrModelManager.filesPresentQuick())
+        }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    /** Per-feature face gate (Settings, AI and machine learning). AND-ed with [aiFeaturesEnabled] before
+     *  the viewer offers the people-in-this-photo action, so turning faces off suppresses it while the
+     *  master AI switch stays on. Observed, so a Settings change is reflected the next time the viewer
+     *  is opened. */
+    val faceEnabled: StateFlow<Boolean> = context.settingsDataStore.data
+        .map { it[SettingsKeys.FACE_ENABLED] ?: false }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    /** One person the face index found on the photo now on screen, for the "people in this photo" bar.
+     *  [faceBox] is the 0..1 crop of this photo, so the chip shows the person's face from this frame. */
+    data class ViewerPerson(
+        val personId: Long,
+        val name: String?,
+        val faceBox: eu.akoos.photos.presentation.gallery.FaceBox,
+    )
+
+    private val _peopleInPhoto = MutableStateFlow<List<ViewerPerson>>(emptyList())
+    /** The people found on the settled photo, named first; empty when AI is off or none are grouped. */
+    val peopleInPhoto: StateFlow<List<ViewerPerson>> = _peopleInPhoto.asStateFlow()
+
+    /**
+     * Resolve the grouped faces on [photoKey] to the people they belong to, so the viewer can offer a
+     * jump to each. One chip per person (the clearest face), named people before unnamed clusters.
+     * Clears when AI is off, so nothing is read or shown for a user who never opted in.
+     */
+    fun loadPeopleInPhoto(item: GalleryItem) {
+        viewModelScope.launch {
+            val userId = accountManager.getPrimaryUserId().first()
+            val prefs = context.settingsDataStore.data.first()
+            val aiOn = prefs[SettingsKeys.AI_FEATURES_ENABLED] == true && prefs[SettingsKeys.FACE_ENABLED] == true
+            _peopleInPhoto.value =
+                if (!aiOn || userId == null) emptyList() else resolvePeople(item, userId, detectIfEmpty = false)
+        }
+    }
+
+    /**
+     * Detect the faces on [item] now if it has none grouped yet, and return the people found, updating
+     * the bar. Called from a long-press on a spot with no already-known face, so tagging works on a
+     * photo the background walk has not reached (the way the text read runs on demand). Empty when AI is
+     * off. The detection itself runs off the main thread.
+     */
+    suspend fun detectFacesNow(item: GalleryItem): List<ViewerPerson> {
+        val userId = accountManager.getPrimaryUserId().first() ?: return emptyList()
+        val prefs = context.settingsDataStore.data.first()
+        val aiOn = prefs[SettingsKeys.AI_FEATURES_ENABLED] == true && prefs[SettingsKeys.FACE_ENABLED] == true
+        if (!aiOn) return emptyList()
+        val list = resolvePeople(item, userId, detectIfEmpty = true)
+        _peopleInPhoto.value = list
+        return list
+    }
+
+    /** The grouped faces on [item] as people; when [detectIfEmpty] and none are grouped yet, scan the
+     *  photo on demand first (a no-op on one already scanned) so a face can still be found. */
+    private suspend fun resolvePeople(
+        item: GalleryItem,
+        userId: me.proton.core.domain.entity.UserId,
+        detectIfEmpty: Boolean,
+    ): List<ViewerPerson> {
+        val account = userId.id
+        val photoKey = item.stableId
+        var faces = runCatching { faceDao.groupedFacesForPhoto(account, photoKey) }.getOrDefault(emptyList())
+        if (faces.isEmpty() && detectIfEmpty) {
+            val scanned = runCatching {
+                withContext(Dispatchers.Default) { faceIndexingScheduler.indexPhotoOnDemand(item, userId, force = true) }
+            }.getOrDefault(false)
+            if (scanned) faces = runCatching { faceDao.groupedFacesForPhoto(account, photoKey) }.getOrDefault(emptyList())
+        }
+        val byPerson = LinkedHashMap<Long, ViewerPerson>()
+        for (f in faces) {
+            val pid = f.personId ?: continue
+            if (byPerson.containsKey(pid)) continue
+            val name = personDao.personById(pid)?.displayName?.takeIf { it.isNotBlank() }
+            byPerson[pid] = ViewerPerson(
+                pid, name,
+                eu.akoos.photos.presentation.gallery.FaceBox(f.left, f.top, f.right, f.bottom),
+            )
+        }
+        return byPerson.values.sortedByDescending { it.name != null }
+    }
 
     /**
      * Where each vaulted photo moved since the pager took its snapshot, so the page keeps showing the

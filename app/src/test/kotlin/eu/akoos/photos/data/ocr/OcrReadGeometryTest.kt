@@ -139,7 +139,16 @@ class OcrReadGeometryTest {
     @Test
     fun `a wide line widens the run up to the ceiling`() {
         assertEquals(480, readBatchWidth(10f))
-        assertEquals(READ_MAX_WIDTH, readBatchWidth(40f))
+        assertEquals(READ_MAX_WIDTH, readBatchWidth(60f))
+    }
+
+    @Test
+    fun `a full width line is read wide enough to stay legible`() {
+        // A line spanning a large screenshot runs many times as long as it is tall. Held to a narrow
+        // ceiling it is squeezed until the reader gives nothing back, so the ceiling has to leave a
+        // long line's glyphs near their own width and sit well above a single ordinary run.
+        assertTrue("a long line must not be crushed", READ_MAX_WIDTH >= 2000)
+        assertEquals(READ_MAX_WIDTH, readBatchWidth(80f))
     }
 
     @Test

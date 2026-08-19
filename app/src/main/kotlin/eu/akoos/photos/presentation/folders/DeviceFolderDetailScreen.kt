@@ -102,6 +102,7 @@ import eu.akoos.photos.presentation.common.SelectionAction
 import eu.akoos.photos.presentation.common.SelectionDrawer
 import eu.akoos.photos.presentation.common.favoriteSelectionAction
 import eu.akoos.photos.presentation.common.favoriteTurnsOn
+import eu.akoos.photos.presentation.common.anyMetadataEditable
 import eu.akoos.photos.presentation.gallery.LocalThumbnailUrls
 import eu.akoos.photos.presentation.gallery.MetadataStripPickerDialog
 import eu.akoos.photos.presentation.gallery.PhotoCell
@@ -124,6 +125,7 @@ import eu.akoos.photos.presentation.theme.FgPrimary
 import eu.akoos.photos.presentation.theme.PillBg
 import eu.akoos.photos.presentation.theme.PillBgOpaque
 import eu.akoos.photos.presentation.theme.PillBorder
+import eu.akoos.photos.presentation.util.monthYearFormat
 import eu.akoos.photos.util.copySensitiveText
 
 /**
@@ -412,7 +414,7 @@ fun DeviceFolderDetailScreen(
         // Group by month like the cloud album. withIndex() keeps each item's original position so
         // onPhotoClick still opens the right one and the drag-select keys stay aligned.
         val photoGroups = remember(items) {
-            val fmt = java.text.SimpleDateFormat("MMMM yyyy", java.util.Locale.getDefault())
+            val fmt = monthYearFormat()
             items.withIndex().groupBy { fmt.format(java.util.Date(it.value.captureTimeMs)) }
         }
         val dragSelectModifier = eu.akoos.photos.presentation.gallery.rememberDragMultiSelectModifier(
@@ -750,9 +752,9 @@ fun DeviceFolderDetailScreen(
                 )
             }
             // A folder of scanned photos is where wrong dates get fixed in bulk, so the date +
-            // place editor opens as soon as one selected item is device-only and the editor names
-            // the count it lands on.
-            if (anyDeviceOnlySelected) {
+            // The date + place editor opens for any editable item (a device photo, or a backed-up
+            // image the corrected-copy replace can rewrite) and names the count it lands on.
+            if (anyMetadataEditable(selectedDeviceItems)) {
                 add(
                     SelectionAction(
                         icon = Icons.Default.EditNote,

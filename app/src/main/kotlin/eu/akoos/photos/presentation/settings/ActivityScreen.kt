@@ -205,54 +205,86 @@ fun ActivityScreen(
                         }
                     }
                 }
-                if (activeUploads.isNotEmpty() || queuedUris.isNotEmpty() || state.uploadTransfers.isNotEmpty()) {
+                val hasBackupCard = activeUploads.isNotEmpty() || queuedUris.isNotEmpty()
+                if (hasBackupCard || state.uploadTransfers.isNotEmpty()) {
                     item(span = { GridItemSpan(maxLineSpan) }) {
                         Column {
                             SectionLabel(stringResource(R.string.activity_uploading))
                             Spacer(Modifier.height(8.dp))
-                            SettingsCard {
-                                // In-card header matching the Downloads tab: the running-upload label,
-                                // how many photos of the batch are done, and a cancel for the whole burst.
-                                BatchCancelHeader(
-                                    label = stringResource(R.string.activity_uploading),
-                                    done = state.uploadDone,
-                                    total = state.uploadDone + activeUploads.size + queuedUris.size + state.uploadTransfers.size,
-                                    cancelable = true,
-                                    onCancel = { viewModel.cancelUpload() },
-                                )
-                                RowDivider()
-                                activeUploads.forEachIndexed { i, evt ->
-                                    val frac = if (evt.sizeBytes > 0L) {
-                                        (evt.doneBytes.toFloat() / evt.sizeBytes).coerceIn(0f, 1f)
-                                    } else {
-                                        null
-                                    }
-                                    val label = if (evt.status == UploadEventStatus.Encrypting) {
-                                        stringResource(R.string.upload_status_encrypting)
-                                    } else {
-                                        stringResource(R.string.upload_status_uploading)
-                                    }
-                                    TransferPhotoRow(uri = evt.uri, stateLabel = label, progress = frac)
-                                    if (i < activeUploads.lastIndex || queuedUris.isNotEmpty() ||
-                                        state.uploadTransfers.isNotEmpty()) RowDivider()
-                                }
-                                queuedUris.forEachIndexed { i, uri ->
-                                    TransferPhotoRow(
-                                        uri = uri,
-                                        stateLabel = stringResource(R.string.upload_status_queued),
-                                        progress = null,
+                            // Backup pipeline: the encrypting/uploading photos and the queued ones, in
+                            // one card with a cancel for the whole burst.
+                            if (hasBackupCard) {
+                                SettingsCard {
+                                    BatchCancelHeader(
+                                        label = stringResource(R.string.activity_uploading),
+                                        done = state.uploadDone,
+                                        total = state.uploadDone + activeUploads.size + queuedUris.size,
+                                        cancelable = true,
+                                        onCancel = { viewModel.cancelUpload() },
                                     )
-                                    if (i < queuedUris.lastIndex || state.uploadTransfers.isNotEmpty()) RowDivider()
+                                    RowDivider()
+                                    activeUploads.forEachIndexed { i, evt ->
+                                        val frac = if (evt.sizeBytes > 0L) {
+                                            (evt.doneBytes.toFloat() / evt.sizeBytes).coerceIn(0f, 1f)
+                                        } else {
+                                            null
+                                        }
+                                        val label = if (evt.status == UploadEventStatus.Encrypting) {
+                                            stringResource(R.string.upload_status_encrypting)
+                                        } else {
+                                            stringResource(R.string.upload_status_uploading)
+                                        }
+                                        TransferPhotoRow(uri = evt.uri, stateLabel = label, progress = frac)
+                                        if (i < activeUploads.lastIndex || queuedUris.isNotEmpty()) RowDivider()
+                                    }
+                                    queuedUris.forEachIndexed { i, uri ->
+                                        TransferPhotoRow(
+                                            uri = uri,
+                                            stateLabel = stringResource(R.string.upload_status_queued),
+                                            progress = null,
+                                        )
+                                        if (i < queuedUris.lastIndex) RowDivider()
+                                    }
                                 }
-                                // Single-photo TransferCenter uploads, e.g. the editor's edit-upload;
-                                // a blank uri still draws a placeholder row so the upload stays visible.
-                                state.uploadTransfers.forEachIndexed { i, t ->
-                                    TransferPhotoRow(
-                                        uri = t.items.firstOrNull().orEmpty(),
-                                        stateLabel = stringResource(R.string.upload_status_uploading),
-                                        progress = null,
+                            }
+                            // TransferCenter upload batches: a metadata-edit batch (named, many photos)
+                            // or the editor's single save-copy upload. One card per batch with the batch's
+                            // real count and its photos in flight, mirroring the Downloads thumbnail cards.
+                            state.uploadTransfers.forEach { t ->
+                                // Per-photo rows for a metadata batch: each photo shows its OWN status
+                                // (keyed by its linkId in itemKeys) and drops off when it finishes. Other
+                                // upload transfers (the editor's save-copy) fall back to the remaining
+                                // thumbnails under one "uploading" label.
+                                val rows: List<Pair<String, String?>> = if (t.itemKeys.isNotEmpty()) {
+                                    t.items.indices.mapNotNull { i ->
+                                        val key = t.itemKeys.getOrNull(i) ?: return@mapNotNull null
+                                        val status = t.itemStatus[key] ?: return@mapNotNull null
+                                        t.items[i] to status
+                                    }
+                                } else {
+                                    t.items.drop(t.done).map { it to null }
+                                }
+                                Spacer(Modifier.height(8.dp))
+                                SettingsCard {
+                                    BatchCancelHeader(
+                                        label = t.name ?: stringResource(R.string.activity_uploading),
+                                        done = t.done,
+                                        total = t.total,
+                                        cancelable = t.cancelable,
+                                        onCancel = { viewModel.cancelTransfer(t.id) },
                                     )
-                                    if (i < state.uploadTransfers.lastIndex) RowDivider()
+                                    if (rows.isNotEmpty()) {
+                                        RowDivider()
+                                        rows.forEachIndexed { i, (uri, status) ->
+                                            TransferPhotoRow(
+                                                uri = uri,
+                                                stateLabel = status
+                                                    ?: stringResource(R.string.upload_status_uploading),
+                                                progress = null,
+                                            )
+                                            if (i < rows.lastIndex) RowDivider()
+                                        }
+                                    }
                                 }
                             }
                         }

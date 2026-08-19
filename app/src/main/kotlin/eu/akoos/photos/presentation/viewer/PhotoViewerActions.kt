@@ -79,6 +79,9 @@ import coil.compose.AsyncImage
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.entity.GalleryItem
+import eu.akoos.photos.presentation.common.deleteConfirmRows
+import eu.akoos.photos.presentation.common.deleteRowDescRes
+import eu.akoos.photos.presentation.common.deleteRowTitleRes
 import eu.akoos.photos.presentation.gallery.LocalThumbnailUrls
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.Bg0
@@ -363,54 +366,23 @@ internal fun DeleteConfirmSheet(
             color = FgPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
         )
 
-        when (item) {
-            is GalleryItem.LocalOnly -> {
-                DangerRow(
-                    title = stringResource(
-                        if (isVaulted) R.string.delete_button_permanently
-                        else R.string.viewer_delete_move_to_trash,
-                    ),
-                    subtitle = stringResource(
-                        if (isVaulted) R.string.viewer_delete_vault_body
-                        else R.string.delete_multi_move_trash_desc,
-                    ),
-                    isDestructive = true,
-                    onClick = { onDelete(true, false) },
-                )
-            }
-
-            is GalleryItem.Synced -> {
-                Text(
-                    stringResource(R.string.viewer_delete_subtitle_synced),
-                    color = FgDim, fontSize = 14.sp,
-                )
-                Spacer(Modifier.height(4.dp))
-                DangerRow(
-                    title = stringResource(R.string.viewer_delete_remove_from_device),
-                    subtitle = stringResource(R.string.viewer_delete_remove_from_device_desc),
-                    onClick = { onDelete(true, false) },
-                )
-                DangerRow(
-                    title = stringResource(R.string.viewer_delete_remove_from_cloud),
-                    subtitle = stringResource(R.string.viewer_delete_remove_from_cloud_desc),
-                    onClick = { onDelete(false, true) },
-                )
-                DangerRow(
-                    title = stringResource(R.string.viewer_delete_everywhere),
-                    subtitle = stringResource(R.string.viewer_delete_everywhere_desc),
-                    isDestructive = true,
-                    onClick = { onDelete(true, true) },
-                )
-            }
-
-            is GalleryItem.CloudOnly -> {
-                DangerRow(
-                    title = stringResource(R.string.viewer_delete_move_to_drive_trash),
-                    subtitle = stringResource(R.string.delete_multi_drive_trash_desc),
-                    isDestructive = true,
-                    onClick = { onDelete(false, true) },
-                )
-            }
+        val hasLocal = item is GalleryItem.LocalOnly || item is GalleryItem.Synced
+        val hasCloud = item is GalleryItem.Synced || item is GalleryItem.CloudOnly
+        val rows = deleteConfirmRows(hasLocal, hasCloud)
+        if (rows.size > 1) {
+            Text(
+                stringResource(R.string.delete_multi_mixed_msg),
+                color = FgDim, fontSize = 14.sp,
+            )
+            Spacer(Modifier.height(4.dp))
+        }
+        rows.forEach { row ->
+            DangerRow(
+                title = stringResource(deleteRowTitleRes(row.kind, isVaulted)),
+                subtitle = stringResource(deleteRowDescRes(row.kind, isVaulted)),
+                isDestructive = row.destructive,
+                onClick = { onDelete(row.freeUpSpace, row.deleteFromCloud) },
+            )
         }
 
         // Matches the gallery multi-delete sheet's cancel exactly (no border), so the two delete

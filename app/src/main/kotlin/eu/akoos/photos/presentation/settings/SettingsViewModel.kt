@@ -25,6 +25,7 @@
 package eu.akoos.photos.presentation.settings
 
 import android.content.Context
+import android.net.Uri
 import android.os.Environment
 import android.os.StatFs
 import androidx.appcompat.app.AppCompatDelegate
@@ -50,13 +51,28 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.launch
 import me.proton.core.accountmanager.domain.AccountManager
 import me.proton.core.telemetry.domain.usecase.IsTelemetryEnabled
 import me.proton.core.user.domain.usecase.GetUser
 import me.proton.core.user.domain.usecase.ObserveUser
 import eu.akoos.photos.R
+import eu.akoos.photos.data.db.dao.FaceDao
+import eu.akoos.photos.data.db.dao.FaceScanDao
+import eu.akoos.photos.data.db.dao.PersonDao
+import eu.akoos.photos.data.db.dao.NotPersonDao
+import eu.akoos.photos.data.db.dao.PersonCoverDao
+import eu.akoos.photos.data.db.dao.PersonManualPhotoDao
+import eu.akoos.photos.data.face.FaceEmbeddingModelManager
+import eu.akoos.photos.data.face.FaceIndexingProgress
+import eu.akoos.photos.data.face.FaceIndexingScheduler
+import eu.akoos.photos.data.face.FaceModelManager
+import eu.akoos.photos.data.ocr.OcrModelComponent
+import eu.akoos.photos.data.ocr.OcrModelManager
+import eu.akoos.photos.data.ocr.OcrModelOutcome
 import eu.akoos.photos.data.hidden.HiddenVaultJournal
 import eu.akoos.photos.data.hidden.HiddenVaultLeftovers
 import eu.akoos.photos.data.hidden.HiddenVaultRecords
@@ -73,10 +89,20 @@ import kotlinx.coroutines.flow.combine
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.LocalMediaRepository
 import eu.akoos.photos.domain.repository.SyncStateRepository
+import eu.akoos.photos.domain.model.PersonSummary
+import eu.akoos.photos.domain.usecase.ClusterFacesUseCase
+import eu.akoos.photos.domain.usecase.ExportFaceIndexUseCase
+import eu.akoos.photos.domain.usecase.FaceIndexImportOutcome
+import eu.akoos.photos.domain.usecase.ImportFaceIndexUseCase
 import eu.akoos.photos.domain.usecase.FreeUpSpaceUseCase
+import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
+import eu.akoos.photos.domain.usecase.MIN_FACES_TO_SHOW_PERSON
+import eu.akoos.photos.domain.usecase.ObservePeopleUseCase
 import eu.akoos.photos.domain.usecase.ReconcileSyncStateUseCase
 import eu.akoos.photos.domain.usecase.UploadPendingUseCase
 import eu.akoos.photos.domain.usecase.UploadStatus
+import eu.akoos.photos.presentation.gallery.FaceBox
+import eu.akoos.photos.presentation.gallery.PersonUi
 import eu.akoos.photos.util.retryOnDbTear
 import eu.akoos.photos.worker.FreeUpSpaceWorker
 import eu.akoos.photos.worker.SyncWorker
@@ -101,13 +127,77 @@ class SettingsViewModel @Inject constructor(
     private val offlineStore: OfflineStorageManager,
     private val hiddenStorage: eu.akoos.photos.data.hidden.HiddenStorageManager,
     private val hiddenVaultJournal: HiddenVaultJournal,
+    private val faceIndexingScheduler: FaceIndexingScheduler,
+    private val personDao: PersonDao,
+    private val faceDao: FaceDao,
+    private val faceScanDao: FaceScanDao,
+    private val personManualPhotoDao: PersonManualPhotoDao,
+    private val notPersonDao: NotPersonDao,
+    private val personCoverDao: PersonCoverDao,
+    private val clusterFacesUseCase: ClusterFacesUseCase,
+    private val exportFaceIndexUseCase: ExportFaceIndexUseCase,
+    private val importFaceIndexUseCase: ImportFaceIndexUseCase,
+    private val observePeopleUseCase: ObservePeopleUseCase,
+    private val getGalleryItems: GetGalleryItemsUseCase,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SettingsUiState())
     val uiState: StateFlow<SettingsUiState> = _uiState.asStateFlow()
 
+    /** Model-presence checks for the per-feature AI gates. Built from [context] rather than injected,
+     *  matching the editor and the indexing scheduler, since they carry no state worth sharing and are
+     *  only ever asked whether their files are on disk. */
+    private val ocrModelManager by lazy { OcrModelManager(context) }
+    private val faceModelManager by lazy { FaceModelManager(context) }
+    private val faceEmbeddingModelManager by lazy { FaceEmbeddingModelManager(context) }
+
+    /** Where the background face indexer stands, surfaced verbatim from the scheduler so the AI
+     *  settings panel can label its state and offer pause / resume. */
+    val faceIndexingProgress: StateFlow<FaceIndexingProgress> = faceIndexingScheduler.progress
+
+    /** How many people the face clustering has grouped for the active account, 0 when signed out.
+     *  Re-resolves on an account switch so the panel never carries the previous account's count. */
+    val peopleCount: StateFlow<Int> = accountManager.getPrimaryUserId()
+        .flatMapLatest { userId ->
+            if (userId != null) {
+                // Count the people-clusters worth showing (named plus unnamed ones with enough faces),
+                // so the settings figure matches what the People page lists instead of reading 0 while
+                // the grid clearly holds clusters the user has not named yet.
+                personDao.observePeopleForUser(userId.id)
+                    .map { list -> list.count { !it.displayName.isNullOrBlank() || it.faceCount >= MIN_FACES_TO_SHOW_PERSON } }
+            } else {
+                flowOf(0)
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), 0)
+
+    /** The active account's clustered people resolved to face-crop tiles for the AI panel, empty when
+     *  signed out. Feeds the gallery's own [ObservePeopleUseCase] against the shared library, so the
+     *  panel shows the same faces the People rail does, and re-resolves on an account switch. */
+    val people: StateFlow<List<PersonUi>> = accountManager.getPrimaryUserId()
+        .flatMapLatest { userId ->
+            if (userId == null) flowOf(emptyList())
+            else observePeopleUseCase(userId, getGalleryItems.invoke(userId))
+                .map { list -> list.mapNotNull { it.toPersonUi() }.filter { !it.displayName.isNullOrBlank() } }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), emptyList())
+
+    /** Adapt a domain [PersonSummary] to the gallery's [PersonUi]; a person with no resolvable cover is
+     *  dropped, matching how the People rail maps them. */
+    private fun PersonSummary.toPersonUi(): PersonUi? {
+        val cover = coverPhotoKey ?: return null
+        return PersonUi(
+            personId = personId,
+            displayName = displayName,
+            coverPhotoKey = cover,
+            faceBox = faceBox?.let { FaceBox(it.left, it.top, it.right, it.bottom) },
+            faceCount = faceCount,
+        )
+    }
+
     init {
         loadPrefs()
+        resolveFaceRecognitionAvailability()
         observeCurrentUser()
         observeTelemetryEnabled()
         observeBackedUpBytes()
@@ -666,6 +756,11 @@ class SettingsViewModel @Inject constructor(
                     themeMode = ThemeMode.fromKey(migratedPrefs[SettingsKeys.THEME_MODE]),
                     palette = ThemePalette.fromKey(migratedPrefs[SettingsKeys.THEME_PALETTE]),
                     amoledBlack = migratedPrefs[SettingsKeys.AMOLED_BLACK] ?: false,
+                    aiFeaturesEnabled = migratedPrefs[SettingsKeys.AI_FEATURES_ENABLED] ?: false,
+                    // Absent OCR opt-in defaults to whether the reader's models are already on disk, so
+                    // a device that has fetched them opens with Copy text on rather than off.
+                    ocrEnabled = migratedPrefs[SettingsKeys.OCR_ENABLED] ?: ocrModelManager.filesPresentQuick(),
+                    faceEnabled = migratedPrefs[SettingsKeys.FACE_ENABLED] ?: false,
                     landingTab = LandingTab.fromIndex(migratedPrefs[SettingsKeys.LANDING_TAB]),
                     lastSyncMs = migratedPrefs[SettingsKeys.LAST_SYNC_MS],
                     language = migratedPrefs[SettingsKeys.LANGUAGE] ?: "system",
@@ -693,8 +788,23 @@ class SettingsViewModel @Inject constructor(
                     seamlessGrid = migratedPrefs[SettingsKeys.SEAMLESS_GRID] ?: false,
                     gridRememberLast = migratedPrefs[SettingsKeys.GRID_REMEMBER_LAST] ?: false,
                     gridDefaultColumns = migratedPrefs[SettingsKeys.GRID_DEFAULT_COLUMNS] ?: 3,
+                    keepScrollOnTabSwitch = migratedPrefs[SettingsKeys.KEEP_SCROLL_ON_TAB_SWITCH] == true,
                 )
             }
+        }
+    }
+
+    /**
+     * Resolve whether both face models (the SCRFD detector and the embedder) are already on disk, so
+     * the settings panel can show the face toggle as usable rather than offering a switch with no model
+     * behind it. Network-free: both [FaceModelManager.onDisk] and [FaceEmbeddingModelManager.onDisk]
+     * verify a local copy without fetching.
+     */
+    private fun resolveFaceRecognitionAvailability() {
+        viewModelScope.launch {
+            val available =
+                faceModelManager.onDisk() != null && faceEmbeddingModelManager.onDisk() != null
+            _uiState.update { it.copy(faceRecognitionAvailable = available) }
         }
     }
 
@@ -890,6 +1000,288 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Persist the master AI-features opt-in. Off keeps every on-device model unfetched and hides the
+     * Copy text and Hide faces entry points; the People grouping added later reads the same gate. The
+     * editor and viewer observe [SettingsKeys.AI_FEATURES_ENABLED] directly, so flipping it takes
+     * effect the next time either surface is opened.
+     */
+    fun setAiFeaturesEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            context.settingsDataStore.edit { it[SettingsKeys.AI_FEATURES_ENABLED] = enabled }
+            _uiState.update { it.copy(aiFeaturesEnabled = enabled) }
+            if (enabled) {
+                // Opt-in begins indexing straight away, so there is no separate manual start step: new
+                // photos are then picked up automatically by the library's own indexing trigger.
+                accountManager.getPrimaryUserId().first()?.let { faceIndexingScheduler.requestIndex(it) }
+            } else {
+                // Turning AI off stands any running scan down promptly rather than waiting for its next
+                // per-photo check to notice the flag.
+                faceIndexingScheduler.reset()
+            }
+        }
+    }
+
+    /**
+     * Handle the Copy text per-feature switch. Independent of the master AI switch: it gates only the
+     * read-the-text gesture, leaving the other AI features running. Turning it on manages the model
+     * rather than just flipping a flag: with the model already on disk it enables at once, and without
+     * it, it raises the download-consent drawer instead of enabling against a model that is not there.
+     * Turning it off disables at once and then asks whether to remove the downloaded model.
+     */
+    fun setOcrEnabled(enabled: Boolean) {
+        if (enabled) enableOcr() else disableOcr()
+    }
+
+    /** Model on disk already: flip Copy text on. Otherwise hold it off and ask to fetch the model first. */
+    private fun enableOcr() {
+        viewModelScope.launch {
+            val present = withContext(Dispatchers.IO) { ocrModelManager.filesPresentQuick() }
+            if (present) {
+                context.settingsDataStore.edit { it[SettingsKeys.OCR_ENABLED] = true }
+                _uiState.update { it.copy(ocrEnabled = true, ocrModelDownloadFailed = false) }
+            } else {
+                _uiState.update {
+                    it.copy(ocrModelPrompt = OcrModelPrompt.Download, ocrModelDownloadFailed = false)
+                }
+            }
+        }
+    }
+
+    /** Flipping Copy text off opens the drawer while the feature stays on, so a tap outside leaves
+     *  everything as it was. Keep or Remove in the drawer are what actually switch it off. */
+    private fun disableOcr() {
+        _uiState.update {
+            it.copy(ocrModelPrompt = OcrModelPrompt.Remove, ocrModelDownloadFailed = false)
+        }
+    }
+
+    /** The drawer's Keep action: switch Copy text off but leave the downloaded model in place. */
+    fun disableOcrKeepingModel() {
+        _uiState.update { it.copy(ocrModelPrompt = OcrModelPrompt.None) }
+        viewModelScope.launch {
+            context.settingsDataStore.edit { it[SettingsKeys.OCR_ENABLED] = false }
+            _uiState.update { it.copy(ocrEnabled = false) }
+        }
+    }
+
+    /**
+     * Accept the Copy text model download. Records the consent the reader itself also checks, fetches
+     * both model halves off the main thread while the panel shows progress, and turns the feature on
+     * only once both verify. A failed fetch leaves it off and surfaces the failure on the row.
+     */
+    fun confirmOcrModelDownload() {
+        _uiState.update {
+            it.copy(
+                ocrModelPrompt = OcrModelPrompt.None,
+                ocrModelDownloading = true,
+                ocrModelDownloadFailed = false,
+            )
+        }
+        viewModelScope.launch {
+            context.settingsDataStore.edit { it[SettingsKeys.OCR_MODEL_DOWNLOAD_ALLOWED] = true }
+            // The reader needs both the detection and the recognition halves, so both are fetched before
+            // the switch flips on; the detection half comes first, so the larger one is not fetched when
+            // the smaller one cannot be.
+            val ready = listOf(OcrModelComponent.Detection, OcrModelComponent.Recognition)
+                .all { ocrModelManager.ensure(it) is OcrModelOutcome.Ready }
+            if (ready) {
+                context.settingsDataStore.edit { it[SettingsKeys.OCR_ENABLED] = true }
+                _uiState.update { it.copy(ocrEnabled = true, ocrModelDownloading = false) }
+            } else {
+                _uiState.update { it.copy(ocrModelDownloading = false, ocrModelDownloadFailed = true) }
+            }
+        }
+    }
+
+    /**
+     * The drawer's Remove action: switch Copy text off AND delete the downloaded model from the device.
+     * Deleting the files also resets the download consent so a later re-enable asks again.
+     */
+    fun confirmOcrModelRemoval() {
+        _uiState.update { it.copy(ocrModelPrompt = OcrModelPrompt.None) }
+        viewModelScope.launch {
+            context.settingsDataStore.edit { it[SettingsKeys.OCR_ENABLED] = false }
+            ocrModelManager.deleteAll()
+            context.settingsDataStore.edit { it[SettingsKeys.OCR_MODEL_DOWNLOAD_ALLOWED] = false }
+            _uiState.update { it.copy(ocrEnabled = false, ocrModelDownloadFailed = false) }
+        }
+    }
+
+    /** Close either OCR drawer with no change: a tap outside leaves the switch and the model exactly as
+     *  they were, so an accidental toggle undoes itself rather than turning the feature off unasked. */
+    fun dismissOcrModelPrompt() {
+        _uiState.update { it.copy(ocrModelPrompt = OcrModelPrompt.None) }
+    }
+
+    /**
+     * The face-features per-feature opt-in. Enabling persists at once and starts a scan. Disabling is
+     * decided in the drawer instead: flipping the switch off opens it while the feature stays on, so a
+     * tap outside leaves everything as it was; the drawer's Keep or Remove are what actually switch it
+     * off. Independent of the master switch, so it gates the face pipeline on its own.
+     */
+    fun setFaceEnabled(enabled: Boolean) {
+        if (enabled) {
+            viewModelScope.launch {
+                context.settingsDataStore.edit { it[SettingsKeys.FACE_ENABLED] = true }
+                _uiState.update { it.copy(faceEnabled = true, faceModelPrompt = FaceModelPrompt.None) }
+                accountManager.getPrimaryUserId().first()?.let { faceIndexingScheduler.requestIndex(it) }
+            }
+        } else {
+            _uiState.update { it.copy(faceModelPrompt = FaceModelPrompt.Remove) }
+        }
+    }
+
+    /** The drawer's Keep action: switch face recognition off but leave the model and the face data. */
+    fun disableFaceKeepingData() {
+        _uiState.update { it.copy(faceModelPrompt = FaceModelPrompt.None) }
+        viewModelScope.launch {
+            context.settingsDataStore.edit { it[SettingsKeys.FACE_ENABLED] = false }
+            _uiState.update { it.copy(faceEnabled = false) }
+            faceIndexingScheduler.reset()
+        }
+    }
+
+    /**
+     * The drawer's Remove action: switch face recognition off AND delete the model and the account's
+     * face data from this device. It stands any running walk down, clears every face and person table in
+     * the sign-out order, deletes both model files, and marks face recognition unavailable so the toggle
+     * has nothing to switch on until a model is side-loaded again.
+     */
+    fun confirmFaceModelRemoval() {
+        _uiState.update { it.copy(faceModelPrompt = FaceModelPrompt.None) }
+        viewModelScope.launch {
+            context.settingsDataStore.edit { it[SettingsKeys.FACE_ENABLED] = false }
+            faceIndexingScheduler.reset()
+            accountManager.getPrimaryUserId().first()?.let { userId ->
+                faceDao.clearForUser(userId.id)
+                personDao.clearForUser(userId.id)
+                faceScanDao.clearForUser(userId.id)
+                personManualPhotoDao.clearForUser(userId.id)
+                notPersonDao.clearForUser(userId.id)
+                personCoverDao.clearForUser(userId.id)
+            }
+            faceModelManager.deleteAll()
+            faceEmbeddingModelManager.deleteAll()
+            _uiState.update { it.copy(faceEnabled = false, faceRecognitionAvailable = false) }
+        }
+    }
+
+    /** The first drawer's Remove asks for a final confirmation before anything is deleted, so an
+     *  accidental tap cannot wipe the model and face data. */
+    fun requestFaceModelRemoval() {
+        _uiState.update { it.copy(faceModelPrompt = FaceModelPrompt.ConfirmRemove) }
+    }
+
+    /** The final confirmation's Cancel steps back to the Keep-or-Remove drawer rather than committing,
+     *  so the earlier choice is not lost. */
+    fun backToFaceRemovePrompt() {
+        _uiState.update { it.copy(faceModelPrompt = FaceModelPrompt.Remove) }
+    }
+
+    /** Close the face drawer with no change: a tap outside leaves the switch on and the model and data in
+     *  place, so an accidental toggle undoes itself rather than switching the feature off unasked. */
+    fun dismissFaceModelPrompt() {
+        _uiState.update { it.copy(faceModelPrompt = FaceModelPrompt.None) }
+    }
+
+    /**
+     * Persist the face-indexing pause switch. Pausing lets the running walk stop itself on its next
+     * per-photo check; resuming kicks a fresh pass for the last account. It never auto-restarts while
+     * paused, so only an explicit resume here re-arms it.
+     */
+    fun setFaceIndexingPaused(paused: Boolean) {
+        viewModelScope.launch { faceIndexingScheduler.setPaused(paused) }
+    }
+
+    /**
+     * Wipe every detected face and clustered person for the account. Stands the running walk down
+     * first, mirroring the sign-out order, then clears the face and person tables; the next indexing
+     * run detects faces again from scratch. The photos themselves are untouched.
+     */
+    fun clearFaceIndex() {
+        viewModelScope.launch {
+            val userId = accountManager.getPrimaryUserId().first() ?: return@launch
+            faceIndexingScheduler.reset()
+            faceDao.clearForUser(userId.id)
+            personDao.clearForUser(userId.id)
+            faceScanDao.clearForUser(userId.id)
+            personManualPhotoDao.clearForUser(userId.id)
+            notPersonDao.clearForUser(userId.id)
+            personCoverDao.clearForUser(userId.id)
+        }
+    }
+
+    /**
+     * Re-detect every photo from scratch at the current detector resolution, KEEPING the user's manual
+     * attachments and "not this person" feedback (both name-keyed), so a detector-quality change is
+     * picked up without discarding curation. Cluster names reset (they are tied to the old face ids);
+     * re-naming a cluster re-attaches its manual adds by name.
+     */
+    fun rescanFaces() {
+        viewModelScope.launch {
+            val userId = accountManager.getPrimaryUserId().first() ?: return@launch
+            faceIndexingScheduler.reset()
+            faceDao.clearForUser(userId.id)
+            personDao.clearForUser(userId.id)
+            faceScanDao.clearForUser(userId.id)
+            // person_manual_photo and not_person are intentionally kept (name-keyed curation).
+            faceIndexingScheduler.requestIndex(userId)
+        }
+    }
+
+    private val _faceTransferMsg = MutableStateFlow<String?>(null)
+    val faceTransferMsg: StateFlow<String?> = _faceTransferMsg.asStateFlow()
+
+    fun clearFaceTransferMsg() { _faceTransferMsg.value = null }
+
+    /** Write the account's portable face index to [uri] (a document the user just chose). Reports the
+     *  face count, or a failure, through [faceTransferMsg]. */
+    fun exportFaceIndex(uri: Uri) {
+        viewModelScope.launch {
+            val count = runCatching {
+                context.contentResolver.openOutputStream(uri)?.use { exportFaceIndexUseCase(it) } ?: -1
+            }.getOrElse { -1 }
+            _faceTransferMsg.value = if (count >= 0) {
+                context.getString(R.string.settings_ai_export_done, count)
+            } else {
+                context.getString(R.string.settings_ai_transfer_failed)
+            }
+        }
+    }
+
+    /** Read a face index from [uri] and fold it into the account, then recluster so the imported faces
+     *  form people. Reports the counts, or a failure, through [faceTransferMsg]. */
+    fun importFaceIndex(uri: Uri) {
+        viewModelScope.launch {
+            val userId = accountManager.getPrimaryUserId().firstOrNull() ?: return@launch
+            // Stand any in-flight walk down first, so it cannot re-detect and overwrite the faces we are
+            // about to import (which would wipe their name labels), mirroring rescan's order.
+            faceIndexingScheduler.reset()
+            val result = runCatching {
+                context.contentResolver.openInputStream(uri)?.use { importFaceIndexUseCase(it) }
+            }.getOrNull()
+            if (result is FaceIndexImportOutcome.Success) {
+                clusterFacesUseCase(userId)
+                _faceTransferMsg.value = context.getString(
+                    R.string.settings_ai_import_done, result.faces, result.people,
+                )
+                // Resume indexing: the imported photos are marked scanned, so the walk skips them and only
+                // picks up anything new, reclustering at the end without disturbing the imported faces.
+                faceIndexingScheduler.requestIndex(userId)
+            } else {
+                // Each refusal names its own cause: a wrong account or a wrong model is a mismatch the
+                // user can act on, unlike the generic failure an unreadable or missing file gets.
+                val message = when (result) {
+                    FaceIndexImportOutcome.WrongAccount -> R.string.settings_ai_import_wrong_account
+                    FaceIndexImportOutcome.WrongModel -> R.string.settings_ai_import_wrong_model
+                    else -> R.string.settings_ai_transfer_failed
+                }
+                _faceTransferMsg.value = context.getString(message)
+            }
+        }
+    }
+
     /** Persist which top-level tab the gallery opens on at app start. The gallery reads the key
      *  once on first composition; this setter is for immediate UI feedback in Settings. */
     fun setLandingTab(tab: LandingTab) {
@@ -910,6 +1302,13 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             context.settingsDataStore.edit { it[SettingsKeys.GRID_DEFAULT_COLUMNS] = columns }
             _uiState.update { it.copy(gridDefaultColumns = columns) }
+        }
+    }
+
+    fun setKeepScrollOnTabSwitch(enabled: Boolean) {
+        viewModelScope.launch {
+            context.settingsDataStore.edit { it[SettingsKeys.KEEP_SCROLL_ON_TAB_SWITCH] = enabled }
+            _uiState.update { it.copy(keepScrollOnTabSwitch = enabled) }
         }
     }
 

@@ -37,11 +37,16 @@ import eu.akoos.photos.data.hidden.HiddenStorageManager
 import eu.akoos.photos.data.hidden.HiddenVaultEditor
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.repository.LocalMediaRepository
+import eu.akoos.photos.domain.usecase.CloudMetadataSaveController
+import eu.akoos.photos.domain.usecase.CloudWorkItem
 import eu.akoos.photos.domain.usecase.ExifAsciiText
+import eu.akoos.photos.domain.usecase.LocationEdit
 import eu.akoos.photos.domain.usecase.MetadataWriteResult
 import eu.akoos.photos.domain.usecase.TextTagEdit
+import eu.akoos.photos.domain.usecase.WriteCloudPhotoMetadataUseCase
 import eu.akoos.photos.domain.usecase.WriteLocalPhotoMetadataUseCase
 import eu.akoos.photos.util.CaptureDateOverride
 import eu.akoos.photos.util.ExifHelper
@@ -51,6 +56,7 @@ import eu.akoos.photos.util.PhotoMetadata
 import eu.akoos.photos.util.forEachSqlChunk
 import eu.akoos.photos.util.originalUriForExif
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -121,8 +127,8 @@ data class MetadataEditorUiState(
     /** True when more than one editable photo is bound: the date and place start unset and a chosen
      *  value applies to every editable item at once, rather than showing one photo's own values. */
     val bulk: Boolean = false,
-    /** How many bound photos this editor can write (device-only), and how many are read-only here
-     *  (backed up / cloud), so the screen can label a mixed selection. */
+    /** How many bound photos this editor can edit (device files plus cloud images), and how many are
+     *  read-only here (backed up, cloud videos, shared), so the screen can label a mixed selection. */
     val editableCount: Int = 0,
     val skippedCount: Int = 0,
     /** In bulk mode, whether the user has picked a date / place yet. A single photo seeds both true
@@ -152,6 +158,12 @@ data class MetadataEditorUiState(
     val description: MetadataTextFieldState = MetadataTextFieldState(),
     val artist: MetadataTextFieldState = MetadataTextFieldState(),
     val copyright: MetadataTextFieldState = MetadataTextFieldState(),
+    /** How many cloud photos carry a staged date or place edit waiting for the Done action to apply
+     *  them, so the screen can route Done to the confirm instead of leaving. */
+    val stagedCloudCount: Int = 0,
+    /** Set when the Done action raised the confirm for the staged cloud edits, since replacing a cloud
+     *  photo re-uploads a corrected copy and trashes the original. */
+    val pendingCloudConfirm: CloudConfirm? = null,
 ) {
     /** The span a shift moves, ready for [DateShift]'s own rules, or null when no shift is possible. */
     val dateShiftSpan: DateShift.Span?
@@ -173,6 +185,10 @@ data class MetadataEditorUiState(
     }
 }
 
+/** How many cloud photos a confirmed replace would rewrite. The resolved per-photo work is stashed in
+ *  the ViewModel; this carries only the count the confirm prompt shows. */
+data class CloudConfirm(val count: Int)
+
 /** One-shot outcomes the screen reacts to (a brief confirmation, or a failure snackbar). */
 sealed interface MetadataEditorEvent {
     data object Saved : MetadataEditorEvent
@@ -181,6 +197,10 @@ sealed interface MetadataEditorEvent {
     data class PartlySaved(val saved: Int, val failed: Int) : MetadataEditorEvent
 
     data object Failed : MetadataEditorEvent
+
+    /** Nothing to upload: every edit was to a device file, already written, so the editor just closes.
+     *  Raised by [MetadataEditorViewModel.applyOrFinish] so the Done checkmark leaves without a confirm. */
+    data object Finished : MetadataEditorEvent
 }
 
 /**
@@ -223,10 +243,11 @@ internal fun staleLocationIds(items: List<GalleryItem>, savedUris: Set<String>):
 
 /**
  * Backs the metadata editor for one photo or a whole multi-select: it exposes the capture date and
- * place on the same basis the timeline shows, plus the descriptive text tags read from the file, and
- * applies edits to LOCAL (device) photos through [WriteLocalPhotoMetadataUseCase]. Cloud-only photos
- * and photos in an album shared with the user are surfaced read-only, because the Drive backend
- * refuses an in-place metadata rewrite.
+ * place on the same basis the timeline shows, plus the descriptive text tags read from the file. Device
+ * photos take edits in place through [WriteLocalPhotoMetadataUseCase]; a cloud-only IMAGE takes a date
+ * or place edit through [WriteCloudPhotoMetadataUseCase], which replaces it with a corrected copy once
+ * the user confirms. Cloud videos, backed-up photos and shared-with-me photos stay read-only, and the
+ * descriptive text tags reach device files only.
  *
  * A single bound photo shows its own current values and edits them in place. Two or more editable
  * photos switch to a "set for all" mode: the date and place start unset, and a chosen value is
@@ -249,6 +270,7 @@ class MetadataEditorViewModel @Inject constructor(
     private val hiddenStorage: HiddenStorageManager,
     private val hiddenVaultEditor: HiddenVaultEditor,
     private val localMediaRepository: LocalMediaRepository,
+    private val cloudSaveController: CloudMetadataSaveController,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(MetadataEditorUiState())
@@ -308,6 +330,35 @@ class MetadataEditorViewModel @Inject constructor(
         data class Text(val tag: MetadataTextTag, val value: String) : PendingAction
     }
 
+    /** The cloud IMAGE photos this editor can rewrite (cloud videos excluded): the targets a date or a
+     *  place edit replaces with a corrected copy. Every one is an EXIF-writable image, so the same set
+     *  serves both the cloud date and the cloud place edits. */
+    private var cloudImageTargets: List<CloudPhoto> = emptyList()
+
+    /** The SYNCED image photos this editor can rewrite: like [cloudImageTargets], but each also has a
+     *  device file, so its cloud copy is replaced by uploading that already edited device file. */
+    private var syncedImageTargets: List<CloudPhoto> = emptyList()
+
+    /** Each synced target's device-file uri, so a staged replacement knows which edited file to upload. */
+    private var syncedDeviceUriByPhoto: Map<CloudPhoto, String> = emptyMap()
+
+    /** The device uris of the synced targets, so their in-place device write is NOT double-counted in the
+     *  save drawer total: each synced photo is reported once, through its cloud replacement. */
+    private var syncedDeviceUris: Set<String> = emptySet()
+
+    /** Each cloud image whose own file name records a capture date, keyed to the instant that name
+     *  encodes: what the "from filename" date mode writes to a cloud photo. */
+    private var filenameDateByCloud: Map<CloudPhoto, Long> = emptyMap()
+
+    /** The cloud edits staged so far, merged per photo so a date pick and a place pick on the same
+     *  photo become one replacement; held until [confirmCloudReplace] runs them or the screen leaves. */
+    private val pendingCloudEdits = linkedMapOf<CloudPhoto, CloudWorkItem>()
+
+    /** Device-photo uris this editor has written in place this session. Device edits apply the moment
+     *  they are picked, so at cloud-confirm time this count is folded into the save drawer's total and a
+     *  mixed selection reports every photo it changed, not only the Drive uploads. */
+    private val locallyUpdatedUris = linkedSetOf<String>()
+
     /**
      * Binds the editor to [items]. [isReadOnlyAlbum] mirrors the viewer's guest gate: photos in an
      * album shared with the user are fully read-only. A lone editable item shows its own current date
@@ -319,9 +370,19 @@ class MetadataEditorViewModel @Inject constructor(
         if (_state.value.loaded || items.isEmpty()) return
 
         boundItems = items
-        // Only device-only photos have a file this screen may write; the rest are read-only here.
+        locallyUpdatedUris.clear()
+        // A device-only photo has a file this screen writes in place; a cloud-only IMAGE is editable
+        // too, by replacing it with a corrected copy (cloud videos stay read-only). Everything else
+        // (backed up, shared) is read-only here.
         val editable = items.filterIsInstance<GalleryItem.LocalOnly>()
-        val editableCount = editable.size
+        val cloudImages = items.filterIsInstance<GalleryItem.CloudOnly>()
+            .filter { WriteLocalPhotoMetadataUseCase.isExifWritableImageMime(it.cloud.mimeType) }
+        // A synced IMAGE has both a device file and a cloud copy: its device file is EXIF-edited in place
+        // on pick, and its cloud copy is replaced by uploading that edited file. A synced video stays
+        // read-only, matching the cloud-only rule.
+        val syncedImages = items.filterIsInstance<GalleryItem.Synced>()
+            .filter { WriteLocalPhotoMetadataUseCase.isExifWritableImageMime(it.local.mimeType) }
+        val editableCount = editable.size + cloudImages.size + syncedImages.size
         val skippedCount = items.size - editableCount
         // A lone editable item keeps the single-photo flow exactly; anything else with an editable
         // item is the "set for all" bulk mode.
@@ -341,14 +402,23 @@ class MetadataEditorViewModel @Inject constructor(
                     WriteLocalPhotoMetadataUseCase.isExifWritableImageMime(it.local.mimeType) ||
                     WriteLocalPhotoMetadataUseCase.isVideoMime(it.local.mimeType)
             }
-            .map { it.local.uri }
-        placeTargetUris = editable
+            .map { it.local.uri } + syncedImages.map { it.local.uri }
+        placeTargetUris = (editable
             .filter { WriteLocalPhotoMetadataUseCase.isExifWritableImageMime(it.local.mimeType) }
-            .map { it.local.uri }
-        textTargetUris = editable
+            .map { it.local.uri }) + syncedImages.map { it.local.uri }
+        textTargetUris = (editable
             .filter { WriteLocalPhotoMetadataUseCase.isExifWritableImageMime(it.local.mimeType) }
-            .map { it.local.uri }
+            .map { it.local.uri }) + syncedImages.map { it.local.uri }
         val anyEditableImage = placeTargetUris.isNotEmpty()
+        // Every cloud image is an EXIF-writable image (a cloud video was filtered out above), so the
+        // same set is both the cloud date target and the cloud place target.
+        cloudImageTargets = cloudImages.map { it.cloud }
+        syncedImageTargets = syncedImages.map { it.cloud }
+        syncedDeviceUriByPhoto = syncedImages.associate { it.cloud to it.local.uri }
+        syncedDeviceUris = syncedImages.map { it.local.uri }.toSet()
+        // "Has a cloud image to replace" covers both a cloud-only image and a synced one, so the date and
+        // place locks below stay open for a selection that is only synced photos.
+        val hasCloudImage = cloudImageTargets.isNotEmpty() || syncedImageTargets.isNotEmpty()
 
         // A shift needs each photo's own date to add its delta to, so it covers the date targets whose
         // date is real. Two of them is the least that makes a shift mean anything: on one photo a shift
@@ -360,40 +430,46 @@ class MetadataEditorViewModel @Inject constructor(
         // for the meme, screenshot and download that reached the device with no EXIF, and the durable
         // override a landed write records is what carries the date for the very images MediaStore
         // refuses a DATE_TAKEN column. So the offer is not narrowed to the EXIF-writable set.
-        filenameDateByUri = editable.mapNotNull { li ->
-            FilenameDate.parse(li.local.displayName, System.currentTimeMillis())?.let { li.local.uri to it }
+        filenameDateByUri = (editable.map { it.local } + syncedImages.map { it.local }).mapNotNull { li ->
+            FilenameDate.parse(li.displayName, System.currentTimeMillis())?.let { li.uri to it }
+        }.toMap()
+        filenameDateByCloud = cloudImages.mapNotNull { ci ->
+            FilenameDate.parse(ci.cloud.displayName, System.currentTimeMillis())?.let { ci.cloud to it }
         }.toMap()
 
-        // A shared-with-me album outranks everything: both fields are read-only. With no editable item
-        // every target is backed up / cloud, so both fields lock as CLOUD. Otherwise the date is editable
-        // as long as one editable container durably takes it (an EXIF-writable image or any video); an
-        // all-HEIC set has only the column, which the next scan reverts, so the date locks as DATE_FORMAT.
-        // The place is editable as long as one EXIF-writable image is present. With none, a video set has
-        // no GPS block and locks as VIDEO, while an unwritable-image set (HEIC, GIF, RAW) locks as
-        // PLACE_FORMAT, since the message differs.
+        // A shared-with-me album outranks everything: both fields are read-only. With nothing editable
+        // (no device file and no cloud image) every target is backed up or a cloud video, so both fields
+        // lock as CLOUD. Otherwise the date is editable as long as one container durably takes it: an
+        // editable device image or video, or a cloud image the replace rewrites. An all-HEIC device set
+        // with no cloud image has only the column, which the next scan reverts, so the date locks as
+        // DATE_FORMAT. The place is editable as long as one EXIF-writable image is present, device or
+        // cloud. With none, a device video set has no GPS block and locks as VIDEO, while an
+        // unwritable-image set (HEIC, GIF, RAW) locks as PLACE_FORMAT, since the message differs.
         val dateLock: EditLock?
         val placeLock: EditLock?
         when {
             isReadOnlyAlbum -> { dateLock = EditLock.SHARED; placeLock = EditLock.SHARED }
             editableCount == 0 -> { dateLock = EditLock.CLOUD; placeLock = EditLock.CLOUD }
             else -> {
-                dateLock = if (dateTargetUris.isEmpty()) EditLock.DATE_FORMAT else null
+                dateLock = if (dateTargetUris.isNotEmpty() || hasCloudImage) null else EditLock.DATE_FORMAT
                 placeLock = when {
-                    anyEditableImage -> null
+                    anyEditableImage || hasCloudImage -> null
                     editable.any { it.local.mimeType.startsWith("video/") } -> EditLock.VIDEO
                     else -> EditLock.PLACE_FORMAT
                 }
             }
         }
 
-        // The text tags share those first two reasons and add their own: with no target the container
-        // is what refuses them, and a description is meaningful for one photo only, so it is offered
-        // exactly where its stored value is also read back (the single-photo case below).
+        // A descriptive text tag reaches any writable image in the selection now: a device file (local
+        // or synced) takes it in place, and a cloud image takes it through the replace. So the tags are
+        // editable as long as one writable image is present, device or cloud; with items but no writable
+        // image among them (all video or unwritable-format) they lock as FORMAT. A description is
+        // meaningful for one photo only, so it is offered exactly where its stored value is also read
+        // back (the single-photo case below).
         val textLock: EditLock? = when {
             isReadOnlyAlbum -> EditLock.SHARED
-            editableCount == 0 -> EditLock.CLOUD
-            textTargetUris.isEmpty() -> EditLock.FORMAT
-            else -> null
+            textTargetUris.isNotEmpty() || cloudImageTargets.isNotEmpty() -> null
+            else -> EditLock.FORMAT
         }
         val descriptionLock = textLock ?: EditLock.BULK.takeIf { bulk }
 
@@ -416,7 +492,7 @@ class MetadataEditorViewModel @Inject constructor(
             placeChosen = !bulk,
             dateShiftAvailable = dateLock == null && dateShiftTargets.size >= 2,
             dateShiftSkippedCount = dateTargetUris.size - dateShiftTargets.size,
-            filenameDateCount = filenameDateByUri.size,
+            filenameDateCount = filenameDateByUri.size + filenameDateByCloud.size,
             description = MetadataTextFieldState(lock = descriptionLock),
             artist = MetadataTextFieldState(lock = textLock, chosen = !bulk),
             copyright = MetadataTextFieldState(lock = textLock, chosen = !bulk),
@@ -490,6 +566,10 @@ class MetadataEditorViewModel @Inject constructor(
     fun setDate(ms: Long) {
         if (_state.value.dateLock != null) return
         performBatch(PendingAction.Date(ms), dateTargetUris)
+        val cloudTargets = cloudImageTargets + syncedImageTargets
+        if (cloudTargets.isEmpty()) return
+        stageCloudDate(cloudTargets.associateWith { ms })
+        _state.update { it.copy(captureDateMs = ms, dateChosen = true) }
     }
 
     /**
@@ -508,6 +588,10 @@ class MetadataEditorViewModel @Inject constructor(
         val deltaMs = DateShift.deltaFor(span, earliestMs)
         if (deltaMs == 0L) return
         performBatch(PendingAction.DateShift(deltaMs), dateShiftTargets.map { it.uri })
+        val cloudTargets = cloudImageTargets + syncedImageTargets
+        if (cloudTargets.isEmpty()) return
+        stageCloudDate(cloudTargets.associateWith { it.captureTimeMs + deltaMs })
+        _state.update { it.copy(dateChosen = true) }
     }
 
     /** Dates every editable photo whose file name records a capture date from that name, so a batch of
@@ -516,6 +600,12 @@ class MetadataEditorViewModel @Inject constructor(
     fun fixDatesFromName() {
         if (_state.value.dateLock != null) return
         performBatch(PendingAction.FilenameDate, filenameDateByUri.keys.toList())
+        val cloudDates = (cloudImageTargets.mapNotNull { p -> filenameDateByCloud[p]?.let { p to it } } +
+            syncedImageTargets.mapNotNull { p -> filenameDateByUri[syncedDeviceUriByPhoto[p]]?.let { p to it } })
+            .toMap()
+        if (cloudDates.isEmpty()) return
+        stageCloudDate(cloudDates)
+        _state.update { it.copy(dateChosen = true) }
     }
 
     /** Places every editable image at [code]'s country centroid, labelling it with the country name. */
@@ -528,6 +618,10 @@ class MetadataEditorViewModel @Inject constructor(
             }
             val label = Locale("", code).getDisplayCountry(Locale.getDefault()).ifBlank { code }
             performBatch(PendingAction.Location(point.first, point.second, label), placeTargetUris)
+            val cloudTargets = cloudImageTargets + syncedImageTargets
+            if (cloudTargets.isEmpty()) return@launch
+            stageCloudLocation(cloudTargets, LocationEdit.Set(point.first, point.second))
+            _state.update { it.copy(hasLocation = true, placeLabel = label, placeChosen = true) }
         }
     }
 
@@ -537,16 +631,22 @@ class MetadataEditorViewModel @Inject constructor(
         val country = Locale("", place.countryCode)
             .getDisplayCountry(Locale.getDefault())
             .ifBlank { place.countryCode }
-        performBatch(
-            PendingAction.Location(place.latitude, place.longitude, "${place.name}, $country"),
-            placeTargetUris,
-        )
+        val label = "${place.name}, $country"
+        performBatch(PendingAction.Location(place.latitude, place.longitude, label), placeTargetUris)
+        val cloudTargets = cloudImageTargets + syncedImageTargets
+        if (cloudTargets.isEmpty()) return
+        stageCloudLocation(cloudTargets, LocationEdit.Set(place.latitude, place.longitude))
+        _state.update { it.copy(hasLocation = true, placeLabel = label, placeChosen = true) }
     }
 
     /** Strips the GPS location from every editable image. */
     fun removeLocation() {
         if (_state.value.placeLock != null) return
         performBatch(PendingAction.ClearLocation, placeTargetUris)
+        val cloudTargets = cloudImageTargets + syncedImageTargets
+        if (cloudTargets.isEmpty()) return
+        stageCloudLocation(cloudTargets, LocationEdit.Clear)
+        _state.update { it.copy(hasLocation = false, placeLabel = null, placeChosen = true) }
     }
 
     /** Records typing in [tag]'s box. The value is capped at the length one EXIF text tag holds, so what
@@ -558,13 +658,43 @@ class MetadataEditorViewModel @Inject constructor(
         }
     }
 
-    /** Writes [tag]'s typed value to every editable image. This is the field's whole commit: unlike the
-     *  date and the place, typing has no moment of its own to write on. A locked or unchanged field
-     *  writes nothing, so the apply action can never fire a pointless pass over the files. */
-    fun applyText(tag: MetadataTextTag) {
+    /** Writes [tag]'s typed value to every editable image: device files (local and synced) in place now,
+     *  and cloud images (cloud-only and synced) staged for the replace the Done action confirms. This is
+     *  the field's whole commit: unlike the date and the place, typing has no moment of its own to write
+     *  on. A locked or unchanged field writes nothing, so the apply action can never fire a pointless
+     *  pass over the files. */
+    fun applyText(tag: MetadataTextTag): Job? {
         val field = _state.value.textField(tag)
-        if (field.lock != null || !field.dirty) return
-        performBatch(PendingAction.Text(tag, field.value), textTargetUris)
+        if (field.lock != null || !field.dirty) return null
+        // Cloud-only images take the text from the corrected copy the rewriter builds at save time, so
+        // they stage now. A synced image carries the text only in its re-uploaded device bytes, so it
+        // stages from applySuccess once the device write has actually landed on that file: a write the
+        // user declines or that fails never turns into a cloud replacement shipping the old text. The
+        // returned job completes once that device write and its staging have landed.
+        val job = performBatch(PendingAction.Text(tag, field.value), textTargetUris)
+        if (cloudImageTargets.isNotEmpty()) stageCloudText(cloudImageTargets, tag, field.value)
+        return job
+    }
+
+    /** The Done checkmark's whole action. Commits any typed text first, one tag at a time so the three
+     *  never write one file at once and awaiting each so a synced tag stages before the decision, then
+     *  raises the cloud confirm when anything is staged, or finishes when only device files (already
+     *  written) changed. Replaces the per-field Save; the ASCII transliteration happens on these writes. */
+    fun applyOrFinish() {
+        viewModelScope.launch {
+            for (tag in MetadataTextTag.entries) {
+                val f = _state.value.textField(tag)
+                if (f.lock == null && f.dirty) applyText(tag)?.join()
+            }
+            // A foreign-file write can raise a consent request; the grant replays it and the next Done
+            // applies, so bail here rather than deciding against an unfinished write.
+            if (_state.value.pendingWriteIntent != null) return@launch
+            if (pendingCloudEdits.isNotEmpty()) {
+                _state.update { it.copy(pendingCloudConfirm = CloudConfirm(pendingCloudEdits.size)) }
+            } else {
+                _events.send(MetadataEditorEvent.Finished)
+            }
+        }
     }
 
     /** Replays the writes the OS gated, once the screen relays the user's consent. */
@@ -581,14 +711,85 @@ class MetadataEditorViewModel @Inject constructor(
         _state.update { it.copy(pendingWriteIntent = null) }
     }
 
+    /** The edit already staged for [photo], or a fresh baseline that changes nothing and carries the
+     *  photo's device uri when it is a synced target. Every stager builds on this and copies only its own
+     *  field, so applying one field (a date, a place, or a text tag) never drops another already picked
+     *  for the same photo. */
+    private fun cloudEditFor(photo: CloudPhoto): CloudWorkItem =
+        pendingCloudEdits[photo] ?: CloudWorkItem(
+            photo = photo,
+            newCaptureMs = null,
+            location = LocationEdit.Unchanged,
+            deviceUri = syncedDeviceUriByPhoto[photo],
+        )
+
+    /** Merges a staged cloud date edit per photo (keeping any place and text already staged for it) and
+     *  updates the count the Done action reads. Nothing uploads until the confirm is accepted. */
+    private fun stageCloudDate(dates: Map<CloudPhoto, Long>) {
+        if (dates.isEmpty()) return
+        dates.forEach { (photo, ms) ->
+            pendingCloudEdits[photo] = cloudEditFor(photo).copy(newCaptureMs = ms)
+        }
+        _state.update { it.copy(stagedCloudCount = pendingCloudEdits.size) }
+    }
+
+    /** Merges a staged cloud place edit per photo (keeping any date and text already staged for it). */
+    private fun stageCloudLocation(photos: List<CloudPhoto>, location: LocationEdit) {
+        if (photos.isEmpty()) return
+        photos.forEach { photo ->
+            pendingCloudEdits[photo] = cloudEditFor(photo).copy(location = location)
+        }
+        _state.update { it.copy(stagedCloudCount = pendingCloudEdits.size) }
+    }
+
+    /** Merges a staged cloud text edit per photo, setting only [tag]'s value and keeping every other
+     *  staged field (the date, the place, the device uri, and the other two text tags) intact. */
+    private fun stageCloudText(photos: List<CloudPhoto>, tag: MetadataTextTag, value: String) {
+        if (photos.isEmpty()) return
+        photos.forEach { photo ->
+            val base = cloudEditFor(photo)
+            pendingCloudEdits[photo] = when (tag) {
+                MetadataTextTag.DESCRIPTION -> base.copy(description = value)
+                MetadataTextTag.ARTIST -> base.copy(artist = value)
+                MetadataTextTag.COPYRIGHT -> base.copy(copyright = value)
+            }
+        }
+        _state.update { it.copy(stagedCloudCount = pendingCloudEdits.size) }
+    }
+
+    /** Raises the confirm for the staged cloud edits. The Done action calls this instead of leaving
+     *  when edits are waiting, so a date and a place picked on the same photos upload together in one
+     *  pass rather than one prompt per field. No-op when nothing is staged. */
+    fun requestCloudApply() {
+        if (pendingCloudEdits.isEmpty()) return
+        _state.update { it.copy(pendingCloudConfirm = CloudConfirm(pendingCloudEdits.size)) }
+    }
+
+    /** Hands the confirmed cloud replacements to [cloudSaveController], which runs them on the app scope
+     *  so the editor can close to the timeline at once. The staged edits and the prompt are cleared
+     *  first; each corrected copy re-uploads in the background, tracked like a normal upload, so progress
+     *  shows outside this screen rather than a modal that traps the user on the editor. */
+    fun confirmCloudReplace() {
+        val work = pendingCloudEdits.values.toList()
+        pendingCloudEdits.clear()
+        _state.update { it.copy(pendingCloudConfirm = null, stagedCloudCount = 0) }
+        cloudSaveController.start(work, localUpdated = locallyUpdatedUris.size)
+    }
+
+    /** Drops the confirm but keeps the staged edits, so the user can adjust a value and apply again
+     *  from the Done action. */
+    fun dismissCloudReplace() {
+        _state.update { it.copy(pendingCloudConfirm = null) }
+    }
+
     /**
      * Writes [action] to each of [uris] (a single item is a one-element batch). Foreign files the OS
      * refuses are gathered into one system consent request instead of one dialog per file; on approval
      * the screen calls [onPermissionGranted], which replays exactly the deferred URIs.
      */
-    private fun performBatch(action: PendingAction, uris: List<String>) {
-        if (uris.isEmpty()) return
-        viewModelScope.launch {
+    private fun performBatch(action: PendingAction, uris: List<String>): Job? {
+        if (uris.isEmpty()) return null
+        return viewModelScope.launch {
             _state.update { it.copy(isSaving = true) }
             val needsPermission = mutableListOf<Pair<String, IntentSender>>()
             // The URIs that took the write, not just a flag: the count drives the reported outcome and
@@ -714,12 +915,24 @@ class MetadataEditorViewModel @Inject constructor(
      * new value; a place write (set or cleared) drops their stored GPS fix.
      */
     private suspend fun applySuccess(action: PendingAction, savedUris: List<String>) {
+        // Each device photo that took a write counts once toward the session total the cloud save drawer
+        // reports. A synced photo is excluded here: its cloud replacement already counts it, so counting
+        // its device write too would report it twice.
+        locallyUpdatedUris.addAll(savedUris.filter { it !in syncedDeviceUris })
         when (action) {
             is PendingAction.Date -> retargetDateOverrides(savedUris.associateWith { action.ms })
             is PendingAction.DateShift -> applyLandedShift(action.deltaMs, savedUris)
             is PendingAction.FilenameDate -> applyLandedFilenameDates(savedUris)
             is PendingAction.Location, PendingAction.ClearLocation -> invalidateStoredLocations(savedUris)
-            is PendingAction.Text -> Unit
+            is PendingAction.Text -> {
+                // A synced image's cloud copy takes the text from its re-uploaded device bytes, so its
+                // replacement is staged only now that the device write has actually landed on this uri.
+                // A write the user declined or that failed is not in savedUris, so it never stages, and a
+                // text-only edit on it stays NothingToDo rather than reporting a save it did not make.
+                val saved = savedUris.toSet()
+                val landedSynced = syncedImageTargets.filter { syncedDeviceUriByPhoto[it] in saved }
+                if (landedSynced.isNotEmpty()) stageCloudText(landedSynced, action.tag, action.value)
+            }
         }
         // A vaulted photo's date lives in its file name, not in a column, so a landed date write is only
         // half done until the name carries it. The shift resolves each file's own new date from the

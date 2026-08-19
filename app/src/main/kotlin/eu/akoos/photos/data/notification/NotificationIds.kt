@@ -54,6 +54,9 @@ object NotificationIds {
     /** The screenshot overlay service's foreground notification. */
     const val SCREENSHOT_OVERLAY = 4247
 
+    /** The cloud metadata-save worker's foreground notification. */
+    const val METADATA_EDIT = 4248
+
     /**
      * Reserved for album downloads, which take one id per run so two concurrent downloads keep
      * separate entries in the shade instead of overwriting each other. No fixed id may fall in here.

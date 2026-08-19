@@ -44,9 +44,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Smartphone
-import androidx.compose.material.icons.filled.Sort
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -398,7 +398,7 @@ private fun WhatsNewAlbumOrderCard() {
                     .background(colors.accent.copy(alpha = 0.16f)),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(Icons.Default.Sort, null, tint = colors.accent, modifier = Modifier.size(22.dp))
+                Icon(Icons.AutoMirrored.Filled.Sort, null, tint = colors.accent, modifier = Modifier.size(22.dp))
             }
             Text(
                 stringResource(R.string.whats_new_albums_title),

@@ -23,6 +23,7 @@
 package eu.akoos.photos.presentation.common
 
 import eu.akoos.photos.domain.entity.GalleryItem
+import eu.akoos.photos.domain.usecase.WriteLocalPhotoMetadataUseCase
 
 /**
  * Single source of truth for multi-select action visibility over a [GalleryItem] selection.
@@ -56,6 +57,20 @@ fun allLocalOnly(items: Collection<GalleryItem>): Boolean =
 /** The selection holds at least one cloud-only photo. */
 fun anyCloudOnly(items: Collection<GalleryItem>): Boolean =
     items.any { it is GalleryItem.CloudOnly }
+
+/** The selection holds at least one photo whose metadata the editor can write: a device photo, a
+ *  cloud image whose container takes an EXIF rewrite (replaced by a corrected copy), or a synced image
+ *  (its device file is edited in place and its cloud copy replaced). A cloud or synced VIDEO stays out,
+ *  so the Edit-metadata entry shows only when the editor has something it can change. Gates the
+ *  multi-select Edit metadata action. */
+fun anyMetadataEditable(items: Collection<GalleryItem>): Boolean =
+    items.any {
+        it is GalleryItem.LocalOnly ||
+            (it is GalleryItem.CloudOnly &&
+                WriteLocalPhotoMetadataUseCase.isExifWritableImageMime(it.cloud.mimeType)) ||
+            (it is GalleryItem.Synced &&
+                WriteLocalPhotoMetadataUseCase.isExifWritableImageMime(it.local.mimeType))
+    }
 
 /** Something in the selection can be pulled down from Drive. Mirrors [anyCloudOnly] — a cloud-only
  *  photo has no local file yet, so it is the downloadable case. Gates the Download row. */

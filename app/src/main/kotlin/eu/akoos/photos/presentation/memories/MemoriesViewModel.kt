@@ -30,15 +30,22 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.R
+import eu.akoos.photos.data.preferences.SettingsKeys
+import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.data.repository.drive.ThumbnailDecryptScheduler
 import eu.akoos.photos.data.repository.drive.ThumbnailUrlStore
 import eu.akoos.photos.domain.entity.GalleryItem
+import eu.akoos.photos.domain.model.PersonSummary
 import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
+import eu.akoos.photos.domain.usecase.ObservePeopleUseCase
+import eu.akoos.photos.presentation.gallery.FaceBox
+import eu.akoos.photos.presentation.gallery.PersonUi
 import eu.akoos.photos.util.computeOnThisDay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
@@ -59,13 +66,16 @@ data class SeasonBucket(
 data class MemoriesUiState(
     val onThisDay: List<Pair<Int, List<GalleryItem>>> = emptyList(),
     val seasons: List<SeasonBucket> = emptyList(),
+    val people: List<PersonUi> = emptyList(),
 )
 
-/** Backs the Memories screen — derives "On this day" milestones and per-season buckets from the
- *  merged library, exactly like the gallery carousel, recomputed off the main thread. */
+/** Backs the Memories screen: derives "On this day" milestones and per-season buckets from the
+ *  merged library, exactly like the gallery carousel, plus the clustered people when AI is on,
+ *  recomputed off the main thread. */
 @HiltViewModel
 class MemoriesViewModel @Inject constructor(
     getGalleryItems: GetGalleryItemsUseCase,
+    observePeopleUseCase: ObservePeopleUseCase,
     accountManager: AccountManager,
     private val thumbnailDecryptScheduler: ThumbnailDecryptScheduler,
     private val thumbnailUrlStore: ThumbnailUrlStore,
@@ -81,8 +91,20 @@ class MemoriesViewModel @Inject constructor(
             if (userId == null) {
                 flowOf(MemoriesUiState())
             } else {
-                getGalleryItems.invoke(userId)
+                val memories = getGalleryItems.invoke(userId)
                     .map { all -> MemoriesUiState(onThisDay = computeOnThisDay(all), seasons = buckets(all)) }
+                // People show in the Collection only with AI on, the same opt-in the rest of the
+                // grouping honours; the face crop needs the feed's original dimensions, so the use
+                // case is handed the same library flow.
+                val people = context.settingsDataStore.data
+                    .map { it[SettingsKeys.AI_FEATURES_ENABLED] == true && it[SettingsKeys.FACE_ENABLED] == true }
+                    .distinctUntilChanged()
+                    .flatMapLatest { enabled ->
+                        if (!enabled) flowOf(emptyList<PersonUi>())
+                        else observePeopleUseCase(userId, getGalleryItems.invoke(userId))
+                            .map { list -> list.mapNotNull { it.toPersonUi() } }
+                    }
+                combine(memories, people) { state, ppl -> state.copy(people = ppl) }
                     // Pin + warm the cover thumbnails so they survive the large-library cache trim and
                     // the Collection cards don't sit blank on a library too big to fully warm. Re-pin
                     // only when the cover set actually changes, not on every decrypt-driven re-emit.
@@ -103,6 +125,18 @@ class MemoriesViewModel @Inject constructor(
         }
         .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), MemoriesUiState())
+
+    /** Map a clustered person to the round-tile model, dropping any without a resolvable cover. */
+    private fun PersonSummary.toPersonUi(): PersonUi? {
+        val cover = coverPhotoKey ?: return null
+        return PersonUi(
+            personId = personId,
+            displayName = displayName,
+            coverPhotoKey = cover,
+            faceBox = faceBox?.let { FaceBox(it.left, it.top, it.right, it.bottom) },
+            faceCount = faceCount,
+        )
+    }
 
     /** Stamp the store URLs onto every cloud-only cover in this state (both the On-this-day cover
      *  items and each season cover). Local/Synced covers paint from their local uri and are left as

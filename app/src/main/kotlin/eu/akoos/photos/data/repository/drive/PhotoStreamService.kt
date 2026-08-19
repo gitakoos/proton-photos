@@ -224,6 +224,10 @@ internal fun isKnownFatalEventAnchorCode(e: Throwable): Boolean {
  */
 internal fun shouldResetEventAnchor(e: Throwable): Boolean {
     if (eu.akoos.photos.util.isTransientApiError(e)) return false
+    // Being offline is evidence about the connection, not the anchor. It reads as non-transient so a
+    // retry loop stops, but here it must still keep the anchor rather than force a full re-walk once
+    // the network returns.
+    if (eu.akoos.photos.util.isOfflineError(e)) return false
     return e is me.proton.core.network.domain.ApiException
 }
 

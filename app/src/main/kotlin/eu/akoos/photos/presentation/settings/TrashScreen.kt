@@ -92,7 +92,9 @@ import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.CloudTrashItem
 import eu.akoos.photos.presentation.common.ConfirmDialog
 import eu.akoos.photos.presentation.common.EmptyState
+import eu.akoos.photos.presentation.common.SelectionCheckPop
 import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
+import eu.akoos.photos.presentation.common.selectPressScale
 import eu.akoos.photos.presentation.settings.components.SettingsPillHeader
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.AppColorsTokens
@@ -564,6 +566,7 @@ private fun TrashPhotoCell(
     Box(
         modifier = Modifier
             .aspectRatio(1f)
+            .selectPressScale(selected)
             .clip(RoundedCornerShape(8.dp))
             .background(colors.bg2)
             .combinedClickable(onClick = onClick, onLongClick = onLongClick)
@@ -572,19 +575,18 @@ private fun TrashPhotoCell(
         content()
         if (inSelectionMode) {
             Box(Modifier.padding(4.dp).size(20.dp).align(Alignment.TopStart)) {
-                if (selected) {
+                Box(
+                    Modifier.fillMaxSize()
+                        .background(Color.Black.copy(0.3f), CircleShape)
+                        .border(1.5.dp, Color.White.copy(0.8f), CircleShape),
+                )
+                SelectionCheckPop(selected) {
                     Box(
                         Modifier.fillMaxSize().background(colors.accent, CircleShape),
                         contentAlignment = Alignment.Center,
                     ) {
                         Icon(Icons.Default.Check, null, tint = Color.White, modifier = Modifier.size(13.dp))
                     }
-                } else {
-                    Box(
-                        Modifier.fillMaxSize()
-                            .background(Color.Black.copy(0.3f), CircleShape)
-                            .border(1.5.dp, Color.White.copy(0.8f), CircleShape),
-                    )
                 }
             }
         }

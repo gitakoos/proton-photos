@@ -39,6 +39,7 @@ import eu.akoos.photos.presentation.collage.COLLAGE_MAX_PHOTOS
 import eu.akoos.photos.presentation.collage.COLLAGE_MIN_PHOTOS
 import eu.akoos.photos.presentation.collage.isVideo
 import androidx.compose.material.icons.filled.OfflinePin
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PhotoAlbum
 import androidx.compose.material.icons.filled.PrivacyTip
 import androidx.compose.material.icons.filled.SelectAll
@@ -67,6 +68,7 @@ import eu.akoos.photos.presentation.common.SelectionAction
 import eu.akoos.photos.presentation.common.allLocalOnly
 import eu.akoos.photos.presentation.common.anyCloudOnly
 import eu.akoos.photos.presentation.common.anyLocalOnly
+import eu.akoos.photos.presentation.common.anyMetadataEditable
 import eu.akoos.photos.presentation.common.favoriteSelectionAction
 import eu.akoos.photos.presentation.common.favoriteTurnsOn
 import eu.akoos.photos.presentation.common.hasDownloadable
@@ -110,6 +112,7 @@ fun rememberGallerySelectionActions(
     onDownload: () -> Unit,
     onMakeAvailableOffline: () -> Unit,
     onRequestAddToAlbum: () -> Unit,
+    onRequestAddToPerson: () -> Unit,
     onToggleFavorite: () -> Unit,
     onBackUp: () -> Unit,
     onStripMetadata: (MetadataStripConfig) -> Unit,
@@ -157,6 +160,13 @@ fun rememberGallerySelectionActions(
                 working = isAddingToAlbum,
                 enabled = !isAddingToAlbum,
                 onClick = onRequestAddToAlbum,
+            )
+        )
+        add(
+            SelectionAction(
+                icon = Icons.Default.Person,
+                label = stringResource(R.string.gallery_add_to_person),
+                onClick = onRequestAddToPerson,
             )
         )
         add(
@@ -214,9 +224,11 @@ fun rememberGallerySelectionActions(
                 )
             )
         }
-        // The editor writes exactly the device-only photos and names the count it lands on, so a
-        // mixed selection keeps the entry instead of losing it without a word.
-        if (anyLocalOnly(selectedItems)) {
+        // The editor writes device photos in place and cloud images by re-uploading a corrected copy,
+        // so the entry shows whenever the selection holds either, a cloud-only selection included. It
+        // names the count it lands on, so a mixed or partly read-only selection keeps it rather than
+        // losing it without a word.
+        if (anyMetadataEditable(selectedItems)) {
             add(
                 SelectionAction(
                     icon = Icons.Default.EditNote,

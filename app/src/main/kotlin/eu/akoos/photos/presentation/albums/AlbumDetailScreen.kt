@@ -77,6 +77,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PersonAdd
@@ -89,6 +90,7 @@ import androidx.compose.material.icons.filled.RemoveCircleOutline
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.VisibilityOff
+import eu.akoos.photos.presentation.common.CloudMetadataSaveDrawer
 import eu.akoos.photos.presentation.common.ConfirmDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -120,6 +122,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import eu.akoos.photos.presentation.gallery.CloudSaveDrawerViewModel
 import coil.compose.AsyncImage
 import kotlinx.coroutines.launch
 import androidx.compose.ui.res.stringResource
@@ -132,6 +135,7 @@ import eu.akoos.photos.presentation.common.IconBubble
 import eu.akoos.photos.presentation.common.ReturnToViewerPhoto
 import eu.akoos.photos.presentation.common.SelectionAction
 import eu.akoos.photos.presentation.common.SelectionDrawer
+import eu.akoos.photos.presentation.common.anyMetadataEditable
 import eu.akoos.photos.presentation.common.favoriteSelectionAction
 import eu.akoos.photos.presentation.common.favoriteTurnsOnForCloudPhotos
 import eu.akoos.photos.presentation.common.offlineTurnsOn
@@ -149,6 +153,7 @@ import eu.akoos.photos.presentation.theme.PillBg
 import eu.akoos.photos.presentation.theme.PillBgOpaque
 import eu.akoos.photos.presentation.theme.PillBorder
 import eu.akoos.photos.presentation.theme.StatusSynced
+import eu.akoos.photos.presentation.util.monthYearFormat
 import eu.akoos.photos.util.copySensitiveText
 
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
@@ -177,6 +182,9 @@ fun AlbumDetailScreen(
     /** Owner-only: opens the photo picker to add more photos. Carries the album's current cloud
      *  member linkIds so the picker pre-filters out photos already in the album. */
     onAddPhotosClick: (Set<String>) -> Unit = {},
+    /** Opens the metadata editor over the supplied album photos. A multi-select carries the current
+     *  selection; a whole-album long-press carries every member, each one set for all. */
+    onEditMetadata: (List<GalleryItem>) -> Unit = {},
     onBack: () -> Unit,
     viewModel: AlbumDetailViewModel = hiltViewModel(),
 ) {
@@ -225,6 +233,15 @@ fun AlbumDetailScreen(
     var showManageLinkSheet by remember { mutableStateOf(false) }
     val manageLinkSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val publicLinkState by viewModel.publicLinkState.collectAsStateWithLifecycle()
+    // Add-to-person drawer for the album selection.
+    var showAddToPersonSheet by remember { mutableStateOf(false) }
+    val addToPersonSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val albumPeople by viewModel.people.collectAsStateWithLifecycle()
+
+    // The cloud metadata save drawer's live view, shared with the timeline through the app-scoped
+    // controller, so a save started in this album shows its progress here rather than only on the feed.
+    val cloudSaveVm: CloudSaveDrawerViewModel = hiltViewModel()
+    val cloudSaveUi by cloudSaveVm.ui.collectAsStateWithLifecycle()
 
     // In selection mode, system back cancels the selection instead of popping the album.
     androidx.activity.compose.BackHandler(enabled = state.isSelectionMode) {
@@ -281,6 +298,22 @@ fun AlbumDetailScreen(
     // here is offered again.
     fun addPhotos() = onAddPhotosClick(state.photos.map { it.linkId }.toSet())
 
+    // Opens the metadata editor over the whole album, each photo typed the same way the selection's
+    // items are, so the editor's own per-item rules decide what is writable. An empty album has
+    // nothing to edit and is left alone.
+    fun editAllMetadata() {
+        if (state.photos.isEmpty()) return
+        onEditMetadata(
+            state.photos.map { p ->
+                AlbumPhotoItems.galleryItem(
+                    p,
+                    state.localItemByLinkId[p.linkId],
+                    state.localUriByLinkId[p.linkId],
+                )
+            },
+        )
+    }
+
     // An action asked for from the Albums grid arrives as an intent rather than as a raised drawer:
     // the grid offers those rows itself, so raising this screen's drawer would swap a sheet for its
     // twin. Each of them reads the album's members, which land after the screen mounts, so the
@@ -303,6 +336,7 @@ fun AlbumDetailScreen(
             AlbumOpenAction.DownloadAll -> showDownloadAllConfirm = true
             AlbumOpenAction.Slideshow -> playSlideshow()
             AlbumOpenAction.AddPhotos -> addPhotos()
+            AlbumOpenAction.EditMetadata -> editAllMetadata()
             null -> Unit
         }
     }
@@ -435,7 +469,7 @@ fun AlbumDetailScreen(
     // the map the ViewModel already holds, so the lambda only does a hash lookup per row.
     // withIndex() preserves each photo's position so the viewer opens the right one.
     val photoGroups = remember(state.photos, state.localItemByLinkId) {
-        val fmt = java.text.SimpleDateFormat("MMMM yyyy", java.util.Locale.getDefault())
+        val fmt = monthYearFormat()
         state.photos.withIndex().groupBy {
             val ms = AlbumPhotoItems.captureTimeMs(it.value, state.localItemByLinkId[it.value.linkId])
             fmt.format(java.util.Date(ms))
@@ -836,6 +870,26 @@ fun AlbumDetailScreen(
                     onClick = { showPhotoShareSheet = true },
                 )
             )
+            // Edit date + place, placed right after Share so it is reachable without scrolling the
+            // action row. The editor writes a device copy in place and re-uploads a corrected copy for a
+            // cloud image, so it shows off an own album whenever the selection holds something it can
+            // change. It stays off a shared-with-me album, where those fields belong to the owner.
+            if (!state.isSharedWithMe && anyMetadataEditable(selectedAlbumItems)) {
+                add(
+                    SelectionAction(
+                        icon = Icons.Default.EditNote,
+                        label = stringResource(R.string.metadata_editor_edit_metadata),
+                        onClick = { onEditMetadata(selectedAlbumItems) },
+                    )
+                )
+            }
+            add(
+                SelectionAction(
+                    icon = Icons.Default.PersonAdd,
+                    label = stringResource(R.string.gallery_add_to_person),
+                    onClick = { showAddToPersonSheet = true },
+                )
+            )
             // Favourite the selection. An album is where a set worth favouriting is already
             // gathered, and the cells carry the heart, so the press shows on the grid it came
             // from. Off a shared-with-me album: tag 0 belongs to the owner's photo, the same
@@ -1014,6 +1068,19 @@ fun AlbumDetailScreen(
         eu.akoos.photos.presentation.common.ThemedSnackbarHost(snackbarHostState, modifier = Modifier.align(Alignment.BottomCenter))
     }
 
+    // Add the album selection to a person, mirroring the timeline's add-to-person.
+    if (showAddToPersonSheet && state.selectedCount > 0) {
+        eu.akoos.photos.presentation.gallery.GalleryAddToPersonSheet(
+            people = albumPeople,
+            sheetState = addToPersonSheetState,
+            onPersonSelected = { personId ->
+                showAddToPersonSheet = false
+                viewModel.addSelectedToPerson(personId)
+            },
+            onDismiss = { showAddToPersonSheet = false },
+        )
+    }
+
     // Unified share drawer for a photo selection (Send to app / Public link) — mirrors the timeline
     // so an album selection shares the same way. "Share with people" is hidden (already in an album).
     if (showPhotoShareSheet && state.selectedCount > 0) {
@@ -1092,6 +1159,7 @@ fun AlbumDetailScreen(
                 if (state.isSharedWithMe) showSaveToLibraryConfirm = true
                 else showDownloadAllConfirm = true
             },
+            onEditMetadata = { editAllMetadata() },
             onRename = { showRenameSheet = true },
             onToggleHiddenFromTimeline = { viewModel.toggleHiddenFromTimeline() },
             onHide = { viewModel.hideAlbum() },
@@ -1106,6 +1174,10 @@ fun AlbumDetailScreen(
             onLeaveAlbum = { showLeaveAlbumConfirm = true },
         )
     }
+
+    // The cloud metadata save drawer follows the batch onto this screen, so a whole-album or in-album
+    // edit shows its progress here instead of only on the timeline it closed back through.
+    CloudMetadataSaveDrawer(ui = cloudSaveUi, onDismiss = { cloudSaveVm.dismiss() })
 
     if (showShareSheet) {
         if (state.isSharedWithMe) {

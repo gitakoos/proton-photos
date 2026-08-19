@@ -27,6 +27,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.provider.OpenableColumns
+import android.view.MotionEvent
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -99,11 +100,19 @@ import eu.akoos.photos.presentation.settings.ThemePalette
 import eu.akoos.photos.presentation.theme.ProtonPhotosTheme
 import eu.akoos.photos.presentation.util.LocaleOverride
 import eu.akoos.photos.data.repository.drive.PhotoStreamService
+import eu.akoos.photos.util.DeviceHealthPolicy
 import eu.akoos.photos.util.NetworkObserver
 import eu.akoos.photos.util.isBatteryLow
 import eu.akoos.photos.worker.FreeUpSpaceWorker
 import eu.akoos.photos.worker.SyncWorker
 import javax.inject.Inject
+
+/**
+ * A cross-app edit or view intent is honoured only for a content:// URI. A file:// URI could aim
+ * the app at its own private storage, so every scheme other than content is refused. Kept as a pure
+ * predicate so it is verifiable in a plain JVM unit test.
+ */
+internal fun isAcceptableExternalEditScheme(scheme: String?): Boolean = scheme == "content"
 
 @AndroidEntryPoint
 class MainActivity : AppCompatActivity() {
@@ -115,6 +124,7 @@ class MainActivity : AppCompatActivity() {
     @Inject lateinit var driveRepo: DrivePhotoRepository
     @Inject lateinit var photoStreamService: PhotoStreamService
     @Inject lateinit var networkObserver: NetworkObserver
+    @Inject lateinit var deviceHealth: DeviceHealthPolicy
     @Inject lateinit var reconcile: ReconcileSyncStateUseCase
     @Inject lateinit var pendingDeleteNotif: PendingDeleteNotificationUseCase
     @Inject lateinit var updateOrchestrator: UpdateOrchestrator
@@ -531,6 +541,7 @@ class MainActivity : AppCompatActivity() {
         val action = intent.action ?: return null
         if (action != Intent.ACTION_EDIT && action != Intent.ACTION_VIEW) return null
         val uri = intent.data ?: return null
+        if (!isAcceptableExternalEditScheme(uri.scheme)) return null
         // Prefer the intent's type; fall back to the ContentResolver (some apps omit it).
         val mimeType = intent.type
             ?: runCatching { contentResolver.getType(uri) }.getOrNull()
@@ -564,6 +575,13 @@ class MainActivity : AppCompatActivity() {
         if (!segment.isNullOrBlank() && segment.contains('.')) return segment
         val ts = System.currentTimeMillis()
         return if (isVideo) "video_$ts.mp4" else "image_$ts.jpg"
+    }
+
+    // Feed the device-health policy every touch so heavy on-device work stands aside while the user
+    // is actively using the app, then resumes shortly after they stop.
+    override fun dispatchTouchEvent(ev: MotionEvent?): Boolean {
+        deviceHealth.markInteraction()
+        return super.dispatchTouchEvent(ev)
     }
 
     override fun onStop() {

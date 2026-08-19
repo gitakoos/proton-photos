@@ -514,6 +514,215 @@ class AppDatabaseMigrationTest {
     }
 
     @Test
+    fun migrate_v23_to_v24_createsFaceScanTable_andBackfillsFromExistingFaces() {
+        // At v23 the face table already exists; the migration seeds face_scan from photos that already
+        // carry a face, so an existing library is not re-scanned. A minimal face shape covers the
+        // userId + photoKey the backfill reads.
+        db.execSQL(
+            "CREATE TABLE `face` (`id` TEXT NOT NULL, `userId` TEXT NOT NULL, `photoKey` TEXT NOT NULL, PRIMARY KEY(`id`))"
+        )
+        db.execSQL("INSERT INTO face (id, userId, photoKey) VALUES ('f1','u1','link-1')")
+        db.execSQL("INSERT INTO face (id, userId, photoKey) VALUES ('f2','u1','link-1')")
+        db.execSQL("INSERT INTO face (id, userId, photoKey) VALUES ('f3','u2','link-9')")
+
+        Migrations.MIGRATION_23_24.migrate(db)
+
+        // Two faces on one photo collapse to one marker; the other account's photo is its own marker.
+        db.query("SELECT COUNT(*) FROM face_scan").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals("backfilled distinct (user, photo) markers", 2, cur.getInt(0))
+        }
+
+        // New markers are accepted and the composite key dedups per (user, photo).
+        db.execSQL("INSERT OR REPLACE INTO face_scan (userId, photoKey) VALUES ('u1','link-1')")
+        db.execSQL("INSERT INTO face_scan (userId, photoKey) VALUES ('u2','link-1')")
+        db.query("SELECT COUNT(*) FROM face_scan").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals("the duplicate marker collapsed; the new one was added", 3, cur.getInt(0))
+        }
+
+        // The sign-out wipe and clear-index are scoped to one account, leaving another's markers alone.
+        db.execSQL("DELETE FROM face_scan WHERE userId = 'u1'")
+        db.query("SELECT COUNT(*) FROM face_scan WHERE userId = 'u1'").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals("one account's markers cleared", 0, cur.getInt(0))
+        }
+        db.query("SELECT COUNT(*) FROM face_scan WHERE userId = 'u2'").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals("the other account's markers remain", 2, cur.getInt(0))
+        }
+    }
+
+    @Test
+    fun migrate_v24_to_v25_addsRejectedColumn_andPersonManualPhotoTable() {
+        // The migration ALTERs the face table (a rejected flag) and creates the manual-photo table, so
+        // a minimal face shape must exist first.
+        db.execSQL(
+            "CREATE TABLE `face` (`id` TEXT NOT NULL, `userId` TEXT NOT NULL, `photoKey` TEXT NOT NULL, PRIMARY KEY(`id`))"
+        )
+        db.execSQL("INSERT INTO face (id, userId, photoKey) VALUES ('f1','u1','link-1')")
+
+        Migrations.MIGRATION_24_25.migrate(db)
+
+        // An existing face defaults to not-rejected, so a rescan keeps clustering it until the user
+        // says otherwise.
+        db.query("SELECT rejected FROM face WHERE id = 'f1'").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals("existing face defaults to not rejected", 0, cur.getInt(0))
+        }
+
+        // The manual-photo table exists and its composite key dedups per (user, name, photo).
+        db.execSQL("INSERT INTO person_manual_photo (userId, personName, photoKey) VALUES ('u1','Akos','link-2')")
+        db.execSQL("INSERT OR IGNORE INTO person_manual_photo (userId, personName, photoKey) VALUES ('u1','Akos','link-2')")
+        db.query("SELECT COUNT(*) FROM person_manual_photo").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals("the duplicate manual membership collapsed", 1, cur.getInt(0))
+        }
+        // The same photo under a different name is a separate membership, so renaming can re-key it.
+        db.execSQL("INSERT INTO person_manual_photo (userId, personName, photoKey) VALUES ('u1','Bela','link-2')")
+        db.query("SELECT COUNT(*) FROM person_manual_photo").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals("a different name is a separate membership", 2, cur.getInt(0))
+        }
+    }
+
+    @Test
+    fun migrate_v25_to_v26_addsManualNameColumn_nullByDefault() {
+        db.execSQL(
+            "CREATE TABLE `face` (`id` TEXT NOT NULL, `userId` TEXT NOT NULL, `photoKey` TEXT NOT NULL, PRIMARY KEY(`id`))"
+        )
+        db.execSQL("INSERT INTO face (id, userId, photoKey) VALUES ('f1','u1','link-1')")
+
+        Migrations.MIGRATION_25_26.migrate(db)
+
+        // An existing face is unconfirmed (null), so it is not treated as anchoring any person.
+        db.query("SELECT manualName FROM face WHERE id = 'f1'").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertTrue("existing face has no confirmed name", cur.isNull(0))
+        }
+        // The column accepts a confirmed name.
+        db.execSQL("UPDATE face SET manualName = 'Akos' WHERE id = 'f1'")
+        db.query("SELECT manualName FROM face WHERE id = 'f1'").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals("a confirmed name is stored", "Akos", cur.getString(0))
+        }
+    }
+
+    @Test
+    fun migrate_v26_to_v27_addsNotPersonTable() {
+        Migrations.MIGRATION_26_27.migrate(db)
+        // The table exists and its composite key dedups a (user, name, face) rejection.
+        db.execSQL("INSERT INTO not_person (userId, personName, faceId) VALUES ('u1','Akos','face-1')")
+        db.execSQL("INSERT OR IGNORE INTO not_person (userId, personName, faceId) VALUES ('u1','Akos','face-1')")
+        db.query("SELECT COUNT(*) FROM not_person").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals("the duplicate rejection collapsed", 1, cur.getInt(0))
+        }
+        // The same face rejected for a different person is its own row.
+        db.execSQL("INSERT INTO not_person (userId, personName, faceId) VALUES ('u1','Bela','face-1')")
+        db.query("SELECT COUNT(*) FROM not_person").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals("a different person is a separate rejection", 2, cur.getInt(0))
+        }
+    }
+
+    @Test
+    fun migrate_v28_to_v29_addsPersonCoverTable_oneCoverPerName() {
+        Migrations.MIGRATION_28_29.migrate(db)
+        // One cover per (user, name): re-picking replaces rather than piling up rows.
+        db.execSQL("INSERT INTO person_cover (userId, personName, photoKey) VALUES ('u1','Akos','link-1')")
+        db.execSQL("INSERT OR REPLACE INTO person_cover (userId, personName, photoKey) VALUES ('u1','Akos','link-2')")
+        db.query("SELECT COUNT(*), MAX(photoKey) FROM person_cover WHERE userId = 'u1' AND personName = 'Akos'")
+            .use { cur ->
+                assertTrue(cur.moveToFirst())
+                assertEquals("the person keeps a single cover", 1, cur.getInt(0))
+                assertEquals("the latest pick won", "link-2", cur.getString(1))
+            }
+        // A different name is a separate cover, so renaming can re-key it.
+        db.execSQL("INSERT INTO person_cover (userId, personName, photoKey) VALUES ('u1','Bela','link-1')")
+        db.query("SELECT COUNT(*) FROM person_cover").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals("a different name is a separate cover", 2, cur.getInt(0))
+        }
+    }
+
+    @Test
+    fun migrate_v29_to_v30_createsPendingMetadataEditTable_replacesOnLinkIdPk_andKeepsEmptyVersusNull() {
+        Migrations.MIGRATION_29_30.migrate(db)
+
+        // The table exists and accepts a row shaped exactly like PendingMetadataEditEntity, including
+        // the nullable columns left NULL on a cloud-only, unchanged-place edit.
+        db.execSQL(
+            "INSERT INTO pending_metadata_edit " +
+                "(linkId, userId, deviceUri, newCaptureMs, locationMode, lat, lng, description, artist, copyright, enqueuedAt) " +
+                "VALUES ('link-1','u1',NULL,NULL,'UNCHANGED',NULL,NULL,NULL,NULL,NULL,10)"
+        )
+        // A second edit for the same photo REPLACES the first (linkId is the primary key), so a
+        // re-enqueue never piles up two pending edits for one photo.
+        db.execSQL(
+            "INSERT OR REPLACE INTO pending_metadata_edit " +
+                "(linkId, userId, deviceUri, newCaptureMs, locationMode, lat, lng, description, artist, copyright, enqueuedAt) " +
+                "VALUES ('link-1','u1','content://media/7',1700,'SET',47.5,19.05,'','a','c',20)"
+        )
+
+        db.query(
+            "SELECT COUNT(*), MAX(locationMode), MAX(lat), MAX(lng), MAX(deviceUri), MAX(enqueuedAt) " +
+                "FROM pending_metadata_edit WHERE linkId = 'link-1'"
+        ).use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals("the linkId is a primary key, so only one pending edit survives", 1, cur.getInt(0))
+            assertEquals("the replacement's SET place won", "SET", cur.getString(1))
+            assertEquals(47.5, cur.getDouble(2), 0.0)
+            assertEquals(19.05, cur.getDouble(3), 0.0)
+            assertEquals("content://media/7", cur.getString(4))
+            assertEquals(20L, cur.getLong(5))
+        }
+
+        // An empty text tag is stored as "", distinct from a NULL "leave unchanged".
+        db.query("SELECT description, artist FROM pending_metadata_edit WHERE linkId = 'link-1'").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals("an empty tag clears that field and stays an empty string, not NULL", "", cur.getString(0))
+            assertEquals("a", cur.getString(1))
+        }
+    }
+
+    @Test
+    fun migrate_v30_to_v31_bringsPendingMetadataEditToTheResumeStateShape() {
+        // Simulate the unreleased v30 that created pending_metadata_edit WITHOUT the newLinkId column,
+        // the shape a test build already left on device, and seed a row so the drop is observable.
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `pending_metadata_edit` (" +
+                "`linkId` TEXT NOT NULL, `userId` TEXT NOT NULL, `deviceUri` TEXT, " +
+                "`newCaptureMs` INTEGER, `locationMode` TEXT NOT NULL, `lat` REAL, `lng` REAL, " +
+                "`description` TEXT, `artist` TEXT, `copyright` TEXT, `enqueuedAt` INTEGER NOT NULL, " +
+                "PRIMARY KEY(`linkId`))"
+        )
+        db.execSQL(
+            "INSERT INTO pending_metadata_edit " +
+                "(linkId, userId, deviceUri, newCaptureMs, locationMode, lat, lng, description, artist, copyright, enqueuedAt) " +
+                "VALUES ('stale','u1',NULL,NULL,'UNCHANGED',NULL,NULL,NULL,NULL,NULL,10)"
+        )
+
+        Migrations.MIGRATION_30_31.migrate(db)
+
+        // The transient queue is recreated, so the pre-migration row is gone (an empty queue is the
+        // correct state to arrive at) and the table now carries the resume-state newLinkId column.
+        db.query("SELECT COUNT(*) FROM pending_metadata_edit").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals("the transient queue is recreated empty", 0, cur.getInt(0))
+        }
+        db.execSQL(
+            "INSERT INTO pending_metadata_edit " +
+                "(linkId, userId, deviceUri, newCaptureMs, locationMode, lat, lng, description, artist, copyright, enqueuedAt, newLinkId) " +
+                "VALUES ('link-1','u1',NULL,NULL,'UNCHANGED',NULL,NULL,NULL,NULL,NULL,10,'new-link-9')"
+        )
+        db.query("SELECT newLinkId FROM pending_metadata_edit WHERE linkId = 'link-1'").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals("the recorded upload link is stored so a resume skips re-uploading", "new-link-9", cur.getString(0))
+        }
+    }
+
+    @Test
     fun migrate_v2_through_v4_chain_appliesBothMigrations() {
         // Seed a pure v2 row.
         db.execSQL(

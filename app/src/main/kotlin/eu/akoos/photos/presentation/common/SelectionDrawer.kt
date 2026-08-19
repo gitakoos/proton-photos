@@ -330,10 +330,14 @@ private fun SelectionDrawerBody(
 
             override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity {
                 if (reveal.value <= 0f || reveal.value >= expandedTravelPx) return Velocity.Zero
-                reveal.animateTo(
-                    if (reveal.value > expandedTravelPx / 2f) expandedTravelPx else 0f,
-                    tween(240),
-                )
+                // Same reason as the drag settle: run it on the drawer's own scope so the fling
+                // handoff finishes settling even after the scroll gesture that raised it has ended.
+                scope.launch {
+                    reveal.animateTo(
+                        if (reveal.value > expandedTravelPx / 2f) expandedTravelPx else 0f,
+                        tween(240),
+                    )
+                }
                 return Velocity.Zero
             }
         }
@@ -375,7 +379,10 @@ private fun SelectionDrawerBody(
                 reveal.value > expandedTravelPx / 2f -> expandedTravelPx
                 else -> 0f
             }
-            reveal.animateTo(target, tween(240))
+            // Settle on the drawer's own scope rather than the drag gesture's: the gesture scope does
+            // not outlive the release, so an animateTo left in it is cancelled mid-settle and the
+            // drawer stops wherever the finger let go instead of snapping to a detent.
+            scope.launch { reveal.animateTo(target, tween(240)) }
         },
     )
 

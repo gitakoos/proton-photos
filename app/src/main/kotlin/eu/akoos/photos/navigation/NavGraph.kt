@@ -86,6 +86,10 @@ import eu.akoos.photos.presentation.folders.DeviceFolderOpenAction
 import eu.akoos.photos.presentation.gallery.GalleryScreen
 import eu.akoos.photos.presentation.hidden.HiddenAlbumScreen
 import eu.akoos.photos.presentation.offline.OfflinePhotosScreen
+import eu.akoos.photos.presentation.people.PeopleScreen
+import eu.akoos.photos.presentation.people.ReviewSuggestionsScreen
+import eu.akoos.photos.presentation.person.PersonDetailScreen
+import eu.akoos.photos.presentation.person.PersonDetailViewModel
 import eu.akoos.photos.presentation.memories.MemoriesScreen
 import eu.akoos.photos.presentation.memories.MemoryCategory
 import eu.akoos.photos.presentation.memories.MemoryCategoryScreen
@@ -95,6 +99,8 @@ import eu.akoos.photos.presentation.onboarding.OnboardingScreen
 import eu.akoos.photos.presentation.settings.AboutScreen
 import eu.akoos.photos.presentation.settings.AccountScreen
 import eu.akoos.photos.presentation.settings.FaqScreen
+import eu.akoos.photos.presentation.settings.AiSettingsScreen
+import eu.akoos.photos.presentation.settings.FaceRecognitionScreen
 import eu.akoos.photos.presentation.settings.AppearanceSettingsScreen
 import eu.akoos.photos.presentation.settings.LandingTabScreen
 import eu.akoos.photos.presentation.settings.LanguageSettingsScreen
@@ -146,6 +152,8 @@ sealed class Screen(val route: String) {
     data object BackupBehavior : Screen("backup_behavior")
     data object BackupNetwork : Screen("backup_network")
     data object StorageSettings : Screen("storage_settings")
+    data object AiSettings : Screen("ai_settings")
+    data object FaceRecognition : Screen("face_recognition")
     data object FreeUpSpace : Screen("free_up_space")
     data object PrivacySettings : Screen("privacy_settings")
     data object SecuritySettings : Screen("security_settings")
@@ -198,6 +206,17 @@ sealed class Screen(val route: String) {
         fun create(type: String) = "memory_category/$type"
     }
     data object DayDetail : Screen("day_detail")
+    data object People : Screen("people")
+    data object ReviewSuggestions : Screen("review_suggestions")
+    data object PersonDetail : Screen("person_detail/{personId}") {
+        fun create(personId: Long) = "person_detail/$personId"
+    }
+    data object PersonPhotoPicker : Screen("person_photo_picker/{personId}") {
+        fun create(personId: Long) = "person_photo_picker/$personId"
+    }
+    data object FindMorePhotos : Screen("find_more_photos/{personId}") {
+        fun create(personId: Long) = "find_more_photos/$personId"
+    }
 }
 
 enum class StartupRoute { Unknown, NotLoggedIn, NeedsOnboarding, Ready }
@@ -667,6 +686,23 @@ fun NavGraph(
                         ),
                     )
                 },
+                onPersonClick = { personId -> navController.navigate(Screen.PersonDetail.create(personId)) },
+                onSeeAllPeople = { navController.navigate(Screen.People.route) },
+            )
+        }
+
+        composable(Screen.People.route) {
+            PeopleScreen(
+                onBack = { navController.popBackStack() },
+                onPersonClick = { personId -> navController.navigate(Screen.PersonDetail.create(personId)) },
+                onOpenAiSettings = { navController.navigate(Screen.AiSettings.route) },
+                onReviewSuggestions = { navController.navigate(Screen.ReviewSuggestions.route) },
+            )
+        }
+        composable(Screen.ReviewSuggestions.route) {
+            ReviewSuggestionsScreen(
+                onBack = { navController.popBackStack() },
+                onOpenCluster = { personId -> navController.navigate(Screen.PersonDetail.create(personId)) },
             )
         }
 
@@ -717,6 +753,94 @@ fun NavGraph(
             }
         }
 
+        composable(
+            Screen.PersonDetail.route,
+            arguments = listOf(navArgument("personId") { type = NavType.LongType }),
+        ) { backStackEntry ->
+            val personId = backStackEntry.arguments?.getLong("personId") ?: -1L
+            val personVm = hiltViewModel<PersonDetailViewModel>()
+            LaunchedEffect(personId) { personVm.load(personId); personVm.loadMergeSuggestion(personId) }
+            val personState by personVm.uiState.collectAsStateWithLifecycle()
+            val mergeCandidates by personVm.mergeCandidates.collectAsStateWithLifecycle()
+            val mergeSuggestion by personVm.mergeSuggestion.collectAsStateWithLifecycle()
+            val personMessage by personVm.message.collectAsStateWithLifecycle()
+            val personCtx = androidx.compose.ui.platform.LocalContext.current
+            LaunchedEffect(personMessage) {
+                personMessage?.let {
+                    android.widget.Toast.makeText(personCtx, personCtx.getString(it), android.widget.Toast.LENGTH_SHORT).show()
+                    personVm.clearMessage()
+                }
+            }
+            PersonDetailScreen(
+                state = personState,
+                mergeCandidates = mergeCandidates,
+                onLoadMergeCandidates = { personVm.loadMergeCandidates(personId) },
+                onMergeName = { name -> personVm.mergeWith(personId, name); navController.popBackStack() },
+                onIgnorePerson = { personVm.ignorePerson(personId) { navController.popBackStack() } },
+                onBack = { navController.popBackStack() },
+                onOpenPhoto = { item ->
+                    // Same viewer the timeline / location detail open, over this person's whole set
+                    // so the user can swipe between their photos. These are the user's own library,
+                    // not an album's members, so viewerFromAlbum stays false.
+                    val items = personState.items
+                    selectedViewerItems = items
+                    selectedViewerIndex = items.indexOfFirst { it.stableId == item.stableId }.coerceAtLeast(0)
+                    selectedViewerHiddenLinkIds = emptySet()
+                    viewerFromAlbum = false
+                    navController.navigate(Screen.Viewer.route)
+                },
+                onRename = { name -> personVm.rename(personId, name) },
+                onAddPhotos = { navController.navigate(Screen.PersonPhotoPicker.create(personId)) },
+                onRemovePhotos = { keys -> personVm.removePhotos(personId, keys) },
+                onSetCover = { key -> personVm.setCover(personId, key) },
+                mergeSuggestion = mergeSuggestion,
+                onAcceptSuggestion = { candidateId -> personVm.acceptMergeSuggestion(personId, candidateId) },
+                onDismissSuggestion = { candidateId -> personVm.dismissMergeSuggestion(personId, candidateId) },
+                onLeaveSuggestion = { personVm.clearMergeSuggestion() },
+                onFindMore = { navController.navigate(Screen.FindMorePhotos.create(personId)) },
+            )
+        }
+
+        composable(
+            Screen.PersonPhotoPicker.route,
+            arguments = listOf(navArgument("personId") { type = NavType.LongType }),
+        ) { backStackEntry ->
+            // The album picker in "return" mode: it hands the picked photos to the person instead of
+            // adding them to an album. A fresh ViewModel here just performs the write; the person
+            // detail in the back stack re-observes and shows them on return.
+            val personId = backStackEntry.arguments?.getLong("personId") ?: -1L
+            val personVm = hiltViewModel<PersonDetailViewModel>()
+            LaunchedEffect(personId) { personVm.loadKeys(personId) }
+            val excludeKeys by personVm.keysForPicker.collectAsStateWithLifecycle()
+            AlbumPhotoPickerScreen(
+                titleRes = R.string.person_add_photos_title,
+                excludeKeys = excludeKeys,
+                onBack = { navController.popBackStack() },
+                onPick = { picked ->
+                    personVm.addPhotos(personId, picked.map { it.stableId })
+                    navController.popBackStack()
+                },
+            )
+        }
+
+        composable(
+            Screen.FindMorePhotos.route,
+            arguments = listOf(navArgument("personId") { type = NavType.LongType }),
+        ) { backStackEntry ->
+            val personId = backStackEntry.arguments?.getLong("personId") ?: -1L
+            val findVm = hiltViewModel<eu.akoos.photos.presentation.person.FindMorePhotosViewModel>()
+            LaunchedEffect(personId) { findVm.start(personId) }
+            val findState by findVm.uiState.collectAsStateWithLifecycle()
+            eu.akoos.photos.presentation.person.FindMorePhotosScreen(
+                state = findState,
+                onBack = { navController.popBackStack() },
+                onAdd = { faceIds ->
+                    findVm.addSelected(personId, faceIds)
+                    navController.popBackStack()
+                },
+            )
+        }
+
         composable(Screen.Viewer.route) { backStackEntry ->
             // When the viewer was opened from an album, propagate the album linkId to the
             // viewer + editor so edited/renamed copies land back in the same album.
@@ -760,6 +884,7 @@ fun NavGraph(
                     metadataEditorRequest = MetadataEditorRequest(listOf(item), readOnlyAlbum)
                     navController.navigate(Screen.MetadataEditor.route)
                 },
+                onOpenPerson = { personId -> navController.navigate(Screen.PersonDetail.create(personId)) },
             )
         }
 
@@ -1024,6 +1149,15 @@ fun NavGraph(
                         pickerExcludeLinkIds = currentLinkIds
                         navController.navigate(Screen.AlbumPhotoPicker.route)
                     },
+                    onEditMetadata = { items ->
+                        // A photo reached through an album someone shared with the user is read-only;
+                        // an own album's photos take the editor's own per-item rules.
+                        metadataEditorRequest = MetadataEditorRequest(
+                            items,
+                            isReadOnlyAlbum = selectedAlbum?.sharedByEmail != null,
+                        )
+                        navController.navigate(Screen.MetadataEditor.route)
+                    },
                     onBack = { navController.popBackStack() },
                 )
             }
@@ -1051,6 +1185,7 @@ fun NavGraph(
                 onSyncSettingsClick       = { navController.navigate(Screen.SyncSettings.route) },
                 onActivityClick           = { navController.navigate(Screen.Activity.route) },
                 onStorageClick            = { navController.navigate(Screen.StorageSettings.route) },
+                onAiClick                 = { navController.navigate(Screen.AiSettings.route) },
                 onPrivacySecurityClick    = { navController.navigate(Screen.PrivacySecuritySettings.route) },
                 onPermissionsClick        = { navController.navigate(Screen.Permissions.route) },
                 onNotificationsClick      = { navController.navigate(Screen.NotificationSettings.route) },
@@ -1186,6 +1321,20 @@ fun NavGraph(
         composable(Screen.FreeUpSpace.route) {
             eu.akoos.photos.presentation.settings.FreeUpSpaceScreen(
                 onBack = { navController.popBackStack() },
+            )
+        }
+
+        composable(Screen.AiSettings.route) {
+            AiSettingsScreen(
+                onBack = { navController.popBackStack() },
+                onFaceRecognitionClick = { navController.navigate(Screen.FaceRecognition.route) },
+            )
+        }
+
+        composable(Screen.FaceRecognition.route) {
+            FaceRecognitionScreen(
+                onBack = { navController.popBackStack() },
+                onSeeAllPeople = { navController.navigate(Screen.People.route) },
             )
         }
 
@@ -1410,12 +1559,14 @@ fun NavGraph(
                     }
                 },
                 onOpenOffline = { navController.navigate(Screen.Offline.route) },
+                onOpenPeople = { navController.navigate(Screen.People.route) },
                 onEditMetadata = { selection ->
                     // Search runs over the user's own library, never an album someone shared with
                     // them, so the editor's own per-item rules decide what is writable.
                     metadataEditorRequest = MetadataEditorRequest(selection, isReadOnlyAlbum = false)
                     navController.navigate(Screen.MetadataEditor.route)
                 },
+                onOpenPerson = { personId -> navController.navigate(Screen.PersonDetail.create(personId)) },
             )
         }
 

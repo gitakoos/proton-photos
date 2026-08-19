@@ -141,6 +141,7 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
         CachePruneWorker.schedule(WorkManager.getInstance(this))
         scheduleUpdateCheck()
         seedAlbumOptInFromBucketMap()
+        migrateOcrConsentToAiFeatures()
         importPendingAlbumAdds()
         recoverMirrorOverwrites()
         registerCacheCleanupOnBackground()
@@ -260,6 +261,25 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
                     p[SettingsKeys.ALBUM_OPT_IN_MIGRATED] = true
                 }
                 Log.d("AlbumOptInMigration", "Seeded album opt-in list with ${existingBucketNames.size} folders from ALBUM_BUCKET_MAP")
+            }
+        }
+    }
+
+    /**
+     * One-shot migration onto the new master AI-features gate ([SettingsKeys.AI_FEATURES_ENABLED]): a
+     * user who already accepted the text-detection model keeps Copy text working, so their consent
+     * pre-enables the gate. Only runs while the gate has never been set, which is its own idempotency:
+     * once it (or the user) writes the key the check is skipped, and a later turn-off is never undone.
+     * New installs have no OCR consent, so the gate stays absent (OFF).
+     */
+    private fun migrateOcrConsentToAiFeatures() {
+        appScope.launch {
+            runCatching {
+                val prefs = settingsDataStore.data.first()
+                if (prefs[SettingsKeys.AI_FEATURES_ENABLED] != null) return@runCatching
+                if (prefs[SettingsKeys.OCR_MODEL_DOWNLOAD_ALLOWED] == true) {
+                    settingsDataStore.edit { it[SettingsKeys.AI_FEATURES_ENABLED] = true }
+                }
             }
         }
     }

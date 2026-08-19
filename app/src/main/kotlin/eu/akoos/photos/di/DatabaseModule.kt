@@ -52,9 +52,16 @@ import eu.akoos.photos.data.db.Migrations
 import eu.akoos.photos.data.db.dao.AlbumPhotoMembershipDao
 import eu.akoos.photos.data.db.dao.CloudAlbumDao
 import eu.akoos.photos.data.db.dao.DayMetaDao
+import eu.akoos.photos.data.db.dao.FaceDao
+import eu.akoos.photos.data.db.dao.FaceScanDao
 import eu.akoos.photos.data.db.dao.ListingSweepSnapshotDao
 import eu.akoos.photos.data.db.dao.LocalTagDao
 import eu.akoos.photos.data.db.dao.PerceptualHashDao
+import eu.akoos.photos.data.db.dao.NotPersonDao
+import eu.akoos.photos.data.db.dao.PersonDao
+import eu.akoos.photos.data.db.dao.PersonCoverDao
+import eu.akoos.photos.data.db.dao.PendingMetadataEditDao
+import eu.akoos.photos.data.db.dao.PersonManualPhotoDao
 import eu.akoos.photos.data.db.dao.PhotoListingDao
 import eu.akoos.photos.data.db.dao.PhotoLocationDao
 import eu.akoos.photos.data.db.dao.SyncStateDao
@@ -165,7 +172,36 @@ abstract class DatabaseModule {
 
         @Provides
         @Singleton
+        fun providePendingMetadataEditDao(db: AppDatabase): PendingMetadataEditDao =
+            db.pendingMetadataEditDao()
+
+        @Provides
+        @Singleton
         fun provideListingSweepSnapshotDao(db: AppDatabase): ListingSweepSnapshotDao =
             db.listingSweepSnapshotDao()
+
+        @Provides
+        @Singleton
+        fun provideFaceDao(db: AppDatabase): FaceDao = db.faceDao()
+
+        @Provides
+        @Singleton
+        fun providePersonDao(db: AppDatabase): PersonDao = db.personDao()
+
+        @Provides
+        @Singleton
+        fun provideFaceScanDao(db: AppDatabase): FaceScanDao = db.faceScanDao()
+
+        @Provides
+        @Singleton
+        fun providePersonManualPhotoDao(db: AppDatabase): PersonManualPhotoDao = db.personManualPhotoDao()
+
+        @Provides
+        @Singleton
+        fun provideNotPersonDao(db: AppDatabase): NotPersonDao = db.notPersonDao()
+
+        @Provides
+        @Singleton
+        fun providePersonCoverDao(db: AppDatabase): PersonCoverDao = db.personCoverDao()
     }
 }

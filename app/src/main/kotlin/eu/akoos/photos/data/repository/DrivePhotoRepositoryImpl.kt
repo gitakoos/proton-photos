@@ -92,6 +92,10 @@ class DrivePhotoRepositoryImpl @Inject constructor(
     private val cloudGpsBackfillScheduler: CloudGpsBackfillScheduler,
     private val videoDurationBackfillScheduler: VideoDurationBackfillScheduler,
     private val localExifBackfillScheduler: LocalExifBackfillScheduler,
+    private val faceIndexingScheduler: eu.akoos.photos.data.face.FaceIndexingScheduler,
+    private val faceDao: eu.akoos.photos.data.db.dao.FaceDao,
+    private val personDao: eu.akoos.photos.data.db.dao.PersonDao,
+    private val faceScanDao: eu.akoos.photos.data.db.dao.FaceScanDao,
     private val photoListingDao: PhotoListingDao,
     private val listingSweepSnapshotDao: ListingSweepSnapshotDao,
     private val syncStateDao: SyncStateDao,
@@ -209,6 +213,9 @@ class DrivePhotoRepositoryImpl @Inject constructor(
 
     override suspend fun getAlbumIdsByPhoto(userId: UserId): Map<String, Set<String>> =
         albumService.getAlbumIdsByPhoto(userId)
+
+    override suspend fun getVerifiedAlbumIdsByPhoto(userId: UserId): Map<String, Set<String>> =
+        albumService.getVerifiedAlbumIdsByPhoto(userId)
 
     /**
      * Routed the same way as the add: an album shared with this user sits on the sharer's volume,
@@ -469,6 +476,13 @@ class DrivePhotoRepositoryImpl @Inject constructor(
         // sign-out route reaches this method (explicit sign-out, force-logout, 2FA and key-check
         // failures all converge on onAccountDisabled), so this is the one place that covers them.
         runCatching { streamService.cancelRefreshFor(userId) }
+        // Stop the background face-indexing walk and drop its in-session state BEFORE the rows below
+        // are wiped, so it is already standing down when the wipe lands and writes no face for the
+        // account that is leaving. Face embeddings are biometric data, so the rows go with the session.
+        runCatching { faceIndexingScheduler.reset() }
+        runCatching { faceDao.clearForUser(userId.id) }
+        runCatching { personDao.clearForUser(userId.id) }
+        runCatching { faceScanDao.clearForUser(userId.id) }
         // Wipe all plaintext key material before the user's tokens disappear, so even if the
         // process keeps running afterwards a heap inspection can't pull keys from this Singleton.
         shareService.wipeKeyCache()
@@ -572,5 +586,9 @@ class DrivePhotoRepositoryImpl @Inject constructor(
 
     override suspend fun backfillLocalExif(userId: UserId) {
         localExifBackfillScheduler.backfillAll(userId)
+    }
+
+    override suspend fun backfillFaces(userId: UserId) {
+        faceIndexingScheduler.indexAll(userId)
     }
 }

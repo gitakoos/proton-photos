@@ -36,6 +36,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.IOException
 import java.net.SocketTimeoutException
+import java.net.UnknownHostException
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.time.Duration.Companion.milliseconds
 
@@ -101,15 +102,43 @@ class RetryWithBackoffTest {
     }
 
     @Test
-    fun `connectivity ApiResult errors are transient`() {
-        assertTrue(isTransientApiError(ApiException(ApiResult.Error.NoInternet())))
+    fun `Connection and Timeout ApiResult errors are transient`() {
         assertTrue(isTransientApiError(ApiException(ApiResult.Error.Connection(false))))
         assertTrue(isTransientApiError(ApiException(ApiResult.Error.Timeout(false))))
     }
 
     @Test
+    fun `no-network errors are NOT transient so an offline device fails fast instead of spinning`() {
+        // #100: a DNS-resolution failure (raw UnknownHostException) or an explicit NoInternet means
+        // there is no route right now, not a transient server blip. Retrying in a tight backoff loop
+        // across every concurrent caller only spins the radio and drains the battery (flagged on
+        // aggressive OEMs); the network-constrained worker / content-observer re-arm resumes the work
+        // once connectivity actually returns.
+        assertFalse(isTransientApiError(UnknownHostException("Unable to resolve host: No address associated")))
+        assertFalse(isTransientApiError(ApiException(ApiResult.Error.NoInternet())))
+    }
+
+    @Test
+    fun `an http error wrapping UnknownHostException as its cause is NOT transient`() {
+        // The wrapped-cause branch still retries a generic network IOException, but a wrapped
+        // host-resolution failure is "no network", not a transient blip, so it fails fast.
+        val wrapped = ApiException(ApiResult.Error.Http(404, "wrapped", cause = UnknownHostException("no address")))
+        assertFalse(isTransientApiError(wrapped))
+    }
+
+    @Test
+    fun `a Connection error caused by host resolution failure is NOT transient`() {
+        // ProtonCore maps a raw UnknownHostException to Connection(cause = UHE), so this is the shape
+        // an offline Proton API call actually throws. It must fail fast like a raw UnknownHostException,
+        // not spin the backoff loop, while a plain Connection blip (no UHE cause) still retries.
+        val offline = ApiException(ApiResult.Error.Connection(false, cause = UnknownHostException("no address")))
+        assertFalse(isTransientApiError(offline))
+        assertTrue(isTransientApiError(ApiException(ApiResult.Error.Connection(false))))
+    }
+
+    @Test
     fun `http error whose cause is an IOException is transient`() {
-        // A 4xx that wraps a network IOException as its cause still retries — the cause check
+        // A 4xx that wraps a network IOException as its cause still retries: the cause check
         // catches the wrapped-network case the httpCode branch alone would reject.
         val wrapped = ApiException(ApiResult.Error.Http(404, "wrapped", cause = IOException("reset")))
         assertTrue(isTransientApiError(wrapped))

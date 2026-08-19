@@ -49,7 +49,7 @@ data class OcrModelAsset(
  * A stage of the reader that can be put on the device on its own.
  *
  * The split is deliberate. Finding where the words are costs 4.5 MB; turning those regions into
- * characters costs another 16.4 MB, and a caller that only wants outlines should never be made to
+ * characters costs another 8.7 MB, and a caller that only wants outlines should never be made to
  * pay for the second. Each component is resolved, verified and fetched as a unit.
  */
 enum class OcrModelComponent {
@@ -71,11 +71,14 @@ object OcrModelAssets {
         sha256 = "d7fe3ea74652890722c0f4d02458b7261d9f5ae6c92904d05707c9eb155c7924",
     )
 
-    /** The SVTR network that turns one cropped line into characters. */
+    /** The SVTR network that turns one cropped line into characters, trained on the Latin script (45
+     *  languages including Hungarian) rather than the full multilingual set, so its alphabet is small
+     *  and its accuracy on Latin text high. Reads the full Latin accent set, the older multilingual
+     *  network could not represent every Hungarian letter. */
     val RECOGNITION = OcrModelAsset(
-        fileName = "rec.onnx",
-        sizeBytes = 16_517_247L,
-        sha256 = "bf66820f48fa99f779974c4df78e5274a9d8e0458c4137e8c5357e40e2c3faf2",
+        fileName = "rec_latin.onnx",
+        sizeBytes = 8_064_539L,
+        sha256 = "995b0f5f28d2073896a78c03b5b863eae6af3744bafa0245b8522beea6994927",
     )
 
     /** The classifier that says whether a cropped line is upside down. */
@@ -91,9 +94,9 @@ object OcrModelAssets {
      * characters. It is pinned and verified exactly like the networks are.
      */
     val DICTIONARY = OcrModelAsset(
-        fileName = "ppocrv5_dict.txt",
-        sizeBytes = 74_012L,
-        sha256 = "d1979e9f794c464c0d2e0b70a7fe14dd978e9dc644c0e71f14158cdf8342af1b",
+        fileName = "ppocrv5_latin_dict.txt",
+        sizeBytes = 2_616L,
+        sha256 = "ccbcc45730b3fbbd9050c5bc74db6a99067141ef1035e3d14889a84a6b9b1aff",
     )
 
     /** What [component] is made of, in the order the files are fetched. */
@@ -116,10 +119,10 @@ object OcrModelAssets {
      * models change on their own schedule and every app version that expects these exact bytes
      * points at the same immutable assets.
      */
-    const val RELEASE_TAG = "ocr-models-v1"
+    const val RELEASE_TAG = "v1"
 
     /** Where [REQUIRED] is fetched from; a file name appends directly to it. */
-    const val BASE_URL = "https://github.com/gitakoos/proton-photos/releases/download/$RELEASE_TAG/"
+    const val BASE_URL = "https://github.com/gitakoos/ocr-models/releases/download/$RELEASE_TAG/"
 
     /** Sub-directory holding the models, under app-private storage and under the side-load root. */
     const val DIRECTORY = "ocr"

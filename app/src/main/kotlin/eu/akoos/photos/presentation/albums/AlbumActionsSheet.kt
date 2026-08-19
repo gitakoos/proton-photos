@@ -37,6 +37,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.HideImage
 import androidx.compose.material.icons.filled.Info
@@ -104,6 +105,7 @@ internal fun AlbumActionsSheet(
     onAddPhotos: () -> Unit,
     onShareOrInfo: () -> Unit,
     onCopy: () -> Unit,
+    onEditMetadata: () -> Unit,
     onRename: () -> Unit,
     onToggleHiddenFromTimeline: () -> Unit,
     onHide: () -> Unit,
@@ -184,6 +186,18 @@ internal fun AlbumActionsSheet(
                 busy = copyBusy,
                 busyFraction = copyFraction,
             )
+
+            // Edit the date, place and text tags across the whole album, the same entry the album
+            // grid's long-press sheet carries. An owner action: on a shared-with-me album those fields
+            // belong to the owner.
+            if (!isSharedWithMe && hasPhotos) {
+                Spacer(Modifier.height(8.dp))
+                ActionSheetRow(
+                    icon = Icons.Default.EditNote,
+                    title = stringResource(R.string.metadata_editor_edit_metadata),
+                    onClick = { close(onEditMetadata) },
+                )
+            }
 
             if (hasPhotos) {
                 Spacer(Modifier.height(8.dp))

@@ -99,6 +99,14 @@ data class GalleryUiState(
     /** Cloud album linkIds the user hid client-side. The add-to-album picker marks these rows with
      *  a lock so a hidden album reads as hidden while staying fully selectable. */
     val hiddenAlbumIds: Set<String> = emptySet(),
+    /** Indexed people (face clusters) for the People rail, most-photographed first. Empty when the
+     *  AI features are off or nothing has been indexed yet, which keeps the People chip hidden. */
+    val people: List<PersonUi> = emptyList(),
+    /** The person the timeline is filtered to, or null for no person filter. */
+    val selectedPersonId: Long? = null,
+    /** Photo keys ([GalleryItem.stableId]) the selected person appears in. [applyFilter] keeps only
+     *  feed items in this set while [selectedPersonId] is non-null, composing like the Offline set. */
+    val personPhotoKeys: Set<String> = emptySet(),
 ) {
     val storageFraction: Float
         get() = if (cloudMaxBytes > 0L)
@@ -189,3 +197,43 @@ enum class MediaType { All, PhotosOnly, VideosOnly }
 enum class SyncStatusFilter { All, LocalOnly, BackedUp }
 
 enum class TimelineGrouping { None, Day, Month, Year }
+
+/**
+ * One person on the People rail. Small on purpose (a cover reference, never an embedding) so the
+ * gallery state stays cheap. [coverPhotoKey] is the cover face's photo ([GalleryItem.stableId]),
+ * resolved to a thumbnail the same way a timeline cell is. [faceBox] is the cover face region as
+ * fractions (0..1) of the cover image so a tile can crop to the face at any thumbnail resolution;
+ * it is null when the cover photo's dimensions are unknown (a cloud-only photo not on the device),
+ * in which case the tile shows the whole cover thumbnail.
+ */
+data class PersonUi(
+    val personId: Long,
+    val displayName: String?,
+    val coverPhotoKey: String,
+    val faceBox: FaceBox? = null,
+    /** Cached number of faces assigned to the person; the album-style People card shows it as a count. */
+    val faceCount: Int = 0,
+)
+
+/** A face region as fractions (0..1) of its image, left/top/right/bottom. */
+data class FaceBox(
+    val left: Float,
+    val top: Float,
+    val right: Float,
+    val bottom: Float,
+)
+
+/**
+ * Adapt a domain [eu.akoos.photos.domain.model.PersonSummary] to the UI [PersonUi], dropping a person
+ * with no resolvable cover (so a tile never renders blank). Shared by every surface that lists people.
+ */
+fun eu.akoos.photos.domain.model.PersonSummary.toPersonUi(): PersonUi? {
+    val cover = coverPhotoKey ?: return null
+    return PersonUi(
+        personId = personId,
+        displayName = displayName,
+        coverPhotoKey = cover,
+        faceBox = faceBox?.let { FaceBox(it.left, it.top, it.right, it.bottom) },
+        faceCount = faceCount,
+    )
+}

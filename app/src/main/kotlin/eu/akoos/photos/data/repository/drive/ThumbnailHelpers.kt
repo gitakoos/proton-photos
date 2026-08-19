@@ -75,6 +75,9 @@ class ThumbnailHelpers @Inject constructor(
      *  whole-library warm-up so its CDN GETs wait out the shared 429 cooldown; false (default)
      *  for foreground / visible thumbnail fetches so they are never blocked by the warm-up's
      *  backoff.
+     * @param fileName Output cache file name, defaulting to `thumb_<linkId>.jpg`. The face indexer
+     *  passes `thumb_hd_<linkId>.jpg` so its HD (Type 2) decrypt never overwrites the gallery's
+     *  Type 1 cache for the same linkId.
      * @return A `file://` URI to the decrypted JPEG cached on disk, or null on failure.
      */
     suspend fun downloadAndDecryptBinary(
@@ -84,9 +87,10 @@ class ThumbnailHelpers @Inject constructor(
         linkId: String,
         cacheDir: File,
         background: Boolean = false,
+        fileName: String? = null,
     ): String? {
         return try {
-            val decFile = File(cacheDir, "thumb_$linkId.jpg")
+            val decFile = File(cacheDir, fileName ?: "thumb_$linkId.jpg")
             if (decFile.exists() && decFile.length() > 0) return "file://${decFile.absolutePath}"
 
             // DEBUG-only large-library simulator: a `simlocal://<seedIndex>` source resolves to a

@@ -42,8 +42,6 @@
     <string name="onboarding_manage_media_title">Manage media</string>
     <string name="onboarding_all_files_title">All files access</string>
     <string name="onboarding_all_files_subtitle">Recommended. Lets the app put restored hidden photos back into their original folder (for example a chat app media folder, not just Pictures) and write changes to your local files in place. Tap to open system settings.</string>
-    <string name="settings_all_files_title">All files access</string>
-    <string name="settings_all_files_desc">Lets restored hidden photos return to their original folder and local files update in place. Tap to grant in system settings.</string>
     <string name="permissions_title">Permissions</string>
     <string name="permissions_intro">Manage what Photos for Proton can access. Each item explains why it is used.</string>
     <string name="permissions_state_granted">Granted</string>
@@ -131,7 +129,7 @@
     <string name="metadata_editor_place_search_city">Search for a city</string>
     <string name="metadata_editor_place_remove">Remove location</string>
     <string name="metadata_editor_country_search">Search countries</string>
-    <string name="metadata_editor_note_cloud">Photos stored on Proton Drive keep the date and place they were uploaded with and can\'t be changed here.</string>
+    <string name="metadata_editor_note_cloud">This photo keeps the date and place it was uploaded to Proton Drive with, so they can\'t be changed here.</string>
     <string name="metadata_editor_note_shared">This photo lives in an album shared with you, so its date and place are read-only.</string>
     <string name="metadata_editor_note_video_place">Location can\'t be changed for videos.</string>
     <string name="metadata_editor_note_place_format">Location can only be added to JPEG, PNG and WebP photos.</string>
@@ -140,7 +138,7 @@
     <string name="metadata_editor_bulk_place_label">Set a place for these photos</string>
     <string name="metadata_editor_bulk_apply_hint">Applies to every selected photo</string>
     <string name="metadata_editor_bulk_summary">Editing %1$d photos</string>
-    <string name="metadata_editor_bulk_summary_skipped">Editing %1$d, %2$d skipped (backed up)</string>
+    <string name="metadata_editor_bulk_summary_skipped">Editing %1$d, %2$d skipped</string>
     <string name="metadata_editor_bulk_artist_label">Set the artist for these photos</string>
     <string name="metadata_editor_bulk_copyright_label">Set the copyright for these photos</string>
     <string name="metadata_editor_text_none">Not set</string>
@@ -167,6 +165,31 @@
         <item quantity="one">%1$d of %2$d selected photos has a date in its name</item>
         <item quantity="other">%1$d of %2$d selected photos have a date in their name</item>
     </plurals>
+    <!-- Cloud photo date/place edits: Proton Drive can\'t rewrite a photo in place, so a corrected
+         copy is re-uploaded and the original is removed, behind an explicit confirm. -->
+    <string name="metadata_editor_cloud_replace_note">Changing the date or place re-uploads a corrected copy to Proton Drive and removes the original.</string>
+    <string name="metadata_editor_cloud_staged_hint">Tap the checkmark to apply your changes on Proton Drive.</string>
+    <string name="metadata_editor_cloud_confirm_title">Update on Proton Drive?</string>
+    <plurals name="metadata_editor_cloud_confirm_body">
+        <item quantity="one">%1$d photo will be re-uploaded to Proton Drive with the new date or place, and the original will be removed.</item>
+        <item quantity="other">%1$d photos will be re-uploaded to Proton Drive with the new date or place, and the originals will be removed.</item>
+    </plurals>
+    <string name="metadata_editor_cloud_confirm_action">Update</string>
+    <string name="metadata_editor_cloud_progress">Updating %1$d of %2$d</string>
+    <string name="metadata_editor_cloud_saving_title">Updating on Proton Drive</string>
+    <string name="metadata_editor_cloud_done_title">Done</string>
+    <plurals name="metadata_editor_cloud_result_updated">
+        <item quantity="one">Updated %1$d photo</item>
+        <item quantity="other">Updated %1$d photos</item>
+    </plurals>
+    <plurals name="metadata_editor_cloud_result_partial">
+        <item quantity="one">%1$d updated, %2$d could not be changed</item>
+        <item quantity="other">%1$d updated, %2$d could not be changed</item>
+    </plurals>
+    <string name="metadata_editor_cloud_phase_preparing">Preparing</string>
+    <string name="metadata_editor_cloud_phase_uploading">Uploading</string>
+    <string name="metadata_editor_cloud_phase_finishing">Finishing</string>
+    <string name="metadata_editor_cloud_background">Continue in background</string>
 
     <!-- Photo editor error strings, previously hardcoded Hungarian in PhotoEditorViewModel.
          Surfaced via state.errorMessage on the editor screen. -->
@@ -181,7 +204,6 @@
     <string name="editor_error_decode_failed">Couldn\'t decode the image</string>
     <string name="editor_error_low_memory">Not enough memory to process this. Try closing other apps or using a smaller file.</string>
     <string name="editor_auto_fix">Auto-fix</string>
-    <string name="editor_crop_reset">Reset</string>
     <string name="editor_crop_free">Free</string>
     <!-- Adjustment pill labels in the redesigned Adjust panel. The Auto pill reuses
          the existing editor_auto_fix string. -->
@@ -214,7 +236,6 @@
     <string name="editor_text_add">Add text</string>
     <string name="editor_text_edit">Edit</string>
     <string name="editor_text_delete">Delete</string>
-    <string name="editor_text_size">Size</string>
     <string name="editor_text_hint">Add text, then drag it to move and pinch to resize</string>
     <string name="editor_text_resize_hint">Drag to move, pinch to resize</string>
     <!-- Filter preset labels under the Filter tab. -->
@@ -231,11 +252,24 @@
     <string name="editor_filter_dramatic">Dramatic</string>
     <string name="editor_filter_fresh">Fresh</string>
     <!-- Redact tab. -->
-    <string name="editor_redact_hint">Draw over faces or text to hide them</string>
     <string name="editor_redact_blackout">Black-out</string>
     <string name="editor_redact_pixelate">Pixelate</string>
-    <string name="editor_redact_clear">Clear</string>
     <string name="editor_redact_brush">Brush size</string>
+    <!-- Hide faces tab. -->
+    <string name="editor_hide_faces">Hide faces</string>
+    <string name="editor_hide_faces_detect">Detect faces</string>
+    <string name="editor_hide_faces_style_pixelate">Pixelate</string>
+    <string name="editor_hide_faces_style_blur">Blur</string>
+    <string name="editor_hide_faces_strength">Strength</string>
+    <string name="editor_hide_faces_none">No faces found</string>
+    <string name="editor_hide_faces_clear">Clear</string>
+    <plurals name="editor_hide_faces_count">
+        <item quantity="one">%1$d face hidden</item>
+        <item quantity="other">%1$d faces hidden</item>
+    </plurals>
+    <string name="editor_face_model_title">Download the face model?</string>
+    <string name="editor_face_model_body">Hiding faces needs a small on-device model. It runs entirely on your phone.</string>
+    <string name="editor_face_model_failed">The face model could not be loaded.</string>
     <!-- Press-and-hold the preview to compare against the original. -->
     <string name="editor_compare_original">Original</string>
     <!-- Rotate tab flip actions (Rotate reuses video_editor_rotate). -->
@@ -332,8 +366,7 @@
     <string name="share_with_people_desc">Add to a shared album</string>
     <string name="share_public_link">Public link</string>
     <string name="share_create_link">Create public link</string>
-    <string name="share_upload_create_link">Upload &amp; create link</string>
-    <string name="share_creating_link">Creating link…</string>
+    <string name="share_upload_create_link">Back up &amp; create link</string>
     <string name="share_link_busy">Working…</string>
     <string name="share_copy_link">Copy link</string>
     <string name="share_remove_link">Remove link</string>
@@ -360,6 +393,7 @@
     <string name="gallery_share_cloud_warning_body">Some of these are stored only in the cloud. The app fetches a temporary private copy and hands it only to the app you pick. Nothing is added to your gallery or visible to other apps.</string>
     <string name="gallery_share_cloud_warning_continue">Share</string>
     <string name="gallery_add_to_album">Add to album</string>
+    <string name="gallery_add_to_person">Add to person</string>
     <string name="offline_make_available">Make available offline</string>
     <string name="offline_remove">Remove from offline</string>
     <string name="offline_card_subtitle">Photos saved for offline viewing</string>
@@ -372,15 +406,12 @@
     <string name="filter_offline">Offline</string>
     <string name="gallery_add_to_album_local_note">These photos will back up first, then join the album.</string>
     <string name="gallery_no_albums_yet">No albums yet. Create one above.</string>
-    <string name="gallery_add_to_album_mixed_hint">Mixed device and cloud only selection can\'t share an album cleanly. Pick one type.</string>
     <plurals name="gallery_add_to_album_partial">
         <item quantity="one">Added %1$d to %2$s, %3$d item couldn\'t be saved (mixed selection)</item>
         <item quantity="other">Added %1$d to %2$s, %3$d items couldn\'t be saved (mixed selection)</item>
     </plurals>
     <string name="gallery_strip_metadata">Strip metadata</string>
     <string name="gallery_added_to_album">Added %1$d photos to %2$s</string>
-    <string name="gallery_add_to_album_added_and_queued">Added %1$d, %2$d more will be added after they back up</string>
-    <string name="gallery_add_to_album_queued_only">%1$d will be added to %2$s after they back up</string>
     <string name="gallery_stripped_metadata">Stripped metadata from %1$d photos</string>
     <string name="gallery_stripped_with_skipped">Stripped %1$d, skipped %2$d (foreign)</string>
     <string name="gallery_stripped_with_failed">Stripped %1$d, %2$d couldn\'t be stripped</string>
@@ -398,6 +429,7 @@
     <string name="gallery_filter_bursts">Bursts</string>
     <string name="gallery_filter_panoramas">Panoramas</string>
     <string name="gallery_filter_raw">RAW</string>
+    <string name="gallery_category_people">People</string>
     <string name="gallery_filter_photos">Photos</string>
     <!-- Gallery snackbar / error fallbacks (raw exception text stays in the log) -->
     <string name="gallery_error_title">Error</string>
@@ -425,7 +457,6 @@
     <string name="gallery_add_to_album_failed">Could not add to album</string>
     <string name="gallery_select_photos_first">Select photos first</string>
     <string name="gallery_create_album_failed">Could not create album: %1$s</string>
-    <string name="gallery_enable_metadata_category">Enable a metadata category in Settings → Privacy first</string>
     <string name="gallery_album_picker_count_drive">%1$s · Drive</string>
     <string name="gallery_album_picker_count_shared">%1$s · Drive · Shared</string>
     <!-- How many of the selected photos an album already holds, e.g. "3 / 5". Digits only, so it
@@ -454,18 +485,15 @@
     <string name="sync_pending">Pending</string>
     <string name="sync_open_settings">Backup settings</string>
     <string name="sync_open_settings_desc">Choose what and how to back up, and the network to use.</string>
-    <string name="sync_view_activity">Details</string>
     <string name="activity_title">Activity</string>
     <string name="activity_uploading">Uploading</string>
     <string name="activity_downloading">Downloading</string>
-    <string name="activity_pending">Waiting to upload (%1$d)</string>
     <string name="activity_empty">Nothing is transferring right now</string>
     <string name="activity_waiting_battery">Backup is waiting for the battery. It starts again once the battery charges back above the low level, which takes more than plugging in.</string>
     <string name="activity_row_desc">See ongoing transfers and photos waiting to upload</string>
     <string name="activity_offline">Offline</string>
     <string name="activity_photos">Photos</string>
     <string name="activity_downloading_state">Downloading</string>
-    <string name="activity_tab_active">Active</string>
     <string name="activity_tab_uploads">Uploads</string>
     <string name="activity_tab_downloads">Downloads</string>
     <string name="activity_tab_history">History</string>
@@ -509,13 +537,13 @@
     <!-- Delete bottom sheet -->
     <string name="delete_album_container_warning">This deletes the album but keeps your photos in Proton Drive.</string>
     <string name="delete_button_permanently">Delete permanently</string>
-    <string name="delete_multi_mixed_msg">Some of these photos are backed up to Proton Drive. Choose how to delete them.</string>
+    <string name="delete_multi_mixed_msg">Choose which copies to remove.</string>
     <string name="delete_multi_remove_device">Remove from device</string>
     <string name="delete_multi_remove_device_desc">Proton Drive backup is kept</string>
     <string name="delete_multi_move_trash">Move to trash</string>
     <string name="delete_multi_move_trash_desc">Moved to Recently Deleted, recoverable for 30 days</string>
     <string name="delete_multi_remove_cloud">Remove from cloud</string>
-    <string name="delete_multi_remove_cloud_desc">Keep the photos on this device, move the backups to Drive trash</string>
+    <string name="delete_multi_remove_cloud_desc">Keep it on this device, move the backup to Drive trash</string>
     <string name="delete_multi_move_trash_everywhere">Move to trash everywhere</string>
     <string name="delete_multi_move_trash_everywhere_desc">Moves to device trash &amp; Proton Drive trash</string>
     <string name="delete_multi_drive_trash">Move to Drive trash</string>
@@ -527,7 +555,6 @@
     <string name="settings_sync_now">Sync now</string>
     <string name="settings_storage_section">Storage</string>
     <string name="settings_storage_nav_desc">Drive quota, device space, app cache, recently deleted</string>
-    <string name="settings_free_up_now">Free up space now</string>
     <string name="settings_free_up_interval_10_minutes">10 minutes</string>
     <string name="settings_free_up_interval_1_day">1 day</string>
     <string name="settings_free_up_interval_1_week">1 week</string>
@@ -569,7 +596,6 @@
     <string name="settings_backup_folders_desc">Choose which folders to back up</string>
     <!-- Sync settings reorganisation (v1.3.2): two grouped sections. -->
     <string name="settings_what_backed_up_section">What gets backed up</string>
-    <string name="settings_when_section">When it happens</string>
     <string name="settings_network_section">Network usage</string>
     <string name="settings_continuous_backup">Continuous backup</string>
     <string name="settings_continuous_backup_desc">Photos and videos upload within seconds of capture.</string>
@@ -587,11 +613,6 @@
     <string name="settings_excluded_folders_select_all">Exclude all</string>
     <string name="settings_excluded_folders_deselect_all">Include all</string>
     <!-- Album mirror -->
-    <string name="settings_album_mirror_folders">Folders as albums</string>
-    <string name="settings_album_mirror_folders_desc">Pick which device folders also appear as Drive albums when their photos upload</string>
-    <string name="album_mirror_folders_title">Mirror folders as Drive albums</string>
-    <string name="album_mirror_folders_subtitle">Photos in checked folders also appear in matching Drive albums. Photos still upload to your stream either way.</string>
-    <string name="album_mirror_add_custom">Add folder name</string>
     <string name="album_mirror_custom_dialog_title">Add a folder name</string>
     <string name="album_mirror_custom_dialog_hint">Folder name (e.g. Trip 2026)</string>
     <string name="settings_recently_deleted">Recently Deleted</string>
@@ -640,13 +661,7 @@
         <item quantity="one">Delete %1$d photo forever?</item>
         <item quantity="other">Delete %1$d photos forever?</item>
     </plurals>
-    <string name="trash_selected_count">%1$d selected</string>
-    <string name="trash_long_press_hint">Long-press to select</string>
     <string name="settings_recently_deleted_subtitle_device_cloud">%1$d on device · %2$d on Drive</string>
-    <string name="settings_free_up_desc">Delete already backed up files from device</string>
-    <string name="settings_free_up_action">Delete</string>
-    <string name="settings_free_up_confirm_title">Free up device space?</string>
-    <string name="settings_free_up_confirm_message">Every photo and video that\'s already backed up to Proton Drive will be deleted from this device. Drive copies stay intact and can be downloaded again later.</string>
     <string name="settings_backup_size">%s synced from this device</string>
     <!-- Storage card, Proton / Device / App-cache sub-sections -->
     <string name="settings_storage_proton">Proton Drive</string>
@@ -657,7 +672,6 @@
     <string name="settings_storage_clear">Clear</string>
     <string name="settings_storage_free_up">Free up</string>
     <string name="settings_storage_app_cache_desc">Thumbnails, streamed videos and temp upload blocks</string>
-    <string name="settings_storage_clear_cache">Clear cache</string>
     <string name="settings_storage_clear_cache_dialog_title">Clear app cache?</string>
     <string name="settings_storage_clear_cache_dialog_message">This will delete %s of cached files. They’ll be re-downloaded as needed.</string>
     <string name="settings_offline_storage_title">Offline photos</string>
@@ -668,8 +682,63 @@
     <string name="settings_section_settings">Settings</string>
     <string name="settings_section_extras">Extras</string>
     <string name="settings_section_about">About</string>
-    <string name="settings_privacy_metadata">Privacy &amp; Metadata</string>
-    <string name="settings_privacy_metadata_desc">Remove GPS and optional EXIF fields from uploads</string>
+    <string name="settings_ai_section">Machine learning</string>
+    <string name="settings_ai_nav_desc">On-device Copy text, Hide faces, and more</string>
+    <string name="settings_ai_enable">Enable machine learning</string>
+    <string name="settings_ai_enable_desc">Everything runs on your phone. Turning this on lets the app download the small models it needs and use Copy text and Hide faces. More features are coming.</string>
+    <string name="settings_ai_ocr">Copy text</string>
+    <string name="settings_ai_ocr_desc">Recognise and copy text you see in a photo</string>
+    <string name="settings_ai_ocr_downloading">Downloading…</string>
+    <string name="settings_ai_ocr_download_title">Download the text model?</string>
+    <string name="settings_ai_ocr_download_message">Copy text needs a %1$s model download. It works on any connection, though Wi-Fi is recommended.</string>
+    <string name="settings_ai_ocr_download_confirm">Download</string>
+    <string name="settings_ai_ocr_remove_title">Remove the downloaded model?</string>
+    <string name="settings_ai_ocr_remove_message">This frees about %1$s. You can download it again later.</string>
+    <string name="settings_ai_ocr_remove_confirm">Remove</string>
+    <string name="settings_ai_ocr_remove_keep">Keep</string>
+    <string name="settings_ai_face_toggle">Face recognition</string>
+    <string name="settings_ai_face_desc">Group photos by the people in them, on your device</string>
+    <string name="settings_ai_face_unavailable">Not available yet</string>
+    <string name="settings_ai_face_remove_title">Remove face data?</string>
+    <string name="settings_ai_face_remove_message">Face recognition is off. Remove the face model and every detected face and name from this device? Export them from the Recognized faces page first if you want to keep a copy.</string>
+    <string name="settings_ai_face_remove_confirm">Remove</string>
+    <string name="settings_ai_face_remove_keep">Keep</string>
+    <string name="settings_ai_face_remove_confirm_title">Are you sure?</string>
+    <string name="settings_ai_face_remove_confirm_message">This permanently removes the face model and every recognized face and name. It cannot be undone.</string>
+    <string name="settings_face_section">Recognized faces</string>
+    <string name="settings_face_maintenance">Maintenance</string>
+    <string name="settings_face_transfer">Transfer</string>
+    <string name="settings_face_rescan_desc">Detect faces again, keeping your names and corrections.</string>
+    <string name="settings_face_clear_desc">Remove every found person and all face data from this phone.</string>
+    <string name="settings_face_export_desc">Save a private copy you can reuse on another device.</string>
+    <string name="settings_face_import_desc">Load a face index you saved before.</string>
+    <string name="settings_ai_import_confirm_title">Import face index?</string>
+    <string name="settings_ai_import_confirm_msg">This adds the faces and people from the file to this phone and regroups them. Your current faces are kept.</string>
+    <string name="settings_ai_indexing_running">Scanning your photos</string>
+    <string name="settings_ai_indexing_waiting">Waiting for the face model</string>
+    <string name="settings_ai_indexing_paused">Paused</string>
+    <string name="settings_ai_indexing_progress">%1$d of %2$d photos</string>
+    <plurals name="settings_ai_indexing_people">
+        <item quantity="one">%1$d person found</item>
+        <item quantity="other">%1$d people found</item>
+    </plurals>
+    <string name="settings_ai_pause">Pause</string>
+    <string name="settings_ai_resume">Resume</string>
+    <string name="settings_ai_rescan">Rescan photos</string>
+    <string name="settings_ai_export">Export face index</string>
+    <string name="settings_ai_import">Import face index</string>
+    <string name="settings_ai_export_warn_title">Export face index?</string>
+    <string name="settings_ai_export_warn_msg">This file holds the face fingerprints computed from your photos. Anyone who gets it could rebuild a face model of the people in your library, so keep it private and share it only with people you trust.</string>
+    <string name="settings_ai_export_done">Face index exported (%1$d faces).</string>
+    <string name="settings_ai_import_done">Imported %1$d faces, %2$d people.</string>
+    <string name="settings_ai_transfer_failed">Face index transfer failed.</string>
+    <string name="settings_ai_import_wrong_account">This face index belongs to a different account and cannot be opened here.</string>
+    <string name="settings_ai_import_wrong_model">This face index was made with a different face model, so it cannot be imported.</string>
+    <string name="settings_ai_rescan_confirm_title">Rescan all photos?</string>
+    <string name="settings_ai_rescan_confirm_msg">Every photo is scanned for faces again at higher detail, which finds smaller and more distant faces. Your manually added photos are kept, but people are regrouped, so you may need to name a few again.</string>
+    <string name="settings_ai_clear">Clear face data</string>
+    <string name="settings_ai_clear_confirm_title">Clear face data?</string>
+    <string name="settings_ai_clear_confirm_msg">This removes every found person and all face data. Your photos are not affected. Faces are detected again the next time indexing runs.</string>
     <string name="settings_privacy">Privacy</string>
     <string name="settings_privacy_desc">Cache, offline photos, and telemetry</string>
     <string name="settings_metadata">Upload processing</string>
@@ -703,7 +772,6 @@
     <string name="settings_strip_software_desc">Strip software, comment, artist and copyright fields</string>
     <string name="settings_strip_authorship">Remove artist and copyright</string>
     <string name="settings_strip_format_note">Some formats, such as HEIC, cannot store metadata changes. When metadata removal is on, the uploaded copy of such a photo is converted to JPEG so the selected data is actually removed. The photo on your device stays unchanged.</string>
-    <string name="settings_compress_upload">Compress uploads</string>
     <string name="settings_compress_upload_desc">Uploads a lighter version to save space. The copy on the phone stays full quality unless the local mirror below is on.</string>
     <string name="settings_compress_photos">Compress photos</string>
     <string name="settings_compress_videos">Compress videos</string>
@@ -741,7 +809,6 @@
     <string name="screenshot_overlay_copied">Copied to clipboard</string>
     <string name="screenshot_overlay_share_image">Share screenshot</string>
     <string name="viewer_added_to_album">Added to %1$s</string>
-    <string name="settings_photos_timeline_section">Photos timeline</string>
     <string name="settings_hide_album_photos">Hide photos in Drive albums</string>
     <string name="settings_hide_all_folders">Hide all device folders</string>
     <string name="settings_hide_all_folders_desc">Photos in hidden device folders won\'t appear in your main Photos timeline. They stay on your device.</string>
@@ -749,7 +816,6 @@
     <string name="settings_timeline_filter">Timeline filter</string>
     <string name="settings_timeline">Timeline</string>
     <string name="settings_timeline_section_layout">Layout</string>
-    <string name="settings_timeline_section_shows">What shows</string>
     <string name="settings_timeline_section_display">Display</string>
     <string name="settings_show_scroll_date">Show date while scrolling</string>
     <string name="settings_show_scroll_date_desc">A floating month and year label appears over the timeline while you scroll, so you always have a time reference.</string>
@@ -759,15 +825,12 @@
     <string name="settings_mosaic_grid_desc">Lay the timeline out as a staggered mosaic where each photo keeps its own shape, so portrait photos stand taller.</string>
     <string name="settings_seamless_grid">Edge to edge</string>
     <string name="settings_seamless_grid_desc">Denser grid with square corners and thumbnails that reach the screen edge.</string>
-    <string name="timeline_filter_title">Timeline filter</string>
     <string name="timeline_filter_subtitle">Choose what to hide from your main Photos timeline. Hidden photos stay on your device and keep backing up.</string>
     <string name="timeline_filter_categories_header">Category bar</string>
     <string name="timeline_filter_layout_desc">Applies to all photo grids</string>
     <string name="timeline_filter_reorder_hint">Use the arrows to set the order of the category bar shown above your Photos timeline.</string>
     <string name="timeline_filter_per_album_hint">Hide individual albums from the timeline. The switch above hides them all at once.</string>
     <string name="timeline_filter_hidden_album">Hidden album</string>
-    <string name="cd_move_up">Move up</string>
-    <string name="cd_move_down">Move down</string>
     <string name="timeline_filter_albums_header">Drive albums</string>
     <string name="settings_telemetry">Telemetry</string>
     <string name="settings_telemetry_desc">Controlled by your Proton account settings. Open account.proton.me to change.</string>
@@ -777,10 +840,6 @@
     <string name="settings_privacy_map_tiles_note">The map\'s background tiles come from OpenStreetMap, so their servers see your IP address and the map area you are looking at. Your photos and their locations are never sent.</string>
     <string name="settings_hidden_photos">Hidden Photos</string>
     <string name="settings_hidden_photos_desc">Photos hidden from the main gallery, unlocked with your device biometrics or PIN</string>
-    <string name="settings_media_management">Media Management</string>
-    <string name="settings_media_management_granted">Granted, deleting photos won\'t ask every time</string>
-    <string name="settings_media_management_grant_desc">Grant once to skip the per-delete confirmation</string>
-    <string name="settings_media_management_grant_action">Grant</string>
     <string name="settings_appearance">Appearance &amp; Language</string>
     <string name="settings_appearance_desc">Theme, palette, app language</string>
     <string name="settings_landing_tab">Landing tab</string>
@@ -821,7 +880,7 @@
     <!-- Labels on the selection drawer's action rows. Each one names what the tap does, and the
          viewer's own menu draws the same rows from here, so one action reads the same everywhere. -->
     <string name="sel_label_back_up">Back up</string>
-    <string name="sel_label_download">Download</string>
+    <string name="sel_label_download">Save to device</string>
     <string name="sel_label_delete">Delete</string>
     <string name="sel_label_share">Share</string>
     <string name="sel_label_hide">Move to Hidden Photos</string>
@@ -840,7 +899,6 @@
     <string name="settings_privacy_section_metadata">Metadata</string>
     <string name="settings_privacy_section_device">On this device</string>
     <string name="settings_security_section_lock">App lock</string>
-    <string name="settings_security_section_media">Media access</string>
 
     <!-- Palette -->
     <string name="settings_palette_section">Palette</string>
@@ -850,6 +908,11 @@
     <string name="palette_sea">Sea</string>
     <string name="palette_sepia">Sepia</string>
     <string name="palette_mono">Mono</string>
+    <string name="palette_lavender">Lavender</string>
+    <string name="palette_rose">Rose</string>
+    <string name="palette_mint">Mint</string>
+    <string name="palette_gold">Gold</string>
+    <string name="palette_ruby">Ruby</string>
 
     <!-- AMOLED pure-black dark theme -->
     <string name="settings_amoled_black">Pure black (AMOLED)</string>
@@ -924,6 +987,11 @@
     <string name="album_download_notification_title">Downloading %1$s</string>
     <string name="album_download_notification_progress">%1$d of %2$d</string>
     <string name="album_download_notification_cancel">Cancel</string>
+    <!-- Background metadata-edit notification. -->
+    <string name="metadata_edit_channel_name">Photo detail changes</string>
+    <string name="metadata_edit_channel_desc">Shows progress while saving photo detail changes to Proton Drive.</string>
+    <string name="metadata_edit_notification_title">Saving photo details…</string>
+    <string name="metadata_edit_notification_progress">%1$d of %2$d</string>
     <string name="download_started_background">Downloading in the background, see Activity for progress</string>
     <string name="albums_share_button">Share album</string>
     <string name="album_link_copied">Link copied to clipboard</string>
@@ -962,7 +1030,6 @@
     <string name="share_invite_email_hint">Email address</string>
     <string name="share_invite_add">Add</string>
     <string name="share_invite_will_invite">Will invite</string>
-    <string name="share_invite_message_hint">Add a message (optional)</string>
     <string name="share_invite_send">Share</string>
     <string name="share_invite_cancel">Cancel</string>
     <string name="share_invite_email_invalid">Not a valid email address</string>
@@ -973,7 +1040,6 @@
     <string name="share_revoke_failed">Couldn\'t withdraw the invitation</string>
     <string name="share_remove_member_failed">Couldn\'t remove the member</string>
     <string name="share_permission_change_failed">Couldn\'t change the role</string>
-    <string name="share_invite_failed">Couldn\'t send the invitation</string>
     <string name="share_stop_failed">Couldn\'t stop sharing</string>
     <string name="share_create_link_failed">Couldn\'t create the share link</string>
     <string name="share_disable_link_failed">Couldn\'t turn off the link</string>
@@ -1012,7 +1078,6 @@
     <string name="filter_sync_backedup">Backed up</string>
     <string name="filter_year_label">Year</string>
     <string name="filter_any">Any</string>
-    <string name="filter_month_label">Month</string>
     <string name="filter_whole_month">Whole month</string>
     <string name="filter_reset">Reset</string>
 
@@ -1046,6 +1111,64 @@
     <string name="location_save_as_album_confirm_body_fmt">Create an album from %1$s?</string>
     <string name="location_saved_as_album_fmt">Album \"%1$s\" created</string>
 
+    <!-- Person detail -->
+    <string name="person_detail_unnamed">Person</string>
+    <string name="person_rename_title">Rename</string>
+    <string name="person_rename_hint">Name</string>
+    <string name="person_add_photos">Add photos</string>
+    <string name="person_add_photos_title">Add to this person</string>
+    <string name="person_add_needs_name">Name this person first, then add photos to them.</string>
+    <string name="person_remove_from">Remove from person</string>
+    <string name="person_remove_confirm_title">Remove from this person?</string>
+    <string name="person_remove_confirm_body">The selected photos stop showing under this person and are not grouped here again on a rescan. The photos themselves are not deleted.</string>
+    <string name="person_remove_confirm">Remove</string>
+    <string name="person_merge">Merge people</string>
+    <string name="person_merge_suggest_title">Might be the same person</string>
+    <string name="person_merge_suggest_merge">Merge</string>
+    <string name="person_merge_suggest_dismiss">Different person</string>
+    <string name="person_merge_suggest_later">Not now</string>
+    <string name="find_more">Find more photos</string>
+    <string name="find_more_title">Find more photos</string>
+    <string name="find_more_title_named">More photos of %1$s</string>
+    <string name="find_more_searching">Searching photos %1$d of %2$d</string>
+    <string name="find_more_empty">No more photos of this person were found.</string>
+    <string name="find_more_add">Add %1$d</string>
+    <string name="person_not_a_person">This is not a person</string>
+    <string name="person_not_a_person_confirm_title">Dismiss this group?</string>
+    <string name="person_not_a_person_confirm_body">These faces are dismissed as not a person, so this group is removed from People and its faces are not grouped again. The photos themselves are not deleted.</string>
+    <string name="person_not_a_person_confirm">Dismiss</string>
+    <string name="person_merge_pick_title">Choose the person to merge in</string>
+    <string name="person_merge_empty">There are no other people to merge.</string>
+    <string name="person_merge_confirm_title">Merge people?</string>
+    <string name="person_merge_confirm_body">The chosen person\'s photos join this one, and the two are treated as the same person from now on. This cannot be split back apart automatically.</string>
+    <string name="person_merge_confirm">Merge</string>
+    <string name="people_add_names">Add names</string>
+    <string name="people_none_named">You have not named anyone yet. Open the review to name, merge and tidy up the people the app found.</string>
+    <string name="people_review_title">People to name</string>
+    <string name="people_review_empty">No unnamed people right now. As your photos are scanned, clusters to name and merge show up here.</string>
+    <string name="people_search_hint">Search people</string>
+    <string name="people_card_subtitle">Browse your photos by person</string>
+    <string name="person_set_cover">Set as cover</string>
+    <string name="person_cover_no_face">No detected face in that photo.</string>
+    <string name="person_merge_action">Merge</string>
+    <string name="person_picker_search">Search or type a new name</string>
+    <string name="person_picker_create">Create \"%1$s\"</string>
+    <string name="person_picker_empty">No named people yet. Type a name above to create one.</string>
+    <string name="person_merge_name_title">Name these as one person</string>
+    <string name="person_not_a_person_title">Not a person?</string>
+    <string name="person_not_a_person_body">The selected faces are dropped from People and skipped on every future scan. Use this for statues, posters and mistakes. The photos themselves are not deleted.</string>
+    <string name="person_suggestions_review">Review suggestions</string>
+    <string name="person_suggestions_title">Suggestions</string>
+    <string name="person_suggestion_question">Is this %1$s?</string>
+    <string name="person_suggestion_yes">Yes</string>
+    <string name="person_suggestion_no">No</string>
+    <string name="person_suggestion_skip">Skip</string>
+    <string name="person_suggestions_empty">No suggestions right now. As your photos are scanned, likely matches to the people you have named show up here to confirm.</string>
+    <plurals name="person_suggestions_left">
+        <item quantity="one">%1$d to review</item>
+        <item quantity="other">%1$d to review</item>
+    </plurals>
+
     <!-- Photo viewer slideshow controls -->
     <string name="viewer_play_slideshow">Play slideshow</string>
     <string name="viewer_pause_slideshow">Pause slideshow</string>
@@ -1054,7 +1177,6 @@
     <string name="widget_description">Photos for Proton, displays your photos on the home screen</string>
     <string name="widget_setup_title">Photo Widget</string>
     <string name="widget_setup_subtitle">Configure how photos are displayed on your home screen.</string>
-    <string name="widget_change_selection">Change selection</string>
     <string name="widget_section_choose_album">Choose album</string>
     <string name="widget_mode_section">Display mode</string>
     <string name="widget_mode_all">All photos</string>
@@ -1079,7 +1201,6 @@
     <string name="widget_interval_8hr">8 hours</string>
     <string name="widget_interval_1day">1 day</string>
     <string name="widget_add_button">Add Widget</string>
-    <string name="widget_select_photos">+ Select photos</string>
     <string name="widget_photos_selected">%d photos selected</string>
     <string name="widget_no_photos">No photos found</string>
 
@@ -1099,10 +1220,6 @@
     <plurals name="offline_batch_result">
         <item quantity="one">%d photo available offline</item>
         <item quantity="other">%d photos available offline</item>
-    </plurals>
-    <plurals name="map_card_subtitle_count">
-        <item quantity="one">%1$d photo on the map</item>
-        <item quantity="other">%1$d photos on the map</item>
     </plurals>
     <plurals name="map_card_cities_count">
         <item quantity="one">%d city</item>
@@ -1141,6 +1258,8 @@
 
     <!-- Viewer overflow menu -->
     <string name="viewer_menu_more">More</string>
+    <string name="viewer_people_in_photo">People in this photo</string>
+    <string name="viewer_face_none_found">No faces found on this photo.</string>
     <string name="viewer_menu_save_to_device">Save to device</string>
     <string name="viewer_menu_details">Details</string>
     <string name="viewer_menu_delete">Delete</string>
@@ -1151,7 +1270,6 @@
     <string name="cd_panorama">Panorama</string>
     <string name="cd_play_motion_photo">Play motion photo</string>
     <string name="cd_stop_motion_photo">Stop motion photo</string>
-    <string name="cd_view_panorama">View panorama</string>
     <string name="cd_exit_panorama">Exit panorama</string>
     <string name="viewer_view_panorama">View panorama</string>
     <string name="viewer_exit_panorama">Exit</string>
@@ -1184,13 +1302,8 @@
 
     <!-- Calendar view -->
     <string name="calendar_title">Calendar</string>
-    <string name="calendar_no_photos">No photos this month</string>
     <string name="calendar_search_placeholder">Search by month, year, or description</string>
-    <string name="calendar_search_no_results">No matching days</string>
-    <string name="calendar_view_toggle_cd">Switch view mode</string>
     <string name="calendar_search_cd">Search calendar</string>
-    <string name="calendar_jump_cd">Jump to month</string>
-    <string name="calendar_jump_title">Jump to month</string>
     <string name="day_detail_description_hint">Add a note about this day</string>
     <string name="day_detail_edit_description_title">Edit description</string>
     <string name="day_detail_save">Save</string>
@@ -1214,7 +1327,6 @@
     <string name="cd_status_backed_up_device">Proton Drive and device</string>
     <string name="cd_status_cloud_only">Proton Drive only</string>
     <string name="cd_status_hidden_local">Hidden on this device</string>
-    <string name="cd_status_device_only">Only on device</string>
     <string name="cd_status_backed_up">Backed up</string>
     <string name="cd_status_in_album">In this album</string>
     <string name="cd_status_all_selected_in_album">All selected photos are in this album</string>
@@ -1244,22 +1356,11 @@
     <string name="op_deleting">Deleting…</string>
     <string name="op_hiding">Hiding…</string>
     <string name="op_removing_from_album">Removing from album…</string>
-    <string name="viewer_delete_subtitle_synced">This photo is backed up to Proton Drive. Choose what to do:</string>
-    <string name="viewer_delete_remove_from_device">Remove from device</string>
-    <string name="viewer_delete_remove_from_device_desc">Keep the backup in Proton Drive</string>
-    <string name="viewer_delete_remove_from_cloud">Remove from cloud</string>
-    <string name="viewer_delete_remove_from_cloud_desc">Keep the photo on this device, move the backup to Drive trash</string>
-    <string name="viewer_delete_everywhere">Delete everywhere</string>
-    <string name="viewer_delete_everywhere_desc">Moves to device trash AND Proton Drive trash</string>
-    <string name="viewer_delete_subtitle_cloud_only">This will move the photo to Proton Drive\'s trash. You can recover it from Recently Deleted.</string>
-    <string name="viewer_delete_move_to_drive_trash">Move to Drive trash</string>
     <string name="action_save">Save</string>
     <string name="gallery_picker_drive_albums">Drive albums</string>
     <string name="album_card_folder_badge">Folder</string>
     <string name="albums_unhide_album">Unhide album</string>
     <string name="device_folders_section">Folders on this device</string>
-    <string name="device_folders_empty">No folders on this device.</string>
-    <string name="device_folder_uploading_fmt">Uploading %1$d to Drive</string>
     <string name="device_folder_already_backed_up">Already backed up to Drive</string>
     <string name="backup_started">Backing up to Drive</string>
     <string name="upload_confirm_title">Upload to Drive?</string>
@@ -1289,16 +1390,9 @@
     <string name="sync_folders_add_row_subtitle">Pre-declare a folder so future photos in it back up automatically</string>
     <string name="sync_folders_add_dialog_body">Enter the exact folder name (e.g. \"Trip 2026\"). Once a photo lands in a matching folder it will back up automatically.</string>
     <string name="sync_folders_add_dialog_name_invalid">Enter a new folder name that isn\'t already added</string>
-    <string name="sync_folders_selected_cd">Selected</string>
     <string name="sync_folder_backup_label">Back up</string>
     <string name="sync_folder_album_label">Album</string>
     <!-- Mirror device folders as albums screen -->
-    <string name="mirror_opted_in_cd">Opted in</string>
-    <string name="mirror_custom_pending">Pending, applies when a folder with this name appears</string>
-    <string name="mirror_remove_cd">Remove</string>
-    <string name="mirror_name_empty">Folder name cannot be empty</string>
-    <string name="mirror_name_invalid_chars">Name cannot contain \'/\' or \'=\'</string>
-    <string name="mirror_name_already_added">Folder already added</string>
     <!-- Settings — sync error popup + free-up snackbars -->
     <string name="settings_sync_failed">Sync failed</string>
     <string name="settings_sync_failed_reconcile">Couldn\'t check what needs backing up</string>
@@ -1345,7 +1439,6 @@
     <string name="rename_sheet_option_copy_subtitle_vault">Creates a second copy in Hidden Photos.</string>
     <string name="save_to_library_confirm_title">Save to my library</string>
     <string name="save_to_library_confirm_body_fmt">Copying %1$d items into your library. They\'ll appear in your Photos as soon as the copy finishes.</string>
-    <string name="save_to_library_action_cancel">Cancel save</string>
     <string name="save_to_library_cancelled_fmt">Save cancelled at %1$d / %2$d</string>
     <string name="albums_more_actions">More actions</string>
     <!-- Action-sheet section headings, shared by every drawer that groups its rows -->
@@ -1381,7 +1474,6 @@
     <string name="settings_theme_palette">Theme &amp; palette</string>
     <string name="settings_privacy_security">Privacy &amp; security</string>
     <string name="cd_scroll_to_top">Scroll to top</string>
-    <string name="albums_section_header">Albums</string>
     <string name="albums_filter_all">All</string>
     <string name="albums_filter_cloud">Cloud</string>
     <string name="albums_filter_local">On device</string>
@@ -1408,7 +1500,6 @@
     <string name="viewer_meta_row_type">Type</string>
     <string name="viewer_meta_row_resolution">Resolution</string>
     <string name="viewer_meta_row_duration">Duration</string>
-    <string name="viewer_meta_row_album">Album</string>
     <string name="viewer_meta_row_local_folder">Local folder</string>
     <string name="viewer_meta_row_cloud_albums">Cloud albums</string>
     <string name="viewer_meta_row_source">Source</string>
@@ -1458,8 +1549,6 @@
     <string name="viewer_delete_title_local">Delete photo?</string>
     <string name="viewer_delete_title_synced">Remove photo?</string>
     <string name="viewer_delete_title_cloud">Delete from Proton Drive?</string>
-    <string name="viewer_delete_local_body">This will move the photo to your device\'s Recently Deleted folder.</string>
-    <string name="viewer_delete_move_to_trash">Move to trash</string>
     <string name="viewer_delete_vault_body">Deleting removes the hidden copy from this device for good. Any Proton Drive copy stays as it is.</string>
     <string name="viewer_delete_vault_failed">Could not delete this photo</string>
     <string name="viewer_add_to_album_title">Add to Album</string>
@@ -1519,9 +1608,10 @@
     <string name="err_copy">Copy</string>
 
     <!-- Grid layout (Appearance) -->
-    <string name="settings_grid_layout">Grid layout</string>
     <string name="grid_remember_last">Remember last used</string>
     <string name="grid_remember_last_desc">Open your photos at the zoom level you last used</string>
+    <string name="settings_keep_scroll_tabs">Keep place when switching tabs</string>
+    <string name="settings_keep_scroll_tabs_desc">When you switch tabs, stay where you were instead of jumping to the top.</string>
     <string name="grid_default_columns_section">Photos per row</string>
 
     <!-- Duplicate finder -->
@@ -1552,7 +1642,6 @@
     <!-- What's new -->
     <string name="whats_new_title">What\'s new</string>
     <string name="whats_new_done">Got it</string>
-    <string name="whats_new_open">Open</string>
     <string name="whats_new_hide_title">Hide photos and albums</string>
     <string name="whats_new_hide_intro">Hide anything you don\'t want in your timeline, and unhide it any time from Hidden Photos. What happens depends on the photo\'s badge:</string>
     <string name="whats_new_hide_device">Only on this phone: it moves into Hidden Photos, locked inside this app, and out of the device gallery, so no other app can see it.</string>
@@ -1617,24 +1706,34 @@
     <string name="whats_new_news_title">News and feedback</string>
     <string name="whats_new_news_body">A news screen carries updates about the app, and a button takes you straight to where you can send feedback or report a bug.</string>
     <string name="whats_new_more_241">Plus you can shift several photos\' dates at once, hide a whole device folder, and updates install without asking every time. Photos deleted on another device disappear here even on a large library, a rename no longer leaves a copy behind, and backup, hiding, duplicates and shared albums all got steadier.</string>
+    <!-- What's new in 2.5.0 -->
+    <string name="whats_new_editor_title">A much bigger photo editor</string>
+    <string name="whats_new_editor_body">Draw and add text, straighten and fix perspective, shape tone curves and per-colour HSL, and add vibrance, sharpen and grain. Hold the photo to compare with the original.</string>
+    <string name="whats_new_collage_title">Make a collage</string>
+    <string name="whats_new_collage_body">Combine a few photos into a grid or a freeform layout, reframe each one with a pinch, and save it as a new photo.</string>
+    <string name="whats_new_export_title">Save an edited copy your way</string>
+    <string name="whats_new_export_body">Save a copy as JPEG, PNG or WebP and pick its quality and size, so a screenshot can stay lossless or a share-ready copy can come out smaller.</string>
+    <string name="whats_new_video_title">More video tools</string>
+    <string name="whats_new_video_body">Mute a clip in one tap with no quality loss, and save the frame you are paused on as a photo in the gallery.</string>
+    <string name="whats_new_smooth_title">Smoother, with motion</string>
+    <string name="whats_new_smooth_body">Screens, menus and buttons move rather than snap, prompts slide up as drawers, and a back swipe shows the screen you are heading to.</string>
+    <string name="whats_new_dupreview_title">Tell duplicate copies apart</string>
+    <string name="whats_new_dupreview_body">The duplicate finder opens a group at full size and shows each copy\'s size, resolution, date and place, so you keep the right one.</string>
+    <string name="whats_new_filedate_title">Fix dates from the filename</string>
+    <string name="whats_new_filedate_body">Photos that carry the date in their name but not in their data can have it set in bulk, so they land in the right place on the timeline.</string>
+    <string name="whats_new_more_250">Plus the System theme now follows your phone, the backup banner gets out of the way as you scroll, and Sync on Wi-Fi only no longer uses mobile data in the background.</string>
     <string name="whats_new_more_240">Plus copied links stay hidden in the clipboard preview, file sizes match everywhere they appear, automatic free-up checks with Drive before removing a copy from your phone, and large albums and selections hold together better.</string>
     <string name="duplicates_filter_identical">Identical</string>
     <string name="duplicates_filter_similar">Similar</string>
     <!-- Collage -->
-    <string name="collage_title">Collage</string>
     <string name="collage_save">Save</string>
     <string name="collage_aspect_original">Original</string>
     <string name="collage_create">Create collage</string>
     <string name="collage_add">Add photos</string>
     <string name="collage_remove">Remove</string>
     <string name="collage_swap">Swap</string>
-    <string name="collage_swap_pick">Tap a photo</string>
-    <string name="collage_done">Done</string>
     <string name="collage_saved">Collage saved</string>
     <string name="collage_save_failed">Couldn\'t save the collage</string>
-    <string name="collage_mode_collage">Collage</string>
-    <string name="collage_mode_photos">Photos</string>
-    <string name="collage_photos_hint">Tap a photo to reframe, hold to swap</string>
     <string name="collage_spacing">Spacing</string>
     <string name="collage_tab_layout">Layout</string>
     <string name="collage_tab_ratio">Ratio</string>
@@ -1647,4 +1746,7 @@
     <string name="collage_bg_blur">Blur</string>
     <string name="collage_drop_remove">Release to remove from the collage</string>
     <string name="collage_trim_for_grid">Remove %1$d to switch to a grid layout</string>
+    <string name="permissions_default_gallery_title">Set as default gallery</string>
+    <string name="permissions_default_gallery_why">Open the system settings to make this app the default for opening photos and videos.</string>
+    <string name="permissions_action_open">Open</string>
 </resources>

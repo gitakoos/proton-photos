@@ -76,8 +76,10 @@ import eu.akoos.photos.presentation.common.IconBubble
 import eu.akoos.photos.presentation.common.ReturnToViewerPhoto
 import eu.akoos.photos.presentation.common.SecureScreenEffect
 import eu.akoos.photos.presentation.common.SelectionAction
+import eu.akoos.photos.presentation.common.SelectionCheckPop
 import eu.akoos.photos.presentation.common.SelectionDrawer
 import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
+import eu.akoos.photos.presentation.common.selectPressScale
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -717,6 +719,7 @@ private fun HiddenPhotoCell(
     Box(
         modifier = Modifier
             .aspectRatio(1f)
+            .selectPressScale(isSelected)
             .clip(RoundedCornerShape(if (seamless) 0.dp else 8.dp))
             .background(Bg2)
             // The grid owns long-press at its level (drag-to-select), so the cell stays tap-only:
@@ -775,7 +778,13 @@ private fun HiddenPhotoCell(
                     .size(22.dp)
                     .align(Alignment.TopStart),
             ) {
-                if (isSelected) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.3f), CircleShape)
+                        .border(1.5.dp, Color.White.copy(alpha = 0.8f), CircleShape),
+                )
+                SelectionCheckPop(isSelected) {
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
@@ -789,13 +798,6 @@ private fun HiddenPhotoCell(
                             modifier = Modifier.size(14.dp),
                         )
                     }
-                } else {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(Color.Black.copy(alpha = 0.3f), CircleShape)
-                            .border(1.5.dp, Color.White.copy(alpha = 0.8f), CircleShape),
-                    )
                 }
             }
         }

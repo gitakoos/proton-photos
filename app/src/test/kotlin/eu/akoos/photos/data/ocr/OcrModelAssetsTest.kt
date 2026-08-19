@@ -46,10 +46,10 @@ class OcrModelAssetsTest {
 
     @Test
     fun `the reading models are the ones this build was written against`() {
-        assertEquals("rec.onnx", OcrModelAssets.RECOGNITION.fileName)
-        assertEquals(16_517_247L, OcrModelAssets.RECOGNITION.sizeBytes)
+        assertEquals("rec_latin.onnx", OcrModelAssets.RECOGNITION.fileName)
+        assertEquals(8_064_539L, OcrModelAssets.RECOGNITION.sizeBytes)
         assertEquals(
-            "bf66820f48fa99f779974c4df78e5274a9d8e0458c4137e8c5357e40e2c3faf2",
+            "995b0f5f28d2073896a78c03b5b863eae6af3744bafa0245b8522beea6994927",
             OcrModelAssets.RECOGNITION.sha256,
         )
         assertEquals("cls.onnx", OcrModelAssets.CLASSIFICATION.fileName)
@@ -64,17 +64,17 @@ class OcrModelAssetsTest {
     fun `the alphabet is pinned as tightly as the models are`() {
         // A mismatched dictionary does not fail: every photo simply comes back as the wrong
         // characters, which is the one failure nobody would think to look for.
-        assertEquals("ppocrv5_dict.txt", OcrModelAssets.DICTIONARY.fileName)
-        assertEquals(74_012L, OcrModelAssets.DICTIONARY.sizeBytes)
+        assertEquals("ppocrv5_latin_dict.txt", OcrModelAssets.DICTIONARY.fileName)
+        assertEquals(2_616L, OcrModelAssets.DICTIONARY.sizeBytes)
         assertEquals(
-            "d1979e9f794c464c0d2e0b70a7fe14dd978e9dc644c0e71f14158cdf8342af1b",
+            "ccbcc45730b3fbbd9050c5bc74db6a99067141ef1035e3d14889a84a6b9b1aff",
             OcrModelAssets.DICTIONARY.sha256,
         )
     }
 
     @Test
     fun `finding the words and reading them are separate downloads`() {
-        // The split is the whole point: a caller that only wants outlines pays 4.5 MB, not 21.
+        // The split is the whole point: a caller that only wants outlines pays 4.5 MB, not 13.
         assertEquals(listOf(asset), OcrModelAssets.assetsOf(OcrModelComponent.Detection))
         assertEquals(
             setOf(OcrModelAssets.CLASSIFICATION, OcrModelAssets.DICTIONARY, OcrModelAssets.RECOGNITION),
@@ -90,7 +90,7 @@ class OcrModelAssetsTest {
     @Test
     fun `the prompt quotes every byte that will be fetched`() {
         assertEquals(OcrModelAssets.REQUIRED.size, OcrModelAssets.REQUIRED.distinct().size)
-        assertEquals(21_922_691L, OcrModelAssets.TOTAL_DOWNLOAD_BYTES)
+        assertEquals(13_398_587L, OcrModelAssets.TOTAL_DOWNLOAD_BYTES)
         assertEquals(
             OcrModelComponent.entries.sumOf { OcrModelAssets.downloadBytesOf(it) },
             OcrModelAssets.TOTAL_DOWNLOAD_BYTES,
@@ -101,7 +101,7 @@ class OcrModelAssetsTest {
     fun `every file is fetched from this project's own releases`() {
         for (each in OcrModelAssets.REQUIRED) {
             val url = OcrModelAssets.downloadUrl(each)
-            assertTrue(url, url.startsWith("https://github.com/gitakoos/proton-photos/releases/download/"))
+            assertTrue(url, url.startsWith("https://github.com/gitakoos/ocr-models/releases/download/"))
             assertTrue(url, url.endsWith("/${each.fileName}"))
             assertFalse(url, url.contains("ente"))
         }

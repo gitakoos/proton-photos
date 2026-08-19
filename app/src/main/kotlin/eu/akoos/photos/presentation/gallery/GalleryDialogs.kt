@@ -24,6 +24,8 @@ package eu.akoos.photos.presentation.gallery
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -245,6 +247,68 @@ internal fun GalleryAddToAlbumDialog(
             selectionCloudLinkIds = selectionLinkIds,
             albumMemberIds = albumMemberIds,
         )
+    }
+}
+
+/**
+ * Bottom sheet for "add to person": a horizontally scrolling row of the named people, each shown as
+ * the same circular face tile the timeline rail uses, so tapping one attaches the current selection to
+ * that person. Only named people appear, since a manual add is stored against the name; when there are
+ * none, the sheet explains that a person must be named first.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun GalleryAddToPersonSheet(
+    people: List<PersonUi>,
+    sheetState: SheetState,
+    onPersonSelected: (Long) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val colors = AppColors.current
+    val named = people.filter { !it.displayName.isNullOrBlank() }
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = Bg2,
+        scrimColor = Color.Black.copy(alpha = 0.5f),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(horizontal = 20.dp)
+                .padding(top = 8.dp, bottom = 28.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Text(
+                stringResource(R.string.person_add_photos_title),
+                color = colors.fgPrimary,
+                fontSize = 17.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+            if (named.isEmpty()) {
+                Text(
+                    stringResource(R.string.person_add_needs_name),
+                    color = colors.fgMute,
+                    fontSize = 14.sp,
+                )
+            } else {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    named.forEach { person ->
+                        PersonTile(
+                            person = person,
+                            selected = false,
+                            onClick = { onPersonSelected(person.personId) },
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 

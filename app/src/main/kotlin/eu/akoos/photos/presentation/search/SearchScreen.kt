@@ -51,9 +51,11 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -79,6 +81,8 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.material3.Text
+import eu.akoos.photos.presentation.gallery.PersonTile
+import eu.akoos.photos.presentation.gallery.PersonUi
 import eu.akoos.photos.presentation.gallery.PhotoCell
 import eu.akoos.photos.presentation.gallery.photoCellInputsFor
 import eu.akoos.photos.presentation.gallery.rememberSeamlessGrid
@@ -111,6 +115,7 @@ import eu.akoos.photos.presentation.common.favoriteSelectionAction
 import eu.akoos.photos.presentation.common.favoriteTurnsOn
 import eu.akoos.photos.presentation.common.anyCloudOnly
 import eu.akoos.photos.presentation.common.anyLocalOnly
+import eu.akoos.photos.presentation.common.anyMetadataEditable
 import eu.akoos.photos.presentation.common.hasDownloadable
 import eu.akoos.photos.presentation.common.offlinePinnableLinkIds
 import eu.akoos.photos.presentation.common.offlineTurnsOn
@@ -132,6 +137,7 @@ import eu.akoos.photos.presentation.gallery.rememberDragMultiSelectModifier
 import eu.akoos.photos.presentation.memories.FloatingMemoriesHeader
 import eu.akoos.photos.presentation.search.components.CalendarPreviewCard
 import eu.akoos.photos.presentation.search.components.OfflinePreviewCard
+import eu.akoos.photos.presentation.search.components.PeoplePreviewCard
 import eu.akoos.photos.presentation.search.components.JumpToMonthHeader
 import eu.akoos.photos.presentation.search.components.MonthTileRow
 import eu.akoos.photos.presentation.search.components.MapPreviewCard
@@ -162,12 +168,16 @@ fun SearchScreen(
     onOpenMap: () -> Unit = {},
     onOpenCalendar: () -> Unit = {},
     onOpenOffline: () -> Unit = {},
+    onOpenPeople: () -> Unit = {},
     /** Opens the date + place editor for the current selection, matching the timeline's entry. */
     onEditMetadata: (items: List<GalleryItem>) -> Unit = {},
+    /** Opens a matched person's page from the name suggestion row. */
+    onOpenPerson: (Long) -> Unit = {},
     vm: SearchViewModel = hiltViewModel(),
 ) {
     val colors = AppColors.current
     val query by vm.query.collectAsStateWithLifecycle()
+    val peopleSuggestions by vm.peopleSuggestions.collectAsStateWithLifecycle()
     val results by vm.results.collectAsStateWithLifecycle()
     val filter by vm.contentFilter.collectAsStateWithLifecycle()
     val selectedCategory by vm.selectedCategory.collectAsStateWithLifecycle()
@@ -401,6 +411,12 @@ fun SearchScreen(
             }
         }
 
+        // People whose name matches the query, above the results so a name search reaches a person
+        // even when no photo filename matches the text.
+        if (query.isNotBlank() && peopleSuggestions.isNotEmpty()) {
+            PeopleSuggestionRow(people = peopleSuggestions, onOpenPerson = onOpenPerson)
+        }
+
         val isIdle = query.isBlank() && filter == ContentFilter() && selectedCategory == GalleryFilter.All
         if (results.isEmpty() && isIdle) {
             // Idle empty state — surface "On this day" memories + a month-jump grid
@@ -443,6 +459,9 @@ fun SearchScreen(
                 }
                 item(key = "offline_preview_section") {
                     OfflinePreviewCard(onClick = onOpenOffline)
+                }
+                item(key = "people_preview_section") {
+                    PeoplePreviewCard(onClick = onOpenPeople)
                 }
                 if (recent.isNotEmpty()) {
                     item(key = "recent_section") {
@@ -730,9 +749,10 @@ fun SearchScreen(
                     )
                 )
             }
-            // The date + place editor opens as soon as one selected photo is device-only, so a mixed
-            // selection keeps the entry (the editor writes exactly those photos and names the count).
-            if (anyLocalOnly(selectedItems)) {
+            // The date + place editor opens for any editable photo (a device photo, or a cloud or
+            // backed-up image the corrected-copy replace can rewrite), so a mixed selection keeps the
+            // entry (the editor writes exactly those photos and names the count).
+            if (anyMetadataEditable(selectedItems)) {
                 add(
                     SelectionAction(
                         icon = Icons.Default.EditNote,
@@ -896,4 +916,40 @@ private fun keyOf(item: GalleryItem): String = when (item) {
     is GalleryItem.LocalOnly -> "L:" + item.local.uri
     is GalleryItem.Synced    -> "S:" + item.local.uri
     is GalleryItem.CloudOnly -> "C:" + item.cloud.linkId
+}
+
+/**
+ * A horizontally scrolling row of the people whose name matches the search query, each shown as the
+ * same circular face tile the timeline rail uses. Tapping one opens that person's page. Sits above the
+ * results so a name search reaches a person even when no photo text matches.
+ */
+@Composable
+private fun PeopleSuggestionRow(
+    people: List<PersonUi>,
+    onOpenPerson: (Long) -> Unit,
+) {
+    val colors = AppColors.current
+    Column(modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 4.dp)) {
+        Text(
+            text = stringResource(R.string.gallery_category_people),
+            color = colors.fgDim,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(bottom = 8.dp),
+        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            people.forEach { person ->
+                PersonTile(
+                    person = person,
+                    selected = false,
+                    onClick = { onOpenPerson(person.personId) },
+                )
+            }
+        }
+    }
 }

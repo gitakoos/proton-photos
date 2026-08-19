@@ -47,6 +47,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.navigationBars
 import eu.akoos.photos.presentation.common.ConfirmDialog
+import eu.akoos.photos.presentation.common.EmptyState
 import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -194,9 +195,10 @@ fun DuplicateFinderScreen(
             }
             // Nothing found at all: no filter combination could reveal anything, so offer no rows.
             !hasAnyContent ->
-                DupEmptyState(
-                    stringResource(R.string.duplicates_empty),
-                    Modifier.fillMaxSize().padding(top = contentTopPad),
+                EmptyState(
+                    title = stringResource(R.string.duplicates_empty),
+                    icon = Icons.Default.ContentCopy,
+                    modifier = Modifier.fillMaxSize().padding(top = contentTopPad),
                 )
             else -> LazyColumn(
                 state = listState,
@@ -216,9 +218,10 @@ fun DuplicateFinderScreen(
                 // recoverable without leaving the screen.
                 if (!exactVisible && !similarVisible) {
                     item("empty") {
-                        DupEmptyState(
-                            stringResource(R.string.duplicates_empty),
-                            Modifier.fillMaxWidth().padding(vertical = 56.dp),
+                        EmptyState(
+                            title = stringResource(R.string.duplicates_empty),
+                            icon = Icons.Default.ContentCopy,
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 56.dp),
                         )
                     }
                 }
@@ -228,6 +231,7 @@ fun DuplicateFinderScreen(
                         items(deviceGroups, key = { "d-" + it.items.first().stableId }) { group ->
                             val key = duplicateGroupKey(group)
                             DuplicateGroupCard(
+                                modifier = Modifier.animateItem(),
                                 group = group,
                                 similar = false,
                                 isDeleting = state.isDeleting,
@@ -246,6 +250,7 @@ fun DuplicateFinderScreen(
                         items(cloudGroups, key = { "c-" + it.items.first().stableId }) { group ->
                             val key = duplicateGroupKey(group)
                             DuplicateGroupCard(
+                                modifier = Modifier.animateItem(),
                                 group = group,
                                 similar = false,
                                 isDeleting = state.isDeleting,
@@ -272,6 +277,7 @@ fun DuplicateFinderScreen(
                         items(similarDeviceGroups, key = { "sd-" + it.items.first().stableId }) { group ->
                             val key = duplicateGroupKey(group)
                             DuplicateGroupCard(
+                                modifier = Modifier.animateItem(),
                                 group = group,
                                 similar = true,
                                 isDeleting = state.isDeleting,
@@ -287,6 +293,7 @@ fun DuplicateFinderScreen(
                         items(similarCloudGroups, key = { "sc-" + it.items.first().stableId }) { group ->
                             val key = duplicateGroupKey(group)
                             DuplicateGroupCard(
+                                modifier = Modifier.animateItem(),
                                 group = group,
                                 similar = true,
                                 isDeleting = state.isDeleting,
@@ -351,20 +358,6 @@ private fun SectionLabel(text: String) {
         text, color = FgMute, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
         modifier = Modifier.padding(top = 12.dp, bottom = 2.dp),
     )
-}
-
-@Composable
-private fun DupEmptyState(text: String, modifier: Modifier = Modifier) {
-    Box(
-        modifier,
-        contentAlignment = Alignment.Center,
-    ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Icon(Icons.Default.ContentCopy, null, tint = FgMute, modifier = Modifier.size(40.dp))
-            Spacer(Modifier.height(16.dp))
-            Text(text, color = FgDim, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 40.dp))
-        }
-    }
 }
 
 /** The duplicate-list filter modes. ALL (the default) shows exact and similar together. */
@@ -516,13 +509,14 @@ private fun DuplicateGroupCard(
     onOpenReview: () -> Unit,
     requestDecrypt: (String) -> Unit,
     cancelDecrypt: (String) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val allIds = remember(group) { group.items.map { it.stableId }.toSet() }
     var showConfirm by remember(group) { mutableStateOf(false) }
     val nothingToDelete = selected.isEmpty()
 
     Column(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(14.dp))
             .background(PillBg)

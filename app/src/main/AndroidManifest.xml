@@ -99,30 +99,29 @@
             </intent-filter>
             <!--
                 ACTION_VIEW for local image/video URIs so the app appears in another app's
-                "Open with" chooser. The content:// and file:// schemes are stated explicitly:
-                they are already the implicit default for a MIME-type-only filter (Android only
-                matches content/file URIs when no scheme is given), but ACTION_VIEW with a data
-                type and no scheme trips the AppLinkUrlError lint, which treats a bare VIEW filter
-                as an incomplete web link. No BROWSABLE / http(s) here: this is not a web link or
-                App Link, only local media handed over by another app, so naming the two real
-                schemes both keeps the behaviour identical and satisfies the check.
+                "Open with" chooser. Only the content:// scheme is accepted: a cross-app file://
+                URI is refused so a caller cannot aim the app at its own private storage, and the
+                parser enforces the same rule. The scheme is stated explicitly because ACTION_VIEW
+                with a data type and no scheme trips the AppLinkUrlError lint, which treats a bare
+                VIEW filter as an incomplete web link. No BROWSABLE / http(s) here: this is not a
+                web link or App Link, only local media handed over by another app.
             -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:scheme="content" />
-                <data android:scheme="file" />
-                <data android:mimeType="image/jpeg" />
-                <data android:mimeType="image/png" />
-                <data android:mimeType="image/webp" />
-                <data android:mimeType="image/heic" />
-                <data android:mimeType="image/heif" />
-                <data android:mimeType="image/gif" />
-                <data android:mimeType="video/mp4" />
-                <data android:mimeType="video/quicktime" />
-                <data android:mimeType="video/x-matroska" />
-                <data android:mimeType="video/webm" />
-                <data android:mimeType="video/3gpp" />
+                <data android:mimeType="image/*" />
+                <data android:mimeType="video/*" />
+            </intent-filter>
+            <!--
+                Registers the app as a gallery so a camera or system "open gallery"
+                action (ACTION_MAIN + CATEGORY_APP_GALLERY) can target it. The launch
+                behaves like a normal app start, so no extra handling is needed.
+            -->
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.APP_GALLERY" />
+                <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
 

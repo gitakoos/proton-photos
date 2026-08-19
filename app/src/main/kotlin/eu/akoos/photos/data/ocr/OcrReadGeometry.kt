@@ -49,12 +49,15 @@ const val READ_HEIGHT = 48
 const val READ_MIN_WIDTH = 320
 
 /**
- * Widest input a batch is stretched to. A wider crop is squeezed horizontally rather than given more
- * columns, because the reader's output carries one full alphabet score per column and the alphabet
- * has eighteen thousand entries: letting the width follow the crop would make a single banner photo
- * allocate hundreds of megabytes.
+ * Widest input a crop is scaled to, and so the width a long line's glyphs are read at. A line longer
+ * than this is squeezed horizontally to fit rather than given more columns, which is a balance struck
+ * in both directions: set it too low and a full-width line of small type is crushed until the reader
+ * gives nothing back, set it too high and a single wide crop's output, one score per column across an
+ * eighteen thousand entry alphabet, runs to tens of megabytes. This is wide enough to read a
+ * full-width line of a large screenshot close to its own scale, and a crop this wide forms a reader
+ * run of its own, so that output is paid for once rather than multiplied across a batch.
  */
-const val READ_MAX_WIDTH = 960
+const val READ_MAX_WIDTH = 2400
 
 /** Most crops one reader run may carry. */
 const val READ_MAX_BATCH = 6

@@ -87,6 +87,7 @@ import eu.akoos.photos.presentation.theme.ErrorColor
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
+@Suppress("DEPRECATION") // The suspend Clipboard API is unnecessary for a synchronous copy in a click handler.
 fun ErrorPopup(
     title: String,
     message: String,

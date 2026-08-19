@@ -30,12 +30,14 @@ import eu.akoos.photos.data.preferences.settingsDataStore
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -105,6 +107,7 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -126,6 +129,34 @@ import eu.akoos.photos.presentation.theme.FgPrimary
 import eu.akoos.photos.presentation.theme.PillBg
 import eu.akoos.photos.presentation.theme.PillBgOpaque
 import eu.akoos.photos.presentation.theme.PillBorder
+import android.graphics.Bitmap
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.filled.Face
+import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.ui.layout.ContentScale
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
+import coil.transform.Transformation
+
+/**
+ * Data and callbacks the People chip and face bar on the category rail read, handed down by
+ * [eu.akoos.photos.presentation.gallery.GalleryScreen] through a CompositionLocal so [CategoryRail]
+ * can render them without new parameters threaded through the header. Empty by default, so a rail
+ * composed with the AI features off, no indexed people, or outside the provider (the search screen)
+ * shows no People chip and no bar.
+ */
+internal data class PeopleRailData(
+    val people: List<PersonUi> = emptyList(),
+    val selectedPersonId: Long? = null,
+    /** True while the People bar is revealed (the chip is toggled on or a person is selected). */
+    val active: Boolean = false,
+    val onToggle: () -> Unit = {},
+    val onPersonSelected: (Long) -> Unit = {},
+)
+
+internal val LocalPeopleRail = compositionLocalOf { PeopleRailData() }
 
 @Composable
 internal fun AlbumsFilterRail(
@@ -638,43 +669,306 @@ internal fun CategoryRail(
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
+    val peopleRail = LocalPeopleRail.current
 
     val savedCsv by remember {
         context.settingsDataStore.data.map { it[SettingsKeys.CATEGORY_RAIL_ORDER] }
     }.collectAsState(initial = null)
     val order = remember(savedCsv) { resolveCategoryOrder(savedCsv) }
 
+    Column(modifier = modifier) {
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            contentPadding = PaddingValues(horizontal = 20.dp),
+        ) {
+            itemsIndexed(order, key = { _, f -> f.name }) { _, cat ->
+                val selected = selectedFilter == cat
+                val chipBg by animateColorAsState(
+                    if (selected) Accent.copy(alpha = 0.18f) else PillBg, label = "catChipBg")
+                val chipFg by animateColorAsState(if (selected) Accent else FgDim, label = "catChipFg")
+                Row(
+                    modifier = Modifier
+                        .height(34.dp)
+                        .clip(pillShape)
+                        .background(chipBg, pillShape)
+                        .then(if (!selected) Modifier.border(0.5.dp, PillBorder, pillShape) else Modifier)
+                        .clickable { onFilterSelected(if (selected) GalleryFilter.All else cat) }
+                        .padding(horizontal = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    GalleryCategoryIcon(cat, tint = chipFg)
+                    Text(
+                        categoryLabel(cat),
+                        color = chipFg,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                    )
+                }
+            }
+            // People chip: present only once at least one person is indexed (which already implies
+            // the AI features are on). Toggles the face bar below; highlighted while it is open.
+            if (peopleRail.people.isNotEmpty()) {
+                item(key = "people") {
+                    val selected = peopleRail.active
+                    val chipBg by animateColorAsState(
+                        if (selected) Accent.copy(alpha = 0.18f) else PillBg, label = "peopleChipBg")
+                    val chipFg by animateColorAsState(if (selected) Accent else FgDim, label = "peopleChipFg")
+                    Row(
+                        modifier = Modifier
+                            .height(34.dp)
+                            .clip(pillShape)
+                            .background(chipBg, pillShape)
+                            .then(if (!selected) Modifier.border(0.5.dp, PillBorder, pillShape) else Modifier)
+                            .clickable { peopleRail.onToggle() }
+                            .padding(horizontal = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Icon(
+                            Icons.Default.Face,
+                            contentDescription = null,
+                            tint = chipFg,
+                            modifier = Modifier.size(15.dp),
+                        )
+                        Text(
+                            stringResource(R.string.gallery_category_people),
+                            color = chipFg,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium,
+                        )
+                    }
+                }
+            }
+        }
+        if (peopleRail.active && peopleRail.people.isNotEmpty()) {
+            PeopleBar(
+                people = peopleRail.people,
+                selectedPersonId = peopleRail.selectedPersonId,
+                onPersonSelected = peopleRail.onPersonSelected,
+                modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+            )
+        }
+    }
+}
+
+/**
+ * Horizontal row of round face thumbnails, one per indexed [PersonUi], shown under the category rail
+ * when the People chip is open. Tapping a face filters the timeline to that person; the selected
+ * face carries an accent ring. The list is small (cover references only) and the tiles decode at a
+ * low target size, so this stays memory-light on the timeline screen.
+ */
+@Composable
+private fun PeopleBar(
+    people: List<PersonUi>,
+    selectedPersonId: Long?,
+    onPersonSelected: (Long) -> Unit,
+    modifier: Modifier = Modifier,
+) {
     LazyRow(
         modifier = modifier,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
         contentPadding = PaddingValues(horizontal = 20.dp),
     ) {
-        itemsIndexed(order, key = { _, f -> f.name }) { _, cat ->
-            val selected = selectedFilter == cat
-            val chipBg by animateColorAsState(
-                if (selected) Accent.copy(alpha = 0.18f) else PillBg, label = "catChipBg")
-            val chipFg by animateColorAsState(if (selected) Accent else FgDim, label = "catChipFg")
-            Row(
+        items(people, key = { it.personId }) { person ->
+            PersonTile(
+                person = person,
+                selected = person.personId == selectedPersonId,
+                onClick = { onPersonSelected(person.personId) },
+            )
+        }
+    }
+}
+
+/** One round face tile: the cover photo's thumbnail cropped to the face box inside a circle, with the
+ *  person's name below when one is set. Reuses the timeline's linkId → decrypted-thumbnail resolution
+ *  ([LocalThumbnailUrls]); a local cover falls back to its own content uri. */
+@Composable
+internal fun PersonTile(
+    person: PersonUi,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    val context = LocalContext.current
+    val model = LocalThumbnailUrls.current.value[person.coverPhotoKey] ?: person.coverPhotoKey
+    val request = remember(model, person.faceBox) {
+        ImageRequest.Builder(context)
+            .data(model)
+            .size(FACE_TILE_PX)
+            .crossfade(false)
+            .apply { person.faceBox?.let { transformations(FaceCropTransformation(it)) } }
+            .build()
+    }
+    Column(
+        modifier = Modifier
+            .width(64.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
+            .padding(vertical = 2.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(56.dp)
+                .clip(CircleShape)
+                .background(Bg2)
+                .then(if (selected) Modifier.border(2.dp, Accent, CircleShape) else Modifier),
+            contentAlignment = Alignment.Center,
+        ) {
+            AsyncImage(
+                model = request,
+                contentDescription = person.displayName,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize().clip(CircleShape),
+            )
+        }
+        val name = person.displayName?.takeIf { it.isNotBlank() }
+        if (name != null) {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                name,
+                color = if (selected) Accent else FgDim,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+/**
+ * Album-style People card: the person's face-cropped cover filling a rounded rectangle, captioned with
+ * the name and a photo count, mirroring the memories [SeasonCard] (same aspect, corners, background and
+ * caption treatment) but for a person. Fills its grid cell width. Reuses [PersonTile]'s cover resolution
+ * ([LocalThumbnailUrls] keyed by coverPhotoKey) and the same [FaceCropTransformation], clipped to the
+ * card corners instead of a circle; an unresolved cover falls back to the card's [Bg2] background.
+ */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+internal fun PersonCard(
+    person: PersonUi,
+    onClick: () -> Unit,
+    onLongClick: (() -> Unit)? = null,
+    selected: Boolean = false,
+) {
+    val context = LocalContext.current
+    val model = LocalThumbnailUrls.current.value[person.coverPhotoKey] ?: person.coverPhotoKey
+    val request = remember(model, person.faceBox) {
+        ImageRequest.Builder(context)
+            .data(model)
+            .size(FACE_CARD_PX)
+            .crossfade(false)
+            .apply { person.faceBox?.let { transformations(FaceCropTransformation(it)) } }
+            .build()
+    }
+    val name = person.displayName ?: stringResource(R.string.person_detail_unnamed)
+    val countLabel = pluralStringResource(
+        R.plurals.count_photos_plural, person.faceCount, person.faceCount,
+    )
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .aspectRatio(132f / 168f)
+            .clip(RoundedCornerShape(16.dp))
+            .background(Bg2)
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
+    ) {
+        AsyncImage(
+            model = request,
+            contentDescription = name,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier.fillMaxSize(),
+        )
+        // Bottom gradient so the caption stays legible over bright covers.
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(76.dp)
+                .align(Alignment.BottomCenter)
+                .background(
+                    Brush.verticalGradient(
+                        listOf(Color.Transparent, Color.Black.copy(alpha = 0.66f)),
+                    ),
+                ),
+        )
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .padding(horizontal = 10.dp, vertical = 10.dp),
+        ) {
+            Text(
+                text = name,
+                color = Color.White,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = countLabel,
+                color = Color.White.copy(alpha = 0.85f),
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Medium,
+            )
+        }
+        if (selected) {
+            Box(modifier = Modifier.matchParentSize().background(Accent.copy(alpha = 0.30f)))
+            Box(
                 modifier = Modifier
-                    .height(34.dp)
-                    .clip(pillShape)
-                    .background(chipBg, pillShape)
-                    .then(if (!selected) Modifier.border(0.5.dp, PillBorder, pillShape) else Modifier)
-                    .clickable { onFilterSelected(if (selected) GalleryFilter.All else cat) }
-                    .padding(horizontal = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    .align(Alignment.TopEnd)
+                    .padding(8.dp)
+                    .size(22.dp)
+                    .clip(CircleShape)
+                    .background(Accent),
+                contentAlignment = Alignment.Center,
             ) {
-                GalleryCategoryIcon(cat, tint = chipFg)
-                Text(
-                    categoryLabel(cat),
-                    color = chipFg,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Medium,
+                Icon(
+                    Icons.Default.Check,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(14.dp),
                 )
             }
         }
     }
+}
+
+/** Decode width for the small circular face tile (56dp). The crop keeps only the face region, so the
+ *  source is decoded well above the tile's pixel size to leave the cropped face sharp. */
+private const val FACE_TILE_PX = 320
+
+/** Decode width for the larger album-style [PersonCard]. The face box is a fraction of the frame, so
+ *  cropping it out of a small decode would upscale a tiny region; a generous source keeps the card as
+ *  crisp as the uncropped Season card (a cloud cover is still capped by its thumbnail's own size). */
+private const val FACE_CARD_PX = 1024
+
+/**
+ * Crops a Coil-decoded cover thumbnail to a square around the stored face box (given as fractions of
+ * the image, so it is correct at any decode resolution), with a little padding, so a tile reads as a
+ * face portrait rather than the whole photo. The output square is clipped to a circle by the tile.
+ */
+internal class FaceCropTransformation(private val box: FaceBox) : Transformation {
+    override val cacheKey: String = "face:${box.left},${box.top},${box.right},${box.bottom}"
+
+    override suspend fun transform(input: Bitmap, size: coil.size.Size): Bitmap {
+        val w = input.width
+        val h = input.height
+        if (w <= 0 || h <= 0) return input
+        val faceW = (box.right - box.left) * w
+        val faceH = (box.bottom - box.top) * h
+        val cx = ((box.left + box.right) / 2f) * w
+        val cy = ((box.top + box.bottom) / 2f) * h
+        val side = (maxOf(faceW, faceH) * 1.4f).coerceIn(1f, minOf(w, h).toFloat())
+        val half = side / 2f
+        val left = (cx - half).roundToInt().coerceIn(0, w - 1)
+        val top = (cy - half).roundToInt().coerceIn(0, h - 1)
+        val s = side.roundToInt().coerceIn(1, minOf(w - left, h - top))
+        return Bitmap.createBitmap(input, left, top, s, s)
+    }
+
+    override fun equals(other: Any?): Boolean = other is FaceCropTransformation && other.box == box
+    override fun hashCode(): Int = box.hashCode()
 }
 
 /**

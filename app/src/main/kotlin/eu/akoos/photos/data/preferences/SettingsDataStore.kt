@@ -46,10 +46,6 @@ object SettingsKeys {
      *  actively scrolling, giving a time reference for the topmost visible photo. Off by default. */
     val SHOW_SCROLL_DATE = booleanPreferencesKey("show_scroll_date")
 
-    /** When true, the selection-mode action buttons (share, delete, download, set as cover, remove)
-     *  show a short text label beneath the icon. On by default; users who prefer icon-only can
-     *  turn it off so the action bars stay compact. */
-
     /** When true, the Photos timeline is flipped so the oldest photos sit at the top and the
      *  newest at the bottom (scroll up for older). Off by default — the timeline stays newest-first.
      *  Display-only: the shared item sort that also feeds Search and Calendar is untouched. */
@@ -187,6 +183,11 @@ object SettingsKeys {
     val GRID_REMEMBER_LAST = booleanPreferencesKey("grid_remember_last")
     /** Last pinched timeline zoom level index; restored on launch when [GRID_REMEMBER_LAST] is on. */
     val GRID_LAST_LEVEL = intPreferencesKey("grid_last_level")
+
+    /** When on, tapping a different bottom tab keeps that page where it was last scrolled; only
+     *  re-tapping the already-active tab returns it to the top. Off by default, so any tab tap
+     *  resets that tab to the top as before. */
+    val KEEP_SCROLL_ON_TAB_SWITCH = booleanPreferencesKey("keep_scroll_on_tab_switch")
 
     /** Folders selected for backup. null (key absent) = back up nothing (first-run default). */
     val SYNC_FOLDER_NAMES = stringSetPreferencesKey("sync_folder_names")
@@ -456,8 +457,7 @@ object SettingsKeys {
     val MIRROR_STRIP_TO_LOCAL = booleanPreferencesKey("mirror_strip_to_local")
     /** When true, "compress on upload" also replaces the on-device original with the lighter
      *  re-encode (with all-files access), so the backed-up copy and the local file stay identical.
-     *  The full-quality original is overwritten. Persisted only for now; the upload pipeline wires
-     *  it in a later change. */
+     *  The full-quality original is overwritten. */
     val MIRROR_COMPRESS_TO_LOCAL = booleanPreferencesKey("mirror_compress_to_local")
     /** When true, the upload pipeline derives a new filename from the source's capture
      *  timestamp before sending bytes to Drive — e.g. `IMG_2841.jpg` → `2026-05-29_14-32-08.jpg`.
@@ -634,6 +634,30 @@ object SettingsKeys {
     const val RECENT_UPLOAD_TTL_MS = 60L * 60L * 1000L
 
     /**
+     * Master opt-in for the app's on-device machine-learning features: Copy text, Hide faces, and the
+     * People grouping those build toward. Absent reads as OFF, so a fresh install fetches no model and
+     * keeps the AI entry points hidden until the user turns this on in Settings. The per-model consent
+     * flags below ([OCR_MODEL_DOWNLOAD_ALLOWED], [FACE_MODEL_DOWNLOAD_ALLOWED]) stay as the second gate
+     * on the actual download; this one decides whether those features are reachable at all.
+     */
+    val AI_FEATURES_ENABLED = booleanPreferencesKey("ai_features_enabled")
+
+    /**
+     * Per-feature opt-in for the Copy text reader, nested under [AI_FEATURES_ENABLED]. Absent falls
+     * back to whether the detection and recognition models already sit on disk, so a device that has
+     * fetched them reads as ON and one that has not reads as OFF. Off keeps the master AI switch on
+     * while hiding only the read-the-text gesture.
+     */
+    val OCR_ENABLED = booleanPreferencesKey("ocr_enabled")
+
+    /**
+     * Per-feature opt-in for the face features (Hide faces and the People grouping), nested under
+     * [AI_FEATURES_ENABLED]. Absent reads as OFF, so the face pipeline stays idle until the user turns
+     * it on. Off keeps the master AI switch on while standing the face work down.
+     */
+    val FACE_ENABLED = booleanPreferencesKey("face_enabled")
+
+    /**
      * True once the user has agreed to fetch the on-device text-detection model, which the viewer's
      * read-the-text gesture needs and which is several megabytes. Absent means the agreement has not
      * been given yet, and the gesture asks.
@@ -643,6 +667,26 @@ object SettingsKeys {
      * such request is the answer to that request rather than a second attempt at the same one.
      */
     val OCR_MODEL_DOWNLOAD_ALLOWED = booleanPreferencesKey("ocr_model_download_allowed")
+
+    /**
+     * True once the user has agreed to fetch the on-device face-detection model, the SCRFD detector
+     * that finds where the faces are so the editor can blur them. Several megabytes, so it is fetched
+     * only on agreement. Absent means the agreement has not been given yet.
+     *
+     * Mirrors [OCR_MODEL_DOWNLOAD_ALLOWED]: only an acceptance is stored, never a refusal, because the
+     * prompt never appears on its own. It only ever follows the user reaching for the feature, so
+     * asking again on the next such request is the answer to that request rather than a repeat of the
+     * same one.
+     */
+    val FACE_MODEL_DOWNLOAD_ALLOWED = booleanPreferencesKey("face_model_download_allowed")
+
+    /**
+     * User pause switch for the background face-indexing walk. Absent (the default) reads as NOT
+     * paused, so indexing runs whenever the AI features are on. When true the walk stops itself
+     * between photos and never auto-restarts, so a user who would rather the phone not spend cycles
+     * on it can turn it off from Settings and have it stay off until they turn it back on.
+     */
+    val FACE_INDEXING_PAUSED = booleanPreferencesKey("face_indexing_paused")
 
     /**
      * DEBUG-only large-library simulator size. N synthetic photo_listing rows are generated

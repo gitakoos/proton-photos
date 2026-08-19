@@ -68,8 +68,14 @@ private const val BINARY_THRESHOLD = 0.3f
 /** Mean probability a region has to reach to be reported at all. */
 private const val BOX_THRESHOLD = 0.6f
 
-/** How far a region is grown before it is reported, as a fraction of area over perimeter. */
-private const val UNCLIP_RATIO = 1.5f
+/**
+ * How far a region is grown before it is reported, as a fraction of area over perimeter. The
+ * binarisation cuts where a stroke fades out, so the raw region sits inside the ink and the report has
+ * to grow back out to cover the strokes the threshold ate. A little above the reference default so a
+ * bold glyph on a product label keeps its outer strokes: a first "K" whose diagonals are clipped reads
+ * as a narrower letter, and the extra margin is what keeps the letter whole for the reader.
+ */
+private const val UNCLIP_RATIO = 1.8f
 
 /** Shortest side, in grid cells, a grown region has to keep. */
 private const val MIN_SIDE = 3f

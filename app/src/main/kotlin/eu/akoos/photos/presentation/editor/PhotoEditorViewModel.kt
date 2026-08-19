@@ -35,6 +35,7 @@ import android.graphics.Paint
 import android.graphics.RadialGradient
 import android.graphics.Shader
 import android.graphics.Rect
+import android.graphics.RectF
 import android.net.Uri
 import android.os.Build
 import coil.imageLoader
@@ -45,21 +46,31 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlin.math.abs
+import kotlin.math.ceil
+import kotlin.math.floor
 import kotlin.math.hypot
 import kotlin.math.roundToInt
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import eu.akoos.photos.R
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import me.proton.core.accountmanager.domain.AccountManager
+import androidx.datastore.preferences.core.edit
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.data.face.FaceDetector
+import eu.akoos.photos.data.face.FaceModelManager
+import eu.akoos.photos.data.face.FaceModelPreparation
 import eu.akoos.photos.data.hidden.HiddenVaultRecords
 import eu.akoos.photos.data.transfer.TransferCenter
 import eu.akoos.photos.domain.entity.CloudPhoto
@@ -103,6 +114,9 @@ enum class FilterPreset(@androidx.annotation.StringRes val labelRes: Int) {
 
 /** Redact stroke mode — what to draw under the user's finger. */
 enum class RedactMode { Black, Pixelate }
+
+/** How a face cover obscures its area: a block mosaic or a heavy blur. */
+enum class FaceCoverStyle { Pixelate, Blur }
 
 /**
  * A single redaction stroke. Points are in SOURCE-BITMAP coordinates so they survive
@@ -197,6 +211,14 @@ data class EditorAdjustments(
     val cropRect: Rect? = null,
     /** Black-out / pixelate strokes applied after all color and geometry transforms. */
     val redactStrokes: List<RedactionStroke> = emptyList(),
+    /** Oriented ellipses covering detected faces, composited alongside the redaction step. Coordinates
+     *  are absolute pixels of the rendered (post-crop) image, the same convention as [redactStrokes],
+     *  so they land identically on the full-res preview and the full-res save. */
+    val faceCovers: List<OvalSpec> = emptyList(),
+    /** How the face covers obscure their area: a block mosaic or a heavy blur. */
+    val faceCoverStyle: FaceCoverStyle = FaceCoverStyle.Pixelate,
+    /** 0..1 face-cover intensity; larger values coarsen the mosaic or blur harder. */
+    val faceCoverStrength: Float = 0.5f,
     /** Per-colour HSL: eight bands (red, orange, yellow, green, aqua, blue, purple, magenta). */
     val hslBands: List<HslBand> = List(8) { HslBand() },
     /** Tone curves: a master applied to every channel, then a per-channel curve. */
@@ -209,6 +231,19 @@ data class EditorAdjustments(
     /** Text overlays (normalised), drawn last. */
     val textItems: List<TextItem> = emptyList(),
 )
+
+/**
+ * Where the Hide-faces tool is in its one-shot detect flow, surfaced so the panel can show a spinner
+ * while a run is in flight, a face count when it settles, a consent prompt before the model download,
+ * or a failure. Detection is only ever started by a user action, never a per-frame loop.
+ */
+sealed interface HideFacesState {
+    data object Idle : HideFacesState
+    data object Detecting : HideFacesState
+    data class Ready(val faceCount: Int) : HideFacesState
+    data object NeedsConsent : HideFacesState
+    data class Failed(val message: String) : HideFacesState
+}
 
 data class EditorUiState(
     val source: EditorSource? = null,
@@ -238,6 +273,8 @@ data class EditorUiState(
     /** OS delete-consent dialog ([MediaStore.createDeleteRequest]) when a Synced Overwrite falls back
      *  to copy, so the orphaned original can be removed. Mirrors [pendingWriteIntent]. */
     val pendingDeleteIntent: android.app.PendingIntent? = null,
+    /** Where the Hide-faces tool is in its one-shot detect flow. */
+    val hideFacesState: HideFacesState = HideFacesState.Idle,
 )
 
 sealed class SaveResult {
@@ -522,6 +559,35 @@ class PhotoEditorViewModel @Inject constructor(
 
     val hasCloudCounterpart: StateFlow<Boolean> = _hasCloudCounterpart.asStateFlow()
 
+    // ── Hide faces ─────────────────────────────────────────────────────────────
+    /** Master AI-features gate (Settings, AI and machine learning). Off hides the Hide-faces tool from
+     *  the editor tool row so no face model is ever fetched. Observed, so a change made in Settings is
+     *  reflected the next time the editor is opened. */
+    val aiFeaturesEnabled: StateFlow<Boolean> = context.settingsDataStore.data
+        .map { it[SettingsKeys.AI_FEATURES_ENABLED] ?: false }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    /** Per-feature face gate (Settings, AI and machine learning). AND-ed with [aiFeaturesEnabled] before
+     *  the Hide-faces tool is offered, so turning faces off drops the tool while the master AI switch
+     *  stays on. Observed, so a change made in Settings is reflected the next time the editor is opened. */
+    val faceEnabled: StateFlow<Boolean> = context.settingsDataStore.data
+        .map { it[SettingsKeys.FACE_ENABLED] ?: false }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    /** Resolves the SCRFD model (side-loaded, cached, or downloaded on consent). Built lazily so the
+     *  editor pays nothing for it until the user reaches for Hide faces. */
+    private val faceModelManager by lazy { FaceModelManager(context) }
+    /** Detector holding one open ONNX session, reused across detects and rebuilt only if the resolved
+     *  model path changes. Closed in [onCleared]. */
+    private var faceDetector: FaceDetector? = null
+    private var faceDetectorModelPath: String? = null
+
+    /** Longest edge the detection copy is capped to, so a large source never inflates ARGB_8888 past
+     *  the heap during a detect. Results are scaled back up to full-res image pixels afterwards. */
+    private val faceDetectMaxEdge = 1920
+
     /** Longest-edge cap on decode: a 50 MP photo as ARGB_8888 (~200 MB) exceeds the ~100 MB a hardware
      *  Canvas can draw ("too large bitmap"). ~12 MP photos pass through untouched. */
     private val editorMaxDim = 4096
@@ -803,6 +869,119 @@ class PhotoEditorViewModel @Inject constructor(
     /** Set the redact brush diameter (screen dp). No re-render: it only sizes the next stroke. */
     fun setRedactBrush(dp: Float) = _state.update { it.copy(redactBrushDp = dp.coerceIn(8f, 80f)) }
 
+    // ── Hide faces ─────────────────────────────────────────────────────────────
+
+    /**
+     * One-shot face detection for the Hide-faces tool. Resolves the model first, routing a
+     * still-unavailable model through [HideFacesState] as a consent prompt or a failure; on success it
+     * detects on a memory-bounded copy of the source and covers every face found.
+     *
+     * The detect runs on a copy whose long edge is capped so a large source never inflates ARGB_8888
+     * past the heap, then each resulting oval is scaled UP to full-res image pixels, the same space
+     * the redact strokes and the covers pipeline (step 4b) work in, so a full-res save re-renders the
+     * covers for free. Committed through [updateAdjustments], so it is one undo entry and one re-render.
+     */
+    fun detectFaces() {
+        val orig = _state.value.originalBitmap ?: return
+        _state.update { it.copy(hideFacesState = HideFacesState.Detecting) }
+        viewModelScope.launch(Dispatchers.Default) {
+            try {
+                val modelFile = when (val prep = faceModelManager.prepare()) {
+                    is FaceModelPreparation.Ready -> prep.file
+                    FaceModelPreparation.NeedsConsent -> {
+                        _state.update { it.copy(hideFacesState = HideFacesState.NeedsConsent) }
+                        return@launch
+                    }
+                    is FaceModelPreparation.Failed -> {
+                        _state.update { it.copy(hideFacesState = HideFacesState.Failed(
+                            context.getString(R.string.editor_face_model_failed),
+                        )) }
+                        return@launch
+                    }
+                }
+                val detector = ensureFaceDetector(modelFile)
+
+                val fullW = orig.width
+                val fullH = orig.height
+                val scale = (faceDetectMaxEdge.toFloat() / maxOf(fullW, fullH)).coerceAtMost(1f)
+                val detectW = (fullW * scale).roundToInt().coerceAtLeast(1)
+                val detectH = (fullH * scale).roundToInt().coerceAtLeast(1)
+                val detectBitmap = Bitmap.createScaledBitmap(orig, detectW, detectH, true)
+                val faces = try {
+                    detector.detect(detectBitmap)
+                } finally {
+                    // createScaledBitmap hands back the same instance when nothing needs scaling.
+                    if (detectBitmap !== orig && !detectBitmap.isRecycled) detectBitmap.recycle()
+                }
+
+                // Scale ovals from detect-copy pixels up to full-res image pixels. The scale is uniform
+                // (aspect preserved), so the eye-line rotation baked by faceOval carries over unchanged.
+                val sx = fullW.toFloat() / detectW.toFloat()
+                val sy = fullH.toFloat() / detectH.toFloat()
+                val covers = faces.mapNotNull { face ->
+                    if (face.landmarks.size < 2) return@mapNotNull null
+                    val leftEye = face.landmarks[0]
+                    val rightEye = face.landmarks[1]
+                    val oval = faceOval(
+                        face.box.left, face.box.top, face.box.right, face.box.bottom,
+                        leftEye.x, leftEye.y, rightEye.x, rightEye.y,
+                    )
+                    OvalSpec(
+                        centerX = oval.centerX * sx,
+                        centerY = oval.centerY * sy,
+                        radiusX = oval.radiusX * sx,
+                        radiusY = oval.radiusY * sy,
+                        rotationDegrees = oval.rotationDegrees,
+                    )
+                }
+
+                withContext(Dispatchers.Main) {
+                    updateAdjustments { it.copy(faceCovers = covers) }
+                    _state.update { it.copy(hideFacesState = HideFacesState.Ready(covers.size)) }
+                }
+            } catch (ce: kotlinx.coroutines.CancellationException) {
+                throw ce
+            } catch (t: Throwable) {
+                _state.update { it.copy(hideFacesState = HideFacesState.Failed(
+                    context.getString(R.string.editor_face_model_failed),
+                )) }
+            }
+        }
+    }
+
+    /** The detector for [modelFile], reusing its open session unless the resolved model path changed. */
+    private fun ensureFaceDetector(modelFile: File): FaceDetector {
+        faceDetector?.let { if (faceDetectorModelPath == modelFile.absolutePath) return it }
+        faceDetector?.close()
+        return FaceDetector(modelFile).also {
+            faceDetector = it
+            faceDetectorModelPath = modelFile.absolutePath
+        }
+    }
+
+    fun setFaceCoverStyle(style: FaceCoverStyle) = updateAdjustments { it.copy(faceCoverStyle = style) }
+    /** Live strength drag: fast path per tick, folded into one undo entry by [finalizeAdjustments]. */
+    fun setFaceCoverStrength(v: Float) = updateAdjustmentsFast { it.copy(faceCoverStrength = v.coerceIn(0f, 1f)) }
+    fun clearFaceCovers() {
+        updateAdjustments { it.copy(faceCovers = emptyList()) }
+        _state.update { it.copy(hideFacesState = HideFacesState.Idle) }
+    }
+
+    /** Clear a consent / failure prompt without acting on it (the user backed out of the dialog). */
+    fun dismissHideFacesPrompt() = _state.update { it.copy(hideFacesState = HideFacesState.Idle) }
+
+    /**
+     * Records the user's agreement to fetch the face model and re-runs detection, so the tap that
+     * accepted the prompt is what produces the covers. Persisting first (the write suspends until it is
+     * durable) means the re-run's model resolve reads the accepted flag rather than racing the write.
+     */
+    fun allowFaceModelDownload() {
+        viewModelScope.launch {
+            context.settingsDataStore.edit { it[SettingsKeys.FACE_MODEL_DOWNLOAD_ALLOWED] = true }
+            detectFaces()
+        }
+    }
+
     fun addDrawStroke(stroke: DrawStroke) = updateAdjustments { it.copy(drawStrokes = it.drawStrokes + stroke) }
     fun undoLastDrawStroke() = updateAdjustments {
         it.copy(drawStrokes = if (it.drawStrokes.isEmpty()) it.drawStrokes else it.drawStrokes.dropLast(1))
@@ -1016,8 +1195,9 @@ class PhotoEditorViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.Default) {
             // Instant screen-res preview first, so a filter / rotate / crop / auto-fix shows immediately
             // instead of after the slow full-res pass on a big photo, with the crop scaled down to the
-            // small source. Only redact strokes skip it (their points are in full-res coordinates).
-            if (newAdj.redactStrokes.isEmpty()) {
+            // small source. Redact strokes and face covers skip it (their geometry is in full-res
+            // coordinates and the small source would drift it).
+            if (newAdj.redactStrokes.isEmpty() && newAdj.faceCovers.isEmpty()) {
                 val small = ensureSmallSource(orig)
                 val sc = if (orig.width > 0) small.width.toFloat() / orig.width.toFloat() else 1f
                 val smallPreview = applyAdjustments(small, scaleCropForSmall(forPreview(newAdj), sc))
@@ -1075,9 +1255,9 @@ class PhotoEditorViewModel @Inject constructor(
         sliderRenderJob?.cancel()
         sliderRenderJob = viewModelScope.launch(Dispatchers.Default) {
             // Smooth small-source render, with the crop scaled down to match, so a live slider stays fast
-            // even after a crop. Only redact strokes force the full-res path (their points are in full-res
-            // coordinates and the small source would drift them); that case is rare.
-            val newPreview = if (newAdj.redactStrokes.isEmpty()) {
+            // even after a crop. Redact strokes and face covers force the full-res path (their geometry is
+            // in full-res coordinates and the small source would drift it); that case is rare.
+            val newPreview = if (newAdj.redactStrokes.isEmpty() && newAdj.faceCovers.isEmpty()) {
                 val small = ensureSmallSource(orig)
                 val sc = if (orig.width > 0) small.width.toFloat() / orig.width.toFloat() else 1f
                 applyAdjustments(small, scaleCropForSmall(forPreview(newAdj), sc))
@@ -1519,9 +1699,15 @@ class PhotoEditorViewModel @Inject constructor(
             else applyRedactStrokes(vignetted, adj.redactStrokes, recycleIntermediates)
         recycle(vignetted, redacted)
 
+        // 4b. face covers: oriented ellipses over detected faces, in the same display space as the
+        //     redact strokes, so a full-res save re-renders them for free through this same path.
+        val faceCovered = if (adj.faceCovers.isEmpty()) redacted
+            else applyFaceCovers(redacted, adj.faceCovers, adj.faceCoverStyle, adj.faceCoverStrength, recycleIntermediates)
+        recycle(redacted, faceCovered)
+
         // 5. pen strokes (normalised geometry, any resolution)
-        val drawn = if (adj.drawStrokes.isEmpty()) redacted else applyDrawStrokes(redacted, adj.drawStrokes)
-        recycle(redacted, drawn)
+        val drawn = if (adj.drawStrokes.isEmpty()) faceCovered else applyDrawStrokes(faceCovered, adj.drawStrokes)
+        recycle(faceCovered, drawn)
 
         // 6. text overlays, drawn last, on top of everything.
         val final = if (adj.textItems.isEmpty()) drawn else applyTextItems(drawn, adj.textItems)
@@ -1611,6 +1797,125 @@ class PhotoEditorViewModel @Inject constructor(
         }
         canvas.drawBitmap(pixelated, 0f, 0f, xfer)
         canvas.restoreToCount(saveCount)
+    }
+
+    /**
+     * Composites [covers] onto [src] and returns a new bitmap. Each oval is drawn as a rotated filled
+     * ellipse into an alpha mask, then the obscured pixels show through that mask via SRC_IN, exactly
+     * like the pixelate redact stroke. Oval coordinates are already this render bitmap's own pixels, so
+     * nothing is scaled here, the same reason the redact strokes stay in full-res coordinates.
+     *
+     * [FaceCoverStyle.Pixelate] mosaics each face on its own bounded region with hard blocks sized to the
+     * face, so memory stays small regardless of the image size. [FaceCoverStyle.Blur] builds one soft
+     * downscale of the whole render and shows it only through the combined ovals. Strength drives both.
+     */
+    private fun applyFaceCovers(
+        src: Bitmap,
+        covers: List<OvalSpec>,
+        style: FaceCoverStyle,
+        strength: Float,
+        recycleIntermediates: Boolean = false,
+    ): Bitmap {
+        if (covers.isEmpty()) return src
+        val w = src.width
+        val h = src.height
+        val out = src.copy(Bitmap.Config.ARGB_8888, true)
+        val canvas = Canvas(out)
+
+        val s = strength.coerceIn(0f, 1f)
+        val maskPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.BLACK }
+
+        when (style) {
+            FaceCoverStyle.Pixelate -> {
+                val layerPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+                val srcInPaint = Paint().apply {
+                    xfermode = android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.SRC_IN)
+                }
+
+                for (oval in covers) {
+                    val cx = oval.centerX
+                    val cy = oval.centerY
+                    val rx = oval.radiusX
+                    val ry = oval.radiusY
+
+                    // Blocks scale to the face: ~22 fine blocks across at low strength, ~7 chunky ones high.
+                    val blocksAcross = 22f + (7f - 22f) * s
+                    val faceSpan = minOf(2f * rx, 2f * ry)
+                    val block = (faceSpan / blocksAcross).coerceAtLeast(2f)
+
+                    // A rotated ellipse fits inside a circle of radius max(rx, ry), so this square contains it at
+                    // any angle; clamp to the bitmap so the crop stays in bounds.
+                    val half = maxOf(rx, ry)
+                    val left = floor(cx - half).toInt().coerceIn(0, w)
+                    val top = floor(cy - half).toInt().coerceIn(0, h)
+                    val right = ceil(cx + half).toInt().coerceIn(0, w)
+                    val bottom = ceil(cy + half).toInt().coerceIn(0, h)
+                    val regionW = right - left
+                    val regionH = bottom - top
+                    if (regionW <= 0 || regionH <= 0) continue
+
+                    val region = Bitmap.createBitmap(src, left, top, regionW, regionH)
+
+                    // Downscale by the block size and back up with no filtering for hard mosaic squares.
+                    val smallW = (regionW / block).roundToInt().coerceAtLeast(1)
+                    val smallH = (regionH / block).roundToInt().coerceAtLeast(1)
+                    val small = Bitmap.createScaledBitmap(region, smallW, smallH, false)
+                    val cover = Bitmap.createScaledBitmap(small, regionW, regionH, false)
+                    if (small !== cover && small !== region && !small.isRecycled) small.recycle()
+
+                    // Per-oval rotated mask in the region's own coordinate space (offset by the crop origin).
+                    val mask = Bitmap.createBitmap(regionW, regionH, Bitmap.Config.ALPHA_8)
+                    val maskCanvas = Canvas(mask)
+                    maskCanvas.save()
+                    maskCanvas.translate(-left.toFloat(), -top.toFloat())
+                    maskCanvas.rotate(oval.rotationDegrees, cx, cy)
+                    maskCanvas.drawOval(RectF(cx - rx, cy - ry, cx + rx, cy + ry), maskPaint)
+                    maskCanvas.restore()
+
+                    // Show the mosaic only through this oval, on an offscreen layer bounded to the region.
+                    val bounds = RectF(left.toFloat(), top.toFloat(), right.toFloat(), bottom.toFloat())
+                    val saveCount = canvas.saveLayer(bounds, layerPaint)
+                    canvas.drawBitmap(mask, left.toFloat(), top.toFloat(), null)
+                    canvas.drawBitmap(cover, left.toFloat(), top.toFloat(), srcInPaint)
+                    canvas.restoreToCount(saveCount)
+
+                    // On the save path recycle every per-oval intermediate; off it, leave them to GC.
+                    if (recycleIntermediates) {
+                        if (!mask.isRecycled) mask.recycle()
+                        if (cover !== region && !cover.isRecycled) cover.recycle()
+                        if (region !== src && !region.isRecycled) region.recycle()
+                    }
+                }
+            }
+            FaceCoverStyle.Blur -> {
+                // One soft downscale of the whole render, shown only through the combined ovals.
+                val downscale = (10f + s * 30f).roundToInt().coerceAtLeast(1)
+                val small = Bitmap.createScaledBitmap(
+                    src, (w / downscale).coerceAtLeast(1), (h / downscale).coerceAtLeast(1), true)
+                val coverLayer = Bitmap.createScaledBitmap(small, w, h, true)
+                if (small !== coverLayer && !small.isRecycled) small.recycle()
+
+                val mask = Bitmap.createBitmap(w, h, Bitmap.Config.ALPHA_8)
+                val maskCanvas = Canvas(mask)
+                for (oval in covers) {
+                    maskCanvas.save()
+                    maskCanvas.rotate(oval.rotationDegrees, oval.centerX, oval.centerY)
+                    maskCanvas.drawOval(
+                        RectF(oval.centerX - oval.radiusX, oval.centerY - oval.radiusY,
+                            oval.centerX + oval.radiusX, oval.centerY + oval.radiusY),
+                        maskPaint,
+                    )
+                    maskCanvas.restore()
+                }
+                drawPixelatedThroughMask(canvas, coverLayer, mask)
+
+                if (recycleIntermediates) {
+                    if (!mask.isRecycled) mask.recycle()
+                    if (coverLayer !== out && !coverLayer.isRecycled) coverLayer.recycle()
+                }
+            }
+        }
+        return out
     }
 
     private fun buildColorMatrix(adj: EditorAdjustments): ColorMatrix? {
@@ -2684,6 +2989,10 @@ class PhotoEditorViewModel @Inject constructor(
      */
     override fun onCleared() {
         super.onCleared()
+        // Release the ONNX session the face detector holds; nothing runs it once the editor is gone.
+        faceDetector?.close()
+        faceDetector = null
+        faceDetectorModelPath = null
         val s = _state.value
         val original = s.originalBitmap
         fun releaseIfPrivate(bmp: Bitmap?) {

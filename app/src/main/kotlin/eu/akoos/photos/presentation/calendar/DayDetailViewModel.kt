@@ -46,10 +46,9 @@ import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
+import eu.akoos.photos.presentation.util.isoDateFormat
 import java.text.SimpleDateFormat
 import java.util.Date
-import java.util.Locale
-import java.util.TimeZone
 import javax.inject.Inject
 
 /**
@@ -180,10 +179,7 @@ class DayDetailViewModel @Inject constructor(
 
     companion object {
         private val ISO_DATE = object : ThreadLocal<SimpleDateFormat>() {
-            override fun initialValue(): SimpleDateFormat =
-                SimpleDateFormat("yyyy-MM-dd", Locale.US).apply {
-                    timeZone = TimeZone.getDefault()
-                }
+            override fun initialValue(): SimpleDateFormat = isoDateFormat()
         }
     }
 }

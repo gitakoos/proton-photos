@@ -50,6 +50,7 @@ import androidx.compose.ui.unit.Density
 import eu.akoos.photos.domain.ocr.RecognizedTextBlock
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.util.ImageFit
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 /**
@@ -106,7 +107,8 @@ fun ViewerTextSelectionLayer(
         // Placed at fit-to-screen and zoomed by the layer below, so the arithmetic here survives a
         // pinch untouched.
         val flat = ViewerTransform.untransformed(transform.containerW, transform.containerH)
-        showing.blocks.mapNotNull { block -> textRun(block, fit, flat, density, measurer) }
+        val built = showing.blocks.mapNotNull { block -> textRun(block, fit, flat, density, measurer) }
+        snapRunsToRows(built)
     }
     if (runs.isEmpty()) return
 
@@ -129,14 +131,16 @@ fun ViewerTextSelectionLayer(
             Layout(
                 content = {
                     runs.forEach { run ->
-                        // The trailing break is what a selection dragged across several runs joins
-                        // them with: the platform concatenates the runs it crossed with nothing in
-                        // between, and a shop name run straight into its street is one unusable
-                        // string. A run the drag ends inside contributes only as far as the finger
-                        // got, so the break never lands at the end of what the user picked. Held off
-                        // the single laid-out line so it costs the node no height.
+                        // Each run is closed by a separator so a selection dragged across several of
+                        // them comes out readable: the platform concatenates the runs it crossed with
+                        // nothing between them, and a shop name run straight into its street is one
+                        // unusable string. A run the drag ends inside still contributes only as far as
+                        // the finger got, so the separator never lands inside what the user picked. It
+                        // is a space and not a line break because a hard break opens a second line this
+                        // one-line node clips away, and a selection run onto that clipped break is what
+                        // the platform selection throws on.
                         BasicText(
-                            text = run.text + "\n",
+                            text = viewerRunSelectableText(run.text),
                             style = run.style,
                             softWrap = false,
                             maxLines = 1,
@@ -263,6 +267,69 @@ private fun runStyle(placement: ViewerTextBlockPlacement, density: Density): Tex
     // the quad.
     platformStyle = PlatformTextStyle(includeFontPadding = false),
 )
+
+/**
+ * The selectable text a run contributes: its own words closed by a separator, the mark a selection
+ * dragged across several runs joins them on.
+ *
+ * A single space, never a hard line break. A newline would open a second line this one-line node
+ * clips away, and a selection run onto that clipped break is what the platform selection throws on.
+ */
+internal fun viewerRunSelectableText(text: String): String = text + RUN_SEPARATOR
+
+/**
+ * What closes each run in the selectable layer. A space, not a line break, so no run ever lays out a
+ * line it clips and then has a selection resolve an offset onto.
+ */
+private const val RUN_SEPARATOR = " "
+
+/**
+ * Runs on one line come off the detector with slightly different tops, one per word, because each
+ * quad is drawn tight around its own glyphs. The platform orders a spanning selection by where each
+ * node sits, so those small top differences turn a line into a top-to-bottom sort and hand the words
+ * back out of order. Snapping every run on a line to the line's own top makes that sort fall back to
+ * left-to-right, which is how the line reads. The runs arrive in reading order, so a line is a run of
+ * neighbours.
+ */
+private fun snapRunsToRows(runs: List<ViewerTextRun>): List<ViewerTextRun> {
+    if (runs.size < 2) return runs
+    val tops = snapRowTops(runs.map { it.placement.originY }, runs.map { it.placement.heightPx })
+    return runs.mapIndexed { i, run ->
+        if (run.placement.originY == tops[i]) run
+        else run.copy(placement = run.placement.copy(originY = tops[i]))
+    }
+}
+
+/**
+ * For runs given top to bottom in reading order, the top each should be placed at so that a line
+ * shares a single top. Neighbours on one line (their vertical centres within [SAME_LINE_RATIO] of the
+ * shorter height) all take the line's own minimum top, which is what makes the platform's position
+ * sort of a spanning selection fall back to left to right. One top per input index, in order.
+ */
+internal fun snapRowTops(tops: List<Float>, heights: List<Float>): List<Float> {
+    val out = FloatArray(tops.size)
+    var start = 0
+    while (start < tops.size) {
+        var end = start + 1
+        while (end < tops.size && sameLine(tops[end - 1], heights[end - 1], tops[end], heights[end])) end++
+        var rowTop = tops[start]
+        for (i in start + 1 until end) rowTop = minOf(rowTop, tops[i])
+        for (i in start until end) out[i] = rowTop
+        start = end
+    }
+    return out.toList()
+}
+
+/** Whether two neighbouring runs sit on one line, by how far apart their vertical centres are. */
+internal fun sameLine(topA: Float, heightA: Float, topB: Float, heightB: Float): Boolean {
+    val centreA = topA + heightA / 2f
+    val centreB = topB + heightB / 2f
+    val shorter = minOf(heightA, heightB)
+    return abs(centreA - centreB) <= maxOf(shorter, 1f) * SAME_LINE_RATIO
+}
+
+/** How far two runs' centres may sit apart, as a fraction of the shorter, and still be one line. */
+internal const val SAME_LINE_RATIO = 0.5f
 
 /** The smallest quad worth a node: below this a run is noise no handle could be dropped into. */
 private const val MIN_RUN_PX = 4f

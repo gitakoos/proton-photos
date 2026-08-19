@@ -24,9 +24,14 @@ package eu.akoos.photos.presentation.util
 
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Date
 import java.util.Locale
+import java.util.TimeZone
 
 /**
  * Pins [formatBytes] to binary units and to the reader's locale.
@@ -93,5 +98,59 @@ class FormatUtilsTest {
         Locale.setDefault(Locale.GERMANY)
         assertEquals("1,5 KB", formatBytes(1536))
         assertEquals("200,00 GB", formatBytes(200L * 1024 * 1024 * 1024))
+    }
+
+    @Test
+    fun `month-year factory equals the inline construction it replaced`() {
+        val date = Date(0L)
+        val reference = SimpleDateFormat("MMMM yyyy", Locale.getDefault())
+        assertEquals(reference.format(date), monthYearFormat().format(date))
+    }
+
+    @Test
+    fun `month-year factory renders a month name then a four-digit year`() {
+        val label = monthYearFormat().format(Date(0L))
+        assertTrue(label, Regex(""".+\s\d{4}$""").containsMatchIn(label))
+    }
+
+    @Test
+    fun `day-month-year factory equals the inline construction it replaced`() {
+        val date = Date(0L)
+        val reference = SimpleDateFormat("d MMMM yyyy", Locale.getDefault())
+        assertEquals(reference.format(date), dayMonthYearFormat().format(date))
+    }
+
+    @Test
+    fun `day-month-year factory renders a day, a month name and a four-digit year`() {
+        val label = dayMonthYearFormat().format(Date(0L))
+        assertTrue(label, Regex("""^\d{1,2}\s.+\s\d{4}$""").containsMatchIn(label))
+    }
+
+    @Test
+    fun `iso factory round-trips a leap day and both sides of a year boundary`() {
+        val fmt = isoDateFormat()
+        for (day in listOf("2024-02-29", "2023-12-31", "2024-01-01")) {
+            assertEquals(day, fmt.format(fmt.parse(day)!!))
+        }
+    }
+
+    @Test
+    fun `iso factory parses a date at midnight in the device default zone`() {
+        val parsed = isoDateFormat().parse("2024-02-29")!!
+        val expected = Calendar.getInstance(TimeZone.getDefault()).apply {
+            clear()
+            set(2024, Calendar.FEBRUARY, 29, 0, 0, 0)
+        }.timeInMillis
+        assertEquals(expected, parsed.time)
+    }
+
+    @Test
+    fun `iso factory equals the inline parser it replaced`() {
+        val reference = SimpleDateFormat("yyyy-MM-dd", Locale.US).apply {
+            timeZone = TimeZone.getDefault()
+        }
+        val factory = isoDateFormat()
+        assertEquals(reference.timeZone, factory.timeZone)
+        assertEquals(reference.parse("2023-12-31")!!.time, factory.parse("2023-12-31")!!.time)
     }
 }

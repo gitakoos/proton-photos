@@ -58,6 +58,7 @@ import eu.akoos.photos.presentation.calendar.DayBucket
 import eu.akoos.photos.presentation.calendar.MonthBucket
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.PillBorder
+import eu.akoos.photos.presentation.util.monthYearFormat
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
@@ -105,7 +106,7 @@ fun MonthGrid(
         val dateCal = Calendar.getInstance().apply {
             set(Calendar.YEAR, bucket.year); set(Calendar.MONTH, bucket.month - 1); set(Calendar.DAY_OF_MONTH, 1)
         }
-        SimpleDateFormat("MMMM yyyy", Locale.getDefault()).format(dateCal.time)
+        monthYearFormat().format(dateCal.time)
     }
 
     // Outer column sizing depends on the mode:

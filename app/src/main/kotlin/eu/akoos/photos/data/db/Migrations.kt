@@ -312,5 +312,168 @@ object Migrations {
         }
     }
 
-    val ALL: Array<Migration> = arrayOf(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21)
+    /**
+     * v21 → v22: two new tables backing People; `face` holds one detected face per row, keyed by a
+     * stable id the indexer derives from the photo, and `person` holds the clusters those faces group
+     * into. Both are additive and rebuildable: the empty tables are the correct state to arrive at,
+     * since a face and its embedding come from re-reading images this migration cannot see, and no
+     * backfill could conjure them. Existing tables are untouched.
+     */
+    val MIGRATION_21_22 = object : Migration(21, 22) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `face` (`id` TEXT NOT NULL, `userId` TEXT NOT NULL, " +
+                    "`photoKey` TEXT NOT NULL, `left` REAL NOT NULL, `top` REAL NOT NULL, " +
+                    "`right` REAL NOT NULL, `bottom` REAL NOT NULL, `landmarks` TEXT NOT NULL, " +
+                    "`embedding` BLOB NOT NULL, `personId` INTEGER, `score` REAL NOT NULL, " +
+                    "PRIMARY KEY(`id`))"
+            )
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_face_photoKey` ON `face` (`photoKey`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_face_personId` ON `face` (`personId`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_face_userId` ON `face` (`userId`)")
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `person` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                    "`userId` TEXT NOT NULL, `displayName` TEXT, `coverFaceId` TEXT, " +
+                    "`faceCount` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL)"
+            )
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_person_userId` ON `person` (`userId`)")
+        }
+    }
+
+    /** v23: a per-face Laplacian sharpness score, so a blurred crop can be held to a stricter cluster
+     *  distance. Nullable, so rows indexed before it stay valid until the next re-index fills them. */
+    val MIGRATION_22_23 = object : Migration(22, 23) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE `face` ADD COLUMN `blur` REAL")
+        }
+    }
+
+    /**
+     * v23 → v24: new `face_scan` table, one marker per photo the face indexer has fully scanned, so a
+     * re-run skips a photo it already looked at whether or not it held a face, instead of re-decoding
+     * every faceless photo on each pass. Additive and rebuildable: the empty table is the correct state
+     * to arrive at, since the marker records a scan this migration cannot redo, and the first pass after
+     * the upgrade re-derives it. Existing tables are untouched.
+     */
+    val MIGRATION_23_24 = object : Migration(23, 24) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `face_scan` (`userId` TEXT NOT NULL, " +
+                    "`photoKey` TEXT NOT NULL, PRIMARY KEY(`userId`, `photoKey`))"
+            )
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_face_scan_userId` ON `face_scan` (`userId`)")
+            // Seed the marker from photos already carrying a face, so an existing library is not
+            // re-scanned (and, for a cloud photo, re-downloaded) just to record what it already knows.
+            // Faceless photos were never persisted, so they get scanned once and marked from then on.
+            db.execSQL(
+                "INSERT OR IGNORE INTO `face_scan` (`userId`, `photoKey`) " +
+                    "SELECT DISTINCT `userId`, `photoKey` FROM `face`"
+            )
+        }
+    }
+
+    /** People curation: a per-face "removed by the user" flag so a manual removal survives a rescan,
+     *  and a table of photos the user manually attached to a named person (keyed by name so the
+     *  membership follows the person across a clustering rebuild). Both are additive. */
+    val MIGRATION_24_25 = object : Migration(24, 25) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE `face` ADD COLUMN `rejected` INTEGER NOT NULL DEFAULT 0")
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `person_manual_photo` (`userId` TEXT NOT NULL, " +
+                    "`personName` TEXT NOT NULL, `photoKey` TEXT NOT NULL, " +
+                    "PRIMARY KEY(`userId`, `personName`, `photoKey`))"
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_person_manual_photo_userId_personName` " +
+                    "ON `person_manual_photo` (`userId`, `personName`)"
+            )
+        }
+    }
+
+    /** Teaching: a per-face confirmed person name. A face the user confirms (by adding its photo to a
+     *  person) anchors that person and pulls matching faces in on the next clustering pass. Additive
+     *  and nullable, so existing faces stay unconfirmed. */
+    val MIGRATION_25_26 = object : Migration(25, 26) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE `face` ADD COLUMN `manualName` TEXT")
+        }
+    }
+
+    /** People suggestions: a "not this person" feedback table, so a rejected match ("Is this X? No")
+     *  is never re-offered nor pulled into that person again. Keyed by name so it survives a rebuild. */
+    val MIGRATION_26_27 = object : Migration(26, 27) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `not_person` (`userId` TEXT NOT NULL, " +
+                    "`personName` TEXT NOT NULL, `faceId` TEXT NOT NULL, " +
+                    "PRIMARY KEY(`userId`, `personName`, `faceId`))"
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_not_person_userId_personName` " +
+                    "ON `not_person` (`userId`, `personName`)"
+            )
+        }
+    }
+
+    /** Un-poison people: a manual "add to person" used to auto-label the photo's single detected face,
+     *  which mislabels a bystander when the person's own face was too small to detect. Drop every label
+     *  that sits on a manually attached photo, so the next rebuild reclusters those faces by likeness
+     *  alone. The manual attachments themselves (the display membership) are untouched. */
+    val MIGRATION_27_28 = object : Migration(27, 28) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "UPDATE `face` SET `manualName` = NULL WHERE EXISTS (" +
+                    "SELECT 1 FROM `person_manual_photo` p " +
+                    "WHERE p.`photoKey` = `face`.`photoKey` AND p.`userId` = `face`.`userId`)"
+            )
+        }
+    }
+
+    /** Custom person covers: the photo a user picked as a named person's cover, overriding the
+     *  automatic clearest-face pick. Keyed by name so the choice follows the person across a rebuild.
+     *  Additive. */
+    val MIGRATION_28_29 = object : Migration(28, 29) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `person_cover` (`userId` TEXT NOT NULL, " +
+                    "`personName` TEXT NOT NULL, `photoKey` TEXT NOT NULL, " +
+                    "PRIMARY KEY(`userId`, `personName`))"
+            )
+        }
+    }
+
+    /** v29 to v30: new `pending_metadata_edit` table, one persisted row per queued cloud/synced
+     *  metadata edit, so the durable drain survives a process kill. Additive, and the empty table is
+     *  the correct state to arrive at: a pending edit exists only once the editor enqueues one, and
+     *  nothing this migration can see stands in for an edit a person has not yet made. */
+    val MIGRATION_29_30 = object : Migration(29, 30) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `pending_metadata_edit` (" +
+                    "`linkId` TEXT NOT NULL, `userId` TEXT NOT NULL, `deviceUri` TEXT, " +
+                    "`newCaptureMs` INTEGER, `locationMode` TEXT NOT NULL, `lat` REAL, `lng` REAL, " +
+                    "`description` TEXT, `artist` TEXT, `copyright` TEXT, `enqueuedAt` INTEGER NOT NULL, " +
+                    "`newLinkId` TEXT, PRIMARY KEY(`linkId`))"
+            )
+        }
+    }
+
+    /** v30 to v31: bring `pending_metadata_edit` to its final shape (the resume-state `newLinkId`
+     *  column). An unreleased v30 created the table without that column on some test builds, so this
+     *  drops and recreates it: the table is a transient edit queue, so an empty table is the correct
+     *  state to arrive at, and a fresh v29 to v31 path never had a pending edit to preserve. */
+    val MIGRATION_30_31 = object : Migration(30, 31) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("DROP TABLE IF EXISTS `pending_metadata_edit`")
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `pending_metadata_edit` (" +
+                    "`linkId` TEXT NOT NULL, `userId` TEXT NOT NULL, `deviceUri` TEXT, " +
+                    "`newCaptureMs` INTEGER, `locationMode` TEXT NOT NULL, `lat` REAL, `lng` REAL, " +
+                    "`description` TEXT, `artist` TEXT, `copyright` TEXT, `enqueuedAt` INTEGER NOT NULL, " +
+                    "`newLinkId` TEXT, PRIMARY KEY(`linkId`))"
+            )
+        }
+    }
+
+    val ALL: Array<Migration> = arrayOf(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22, MIGRATION_22_23, MIGRATION_23_24, MIGRATION_24_25, MIGRATION_25_26, MIGRATION_26_27, MIGRATION_27_28, MIGRATION_28_29, MIGRATION_29_30, MIGRATION_30_31)
 }

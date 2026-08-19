@@ -83,9 +83,9 @@ import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.Bg2
 import eu.akoos.photos.presentation.theme.PillBg
 import eu.akoos.photos.presentation.theme.PillBorder
+import eu.akoos.photos.presentation.util.isoDateFormat
 import java.text.SimpleDateFormat
 import java.util.Locale
-import java.util.TimeZone
 
 /**
  * Day Detail screen — hero photo at the top, editable description below, then a grid of
@@ -387,9 +387,7 @@ private fun itemKey(item: GalleryItem): String = when (item) {
 }
 
 private fun formatDateLabel(date: String): String {
-    val parser = SimpleDateFormat("yyyy-MM-dd", Locale.US).apply {
-        timeZone = TimeZone.getDefault()
-    }
+    val parser = isoDateFormat()
     val parsed = runCatching { parser.parse(date) }.getOrNull() ?: return date
     val display = SimpleDateFormat("EEEE, d MMMM yyyy", Locale.getDefault())
     return display.format(parsed)

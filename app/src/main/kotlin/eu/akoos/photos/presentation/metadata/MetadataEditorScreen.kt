@@ -108,7 +108,9 @@ import coil.compose.AsyncImage
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.usecase.ExifAsciiText
+import eu.akoos.photos.presentation.common.ConfirmSheet
 import eu.akoos.photos.presentation.common.IconBubble
+import androidx.activity.compose.BackHandler
 import eu.akoos.photos.presentation.common.PrimaryButton
 import eu.akoos.photos.presentation.common.ThemedSnackbarHost
 import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
@@ -133,6 +135,7 @@ private val cardShape = RoundedCornerShape(14.dp)
  * description, which stays a single-photo field. Cloud-only and shared-with-me photos open read-only
  * with an inline note, because Drive refuses an in-place rewrite.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MetadataEditorScreen(
     items: List<GalleryItem>,
@@ -164,16 +167,29 @@ fun MetadataEditorScreen(
     val failedMessage = stringResource(R.string.metadata_editor_write_failed)
     LaunchedEffect(Unit) {
         viewModel.events.collect { event ->
-            val message = when (event) {
-                MetadataEditorEvent.Saved -> savedMessage
-                is MetadataEditorEvent.PartlySaved -> screenContext.getString(
-                    R.string.metadata_editor_saved_partial, event.saved, event.failed,
+            when (event) {
+                MetadataEditorEvent.Saved -> snackbarHostState.showSnackbar(savedMessage)
+                is MetadataEditorEvent.PartlySaved -> snackbarHostState.showSnackbar(
+                    screenContext.getString(
+                        R.string.metadata_editor_saved_partial, event.saved, event.failed,
+                    ),
                 )
-                MetadataEditorEvent.Failed -> failedMessage
+                MetadataEditorEvent.Failed -> snackbarHostState.showSnackbar(failedMessage)
+                // Nothing to upload, so the checkmark just leaves.
+                MetadataEditorEvent.Finished -> onBack()
             }
-            snackbarHostState.showSnackbar(message)
         }
     }
+
+    // Back with unsaved edits asks first rather than dropping them: staged cloud edits, or text typed
+    // but not yet committed by the checkmark, are what a stray back would otherwise lose.
+    var showDiscardConfirm by remember { mutableStateOf(false) }
+    val hasUnsavedChanges = state.stagedCloudCount > 0 ||
+        state.description.dirty || state.artist.dirty || state.copyright.dirty
+    fun handleBack() {
+        if (hasUnsavedChanges) showDiscardConfirm = true else onBack()
+    }
+    BackHandler { handleBack() }
 
     Box(modifier = Modifier.fillMaxSize().background(colors.pageBg)) {
         val contentTopPad = floatingHeaderContentTopPadding()
@@ -209,6 +225,16 @@ fun MetadataEditorScreen(
                     }
                     Text(summary, color = colors.fgMute, fontSize = 13.sp)
                 }
+                // A cloud edit waits for the Done checkmark, so a staged change is called out here:
+                // leaving by the back arrow instead would drop it.
+                if (state.stagedCloudCount > 0) {
+                    Text(
+                        stringResource(R.string.metadata_editor_cloud_staged_hint),
+                        color = colors.accent,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                    )
+                }
                 DateField(
                     state = state,
                     onPickDate = viewModel::setDate,
@@ -231,7 +257,6 @@ fun MetadataEditorScreen(
                     // A caption is a sentence, so it wraps instead of scrolling out of sight sideways.
                     maxLines = 3,
                     onValueChange = { viewModel.setText(MetadataTextTag.DESCRIPTION, it) },
-                    onApply = { viewModel.applyText(MetadataTextTag.DESCRIPTION) },
                 )
                 TextTagField(
                     label = stringResource(
@@ -242,7 +267,6 @@ fun MetadataEditorScreen(
                     bulk = state.bulk,
                     isSaving = state.isSaving,
                     onValueChange = { viewModel.setText(MetadataTextTag.ARTIST, it) },
-                    onApply = { viewModel.applyText(MetadataTextTag.ARTIST) },
                 )
                 TextTagField(
                     label = stringResource(
@@ -253,7 +277,6 @@ fun MetadataEditorScreen(
                     bulk = state.bulk,
                     isSaving = state.isSaving,
                     onValueChange = { viewModel.setText(MetadataTextTag.COPYRIGHT, it) },
-                    onApply = { viewModel.applyText(MetadataTextTag.COPYRIGHT) },
                 )
             }
             Spacer(Modifier.height(32.dp + navBottom))
@@ -261,7 +284,7 @@ fun MetadataEditorScreen(
 
         SettingsPillHeader(
             title = stringResource(R.string.metadata_editor_title),
-            onBack = onBack,
+            onBack = { handleBack() },
             trailing = {
                 if (state.isSaving) {
                     Box(modifier = Modifier.size(40.dp), contentAlignment = Alignment.Center) {
@@ -275,7 +298,10 @@ fun MetadataEditorScreen(
                     IconBubble(
                         icon = Icons.Default.Check,
                         contentDescription = stringResource(R.string.metadata_editor_done),
-                        onClick = onBack,
+                        // The one commit point: applyOrFinish writes any typed text, then uploads the
+                        // staged cloud edits in one pass (date, place and text together) or just leaves
+                        // when only device files changed. Nothing is written until this checkmark.
+                        onClick = { viewModel.applyOrFinish() },
                         diameter = 40.dp,
                         iconSize = 18.dp,
                         background = colors.surfaceWeak,
@@ -295,6 +321,34 @@ fun MetadataEditorScreen(
                 .windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars))
                 .padding(bottom = 24.dp),
         )
+
+        // Confirming re-uploads the corrected copies on a background app scope tracked by the transfer
+        // center, then closes the editor to the timeline, so progress shows in the Activity transfer UI
+        // like any other upload instead of a modal that traps the user here.
+        state.pendingCloudConfirm?.let { confirm ->
+            ConfirmSheet(
+                title = stringResource(R.string.metadata_editor_cloud_confirm_title),
+                message = pluralStringResource(
+                    R.plurals.metadata_editor_cloud_confirm_body, confirm.count, confirm.count,
+                ),
+                confirmLabel = stringResource(R.string.metadata_editor_cloud_confirm_action),
+                dismissLabel = stringResource(R.string.cancel),
+                onConfirm = { viewModel.confirmCloudReplace(); onBack() },
+                onDismiss = viewModel::dismissCloudReplace,
+            )
+        }
+
+        if (showDiscardConfirm) {
+            ConfirmSheet(
+                title = stringResource(R.string.editor_discard_changes_title),
+                message = stringResource(R.string.editor_discard_changes_message),
+                confirmLabel = stringResource(R.string.editor_discard_changes_confirm),
+                dismissLabel = stringResource(R.string.editor_discard_changes_keep),
+                onConfirm = { showDiscardConfirm = false; onBack() },
+                onDismiss = { showDiscardConfirm = false },
+                destructive = true,
+            )
+        }
     }
 }
 
@@ -514,6 +568,15 @@ private fun DateField(
             }
         }
         state.dateLock?.let { LockNote(it) }
+        // A single editable cloud photo takes a date edit by being re-uploaded, so the field is open
+        // but the note is honest about what applying it does.
+        if (!state.bulk && state.dateSource == DateSource.CLOUD && state.dateLock == null) {
+            Text(
+                stringResource(R.string.metadata_editor_cloud_replace_note),
+                color = colors.fgMute,
+                fontSize = 12.sp,
+            )
+        }
     }
 
     // What the pickers open on: in shift mode the OLDEST photo's own instant, which is the one the user
@@ -651,6 +714,14 @@ private fun PlaceField(
             fontWeight = FontWeight.Medium,
         )
         state.placeLock?.let { LockNote(it) }
+        // Same honest note as the date field: a lone cloud photo is editable here through a re-upload.
+        if (!state.bulk && state.dateSource == DateSource.CLOUD && state.placeLock == null) {
+            Text(
+                stringResource(R.string.metadata_editor_cloud_replace_note),
+                color = colors.fgMute,
+                fontSize = 12.sp,
+            )
+        }
 
         if (state.placeLock == null && expanded) {
             Spacer(Modifier.height(4.dp))
@@ -860,9 +931,8 @@ private fun CountryPickerDialog(
 
 /**
  * One descriptive EXIF text field (description, artist, copyright), opened by the same pencil the
- * place field uses. Typing has no natural moment to commit, so the box carries an explicit Save,
- * enabled only once the text would change what the file holds; the typed value lives in the ViewModel,
- * so the keyboard closing never drops it.
+ * place field uses. The typed value lives in the ViewModel and is committed by the Done checkmark with
+ * the date and place, so the box carries no Save of its own and the keyboard closing never drops it.
  */
 @Composable
 private fun TextTagField(
@@ -871,7 +941,6 @@ private fun TextTagField(
     bulk: Boolean,
     isSaving: Boolean,
     onValueChange: (String) -> Unit,
-    onApply: () -> Unit,
     maxLines: Int = 1,
 ) {
     val colors = AppColors.current
@@ -905,6 +974,9 @@ private fun TextTagField(
 
         if (field.lock == null && expanded) {
             Spacer(Modifier.height(4.dp))
+            // No per-field Save: the typed value is held here and committed by the final checkmark along
+            // with the date and place, in one pass. The ASCII transliteration below previews what that
+            // write stores, and it happens automatically on the write, so nothing has to be pre-saved.
             OutlinedTextField(
                 value = field.value,
                 onValueChange = onValueChange,
@@ -923,32 +995,6 @@ private fun TextTagField(
                 modifier = Modifier.fillMaxWidth(),
             )
             AsciiPreview(typed = field.value)
-
-            val canApply = field.dirty && !isSaving
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable(enabled = canApply) {
-                        focusManager.clearFocus()
-                        onApply()
-                    }
-                    .padding(vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Icon(
-                    Icons.Default.Check,
-                    contentDescription = null,
-                    tint = if (canApply) colors.accent else colors.fgMute,
-                    modifier = Modifier.size(18.dp),
-                )
-                Text(
-                    stringResource(R.string.action_save),
-                    color = if (canApply) colors.accent else colors.fgMute,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Medium,
-                )
-            }
         }
     }
 }

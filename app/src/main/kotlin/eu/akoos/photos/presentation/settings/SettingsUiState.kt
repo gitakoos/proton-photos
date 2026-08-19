@@ -68,6 +68,34 @@ data class SettingsUiState(
     /** When true, dark mode forces base surfaces to true black for OLED panels. Off by default;
      *  has no effect in light mode. */
     val amoledBlack: Boolean = false,
+    /** Master opt-in for on-device AI/ML features (Copy text, Hide faces, and the People grouping to
+     *  come). Off by default: when off no model is downloaded and the AI entry points stay hidden. */
+    val aiFeaturesEnabled: Boolean = false,
+    /** Per-feature opt-in for the Copy text reader, nested under [aiFeaturesEnabled]. When the stored
+     *  value is absent this defaults to whether the reader's models already sit on disk, so a device
+     *  that has them reads as ON. */
+    val ocrEnabled: Boolean = false,
+    /** Which Copy text model drawer the AI panel is showing: [OcrModelPrompt.Download] when the feature
+     *  was switched on with no model on disk, [OcrModelPrompt.Remove] when it was switched off, or
+     *  [OcrModelPrompt.None] for neither. */
+    val ocrModelPrompt: OcrModelPrompt = OcrModelPrompt.None,
+    /** True while an accepted Copy text model download runs, so the toggle row reads as busy and holds
+     *  its switch until both model halves land. */
+    val ocrModelDownloading: Boolean = false,
+    /** True when the last Copy text model download did not produce usable models, so the row can say so
+     *  and the feature stays off. */
+    val ocrModelDownloadFailed: Boolean = false,
+    /** Per-feature opt-in for the face features (Hide faces and People), nested under
+     *  [aiFeaturesEnabled]. Off by default. */
+    val faceEnabled: Boolean = false,
+    /** Which face model drawer the AI panel is showing: [FaceModelPrompt.Remove] when the feature was
+     *  switched off, offering to delete the model and data it leaves behind, or [FaceModelPrompt.None]
+     *  for no drawer. */
+    val faceModelPrompt: FaceModelPrompt = FaceModelPrompt.None,
+    /** Whether both face models (the SCRFD detector and the embedder) are already on disk, so the face
+     *  toggle can present as usable rather than offering a switch with no model behind it. Resolved
+     *  once at load, network-free. */
+    val faceRecognitionAvailable: Boolean = false,
     /** Which top-level tab the gallery opens on at app start. Default Photos. */
     val landingTab: LandingTab = LandingTab.Photos,
     /** Grid-layout settings (Appearance → Grid layout). [gridRememberLast] on = the timeline
@@ -75,6 +103,9 @@ data class SettingsUiState(
      *  the album / device-folder / hidden grids. 3 = the default columns-per-row baseline. */
     val gridRememberLast: Boolean = false,
     val gridDefaultColumns: Int = 3,
+    /** When on, switching bottom tabs keeps each tab's scroll position; only re-tapping the
+     *  active tab returns it to the top. Off by default. */
+    val keepScrollOnTabSwitch: Boolean = false,
     val userDisplayName: String = "",
     val userEmail: String = "",
     val cloudUsedBytes: Long = 0L,
@@ -146,7 +177,6 @@ data class SettingsUiState(
     /** When true, the Photos timeline shows a floating month/year label while scrolling.
      *  Off by default. */
     val showScrollDate: Boolean = false,
-    /** When true, selection-mode action buttons show a text label beneath the icon. On by default. */
     /** When true, the Photos timeline runs oldest-first (newest at the bottom). Off by default. */
     val reverseTimelineOrder: Boolean = false,
     /** When true, the Photos timeline uses a staggered (masonry) grid that keeps each photo's
@@ -204,6 +234,21 @@ data class UploadEvent(
 
 enum class UploadEventStatus { Uploading, Queued, Encrypting, Done, Failed }
 
+/**
+ * Which Copy text model drawer the AI settings panel is showing, if any. [Download] asks to fetch the
+ * model when the feature is switched on without it on disk; [Remove] asks whether to delete it when the
+ * feature is switched off.
+ */
+enum class OcrModelPrompt { None, Download, Remove }
+
+/**
+ * Which face model drawer the AI settings panel is showing, if any. The removal takes two stages so an
+ * accidental tap cannot delete: [Remove] asks whether to delete the face model and every detected face
+ * and name when the feature is switched off, and [ConfirmRemove] is the final are-you-sure before
+ * anything is wiped; [None] shows no drawer.
+ */
+enum class FaceModelPrompt { None, Remove, ConfirmRemove }
+
 enum class ThemeMode(val storageKey: String, val labelRes: Int) {
     System("system", eu.akoos.photos.R.string.theme_mode_system),
     Light ("light",  eu.akoos.photos.R.string.theme_mode_light),
@@ -226,7 +271,12 @@ enum class ThemePalette(val storageKey: String, val labelRes: Int) {
     Sunset ("sunset",  eu.akoos.photos.R.string.palette_sunset),
     Sea    ("sea",     eu.akoos.photos.R.string.palette_sea),
     Sepia  ("sepia",   eu.akoos.photos.R.string.palette_sepia),
-    Mono   ("mono",    eu.akoos.photos.R.string.palette_mono);
+    Mono   ("mono",    eu.akoos.photos.R.string.palette_mono),
+    Lavender("lavender", eu.akoos.photos.R.string.palette_lavender),
+    Rose   ("rose",    eu.akoos.photos.R.string.palette_rose),
+    Mint   ("mint",    eu.akoos.photos.R.string.palette_mint),
+    Gold   ("gold",    eu.akoos.photos.R.string.palette_gold),
+    Ruby   ("ruby",    eu.akoos.photos.R.string.palette_ruby);
 
     companion object {
         fun fromKey(key: String?): ThemePalette = entries.firstOrNull { it.storageKey == key } ?: Default

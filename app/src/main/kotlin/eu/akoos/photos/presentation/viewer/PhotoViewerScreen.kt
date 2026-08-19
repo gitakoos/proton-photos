@@ -35,6 +35,8 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
@@ -58,7 +60,6 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.gestures.rememberTransformableState
 import androidx.compose.foundation.gestures.transformable
@@ -127,6 +128,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.res.stringResource
 import eu.akoos.photos.R
 import eu.akoos.photos.presentation.common.ConfirmDialog
+import eu.akoos.photos.presentation.common.anyMetadataEditable
 import eu.akoos.photos.presentation.gallery.MetadataStripPickerDialog
 import eu.akoos.photos.presentation.common.SecureScreenEffect
 import eu.akoos.photos.presentation.common.UndoAction
@@ -149,11 +151,13 @@ import coil.compose.AsyncImagePainter
 import coil.request.ImageRequest
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.OfflinePin
 import androidx.compose.material.icons.filled.FileDownload
+import androidx.compose.material.icons.filled.Face
 import androidx.compose.material.icons.filled.LibraryAdd
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.RemoveCircleOutline
@@ -271,6 +275,46 @@ internal fun applyVaultMoves(
     return if (moved == items) items else moved
 }
 
+/** One press's outcome for the viewer's hand-rolled tap detector: a lift (a tap), a hold past the
+ *  long-press time, or a cancel (a move past touch slop, or a second finger for a pinch). */
+private sealed interface ViewerTapOutcome {
+    data class Lifted(val change: androidx.compose.ui.input.pointer.PointerInputChange) : ViewerTapOutcome
+    object HeldLong : ViewerTapOutcome
+    object Cancelled : ViewerTapOutcome
+}
+
+/** Waits out one press on [pointerId]. The caller reads the down with requireUnconsumed = false, so a
+ *  first press whose down a lower node consumed (the pager arresting its snap as a page lands) is
+ *  still seen; consumption is ignored from here so that settle is not mistaken for a cancel. */
+private suspend fun androidx.compose.ui.input.pointer.AwaitPointerEventScope.awaitViewerTapOutcome(
+    pointerId: androidx.compose.ui.input.pointer.PointerId,
+    downPosition: Offset,
+    slop: Float,
+    longPressMs: Long,
+): ViewerTapOutcome {
+    var lifted: androidx.compose.ui.input.pointer.PointerInputChange? = null
+    val cancelled = withTimeoutOrNull(longPressMs) {
+        var result: Boolean? = null
+        while (result == null) {
+            val event = awaitPointerEvent()
+            val change = event.changes.firstOrNull { it.id == pointerId }
+            result = when {
+                event.changes.count { it.pressed } > 1 -> true
+                change == null -> true
+                !change.pressed -> { lifted = change; false }
+                (change.position - downPosition).getDistance() > slop -> true
+                else -> null
+            }
+        }
+        result
+    }
+    return when (cancelled) {
+        null -> ViewerTapOutcome.HeldLong
+        true -> ViewerTapOutcome.Cancelled
+        else -> ViewerTapOutcome.Lifted(lifted!!)
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun PhotoViewerScreen(
@@ -305,6 +349,8 @@ fun PhotoViewerScreen(
     /** Opens the date + place metadata editor for the current item. Suppressed for a shared-with-me
      *  album (the sheet hides the affordance), mirroring the rename gate. */
     onEditMetadata: (GalleryItem) -> Unit = {},
+    /** Opens the page of the person the face index grouped, from the "people in this photo" bar. */
+    onOpenPerson: (Long) -> Unit = {},
     viewModel: PhotoViewerViewModel = hiltViewModel(),
 ) {
     if (items.isEmpty()) { onBack(null); return }
@@ -386,6 +432,21 @@ fun PhotoViewerScreen(
         }
     }
     val state by viewModel.state.collectAsStateWithLifecycle()
+    // Master AI-features gate, still required by the people-in-this-photo action alongside the
+    // per-feature face switch below.
+    val aiFeaturesEnabled by viewModel.aiFeaturesEnabled.collectAsStateWithLifecycle()
+    // Copy-text gate: the master switch and the per-feature Copy text opt-in together. With it off the
+    // long press to read is inert, so no OCR model is ever fetched from the viewer.
+    val copyTextEnabled by viewModel.copyTextEnabled.collectAsStateWithLifecycle()
+    // Per-feature face gate: the people-in-this-photo action needs this AND the master switch.
+    val faceEnabled by viewModel.faceEnabled.collectAsStateWithLifecycle()
+    // The people the face index found on the settled photo, and whether their name tags are pinned over
+    // the faces. Reset on every page settle so tags never carry a previous photo's faces.
+    val peopleInPhoto by viewModel.peopleInPhoto.collectAsStateWithLifecycle()
+    var facesMode by remember { mutableStateOf(false) }
+    // The settled photo's decoded pixel size, shared by the tags and the long-press face hit-test.
+    var settledImageSize by remember { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
+    val noFacesFoundMsg = stringResource(R.string.viewer_face_none_found)
     val isDownloading by viewModel.isDownloading.collectAsStateWithLifecycle()
     val downloadProgress by viewModel.downloadProgress.collectAsStateWithLifecycle()
     val fullResBlockedByMetered by viewModel.fullResBlockedByMetered.collectAsStateWithLifecycle()
@@ -492,6 +553,14 @@ fun PhotoViewerScreen(
             is GalleryItem.CloudOnly  -> viewModel.loadCloud(item.cloud)
             null -> {}
         }
+    }
+
+    // People-in-this-photo bar: fold it away on every settle, then read the settled photo's grouped
+    // faces. The read is a no-op with AI off, so nothing is queried for a user who never opted in.
+    LaunchedEffect(pagerState.settledPage, pageGeneration) {
+        facesMode = false
+        settledImageSize = androidx.compose.ui.unit.IntSize.Zero
+        items.getOrNull(pagerState.settledPage)?.let { viewModel.loadPeopleInPhoto(it) }
     }
 
     // Keyed on `state` (not just the page) so detection runs once the still is actually showing —
@@ -755,7 +824,8 @@ fun PhotoViewerScreen(
                 }
                 textState = ViewerTextState.Working(ViewerTextStage.Detecting)
                 val failure = try {
-                    when (val pixels = ViewerPixels.capture(textContext, state)) {
+                    val pixels = ViewerPixels.capture(textContext, state)
+                    when (pixels) {
                         is ViewerPixels.Ok -> {
                             // Read before the recycle below: a recycled bitmap refuses to report its
                             // own size, and the blocks mean nothing without the frame they index.
@@ -799,9 +869,10 @@ fun PhotoViewerScreen(
             onConfirm = {
                 askForTextModel = false
                 // The recognizer takes the answer before it is written to storage, so the read this
-                // starts cannot outrun the write and ask a second time.
+                // starts cannot outrun the write and ask a second time. Re-checked so a switch flipped
+                // off while the consent dialog was up cannot start a read.
                 textRecognizer.allowModelDownload()
-                readTextOnPhoto()
+                if (copyTextEnabled) readTextOnPhoto()
             },
             onDismiss = { askForTextModel = false },
         )
@@ -1071,24 +1142,99 @@ fun PhotoViewerScreen(
         }
     }
 
+    // Every viewer gesture is detected here on the stable root box, not on the per-page box inside
+    // the pager. On a fresh open (and the instant a swipe settles) the pager rebuilds the current
+    // page's box as it lands, so a first tap or long press arriving in that window is lost on a
+    // per-page detector. This root box is not rebuilt by that settle, so it catches the very first
+    // press. The pager and the image transform sit below and take horizontal swipes and pinch first;
+    // a tap, double tap, long press, or upward drag they do not consume lands here.
+    val rootReadText   by rememberUpdatedState(readTextOnPhoto)
+    val rootCopyTextOn by rememberUpdatedState(copyTextEnabled)
+    val rootTextState  by rememberUpdatedState(textState)
+    val rootMetaShown  by rememberUpdatedState(showMetadata)
+    val rootScale      by rememberUpdatedState(scale)
+    val rootSlideshow  by rememberUpdatedState(isPlaying)
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Bg0)
-            .onSizeChanged { containerSize = it },
+            .onSizeChanged { containerSize = it }
+            .pointerInput("viewer-taps") {
+                // Hand-rolled tap, double tap and long press. The down is read even if a lower node
+                // consumed it (so the first press on a freshly landed page is not lost), and a tap
+                // acts only when its up was not consumed, so a chrome button keeps its own tap.
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    val slop = viewConfiguration.touchSlop
+                    val longPressMs = viewConfiguration.longPressTimeoutMillis
+                    val readIfAllowed = {
+                        if (rootCopyTextOn && rootTextState !is ViewerTextState.Showing && !rootMetaShown) rootReadText()
+                    }
+                    val toggleChrome = {
+                        if (rootTextState is ViewerTextState.Showing) {
+                            when (viewerTextTap(textSelection.active)) {
+                                ViewerTextTap.ClearSelection -> textFocus.clearFocus()
+                                ViewerTextTap.LeaveTextMode -> textState = ViewerTextState.Idle
+                            }
+                        } else if (rootSlideshow) {
+                            isPlaying = false
+                            showOverlays = true
+                        } else {
+                            showOverlays = !showOverlays
+                        }
+                    }
+                    val zoomToward = { p: Offset ->
+                        textZoomBefore = null
+                        if (rootScale > 1f) {
+                            scale = 1f
+                            offset = Offset.Zero
+                        } else {
+                            val newScale = 2.5f
+                            val cx = containerSize.width / 2f
+                            val cy = containerSize.height / 2f
+                            val maxX = (containerSize.width * (newScale - 1f)) / 2f
+                            val maxY = (containerSize.height * (newScale - 1f)) / 2f
+                            scale = newScale
+                            offset = Offset(
+                                ((cx - p.x) * (newScale - 1f)).coerceIn(-maxX, maxX),
+                                ((cy - p.y) * (newScale - 1f)).coerceIn(-maxY, maxY),
+                            )
+                        }
+                    }
+                    when (val first = awaitViewerTapOutcome(down.id, down.position, slop, longPressMs)) {
+                        ViewerTapOutcome.HeldLong -> readIfAllowed()
+                        ViewerTapOutcome.Cancelled -> Unit
+                        // A tap whose up a control consumed (a chrome button) belongs to that control,
+                        // so tapping the top or bottom bar uses the button without also hiding the bar.
+                        is ViewerTapOutcome.Lifted -> if (!first.change.isConsumed) {
+                            val second = withTimeoutOrNull(viewConfiguration.doubleTapTimeoutMillis) {
+                                awaitFirstDown(requireUnconsumed = false)
+                            }
+                            if (second == null) {
+                                toggleChrome()
+                            } else when (awaitViewerTapOutcome(second.id, second.position, slop, longPressMs)) {
+                                is ViewerTapOutcome.Lifted -> zoomToward(second.position)
+                                ViewerTapOutcome.HeldLong -> { toggleChrome(); readIfAllowed() }
+                                ViewerTapOutcome.Cancelled -> toggleChrome()
+                            }
+                        }
+                    }
+                }
+            }
+            .pointerInput("viewer-swipe-up") {
+                // Swipe up opens details when not zoomed and not reading text. Its own detector so it
+                // does not disturb the tap gesture above.
+                detectVerticalDragGestures { _, dragAmount ->
+                    if (rootScale <= 1f && !rootMetaShown && dragAmount < -40f &&
+                        rootTextState !is ViewerTextState.Showing
+                    ) {
+                        showMetadata = true
+                        showOverlays = true
+                    }
+                }
+            },
         contentAlignment = Alignment.Center,
     ) {
-        // Gesture lambdas live in a key-less pointerInput so the detectors are installed
-        // exactly once per page composition. Keying the pointerInput on scale/showMetadata
-        // (the previous setup) cancelled and re-installed the tap detector on every pinch
-        // step, and the first tap after a zoom landed in the restart window and was
-        // silently dropped — the chrome only reacted to the second tap.
-        val currentScale  by rememberUpdatedState(scale)
-        val metadataShown by rememberUpdatedState(showMetadata)
-        val slideshowOn   by rememberUpdatedState(isPlaying)
-        val textShown     by rememberUpdatedState(textState)
-        val readText      by rememberUpdatedState(readTextOnPhoto)
-
         // ── Pager ──────────────────────────────────────────────────────────────
         HorizontalPager(
             state = pagerState,
@@ -1099,11 +1245,11 @@ fun PhotoViewerScreen(
             // and that one page rebuilds cleanly against the now-backed-up item while the user stays
             // on it.
             key = { page -> items.getOrNull(page)?.stableId ?: page },
-            // Page-swipe is suppressed while zoomed (scale > 1f) and while panorama mode
-            // is active, so the panorama's own horizontal drag doesn't fight the pager. Text mode
-            // squeezes the photo below fit-to-screen, which is still not zoomed in, so a swipe
-            // there pages and drops the highlights the way it always did.
-            userScrollEnabled = scale <= 1f && !isPanoramaMode,
+            // Page-swipe is suppressed while zoomed (scale > 1f), while panorama mode is active so its
+            // own horizontal drag doesn't fight the pager, and while recognised text is up: a selection
+            // is dragged horizontally, so paging there would swap the photo out from under the words the
+            // user is picking.
+            userScrollEnabled = scale <= 1f && !isPanoramaMode && textState !is ViewerTextState.Showing,
         ) { page ->
             val item      = items.getOrNull(page)
             val isSettled = page == pagerState.settledPage
@@ -1115,80 +1261,7 @@ fun PhotoViewerScreen(
                     // mode, white in light mode. Bg0 also covers the one-frame window
                     // between the thumb hiding and the full-res draw, so no off-theme
                     // flash can show through.
-                    .background(Bg0)
-                    .pointerInput(Unit) {
-                        coroutineScope {
-                            launch {
-                                detectTapGestures(
-                                    // Tap → toggle overlays. While the slideshow is running,
-                                    // a tap pauses it and forces the chrome visible so the
-                                    // user gets immediate feedback that auto-advance stopped.
-                                    // While recognised text is up a tap goes no further than text
-                                    // mode, so neither putting a pick down nor leaving also flips
-                                    // the chrome. Picking words out of the photo is a long press and
-                                    // a drag, never a tap, so nothing on screen wants one.
-                                    onTap = {
-                                        if (textShown is ViewerTextState.Showing) {
-                                            when (viewerTextTap(textSelection.active)) {
-                                                ViewerTextTap.ClearSelection -> textFocus.clearFocus()
-                                                ViewerTextTap.LeaveTextMode ->
-                                                    textState = ViewerTextState.Idle
-                                            }
-                                        } else if (slideshowOn) {
-                                            isPlaying = false
-                                            showOverlays = true
-                                        } else {
-                                            showOverlays = !showOverlays
-                                        }
-                                    },
-                                    // Long press → read the text on the photo. It hangs off the
-                                    // page's own detector, above the image, so it is not competing
-                                    // with the transform gestures the image itself carries. Once
-                                    // the words are up the long press belongs to the selectable
-                                    // layer over them, which sits nearer the finger and takes it
-                                    // first, so this stands aside.
-                                    onLongPress = {
-                                        if (textShown !is ViewerTextState.Showing) readText()
-                                    },
-                                    // Double tap → zoom toward the tapped point; double tap
-                                    // again → reset to fit. Takes the page off text mode's hands
-                                    // the same way a pinch does.
-                                    onDoubleTap = { tap ->
-                                        textZoomBefore = null
-                                        if (currentScale > 1f) {
-                                            scale = 1f
-                                            offset = Offset.Zero
-                                        } else {
-                                            val newScale = 2.5f
-                                            val cx = containerSize.width / 2f
-                                            val cy = containerSize.height / 2f
-                                            val maxX = (containerSize.width  * (newScale - 1f)) / 2f
-                                            val maxY = (containerSize.height * (newScale - 1f)) / 2f
-                                            scale = newScale
-                                            offset = Offset(
-                                                ((cx - tap.x) * (newScale - 1f)).coerceIn(-maxX, maxX),
-                                                ((cy - tap.y) * (newScale - 1f)).coerceIn(-maxY, maxY),
-                                            )
-                                        }
-                                    },
-                                )
-                            }
-                            // Swipe up → open details (only when not zoomed). Stands down while
-                            // recognised text is up: dragging a selection upward past a word is
-                            // the ordinary way to take a line, and it must not throw the details
-                            // sheet over the photo the user is reading.
-                            launch {
-                                detectVerticalDragGestures { _, dragAmount ->
-                                    if (currentScale <= 1f && !metadataShown && dragAmount < -40f &&
-                                        textShown !is ViewerTextState.Showing
-                                    ) {
-                                        showMetadata = true
-                                        showOverlays = true
-                                    }
-                                }
-                            }
-                        }
-                    },
+                    .background(Bg0),
                 contentAlignment = Alignment.Center,
             ) {
                 // Videos: Coil's VideoFrameDecoder grabs a frame via MediaMetadataRetriever, which
@@ -1346,6 +1419,13 @@ fun PhotoViewerScreen(
                                                     fullResPainted = true
                                                     fullResFailed = false
                                                     fullResIsHdr = st.result.drawable.hasGainMap()
+                                                    // Only the settled page feeds the shared size the
+                                                    // face tags + long-press hit-test read.
+                                                    if (isSettled) settledImageSize =
+                                                        androidx.compose.ui.unit.IntSize(
+                                                            st.result.drawable.intrinsicWidth,
+                                                            st.result.drawable.intrinsicHeight,
+                                                        )
                                                 }
                                                 is AsyncImagePainter.State.Error -> fullResFailed = true
                                                 else -> Unit
@@ -1374,6 +1454,25 @@ fun PhotoViewerScreen(
                                             modifier = Modifier
                                                 .align(Alignment.Center)
                                                 .size(64.dp),
+                                        )
+                                    }
+                                    // Face name tags over the settled photo when the menu has them on,
+                                    // placed through the same fit and zoom the image rides so each tag
+                                    // stays on its face while panning and pinching. A tap opens the
+                                    // person.
+                                    if (facesMode && stateMatchesPage && peopleInPhoto.isNotEmpty() &&
+                                        settledImageSize.width > 0 && settledImageSize.height > 0
+                                    ) {
+                                        ViewerFaceTags(
+                                            imageSize = settledImageSize,
+                                            containerSize = containerSize,
+                                            scale = scale,
+                                            offset = offset,
+                                            people = peopleInPhoto,
+                                            onPersonClick = { personId ->
+                                                facesMode = false
+                                                onOpenPerson(personId)
+                                            },
                                         )
                                     }
                                 }
@@ -1736,6 +1835,35 @@ fun PhotoViewerScreen(
                                     },
                                 )
                             }
+                            // People in this photo: detect the faces on this photo (if not already) and
+                            // pin their name tags, or take them down. The reliable path when a long
+                            // press is awkward, and the only one on a photo not yet scanned.
+                            if (aiFeaturesEnabled && faceEnabled) {
+                                androidx.compose.material3.DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.viewer_people_in_photo),
+                                        color = FgPrimary) },
+                                    leadingIcon = { Icon(Icons.Default.Face, null,
+                                        tint = Accent, modifier = Modifier.size(20.dp)) },
+                                    onClick = {
+                                        menuExpanded = false
+                                        if (facesMode) {
+                                            facesMode = false
+                                        } else {
+                                            val s = items.getOrNull(pagerState.settledPage)
+                                            if (s != null) {
+                                                facesMode = true
+                                                scope.launch {
+                                                    val found = viewModel.detectFacesNow(s)
+                                                    if (found.isEmpty()) {
+                                                        facesMode = false
+                                                        snackbarHostState.showSnackbar(noFacesFoundMsg)
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    },
+                                )
+                            }
                             androidx.compose.material3.DropdownMenuItem(
                                 text = { Text(stringResource(R.string.viewer_menu_details),
                                     color = FgPrimary) },
@@ -1746,10 +1874,14 @@ fun PhotoViewerScreen(
                                     showMetadata = true
                                 },
                             )
-                            // Edit the capture date and place. The editor itself shows a backed-up or
-                            // cloud photo read-only, so it is offered for any settled item outside a
-                            // shared-with-me album, matching the Details sheet's own edit row.
-                            if (settledItem != null && !isReadOnlyAlbum) {
+                            // Edit the capture date and place. Offered when the item is editable (a
+                            // device photo, or a cloud or backed-up image the corrected-copy replace can
+                            // rewrite) outside a shared-with-me album; a cloud or synced video, which the
+                            // editor cannot change, is left out, matching the multi-select gate.
+                            val editItem = settledItem
+                            if (editItem != null && !isReadOnlyAlbum &&
+                                anyMetadataEditable(listOf(editItem))
+                            ) {
                                 androidx.compose.material3.DropdownMenuItem(
                                     text = { Text(stringResource(R.string.metadata_editor_edit_metadata),
                                         color = FgPrimary) },
@@ -2243,9 +2375,12 @@ fun PhotoViewerScreen(
                         showRenameDialog = true
                     }
                 },
-                // Edit date + place. Null on a shared-with-me album so the sheet hides the row,
-                // matching how the rest of the mutating affordances collapse for a guest.
-                onEditMetadata = if (isReadOnlyAlbum || item == null) null else {
+                // Edit date + place. Null on a shared-with-me album, and null for an item the editor
+                // cannot change (a cloud or synced video), so the row hides exactly where the
+                // multi-select entry would also be absent.
+                onEditMetadata = if (isReadOnlyAlbum || item == null ||
+                    !anyMetadataEditable(listOf(item))
+                ) null else {
                     { showMetadata = false; onEditMetadata(item) }
                 },
             )

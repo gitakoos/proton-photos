@@ -60,6 +60,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -212,6 +213,42 @@ internal fun NavRow(label: String, description: String? = null, onClick: () -> U
             if (description != null) Text(description, color = colors.fgMute, fontSize = 12.5.sp)
         }
         Icon(Icons.AutoMirrored.Filled.ArrowForwardIos, null, tint = colors.fgMute, modifier = Modifier.size(14.dp))
+    }
+}
+
+/**
+ * Tappable action row: a leading icon, a label, and a short description, with no trailing chevron so
+ * it reads as an action performed in place rather than a jump to another page. [destructive] tints the
+ * icon and label with the error colour for a wipe; [enabled] greys the row and blocks the tap while an
+ * action is already running. Used for the maintenance and transfer actions on the face-recognition page.
+ */
+@Composable
+internal fun ActionRow(
+    label: String,
+    icon: ImageVector,
+    onClick: () -> Unit,
+    description: String? = null,
+    destructive: Boolean = false,
+    enabled: Boolean = true,
+) {
+    val colors = AppColors.current
+    val alpha = if (enabled) 1f else 0.4f
+    val labelColor = (if (destructive) colors.errorColor else colors.fgPrimary).copy(alpha = alpha)
+    val iconColor = (if (destructive) colors.errorColor else colors.fgDim).copy(alpha = alpha)
+    Row(
+        modifier = Modifier.fillMaxWidth()
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, null, tint = iconColor, modifier = Modifier.size(20.dp))
+        Spacer(Modifier.width(14.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(label, color = labelColor, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+            if (description != null) {
+                Text(description, color = colors.fgMute.copy(alpha = alpha), fontSize = 12.5.sp)
+            }
+        }
     }
 }
 

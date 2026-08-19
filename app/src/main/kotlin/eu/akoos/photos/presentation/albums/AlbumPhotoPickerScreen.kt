@@ -121,9 +121,15 @@ fun AlbumPhotoPickerScreen(
     albumLinkId: String = "",
     albumName: String = "",
     excludeLinkIds: Set<String> = emptySet(),
+    // Item keys (the GalleryItem.stableId keyspace) already attached to the target, filtered out for
+    // both cloud and on-device photos so the picker never offers a photo the target already holds.
+    excludeKeys: Set<String> = emptySet(),
     onBack: () -> Unit,
     onAdded: () -> Unit = {},
     onPick: ((List<GalleryItem>) -> Unit)? = null,
+    // Header title when nothing is picked yet. Defaults to the "Add to album" wording; a return-mode
+    // caller (collage, person) passes its own so the picker reads for its context.
+    titleRes: Int = R.string.album_picker_title,
     viewModel: AlbumPhotoPickerViewModel = hiltViewModel(),
 ) {
     val appColors = AppColors.current
@@ -144,15 +150,16 @@ fun AlbumPhotoPickerScreen(
 
     // Drop photos already in this album, and photos hidden on this device, so the picker only
     // offers addable new ones. A hidden photo re-added to an album would un-hide it.
-    val basePhotos = remember(allItems, excludeLinkIds, hiddenCloudLinkIds) {
-        if (excludeLinkIds.isEmpty() && hiddenCloudLinkIds.isEmpty()) allItems
+    val basePhotos = remember(allItems, excludeLinkIds, excludeKeys, hiddenCloudLinkIds) {
+        if (excludeLinkIds.isEmpty() && excludeKeys.isEmpty() && hiddenCloudLinkIds.isEmpty()) allItems
         else allItems.filter { item ->
             val cloudId = when (item) {
                 is GalleryItem.CloudOnly -> item.cloud.linkId
                 is GalleryItem.Synced    -> item.cloud.linkId
                 is GalleryItem.LocalOnly -> null
             }
-            cloudId == null || (cloudId !in excludeLinkIds && cloudId !in hiddenCloudLinkIds)
+            val cloudOk = cloudId == null || (cloudId !in excludeLinkIds && cloudId !in hiddenCloudLinkIds)
+            cloudOk && AlbumPhotoPickerViewModel.stableKeyOf(item) !in excludeKeys
         }
     }
     // Type filter (#40): narrow the mixed library to cloud-backed photos (CloudOnly + Synced) or
@@ -354,7 +361,7 @@ fun AlbumPhotoPickerScreen(
                 tint = appColors.fgPrimary,
             )
             Text(
-                if (selected.isEmpty()) stringResource(R.string.album_picker_title)
+                if (selected.isEmpty()) stringResource(titleRes)
                 else stringResource(R.string.album_picker_selected, selected.size),
                 color = FgPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
                 maxLines = 1,

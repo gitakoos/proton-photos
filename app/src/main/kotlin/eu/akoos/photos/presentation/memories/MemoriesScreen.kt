@@ -37,7 +37,11 @@ import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -66,7 +70,9 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.GalleryItem
+import eu.akoos.photos.domain.usecase.MIN_FACES_TO_SHOW_PERSON
 import eu.akoos.photos.presentation.common.FloatingHeaderScrim
+import eu.akoos.photos.presentation.gallery.PersonCard
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.PillBg
 import eu.akoos.photos.presentation.theme.PillBorder
@@ -87,6 +93,8 @@ fun MemoriesScreen(
     onBack: () -> Unit,
     onPhotoClick: (items: List<GalleryItem>, index: Int) -> Unit,
     onSeeAll: (MemoryCategory) -> Unit = {},
+    onPersonClick: (Long) -> Unit = {},
+    onSeeAllPeople: () -> Unit = {},
     viewModel: MemoriesViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -103,7 +111,17 @@ fun MemoriesScreen(
         val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
         val contentTopPad = statusBarTop + 72.dp
 
-        val isEmpty = state.onThisDay.isEmpty() && state.seasons.isEmpty()
+        // Only people who appear in at least two photos reach the preview, so a single stray
+        // detection cannot open a section of its own; the empty state keys off that same set.
+        // Ente-style: the preview shows the people you have NAMED, so unnamed and junk clusters never
+        // clutter it. Before any are named, it falls back to the clusters worth naming, so the first
+        // person is still reachable; the header chevron opens the full People page either way.
+        val peopleNamed = state.people.filter { !it.displayName.isNullOrBlank() }
+        val peopleToName = state.people.filter {
+            it.displayName.isNullOrBlank() && it.faceCount >= MIN_FACES_TO_SHOW_PERSON
+        }
+        val peopleShown = if (peopleNamed.isNotEmpty()) peopleNamed else peopleToName
+        val isEmpty = state.onThisDay.isEmpty() && state.seasons.isEmpty() && peopleShown.isEmpty()
         if (isEmpty) {
             Box(
                 modifier = Modifier
@@ -126,6 +144,35 @@ fun MemoriesScreen(
                 ),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                if (peopleShown.isNotEmpty()) {
+                    item(key = "people_section") {
+                        // Same shape as Seasons: a tappable header with a chevron opening the full
+                        // People sub-page, over a preview of the first few most-photographed people.
+                        SectionHeaderRow(
+                            title = stringResource(R.string.gallery_category_people),
+                            onClick = onSeeAllPeople,
+                        )
+                        // A single horizontally scrolling row of person cards sized to match the
+                        // Seasons cards (132x168), so People read as the same album-style tile rather
+                        // than a taller, wider grid. The header chevron opens the full People page.
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState())
+                                .padding(top = 2.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            peopleShown.take(12).forEach { person ->
+                                Box(Modifier.width(132.dp)) {
+                                    PersonCard(
+                                        person = person,
+                                        onClick = { onPersonClick(person.personId) },
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
                 if (state.onThisDay.isNotEmpty()) {
                     item(key = "otd_section") {
                         SectionHeaderRow(

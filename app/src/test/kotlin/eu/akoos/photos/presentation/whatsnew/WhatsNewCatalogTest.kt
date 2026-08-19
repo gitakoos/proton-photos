@@ -149,13 +149,10 @@ class WhatsNewCatalogTest {
     }
 
     @Test
-    fun the_current_release_leads_with_album_ordering_and_carries_the_crop_card() {
+    fun the_current_release_is_2_5_0_and_leads_with_the_editor() {
         val latest = LatestWhatsNewRelease
-        assertEquals("2.4.1", latest.version)
-        assertEquals(WhatsNewHero.AlbumOrder, latest.hero)
-        assertFalse(
-            "the hide card belongs to the release that introduced it",
-            latest.hero == WhatsNewHero.Hide,
-        )
+        assertEquals("2.5.0", latest.version)
+        assertTrue("2.5.0 leads with the editor feature, not a hero card", latest.hero == null)
+        assertTrue("2.5.0 announces several features", latest.features.size >= 5)
     }
 }

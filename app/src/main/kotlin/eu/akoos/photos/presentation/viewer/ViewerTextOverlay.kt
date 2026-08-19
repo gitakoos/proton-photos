@@ -60,8 +60,6 @@ import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.StrokeJoin
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -80,7 +78,6 @@ import eu.akoos.photos.data.ocr.OnnxTextRecognizer
 import eu.akoos.photos.domain.ocr.RecognizedTextBlock
 import eu.akoos.photos.domain.ocr.TextReadStage
 import eu.akoos.photos.presentation.common.ConfirmDialog
-import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.FgPrimary
 import eu.akoos.photos.presentation.theme.PillBg
@@ -224,14 +221,14 @@ fun viewerTransform(containerSize: IntSize, scale: Float, offset: Offset): Viewe
     )
 
 /**
- * Highlights recognised text over the photo. Sits beside the image rather than inside its
- * `graphicsLayer`, and applies [transform] itself, so the quads stay glued to the words through a
- * pinch and a pan while the outlines keep their on-screen weight.
+ * Dims the photo and lifts the dim off the words that were read. Sits beside the image rather than
+ * inside its `graphicsLayer`, and applies [transform] itself, so the lit words stay glued to what was
+ * read through a pinch and a pan.
  *
  * The photo goes dark and the words that were read stay lit: the scrim is laid over the drawn photo
- * and then lifted off each run, so the eye lands on what can be read instead of hunting for thin
- * outlines on a fully lit picture. Nothing is painted outside the photo's own rectangle, so the
- * letterbox bars stay clean whatever the frame's shape.
+ * and then lifted off each run, so the eye lands on what can be read rather than on the rest of the
+ * picture. Nothing is painted outside the photo's own rectangle, so the letterbox bars stay clean
+ * whatever the frame's shape. No box is drawn around a run: the lifted dim is what marks the words.
  *
  * What the user has actually picked out of those runs is not drawn here: the selection is the
  * platform's own, painted by the selectable layer over this one.
@@ -263,9 +260,7 @@ fun ViewerTextOverlay(
     val fit = remember(showing, transform.containerW, transform.containerH) {
         viewerTextFit(showing, transform.containerW, transform.containerH)
     }
-    val accent = Accent
     val density = LocalDensity.current
-    val strokePx = with(density) { OUTLINE_WIDTH.toPx() }
     val padPx = with(density) { ViewerTextHighlightPadding.toPx() }
     // Reused across frames: a pan redraws this on every pointer event and a fresh Path per block per
     // frame is pure churn.
@@ -294,17 +289,6 @@ fun ViewerTextOverlay(
                     paths[slot],
                     color = Color.Black.copy(alpha = reveal),
                     blendMode = BlendMode.DstOut,
-                )
-            }
-            // Every outline after every hole: a hole punched later would erase what was drawn
-            // before it, and runs reveal in turn.
-            showing.blocks.indices.forEach { slot ->
-                val reveal = blockReveal(progress, slot, showing.blocks.size)
-                if (reveal <= 0f) return@forEach
-                drawPath(
-                    paths[slot],
-                    color = accent.copy(alpha = OUTLINE_ALPHA * reveal),
-                    style = Stroke(width = strokePx, join = StrokeJoin.Round),
                 )
             }
         }
@@ -471,14 +455,5 @@ val ViewerTextPillReserve = ViewerTextPillControl + ViewerTextPillPadding * 2
  * often what tells the user which photo they are reading.
  */
 private const val SCRIM_ALPHA = 0.66f
-
-/**
- * The edge of a run, kept to the faintest line that still reads as one. The dim on either side of it
- * is what marks the words out; the outline only has to say where a run stops, and anything heavier
- * turns a page of text into a grid of boxes the eye reads before the words. Set to blend into the
- * darkening rather than sit on top of it.
- */
-private val OUTLINE_WIDTH = 0.5.dp
-private const val OUTLINE_ALPHA = 0.16f
 
 private const val REVEAL_GROW = 0.06f

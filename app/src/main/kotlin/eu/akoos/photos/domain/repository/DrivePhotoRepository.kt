@@ -104,6 +104,15 @@ interface DrivePhotoRepository {
      * to REMOVE the photo instead of adding it again.
      */
     suspend fun getAlbumIdsByPhoto(userId: UserId): Map<String, Set<String>>
+
+    /**
+     * Like [getAlbumIdsByPhoto] but guaranteed complete or throwing: returns the full
+     * `photoLinkId → Set<albumLinkId>` map only when every album's children enumerated, and throws
+     * when the walk could not be verified complete. The metadata-replace use cases enumerate through
+     * this before trashing an original so a transient album-list failure can never silently drop the
+     * photo from an album.
+     */
+    suspend fun getVerifiedAlbumIdsByPhoto(userId: UserId): Map<String, Set<String>>
     suspend fun createDriveAlbum(userId: UserId, name: String): Album
     suspend fun loadAlbumChildren(userId: UserId, albumLinkId: String): List<AlbumChild>
     /**
@@ -542,4 +551,12 @@ interface DrivePhotoRepository {
      * ACCESS_MEDIA_LOCATION and stands down without it; the date leg runs either way.
      */
     suspend fun backfillLocalExif(userId: UserId)
+
+    /**
+     * Walk the library's photos that have not been face-indexed yet, detect and embed each face, and
+     * store it for the People grouping. A no-op unless the AI features are on and the user has not
+     * paused indexing, and unless the on-device face models are present. Resumable and idempotent: a
+     * re-run only touches photos it has never produced a face for.
+     */
+    suspend fun backfillFaces(userId: UserId)
 }

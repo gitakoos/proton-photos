@@ -30,7 +30,12 @@ import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Compress
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.Crop
+import androidx.compose.material.icons.filled.Difference
+import androidx.compose.material.icons.filled.SaveAlt
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.GridView
@@ -92,6 +97,20 @@ internal data class WhatsNewRelease(
  * fails if a card is repeated from an older entry.
  */
 internal val WhatsNewReleases: List<WhatsNewRelease> = listOf(
+    WhatsNewRelease(
+        version = "2.5.0",
+        hero = null,
+        features = listOf(
+            WhatsNewFeature(Icons.Default.Brush, R.string.whats_new_editor_title, R.string.whats_new_editor_body),
+            WhatsNewFeature(Icons.Default.GridView, R.string.whats_new_collage_title, R.string.whats_new_collage_body),
+            WhatsNewFeature(Icons.Default.SaveAlt, R.string.whats_new_export_title, R.string.whats_new_export_body),
+            WhatsNewFeature(Icons.Default.Movie, R.string.whats_new_video_title, R.string.whats_new_video_body),
+            WhatsNewFeature(Icons.Default.AutoAwesome, R.string.whats_new_smooth_title, R.string.whats_new_smooth_body),
+            WhatsNewFeature(Icons.Default.Difference, R.string.whats_new_dupreview_title, R.string.whats_new_dupreview_body),
+            WhatsNewFeature(Icons.Default.Schedule, R.string.whats_new_filedate_title, R.string.whats_new_filedate_body),
+        ),
+        moreRes = R.string.whats_new_more_250,
+    ),
     WhatsNewRelease(
         version = "2.4.1",
         hero = WhatsNewHero.AlbumOrder,

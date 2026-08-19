@@ -164,6 +164,8 @@ class UploadPendingUseCase @Inject constructor(
     private val networkObserver: eu.akoos.photos.util.NetworkObserver,
     private val transferCenter: eu.akoos.photos.data.transfer.TransferCenter,
     private val uploadAlbumTargetDao: eu.akoos.photos.data.db.dao.UploadAlbumTargetDao,
+    private val pendingMetadataEditDao: eu.akoos.photos.data.db.dao.PendingMetadataEditDao,
+    private val photoLocationDao: eu.akoos.photos.data.db.dao.PhotoLocationDao,
     @ApplicationContext private val context: Context,
     @eu.akoos.photos.di.AppScope private val appScope: kotlinx.coroutines.CoroutineScope,
 ) {
@@ -435,8 +437,17 @@ class UploadPendingUseCase @Inject constructor(
         // UPLOADING rows are covered by resetStaleUploadingClaims + the stranded-intent recovery, so no
         // separate manual set is needed here.
         val albumTargetUris: Set<String> = uploadAlbumTargetDao.getAll().map { it.localUri }.toSet()
+
+        // A device file queued for a cloud metadata edit is owned end to end by MetadataEditWorker (via
+        // the synced replace path): it seeds its own UPLOADING row and uploads the corrected copy itself.
+        // Exclude those URIs here so this backup selector never races the worker on the same file. The
+        // race is real on a process kill: the pending_metadata_edit row survives, but resetStaleUploadingClaims
+        // would reset the sync row to LOCAL_ONLY and this selector would upload it as a SECOND copy.
+        val metadataEditUris: Set<String> = pendingMetadataEditDao.allPendingDeviceUris().toSet()
+
         val strandedForced = allStates.filter {
             it.localUri in albumTargetUris &&
+                it.localUri !in metadataEditUris &&
                 it.cloudFileId == null &&
                 it.status != SyncStatus.LOCAL_ONLY &&
                 it.status != SyncStatus.HIDDEN
@@ -470,6 +481,12 @@ class UploadPendingUseCase @Inject constructor(
             } else {
                 it
             }
+        }
+
+        // Keep the metadata-edit worker's files out of the backup queue (see [metadataEditUris] above):
+        // the worker uploads the corrected copy, so a backup upload here would be a duplicate.
+        if (metadataEditUris.isNotEmpty()) {
+            pending = pending.filterNot { it.localUri in metadataEditUris }
         }
 
         // Consumed HERE, past every early return above, not where the other prefs are read. A Sync now
@@ -744,6 +761,20 @@ class UploadPendingUseCase @Inject constructor(
             // toggle.
             if (!isExplicitAction(state.queueSource) && state.localUri !in albumTargetUris) {
                 val livePrefs = context.settingsDataStore.data.first()
+                // Wi-Fi-only, enforced PER PHOTO (see [uploadDefersForWifiOnly]): an auto-queued photo
+                // never rides mobile data, even when an explicit "back up now" or album-add opened this
+                // pass. Only the explicitly-picked photos (which skip this whole block) go over cellular,
+                // so a single manual pick uploads just that one rather than dragging the auto backlog
+                // onto mobile. Read live so a Wi-Fi drop mid-batch stops the not-yet-started items.
+                if (uploadDefersForWifiOnly(
+                        state.queueSource,
+                        wifiOnly = livePrefs[SettingsKeys.SYNC_WIFI_ONLY] != false,
+                        onWifi = networkObserver.currentlyOnWifi(),
+                    )
+                ) {
+                    Log.d(UPLOAD_TAG, "Skipping ${rawLocalItem.displayName}: Wi-Fi-only on and not on Wi-Fi")
+                    return
+                }
                 // Same live read for the auto-backup switch, so turning it off part-way through a
                 // long batch stops the items that have not started rather than only the next run.
                 // A user-requested run is exempt: the switch was already off when they asked.
@@ -789,10 +820,7 @@ class UploadPendingUseCase @Inject constructor(
             // runs against the bytes independently, so a stripped + renamed photo still gets erased.
             var mirrorRenameTarget: String? = null
             val renamedItem = if (renameToCaptureDate) {
-                val ext = rawLocalItem.displayName.substringAfterLast('.', "")
-                val captureMs = rawLocalItem.dateTaken.takeIf { it > 0L } ?: System.currentTimeMillis()
-                val newBase = SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", Locale.US).format(Date(captureMs))
-                val newName = if (ext.isNotEmpty()) "$newBase.$ext" else newBase
+                val newName = uploadRenamedName(rawLocalItem.displayName, rawLocalItem.dateTaken, System.currentTimeMillis())
                 Log.d(UPLOAD_TAG, "Rename-on-upload: '${rawLocalItem.displayName}' → '$newName'")
                 if (mirrorStripToLocal) mirrorRenameTarget = newName
                 rawLocalItem.copy(displayName = newName)
@@ -894,8 +922,12 @@ class UploadPendingUseCase @Inject constructor(
                     // trailer), so overwrite the on-device original with the whole motion-preserving
                     // stripped file instead — the local loses its metadata too and byte-matches the
                     // cloud. Silent with all-files; a refused write leaves the original intact.
-                    if (mirrorStripToLocal && overwriteLocalInPlace(state.localUri, motionTemp)) {
+                    val motionMirrorLanded = mirrorStripToLocal && overwriteLocalInPlace(state.localUri, motionTemp)
+                    if (motionMirrorLanded) {
                         Log.d(UPLOAD_TAG, "Mirror strip: on-device motion photo wiped for ${localItem.displayName}")
+                    }
+                    if (mirrorRemovedDeviceGps(stripOnUpload && stripConfig.stripGps, mirrorStripToLocal, motionMirrorLanded)) {
+                        invalidateMirroredLocation(userId, state.localUri)
                     }
                     android.net.Uri.fromFile(motionTemp).toString()
                 } else if (gainMapTemp != null) {
@@ -904,8 +936,12 @@ class UploadPendingUseCase @Inject constructor(
                     // Mirror: same reasoning as the motion photo. An in-place EXIF rewrite would drop the
                     // appended gain map, so the on-device original is replaced with the whole verified
                     // file instead. Silent with all-files; a refused write leaves the original intact.
-                    if (mirrorStripToLocal && overwriteLocalInPlace(state.localUri, gainMapTemp)) {
+                    val gainMapMirrorLanded = mirrorStripToLocal && overwriteLocalInPlace(state.localUri, gainMapTemp)
+                    if (gainMapMirrorLanded) {
                         Log.d(UPLOAD_TAG, "Mirror strip: on-device Ultra HDR photo wiped for ${localItem.displayName}")
+                    }
+                    if (mirrorRemovedDeviceGps(stripOnUpload && stripConfig.stripGps, mirrorStripToLocal, gainMapMirrorLanded)) {
+                        invalidateMirroredLocation(userId, state.localUri)
                     }
                     android.net.Uri.fromFile(gainMapTemp).toString()
                 } else if (mirrorStripToLocal &&
@@ -918,6 +954,9 @@ class UploadPendingUseCase @Inject constructor(
                     // by content hash. The wipe is the last step before the upload and is idempotent,
                     // so a failed upload simply retries it.
                     Log.d(UPLOAD_TAG, "Mirror strip: on-device original wiped for ${localItem.displayName}")
+                    if (mirrorRemovedDeviceGps(stripOnUpload && stripConfig.stripGps, mirrorStripToLocal, deviceRewriteSucceeded = true)) {
+                        invalidateMirroredLocation(userId, state.localUri)
+                    }
                     state.localUri
                 } else {
                     // Mirror off, or the OS refused the in-place write (no MANAGE_MEDIA) → ordinary
@@ -963,8 +1002,12 @@ class UploadPendingUseCase @Inject constructor(
                     // Mirror: overwrite the on-device video with the location-stripped remux so the
                     // local loses its GPS too and matches the cloud. Silent with all-files; a refused
                     // write leaves the original intact.
-                    if (mirrorStripToLocal && overwriteLocalInPlace(state.localUri, tmp)) {
+                    val videoMirrorLanded = mirrorStripToLocal && overwriteLocalInPlace(state.localUri, tmp)
+                    if (videoMirrorLanded) {
                         Log.d(UPLOAD_TAG, "Mirror strip: on-device video wiped for ${localItem.displayName}")
+                    }
+                    if (mirrorRemovedDeviceGps(stripOnUpload && stripConfig.stripGps, mirrorStripToLocal, videoMirrorLanded)) {
+                        invalidateMirroredLocation(userId, state.localUri)
                     }
                     android.net.Uri.fromFile(tmp).toString()
                 } else {
@@ -1638,6 +1681,23 @@ class UploadPendingUseCase @Inject constructor(
     }
 
     /**
+     * Best-effort drop of the on-device [uri]'s stored GPS fix once a mirror strip has rewritten that
+     * file GPS-free. The map, Search's place facet and the location screen all plot `photo_location`,
+     * and the GPS backfill skips any file that already has a row, so a row left standing keeps every one
+     * of them on a point the file no longer carries. Scoped to the account the upload runs under, by the
+     * device content URI the fix is keyed under. A delete failure costs a stale point until the next
+     * pass over the file and never fails the upload it rides on.
+     */
+    private suspend fun invalidateMirroredLocation(userId: UserId, uri: String) {
+        try {
+            photoLocationDao.deleteByIds(userId.id, listOf(uri))
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            Log.w(UPLOAD_TAG, "mirror strip location drop for $uri failed: ${e.message}")
+        }
+    }
+
+    /**
      * Strip path for Motion Photos. Returns a temp upload file when [localUri] is a motion photo,
      * or null when it is not (so the caller runs the ordinary EXIF strip instead).
      *
@@ -2203,5 +2263,48 @@ class UploadPendingUseCase @Inject constructor(
             }
             return mediaStoreDateTakenMs
         }
+
+        /**
+         * Whether an upload's mirror step actually rewrote the on-device file GPS-free, which is what
+         * makes that file's stored `photo_location` fix stale. All three have to hold, and each fails
+         * the same way when it does not: [stripGpsOnUpload] is the effective GPS strip (strip-on-upload
+         * with GPS in its set), and with it off the file keeps its coordinates; [mirrorToLocal] gates the
+         * in-place rewrite, and with it off only a temp copy is stripped while the device original is
+         * left whole; [deviceRewriteSucceeded] is the write's own outcome, and the OS can refuse it,
+         * leaving the original intact. A plain strip-on-upload with no mirror therefore never satisfies
+         * this, so its still-located device file keeps its map point.
+         *
+         * Pure and side-effect-free, so the matrix is pinned by a plain JVM test.
+         */
+        fun mirrorRemovedDeviceGps(
+            stripGpsOnUpload: Boolean,
+            mirrorToLocal: Boolean,
+            deviceRewriteSucceeded: Boolean,
+        ): Boolean = stripGpsOnUpload && mirrorToLocal && deviceRewriteSucceeded
+
+        /**
+         * The cloud displayName a rename-on-upload derives from a source's capture timestamp,
+         * formatted `yyyy-MM-dd_HH-mm-ss` and keeping the original extension. A non-positive
+         * [dateTakenMs] (absent MediaStore DATE_TAKEN) falls back to [nowMs]. Pure and
+         * side-effect-free so the naming is pinned by a plain JVM test.
+         */
+        fun uploadRenamedName(displayName: String, dateTakenMs: Long, nowMs: Long): String {
+            val ext = displayName.substringAfterLast('.', "")
+            val captureMs = dateTakenMs.takeIf { it > 0L } ?: nowMs
+            val base = SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", Locale.US).format(Date(captureMs))
+            return if (ext.isNotEmpty()) "$base.$ext" else base
+        }
     }
 }
+
+/**
+ * #102: whether an auto-queued photo must wait for Wi-Fi under the Wi-Fi-only setting. An explicitly
+ * picked upload (a MANUAL "back up now" of a photo, or an ALBUM_ADD) rides mobile data because the
+ * user asked for that one; a folder auto-backup or an edit re-upload waits for Wi-Fi. Enforced per
+ * photo, so a single manual pick does not drag the whole auto backlog onto cellular just because it
+ * opened the pass.
+ */
+internal fun uploadDefersForWifiOnly(queueSource: String?, wifiOnly: Boolean, onWifi: Boolean): Boolean =
+    wifiOnly && !onWifi &&
+        queueSource != QueueSource.MANUAL &&
+        queueSource != QueueSource.ALBUM_ADD

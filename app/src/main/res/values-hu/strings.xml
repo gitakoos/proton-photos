@@ -42,8 +42,6 @@
     <string name="onboarding_manage_media_title">Média kezelése</string>
     <string name="onboarding_all_files_title">Hozzáférés minden fájlhoz</string>
     <string name="onboarding_all_files_subtitle">Ajánlott. Lehetővé teszi, hogy a visszahozott rejtett fotók az eredeti mappájukba kerüljenek (például egy csevegőalkalmazás média-mappájába, ne csak a Picturesbe), és a helyi fájlok a helyükön frissüljenek. Koppints a rendszerbeállítások megnyitásához.</string>
-    <string name="settings_all_files_title">Hozzáférés minden fájlhoz</string>
-    <string name="settings_all_files_desc">A visszahozott rejtett fotók az eredeti mappájukba kerülnek, a helyi fájlok pedig a helyükön frissülnek. Koppints a megadáshoz a rendszerbeállításokban.</string>
     <string name="permissions_title">Engedélyek</string>
     <string name="permissions_intro">Itt kezelheted, mihez férhet hozzá a Photos for Proton. Mindegyiknél látod, miért kell.</string>
     <string name="permissions_state_granted">Megadva</string>
@@ -118,8 +116,7 @@
     <string name="share_with_people_desc">Hozzáadás megosztott albumhoz</string>
     <string name="share_public_link">Nyilvános link</string>
     <string name="share_create_link">Nyilvános link létrehozása</string>
-    <string name="share_upload_create_link">Feltöltés és link létrehozása</string>
-    <string name="share_creating_link">Link létrehozása…</string>
+    <string name="share_upload_create_link">Mentés és link létrehozása</string>
     <string name="share_link_busy">Egy pillanat…</string>
     <string name="share_copy_link">Link másolása</string>
     <string name="share_remove_link">Link eltávolítása</string>
@@ -156,15 +153,12 @@
     <string name="filter_offline">Offline</string>
     <string name="gallery_add_to_album_local_note">Ezek a fotók előbb feltöltődnek, majd bekerülnek az albumba.</string>
     <string name="gallery_no_albums_yet">Még nincs album. Hozz létre egyet fent.</string>
-    <string name="gallery_add_to_album_mixed_hint">Az eszközön és a csak felhőben lévő fotók nem kerülhetnek közös albumba. Válassz egy típust.</string>
     <plurals name="gallery_add_to_album_partial">
         <item quantity="one">%1$d hozzáadva ehhez: %2$s, %3$d elemet nem lehetett menteni (vegyes kijelölés)</item>
         <item quantity="other">%1$d hozzáadva ehhez: %2$s, %3$d elemet nem lehetett menteni (vegyes kijelölés)</item>
     </plurals>
     <string name="gallery_strip_metadata">Metaadatok eltávolítása</string>
     <string name="gallery_added_to_album">%1$d fotó hozzáadva ehhez: %2$s</string>
-    <string name="gallery_add_to_album_added_and_queued">%1$d hozzáadva, további %2$d a feltöltés után kerül be</string>
-    <string name="gallery_add_to_album_queued_only">%1$d a feltöltés után kerül be ide: %2$s</string>
     <string name="gallery_stripped_metadata">%1$d fotó metaadatai eltávolítva</string>
     <string name="gallery_stripped_with_skipped">Eltávolítva: %1$d, kihagyva: %2$d (idegen)</string>
     <string name="gallery_stripped_with_failed">Eltávolítva: %1$d, sikertelen: %2$d</string>
@@ -182,6 +176,7 @@
     <string name="gallery_filter_bursts">Sorozatfelvételek</string>
     <string name="gallery_filter_panoramas">Panorámák</string>
     <string name="gallery_filter_raw">RAW</string>
+    <string name="gallery_category_people">Emberek</string>
     <string name="gallery_filter_photos">Fotók</string>
 
     <!-- Permission -->
@@ -206,13 +201,13 @@
     <!-- Delete bottom sheet -->
     <string name="delete_album_container_warning">Ez törli az albumot, de a fotóid megmaradnak a Proton Drive-on.</string>
     <string name="delete_button_permanently">Végleges törlés</string>
-    <string name="delete_multi_mixed_msg">Néhány fotó már fel van mentve a Proton Drive-ra. Válaszd ki, hogyan törlődjenek.</string>
+    <string name="delete_multi_mixed_msg">Válaszd ki, mely másolatokat távolítsd el.</string>
     <string name="delete_multi_remove_device">Eltávolítás az eszközről</string>
     <string name="delete_multi_remove_device_desc">A Proton Drive-on lévő biztonsági mentés megmarad</string>
     <string name="delete_multi_move_trash">Áthelyezés a kukába</string>
     <string name="delete_multi_move_trash_desc">A nemrég törölt elemek között marad, 30 napig visszaállítható</string>
     <string name="delete_multi_remove_cloud">Eltávolítás a felhőből</string>
-    <string name="delete_multi_remove_cloud_desc">A fotók az eszközön maradnak, a biztonsági mentések a Drive kukájába kerülnek</string>
+    <string name="delete_multi_remove_cloud_desc">Ezen az eszközön marad, a biztonsági mentés a Drive kukájába kerül</string>
     <string name="delete_multi_move_trash_everywhere">Mindenhol kukába helyezés</string>
     <string name="delete_multi_move_trash_everywhere_desc">Áthelyezés az eszköz és a Proton Drive kukájába</string>
     <string name="delete_multi_drive_trash">Drive kukába helyezés</string>
@@ -224,7 +219,6 @@
     <string name="settings_sync_now">Szinkronizálás most</string>
     <string name="settings_storage_section">Tárhely</string>
     <string name="settings_storage_nav_desc">Drive-kvóta, eszköztár, gyorsítótár, kuka</string>
-    <string name="settings_free_up_now">Hely felszabadítása most</string>
     <string name="settings_free_up_interval_10_minutes">10 perc</string>
     <string name="settings_free_up_interval_1_day">1 nap</string>
     <string name="settings_free_up_interval_1_week">1 hét</string>
@@ -266,7 +260,6 @@
     <string name="settings_backup_folders_desc">Válaszd ki, mely mappákat mentse</string>
     <!-- Sync settings reorganisation (v1.3.2): two grouped sections. -->
     <string name="settings_what_backed_up_section">Mi kerül mentésre</string>
-    <string name="settings_when_section">Mikor történik</string>
     <string name="settings_network_section">Hálózathasználat</string>
     <string name="settings_continuous_backup">Folyamatos mentés</string>
     <string name="settings_continuous_backup_desc">A fotók és videók másodperceken belül feltöltődnek.</string>
@@ -284,11 +277,6 @@
     <string name="settings_excluded_folders_select_all">Mind kizárása</string>
     <string name="settings_excluded_folders_deselect_all">Mind visszavétele</string>
     <!-- Album mirror -->
-    <string name="settings_album_mirror_folders">Mappák albumként</string>
-    <string name="settings_album_mirror_folders_desc">Válaszd ki, mely eszközmappák jelenjenek meg Drive-albumként a fotók feltöltésekor</string>
-    <string name="album_mirror_folders_title">Mappák tükrözése Drive-albumként</string>
-    <string name="album_mirror_folders_subtitle">A bejelölt mappák fotói a hozzájuk tartozó Drive-albumokba is bekerülnek. A fotók mindenképp felkerülnek a fotófolyamodba.</string>
-    <string name="album_mirror_add_custom">Mappanév hozzáadása</string>
     <string name="album_mirror_custom_dialog_title">Mappanév hozzáadása</string>
     <string name="album_mirror_custom_dialog_hint">Mappa neve (pl. Olaszország 2026)</string>
     <string name="settings_recently_deleted">Nemrég törölt</string>
@@ -318,10 +306,6 @@
     <string name="trash_cloud_empty_partial">%1$d eltávolítva, %2$d nem sikerült</string>
     <string name="trash_cloud_empty_failed">A felhőkuka kiürítése nem sikerült</string>
     <string name="settings_recently_deleted_subtitle_device_cloud">%1$d eszközön · %2$d Drive-on</string>
-    <string name="settings_free_up_desc">Már mentett fájlok törlése az eszközről</string>
-    <string name="settings_free_up_action">Törlés</string>
-    <string name="settings_free_up_confirm_title">Helyfelszabadítás?</string>
-    <string name="settings_free_up_confirm_message">Minden, már Proton Drive-ra mentett fotó és videó törlésre kerül az eszközről. A Drive-os másolatok érintetlenek maradnak, később bármikor letölthetők.</string>
     <string name="settings_backup_size">%s feltöltve erről az eszközről</string>
     <!-- Storage card, Proton / Device / App-cache sub-sections -->
     <string name="settings_storage_proton">Proton Drive</string>
@@ -332,7 +316,6 @@
     <string name="settings_storage_clear">Törlés</string>
     <string name="settings_storage_free_up">Hely</string>
     <string name="settings_storage_app_cache_desc">Bélyegképek, streamelt videók és ideiglenes feltöltési blokkok</string>
-    <string name="settings_storage_clear_cache">Gyorsítótár ürítése</string>
     <string name="settings_storage_clear_cache_dialog_title">Üríted az alkalmazás gyorsítótárát?</string>
     <string name="settings_storage_clear_cache_dialog_message">Ez %s gyorsítótárazott fájlt töröl. Szükség esetén újra letöltődnek.</string>
     <string name="settings_offline_storage_title">Offline fotók</string>
@@ -342,8 +325,6 @@
     <string name="settings_storage_refresh">Tárhely frissítése</string>
     <string name="settings_section_settings">Beállítások</string>
     <string name="settings_section_extras">Extrák</string>
-    <string name="settings_privacy_metadata">Adatvédelem és metaadatok</string>
-    <string name="settings_privacy_metadata_desc">GPS és opcionális EXIF-mezők eltávolítása a feltöltésekből</string>
     <string name="settings_security">Biztonság</string>
     <string name="settings_security_desc">Alkalmazás zárolása, Rejtett fotók</string>
     <string name="settings_strip_metadata_upload">Metaadatok eltávolítása feltöltéskor</string>
@@ -371,7 +352,6 @@
     <string name="settings_strip_software_desc">Szoftver, megjegyzés, szerző és szerzői jog mezők eltávolítása</string>
     <string name="settings_strip_authorship">Szerző és szerzői jog eltávolítása</string>
     <string name="settings_strip_format_note">Egyes formátumok, például a HEIC, nem tudják tárolni a metaadat-módosításokat. Ha a metaadat-eltávolítás be van kapcsolva, az ilyen fénykép feltöltött másolata JPEG formátumúra alakul, hogy a kiválasztott adatok valóban eltűnjenek. Az eszközön lévő fénykép változatlan marad.</string>
-    <string name="settings_compress_upload">Feltöltések tömörítése</string>
     <string name="settings_compress_upload_desc">Egy könnyebb változatot tölt fel a hely megtakarításához. A telefonon lévő másolat teljes minőségű marad, kivéve ha az alábbi helyi tükrözés be van kapcsolva.</string>
     <string name="settings_compress_photos">Fényképek tömörítése</string>
     <string name="settings_compress_videos">Videók tömörítése</string>
@@ -409,7 +389,6 @@
     <string name="screenshot_overlay_copied">Vágólapra másolva</string>
     <string name="screenshot_overlay_share_image">Képernyőkép megosztása</string>
     <string name="viewer_added_to_album">Hozzáadva: %1$s</string>
-    <string name="settings_photos_timeline_section">Fotók idővonala</string>
     <string name="settings_hide_album_photos">Drive-albumba rakott fotók elrejtése</string>
     <string name="settings_hide_all_folders">Összes eszközmappa elrejtése</string>
     <string name="settings_hide_all_folders_desc">Az elrejtett eszközmappákban lévő fotók nem jelennek meg a fő Fotók idővonaladon. A készülékeden maradnak.</string>
@@ -417,7 +396,6 @@
     <string name="settings_timeline_filter">Idővonal szűrő</string>
     <string name="settings_timeline">Idővonal</string>
     <string name="settings_timeline_section_layout">Elrendezés</string>
-    <string name="settings_timeline_section_shows">Mit mutasson</string>
     <string name="settings_timeline_section_display">Megjelenítés</string>
     <string name="settings_show_scroll_date">Dátum mutatása görgetés közben</string>
     <string name="settings_show_scroll_date_desc">Görgetés közben egy lebegő hónap- és évcímke jelenik meg az idővonal felett, így mindig van időbeli viszonyítási pontod.</string>
@@ -427,15 +405,12 @@
     <string name="settings_mosaic_grid_desc">Az idővonal lépcsőzetes mozaikként jelenik meg, ahol minden fotó megtartja a saját formáját, így az álló fotók magasabbak lesznek.</string>
     <string name="settings_seamless_grid">Széltől szélig</string>
     <string name="settings_seamless_grid_desc">Sűrűbb rács szögletes sarkokkal és a képernyő széléig érő bélyegképekkel.</string>
-    <string name="timeline_filter_title">Idővonal szűrő</string>
     <string name="timeline_filter_subtitle">Válaszd ki, mi ne jelenjen meg a fő Fotók idővonaladon. Az elrejtett fotók az eszközön maradnak és tovább mentődnek.</string>
     <string name="timeline_filter_categories_header">Kategória sáv</string>
     <string name="timeline_filter_layout_desc">Minden fotórácsra érvényes</string>
     <string name="timeline_filter_reorder_hint">A nyilakkal állítsd be a Fotók idővonalad fölött megjelenő kategória sáv sorrendjét.</string>
     <string name="timeline_filter_per_album_hint">Egyes albumok elrejtése az idővonalról. A fenti kapcsoló egyszerre mindet elrejti.</string>
     <string name="timeline_filter_hidden_album">Rejtett album</string>
-    <string name="cd_move_up">Mozgatás felfelé</string>
-    <string name="cd_move_down">Mozgatás lefelé</string>
     <string name="timeline_filter_albums_header">Drive-albumok</string>
     <string name="settings_telemetry">Telemetria</string>
     <string name="settings_telemetry_desc">A Proton fiókod beállításai vezérlik. A módosításhoz nyisd meg az account.proton.me oldalt.</string>
@@ -445,10 +420,6 @@
     <string name="settings_privacy_map_tiles_note">A térkép háttércsempéi az OpenStreetMap szervereiről érkeznek, így azok látják az IP-címedet és a térképnek azt a részét, amit épp nézel. A térkép a fotóidat és a helyadataikat soha nem küldi el.</string>
     <string name="settings_hidden_photos">Rejtett fotók</string>
     <string name="settings_hidden_photos_desc">A főgalériából elrejtett fotók, az eszköz biometriájával vagy PIN-jével feloldva</string>
-    <string name="settings_media_management">Médiakezelés</string>
-    <string name="settings_media_management_granted">Engedélyezve, törléskor nem kér minden alkalommal megerősítést</string>
-    <string name="settings_media_management_grant_desc">Engedélyezd egyszer, hogy ne kérdezzen rá minden törlésnél</string>
-    <string name="settings_media_management_grant_action">Engedélyezés</string>
     <string name="settings_appearance">Megjelenés és nyelv</string>
     <string name="settings_appearance_desc">Téma, paletta, alkalmazás nyelve</string>
     <string name="settings_landing_tab">Kezdő fül</string>
@@ -483,7 +454,6 @@
     <string name="editor_adj_saturation">Telítettség</string>
     <string name="editor_adj_tone">Tónus</string>
     <string name="editor_adj_temperature">Hőmérséklet</string>
-    <string name="editor_crop_reset">Visszaállítás</string>
     <string name="editor_crop_free">Szabad</string>
     <string name="hidden_photos_title">Rejtett fotók</string>
     <string name="hidden_albums_section">Rejtett albumok</string>
@@ -519,7 +489,6 @@
     <string name="settings_privacy_section_metadata">Metaadatok</string>
     <string name="settings_privacy_section_device">Ezen az eszközön</string>
     <string name="settings_security_section_lock">Alkalmazás zárolás</string>
-    <string name="settings_security_section_media">Médiahozzáférés</string>
 
     <!-- Themed palettes -->
     <string name="settings_palette_section">Paletta</string>
@@ -529,6 +498,11 @@
     <string name="palette_sea">Tenger</string>
     <string name="palette_sepia">Szépia</string>
     <string name="palette_mono">Mono</string>
+    <string name="palette_lavender">Levendula</string>
+    <string name="palette_rose">Rózsa</string>
+    <string name="palette_mint">Menta</string>
+    <string name="palette_gold">Arany</string>
+    <string name="palette_ruby">Rubin</string>
 
     <!-- AMOLED pure-black dark theme -->
     <string name="settings_amoled_black">Tiszta fekete (AMOLED)</string>
@@ -584,6 +558,11 @@
     <string name="album_download_channel_desc">A háttérben futó albumletöltés állapotát mutatja.</string>
     <string name="album_download_notification_title">%1$s letöltése</string>
     <string name="album_download_notification_progress">%1$d / %2$d</string>
+    <!-- Background metadata-edit notification. -->
+    <string name="metadata_edit_channel_name">Fotóadatok módosítása</string>
+    <string name="metadata_edit_channel_desc">A fotóadatok Proton Drive-ra mentésének állapotát mutatja.</string>
+    <string name="metadata_edit_notification_title">Fotóadatok mentése…</string>
+    <string name="metadata_edit_notification_progress">%1$d / %2$d</string>
     <string name="album_download_notification_cancel">Mégse</string>
     <string name="download_started_background">Letöltés a háttérben, a folyamatot a Tevékenység nézetben követheted</string>
     <!-- Backup utáni törlés engedélykérés értesítés -->
@@ -625,7 +604,6 @@
     <string name="share_invite_email_hint">E-mail cím</string>
     <string name="share_invite_add">Hozzáadás</string>
     <string name="share_invite_will_invite">Meghívandó</string>
-    <string name="share_invite_message_hint">Üzenet hozzáadása (nem kötelező)</string>
     <string name="share_invite_send">Megosztás</string>
     <string name="share_invite_cancel">Mégse</string>
     <string name="share_invite_email_invalid">Érvénytelen e-mail cím</string>
@@ -636,7 +614,6 @@
     <string name="share_revoke_failed">Nem sikerült visszavonni a meghívót</string>
     <string name="share_remove_member_failed">Nem sikerült eltávolítani a tagot</string>
     <string name="share_permission_change_failed">Nem sikerült módosítani a szerepkört</string>
-    <string name="share_invite_failed">Nem sikerült elküldeni a meghívót</string>
     <string name="share_stop_failed">Nem sikerült leállítani a megosztást</string>
     <string name="share_create_link_failed">Nem sikerült létrehozni a megosztási hivatkozást</string>
     <string name="share_disable_link_failed">Nem sikerült kikapcsolni a hivatkozást</string>
@@ -658,7 +635,6 @@
     <string name="filter_sync_backedup">Mentett</string>
     <string name="filter_year_label">Év</string>
     <string name="filter_any">Bármelyik</string>
-    <string name="filter_month_label">Hónap</string>
     <string name="filter_whole_month">Egész hónap</string>
     <string name="filter_reset">Visszaállítás</string>
 
@@ -693,7 +669,6 @@
     <string name="widget_description">Photos for Proton, fotóid megjelenítése a kezdőképernyőn</string>
     <string name="widget_setup_title">Fotó widget</string>
     <string name="widget_setup_subtitle">Állítsd be, hogyan jelenjenek meg a fotók a kezdőképernyőn.</string>
-    <string name="widget_change_selection">Kiválasztás módosítása</string>
     <string name="widget_section_choose_album">Válassz albumot</string>
     <string name="widget_mode_section">Megjelenítési mód</string>
     <string name="widget_mode_all">Összes fotó</string>
@@ -718,7 +693,6 @@
     <string name="widget_interval_8hr">8 óra</string>
     <string name="widget_interval_1day">1 nap</string>
     <string name="widget_add_button">Widget hozzáadása</string>
-    <string name="widget_select_photos">+ Fotók kiválasztása</string>
     <string name="widget_photos_selected">%d fotó kiválasztva</string>
     <string name="widget_no_photos">Nincs fotó</string>
 
@@ -738,10 +712,6 @@
     <plurals name="offline_batch_result">
         <item quantity="one">%d fotó offline elérhető</item>
         <item quantity="other">%d fotó offline elérhető</item>
-    </plurals>
-    <plurals name="map_card_subtitle_count">
-        <item quantity="one">%1$d fénykép a térképen</item>
-        <item quantity="other">%1$d fénykép a térképen</item>
     </plurals>
     <plurals name="map_card_cities_count">
         <item quantity="one">%d város</item>
@@ -789,7 +759,6 @@
     <string name="cd_panorama">Panoráma</string>
     <string name="cd_play_motion_photo">Mozgó fénykép lejátszása</string>
     <string name="cd_stop_motion_photo">Mozgó fénykép leállítása</string>
-    <string name="cd_view_panorama">Panoráma megtekintése</string>
     <string name="cd_exit_panorama">Kilépés a panorámából</string>
     <string name="viewer_view_panorama">Panoráma megtekintése</string>
     <string name="viewer_exit_panorama">Kilépés</string>
@@ -825,10 +794,8 @@
     <string name="editor_filter_vivid">Élénk</string>
     <string name="editor_filter_cool">Hideg</string>
     <string name="editor_filter_warm">Meleg</string>
-    <string name="editor_redact_hint">Rajzolj az arcokra vagy szövegre az elrejtésükhöz</string>
     <string name="editor_redact_blackout">Kifeketítés</string>
     <string name="editor_redact_pixelate">Pixelesítés</string>
-    <string name="editor_redact_clear">Törlés</string>
     <string name="editor_flip_h">Vízszintes tükrözés</string>
     <string name="editor_flip_v">Függőleges tükrözés</string>
     <string name="editor_error_title">Szerkesztőhiba</string>
@@ -880,13 +847,8 @@
     <string name="location_save_as_album_confirm_body_fmt">Létrehozol egy albumot ebből: %1$s?</string>
     <string name="location_saved_as_album_fmt">„%1$s” album létrehozva</string>
     <string name="calendar_title">Naptár</string>
-    <string name="calendar_no_photos">Nincs fotó ebben a hónapban</string>
     <string name="calendar_search_placeholder">Keresés hónap, év vagy leírás szerint</string>
-    <string name="calendar_search_no_results">Nincs találat</string>
-    <string name="calendar_view_toggle_cd">Nézet váltása</string>
     <string name="calendar_search_cd">Keresés a naptárban</string>
-    <string name="calendar_jump_cd">Ugrás hónaphoz</string>
-    <string name="calendar_jump_title">Ugrás hónaphoz</string>
     <string name="day_detail_description_hint">Írj egy jegyzetet ehhez a naphoz</string>
     <string name="day_detail_edit_description_title">Leírás szerkesztése</string>
     <string name="day_detail_save">Mentés</string>
@@ -910,7 +872,6 @@
     <string name="cd_status_backed_up_device">Proton Drive és eszköz</string>
     <string name="cd_status_cloud_only">Csak a Proton Drive-on</string>
     <string name="cd_status_hidden_local">Elrejtve ezen az eszközön</string>
-    <string name="cd_status_device_only">Csak az eszközön</string>
     <string name="cd_status_backed_up">Mentve</string>
     <string name="cd_status_in_album">Ebben az albumban</string>
     <string name="cd_status_all_selected_in_album">Minden kijelölt kép ebben az albumban van</string>
@@ -936,22 +897,11 @@
     <string name="op_deleting">Törlés…</string>
     <string name="op_hiding">Elrejtés…</string>
     <string name="op_removing_from_album">Eltávolítás albumból…</string>
-    <string name="viewer_delete_subtitle_synced">Ez a fotó már fent van a Proton Drive-on. Válaszd ki, mit szeretnél tenni:</string>
-    <string name="viewer_delete_remove_from_device">Eltávolítás az eszközről</string>
-    <string name="viewer_delete_remove_from_device_desc">A biztonsági másolat megmarad a Proton Drive-on</string>
-    <string name="viewer_delete_remove_from_cloud">Eltávolítás a felhőből</string>
-    <string name="viewer_delete_remove_from_cloud_desc">A fotó az eszközön marad, a felhős másolat a Drive kukájába kerül</string>
-    <string name="viewer_delete_everywhere">Törlés mindenhonnan</string>
-    <string name="viewer_delete_everywhere_desc">Az eszköz kukájába ÉS a Proton Drive kukájába kerül</string>
-    <string name="viewer_delete_subtitle_cloud_only">A fotó a Proton Drive kukájába kerül. A Nemrég törölt mappából visszaállítható.</string>
-    <string name="viewer_delete_move_to_drive_trash">Áthelyezés a Drive kukájába</string>
     <string name="action_save">Mentés</string>
     <string name="gallery_picker_drive_albums">Drive-albumok</string>
     <string name="album_card_folder_badge">Mappa</string>
     <string name="albums_unhide_album">Album felfedése</string>
     <string name="device_folders_section">Mappák ezen az eszközön</string>
-    <string name="device_folders_empty">Nincsenek mappák ezen az eszközön.</string>
-    <string name="device_folder_uploading_fmt">%1$d feltöltése a Drive-ra</string>
     <string name="device_folder_already_backed_up">Már mentve a Drive-ra</string>
     <string name="device_folder_added_to_album">Hozzáadva az albumhoz</string>
     <string name="device_folder_hiding_fmt">Elrejtés %1$d / %2$d</string>
@@ -983,7 +933,6 @@
     <string name="rename_sheet_option_copy_subtitle_vault">Második másolatot hoz létre a Rejtett fotók között.</string>
     <string name="save_to_library_confirm_title">Mentés a könyvtáramba</string>
     <string name="save_to_library_confirm_body_fmt">%1$d elem másolása a könyvtárba. Amint a másolás befejeződik, megjelennek a Fotókban.</string>
-    <string name="save_to_library_action_cancel">Mentés megszakítása</string>
     <string name="save_to_library_cancelled_fmt">Mentés megszakítva: %1$d / %2$d</string>
     <string name="albums_more_actions">További műveletek</string>
     <string name="action_sheet_actions_heading">Amit tehetsz</string>
@@ -1016,7 +965,6 @@
     <string name="settings_theme_palette">Téma és paletta</string>
     <string name="settings_privacy_security">Adatvédelem és biztonság</string>
     <string name="cd_scroll_to_top">Ugrás a tetejére</string>
-    <string name="albums_section_header">Albumok</string>
     <string name="albums_filter_all">Mind</string>
     <string name="albums_filter_cloud">Felhő</string>
     <string name="albums_filter_local">Eszközön</string>
@@ -1043,7 +991,6 @@
     <string name="viewer_meta_row_type">Típus</string>
     <string name="viewer_meta_row_resolution">Felbontás</string>
     <string name="viewer_meta_row_duration">Hossz</string>
-    <string name="viewer_meta_row_album">Album</string>
     <string name="viewer_meta_row_local_folder">Helyi mappa</string>
     <string name="viewer_meta_row_cloud_albums">Felhőalbumok</string>
     <string name="viewer_meta_row_source">Forrás</string>
@@ -1093,8 +1040,6 @@
     <string name="viewer_delete_title_local">Törlöd a fotót?</string>
     <string name="viewer_delete_title_synced">Eltávolítod a fotót?</string>
     <string name="viewer_delete_title_cloud">Törlöd a Proton Drive-ról?</string>
-    <string name="viewer_delete_local_body">Ezzel a fotó az eszköz „Nemrég törölt” mappájába kerül.</string>
-    <string name="viewer_delete_move_to_trash">Kukába helyezés</string>
     <string name="viewer_delete_vault_body">A törlés véglegesen eltávolítja a rejtett példányt erről az eszközről. A Proton Drive-on lévő másolat, ha van ilyen, változatlanul megmarad.</string>
     <string name="viewer_delete_vault_failed">A fotót nem sikerült törölni</string>
     <string name="viewer_add_to_album_title">Hozzáadás albumhoz</string>
@@ -1174,7 +1119,6 @@
     <string name="gallery_add_to_album_failed">Nem sikerült az albumhoz adni</string>
     <string name="gallery_select_photos_first">Először válassz ki fotókat</string>
     <string name="gallery_create_album_failed">Nem sikerült létrehozni az albumot: %1$s</string>
-    <string name="gallery_enable_metadata_category">Először engedélyezz egy metaadat-kategóriát a Beállítások → Adatvédelem menüben</string>
     <string name="gallery_album_picker_count_drive">%1$s · Drive</string>
     <string name="gallery_album_picker_count_shared">%1$s · Drive · Megosztott</string>
     <string name="album_add_photos">Fotók hozzáadása</string>
@@ -1217,8 +1161,6 @@
         <item quantity="one">Véglegesen törölsz %1$d fotót?</item>
         <item quantity="other">Véglegesen törölsz %1$d fotót?</item>
     </plurals>
-    <string name="trash_selected_count">%1$d kijelölve</string>
-    <string name="trash_long_press_hint">Tartsd nyomva a kijelöléshez</string>
 
     <!-- Backup folders (SyncFolders) screen -->
     <string name="sync_folders_title">Mentési mappák</string>
@@ -1228,15 +1170,8 @@
     <string name="sync_folders_add_row_subtitle">Adj meg előre egy mappát, hogy a benne készülő fotók automatikusan mentésre kerüljenek</string>
     <string name="sync_folders_add_dialog_body">Add meg a mappa pontos nevét (pl. „Nyaralás 2026”). Amint egy fotó egyező nevű mappába kerül, automatikusan mentésre kerül.</string>
     <string name="sync_folders_add_dialog_name_invalid">Adj meg egy új, még nem hozzáadott mappanevet</string>
-    <string name="sync_folders_selected_cd">Kijelölve</string>
 
     <!-- Mirror device folders as albums screen -->
-    <string name="mirror_opted_in_cd">Bekapcsolva</string>
-    <string name="mirror_custom_pending">Függőben. Akkor lép életbe, ha egy ilyen nevű mappa megjelenik</string>
-    <string name="mirror_remove_cd">Eltávolítás</string>
-    <string name="mirror_name_empty">A mappa neve nem lehet üres</string>
-    <string name="mirror_name_invalid_chars">A név nem tartalmazhat \'/\' vagy \'=\' karaktert</string>
-    <string name="mirror_name_already_added">A mappa már hozzá van adva</string>
 
     <!-- Settings — sync error popup + free-up snackbars -->
     <string name="settings_sync_failed">A szinkronizálás sikertelen</string>
@@ -1316,9 +1251,10 @@
     <string name="upload_action_short">Feltöltés</string>
 
     <!-- Grid layout (Appearance) -->
-    <string name="settings_grid_layout">Rácselrendezés</string>
     <string name="grid_remember_last">Utolsó nézet megjegyzése</string>
     <string name="grid_remember_last_desc">A fotók az utoljára használt nagyításon nyíljanak meg</string>
+    <string name="settings_keep_scroll_tabs">Hely megőrzése lapváltáskor</string>
+    <string name="settings_keep_scroll_tabs_desc">Lapváltáskor ott maradsz, ahol voltál, a tetejére ugrás helyett.</string>
     <string name="grid_default_columns_section">Kép / sor</string>
     <!-- FAQ -->
     <string name="faq_title">Gyakori kérdések</string>
@@ -1364,7 +1300,6 @@
     <string name="offline_remove">Eltávolítás offline-ból</string>
     <string name="whats_new_title">Újdonságok</string>
     <string name="whats_new_done">Értem</string>
-    <string name="whats_new_open">Megnyitás</string>
     <string name="whats_new_hide_title">Fotók és albumok elrejtése</string>
     <string name="whats_new_hide_intro">Rejts el bármit, amit nem szeretnél az idővonaladon, és bármikor felfedheted a Rejtett fotók közül. Az, hogy mi történik, a fotó jelzésétől függ:</string>
     <string name="whats_new_hide_device">Csak ezen a telefonon: átkerül a Rejtett fotók közé, az alkalmazáson belül zárolva, és eltűnik az eszköz galériájából, így más alkalmazás többé nem látja.</string>
@@ -1422,7 +1357,7 @@
     <string name="share_role_can_view_desc">Megnézheti az albumot és a fotóit.</string>
     <string name="share_role_can_edit_desc">Hozzáadhat és eltávolíthat fotókat.</string>
     <string name="sel_label_back_up">Mentés</string>
-    <string name="sel_label_download">Letöltés</string>
+    <string name="sel_label_download">Mentés eszközre</string>
     <string name="sel_label_delete">Törlés</string>
     <string name="sel_label_share">Megosztás</string>
     <string name="sel_label_hide">Áthelyezés a Rejtett fotókba</string>
@@ -1445,17 +1380,14 @@
     <string name="about_support_subtitle">Támogasd az alkalmazást és a fejlesztését</string>
     <string name="sync_folder_backup_label">Mentés</string>
     <string name="sync_folder_album_label">Album</string>
-    <string name="sync_view_activity">Részletek</string>
     <string name="activity_title">Tevékenység</string>
     <string name="activity_uploading">Feltöltés</string>
-    <string name="activity_pending">Feltöltésre vár (%1$d)</string>
     <string name="activity_empty">Jelenleg nincs folyamatban átvitel</string>
     <string name="activity_waiting_battery">A mentés az akkumulátorra vár. Akkor indul újra, amikor a töltöttség visszamászik az alacsony szint fölé, tehát a töltőre tétel önmagában még nem elég.</string>
     <string name="activity_row_desc">Folyamatban lévő átvitelek és feltöltésre váró fotók megtekintése</string>
     <string name="activity_offline">Offline</string>
     <string name="activity_photos">Fotók</string>
     <string name="activity_downloading_state">Letöltés</string>
-    <string name="activity_tab_active">Aktív</string>
     <string name="activity_tab_uploads">Feltöltések</string>
     <string name="activity_tab_downloads">Letöltések</string>
     <string name="activity_tab_history">Előzmények</string>
@@ -1488,7 +1420,7 @@
     <string name="metadata_editor_place_search_city">Város keresése</string>
     <string name="metadata_editor_place_remove">Helyadat eltávolítása</string>
     <string name="metadata_editor_country_search">Országok keresése</string>
-    <string name="metadata_editor_note_cloud">A Proton Drive-on tárolt fotók megtartják a feltöltéskori dátumot és helyet, ezek itt nem módosíthatók.</string>
+    <string name="metadata_editor_note_cloud">Ez a fotó megtartja a dátumot és a helyet, amellyel a Proton Drive-ra fel lett töltve, ezért ezek itt nem módosíthatók.</string>
     <string name="metadata_editor_note_shared">Ez a fotó egy veled megosztott albumban van, ezért a dátuma és helye csak olvasható.</string>
     <string name="metadata_editor_note_video_place">Videóknál a helyadat nem módosítható.</string>
     <string name="metadata_editor_note_place_format">A helyadat csak JPEG, PNG és WebP fotókban tárolható.</string>
@@ -1497,7 +1429,7 @@
     <string name="metadata_editor_bulk_place_label">Hely beállítása ezekhez a fotókhoz</string>
     <string name="metadata_editor_bulk_apply_hint">Minden kijelölt fotóra érvényes</string>
     <string name="metadata_editor_bulk_summary">%1$d fotó szerkesztése</string>
-    <string name="metadata_editor_bulk_summary_skipped">%1$d szerkesztése, %2$d kihagyva (mentve)</string>
+    <string name="metadata_editor_bulk_summary_skipped">%1$d szerkesztése, %2$d kihagyva</string>
     <string name="metadata_editor_bulk_artist_label">Szerző beállítása ezekhez a fotókhoz</string>
     <string name="metadata_editor_bulk_copyright_label">Szerzői jog beállítása ezekhez a fotókhoz</string>
     <string name="metadata_editor_text_none">Nincs beállítva</string>
@@ -1518,6 +1450,119 @@
         <item quantity="other">%1$d fotónak nincs saját dátuma, ezért az eltolás nem mozdítja meg őket. Az azonos dátum beállítása viszont eléri őket.</item>
     </plurals>
     <string name="settings_section_about">Névjegy</string>
+    <string name="settings_ai_section">Gépi tanulás</string>
+    <string name="settings_ai_nav_desc">Szövegmásolás, arcelrejtés és még több, közvetlenül az eszközön</string>
+    <string name="settings_ai_enable">Gépi tanulás bekapcsolása</string>
+    <string name="settings_ai_enable_desc">Minden a telefonodon fut. Ha bekapcsolod, az alkalmazás letöltheti a szükséges kis modelleket, és használhatod a szöveg másolása és az arcok elrejtése funkciókat. Több funkció is érkezik.</string>
+    <string name="settings_ai_ocr">Szöveg másolása</string>
+    <string name="settings_ai_ocr_desc">Felismeri és lemásolja a fényképen látható szöveget</string>
+    <string name="settings_ai_ocr_downloading">Letöltés…</string>
+    <string name="settings_ai_ocr_download_title">Letölti a szövegmodellt?</string>
+    <string name="settings_ai_ocr_download_message">A szövegmásoláshoz le kell tölteni egy %1$s méretű modellt. Bármilyen kapcsolaton működik, de a Wi-Fi ajánlott.</string>
+    <string name="settings_ai_ocr_download_confirm">Letöltés</string>
+    <string name="settings_ai_ocr_remove_title">Eltávolítja a letöltött modellt?</string>
+    <string name="settings_ai_ocr_remove_message">Ezzel körülbelül %1$s szabadul fel. Később újra letöltheti.</string>
+    <string name="settings_ai_ocr_remove_confirm">Eltávolítás</string>
+    <string name="settings_ai_ocr_remove_keep">Megtartás</string>
+    <string name="settings_ai_face_toggle">Arcfelismerés</string>
+    <string name="settings_ai_face_desc">Csoportosítja a fényképeket a rajtuk lévő személyek szerint, az eszközödön</string>
+    <string name="settings_ai_face_unavailable">Még nem elérhető</string>
+    <string name="settings_ai_face_remove_title">Eltávolítja az arcadatokat?</string>
+    <string name="settings_ai_face_remove_message">Az arcfelismerés ki van kapcsolva. Eltávolítja erről az eszközről az arcmodellt és az összes felismert arcot és nevet? Ha szeretne megőrizni egy másolatot, előbb exportálja őket a Felismert arcok oldalról.</string>
+    <string name="settings_ai_face_remove_confirm">Eltávolítás</string>
+    <string name="settings_ai_face_remove_keep">Megtartás</string>
+    <string name="settings_ai_face_remove_confirm_title">Biztos benne?</string>
+    <string name="settings_ai_face_remove_confirm_message">Ezzel véglegesen eltávolítja az arcmodellt és az összes felismert arcot és nevet. A művelet nem vonható vissza.</string>
+    <string name="settings_face_section">Felismert arcok</string>
+    <string name="settings_face_maintenance">Karbantartás</string>
+    <string name="settings_face_transfer">Átvitel</string>
+    <string name="settings_face_rescan_desc">Újra felismeri az arcokat, megtartva a neveidet és javításaidat.</string>
+    <string name="settings_face_clear_desc">Eltávolít minden megtalált embert és az összes arcadatot erről a telefonról.</string>
+    <string name="settings_face_export_desc">Privát másolatot ment, amelyet másik eszközön is használhatsz.</string>
+    <string name="settings_face_import_desc">Betölt egy korábban mentett arc-indexet.</string>
+    <string name="settings_ai_import_confirm_title">Arc-index importálása?</string>
+    <string name="settings_ai_import_confirm_msg">Hozzáadja a fájlban lévő arcokat és embereket ehhez a telefonhoz, majd újracsoportosítja őket. A jelenlegi arcaid megmaradnak.</string>
+    <string name="settings_ai_indexing_running">Fotók átvizsgálása</string>
+    <string name="settings_ai_indexing_waiting">Várakozás az arc-modellre</string>
+    <string name="settings_ai_indexing_paused">Szüneteltetve</string>
+    <string name="settings_ai_indexing_progress">%1$d / %2$d fotó</string>
+    <plurals name="settings_ai_indexing_people">
+        <item quantity="one">%1$d ember</item>
+        <item quantity="other">%1$d ember</item>
+    </plurals>
+    <string name="settings_ai_pause">Szünet</string>
+    <string name="settings_ai_resume">Folytatás</string>
+    <string name="settings_ai_clear">Arcadatok törlése</string>
+    <string name="settings_ai_clear_confirm_title">Arcadatok törlése?</string>
+    <string name="settings_ai_clear_confirm_msg">Ez eltávolít minden megtalált embert és az összes arcadatot. A fotóidat nem érinti. Az arcokat a következő indexeléskor újra megtalálja.</string>
+    <string name="gallery_add_to_person">Hozzáadás emberhez</string>
+    <string name="people_search_hint">Emberek keresése</string>
+    <string name="people_card_subtitle">Fotóid böngészése emberek szerint</string>
+    <string name="person_set_cover">Beállítás borítóként</string>
+    <string name="person_cover_no_face">Azon a fotón nincs észlelt arc.</string>
+    <string name="people_add_names">Nevek hozzáadása</string>
+    <string name="people_none_named">Még senkit sem neveztél el. Nyisd meg az áttekintést, hogy elnevezd, egyesítsd és rendezd az alkalmazás által talált embereket.</string>
+    <string name="people_review_empty">Jelenleg nincsenek el nem nevezett emberek. Ahogy a fotóid átvizsgálásra kerülnek, itt jelennek meg az elnevezendő és egyesítendő csoportok.</string>
+    <string name="people_review_title">Elnevezendő emberek</string>
+    <string name="person_add_needs_name">Előbb nevezd el ezt az embert, aztán adj hozzá fotókat.</string>
+    <string name="person_add_photos">Fotók hozzáadása</string>
+    <string name="person_add_photos_title">Hozzáadás ehhez az emberhez</string>
+    <string name="person_merge">Emberek egyesítése</string>
+    <string name="person_merge_suggest_title">Lehet, hogy ugyanaz az ember</string>
+    <string name="person_merge_suggest_merge">Egyesítés</string>
+    <string name="person_merge_suggest_dismiss">Másik ember</string>
+    <string name="person_merge_suggest_later">Most nem</string>
+    <string name="find_more">További fotók keresése</string>
+    <string name="find_more_title">További fotók keresése</string>
+    <string name="find_more_title_named">%1$s további fotói</string>
+    <string name="find_more_searching">Fotók keresése: %1$d / %2$d</string>
+    <string name="find_more_empty">Nem található több fotó erről az emberről.</string>
+    <string name="find_more_add">%1$d hozzáadása</string>
+    <string name="viewer_people_in_photo">Emberek ezen a fotón</string>
+    <string name="viewer_face_none_found">Nem található arc ezen a fotón.</string>
+    <string name="person_merge_action">Egyesítés</string>
+    <string name="person_merge_confirm">Egyesítés</string>
+    <string name="person_merge_confirm_body">A kiválasztott ember fotói ehhez csatlakoznak, és a kettő mostantól ugyanannak az embernek számít. Ez automatikusan nem választható szét újra.</string>
+    <string name="person_merge_confirm_title">Egyesíted az embereket?</string>
+    <string name="person_merge_empty">Nincsenek más emberek az egyesítéshez.</string>
+    <string name="person_merge_name_title">Nevezd el őket egyetlen emberként</string>
+    <string name="person_merge_pick_title">Válaszd ki az egyesítendő embert</string>
+    <string name="person_not_a_person">Ez nem egy ember</string>
+    <string name="person_not_a_person_body">A kijelölt arcok kikerülnek az Emberek közül, és minden későbbi vizsgálat kihagyja őket. Ezt szobrokhoz, plakátokhoz és tévedésekhez használd. Maguk a fotók nem törlődnek.</string>
+    <string name="person_not_a_person_confirm">Elvetés</string>
+    <string name="person_not_a_person_confirm_body">Ezek az arcok elvetésre kerülnek, mint nem ember, így ez a csoport kikerül az Emberek közül, és az arcait többé nem csoportosítja. Maguk a fotók nem törlődnek.</string>
+    <string name="person_not_a_person_confirm_title">Elveted ezt a csoportot?</string>
+    <string name="person_not_a_person_title">Nem egy ember?</string>
+    <string name="person_picker_create">\"%1$s\" létrehozása</string>
+    <string name="person_picker_empty">Még nincsenek elnevezett emberek. Írj be fent egy nevet egy létrehozásához.</string>
+    <string name="person_picker_search">Keress vagy írj be egy új nevet</string>
+    <string name="person_remove_confirm">Eltávolítás</string>
+    <string name="person_remove_confirm_body">A kijelölt fotók többé nem jelennek meg ennél az embernél, és újravizsgálatkor sem kerülnek ide vissza. Maguk a fotók nem törlődnek.</string>
+    <string name="person_remove_confirm_title">Eltávolítod ettől az embertől?</string>
+    <string name="person_remove_from">Eltávolítás embertől</string>
+    <string name="person_suggestion_no">Nem</string>
+    <string name="person_suggestion_question">Ő %1$s?</string>
+    <string name="person_suggestion_skip">Kihagyás</string>
+    <string name="person_suggestion_yes">Igen</string>
+    <string name="person_suggestions_empty">Jelenleg nincsenek javaslatok. Ahogy a fotóid átvizsgálásra kerülnek, itt jelennek meg megerősítésre a valószínű egyezések az általad elnevezett emberekkel.</string>
+    <string name="person_suggestions_review">Javaslatok áttekintése</string>
+    <string name="person_suggestions_title">Javaslatok</string>
+    <string name="settings_ai_export">Arc-index exportálása</string>
+    <string name="settings_ai_export_done">Arc-index exportálva (%1$d arc).</string>
+    <string name="settings_ai_export_warn_msg">Ez a fájl a fotóidból számított arclenyomatokat tartalmazza. Aki hozzájut, újraépíthetné a könyvtáradban lévő emberek arcmodelljét, ezért tartsd titokban, és csak olyanokkal oszd meg, akikben megbízol.</string>
+    <string name="settings_ai_export_warn_title">Arc-index exportálása?</string>
+    <string name="settings_ai_import">Arc-index importálása</string>
+    <string name="settings_ai_import_done">%1$d arc, %2$d ember importálva.</string>
+    <string name="settings_ai_rescan">Fotók újravizsgálata</string>
+    <string name="settings_ai_rescan_confirm_msg">Minden fotót újra átvizsgál arcok után nagyobb részletességgel, ami kisebb és távolabbi arcokat is megtalál. A kézzel hozzáadott fotóid megmaradnak, de az emberek újracsoportosításra kerülnek, így néhányat lehet, hogy újra el kell nevezned.</string>
+    <string name="settings_ai_rescan_confirm_title">Újravizsgálod az összes fotót?</string>
+    <string name="settings_ai_transfer_failed">Az arc-index átvitele sikertelen.</string>
+    <string name="settings_ai_import_wrong_account">Ez az arc-index egy másik fiókhoz tartozik, és itt nem nyitható meg.</string>
+    <string name="settings_ai_import_wrong_model">Ez az arc-index egy másik arcmodellel készült, ezért nem importálható.</string>
+    <plurals name="person_suggestions_left">
+        <item quantity="one">%1$d áttekintésre vár</item>
+        <item quantity="other">%1$d áttekintésre vár</item>
+    </plurals>
     <string name="news_title">Hírek</string>
     <string name="news_settings_desc">Üzenetek és frissítések az alkalmazásról</string>
     <string name="news_show_title">Hírek megjelenítése</string>
@@ -1550,6 +1595,30 @@
         <item quantity="one">%2$d közül %1$d kijelölt fotó nevében van dátum</item>
         <item quantity="other">%2$d közül %1$d kijelölt fotó nevében van dátum</item>
     </plurals>
+    <!-- Cloud photo date/place edits -->
+    <string name="metadata_editor_cloud_replace_note">A dátum vagy a hely módosítása feltölt egy javított másolatot a Proton Drive-ra, és eltávolítja az eredetit.</string>
+    <string name="metadata_editor_cloud_confirm_title">Frissítés a Proton Drive-on?</string>
+    <plurals name="metadata_editor_cloud_confirm_body">
+        <item quantity="one">%1$d fotó újra fel lesz töltve a Proton Drive-ra az új dátummal vagy hellyel, az eredeti pedig el lesz távolítva.</item>
+        <item quantity="other">%1$d fotó újra fel lesz töltve a Proton Drive-ra az új dátummal vagy hellyel, az eredetik pedig el lesznek távolítva.</item>
+    </plurals>
+    <string name="metadata_editor_cloud_confirm_action">Frissítés</string>
+    <string name="metadata_editor_cloud_progress">%1$d/%2$d frissítése</string>
+    <plurals name="metadata_editor_cloud_result_updated">
+        <item quantity="one">%1$d fotó frissítve</item>
+        <item quantity="other">%1$d fotó frissítve</item>
+    </plurals>
+    <plurals name="metadata_editor_cloud_result_partial">
+        <item quantity="one">%1$d frissítve, %2$d nem módosítható</item>
+        <item quantity="other">%1$d frissítve, %2$d nem módosítható</item>
+    </plurals>
+    <string name="metadata_editor_cloud_staged_hint">Koppints a pipára a módosítások alkalmazásához a Proton Drive-on.</string>
+    <string name="metadata_editor_cloud_saving_title">Frissítés a Proton Drive-on</string>
+    <string name="metadata_editor_cloud_done_title">Kész</string>
+    <string name="metadata_editor_cloud_phase_preparing">Előkészítés</string>
+    <string name="metadata_editor_cloud_phase_uploading">Feltöltés</string>
+    <string name="metadata_editor_cloud_phase_finishing">Befejezés</string>
+    <string name="metadata_editor_cloud_background">Folytatás a háttérben</string>
 
     <!-- Collage -->
     <string name="collage_add">Fotók hozzáadása</string>
@@ -1560,11 +1629,7 @@
     <string name="collage_discard">Elveted a kollázst?</string>
     <string name="collage_discard_confirm">Elvetés</string>
     <string name="collage_discard_msg">A kollázs nem lesz elmentve.</string>
-    <string name="collage_done">Kész</string>
     <string name="collage_drop_remove">Engedd el, hogy eltávolítsd a kollázsból</string>
-    <string name="collage_mode_collage">Kollázs</string>
-    <string name="collage_mode_photos">Fotók</string>
-    <string name="collage_photos_hint">Koppints egy fotóra az újrakeretezéshez, tartsd nyomva a cseréhez</string>
     <string name="collage_remove">Eltávolítás</string>
     <string name="collage_save">Mentés</string>
     <string name="collage_save_confirm">Elmented ezt a kollázst?</string>
@@ -1572,11 +1637,9 @@
     <string name="collage_saved">Kollázs elmentve</string>
     <string name="collage_spacing">Térköz</string>
     <string name="collage_swap">Csere</string>
-    <string name="collage_swap_pick">Koppints egy fotóra</string>
     <string name="collage_tab_border">Szegély</string>
     <string name="collage_tab_layout">Elrendezés</string>
     <string name="collage_tab_ratio">Arány</string>
-    <string name="collage_title">Kollázs</string>
     <string name="collage_trim_for_grid">Távolíts el %1$d elemet a rács elrendezéshez</string>
 
     <!-- Editor: new adjustment, color, export, geometry, draw and text controls -->
@@ -1587,6 +1650,20 @@
     <string name="editor_adj_vignette">Vignetta</string>
     <string name="editor_color_curves">Görbék</string>
     <string name="editor_color_hsl">HSL</string>
+    <string name="editor_hide_faces">Arcok elrejtése</string>
+    <string name="editor_hide_faces_detect">Arcok keresése</string>
+    <string name="editor_hide_faces_style_blur">Elmosás</string>
+    <string name="editor_hide_faces_style_pixelate">Pixelezés</string>
+    <string name="editor_hide_faces_strength">Erősség</string>
+    <string name="editor_hide_faces_none">Nincs arc</string>
+    <string name="editor_hide_faces_clear">Törlés</string>
+    <plurals name="editor_hide_faces_count">
+        <item quantity="one">%1$d arc elrejtve</item>
+        <item quantity="other">%1$d arc elrejtve</item>
+    </plurals>
+    <string name="editor_face_model_title">Letöltöd az arc-modellt?</string>
+    <string name="editor_face_model_body">Az arcok elrejtéséhez egy kis, eszközön futó modell kell. Teljesen a telefonodon fut.</string>
+    <string name="editor_face_model_failed">Az arc-modellt nem sikerült betölteni.</string>
     <string name="editor_compare_original">Eredeti</string>
     <string name="editor_draw_width">Vastagság</string>
     <string name="editor_export_format">Formátum</string>
@@ -1611,7 +1688,6 @@
     <string name="editor_text_edit">Szerkesztés</string>
     <string name="editor_text_hint">Adj hozzá szöveget, majd húzva mozgasd, csippentve átméretezd</string>
     <string name="editor_text_resize_hint">Húzással mozgasd, csippentéssel átméretezd</string>
-    <string name="editor_text_size">Méret</string>
     <string name="editor_tool_color">Szín</string>
     <string name="editor_tool_draw">Rajz</string>
     <string name="editor_tool_text">Szöveg</string>
@@ -1621,4 +1697,29 @@
     <string name="video_editor_frame_saved">Képkocka mentve a galériába</string>
     <string name="video_editor_grab_frame">Képkocka mentése</string>
     <string name="video_editor_mute">Némítás</string>
+
+    <!-- What's new in 2.5.0 -->
+    <string name="whats_new_editor_title">Sokkal nagyobb fotószerkesztő</string>
+    <string name="whats_new_editor_body">Rajzolj és adj hozzá szöveget, egyenesíts ki és javítsd a perspektívát, formáld a tónusgörbéket és a színenkénti HSL-t, és adj hozzá élénkséget, élesítést és szemcsét. Tartsd nyomva a fotót az eredetivel való összehasonlításhoz.</string>
+    <string name="whats_new_collage_title">Készíts kollázst</string>
+    <string name="whats_new_collage_body">Fűzz össze néhány fotót rácsba vagy szabad elrendezésbe, keretezd újra mindet egy csippentéssel, és mentsd el új fotóként.</string>
+    <string name="whats_new_export_title">Mentsd a szerkesztett másolatot tetszés szerint</string>
+    <string name="whats_new_export_body">Ments másolatot JPEG, PNG vagy WebP formátumban, és válaszd meg a minőségét és méretét, így egy képernyőkép veszteségmentes maradhat, egy megosztásra kész másolat pedig kisebbre sikerülhet.</string>
+    <string name="whats_new_video_title">Több videóeszköz</string>
+    <string name="whats_new_video_body">Némíts el egy videót egyetlen koppintással, minőségromlás nélkül, és mentsd a galériába fotóként azt a képkockát, amelynél megálltál.</string>
+    <string name="whats_new_smooth_title">Simább, mozgással</string>
+    <string name="whats_new_smooth_body">A képernyők, menük és gombok mozognak, nem ugranak, a kérdések fiókként csúsznak fel, a visszafelé húzás pedig megmutatja azt a képernyőt, ahová tartasz.</string>
+    <string name="whats_new_dupreview_title">Különböztesd meg a duplikált másolatokat</string>
+    <string name="whats_new_dupreview_body">A duplikátumkereső teljes méretben nyit meg egy csoportot, és megmutatja minden másolat méretét, felbontását, dátumát és helyét, így a megfelelőt tartod meg.</string>
+    <string name="whats_new_filedate_title">Javítsd a dátumokat a fájlnévből</string>
+    <string name="whats_new_filedate_body">Azoknál a fotóknál, amelyek a nevükben hordozzák a dátumot, de az adataikban nem, egyszerre beállíthatod, így a megfelelő helyre kerülnek az idővonalon.</string>
+    <string name="whats_new_more_250">Ráadásul a Rendszer téma mostantól a telefonodat követi, a biztonsági mentés sávja félreáll, ahogy görgetsz, a csak Wi-Fi-n való szinkronizálás pedig többé nem használ mobiladatot a háttérben.</string>
+
+    <!-- Person detail -->
+    <string name="person_detail_unnamed">Személy</string>
+    <string name="person_rename_title">Átnevezés</string>
+    <string name="person_rename_hint">Név</string>
+    <string name="permissions_default_gallery_title">Beállítás alapértelmezett galériaként</string>
+    <string name="permissions_default_gallery_why">Nyisd meg a rendszerbeállításokat, hogy ez az alkalmazás legyen az alapértelmezett a fotók és videók megnyitásához.</string>
+    <string name="permissions_action_open">Megnyitás</string>
 </resources>

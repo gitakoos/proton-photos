@@ -29,6 +29,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -127,14 +128,14 @@ fun ThemeSettingsScreen(
 
         // ── Palette dots ────────────────────────────────────────────────────
         CollapsibleSection(label = stringResource(R.string.settings_palette_section)) {
-            Row(
+            FlowRow(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(colors.cardBg, RoundedCornerShape(999.dp))
-                    .border(0.5.dp, colors.cardBorder, RoundedCornerShape(999.dp))
-                    .padding(horizontal = 18.dp, vertical = 12.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
+                    .background(colors.cardBg, RoundedCornerShape(24.dp))
+                    .border(0.5.dp, colors.cardBorder, RoundedCornerShape(24.dp))
+                    .padding(horizontal = 18.dp, vertical = 14.dp),
+                horizontalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterHorizontally),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
                 ThemePalette.entries.forEach { p ->
                     val swatch = paletteAccent(p, isLight = colors.isLight)

@@ -42,6 +42,7 @@ import me.proton.core.accountmanager.domain.AccountManager
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.usecase.FreeUpSpaceUseCase
+import eu.akoos.photos.util.DeviceHealthPolicy
 import java.util.concurrent.TimeUnit
 
 @HiltWorker
@@ -50,9 +51,13 @@ class FreeUpSpaceWorker @AssistedInject constructor(
     @Assisted params: WorkerParameters,
     private val freeUpSpace: FreeUpSpaceUseCase,
     private val accountManager: AccountManager,
+    private val deviceHealth: DeviceHealthPolicy,
 ) : CoroutineWorker(context, params) {
 
     override suspend fun doWork(): Result {
+        // Skip reclaiming device space while the OS is throttling to cool the device; freeing space
+        // is never urgent and the hourly cadence retries once the phone is cool.
+        if (deviceHealth.thermallyThrottled()) return Result.success()
         val userId = accountManager.getPrimaryUserId().first() ?: return Result.failure()
         val intervalMs = inputData.getLong(KEY_INTERVAL_MS, NO_INTERVAL_MS)
         if (!isUsableInterval(intervalMs)) {
@@ -92,7 +97,7 @@ class FreeUpSpaceWorker @AssistedInject constructor(
             // Categorise failures so we only burn the retry budget on transient ones.
             // Permanent failures (file disappeared mid-sweep, MediaStore revoked write
             // access for a foreign-owned URI, the SAF tree we picked got abandoned by
-            // the OS) won't fix themselves on the next attempt — three retries against
+            // the OS) won't fix themselves on the next attempt; three retries against
             // a permanent error just chews battery and timer slots for nothing.
             // Transient failures (IO error, database lock contention) get the existing
             // 3-attempt budget.

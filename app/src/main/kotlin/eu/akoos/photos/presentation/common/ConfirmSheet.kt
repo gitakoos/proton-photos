@@ -67,10 +67,15 @@ fun ConfirmSheet(
     /** A destructive confirm (a delete, or a hide that permanently removes the device originals) shows
      *  the red action instead of the accent one, so it reads like every other destructive confirm. */
     destructive: Boolean = false,
+    /** Called when the sheet is closed by tapping the scrim, swiping down or the back gesture, as
+     *  opposed to the [dismissLabel] button ([onDismiss]). Defaults to [onDismiss]; override when an
+     *  outside dismissal should differ from the labelled cancel, e.g. to leave a pending toggle in its
+     *  prior state rather than commit the cancel. */
+    onOutsideDismiss: () -> Unit = onDismiss,
 ) {
     val colors = AppColors.current
     ModalBottomSheet(
-        onDismissRequest = onDismiss,
+        onDismissRequest = onOutsideDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = Bg2,
         scrimColor = Color.Black.copy(alpha = 0.5f),

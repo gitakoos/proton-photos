@@ -77,6 +77,12 @@ class TransferCenter @Inject constructor(
         val items: List<String> = emptyList(),
         /** Whether the Activity screen may show a cancel button that stops this whole batch. */
         val cancelable: Boolean = false,
+        /** Stable per-item keys (e.g. linkIds), parallel to [items], so a per-item status keys reliably
+         *  even when two photos share a blank thumbnail uri. Empty for batches with no per-item status. */
+        val itemKeys: List<String> = emptyList(),
+        /** Per-item status label keyed by an [itemKeys] entry, e.g. each photo's current phase. A key
+         *  absent from the map is a done (or not-tracked) item and drops off the Activity list. */
+        val itemStatus: Map<String, String> = emptyMap(),
     )
 
     /** One finished transfer, persisted for the History tab. [at] is epoch millis, newest first.
@@ -106,12 +112,17 @@ class TransferCenter @Inject constructor(
         total: Int,
         name: String? = null,
         items: List<String> = emptyList(),
+        itemKeys: List<String> = emptyList(),
+        itemStatus: Map<String, String> = emptyMap(),
         onCancel: (() -> Unit)? = null,
     ): Long {
         val id = ids.incrementAndGet()
         if (onCancel != null) cancels[id] = onCancel
         _active.update {
-            it + Active(id, kind, done = 0, total = total, name = name, items = items, cancelable = onCancel != null)
+            it + Active(
+                id, kind, done = 0, total = total, name = name, items = items,
+                cancelable = onCancel != null, itemKeys = itemKeys, itemStatus = itemStatus,
+            )
         }
         return id
     }
@@ -119,6 +130,19 @@ class TransferCenter @Inject constructor(
     /** Advance the done counter of a live transfer. */
     fun progress(id: Long, done: Int) {
         _active.update { list -> list.map { if (it.id == id) it.copy(done = done) else it } }
+    }
+
+    /** Set or clear one item's status within a live transfer, keyed by its [Active.itemKeys] entry. A
+     *  null label removes the item, which drops its row once that photo is done. */
+    fun setItemStatus(id: Long, key: String, label: String?) {
+        _active.update { list ->
+            list.map {
+                if (it.id != id) it
+                else it.copy(
+                    itemStatus = if (label == null) it.itemStatus - key else it.itemStatus + (key to label),
+                )
+            }
+        }
     }
 
     /** Drop a live transfer once it ends (success or failure). */

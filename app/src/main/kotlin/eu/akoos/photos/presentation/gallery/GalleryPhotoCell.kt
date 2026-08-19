@@ -63,7 +63,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
@@ -80,7 +79,9 @@ import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.usecase.CategorizeItem
 import eu.akoos.photos.presentation.common.LocalVideoThumb
+import eu.akoos.photos.presentation.common.SelectionCheckPop
 import eu.akoos.photos.presentation.common.rememberLocalVideoThumbnail
+import eu.akoos.photos.presentation.common.selectPressScale
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.Bg2
 import eu.akoos.photos.presentation.theme.FgDim
@@ -334,17 +335,11 @@ internal fun PhotoCell(
         else         -> false
     }
 
-    // A gentle inward scale on select (the photo eases back a touch to reveal the accent frame), only
-    // animating on the cells whose selection actually flips.
-    val cellScale by androidx.compose.animation.core.animateFloatAsState(
-        targetValue = if (selected) 0.92f else 1f,
-        label = "cellSelect",
-    )
     Box(
         modifier = Modifier
             // Slightly taller than a square so the corner badges cover less of the photo.
             .aspectRatio(aspectRatioOverride ?: 0.85f)
-            .graphicsLayer { scaleX = cellScale; scaleY = cellScale }
+            .selectPressScale(selected)
             .clip(RoundedCornerShape(cornerRadius))
             .background(Bg2)
             // The timeline owns long-press at the grid level (drag-to-select), so it passes no
@@ -595,11 +590,7 @@ internal fun PhotoCell(
                         .background(Color.Black.copy(alpha = 0.3f), CircleShape)
                         .border(1.5.dp, Color.White.copy(alpha = 0.8f), CircleShape),
                 )
-                androidx.compose.animation.AnimatedVisibility(
-                    visible = selected,
-                    enter = androidx.compose.animation.scaleIn() + androidx.compose.animation.fadeIn(),
-                    exit = androidx.compose.animation.scaleOut() + androidx.compose.animation.fadeOut(),
-                ) {
+                SelectionCheckPop(selected) {
                     Box(
                         modifier = Modifier
                             .fillMaxSize()

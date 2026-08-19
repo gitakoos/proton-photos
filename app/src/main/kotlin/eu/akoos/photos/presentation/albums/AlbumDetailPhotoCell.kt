@@ -68,10 +68,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.presentation.common.LocalVideoThumb
+import eu.akoos.photos.presentation.common.SelectionCheckPop
 import eu.akoos.photos.presentation.common.rememberLocalVideoThumbnail
+import eu.akoos.photos.presentation.common.selectPressScale
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.Bg0
@@ -158,6 +161,7 @@ internal fun PhotoCell(
         modifier = Modifier
             // Slightly taller than square so corner badges cover less of the photo.
             .aspectRatio(0.85f)
+            .selectPressScale(isSelected)
             .clip(RoundedCornerShape(if (seamless) 0.dp else if (isSelected) 8.dp else 6.dp))
             .background(Bg2)
             // Tap-only by default: with no long-press handler the cell is a plain clickable, and the
@@ -189,12 +193,25 @@ internal fun PhotoCell(
                 modifier = Modifier.fillMaxSize(),
             )
             osThumb is LocalVideoThumb.Loading -> Unit // Bg2 tile shows through until the poster lands.
-            imageModel != null -> AsyncImage(
-                model = imageModel,
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize(),
-            )
+            imageModel != null -> {
+                val context = androidx.compose.ui.platform.LocalContext.current
+                // Same key GalleryPhotoCell pins, so Coil returns the already-warm 320 px bitmap
+                // instead of decoding a second copy at this identical size.
+                val request = remember(imageModel, photo.linkId) {
+                    ImageRequest.Builder(context)
+                        .data(imageModel)
+                        .size(ALBUM_THUMB_PX)
+                        .memoryCacheKey(photo.linkId)
+                        .crossfade(false)
+                        .build()
+                }
+                AsyncImage(
+                    model = request,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
             else -> {
                 // Loading placeholder while the on-demand decrypt runs (parent already fills the Bg2 tile).
                 Icon(
@@ -370,20 +387,20 @@ internal fun PhotoCell(
 
         if (isSelectionMode) {
             Box(modifier = Modifier.padding(4.dp).size(20.dp).align(Alignment.TopStart)) {
-                if (isSelected) {
+                // Empty ring underneath; the filled check scales in over it on select.
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(0.3f), CircleShape)
+                        .border(1.5.dp, Color.White.copy(0.8f), CircleShape),
+                )
+                SelectionCheckPop(isSelected) {
                     Box(
                         modifier = Modifier.fillMaxSize().background(Accent, CircleShape),
                         contentAlignment = Alignment.Center,
                     ) {
                         Icon(Icons.Default.Check, null, tint = Color.White, modifier = Modifier.size(13.dp))
                     }
-                } else {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(Color.Black.copy(0.3f), CircleShape)
-                            .border(1.5.dp, Color.White.copy(0.8f), CircleShape),
-                    )
                 }
             }
         }

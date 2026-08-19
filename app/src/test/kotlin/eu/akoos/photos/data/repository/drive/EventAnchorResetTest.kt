@@ -28,6 +28,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.IOException
+import java.net.UnknownHostException
 
 /**
  * The decision [shouldResetEventAnchor] makes when the event feed fails: keep the stored anchor and
@@ -70,6 +71,20 @@ class EventAnchorResetTest {
         assertFalse(shouldResetEventAnchor(ApiException(ApiResult.Error.NoInternet())))
         assertFalse(shouldResetEventAnchor(ApiException(ApiResult.Error.Connection(false))))
         assertFalse(shouldResetEventAnchor(ApiException(ApiResult.Error.Timeout(false))))
+    }
+
+    @Test
+    fun `an offline failure keeps the anchor`() {
+        // Being offline fails fast rather than retrying, so it is not classed as transient, but it is
+        // evidence about the connection and not the anchor. ProtonCore surfaces a host-resolution
+        // failure while offline as Connection(cause = UnknownHostException); dropping the anchor over a
+        // lost signal would force a full library re-walk once the network returns.
+        assertFalse(shouldResetEventAnchor(ApiException(ApiResult.Error.NoInternet())))
+        assertFalse(
+            shouldResetEventAnchor(
+                ApiException(ApiResult.Error.Connection(false, UnknownHostException("photos.proton.me"))),
+            ),
+        )
     }
 
     @Test

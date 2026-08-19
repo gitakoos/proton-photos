@@ -71,6 +71,11 @@ private val AccentDarkSunset  = Color(0xFFFF8A65); private val Accent2DarkSunset
 private val AccentDarkSea     = Color(0xFF4FC3F7); private val Accent2DarkSea     = Color(0xFF0288D1)
 private val AccentDarkSepia   = Color(0xFFD4A574); private val Accent2DarkSepia   = Color(0xFF8B6F47)
 private val AccentDarkMono    = Color(0xFFE0E0E0); private val Accent2DarkMono    = Color(0xFF9E9E9E)
+private val AccentDarkLavender = Color(0xFFC9A7EB); private val Accent2DarkLavender = Color(0xFF9B7FD4)
+private val AccentDarkRose     = Color(0xFFF48FB1); private val Accent2DarkRose     = Color(0xFFE06699)
+private val AccentDarkMint     = Color(0xFF6FE0C4); private val Accent2DarkMint     = Color(0xFF2FB89C)
+private val AccentDarkGold     = Color(0xFFFFD166); private val Accent2DarkGold     = Color(0xFFE9AE3C)
+private val AccentDarkRuby     = Color(0xFFFF7A88); private val Accent2DarkRuby     = Color(0xFFE84C5E)
 private val LineDark = Color(0x14FFFFFF)
 private val Line2Dark = Color(0x1EFFFFFF)
 private val PillBgDark = Color(0xBE1C1C1E)
@@ -93,6 +98,11 @@ private val AccentLightSunset = Color(0xFFE64A19); private val Accent2LightSunse
 private val AccentLightSea    = Color(0xFF0288D1); private val Accent2LightSea    = Color(0xFF01579B)
 private val AccentLightSepia  = Color(0xFF8B6F47); private val Accent2LightSepia  = Color(0xFF5D4037)
 private val AccentLightMono   = Color(0xFF424242); private val Accent2LightMono   = Color(0xFF212121)
+private val AccentLightLavender = Color(0xFF9575CD); private val Accent2LightLavender = Color(0xFF6A4CAF)
+private val AccentLightRose     = Color(0xFFD6336C); private val Accent2LightRose     = Color(0xFFA61E4D)
+private val AccentLightMint     = Color(0xFF12A98C); private val Accent2LightMint     = Color(0xFF0B7A66)
+private val AccentLightGold     = Color(0xFFCC8A00); private val Accent2LightGold     = Color(0xFF995F00)
+private val AccentLightRuby     = Color(0xFFC62838); private val Accent2LightRuby     = Color(0xFF8E1B27)
 private val LineLight = Color(0x14000000)
 private val Line2Light = Color(0x1F000000)
 // Light-theme pills sit over photos (info pill, motion / panorama controls in the viewer), where
@@ -155,6 +165,11 @@ private fun darkAccentFor(palette: ThemePalette): Pair<Color, Color> = when (pal
     ThemePalette.Sea     -> AccentDarkSea      to Accent2DarkSea
     ThemePalette.Sepia   -> AccentDarkSepia   to Accent2DarkSepia
     ThemePalette.Mono    -> AccentDarkMono     to Accent2DarkMono
+    ThemePalette.Lavender -> AccentDarkLavender to Accent2DarkLavender
+    ThemePalette.Rose     -> AccentDarkRose     to Accent2DarkRose
+    ThemePalette.Mint     -> AccentDarkMint     to Accent2DarkMint
+    ThemePalette.Gold     -> AccentDarkGold     to Accent2DarkGold
+    ThemePalette.Ruby     -> AccentDarkRuby     to Accent2DarkRuby
 }
 
 private fun lightAccentFor(palette: ThemePalette): Pair<Color, Color> = when (palette) {
@@ -164,6 +179,11 @@ private fun lightAccentFor(palette: ThemePalette): Pair<Color, Color> = when (pa
     ThemePalette.Sea     -> AccentLightSea     to Accent2LightSea
     ThemePalette.Sepia   -> AccentLightSepia   to Accent2LightSepia
     ThemePalette.Mono    -> AccentLightMono    to Accent2LightMono
+    ThemePalette.Lavender -> AccentLightLavender to Accent2LightLavender
+    ThemePalette.Rose     -> AccentLightRose     to Accent2LightRose
+    ThemePalette.Mint     -> AccentLightMint     to Accent2LightMint
+    ThemePalette.Gold     -> AccentLightGold     to Accent2LightGold
+    ThemePalette.Ruby     -> AccentLightRuby     to Accent2LightRuby
 }
 
 // AMOLED override — base surfaces drop to true black while cards/panels stay one step up so

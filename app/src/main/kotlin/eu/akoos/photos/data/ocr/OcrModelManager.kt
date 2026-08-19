@@ -117,6 +117,24 @@ class OcrModelManager(context: Context) {
     }
 
     /**
+     * Whether every file the Copy text pipeline needs is already present, checked by name and
+     * existence alone. It reads the detection and recognition components in both the side-load root
+     * and the app-private cache, and skips the byte-count and digest checks [onDisk] runs, so it is
+     * cheap enough to answer a settings default off the main thread. A present but stale file still
+     * counts here; the verified [onDisk] path is what guards the bytes handed to the runtime.
+     */
+    fun filesPresentQuick(): Boolean =
+        listOf(OcrModelComponent.Detection, OcrModelComponent.Recognition).all { component ->
+            OcrModelAssets.assetsOf(component).all { asset -> presentQuick(asset) }
+        }
+
+    /** A side-loaded copy first, then the app-private cache, by existence only. */
+    private fun presentQuick(asset: OcrModelAsset): Boolean {
+        sideLoadDir?.let { if (File(it, asset.fileName).isFile) return true }
+        return File(modelsDir, asset.fileName).isFile
+    }
+
+    /**
      * Every file of [component], fetching what is neither side-loaded nor usably cached.
      * [onDownloadStart] fires once, just before the first byte moves, so a caller can say so on
      * screen rather than leaving a multi-megabyte wait looking like a stalled read.
@@ -146,6 +164,26 @@ class OcrModelManager(context: Context) {
                 }
             }
             OcrModelOutcome.Ready(OcrModelFiles(resolved))
+        }
+    }
+
+    /**
+     * Removes every downloaded model file from this device and forgets what was verified in memory.
+     *
+     * OCR keeps nothing else here: no database table and no cached recognised text, so the files under
+     * [modelsDir] and the side-load root, plus the in-memory [verified] map, are the whole of its
+     * footprint. Deleting both roots and clearing the map is therefore a complete removal, and the
+     * pinned size-plus-digest rule means a later re-download is verified from scratch regardless.
+     *
+     * Only the two OCR roots are touched; nothing outside them is removed. Serialised on [gate] so it
+     * cannot race a fetch that is promoting a file at the same moment.
+     */
+    suspend fun deleteAll() = withContext(Dispatchers.IO) {
+        gate.withLock {
+            listOfNotNull(modelsDir, sideLoadDir).forEach { dir ->
+                if (dir.isDirectory) dir.deleteRecursively()
+            }
+            verified.clear()
         }
     }
 

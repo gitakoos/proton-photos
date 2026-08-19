@@ -138,6 +138,7 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.key
 import androidx.compose.runtime.derivedStateOf
@@ -173,6 +174,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -189,15 +191,23 @@ import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.usecase.AlbumSortMode
 import eu.akoos.photos.domain.usecase.CategorizeItem
+import eu.akoos.photos.domain.usecase.CloudMetadataSaveController
+import eu.akoos.photos.domain.usecase.CloudSavePhase
 import eu.akoos.photos.presentation.common.AlbumMembership
 import eu.akoos.photos.presentation.common.ConfirmDialog
 import eu.akoos.photos.presentation.common.albumMembershipState
 import eu.akoos.photos.presentation.common.anyLocalOnly
+import eu.akoos.photos.presentation.common.deleteConfirmRows
+import eu.akoos.photos.presentation.common.deleteRowDescRes
+import eu.akoos.photos.presentation.common.deleteRowTitleRes
 import eu.akoos.photos.presentation.common.ConfirmSheet
 import eu.akoos.photos.presentation.common.HideConfirmSheet
 import eu.akoos.photos.presentation.common.DenseGridWarningDialog
 import eu.akoos.photos.presentation.common.EmptyState
 import eu.akoos.photos.presentation.common.ErrorPopup
+import eu.akoos.photos.presentation.common.CloudMetadataSaveDrawer
+import eu.akoos.photos.presentation.common.PrimaryButton
+import eu.akoos.photos.presentation.common.SecondaryButton
 import eu.akoos.photos.presentation.common.SelectionDrawer
 import eu.akoos.photos.presentation.common.message
 import eu.akoos.photos.presentation.common.shareOutcome
@@ -351,10 +361,17 @@ fun GalleryScreen(
     val albumsState by albumsViewModel.uiState.collectAsStateWithLifecycle()
     val sharedViewModel: SharedViewModel = hiltViewModel()
     val sharedUiState by sharedViewModel.uiState.collectAsStateWithLifecycle()
+    // Live view of the app-scoped cloud-metadata-save batch. Null once nothing is running or the
+    // drawer was sent to the background, so the sheet below mounts only while there is progress to show.
+    val cloudSaveVm: CloudSaveDrawerViewModel = hiltViewModel()
+    val cloudSaveUi by cloudSaveVm.ui.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
     val appColors = AppColors.current
     var selectedTab by rememberSaveable { mutableIntStateOf(0) }
+    // People rail: the face bar is open either because the chip is toggled on (this flag) or because a
+    // person is selected. Local UI state, the person filter itself lives in the ViewModel.
+    var peopleExpanded by rememberSaveable { mutableStateOf(false) }
     val gridState = rememberLazyGridState()
     // Mosaic uses a staggered grid; its scroll state is hoisted here so the screen-level behaviours
     // keyed on scroll position (re-tap scroll-to-top, overlay auto-hide, look-ahead prefetch) follow
@@ -363,6 +380,11 @@ fun GalleryScreen(
     val mosaicGrid by remember {
         context.settingsDataStore.data.map { it[SettingsKeys.MOSAIC_GRID] ?: false }
     }.collectAsState(initial = false)
+    // Opt-in: keep each bottom tab where it was last scrolled when switching between them, so only a
+    // re-tap of the already-active tab returns to the top. Off by default, so any tab tap resets to top.
+    val keepScrollOnTabSwitch by remember {
+        context.settingsDataStore.data.map { it[SettingsKeys.KEEP_SCROLL_ON_TAB_SWITCH] == true }
+    }.collectAsStateWithLifecycle(false)
     // The scroll state the visible Photos grid is driven by; everything below observes this so the
     // mosaic path is no longer inert.
     val activeFirstVisibleItemIndex: () -> Int = {
@@ -877,8 +899,10 @@ fun GalleryScreen(
     // ── Add-to-album multi-action ─────────────────────────────────────────────
     // Drives the picker sheet, the consent dialog and the new-album inline create.
     var showAddToAlbumSheet by remember { mutableStateOf(false) }
+    var showAddToPersonSheet by remember { mutableStateOf(false) }
     var showCreateAlbumInline by remember { mutableStateOf(false) }
     val addToAlbumSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val addToPersonSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     // No MediaStore consent dialog: add-to-album is a DataStore append, not a file move.
 
@@ -1086,6 +1110,29 @@ fun GalleryScreen(
         // transition DURING the swipe rather than after it settles. Crossfade swaps the per-tab content
         // and animateContentSize animates the height between the taller Photos header (2 rows + category
         // rail) and the shorter Albums/Shared ones, so the shrink/grow is smooth instead of a snap.
+        // People rail data handed to the category rail (inside the header) through a CompositionLocal,
+        // so the People chip + face bar render without new header parameters. The bar is open when the
+        // chip is toggled on or a person is selected; toggling it off also clears any person filter.
+        val peopleActive = peopleExpanded || state.selectedPersonId != null
+        val peopleRail = remember(state.people, state.selectedPersonId, peopleActive) {
+            PeopleRailData(
+                people = state.people,
+                selectedPersonId = state.selectedPersonId,
+                active = peopleActive,
+                onToggle = {
+                    if (peopleActive) {
+                        peopleExpanded = false
+                        viewModel.onPersonSelected(null)
+                    } else {
+                        peopleExpanded = true
+                    }
+                },
+                onPersonSelected = { id ->
+                    peopleExpanded = true
+                    viewModel.onPersonSelected(if (state.selectedPersonId == id) null else id)
+                },
+            )
+        }
         AnimatedVisibility(
             visible = showOverlays && !state.isSelectionMode,
             enter = fadeIn() + slideInVertically { -it },
@@ -1094,6 +1141,7 @@ fun GalleryScreen(
         ) {
             Box(modifier = Modifier.animateContentSize()) {
                 Crossfade(targetState = pagerState.currentPage, label = "headerTab") { page ->
+                    CompositionLocalProvider(LocalPeopleRail provides peopleRail) {
                     GalleryHeader(
                         selectedTab = page,
                         galleryState = state,
@@ -1132,6 +1180,7 @@ fun GalleryScreen(
                         newsUnread = newsUnread,
                         onUpdateClick = viewModel::openUpdateFromDot,
                     )
+                    }
                 }
             }
         }
@@ -1171,6 +1220,7 @@ fun GalleryScreen(
             onDownload = viewModel::downloadSelected,
             onMakeAvailableOffline = viewModel::toggleSelectedOffline,
             onRequestAddToAlbum = { showAddToAlbumSheet = true },
+            onRequestAddToPerson = { showAddToPersonSheet = true },
             onToggleFavorite = viewModel::toggleSelectedFavorite,
             onBackUp = { showBackUpConfirm = true },
             onStripMetadata = viewModel::stripMetadataSelected,
@@ -1282,16 +1332,20 @@ fun GalleryScreen(
                 // The live fractional page position drives the sliding highlight, so it follows a swipe.
                 position = pagerState.currentPage + pagerState.currentPageOffsetFraction,
                 onTabSelected = { tab ->
-                    // Always land at the visual top (item 0): re-tapping the active tab or switching
-                    // to another both reset that tab's scroll, so a page never reopens half-scrolled
-                    // where you left it. The Photos tab targets whichever grid is showing (staggered
-                    // when mosaic is on), and item 0 is the top in every order — including reversed,
-                    // where the top is the oldest photo by design.
-                    when (tab) {
-                        0 -> tabScope.launch {
-                            if (mosaicGrid) staggeredState.scrollToItem(0) else gridState.scrollToItem(0)
+                    // Re-tapping the active tab always returns it to the visual top (item 0). Switching
+                    // to a different tab also resets to the top, unless "keep place when switching tabs"
+                    // is on, in which case the target page stays where it was last scrolled. At this
+                    // point [selectedTab] still holds the previous tab, so tab == selectedTab marks a
+                    // re-tap. The Photos tab targets whichever grid is showing (staggered when mosaic is
+                    // on), and item 0 is the top in every order, including reversed, where the top is
+                    // the oldest photo by design.
+                    if (!keepScrollOnTabSwitch || tab == selectedTab) {
+                        when (tab) {
+                            0 -> tabScope.launch {
+                                if (mosaicGrid) staggeredState.scrollToItem(0) else gridState.scrollToItem(0)
+                            }
+                            1 -> tabScope.launch { albumsGridState.scrollToItem(0) }
                         }
-                        1 -> tabScope.launch { albumsGridState.scrollToItem(0) }
                     }
                     // Drive the pager so a tap slides to the page; the rail and dock highlight both
                     // follow pagerState.currentPage, which flips as the slide crosses the midpoint —
@@ -1468,6 +1522,17 @@ fun GalleryScreen(
             hiddenAlbumIds = state.hiddenAlbumIds,
         )
     }
+    if (showAddToPersonSheet && state.selectedItems.isNotEmpty()) {
+        GalleryAddToPersonSheet(
+            people = state.people,
+            sheetState = addToPersonSheetState,
+            onPersonSelected = { personId ->
+                showAddToPersonSheet = false
+                viewModel.addSelectedToPerson(personId)
+            },
+            onDismiss = { showAddToPersonSheet = false },
+        )
+    }
     if (showCreateAlbumInline) {
         GalleryNewAlbumDialog(
             onDismiss = { showCreateAlbumInline = false },
@@ -1530,6 +1595,12 @@ fun GalleryScreen(
             },
         )
     }
+
+    // ── Cloud metadata save drawer ────────────────────────────────────────────
+    // The editor hands its staged cloud edits to the app-scoped controller and closes; this is where
+    // the batch's live per-step status shows over the timeline. "Continue in background" hides the
+    // drawer while the upload keeps running, still tracked by the Activity transfer list.
+    CloudMetadataSaveDrawer(ui = cloudSaveUi, onDismiss = { cloudSaveVm.dismiss() })
 }
 
 // ── Add-to-album picker sheet ─────────────────────────────────────────────────
@@ -1768,80 +1839,31 @@ internal fun MultiDeleteSheet(
             color = colors.fgPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
         )
 
-        if (hasLocal && hasCloud) {
+        val rows = deleteConfirmRows(hasLocal, hasCloud)
+        if (rows.size > 1) {
             Text(
                 stringResource(R.string.delete_multi_mixed_msg),
                 color = colors.fgDim, fontSize = 14.sp,
             )
         }
-
-        if (hasLocal) {
-            // Red only when this row IS the full delete (no cloud copy behind it), matching the viewer's
-            // single-photo delete. In a mixed selection it removes just the device side (the cloud copy
-            // stays), so it is a partial action -> neutral, and the red row is "everywhere" below.
-            val localPrimary = !hasCloud
+        rows.forEach { row ->
+            val bg = if (row.destructive) DeleteTint else colors.cardBg
+            val borderColor = if (row.destructive) ErrorColor.copy(alpha = 0.3f) else colors.cardBorder
+            val titleColor = if (row.destructive) ErrorColor else colors.fgPrimary
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(if (localPrimary) DeleteTint else colors.cardBg, RoundedCornerShape(12.dp))
-                    .border(0.5.dp, if (localPrimary) ErrorColor.copy(alpha = 0.3f) else colors.cardBorder, RoundedCornerShape(12.dp))
-                    .clickable { onDelete(true, false) }
+                    .background(bg, RoundedCornerShape(12.dp))
+                    .border(0.5.dp, borderColor, RoundedCornerShape(12.dp))
+                    .clickable { onDelete(row.freeUpSpace, row.deleteFromCloud) }
                     .padding(horizontal = 16.dp, vertical = 14.dp),
             ) {
                 Text(
-                    if (hasCloud) stringResource(R.string.delete_multi_remove_device)
-                    else stringResource(R.string.delete_multi_move_trash),
-                    color = if (localPrimary) ErrorColor else colors.fgPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium,
+                    stringResource(deleteRowTitleRes(row.kind)),
+                    color = titleColor, fontSize = 15.sp, fontWeight = FontWeight.Medium,
                 )
                 Text(
-                    if (hasCloud) stringResource(R.string.delete_multi_remove_device_desc)
-                    else stringResource(R.string.delete_multi_move_trash_desc),
-                    color = colors.fgMute, fontSize = 12.sp,
-                )
-            }
-        }
-
-        // Middle option (mixed selections only): drop the cloud copies, keep all local files.
-        // Mirrors the per-photo viewer dialog so the user has a consistent "remove just one side"
-        // choice everywhere. Single-side selections don't need this row because there's nothing
-        // to keep on the local side.
-        if (hasLocal && hasCloud) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(DeleteTint, RoundedCornerShape(12.dp))
-                    .border(0.5.dp, ErrorColor.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
-                    .clickable { onDelete(false, true) }
-                    .padding(horizontal = 16.dp, vertical = 14.dp),
-            ) {
-                Text(
-                    stringResource(R.string.delete_multi_remove_cloud),
-                    color = ErrorColor, fontSize = 15.sp, fontWeight = FontWeight.Medium,
-                )
-                Text(
-                    stringResource(R.string.delete_multi_remove_cloud_desc),
-                    color = colors.fgMute, fontSize = 12.sp,
-                )
-            }
-        }
-
-        if (hasCloud) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(DeleteTint, RoundedCornerShape(12.dp))
-                    .border(0.5.dp, ErrorColor.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
-                    .clickable { onDelete(hasLocal, true) }
-                    .padding(horizontal = 16.dp, vertical = 14.dp),
-            ) {
-                Text(
-                    if (hasLocal) stringResource(R.string.delete_multi_move_trash_everywhere)
-                    else stringResource(R.string.delete_multi_drive_trash),
-                    color = ErrorColor, fontSize = 15.sp, fontWeight = FontWeight.Medium,
-                )
-                Text(
-                    if (hasLocal) stringResource(R.string.delete_multi_move_trash_everywhere_desc)
-                    else stringResource(R.string.delete_multi_drive_trash_desc),
+                    stringResource(deleteRowDescRes(row.kind)),
                     color = colors.fgMute, fontSize = 12.sp,
                 )
             }

@@ -45,6 +45,7 @@ import eu.akoos.photos.data.updater.shouldNotifyForUpdate
 import eu.akoos.photos.domain.repository.NewsRepository
 import eu.akoos.photos.domain.repository.UpdateCheckerRepository
 import eu.akoos.photos.domain.repository.UpdateStatus
+import eu.akoos.photos.util.DeviceHealthPolicy
 import eu.akoos.photos.util.NetworkObserver
 import kotlinx.coroutines.flow.first
 import java.io.File
@@ -73,9 +74,13 @@ class UpdateCheckWorker @AssistedInject constructor(
     private val stagedUpdates: StagedUpdateStore,
     private val networkObserver: NetworkObserver,
     private val newsRepository: NewsRepository,
+    private val deviceHealth: DeviceHealthPolicy,
 ) : CoroutineWorker(context, params) {
 
     override suspend fun doWork(): Result {
+        // Actively throttling to cool down: a version check and an APK pre-download are never urgent,
+        // so skip this run and let the next period pick it up once the phone is cool.
+        if (deviceHealth.thermallyThrottled()) return Result.success()
         // Pull the news feed on the same wake-up, so the unread dot is ready the next time the app
         // opens rather than waiting for that open to fetch it. Self-guarded by the news on/off switch.
         runCatching { newsRepository.refresh() }

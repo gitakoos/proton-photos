@@ -199,7 +199,9 @@ internal fun DuplicateGroupReview(
                 reveal.value > travelPx / 2f -> travelPx
                 else -> 0f
             }
-            reveal.animateTo(target, tween(240))
+            // Settle on the stable scope rather than the drag gesture's, which no longer outlives the
+            // release, so the panel snaps to a detent instead of sticking where the finger lifted.
+            scope.launch { reveal.animateTo(target, tween(240)) }
         },
     )
     val toggleDetent: () -> Unit = {
@@ -237,7 +239,7 @@ internal fun DuplicateGroupReview(
                     reveal.value > travelPx / 2f -> travelPx
                     else -> 0f
                 }
-                reveal.animateTo(target, tween(240))
+                scope.launch { reveal.animateTo(target, tween(240)) }
                 return available
             }
         }

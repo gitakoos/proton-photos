@@ -91,9 +91,11 @@ import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Deblur
+import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Draw
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Face
 import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.filled.Grain
 import androidx.compose.material.icons.filled.Gradient
@@ -130,6 +132,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size as GSize
@@ -158,6 +161,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntSize
@@ -196,6 +200,7 @@ private enum class Tool(@androidx.annotation.StringRes val labelRes: Int, val ic
     Color(R.string.editor_tool_color, Icons.Default.Tonality),
     Crop(R.string.video_editor_crop, Icons.Default.Crop),
     Redact(R.string.editor_tool_redact, Icons.Default.Brush),
+    HideFaces(R.string.editor_hide_faces, Icons.Default.Face),
     Draw(R.string.editor_tool_draw, Icons.Default.Draw),
     Text(R.string.editor_tool_text, Icons.Default.TextFields),
     Rotate(R.string.video_editor_rotate, Icons.AutoMirrored.Filled.RotateRight),
@@ -232,6 +237,14 @@ fun PhotoEditorScreen(
     vm: PhotoEditorViewModel = hiltViewModel(),
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
+    // AI-features gate: with the master switch or the per-feature face switch off, the Hide-faces tool
+    // is dropped from the tool row entirely, so its face model can never be fetched from here. Every
+    // other tool is unaffected.
+    val aiFeaturesEnabled by vm.aiFeaturesEnabled.collectAsStateWithLifecycle()
+    val faceEnabled by vm.faceEnabled.collectAsStateWithLifecycle()
+    val visibleTools = remember(aiFeaturesEnabled, faceEnabled) {
+        Tool.entries.filter { it != Tool.HideFaces || (aiFeaturesEnabled && faceEnabled) }
+    }
     var activeTool by remember { mutableStateOf(Tool.Adjust) }
     // Adjust tab exposes ONE slider at a time — the user picks which adjustment
     // (Brightness / Exposure / Contrast / Highlights / Shadows / Saturation / Tone /
@@ -709,6 +722,7 @@ fun PhotoEditorScreen(
                         onPendingCropRectChange = { pendingCropRect = it },
                     )
                     Tool.Redact -> RedactPanel(state, vm)
+                    Tool.HideFaces -> HideFacesPanel(state, vm)
                     Tool.Draw -> DrawPanel(
                         state = state,
                         color = drawColor,
@@ -755,7 +769,7 @@ fun PhotoEditorScreen(
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Tool.entries.forEach { tool ->
+                visibleTools.forEach { tool ->
                     ToolTab(tool = tool, selected = tool == activeTool, onClick = { activeTool = tool })
                 }
             }
@@ -774,6 +788,20 @@ fun PhotoEditorScreen(
             },
             onDismiss = { showDiscardDialog = false },
             destructive = true,
+        )
+    }
+
+    // Raised by the Detect-faces action itself, so it answers something the user just asked for rather
+    // than interrupting. Accepting persists consent and re-runs detection; the failure case is shown
+    // inline in the panel instead.
+    if (state.hideFacesState is HideFacesState.NeedsConsent) {
+        ConfirmDialog(
+            title = stringResource(R.string.editor_face_model_title),
+            message = stringResource(R.string.editor_face_model_body),
+            confirmLabel = stringResource(R.string.sel_label_download),
+            dismissLabel = stringResource(R.string.cancel),
+            onConfirm = { vm.allowFaceModelDownload() },
+            onDismiss = { vm.dismissHideFacesPrompt() },
         )
     }
 
@@ -1663,6 +1691,110 @@ private fun RedactPanel(state: EditorUiState, vm: PhotoEditorViewModel) {
             modifier = Modifier.weight(1f),
         )
         BrushSizeButton(current = state.redactBrushDp, onPick = vm::setRedactBrush, modifier = Modifier.weight(1f))
+    }
+}
+
+/**
+ * The Hide-faces tool: a one-shot Detect action that finds and covers every face, a Blur / Pixelate
+ * style toggle, and a strength slider. The style, strength and Clear controls stay disabled until at
+ * least one face is covered. Detection is only ever run by the Detect tap, never per frame.
+ */
+@Composable
+private fun HideFacesPanel(state: EditorUiState, vm: PhotoEditorViewModel) {
+    val hf = state.hideFacesState
+    val detecting = hf is HideFacesState.Detecting
+    val hasCovers = state.adjustments.faceCovers.isNotEmpty()
+    val style = state.adjustments.faceCoverStyle
+
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            ActionChip(
+                label = stringResource(R.string.editor_hide_faces_detect),
+                icon = Icons.Default.Face,
+                enabled = !detecting,
+                onClick = { vm.detectFaces() },
+                modifier = Modifier.weight(1f),
+            )
+            ActionChip(
+                label = stringResource(R.string.editor_hide_faces_clear),
+                icon = Icons.Default.Delete,
+                enabled = hasCovers && !detecting,
+                onClick = { vm.clearFaceCovers() },
+                modifier = Modifier.weight(1f),
+            )
+        }
+
+        // Status line: spinner while a detect is in flight, then the face count, the not-found note, or
+        // an inline failure message.
+        when (hf) {
+            is HideFacesState.Detecting ->
+                CircularProgressIndicator(color = Accent, strokeWidth = 2.dp, modifier = Modifier.size(16.dp))
+            is HideFacesState.Ready ->
+                Text(
+                    if (hf.faceCount > 0)
+                        pluralStringResource(R.plurals.editor_hide_faces_count, hf.faceCount, hf.faceCount)
+                    else stringResource(R.string.editor_hide_faces_none),
+                    color = FgMute, fontSize = 12.sp,
+                )
+            is HideFacesState.Failed ->
+                Text(hf.message, color = Color(0xFFFF3B30), fontSize = 12.sp)
+            else ->
+                if (hasCovers) Text(
+                    pluralStringResource(
+                        R.plurals.editor_hide_faces_count,
+                        state.adjustments.faceCovers.size,
+                        state.adjustments.faceCovers.size,
+                    ),
+                    color = FgMute, fontSize = 12.sp,
+                )
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .alpha(if (hasCovers) 1f else 0.4f)
+                .background(PillBgOpaque, pillShape)
+                .border(0.5.dp, PillBorder, pillShape)
+                .padding(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            PillSegment(
+                label = stringResource(R.string.editor_hide_faces_style_pixelate),
+                icon = Icons.Default.GridView,
+                selected = style == FaceCoverStyle.Pixelate,
+                onClick = { if (hasCovers) vm.setFaceCoverStyle(FaceCoverStyle.Pixelate) },
+                modifier = Modifier.weight(1f),
+            )
+            PillSegment(
+                label = stringResource(R.string.editor_hide_faces_style_blur),
+                icon = Icons.Default.Deblur,
+                selected = style == FaceCoverStyle.Blur,
+                onClick = { if (hasCovers) vm.setFaceCoverStyle(FaceCoverStyle.Blur) },
+                modifier = Modifier.weight(1f),
+            )
+        }
+
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text(stringResource(R.string.editor_hide_faces_strength), color = FgMute, fontSize = 12.sp)
+            Slider(
+                value = state.adjustments.faceCoverStrength,
+                onValueChange = { vm.setFaceCoverStrength(it) },
+                onValueChangeFinished = { vm.finalizeAdjustments() },
+                valueRange = 0f..1f,
+                enabled = hasCovers,
+                colors = SliderDefaults.colors(thumbColor = Accent, activeTrackColor = Accent, inactiveTrackColor = TrackBg),
+                modifier = Modifier.weight(1f),
+            )
+        }
     }
 }
 

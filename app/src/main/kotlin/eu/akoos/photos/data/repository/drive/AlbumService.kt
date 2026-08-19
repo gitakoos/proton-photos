@@ -36,6 +36,8 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import me.proton.core.crypto.common.context.CryptoContext
@@ -238,6 +240,19 @@ class AlbumService @Inject constructor(
     @Volatile private var fullMembershipCache: Map<String, Set<String>>? = null
 
     /**
+     * Whether the last [ensureMembershipCachesFresh] build enumerated EVERY album fully: loadAlbums
+     * succeeded AND every album's children loaded. [getVerifiedAlbumIdsByPhoto] reads this to tell a
+     * verified-complete map apart from a silent partial, so a destructive caller never trashes an
+     * original against an under-reported album set. The best-effort readers never consult it.
+     */
+    @Volatile private var membershipCacheComplete = false
+
+    /** Serializes the album walk so several concurrent callers (a 4-wide metadata batch that all read
+     *  membership before trashing) share ONE walk instead of each launching a full, network-heavy pass
+     *  that invalidates the others' result. Callers wait on this, then read the now-fresh cache. */
+    private val membershipMutex = Mutex()
+
+    /**
      * Returns a `photoLinkId → albumName` lookup spanning every album the user owns.
      * For photos that live in multiple albums, the alphabetically first album wins
      * (stable, deterministic, no surprises for users sorting by name in their gallery).
@@ -261,16 +276,46 @@ class AlbumService @Inject constructor(
     }
 
     /**
+     * Returns the FULL `photoLinkId → Set<albumLinkId>` map, but only when the enumeration is verified
+     * complete: loadAlbums succeeded AND every album's children loaded. Throws otherwise. A photo that
+     * is genuinely in zero albums under a complete walk simply has no entry (an empty set downstream via
+     * `.orEmpty()`), which is a valid answer a destructive caller may act on. What this refuses to hand
+     * back is a silent partial, so the metadata-replace use cases never trash an original against an
+     * under-reported album set and drop the photo from an album.
+     */
+    suspend fun getVerifiedAlbumIdsByPhoto(userId: UserId): Map<String, Set<String>> = withContext(Dispatchers.IO) {
+        ensureMembershipCachesFresh(userId)
+        fullMembershipCache?.takeIf { membershipCacheComplete }?.let { return@withContext it }
+        // The cache was absent or built from a partial walk. Force exactly one fresh rebuild before
+        // refusing, so a single transient album-list hiccup does not fail an otherwise valid save.
+        invalidateMembershipCache()
+        ensureMembershipCachesFresh(userId)
+        fullMembershipCache?.takeIf { membershipCacheComplete }
+            ?: throw IllegalStateException("album membership enumeration incomplete; refusing to trash original")
+    }
+
+    /** Serializes the walk (see [membershipMutex]) so concurrent callers share one pass instead of each
+     *  running its own. A caller that arrives while a walk is in flight waits, then finds the cache fresh
+     *  and returns without walking again. */
+    private suspend fun ensureMembershipCachesFresh(userId: UserId) = membershipMutex.withLock {
+        ensureMembershipCachesFreshLocked(userId)
+    }
+
+    /**
      * Builds both [membershipCache] (name lookup, alphabetically-first wins) and
      * [fullMembershipCache] (full set of album linkIds) in a single album-walk pass. Both
      * maps share one TTL and a single invalidation entry point.
      */
-    private suspend fun ensureMembershipCachesFresh(userId: UserId) {
+    private suspend fun ensureMembershipCachesFreshLocked(userId: UserId) {
         val now = System.currentTimeMillis()
         if (membershipCache != null && fullMembershipCache != null
             && now - membershipCacheTime < membershipCacheTtlMs) {
             return
         }
+        // A rebuild is committed from here, so hold the completeness flag low until the walk finishes:
+        // a verified read must never trust a half-built map, and the loadAlbums-failure return below
+        // leaves the flag low so getVerifiedAlbumIdsByPhoto refuses rather than trusts a stale set.
+        membershipCacheComplete = false
         val albums = runCatching { loadAlbums(userId) }.getOrElse {
             Log.w(TAG, "membership refresh: loadAlbums failed: ${it.message}")
             return
@@ -278,6 +323,7 @@ class AlbumService @Inject constructor(
         val sortedAlbums = albums.sortedBy { it.name.lowercase() }
         val nameMap = mutableMapOf<String, String>()
         val idsMap = mutableMapOf<String, MutableSet<String>>()
+        var complete = true
         for (album in sortedAlbums) {
             try {
                 val children = loadAlbumChildren(userId, album.linkId)
@@ -288,12 +334,15 @@ class AlbumService @Inject constructor(
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 Log.w(TAG, "membership refresh: album ${album.linkId} children failed: ${e.message}")
+                complete = false
             }
         }
         membershipCache = nameMap
         fullMembershipCache = idsMap.mapValues { it.value.toSet() }
         membershipCacheTime = now
-        Log.d(TAG, "membership refresh: built ${nameMap.size} name entries, ${idsMap.size} id sets across ${albums.size} albums")
+        // Written after the map so a reader that sees the flag set is guaranteed the fresh map too.
+        membershipCacheComplete = complete
+        Log.d(TAG, "membership refresh: built ${nameMap.size} name entries, ${idsMap.size} id sets across ${albums.size} albums (complete=$complete)")
     }
 
     /** Drops both membership caches so the next read re-fetches. */
@@ -301,6 +350,7 @@ class AlbumService @Inject constructor(
         membershipCache = null
         fullMembershipCache = null
         membershipCacheTime = 0L
+        membershipCacheComplete = false
     }
 
     suspend fun loadAlbums(userId: UserId): List<Album> = withContext(Dispatchers.IO) {

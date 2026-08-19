@@ -69,6 +69,8 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.presentation.theme.AppColors
+import eu.akoos.photos.presentation.util.dayMonthYearFormat
+import eu.akoos.photos.presentation.util.monthYearFormat
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -83,9 +85,9 @@ import kotlin.math.roundToInt
 internal fun rememberTimelineDateFormat(grouping: TimelineGrouping): SimpleDateFormat =
     remember(grouping) {
         when (grouping) {
-            TimelineGrouping.None  -> SimpleDateFormat("MMMM yyyy", Locale.getDefault())
-            TimelineGrouping.Day   -> SimpleDateFormat("d MMMM yyyy", Locale.getDefault())
-            TimelineGrouping.Month -> SimpleDateFormat("d MMMM yyyy", Locale.getDefault())
+            TimelineGrouping.None  -> monthYearFormat()
+            TimelineGrouping.Day   -> dayMonthYearFormat()
+            TimelineGrouping.Month -> dayMonthYearFormat()
             TimelineGrouping.Year  -> SimpleDateFormat("yyyy", Locale.getDefault())
         }
     }

@@ -65,10 +65,14 @@ import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.usecase.DeletePhotoUseCase
 import eu.akoos.photos.domain.usecase.DownloadPhotosUseCase
 import eu.akoos.photos.domain.usecase.ForceUploadLocalUrisUseCase
+import eu.akoos.photos.domain.model.PersonSummary
 import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
+import eu.akoos.photos.domain.usecase.ObservePeopleUseCase
 import eu.akoos.photos.presentation.common.GalleryItemSelectionController
 import eu.akoos.photos.presentation.gallery.ContentFilter
+import eu.akoos.photos.presentation.gallery.FaceBox
 import eu.akoos.photos.presentation.gallery.GalleryFilter
+import eu.akoos.photos.presentation.gallery.PersonUi
 import eu.akoos.photos.presentation.map.MapPin
 import eu.akoos.photos.util.MetadataStripConfig
 import eu.akoos.photos.util.OfflineGeocoder
@@ -83,6 +87,7 @@ class SearchViewModel @Inject constructor(
     private val photoLocationDao: PhotoLocationDao,
     private val selectionFactory: GalleryItemSelectionController.Factory,
     private val thumbnailUrlStore: ThumbnailUrlStore,
+    private val observePeopleUseCase: ObservePeopleUseCase,
     @ApplicationContext private val context: Context,
 ) : ViewModel() {
 
@@ -252,6 +257,43 @@ class SearchViewModel @Inject constructor(
         // the main thread so typing stays smooth on large libraries.
         .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /**
+     * Named people whose name matches the typed query, so a name search reaches a person and their
+     * photos even when no filename matches the text. Diacritics are folded both ways, so "akos" finds
+     * "Ákos". Empty while the query is blank or nothing matches.
+     */
+    val peopleSuggestions: StateFlow<List<PersonUi>> = accountManager.getPrimaryUserId()
+        .flatMapLatest { userId ->
+            if (userId == null) flowOf(emptyList())
+            else combine(observePeopleUseCase(userId, allItems), debouncedQuery) { people, q ->
+                val needle = foldForMatch(q)
+                if (needle.isBlank()) emptyList()
+                else people
+                    .filter { !it.displayName.isNullOrBlank() && foldForMatch(it.displayName!!).contains(needle) }
+                    .mapNotNull { it.toPersonUi() }
+                    .take(12)
+            }
+        }
+        .flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** Diacritic-folded, lowercased form so a name search like "akos" matches "Ákos". */
+    private fun foldForMatch(s: String): String =
+        java.text.Normalizer.normalize(s.trim().lowercase(), java.text.Normalizer.Form.NFD)
+            .replace(Regex("\\p{Mn}+"), "")
+
+    /** Adapt a domain [PersonSummary] to [PersonUi], dropping a person with no resolvable cover. */
+    private fun PersonSummary.toPersonUi(): PersonUi? {
+        val cover = coverPhotoKey ?: return null
+        return PersonUi(
+            personId = personId,
+            displayName = displayName,
+            coverPhotoKey = cover,
+            faceBox = faceBox?.let { FaceBox(it.left, it.top, it.right, it.bottom) },
+            faceCount = faceCount,
+        )
+    }
 
     fun setQuery(value: String) { _query.value = value }
     fun setContentFilter(filter: ContentFilter) { _contentFilter.value = filter }

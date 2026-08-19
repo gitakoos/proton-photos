@@ -28,6 +28,7 @@ import androidx.datastore.preferences.core.edit
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -43,8 +44,10 @@ import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.entity.LocalMediaItem
 import eu.akoos.photos.domain.repository.LocalMediaRepository
 import eu.akoos.photos.util.CaptureDateOverride
+import eu.akoos.photos.util.DeviceHealthPolicy
 import eu.akoos.photos.util.ExifDateFormat
 import eu.akoos.photos.util.ExifHelper
+import eu.akoos.photos.util.HEALTH_PAUSE_POLL_MS
 import eu.akoos.photos.util.Mp4CreationTime
 import eu.akoos.photos.util.PhotoGpsResolver
 import eu.akoos.photos.util.hasMediaLocationGrant
@@ -86,6 +89,7 @@ class LocalExifBackfillScheduler @Inject constructor(
     @ApplicationContext private val context: Context,
     private val localMediaRepository: LocalMediaRepository,
     private val photoLocationDao: PhotoLocationDao,
+    private val deviceHealth: DeviceHealthPolicy,
 ) {
     /** Concurrency bound on in-flight EXIF reads, a handful keeping disk I/O off any hot path. */
     private val semaphore = Semaphore(WORKER_COUNT)
@@ -170,6 +174,11 @@ class LocalExifBackfillScheduler @Inject constructor(
         // before a child's try. Clearing the whole reserved set in a finally on the walk guarantees
         // no URI is stranded in inFlight for the process lifetime.
         try {
+            // Defer this background walk while the phone is hot, low on battery, or in the power saver;
+            // it resumes on its own once conditions clear. Not gated on interaction: it runs quietly in
+            // the background and does not compete with the UI. Inside the try so a cancellation during
+            // the wait still reaches the finally that clears the inFlight reservations.
+            while (!deviceHealth.backgroundWorkAllowed()) delay(HEALTH_PAUSE_POLL_MS)
             coroutineScope {
                 pending.forEach { entry ->
                     launch {

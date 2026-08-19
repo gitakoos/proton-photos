@@ -210,8 +210,6 @@ class SyncWorker @AssistedInject constructor(
                     Log.w(TAG, "upload tried ${uploadResult.attempted} items, 0 succeeded — retrying")
                     uploadFailed = true
                 }
-            } catch (_: NotImplementedError) {
-                // Legacy code path: harmless, the use case can be a no-op in some builds.
             } catch (e: IOException) {
                 Log.w(TAG, "upload IO error — will retry", e)
                 uploadFailed = true

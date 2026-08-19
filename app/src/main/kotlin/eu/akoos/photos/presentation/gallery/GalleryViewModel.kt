@@ -79,12 +79,15 @@ import eu.akoos.photos.data.hidden.HiddenStorageManager
 import eu.akoos.photos.data.hidden.HiddenVaultDecisions
 import eu.akoos.photos.data.hidden.HiddenVaultDiagnostics
 import eu.akoos.photos.data.hidden.HiddenVaultJournal
+import eu.akoos.photos.presentation.util.dayMonthYearFormat
 import eu.akoos.photos.presentation.util.formatBytes
+import eu.akoos.photos.presentation.util.monthYearFormat
 import eu.akoos.photos.data.offline.OfflineStorageManager
 import eu.akoos.photos.data.transfer.TransferCenter
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.entity.GalleryItem
+import eu.akoos.photos.domain.model.PersonSummary
 import eu.akoos.photos.data.repository.drive.PhotoStreamService
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.LocalMediaRepository
@@ -96,6 +99,7 @@ import eu.akoos.photos.domain.usecase.DownloadPhotosUseCase
 import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
 import eu.akoos.photos.domain.usecase.InvalidateStrippedLocationsUseCase
+import eu.akoos.photos.domain.usecase.MIN_FACES_TO_SHOW_PERSON
 import eu.akoos.photos.domain.usecase.ReconcileSyncStateUseCase
 import eu.akoos.photos.domain.usecase.UploadPendingUseCase
 import eu.akoos.photos.domain.usecase.ForceUploadLocalUrisUseCase
@@ -108,9 +112,7 @@ import eu.akoos.photos.util.computeOnThisDay
 import eu.akoos.photos.util.isBatteryLow
 import eu.akoos.photos.util.retryOnDbTear
 import eu.akoos.photos.worker.SyncWorker
-import java.text.SimpleDateFormat
 import java.util.Date
-import java.util.Locale
 import javax.inject.Inject
 
 /** Internal bag for the flows the gallery `combine` chain produces. Lives at top
@@ -131,7 +133,7 @@ private data class GallerySources(
  * unchanged. groupBy yields a LinkedHashMap, preserving encounter order.
  */
 private fun groupByMonth(items: List<GalleryItem>): List<Pair<String, List<GalleryItem>>> {
-    val fmt = SimpleDateFormat("MMMM yyyy", Locale.getDefault())
+    val fmt = monthYearFormat()
     val scratch = Date()
     return items
         .groupBy { item -> scratch.time = item.captureTimeMs; fmt.format(scratch) }
@@ -144,7 +146,7 @@ private fun groupByMonth(items: List<GalleryItem>): List<Pair<String, List<Galle
  * the 3-column default headers are unchanged. groupBy yields a LinkedHashMap, preserving order.
  */
 private fun groupByDay(items: List<GalleryItem>): List<Pair<String, List<GalleryItem>>> {
-    val fmt = SimpleDateFormat("d MMMM yyyy", Locale.getDefault())
+    val fmt = dayMonthYearFormat()
     val scratch = Date()
     return items
         .groupBy { item -> scratch.time = item.captureTimeMs; fmt.format(scratch) }
@@ -193,6 +195,9 @@ class GalleryViewModel @Inject constructor(
     private val publicLink: eu.akoos.photos.presentation.common.PublicLinkController,
     private val favoriteWriter: FavoriteWriter,
     private val cryptoServiceClient: eu.akoos.photos.crypto.CryptoServiceClient,
+    private val faceDao: eu.akoos.photos.data.db.dao.FaceDao,
+    private val observePeopleUseCase: eu.akoos.photos.domain.usecase.ObservePeopleUseCase,
+    private val addPhotosToPersonUseCase: eu.akoos.photos.domain.usecase.AddPhotosToPersonUseCase,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(GalleryUiState())
@@ -310,6 +315,7 @@ class GalleryViewModel @Inject constructor(
         observePrimaryUserId()
         observeHideInAlbums()
         observeHiddenAlbumIds()
+        observePeople()
     }
 
     /**
@@ -484,6 +490,98 @@ class GalleryViewModel @Inject constructor(
                     }
                 }
         }
+    }
+
+    /**
+     * People (face clusters) for the current account, surfaced as the round-thumbnail People rail on
+     * the Photos tab. Collected only while the master AI switch is on; an off switch, a signed-out
+     * account, or no indexed faces yet all resolve to an empty list, so the People chip stays hidden
+     * and the feature costs nothing on the common (AI-off) path. Recombined with the item set so each
+     * cover face box can be normalised against its cover photo's own dimensions for a face crop; the
+     * item set changes only when photos are added or removed, not on a thumbnail decrypt, so this does
+     * not rebuild while scrolling. If the list empties while a person filter is active (the switch was
+     * turned off), the filter is cleared so the feed does not stay narrowed with no way back.
+     */
+    private fun observePeople() {
+        val peopleFlow = combine(
+            context.settingsDataStore.data
+                .map { it[SettingsKeys.AI_FEATURES_ENABLED] == true && it[SettingsKeys.FACE_ENABLED] == true }
+                .distinctUntilChanged(),
+            accountManager.getPrimaryUserId(),
+        ) { aiOn, userId -> aiOn to userId }
+            .flatMapLatest { (aiOn, userId) ->
+                if (!aiOn || userId == null) flowOf(emptyList<PersonSummary>())
+                else observePeopleUseCase(userId, uiState.map { it.items }.distinctUntilChanged())
+            }
+        viewModelScope.launch {
+            peopleFlow.collectLatest { summaries ->
+                // Only NAMED people ride the timeline rail, so unnamed and junk clusters never appear
+                // as filter chips; unnamed clusters are named from the People page.
+                val uiPeople = summaries
+                    .filter { !it.displayName.isNullOrBlank() }
+                    .mapNotNull { it.toPersonUi() }
+                val cleared = uiPeople.isEmpty() && _uiState.value.selectedPersonId != null
+                _uiState.update { st ->
+                    if (cleared) st.copy(people = uiPeople, selectedPersonId = null, personPhotoKeys = emptySet())
+                    else st.copy(people = uiPeople)
+                }
+                if (cleared) recomputeFilteredForPerson()
+            }
+        }
+    }
+
+    /** Adapt a domain [PersonSummary] to the gallery's [PersonUi]. A summary carries a nullable cover
+     *  key for reuse by screens that tolerate one, so a null cover is skipped here; [observePeopleUseCase]
+     *  already drops people with no resolvable cover, so the People rail never loses a tile to this. */
+    private fun PersonSummary.toPersonUi(): PersonUi? {
+        val cover = coverPhotoKey ?: return null
+        return PersonUi(
+            personId = personId,
+            displayName = displayName,
+            coverPhotoKey = cover,
+            faceBox = faceBox?.let { FaceBox(it.left, it.top, it.right, it.bottom) },
+            faceCount = faceCount,
+        )
+    }
+
+    /**
+     * Filter the timeline to one person's photos, or clear the person filter when [personId] is null.
+     * Loads the person's photo keys once into state and re-applies the filter; the membership test in
+     * [applyFilter] then composes with every other active filter exactly like the Offline pinned set.
+     */
+    fun onPersonSelected(personId: Long?) {
+        viewModelScope.launch {
+            if (personId == null) {
+                _uiState.update { it.copy(selectedPersonId = null, personPhotoKeys = emptySet()) }
+                recomputeFilteredForPerson()
+                return@launch
+            }
+            val userId = accountManager.getPrimaryUserId().first() ?: return@launch
+            val keys = try {
+                faceDao.photoKeysForPerson(userId.id, personId).first().toSet()
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                emptySet<String>()
+            }
+            _uiState.update { it.copy(selectedPersonId = personId, personPhotoKeys = keys) }
+            recomputeFilteredForPerson()
+        }
+    }
+
+    /** Re-run the full filter chain after the person selection changed, keeping the person membership
+     *  (read inside [applyFilter]) in lockstep with the category, content, favourite and album filters. */
+    private fun recomputeFilteredForPerson() {
+        val state = _uiState.value
+        val filtered = applyFilter(
+            applyContentFilter(state.items, state.contentFilter),
+            state.selectedFilter,
+            state.favoriteIds,
+            state.albumHideCloudIds,
+            state.offlinePinIds,
+        )
+        _uiState.update { it.copy(filteredItems = filtered) }
+        recomputeMonthGroups(filtered)
     }
 
     private fun observeGridPreferences() {
@@ -1019,6 +1117,18 @@ class GalleryViewModel @Inject constructor(
                     // library of header reads must never hold up reconcile or the upload kick-off.
                     viewModelScope.launch(Dispatchers.IO) {
                         runCatching { cloudRepo.backfillLocalExif(userId) }
+                    }
+                    // Index faces for the People grouping. The scheduler no-ops when the AI features
+                    // are off, paused, or the models are absent; gate on the master and face switches
+                    // here so the common (faces-off) path never even launches a coroutine that returns
+                    // at once.
+                    val facePrefs = context.settingsDataStore.data.first()
+                    if (facePrefs[SettingsKeys.AI_FEATURES_ENABLED] == true &&
+                        facePrefs[SettingsKeys.FACE_ENABLED] == true
+                    ) {
+                        viewModelScope.launch(Dispatchers.IO) {
+                            runCatching { cloudRepo.backfillFaces(userId) }
+                        }
                     }
                 }
                 reconcile(userId).collect {}
@@ -1939,6 +2049,17 @@ class GalleryViewModel @Inject constructor(
      * @param albumLinkId Drive link ID of the target album.
      * @param albumName   Album display name, used only for the success snackbar.
      */
+    /** Attach the current selection to a named person, then exit selection. The membership survives a
+     *  rescan (stored against the person's name); an unnamed person is a no-op inside the use case. */
+    fun addSelectedToPerson(personId: Long) {
+        val keys = _uiState.value.selectedItems.map { it.stableId }
+        if (keys.isEmpty()) return
+        viewModelScope.launch {
+            addPhotosToPersonUseCase(personId, keys)
+            clearSelection()
+        }
+    }
+
     fun addSelectedToAlbum(
         albumLinkId: String,
         albumName: String,
@@ -2274,7 +2395,7 @@ class GalleryViewModel @Inject constructor(
                 !inCloudAlbum
             }
         } else items
-        return when (filter) {
+        val categoryFiltered = when (filter) {
             GalleryFilter.All -> baseItems
             // Favourite = the device-side flag for a photo that lives only on the device, the Drive
             // Favorite tag (id 0) for a backed-up one. Same rule the grid hearts and the viewer use,
@@ -2295,9 +2416,19 @@ class GalleryViewModel @Inject constructor(
                 (item as? GalleryItem.CloudOnly)?.cloud?.linkId?.let { id -> id in offlinePinIds } == true
             }
             else -> {
-                val tagId = filter.tagId ?: return baseItems
-                baseItems.filter { CategorizeItem.belongsTo(it, tagId) }
+                val tagId = filter.tagId
+                if (tagId == null) baseItems else baseItems.filter { CategorizeItem.belongsTo(it, tagId) }
             }
+        }
+        // Person filter (People rail): keep only items in the selected person's photo set. An
+        // in-memory membership test over the already-filtered list, the same shape as the Offline
+        // pinned-set test, so it composes on top of whichever category/content filter is active. A
+        // no-op when no person is selected. Read from state so every applyFilter caller composes it.
+        val personId = _uiState.value.selectedPersonId
+        return if (personId == null) categoryFiltered
+        else {
+            val personKeys = _uiState.value.personPhotoKeys
+            categoryFiltered.filter { it.stableId in personKeys }
         }
     }
 

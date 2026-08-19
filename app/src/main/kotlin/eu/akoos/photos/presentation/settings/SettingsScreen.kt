@@ -26,6 +26,7 @@ import android.app.Activity
 import android.content.Intent
 import android.os.Build
 import android.provider.MediaStore
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -49,6 +50,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -62,9 +64,14 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.OfflinePin
+import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PhoneAndroid
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Storage
+import androidx.compose.material.icons.filled.Upload
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
@@ -72,6 +79,7 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
@@ -94,6 +102,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -102,8 +111,14 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import eu.akoos.photos.BuildConfig
 import eu.akoos.photos.R
+import eu.akoos.photos.data.face.FaceIndexingProgress
+import eu.akoos.photos.data.face.FaceIndexingState
+import eu.akoos.photos.data.ocr.OcrModelAssets
 import eu.akoos.photos.domain.entity.UploadCompressionTier
+import eu.akoos.photos.presentation.gallery.PersonTile
 import eu.akoos.photos.presentation.common.ConfirmDialog
+import eu.akoos.photos.presentation.common.ConfirmSheet
+import eu.akoos.photos.presentation.common.PrimaryButton
 import eu.akoos.photos.presentation.common.ErrorPopup
 import eu.akoos.photos.presentation.common.FloatingHeaderScrim
 import eu.akoos.photos.presentation.common.IconBubble
@@ -111,6 +126,7 @@ import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
 import eu.akoos.photos.presentation.common.ShimmerBox
 import eu.akoos.photos.presentation.common.ShimmerTextLine
 import eu.akoos.photos.util.sanitizeErrorMessage
+import eu.akoos.photos.presentation.settings.components.ActionRow
 import eu.akoos.photos.presentation.settings.components.AppLockTimeoutRow
 import eu.akoos.photos.presentation.settings.components.CollapsibleSection
 import eu.akoos.photos.presentation.settings.components.ExpandableHeaderRow
@@ -163,6 +179,7 @@ fun SettingsScreen(
     onSyncSettingsClick: () -> Unit = {},
     onActivityClick: () -> Unit = {},
     onStorageClick: () -> Unit = {},
+    onAiClick: () -> Unit = {},
     onPrivacySecurityClick: () -> Unit = {},
     onPermissionsClick: () -> Unit = {},
     onNotificationsClick: () -> Unit = {},
@@ -182,6 +199,8 @@ fun SettingsScreen(
     val colors = AppColors.current
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
+    // The suspend Clipboard API is unnecessary for a synchronous copy in a click handler.
+    @Suppress("DEPRECATION")
     val clipboard = LocalClipboardManager.current
     val diagnosticsCopiedMsg = stringResource(R.string.settings_diagnostics_copied)
     val shareDiagnosticsChooserTitle = stringResource(R.string.settings_copy_diagnostics)
@@ -293,6 +312,7 @@ fun SettingsScreen(
             dismissButton = {
                 TextButton(onClick = {
                     showDiagnosticsChooser = false
+                    @Suppress("DEPRECATION")
                     clipboard.setText(androidx.compose.ui.text.AnnotatedString(buildDiagnostics()))
                     android.widget.Toast.makeText(
                         context, diagnosticsCopiedMsg, android.widget.Toast.LENGTH_SHORT,
@@ -536,6 +556,23 @@ fun SettingsScreen(
 
             Spacer(Modifier.height(20.dp))
 
+            // ── AI / Machine learning ─────────────────────────────────────────
+            // Master opt-in for every on-device ML feature (Copy text, Hide faces,
+            // and the People grouping to come). A primary section, not buried in
+            // Extras, because it gates whether any model is ever fetched. The
+            // sub-page hosts the toggle now and the indexing status a later piece adds.
+            CollapsibleSection(label = stringResource(R.string.settings_ai_section)) {
+            SettingsCard {
+                NavRow(
+                    label = stringResource(R.string.settings_ai_section),
+                    description = stringResource(R.string.settings_ai_nav_desc),
+                    onClick = onAiClick,
+                )
+            }
+            }
+
+            Spacer(Modifier.height(20.dp))
+
             // ── Settings nav rows ─────────────────────────────────────────────
             CollapsibleSection(label = stringResource(R.string.settings_section_settings)) {
             SettingsCard {
@@ -661,6 +698,8 @@ fun SettingsScreen(
                 LargeLibrarySimCard()
                 Spacer(Modifier.height(20.dp))
                 DebugDialogTestCard()
+                Spacer(Modifier.height(20.dp))
+                DeviceHealthDebugCard()
             }
         }
 
@@ -699,6 +738,399 @@ fun SettingsScreen(
         }
     }
 
+}
+
+// ── Machine learning sub-page (hub) ───────────────────────────────────────────
+// Master opt-in for the on-device ML features. When off, nothing downloads and the per-feature
+// controls stay hidden. With it on, two sub-toggles pick which features run: Copy text and Face
+// recognition. Face recognition stays disabled until its model is available, and adds a management
+// row whose subtitle mirrors the live scan state so progress shows without drilling in.
+
+@Composable
+fun AiSettingsScreen(
+    onBack: () -> Unit,
+    onFaceRecognitionClick: () -> Unit,
+    viewModel: SettingsViewModel = hiltViewModel(),
+) {
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    SettingsSubPageScaffold(title = stringResource(R.string.settings_ai_section), onBack = onBack) {
+        SettingsCard {
+            ToggleRow(
+                label = stringResource(R.string.settings_ai_enable),
+                description = stringResource(R.string.settings_ai_enable_desc),
+                checked = state.aiFeaturesEnabled,
+                onCheckedChange = viewModel::setAiFeaturesEnabled,
+            )
+        }
+
+        // Dark when ML is off: the per-feature toggles stay hidden until the master toggle is on.
+        if (state.aiFeaturesEnabled) {
+            Spacer(Modifier.height(20.dp))
+            SettingsCard {
+                ToggleRow(
+                    label = stringResource(R.string.settings_ai_ocr),
+                    // While the model is fetching the row reads as busy, and a failed fetch is stated in
+                    // place so the switch staying off is explained rather than looking stuck.
+                    description = when {
+                        state.ocrModelDownloading -> stringResource(R.string.settings_ai_ocr_downloading)
+                        state.ocrModelDownloadFailed -> stringResource(R.string.viewer_text_model_failed)
+                        else -> stringResource(R.string.settings_ai_ocr_desc)
+                    },
+                    checked = state.ocrEnabled,
+                    onCheckedChange = viewModel::setOcrEnabled,
+                    enabled = !state.ocrModelDownloading,
+                )
+                RowDivider()
+                ToggleRow(
+                    label = stringResource(R.string.settings_ai_face_toggle),
+                    description = stringResource(
+                        if (state.faceRecognitionAvailable) R.string.settings_ai_face_desc
+                        else R.string.settings_ai_face_unavailable,
+                    ),
+                    checked = state.faceEnabled,
+                    onCheckedChange = viewModel::setFaceEnabled,
+                    enabled = state.faceRecognitionAvailable,
+                )
+            }
+
+            // The face management entry only makes sense once the scan is switched on, so its live
+            // subtitle reflects real progress; it stays hidden while face recognition is off.
+            if (state.faceEnabled) {
+                Spacer(Modifier.height(20.dp))
+                val progress by viewModel.faceIndexingProgress.collectAsStateWithLifecycle()
+                val peopleCount by viewModel.peopleCount.collectAsStateWithLifecycle()
+                SettingsCard {
+                    NavRow(
+                        label = stringResource(R.string.settings_face_section),
+                        description = faceRowSubtitle(progress.state, peopleCount),
+                        onClick = onFaceRecognitionClick,
+                    )
+                }
+            }
+
+            // Both Copy text model drawers, matching the app's other confirm sheets: the download
+            // consent raised when the feature is switched on without the model, and the destructive
+            // removal raised when it is switched off. The size quoted is the figure that goes over the
+            // wire.
+            when (state.ocrModelPrompt) {
+                OcrModelPrompt.Download -> ConfirmSheet(
+                    title = stringResource(R.string.settings_ai_ocr_download_title),
+                    message = stringResource(
+                        R.string.settings_ai_ocr_download_message,
+                        formatBytes(OcrModelAssets.TOTAL_DOWNLOAD_BYTES),
+                    ),
+                    confirmLabel = stringResource(R.string.settings_ai_ocr_download_confirm),
+                    dismissLabel = stringResource(R.string.cancel),
+                    onConfirm = viewModel::confirmOcrModelDownload,
+                    onDismiss = viewModel::dismissOcrModelPrompt,
+                )
+                OcrModelPrompt.Remove -> ConfirmSheet(
+                    title = stringResource(R.string.settings_ai_ocr_remove_title),
+                    message = stringResource(
+                        R.string.settings_ai_ocr_remove_message,
+                        formatBytes(OcrModelAssets.TOTAL_DOWNLOAD_BYTES),
+                    ),
+                    confirmLabel = stringResource(R.string.settings_ai_ocr_remove_confirm),
+                    dismissLabel = stringResource(R.string.settings_ai_ocr_remove_keep),
+                    onConfirm = viewModel::confirmOcrModelRemoval,
+                    onDismiss = viewModel::disableOcrKeepingModel,
+                    onOutsideDismiss = viewModel::dismissOcrModelPrompt,
+                    destructive = true,
+                )
+                OcrModelPrompt.None -> Unit
+            }
+
+            // The face-disable drawer, raised when Face recognition is switched off, in two stages so an
+            // accidental tap cannot delete: Remove asks for a final confirmation, ConfirmRemove then wipes
+            // the model files and every detected face and name. Keep, Cancel, or a swipe leaves both in place.
+            when (state.faceModelPrompt) {
+                FaceModelPrompt.Remove -> ConfirmSheet(
+                    title = stringResource(R.string.settings_ai_face_remove_title),
+                    message = stringResource(R.string.settings_ai_face_remove_message),
+                    confirmLabel = stringResource(R.string.settings_ai_face_remove_confirm),
+                    dismissLabel = stringResource(R.string.settings_ai_face_remove_keep),
+                    onConfirm = viewModel::requestFaceModelRemoval,
+                    onDismiss = viewModel::disableFaceKeepingData,
+                    onOutsideDismiss = viewModel::dismissFaceModelPrompt,
+                    destructive = true,
+                )
+                FaceModelPrompt.ConfirmRemove -> ConfirmSheet(
+                    title = stringResource(R.string.settings_ai_face_remove_confirm_title),
+                    message = stringResource(R.string.settings_ai_face_remove_confirm_message),
+                    confirmLabel = stringResource(R.string.settings_ai_face_remove_confirm),
+                    dismissLabel = stringResource(R.string.cancel),
+                    onConfirm = viewModel::confirmFaceModelRemoval,
+                    onDismiss = viewModel::backToFaceRemovePrompt,
+                    onOutsideDismiss = viewModel::dismissFaceModelPrompt,
+                    destructive = true,
+                )
+                FaceModelPrompt.None -> Unit
+            }
+        }
+        Spacer(Modifier.height(20.dp))
+    }
+}
+
+/** Subtitle for the Face recognition row: the live scan state while a walk runs or is paused,
+ *  otherwise the count of people found, so the row reads as a result when idle. */
+@Composable
+private fun faceRowSubtitle(state: FaceIndexingState, peopleCount: Int): String = when (state) {
+    FaceIndexingState.Running, FaceIndexingState.WaitingModel ->
+        stringResource(R.string.settings_ai_indexing_running)
+    FaceIndexingState.Paused -> stringResource(R.string.settings_ai_indexing_paused)
+    else -> pluralStringResource(R.plurals.settings_ai_indexing_people, peopleCount, peopleCount)
+}
+
+// ── Face recognition sub-page ─────────────────────────────────────────────────
+// The on-device face scan and the controls to manage it: a status card (people found, scan state,
+// progress, a preview of the people, and Start / Pause / Resume), a Maintenance card (rescan / clear),
+// and a Transfer card (export / import the portable index).
+
+@Composable
+fun FaceRecognitionScreen(
+    onBack: () -> Unit,
+    onSeeAllPeople: () -> Unit,
+    viewModel: SettingsViewModel = hiltViewModel(),
+) {
+    val transferMsg by viewModel.faceTransferMsg.collectAsStateWithLifecycle()
+    val transferCtx = LocalContext.current
+    LaunchedEffect(transferMsg) {
+        transferMsg?.let {
+            Toast.makeText(transferCtx, it, Toast.LENGTH_LONG).show()
+            viewModel.clearFaceTransferMsg()
+        }
+    }
+    val progress by viewModel.faceIndexingProgress.collectAsStateWithLifecycle()
+    val peopleCount by viewModel.peopleCount.collectAsStateWithLifecycle()
+    val people by viewModel.people.collectAsStateWithLifecycle()
+
+    SettingsSubPageScaffold(title = stringResource(R.string.settings_face_section), onBack = onBack) {
+        FaceStatusCard(
+            progress = progress,
+            peopleCount = peopleCount,
+            people = people,
+            onSetPaused = viewModel::setFaceIndexingPaused,
+            onSeeAllPeople = onSeeAllPeople,
+        )
+        Spacer(Modifier.height(20.dp))
+        FaceMaintenanceCard(
+            onRescan = viewModel::rescanFaces,
+            onClear = viewModel::clearFaceIndex,
+        )
+        Spacer(Modifier.height(20.dp))
+        FaceTransferCard(
+            onExport = viewModel::exportFaceIndex,
+            onImport = viewModel::importFaceIndex,
+        )
+        Spacer(Modifier.height(20.dp))
+    }
+}
+
+/**
+ * Status of the face scan: the people found, a one-line state label, a progress bar only while a walk
+ * is running or paused, a preview row of the people, and one primary control that pauses a live walk
+ * and starts a scan otherwise, so indexing can be kicked off from Idle or right after a launch.
+ */
+@Composable
+private fun FaceStatusCard(
+    progress: FaceIndexingProgress,
+    peopleCount: Int,
+    people: List<eu.akoos.photos.presentation.gallery.PersonUi>,
+    onSetPaused: (Boolean) -> Unit,
+    onSeeAllPeople: () -> Unit,
+) {
+    val colors = AppColors.current
+    val state = progress.state
+    // Indexing is automatic, so a status line only appears while something is actually happening; an
+    // idle or finished scan shows just the people summary, with no "not started" wording.
+    val stateLabel = when (state) {
+        FaceIndexingState.Running -> stringResource(R.string.settings_ai_indexing_running)
+        FaceIndexingState.WaitingModel -> stringResource(R.string.settings_ai_indexing_waiting)
+        FaceIndexingState.Paused -> stringResource(R.string.settings_ai_indexing_paused)
+        else -> null
+    }
+    val showBar = (state == FaceIndexingState.Running || state == FaceIndexingState.Paused) &&
+        progress.total > 0
+
+    SettingsCard {
+        Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+            Text(
+                pluralStringResource(R.plurals.settings_ai_indexing_people, peopleCount, peopleCount),
+                color = colors.fgPrimary,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+            if (stateLabel != null) {
+                Spacer(Modifier.height(4.dp))
+                Text(stateLabel, color = colors.fgMute, fontSize = 12.5.sp)
+            }
+
+            if (showBar) {
+                Spacer(Modifier.height(12.dp))
+                LinearProgressIndicator(
+                    progress = { progress.indexed.toFloat() / progress.total },
+                    modifier = Modifier.fillMaxWidth(),
+                    color = colors.accent,
+                )
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    stringResource(R.string.settings_ai_indexing_progress, progress.indexed, progress.total),
+                    color = colors.fgMute,
+                    fontSize = 12.sp,
+                )
+            }
+
+            // The found people as round face tiles; tapping any opens the full People page to manage them.
+            if (people.isNotEmpty()) {
+                Spacer(Modifier.height(14.dp))
+                LazyRow(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    items(people, key = { it.personId }) { person ->
+                        PersonTile(person = person, selected = false, onClick = onSeeAllPeople)
+                    }
+                }
+            }
+
+            // No manual start: indexing runs automatically and new photos are picked up on their own,
+            // so the only control is to pause a live scan or resume a paused one. Idle, finished and
+            // model-waiting states show no button at all.
+            when (state) {
+                FaceIndexingState.Running -> {
+                    Spacer(Modifier.height(16.dp))
+                    PrimaryButton(
+                        label = stringResource(R.string.settings_ai_pause),
+                        icon = Icons.Default.Pause,
+                        onClick = { onSetPaused(true) },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                FaceIndexingState.Paused -> {
+                    Spacer(Modifier.height(16.dp))
+                    PrimaryButton(
+                        label = stringResource(R.string.settings_ai_resume),
+                        icon = Icons.Default.PlayArrow,
+                        onClick = { onSetPaused(false) },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                else -> {}
+            }
+        }
+    }
+}
+
+/**
+ * Maintenance actions, one destructive: rescan re-detects every photo (keeping the user's names and
+ * corrections), clear wipes all faces and people. Both confirm first.
+ */
+@Composable
+private fun FaceMaintenanceCard(
+    onRescan: () -> Unit,
+    onClear: () -> Unit,
+) {
+    var showRescanConfirm by remember { mutableStateOf(false) }
+    var showClearConfirm by remember { mutableStateOf(false) }
+
+    SectionLabel(stringResource(R.string.settings_face_maintenance))
+    Spacer(Modifier.height(8.dp))
+    SettingsCard {
+        ActionRow(
+            label = stringResource(R.string.settings_ai_rescan),
+            description = stringResource(R.string.settings_face_rescan_desc),
+            icon = Icons.Default.Refresh,
+            onClick = { showRescanConfirm = true },
+        )
+        RowDivider()
+        ActionRow(
+            label = stringResource(R.string.settings_ai_clear),
+            description = stringResource(R.string.settings_face_clear_desc),
+            icon = Icons.Default.DeleteOutline,
+            destructive = true,
+            onClick = { showClearConfirm = true },
+        )
+    }
+
+    if (showRescanConfirm) {
+        ConfirmDialog(
+            title = stringResource(R.string.settings_ai_rescan_confirm_title),
+            message = stringResource(R.string.settings_ai_rescan_confirm_msg),
+            confirmLabel = stringResource(R.string.settings_ai_rescan),
+            dismissLabel = stringResource(R.string.cancel),
+            onConfirm = { showRescanConfirm = false; onRescan() },
+            onDismiss = { showRescanConfirm = false },
+        )
+    }
+    if (showClearConfirm) {
+        ConfirmDialog(
+            title = stringResource(R.string.settings_ai_clear_confirm_title),
+            message = stringResource(R.string.settings_ai_clear_confirm_msg),
+            confirmLabel = stringResource(R.string.settings_ai_clear),
+            dismissLabel = stringResource(R.string.cancel),
+            onConfirm = { showClearConfirm = false; onClear() },
+            onDismiss = { showClearConfirm = false },
+            destructive = true,
+        )
+    }
+}
+
+/**
+ * Transfer the portable face index. Export warns that the file holds biometric fingerprints; import
+ * explains it folds a saved file into this device and regroups, keeping the current faces.
+ */
+@Composable
+private fun FaceTransferCard(
+    onExport: (android.net.Uri) -> Unit,
+    onImport: (android.net.Uri) -> Unit,
+) {
+    var showExportWarn by remember { mutableStateOf(false) }
+    var showImportConfirm by remember { mutableStateOf(false) }
+    val exportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/octet-stream"),
+    ) { uri -> uri?.let(onExport) }
+    val importLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri -> uri?.let(onImport) }
+
+    SectionLabel(stringResource(R.string.settings_face_transfer))
+    Spacer(Modifier.height(8.dp))
+    SettingsCard {
+        ActionRow(
+            label = stringResource(R.string.settings_ai_export),
+            description = stringResource(R.string.settings_face_export_desc),
+            icon = Icons.Default.Upload,
+            onClick = { showExportWarn = true },
+        )
+        RowDivider()
+        ActionRow(
+            label = stringResource(R.string.settings_ai_import),
+            description = stringResource(R.string.settings_face_import_desc),
+            icon = Icons.Default.Download,
+            onClick = { showImportConfirm = true },
+        )
+    }
+
+    if (showExportWarn) {
+        ConfirmDialog(
+            title = stringResource(R.string.settings_ai_export_warn_title),
+            message = stringResource(R.string.settings_ai_export_warn_msg),
+            confirmLabel = stringResource(R.string.settings_ai_export),
+            dismissLabel = stringResource(R.string.cancel),
+            onConfirm = { showExportWarn = false; exportLauncher.launch("photosforproton-faces.ppfi") },
+            onDismiss = { showExportWarn = false },
+        )
+    }
+    if (showImportConfirm) {
+        ConfirmDialog(
+            title = stringResource(R.string.settings_ai_import_confirm_title),
+            message = stringResource(R.string.settings_ai_import_confirm_msg),
+            confirmLabel = stringResource(R.string.settings_ai_import),
+            dismissLabel = stringResource(R.string.cancel),
+            onConfirm = { showImportConfirm = false; importLauncher.launch(arrayOf("application/octet-stream", "*/*")) },
+            onDismiss = { showImportConfirm = false },
+        )
+    }
 }
 
 // ── Sync Settings sub-page ────────────────────────────────────────────────────
@@ -1989,6 +2421,40 @@ private fun DebugDialogTestCard() {
             onUpdate = { showUpdate = false },
             onDismiss = { showUpdate = false },
         )
+    }
+}
+
+/**
+ * DEBUG-only readout of the live device-health signals and the resulting verdict, so the gate can be
+ * watched while the device state is simulated over adb (battery / temperature / thermal / power
+ * saver). Only ever rendered behind a BuildConfig.DEBUG guard; inline English, never localized.
+ */
+@Composable
+private fun DeviceHealthDebugCard(
+    viewModel: DeviceHealthDebugViewModel = hiltViewModel(),
+) {
+    val colors = AppColors.current
+    val s by viewModel.snapshot.collectAsStateWithLifecycle()
+    val v = eu.akoos.photos.util.evaluateDeviceHealth(s)
+    SettingsCard {
+        Column(Modifier.padding(16.dp)) {
+            Text("Device health (live)", color = colors.fgPrimary, fontSize = 13.sp)
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "battery ${s.batteryPercent}%  charging=${s.charging}  temp=${if (s.batteryTempCelsius.isNaN()) "n/a" else "${s.batteryTempCelsius}C"}",
+                color = colors.fgMute, fontSize = 12.sp,
+            )
+            Text(
+                "thermal=${s.thermal}  powerSaver=${s.powerSaveOn}  interacting=${s.interacting}  online=${s.online}",
+                color = colors.fgMute, fontSize = 12.sp,
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "heavyMl=${v.heavyMlAllowed}  background=${v.backgroundWorkAllowed}",
+                color = colors.fgPrimary, fontSize = 12.sp,
+            )
+            Text("reason: ${v.reason}", color = colors.fgMute, fontSize = 12.sp)
+        }
     }
 }
 

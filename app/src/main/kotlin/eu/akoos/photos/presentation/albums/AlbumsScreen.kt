@@ -72,6 +72,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.HideImage
 import androidx.compose.material.icons.filled.PlayArrow
@@ -990,6 +991,16 @@ private fun CloudAlbumActionSheet(
                             icon = Icons.Default.FileDownload,
                             title = stringResource(R.string.albums_download_all),
                             onClick = { close { onOpenAction(AlbumOpenAction.DownloadAll) } },
+                        )
+                    }
+                    // Editing an album photo's date + place opens the same editor the timeline and
+                    // folders use, over every member set for all. Own albums only, same as download.
+                    if (album.photoCount > 0) {
+                        Spacer(Modifier.height(8.dp))
+                        ActionSheetRow(
+                            icon = Icons.Default.EditNote,
+                            title = stringResource(R.string.metadata_editor_edit_metadata),
+                            onClick = { close { onOpenAction(AlbumOpenAction.EditMetadata) } },
                         )
                     }
                 }

@@ -345,6 +345,22 @@ internal fun PhotoGrid(
         }
     }
 
+    // Per-group photo/video split depends only on [grouped], so compute it once here instead of
+    // re-running the O(all items) count in the grid builder on every thumbnail-decrypt recomposition.
+    val monthCounts: List<Pair<Int, Int>> = remember(grouped) {
+        grouped.map { (_, items) ->
+            val videos = items.count { item ->
+                val mt = when (item) {
+                    is GalleryItem.LocalOnly -> item.local.mimeType
+                    is GalleryItem.Synced    -> item.local.mimeType
+                    is GalleryItem.CloudOnly -> item.cloud.mimeType
+                }
+                mt.startsWith("video/")
+            }
+            (items.size - videos) to videos   // (photos, videos)
+        }
+    }
+
     val haptics = androidx.compose.ui.platform.LocalHapticFeedback.current
 
     // Two-finger pinch detector that does NOT eat single-finger drags. It only activates
@@ -479,6 +495,7 @@ internal fun PhotoGrid(
         MosaicPhotoGrid(
             staggeredState = staggeredState,
             grouped = grouped,
+            monthCounts = monthCounts,
             orderedItems = orderedItems,
             onThisDayByYear = onThisDayByYear,
             showOnThisDay = showOnThisDay,
@@ -567,18 +584,9 @@ internal fun PhotoGrid(
             }
         }
 
-        for ((month, monthItems) in grouped) {
-            // Split month-group count by media type so the header reads
-            // "11 photos, 1 video" instead of an undifferentiated "12 photos".
-            val monthVideos = monthItems.count { item ->
-                val mt = when (item) {
-                    is GalleryItem.LocalOnly -> item.local.mimeType
-                    is GalleryItem.Synced    -> item.local.mimeType
-                    is GalleryItem.CloudOnly -> item.cloud.mimeType
-                }
-                mt.startsWith("video/")
-            }
-            val monthPhotos = monthItems.size - monthVideos
+        for ((index, group) in grouped.withIndex()) {
+            val (month, monthItems) = group
+            val (monthPhotos, monthVideos) = monthCounts[index]
             // None-grouping levels (L0..L2) skip the header entirely so the user gets a
             // truly flat thumbnail wall. The single placeholder "bucket" produced above
             // is still iterated to render its items.
@@ -740,6 +748,7 @@ private fun storedMosaicAspect(item: GalleryItem): Float? {
 private fun MosaicPhotoGrid(
     staggeredState: LazyStaggeredGridState,
     grouped: List<Pair<String, List<GalleryItem>>>,
+    monthCounts: List<Pair<Int, Int>>,
     orderedItems: List<GalleryItem>,
     onThisDayByYear: List<Pair<Int, List<GalleryItem>>>,
     showOnThisDay: Boolean,
@@ -821,16 +830,9 @@ private fun MosaicPhotoGrid(
                 }
             }
 
-            for ((month, monthItems) in grouped) {
-                val monthVideos = monthItems.count { item ->
-                    val mt = when (item) {
-                        is GalleryItem.LocalOnly -> item.local.mimeType
-                        is GalleryItem.Synced    -> item.local.mimeType
-                        is GalleryItem.CloudOnly -> item.cloud.mimeType
-                    }
-                    mt.startsWith("video/")
-                }
-                val monthPhotos = monthItems.size - monthVideos
+            for ((index, group) in grouped.withIndex()) {
+                val (month, monthItems) = group
+                val (monthPhotos, monthVideos) = monthCounts[index]
                 if (effectiveGrouping != TimelineGrouping.None) {
                     val selectedInGroup = monthItems.count { it in selectedItems }
                     item(span = StaggeredGridItemSpan.FullLine, contentType = "header") {

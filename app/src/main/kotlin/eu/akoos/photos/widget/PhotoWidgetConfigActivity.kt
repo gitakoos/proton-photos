@@ -92,6 +92,8 @@ import eu.akoos.photos.R
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.entity.LocalAlbum
+import eu.akoos.photos.presentation.common.SelectionCheckPop
+import eu.akoos.photos.presentation.common.selectPressScale
 import eu.akoos.photos.presentation.settings.ThemeMode
 import eu.akoos.photos.presentation.settings.ThemePalette
 import eu.akoos.photos.presentation.theme.AppColors
@@ -434,6 +436,7 @@ private fun WidgetConfigScreen(
                                     Box(
                                         modifier = Modifier
                                             .aspectRatio(1f)
+                                            .selectPressScale(isSelected)
                                             .clip(RoundedCornerShape(8.dp))
                                             .background(colors.bg2)
                                             .border(
@@ -466,15 +469,21 @@ private fun WidgetConfigScreen(
                                                     .fillMaxSize()
                                                     .background(colors.accent.copy(alpha = 0.25f)),
                                             )
-                                            Icon(
-                                                Icons.Default.CheckCircle,
-                                                contentDescription = null,
-                                                tint = colors.accent,
-                                                modifier = Modifier
-                                                    .align(Alignment.TopEnd)
-                                                    .padding(4.dp)
-                                                    .size(18.dp),
-                                            )
+                                        }
+                                        Box(
+                                            modifier = Modifier
+                                                .align(Alignment.TopEnd)
+                                                .padding(4.dp)
+                                                .size(18.dp),
+                                        ) {
+                                            SelectionCheckPop(visible = isSelected) {
+                                                Icon(
+                                                    Icons.Default.CheckCircle,
+                                                    contentDescription = null,
+                                                    tint = colors.accent,
+                                                    modifier = Modifier.fillMaxSize(),
+                                                )
+                                            }
                                         }
                                     }
                                 }
@@ -512,6 +521,7 @@ private fun WidgetConfigScreen(
                                     Box(
                                         modifier = Modifier
                                             .aspectRatio(1f)
+                                            .selectPressScale(isSelected)
                                             .clip(RoundedCornerShape(8.dp))
                                             .background(colors.bg2)
                                             .border(
@@ -540,15 +550,21 @@ private fun WidgetConfigScreen(
                                                     .fillMaxSize()
                                                     .background(colors.accent.copy(alpha = 0.25f)),
                                             )
-                                            Icon(
-                                                Icons.Default.CheckCircle,
-                                                contentDescription = null,
-                                                tint = colors.accent,
-                                                modifier = Modifier
-                                                    .align(Alignment.TopEnd)
-                                                    .padding(4.dp)
-                                                    .size(18.dp),
-                                            )
+                                        }
+                                        Box(
+                                            modifier = Modifier
+                                                .align(Alignment.TopEnd)
+                                                .padding(4.dp)
+                                                .size(18.dp),
+                                        ) {
+                                            SelectionCheckPop(visible = isSelected) {
+                                                Icon(
+                                                    Icons.Default.CheckCircle,
+                                                    contentDescription = null,
+                                                    tint = colors.accent,
+                                                    modifier = Modifier.fillMaxSize(),
+                                                )
+                                            }
                                         }
                                     }
                                 }
