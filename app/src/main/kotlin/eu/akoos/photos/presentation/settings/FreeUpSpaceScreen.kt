@@ -75,7 +75,7 @@ import eu.akoos.photos.presentation.common.ErrorPopup
 import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
 import eu.akoos.photos.presentation.gallery.SyncedCloudBadge
 import eu.akoos.photos.presentation.settings.components.SettingsCard
-import eu.akoos.photos.presentation.settings.components.SettingsPillHeader
+import eu.akoos.photos.presentation.common.FloatingHeader
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.util.formatBytes
 
@@ -257,7 +257,7 @@ fun FreeUpSpaceScreen(
             }
         }
 
-        SettingsPillHeader(title = stringResource(R.string.settings_storage_free_up), onBack = onBack)
+        FloatingHeader(title = stringResource(R.string.settings_storage_free_up), onBack = onBack)
     }
 
     if (showConfirm) {

@@ -96,6 +96,7 @@ import eu.akoos.photos.presentation.theme.StatusError
 @Composable
 fun TimelineFilterScreen(
     onBack: () -> Unit,
+    isSignedIn: Boolean = true,
     onOpenLayout: () -> Unit = {},
     onOpenCategories: () -> Unit = {},
     onOpenAlbums: () -> Unit = {},
@@ -112,8 +113,11 @@ fun TimelineFilterScreen(
             RowDivider()
             NavRow(label = stringResource(R.string.timeline_filter_categories_header), onClick = onOpenCategories)
             RowDivider()
-            NavRow(label = stringResource(R.string.timeline_filter_albums_header), onClick = onOpenAlbums)
-            RowDivider()
+            // Albums live only on Proton Drive, so the row is hidden for a local-only session.
+            if (isSignedIn) {
+                NavRow(label = stringResource(R.string.timeline_filter_albums_header), onClick = onOpenAlbums)
+                RowDivider()
+            }
             NavRow(label = stringResource(R.string.device_folders_section), onClick = onOpenDeviceFolders)
             RowDivider()
             NavRow(label = stringResource(R.string.settings_landing_tab), onClick = onOpenLandingTab)

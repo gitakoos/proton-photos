@@ -90,7 +90,7 @@ class AlbumPhotoPickerViewModel @Inject constructor(
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     val items: StateFlow<List<GalleryItem>> = accountManager.getPrimaryUserId()
         .flatMapLatest { userId ->
-            if (userId == null) flowOf(emptyList()) else getGalleryItems.invoke(userId)
+            if (userId == null) getGalleryItems.invokeLocalOnly() else getGalleryItems.invoke(userId)
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 

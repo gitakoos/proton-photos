@@ -84,6 +84,19 @@ class WriteCloudPhotoMetadataUseCaseTest {
         revisionId = "rev-$linkId",
     )
 
+    private fun videoCloudPhoto(linkId: String, durationMs: Long? = null) = CloudPhoto(
+        linkId = linkId,
+        shareId = "share",
+        volumeId = "vol1",
+        captureTime = 1_600_000_000L,
+        displayName = "VID_1234.mp4",
+        mimeType = "video/mp4",
+        sizeBytes = 8192L,
+        thumbnailUrl = null,
+        revisionId = "rev-$linkId",
+        durationMs = durationMs,
+    )
+
     @Test
     fun `a correction re-adds the new link to every album, keeps the name, and trashes the original`() = runTest {
         val original = cloudPhoto("orig")
@@ -128,6 +141,38 @@ class WriteCloudPhotoMetadataUseCaseTest {
         assertTrue("membership must not have landed", cloud.albumMembers("albumA").isEmpty())
         // The upload itself still happened (a recoverable duplicate is acceptable).
         assertEquals(1, cloud.uploadedItems.size)
+    }
+
+    @Test
+    fun `a transient upload failure is flagged transient`() = runTest {
+        val original = cloudPhoto("orig")
+        cloud.add(original)
+        // A network-level upload blip (IOException) is exactly the case a retry can clear.
+        cloud.uploadErrorOnce = java.io.IOException("connection reset")
+
+        val result = useCase(original, newCaptureMs = 1_700_000_000_000L, location = LocationEdit.Unchanged)
+
+        assertTrue("must report failure", result is WriteCloudPhotoMetadataUseCase.Result.Failed)
+        assertTrue(
+            "a network blip must be flagged transient",
+            (result as WriteCloudPhotoMetadataUseCase.Result.Failed).transient,
+        )
+    }
+
+    @Test
+    fun `a permanent upload failure is not flagged transient`() = runTest {
+        val original = cloudPhoto("orig")
+        cloud.add(original)
+        // failUploadOnce throws an IllegalStateException: no network signal, so it stays permanent.
+        cloud.failUploadOnce = true
+
+        val result = useCase(original, newCaptureMs = 1_700_000_000_000L, location = LocationEdit.Unchanged)
+
+        assertTrue("must report failure", result is WriteCloudPhotoMetadataUseCase.Result.Failed)
+        assertFalse(
+            "a non-network failure stays permanent",
+            (result as WriteCloudPhotoMetadataUseCase.Result.Failed).transient,
+        )
     }
 
     @Test
@@ -254,6 +299,56 @@ class WriteCloudPhotoMetadataUseCaseTest {
         // The original is trashed once the remaining album has joined.
         assertTrue("original must be trashed", cloud.photos.value.none { it.linkId == "orig" })
         assertTrue(cloud.callLog.contains("DELETE"))
+    }
+
+    @Test
+    fun `a video date correction writes the new date and carries the real duration and dimensions`() = runTest {
+        val original = videoCloudPhoto("orig")
+        cloud.add(original)
+        cloud.albumIdsByPhoto = mapOf("orig" to setOf("albumA"))
+        // The rewriter reports the video's real stream dims + duration (its xAttr video branch), which the
+        // use case must thread onto the upload item so the replaced copy is not a 0x0 / no-duration video.
+        val videoRewriter = RecordingExifRewriter(
+            UploadXAttrMetadata(displayWidth = 1920, displayHeight = 1080, durationMillis = 5_000L),
+        )
+        val videoUseCase = WriteCloudPhotoMetadataUseCase(context, cloud, accountManager, videoRewriter)
+        val newCaptureMs = 1_700_000_000_000L
+
+        val result = videoUseCase(original, newCaptureMs = newCaptureMs, location = LocationEdit.Unchanged)
+
+        assertEquals(WriteCloudPhotoMetadataUseCase.Result.Success, result)
+        // The video's date is handed to the rewriter to stamp into the working file (its mvhd).
+        val call = videoRewriter.calls.single()
+        assertEquals("video/mp4", call.mimeType)
+        assertEquals(newCaptureMs, call.writeCaptureMs)
+        // The uploaded item carries the corrected date and the real duration + dimensions.
+        val item = cloud.uploadedItems.single()
+        assertEquals(newCaptureMs, item.dateTaken)
+        assertEquals(5_000L, item.duration)
+        assertEquals(1920, item.width)
+        assertEquals(1080, item.height)
+        // Trash safety is unchanged for a video: album re-added, upload precedes trash, original gone.
+        assertEquals(listOf(cloud.uploadedLinkIds.single()), cloud.albumMembers("albumA"))
+        assertTrue(
+            "upload must precede trash",
+            cloud.callLog.indexOf("UPLOAD") < cloud.callLog.indexOf("DELETE"),
+        )
+        assertTrue("original must be trashed", cloud.photos.value.none { it.linkId == "orig" })
+    }
+
+    @Test
+    fun `a video whose container could not be probed falls back to the known cloud duration`() = runTest {
+        val original = videoCloudPhoto("orig", durationMs = 12_000L)
+        cloud.add(original)
+        // The rewriter's xAttr carries no duration (the probe found none), so the item duration falls back
+        // to the video's already-known cloud duration rather than landing at 0.
+        val videoRewriter = RecordingExifRewriter(UploadXAttrMetadata(displayWidth = 1280, displayHeight = 720))
+        val videoUseCase = WriteCloudPhotoMetadataUseCase(context, cloud, accountManager, videoRewriter)
+
+        val result = videoUseCase(original, newCaptureMs = 1_700_000_000_000L, location = LocationEdit.Unchanged)
+
+        assertEquals(WriteCloudPhotoMetadataUseCase.Result.Success, result)
+        assertEquals("the known cloud duration is the fallback", 12_000L, cloud.uploadedItems.single().duration)
     }
 
     /** Records the arguments each rewrite receives and returns a canned xAttr, so the orchestration is

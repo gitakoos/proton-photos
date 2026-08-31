@@ -54,6 +54,18 @@ object ShareIntentBuilder {
     )
 
     /**
+     * The per-item MIME and display name a share strip needs, read the same way [shareableMime]
+     * reads MIME: from the local twin when there is one (the bytes actually shared for a local /
+     * synced photo), else the cloud metadata. Feeds [eu.akoos.photos.util.stripForShareOrOriginal],
+     * whose kind decision falls back to the URI extension when the MIME is blank.
+     */
+    fun shareMimeAndName(item: GalleryItem): Pair<String, String> = when (item) {
+        is GalleryItem.LocalOnly -> item.local.mimeType to item.local.displayName
+        is GalleryItem.Synced    -> item.local.mimeType to item.local.displayName
+        is GalleryItem.CloudOnly -> item.cloud.mimeType to item.cloud.displayName
+    }
+
+    /**
      * MIME-string variant of [shareableMime] for callers that already hold raw per-item MIME
      * types (e.g. an album's [eu.akoos.photos.domain.entity.CloudPhoto] list) rather than
      * [GalleryItem]s. Same narrowing rule: image wildcard if all photos, video wildcard if all

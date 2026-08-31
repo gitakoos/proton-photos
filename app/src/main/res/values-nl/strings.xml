@@ -236,13 +236,16 @@
     <string name="sync_worker_notification_progress">%1$d van %2$d geüpload</string>
     <string name="sync_worker_notification_checking">Zoeken naar nieuwe foto\'s…</string>
     <string name="sync_worker_notification_cancel">Annuleren</string>
-    <!-- Background sync service. LOW-importance, idle ContentObserver only — keeps the
-         process alive on Samsung One UI so OS-level MediaStore triggers still wake the
-         upload pipeline after the user closes the app. -->
     <string name="bg_sync_service_channel_name">Fotoback-up op de achtergrond</string>
     <string name="bg_sync_service_channel_desc">Laat de app op de achtergrond reageren op nieuwe foto\'s.</string>
     <string name="bg_sync_service_title">Fotoback-up</string>
     <string name="bg_sync_service_text">Wacht op nieuwe foto\'s</string>
+    <string name="face_index_service_channel_name">Gezichten groeperen</string>
+    <string name="face_index_service_channel_desc">Toont de voortgang terwijl foto\'s op gezicht worden gegroepeerd.</string>
+    <string name="face_index_service_title">Gezichten worden gegroepeerd</string>
+    <string name="face_index_service_progress">%1$d van %2$d</string>
+    <string name="face_index_service_waiting">Wachten om door te gaan</string>
+    <string name="face_index_service_stop">Stoppen</string>
 
     <!-- Delete bottom sheet -->
     <string name="delete_album_container_warning">Hiermee verwijder je het album, maar je foto\'s blijven in Proton Drive.</string>
@@ -261,6 +264,8 @@
 
     <!-- Settings -->
     <string name="settings_title">Instellingen</string>
+    <string name="settings_search_hint">Instellingen zoeken</string>
+    <string name="settings_search_no_results">Geen overeenkomende instellingen</string>
     <string name="settings_sync_wifi_only">Alleen synchroniseren via wifi</string>
     <string name="settings_sync_now">Nu synchroniseren</string>
     <string name="settings_storage_section">Opslag</string>
@@ -275,6 +280,7 @@
     <string name="settings_free_up_interval">Op apparaat houden gedurende</string>
     <string name="settings_free_up_interval_desc">Hoe lang een foto na de back-up op dit apparaat blijft.</string>
     <string name="settings_account_section">Account</string>
+    <string name="settings_sign_in_to_proton">Inloggen bij Proton</string>
     <string name="settings_sign_out">Afmelden</string>
     <string name="settings_sign_out_desc">Beëindig deze sessie op dit apparaat.</string>
     <string name="sign_out_dialog_title">Afmelden?</string>
@@ -345,6 +351,11 @@
         <item quantity="one">%1$d foto hersteld</item>
         <item quantity="other">%1$d foto\'s hersteld</item>
     </plurals>
+    <plurals name="trash_deletes_in_days">
+        <item quantity="one">Wordt over %1$d dag verwijderd</item>
+        <item quantity="other">Wordt over %1$d dagen verwijderd</item>
+    </plurals>
+    <string name="trash_deletes_soon">Wordt binnenkort verwijderd</string>
     <string name="trash_cloud_restore_partial">%1$d hersteld, %2$d konden niet worden hersteld</string>
     <string name="trash_cloud_restore_refresh_failed">Hersteld. Trek omlaag in je galerij om te vernieuwen</string>
     <string name="trash_cloud_restore_failed">Herstellen mislukt</string>
@@ -394,6 +405,9 @@
     <string name="settings_strip_software">Software-info verwijderen</string>
     <string name="settings_strip_software_desc">Software-, opmerking-, maker- en copyrightvelden verwijderen</string>
     <string name="settings_strip_authorship">Maker en copyright verwijderen</string>
+    <string name="settings_strip_share">Metadata verwijderen bij delen</string>
+    <string name="settings_strip_share_title">Metadata bij delen</string>
+    <string name="settings_strip_share_desc">Verwijdert de geselecteerde velden alleen uit de gedeelde kopie, nooit uit je origineel. Bij video\'s wordt alleen de locatie verwijderd.</string>
     <string name="settings_strip_format_note">Sommige formaten, zoals HEIC, kunnen geen metadatawijzigingen opslaan. Wanneer het verwijderen van metadata aanstaat, wordt de geüploade kopie van een dergelijke foto naar JPEG omgezet zodat de geselecteerde gegevens echt worden verwijderd. De foto op je apparaat blijft ongewijzigd.</string>
     <string name="settings_compress_upload_desc">Uploadt een lichtere versie om ruimte te besparen. De kopie op je telefoon blijft op volle kwaliteit, tenzij de lokale spiegel hieronder aanstaat.</string>
     <string name="settings_compress_photos">Foto\'s comprimeren</string>
@@ -455,6 +469,7 @@
     <string name="timeline_filter_per_album_hint">Verberg afzonderlijke albums uit de tijdlijn. De schakelaar hierboven verbergt ze allemaal tegelijk.</string>
     <string name="timeline_filter_hidden_album">Verborgen album</string>
     <string name="timeline_filter_albums_header">Drive-albums</string>
+    <string name="timeline_filter_more_settings">Meer instellingen</string>
     <string name="settings_telemetry">Telemetrie</string>
     <string name="settings_telemetry_desc">Geregeld door je Proton-accountinstellingen. Open account.proton.me om te wijzigen.</string>
     <string name="settings_telemetry_on">Aan</string>
@@ -510,6 +525,11 @@
     <string name="palette_ruby">Robijn</string>
 
     <!-- AMOLED pure-black dark theme -->
+    <string name="settings_map_style">Klassieke kaart</string>
+    <string name="settings_map_style_summary">Gebruik de klassieke OpenStreetMap-tegelkaart in plaats van de moderne wereldkaart.</string>
+    <string name="map_style_prompt_title">Kies je kaartstijl</string>
+    <string name="map_style_modern">Wereldkaart</string>
+    <string name="map_style_modern_summary">Een moderne globe die je naar je plekken kunt draaien.</string>
     <string name="settings_amoled_black">Puur zwart (AMOLED)</string>
     <string name="settings_amoled_black_summary">Gebruik echt zwarte achtergronden in de donkere modus om stroom te besparen op OLED-schermen.</string>
 
@@ -638,9 +658,10 @@
     <string name="filter_title">Filter</string>
     <string name="filter_type_label">Type</string>
     <string name="filter_type_videos">Video\'s</string>
-    <string name="filter_sync_label">Synchronisatie</string>
-    <string name="filter_sync_local">Alleen lokaal</string>
+    <string name="filter_sync_label">Synchronisatiestatus</string>
+    <string name="filter_sync_local">Op apparaat</string>
     <string name="filter_sync_backedup">Geback-upt</string>
+    <string name="filter_sync_cloud">Alleen cloud</string>
     <string name="filter_year_label">Jaar</string>
     <string name="filter_any">Alle</string>
     <string name="filter_whole_month">Hele maand</string>
@@ -661,10 +682,12 @@
     <string name="search_section_jump_to_month">Naar maand springen</string>
     <string name="search_section_recent">Recent</string>
     <string name="map_title">Kaart</string>
+    <string name="map_vector_title">Wereldkaart</string>
     <string name="map_card_title">Kaart</string>
     <string name="map_card_subtitle_empty">Nog geen gelokaliseerde foto\'s</string>
     <string name="map_card_calendar_subtitle">Je afbeeldingen in kalenderweergave</string>
     <string name="map_search_places">Plaatsen zoeken</string>
+    <string name="places_title">Plaatsen</string>
     <string name="map_search_no_places">Nog geen plaatsen</string>
 
     <!-- Location detail -->
@@ -960,6 +983,8 @@
     <string name="settings_backup_how_section">Hoe back-up verloopt</string>
     <string name="settings_theme_palette">Thema &amp; palet</string>
     <string name="settings_privacy_security">Privacy &amp; beveiliging</string>
+    <string name="settings_backup_storage_section">Back-up &amp; opslag</string>
+    <string name="settings_help_about_section">Help &amp; info</string>
     <string name="cd_scroll_to_top">Naar boven</string>
     <string name="albums_filter_all">Alle</string>
     <string name="albums_filter_cloud">Cloud</string>
@@ -969,6 +994,7 @@
     <string name="albums_filter_remember_last">Laatst gebruikte filter onthouden</string>
     <string name="albums_filter_remember_last_summary">Albums openen met het laatst gekozen filter</string>
     <string name="albums_sort_heading">Sorteren op</string>
+    <string name="albums_cover_size_heading">Omslaggrootte</string>
     <string name="albums_sort_custom">Aangepast</string>
     <string name="albums_sort_name">Naam (A-Z)</string>
     <string name="albums_sort_activity">Laatste activiteit</string>
@@ -1335,6 +1361,7 @@
     <string name="offline_card_subtitle">Foto\'s opgeslagen voor offline weergave</string>
     <string name="duplicates_filter_identical">Identiek</string>
     <string name="duplicates_filter_similar">Vergelijkbaar</string>
+    <string name="duplicates_filter_match_label">Overeenkomst</string>
 
     <!-- Duplicate badges -->
     <string name="duplicates_badge_cloud">Cloud</string>
@@ -1497,7 +1524,13 @@
     <string name="settings_ai_ocr_remove_keep">Behouden</string>
     <string name="settings_ai_face_toggle">Gezichtsherkenning</string>
     <string name="settings_ai_face_desc">Groepeert foto\'s op de mensen die erop staan, op je apparaat</string>
-    <string name="settings_ai_face_unavailable">Nog niet beschikbaar</string>
+    <string name="settings_ai_face_downloading">Downloaden…</string>
+    <string name="settings_ai_face_download_failed">Het gezichtsmodel kon niet worden gedownload.</string>
+    <string name="settings_ai_face_download_retry">Zet de schakelaar opnieuw aan om het nog eens te proberen.</string>
+    <string name="settings_ai_face_download_title">Het gezichtsmodel downloaden?</string>
+    <string name="settings_ai_face_download_message">Gezichtsherkenning vereist een modeldownload van %1$s. Het werkt via elke verbinding, maar wifi wordt aanbevolen.</string>
+    <string name="settings_ai_face_download_confirm">Downloaden</string>
+    <string name="settings_ai_face_model_missing">Het gezichtsmodel staat niet op dit apparaat.</string>
     <string name="settings_ai_face_remove_title">Gezichtsgegevens verwijderen?</string>
     <string name="settings_ai_face_remove_message">Gezichtsherkenning is uit. Het gezichtsmodel en alle gedetecteerde gezichten en namen van dit apparaat verwijderen? Exporteer ze eerst vanaf de pagina Herkende gezichten als je een kopie wilt bewaren.</string>
     <string name="settings_ai_face_remove_confirm">Verwijderen</string>
@@ -1516,6 +1549,9 @@
     <string name="settings_ai_indexing_running">Je foto\'s worden doorzocht</string>
     <string name="settings_ai_indexing_waiting">Wachten op het gezichtsmodel</string>
     <string name="settings_ai_indexing_paused">Gepauzeerd</string>
+    <string name="settings_ai_indexing_paused_battery">Gepauzeerd, batterij bijna leeg</string>
+    <string name="settings_ai_indexing_paused_warm">Gepauzeerd, telefoon is warm</string>
+    <string name="settings_ai_indexing_paused_power_save">Gepauzeerd, batterijbesparing staat aan</string>
     <string name="settings_ai_indexing_progress">%1$d van %2$d foto\'s</string>
     <plurals name="settings_ai_indexing_people">
         <item quantity="one">%1$d persoon gevonden</item>
@@ -1530,7 +1566,16 @@
     <string name="people_search_hint">Personen zoeken</string>
     <string name="people_card_subtitle">Blader door je foto\'s per persoon</string>
     <string name="person_set_cover">Als omslag instellen</string>
+    <string name="person_set_cover_confirm_title">Set as cover?</string>
+    <string name="person_set_cover_confirm_body">Use this photo as the cover for this person.</string>
     <string name="person_cover_no_face">Geen gezicht gedetecteerd in die foto.</string>
+    <string name="person_msg_moved">Verplaatst naar een andere persoon</string>
+    <string name="person_msg_removed">Van persoon verwijderd</string>
+    <string name="person_msg_not_person">Gemarkeerd als geen persoon</string>
+    <string name="person_msg_added">Aan persoon toegevoegd</string>
+    <string name="person_msg_merged">Personen samengevoegd</string>
+    <string name="person_msg_renamed">Naam gewijzigd</string>
+    <string name="person_msg_dismissed">Genegeerd</string>
     <string name="people_add_names">Namen toevoegen</string>
     <string name="people_none_named">Je hebt nog niemand een naam gegeven. Open de controle om de personen die de app heeft gevonden een naam te geven, samen te voegen en op te ruimen.</string>
     <string name="people_review_empty">Momenteel geen naamloze personen. Terwijl je foto\'s worden doorzocht, verschijnen hier groepen om een naam te geven en samen te voegen.</string>
@@ -1556,7 +1601,7 @@
     <string name="person_merge_confirm_body">De foto\'s van de gekozen persoon worden bij deze gevoegd, en de twee worden vanaf nu als dezelfde persoon behandeld. Dit kan niet automatisch weer worden gesplitst.</string>
     <string name="person_merge_confirm_title">Personen samenvoegen?</string>
     <string name="person_merge_empty">Er zijn geen andere personen om samen te voegen.</string>
-    <string name="person_merge_name_title">Geef deze een naam als één persoon</string>
+    <string name="person_merge_name_title">Samenvoegen met een persoon</string>
     <string name="person_merge_pick_title">Kies de persoon om samen te voegen</string>
     <string name="person_not_a_person">Dit is geen persoon</string>
     <string name="person_not_a_person_body">De geselecteerde gezichten worden uit Personen verwijderd en bij elke toekomstige scan overgeslagen. Gebruik dit voor standbeelden, posters en vergissingen. De foto\'s zelf worden niet verwijderd.</string>
@@ -1568,18 +1613,22 @@
     <string name="person_picker_empty">Nog geen personen met een naam. Typ hierboven een naam om er een aan te maken.</string>
     <string name="person_picker_search">Zoek of typ een nieuwe naam</string>
     <string name="person_remove_confirm">Verwijderen</string>
-    <string name="person_remove_confirm_body">De geselecteerde foto\'s worden niet meer onder deze persoon getoond en worden bij een nieuwe scan niet opnieuw hier gegroepeerd. De foto\'s zelf worden niet verwijderd.</string>
+    <string name="person_remove_confirm_body">De geselecteerde foto\'s worden bij deze persoon weggehaald, maar hun gezichten blijven in de gezichtsherkenning zodat ze later bij de juiste persoon gegroepeerd kunnen worden. De foto\'s zelf worden niet verwijderd.</string>
     <string name="person_remove_confirm_title">Van deze persoon verwijderen?</string>
     <string name="person_remove_from">Van persoon verwijderen</string>
+    <string name="person_move_to_title">Verplaatsen naar een andere persoon</string>
     <string name="person_suggestion_no">Nee</string>
     <string name="person_suggestion_question">Is dit %1$s?</string>
     <string name="person_suggestion_skip">Overslaan</string>
     <string name="person_suggestion_yes">Ja</string>
     <string name="person_suggestions_empty">Momenteel geen suggesties. Terwijl je foto\'s worden doorzocht, verschijnen hier waarschijnlijke overeenkomsten met de personen die je een naam hebt gegeven, ter bevestiging.</string>
     <string name="person_suggestions_review">Suggesties bekijken</string>
+    <string name="person_suggestions_review_count">Suggesties bekijken (%1$d)</string>
+    <string name="more_options">Meer opties</string>
     <string name="person_suggestions_title">Suggesties</string>
     <string name="settings_ai_export">Gezichtsindex exporteren</string>
     <string name="settings_ai_export_done">Gezichtsindex geëxporteerd (%1$d gezichten).</string>
+    <string name="settings_ai_export_empty">Nog geen gezichten om te exporteren.</string>
     <string name="settings_ai_export_warn_msg">Dit bestand bevat de gezichtsvingerafdrukken die uit je foto\'s zijn berekend. Iedereen die het krijgt, zou een gezichtsmodel van de personen in je bibliotheek kunnen reconstrueren, dus houd het privé en deel het alleen met mensen die je vertrouwt.</string>
     <string name="settings_ai_export_warn_title">Gezichtsindex exporteren?</string>
     <string name="settings_ai_import">Gezichtsindex importeren</string>
@@ -1588,13 +1637,16 @@
     <string name="settings_ai_rescan_confirm_msg">Elke foto wordt opnieuw op gezichten gescand met meer detail, waardoor kleinere en verder weg gelegen gezichten worden gevonden. Je handmatig toegevoegde foto\'s blijven behouden, maar personen worden opnieuw gegroepeerd, dus je moet er misschien een paar opnieuw een naam geven.</string>
     <string name="settings_ai_rescan_confirm_title">Alle foto\'s opnieuw scannen?</string>
     <string name="settings_ai_transfer_failed">Overdracht van gezichtsindex mislukt.</string>
+    <string name="settings_ai_transfer_working">Bezig…</string>
     <string name="settings_ai_import_wrong_account">Deze gezichtsindex hoort bij een ander account en kan hier niet worden geopend.</string>
-    <string name="settings_ai_import_wrong_model">Deze gezichtsindex is gemaakt met een ander gezichtsmodel en kan daarom niet worden geïmporteerd.</string>
+    <string name="settings_ai_import_reattach">Deze index gebruikte een ander model. De %1$d namen erin keren terug naar je foto\'s zodra ze worden gescand.</string>
     <plurals name="person_suggestions_left">
         <item quantity="one">%1$d te bekijken</item>
         <item quantity="other">%1$d te bekijken</item>
     </plurals>
     <string name="news_title">Nieuws</string>
+    <string name="news_banner">Nieuws beschikbaar</string>
+    <string name="news_new_badge">Nieuw</string>
     <string name="news_settings_desc">Berichten en updates over de app</string>
     <string name="news_show_title">Nieuws tonen</string>
     <string name="news_show_desc">Een klein stipje verschijnt als er iets nieuws is</string>
@@ -1602,9 +1654,9 @@
     <string name="news_read_more">Meer lezen</string>
     <string name="news_feedback_heading">Vragen of een bug?</string>
     <string name="news_feedback_body">Stel een vraag of meld een bug.</string>
-    <string name="news_feedback_note">Dit opent de officiële community-Discord van Proton, waar een kleine forumthread wordt gebruikt voor feedback. Photos for Proton is niet verbonden met Proton.</string>
+    <string name="news_feedback_note">Opent de Photos for Proton community-Discord, waar je vragen kunt stellen en bugs kunt melden.</string>
     <string name="news_feedback_button">Feedback sturen</string>
-    <string name="news_feedback_join">Nieuw op de Proton Discord? Word eerst lid</string>
+    <string name="news_feedback_join">Nog niet op de Discord? Doe eerst mee</string>
     <string name="news_feedback_email">Of mail naar %1$s</string>
     <string name="whats_new_metadata_title">Fotodetails bewerken</string>
     <string name="whats_new_metadata_body">Stel de datum en plaats van een foto in en voeg een beschrijving toe, zodat een opname met een verkeerd ingestelde klok of zonder locatie op de juiste plek terechtkomt.</string>
@@ -1622,6 +1674,8 @@
     <string name="metadata_editor_date_mode_filename">Uit bestandsnaam</string>
     <string name="metadata_editor_filename_hint">Stelt de datum van elke foto in op basis van de datum in de bestandsnaam.</string>
     <string name="metadata_editor_filename_apply">Datums herstellen</string>
+    <string name="metadata_editor_filename_single">De bestandsnaam vermeldt %1$s</string>
+    <string name="metadata_editor_filename_use">Deze datum gebruiken</string>
     <plurals name="metadata_editor_filename_count">
         <item quantity="one">%1$d van %2$d geselecteerde foto\'s heeft een datum in de naam</item>
         <item quantity="other">%1$d van %2$d geselecteerde foto\'s hebben een datum in de naam</item>
@@ -1744,13 +1798,47 @@
     <string name="whats_new_dupreview_body">De duplicatenzoeker opent een groep op volledige grootte en toont van elke kopie de grootte, resolutie, datum en plaats, zodat je de juiste houdt.</string>
     <string name="whats_new_filedate_title">Datums herstellen uit de bestandsnaam</string>
     <string name="whats_new_filedate_body">Bij foto\'s die de datum wel in hun naam hebben maar niet in hun gegevens, kun je die datum in bulk instellen, zodat ze op de juiste plek in de tijdlijn terechtkomen.</string>
-    <string name="whats_new_more_250">Daarnaast volgt het Systeemthema nu je telefoon, gaat de back-upbanner uit de weg terwijl je scrolt, en verbruikt Alleen synchroniseren via wifi geen mobiele data meer op de achtergrond.</string>
+    <string name="whats_new_faces_title">Vind mensen op gezicht</string>
+    <string name="whats_new_faces_body">Foto\'s worden gegroepeerd op de gezichten erin, helemaal op je apparaat. Geef iemand een naam om te zoeken en al hun foto\'s te verzamelen, en zet het uit om het altijd te wissen.</string>
+    <string name="whats_new_map_title">De vernieuwde kaart</string>
+    <string name="whats_new_map_body">Een draaibare wereldbol en een opnieuw ontworpen kaart tonen waar je foto\'s zijn gemaakt, met een plaatsverkenner op land en stad. De stijl kies je op de kaart, en tik op een plek om de foto\'s te openen.</string>
+    <string name="whats_new_localonly_title">Gebruik het zonder account</string>
+    <string name="whats_new_localonly_body">Sla het inloggen over om de foto\'s die al op je telefoon staan te bekijken, ordenen en bewerken. Voeg later een Proton-account toe wanneer je ze wilt back-uppen.</string>
+    <string name="whats_new_dupfinder_title">Een duidelijkere duplicaatzoeker</string>
+    <string name="whats_new_dupfinder_body">Elke kopie toont in welk album hij zit, en je kunt sorteren, filteren en er meerdere tegelijk verwijderen.</string>
+    <string name="whats_new_albumcover_title">Grootte van albumomslagen</string>
+    <string name="whats_new_albumcover_body">Kies hoe groot albumomslagen verschijnen, van twee tot vier per rij.</string>
+    <string name="whats_new_denser_title">Een dichtere tijdlijn</string>
+    <string name="whats_new_denser_body">De tijdlijn zoomt nu naar twee dichtere niveaus, tot acht foto\'s per rij.</string>
+    <string name="whats_new_section_new">Nieuw</string>
+    <string name="whats_new_section_improved">Verbeteringen</string>
 
     <!-- Person detail -->
     <string name="person_detail_unnamed">Persoon</string>
+    <string name="person_unsorted">Niet gesorteerd</string>
+    <string name="person_unsorted_hint">Gezichten zonder zekere overeenkomst met een persoon. Selecteer afbeeldingen om een echte persoon eruit te halen, of markeer de rest als geen persoon.</string>
+    <string name="person_unsorted_caption">Overgebleven gezichten die niet konden worden gekoppeld. Open om ze te sorteren.</string>
     <string name="person_rename_title">Naam wijzigen</string>
     <string name="person_rename_hint">Naam</string>
     <string name="permissions_default_gallery_title">Instellen als standaardgalerij</string>
     <string name="permissions_default_gallery_why">Open de systeeminstellingen om deze app in te stellen als standaard voor foto- en videobestanden.</string>
     <string name="permissions_action_open">Openen</string>
+    <string name="sign_in_continue_without_account">Doorgaan zonder account</string>
+    <string name="move_to_folder">Naar map verplaatsen</string>
+    <string name="move_to_folder_new">Nieuwe map</string>
+    <string name="move_to_folder_title">Naar map verplaatsen</string>
+    <string name="move_to_folder_name_hint">Mapnaam</string>
+    <string name="moved_to_folder">Verplaatst naar \"%1$s\"</string>
+    <string name="new_folder">Nieuwe map</string>
+    <string name="new_folder_create">Aanmaken</string>
+    <string name="folder_rename">Map hernoemen</string>
+    <string name="folder_renamed">Hernoemd naar \"%1$s\"</string>
+    <string name="settings_face_excluded">Excluded faces</string>
+    <string name="settings_face_excluded_desc">Review faces you removed from a person or dismissed</string>
+    <string name="face_excluded_empty">Nothing is excluded. Faces you remove from a person, or dismiss as not a person, appear here so you can undo them.</string>
+    <string name="face_excluded_not_person_section">Not this person: %1$s</string>
+    <string name="face_excluded_ignored_section">Ignored (not a person)</string>
+    <string name="face_excluded_undo">Undo</string>
+    <string name="albums_search_hint">Albums zoeken</string>
+    <string name="albums_search_no_results">Geen album komt overeen met de zoekopdracht.</string>
 </resources>

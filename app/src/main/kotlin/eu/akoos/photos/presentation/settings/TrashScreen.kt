@@ -95,7 +95,7 @@ import eu.akoos.photos.presentation.common.EmptyState
 import eu.akoos.photos.presentation.common.SelectionCheckPop
 import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
 import eu.akoos.photos.presentation.common.selectPressScale
-import eu.akoos.photos.presentation.settings.components.SettingsPillHeader
+import eu.akoos.photos.presentation.common.FloatingHeader
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.AppColorsTokens
 import eu.akoos.photos.presentation.theme.FgDim
@@ -103,8 +103,8 @@ import eu.akoos.photos.presentation.theme.FgMute
 import eu.akoos.photos.presentation.theme.FgPrimary
 import eu.akoos.photos.presentation.theme.PillBg
 import eu.akoos.photos.presentation.theme.PillBorder
-
-private val pillShape = RoundedCornerShape(999.dp)
+import eu.akoos.photos.presentation.theme.pillShape
+import eu.akoos.photos.presentation.util.daysUntilPurge
 
 /** Which trash bucket the user is currently viewing. The header pill toggles between
  *  these; selection state and action pills always apply to the active tab only. */
@@ -118,7 +118,11 @@ fun TrashScreen(
     viewModel: TrashViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val isSignedIn by viewModel.isSignedIn.collectAsStateWithLifecycle()
     val colors = AppColors.current
+    // One snapshot per screen open so every cell's retention countdown agrees; day
+    // granularity makes a per-open value fine.
+    val now = remember { System.currentTimeMillis() }
 
     var showDeviceEmptyDialog   by remember { mutableStateOf(false) }
     var showDeviceRestoreDialog by remember { mutableStateOf(false) }
@@ -169,7 +173,8 @@ fun TrashScreen(
             Spacer(Modifier.height(contentTopPad))
 
             // ── Pill rail: tab toggle + action pills ──────────────────────────────────
-            val activeIsDevice = selectedTab == TrashTab.Device
+            // A local-only session has no cloud trash, so it stays pinned to the device tab.
+            val activeIsDevice = selectedTab == TrashTab.Device || !isSignedIn
             val activeHasItems = if (activeIsDevice) {
                 !state.device.apiUnsupported && state.device.items.isNotEmpty()
             } else {
@@ -189,35 +194,37 @@ fun TrashScreen(
             ) {
                 // Toggle pill — flips between Device and Cloud, mirroring the Shared albums pattern.
                 // Fixed-width inner row so swapping labels (Device ↔ Cloud) doesn't reflow the
-                // siblings to the right.
-                item(key = "trash_tab_toggle") {
-                    Row(
-                        modifier = Modifier
-                            .height(38.dp)
-                            .background(colors.chipSelectedBg, pillShape)
-                            .clickable {
-                                selectedTab = if (activeIsDevice) TrashTab.Cloud else TrashTab.Device
-                            }
-                            .padding(horizontal = 14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        Icon(
-                            if (activeIsDevice) Icons.Default.PhoneAndroid else Icons.Default.CloudQueue,
-                            contentDescription = null,
-                            tint = colors.accent,
-                            modifier = Modifier.size(14.dp),
-                        )
-                        Text(
-                            stringResource(
-                                if (activeIsDevice) R.string.trash_section_device else R.string.trash_section_cloud,
-                            ),
-                            color = FgPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium,
-                        )
-                        Icon(
-                            Icons.Default.SwapHoriz, contentDescription = null,
-                            tint = FgDim, modifier = Modifier.size(14.dp),
-                        )
+                // siblings to the right. Hidden for a local-only session, which has no cloud tab.
+                if (isSignedIn) {
+                    item(key = "trash_tab_toggle") {
+                        Row(
+                            modifier = Modifier
+                                .height(38.dp)
+                                .background(colors.chipSelectedBg, pillShape)
+                                .clickable {
+                                    selectedTab = if (activeIsDevice) TrashTab.Cloud else TrashTab.Device
+                                }
+                                .padding(horizontal = 14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            Icon(
+                                if (activeIsDevice) Icons.Default.PhoneAndroid else Icons.Default.CloudQueue,
+                                contentDescription = null,
+                                tint = colors.accent,
+                                modifier = Modifier.size(14.dp),
+                            )
+                            Text(
+                                stringResource(
+                                    if (activeIsDevice) R.string.trash_section_device else R.string.trash_section_cloud,
+                                ),
+                                color = FgPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium,
+                            )
+                            Icon(
+                                Icons.Default.SwapHoriz, contentDescription = null,
+                                tint = FgDim, modifier = Modifier.size(14.dp),
+                            )
+                        }
                     }
                 }
                 // Restore pill — icon-only, confirmation dialog gates the action for both tabs.
@@ -304,10 +311,13 @@ fun TrashScreen(
                         else -> {
                             items(state.device.items, key = { "dev_${it.uri}" }) { item ->
                                 val selected = item.uri in state.device.selectedUris
+                                // OS reports the exact purge instant in seconds (null pre-R / unknown).
+                                val purgeDays = item.dateExpiresSec?.let { daysUntilPurge(it * 1000L, now) }
                                 TrashPhotoCell(
                                     colors          = colors,
                                     selected        = selected,
                                     inSelectionMode = state.device.isSelectionMode,
+                                    purgeDays       = purgeDays,
                                     onClick         = { if (state.device.isSelectionMode) viewModel.toggleDeviceSelection(item.uri) },
                                     onLongClick     = { viewModel.toggleDeviceSelection(item.uri) },
                                 ) {
@@ -373,6 +383,7 @@ fun TrashScreen(
                             items(state.cloud.items, key = { "cloud_${it.linkId}" }) { item ->
                                 val selected = item.linkId in state.cloud.selectedLinkIds
                                 val decryptedUri = state.cloud.decryptedThumbnails[item.linkId]
+                                // Proton Drive trash never auto-purges (manual delete only), so cloud cells show no countdown.
                                 TrashPhotoCell(
                                     colors          = colors,
                                     selected        = selected,
@@ -393,7 +404,7 @@ fun TrashScreen(
             }
         }
 
-        SettingsPillHeader(title = stringResource(R.string.trash_title), onBack = onBack)
+        FloatingHeader(title = stringResource(R.string.trash_title), onBack = onBack)
     }
 
     if (showDeviceRestoreDialog) {
@@ -559,6 +570,7 @@ private fun TrashPhotoCell(
     colors: AppColorsTokens,
     selected: Boolean,
     inSelectionMode: Boolean,
+    purgeDays: Int? = null,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
     content: @Composable () -> Unit,
@@ -573,6 +585,24 @@ private fun TrashPhotoCell(
             .then(if (selected) Modifier.border(2.dp, colors.accent, RoundedCornerShape(8.dp)) else Modifier),
     ) {
         content()
+        // Retention countdown chip. Lives on the stable cell Box rather than inside content(),
+        // so it survives a cloud thumbnail swapping its placeholder for the decrypted image.
+        if (purgeDays != null) {
+            val label = if (purgeDays == 0) {
+                stringResource(R.string.trash_deletes_soon)
+            } else {
+                pluralStringResource(R.plurals.trash_deletes_in_days, purgeDays, purgeDays)
+            }
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(5.dp)
+                    .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(4.dp))
+                    .padding(horizontal = 5.dp, vertical = 2.dp),
+            ) {
+                Text(label, color = Color.White, fontSize = 9.sp, maxLines = 1)
+            }
+        }
         if (inSelectionMode) {
             Box(Modifier.padding(4.dp).size(20.dp).align(Alignment.TopStart)) {
                 Box(

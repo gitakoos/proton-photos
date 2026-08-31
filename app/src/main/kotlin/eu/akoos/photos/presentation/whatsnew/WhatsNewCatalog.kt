@@ -33,11 +33,15 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.Crop
+import androidx.compose.material.icons.filled.DensitySmall
 import androidx.compose.material.icons.filled.Difference
 import androidx.compose.material.icons.filled.SaveAlt
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Face
+import androidx.compose.material.icons.filled.PhoneAndroid
+import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.GroupAdd
 import androidx.compose.material.icons.filled.HdrOn
@@ -50,12 +54,23 @@ import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.ui.graphics.vector.ImageVector
 import eu.akoos.photos.R
 
-/** One feature highlight fed into the pager: its icon chip and strings. */
+/** One feature highlight fed into the pager: its icon chip, strings, and which section it sits under. */
 internal class WhatsNewFeature(
     val icon: ImageVector,
     val titleRes: Int,
     val bodyRes: Int,
+    val category: WhatsNewCategory = WhatsNewCategory.New,
 )
+
+/**
+ * Which section a feature sits under, mirroring the release notes' split so a reader sees at a glance
+ * what is brand new versus what got better. A release whose cards are all one category shows no
+ * section labels, so older entries render exactly as before.
+ */
+internal enum class WhatsNewCategory(val titleRes: Int) {
+    New(R.string.whats_new_section_new),
+    Improved(R.string.whats_new_section_improved),
+}
 
 /**
  * A release's headline item, drawn as a taller card on a page of its own because it needs more than
@@ -97,19 +112,21 @@ internal data class WhatsNewRelease(
  * fails if a card is repeated from an older entry.
  */
 internal val WhatsNewReleases: List<WhatsNewRelease> = listOf(
+    // NOTE for the 2.5.0 STABLE release: prepend WhatsNew250EarlierPreviews (below) to this card's
+    // features so a user updating from 2.4.0 meets the whole of 2.5.0 at once. Each PREVIEW keeps only
+    // its own new cards, so this card lists the newest preview's cards alone. Smaller changes are their
+    // own cards too rather than a closing line, so they are swiped through and actually read.
     WhatsNewRelease(
         version = "2.5.0",
         hero = null,
         features = listOf(
-            WhatsNewFeature(Icons.Default.Brush, R.string.whats_new_editor_title, R.string.whats_new_editor_body),
-            WhatsNewFeature(Icons.Default.GridView, R.string.whats_new_collage_title, R.string.whats_new_collage_body),
-            WhatsNewFeature(Icons.Default.SaveAlt, R.string.whats_new_export_title, R.string.whats_new_export_body),
-            WhatsNewFeature(Icons.Default.Movie, R.string.whats_new_video_title, R.string.whats_new_video_body),
-            WhatsNewFeature(Icons.Default.AutoAwesome, R.string.whats_new_smooth_title, R.string.whats_new_smooth_body),
-            WhatsNewFeature(Icons.Default.Difference, R.string.whats_new_dupreview_title, R.string.whats_new_dupreview_body),
-            WhatsNewFeature(Icons.Default.Schedule, R.string.whats_new_filedate_title, R.string.whats_new_filedate_body),
+            WhatsNewFeature(Icons.Default.Face, R.string.whats_new_faces_title, R.string.whats_new_faces_body, WhatsNewCategory.New),
+            WhatsNewFeature(Icons.Default.PhoneAndroid, R.string.whats_new_localonly_title, R.string.whats_new_localonly_body, WhatsNewCategory.New),
+            WhatsNewFeature(Icons.Default.Public, R.string.whats_new_map_title, R.string.whats_new_map_body, WhatsNewCategory.Improved),
+            WhatsNewFeature(Icons.Default.Difference, R.string.whats_new_dupfinder_title, R.string.whats_new_dupfinder_body, WhatsNewCategory.Improved),
+            WhatsNewFeature(Icons.Default.GridView, R.string.whats_new_albumcover_title, R.string.whats_new_albumcover_body, WhatsNewCategory.Improved),
+            WhatsNewFeature(Icons.Default.DensitySmall, R.string.whats_new_denser_title, R.string.whats_new_denser_body, WhatsNewCategory.Improved),
         ),
-        moreRes = R.string.whats_new_more_250,
     ),
     WhatsNewRelease(
         version = "2.4.1",
@@ -154,6 +171,23 @@ internal val WhatsNewReleases: List<WhatsNewRelease> = listOf(
 
 /** The release the post-update screen announces, and the one Settings opens by default. */
 internal val LatestWhatsNewRelease: WhatsNewRelease get() = WhatsNewReleases.first()
+
+/**
+ * The cards that shipped across the earlier 2.5.0 preview builds (test1 / test2). They are held out of
+ * the 2.5.0 card above so each PREVIEW announces only what THAT preview added; prepend them to the
+ * 2.5.0 card's features for the STABLE release, where someone updating from 2.4.0 meets all of 2.5.0
+ * at once. Referencing the strings here also keeps them from reading as unused until then.
+ */
+@Suppress("unused")
+internal val WhatsNew250EarlierPreviews: List<WhatsNewFeature> = listOf(
+    WhatsNewFeature(Icons.Default.Brush, R.string.whats_new_editor_title, R.string.whats_new_editor_body),
+    WhatsNewFeature(Icons.Default.GridView, R.string.whats_new_collage_title, R.string.whats_new_collage_body),
+    WhatsNewFeature(Icons.Default.SaveAlt, R.string.whats_new_export_title, R.string.whats_new_export_body),
+    WhatsNewFeature(Icons.Default.Movie, R.string.whats_new_video_title, R.string.whats_new_video_body),
+    WhatsNewFeature(Icons.Default.AutoAwesome, R.string.whats_new_smooth_title, R.string.whats_new_smooth_body),
+    WhatsNewFeature(Icons.Default.Difference, R.string.whats_new_dupreview_title, R.string.whats_new_dupreview_body),
+    WhatsNewFeature(Icons.Default.Schedule, R.string.whats_new_filedate_title, R.string.whats_new_filedate_body),
+)
 
 /** Looks up a release by its version string, falling back to the newest for an unknown one. */
 internal fun whatsNewReleaseFor(version: String?): WhatsNewRelease =

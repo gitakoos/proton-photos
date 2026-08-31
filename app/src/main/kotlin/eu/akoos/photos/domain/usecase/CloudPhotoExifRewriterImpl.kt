@@ -24,6 +24,7 @@ package eu.akoos.photos.domain.usecase
 
 import android.content.Context
 import android.graphics.BitmapFactory
+import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.util.Log
 import androidx.exifinterface.media.ExifInterface
@@ -32,6 +33,7 @@ import eu.akoos.photos.data.repository.drive.UploadXAttrMetadata
 import eu.akoos.photos.util.ExifDateFormat
 import eu.akoos.photos.util.ExifHelper
 import eu.akoos.photos.util.MetadataStripConfig
+import eu.akoos.photos.util.Mp4CreationTime
 import eu.akoos.photos.util.isExifWritableImageMime
 import java.io.File
 import java.time.Instant
@@ -48,6 +50,11 @@ private const val TAG = "CloudExifRewriter"
  * the xAttr for the corrected copy. The xAttr mirrors the upload path's image branch
  * ([eu.akoos.photos.domain.usecase.UploadPendingUseCase]'s metadata builder): the ORIGINAL orientation
  * and upright dimensions, the original camera and subject-area, and the new capture time and place.
+ *
+ * A video takes the DATE only. Its date lives in the container's mvhd rather than in EXIF, so the file
+ * edit stamps that box and does no EXIF work, and the xAttr mirrors the upload path's video branch: the
+ * RAW encoded stream dimensions and duration, unswapped, with no camera, place or capture-time block
+ * (Drive reads a video's rotation from the container and its capture time from the upload's own field).
  */
 @Singleton
 class CloudPhotoExifRewriterImpl @Inject constructor(
@@ -65,8 +72,14 @@ class CloudPhotoExifRewriterImpl @Inject constructor(
         copyright: String?,
     ): UploadXAttrMetadata {
         val fileUri = Uri.fromFile(file).toString()
-        if (isExifWritableImageMime(mimeType)) {
-            applyInFileEdits(file, fileUri, writeCaptureMs, location, description, artist, copyright)
+        when {
+            isExifWritableImageMime(mimeType) ->
+                applyInFileEdits(file, fileUri, writeCaptureMs, location, description, artist, copyright)
+            // A video takes the date only, and it lives in the container's mvhd, not in EXIF, so stamp
+            // that box and do no EXIF work at all: no place, no text. writeCaptureMs is null for a place-
+            // or text-only edit, which is a no-op on a video, so nothing is stamped then.
+            writeCaptureMs != null && WriteLocalPhotoMetadataUseCase.isMvhdStampableMime(mimeType) ->
+                Mp4CreationTime.stamp(file, writeCaptureMs)
         }
         // The in-file edits leave orientation, dimensions, camera and subject-area untouched, so the
         // xAttr reads the same values whether it runs before or after them; derive it from the corrected
@@ -80,6 +93,19 @@ class CloudPhotoExifRewriterImpl @Inject constructor(
         xAttrCaptureMs: Long,
         location: LocationEdit,
     ): UploadXAttrMetadata {
+        // A video carries no EXIF Camera/Location block, and Drive reads its display rotation from the
+        // container itself, so the xAttr sends the RAW encoded stream dimensions UNSWAPPED and its
+        // duration, with no camera, place or capture-time block at all, the same shape the upload path
+        // sends for a video. The capture date still reaches Drive through the upload's own capture-time
+        // field, so a video keeps its timeline position without an xAttr Camera block.
+        if (WriteLocalPhotoMetadataUseCase.isVideoMime(mimeType)) {
+            val media = videoMediaInfo(uri)
+            return UploadXAttrMetadata(
+                displayWidth = media.width.takeIf { it > 0 },
+                displayHeight = media.height.takeIf { it > 0 },
+                durationMillis = media.durationMs.takeIf { it > 0 },
+            )
+        }
         // Read the metadata so the xAttr keeps the source orientation, dimensions, camera and
         // subject-area; only the capture time and place are allowed to change here.
         val meta = ExifHelper.readMetadata(context, uri)
@@ -185,6 +211,33 @@ class CloudPhotoExifRewriterImpl @Inject constructor(
         val h = opts.outHeight.takeIf { it > 0 } ?: exifHeight ?: 0
         return w to h
     }
+
+    /** Raw encoded stream width/height and duration read from [uri]'s container through
+     *  [MediaMetadataRetriever], for a video xAttr. Never throws; a value it cannot read stays 0, so the
+     *  caller omits that field rather than reporting a zero. Reads through the resolver so it serves both
+     *  a downloaded-original file uri and a device content uri. */
+    private fun videoMediaInfo(uri: String): VideoMediaInfo {
+        var width = 0
+        var height = 0
+        var durationMs = 0L
+        runCatching {
+            // Released explicitly: MediaMetadataRetriever implements AutoCloseable only from API 29, so a
+            // `use` block throws at close time on every older device and leaks the native retriever there.
+            val retriever = MediaMetadataRetriever()
+            try {
+                retriever.setDataSource(context, Uri.parse(uri))
+                width = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 0
+                height = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0
+                durationMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+            } finally {
+                runCatching { retriever.release() }
+            }
+        }
+        return VideoMediaInfo(width, height, durationMs)
+    }
+
+    /** Raw stream dimensions and duration a video reports, each 0 when it could not be read. */
+    private data class VideoMediaInfo(val width: Int, val height: Int, val durationMs: Long)
 
     /** Reads EXIF SubjectArea (3 or 4 comma-separated ints) into the [Top, Left, Bottom, Right]
      *  rectangle Drive's xAttr SubjectCoordinates expects, matching the upload path. Null when absent

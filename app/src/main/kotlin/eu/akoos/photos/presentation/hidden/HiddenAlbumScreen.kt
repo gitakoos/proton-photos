@@ -72,6 +72,7 @@ import androidx.compose.ui.res.stringResource
 import eu.akoos.photos.R
 import eu.akoos.photos.presentation.common.CloudPhotoCell
 import eu.akoos.photos.presentation.common.ConfirmSheet
+import eu.akoos.photos.presentation.common.FloatingHeader
 import eu.akoos.photos.presentation.common.IconBubble
 import eu.akoos.photos.presentation.common.ReturnToViewerPhoto
 import eu.akoos.photos.presentation.common.SecureScreenEffect
@@ -587,7 +588,7 @@ fun HiddenAlbumScreen(
             // selecting, so the screen belongs to the selection alone and its back arrow cannot
             // leave the vault mid-selection.
             if (!state.isSelectionMode) {
-                eu.akoos.photos.presentation.memories.FloatingMemoriesHeader(
+                FloatingHeader(
                     title = stringResource(R.string.hidden_photos_title),
                     onBack = onBack,
                 )
@@ -867,7 +868,7 @@ private fun HiddenAlbumCard(
             onClick = onUnhide,
             diameter = 32.dp,
             iconSize = 17.dp,
-            background = PillBgOpaque,
+            background = PillBg,
             borderColor = PillBorder,
             tint = Accent,
             modifier = Modifier.align(Alignment.TopEnd).padding(6.dp),
@@ -904,7 +905,7 @@ private fun HiddenFolderCard(
             onClick = onUnhide,
             diameter = 32.dp,
             iconSize = 17.dp,
-            background = PillBgOpaque,
+            background = PillBg,
             borderColor = PillBorder,
             tint = Accent,
             modifier = Modifier.align(Alignment.TopEnd).padding(6.dp),

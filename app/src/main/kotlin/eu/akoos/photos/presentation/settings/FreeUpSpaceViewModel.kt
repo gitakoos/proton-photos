@@ -60,8 +60,6 @@ class FreeUpSpaceViewModel @Inject constructor(
     private val freeUpSpace: FreeUpSpaceUseCase,
     private val syncStateRepo: SyncStateRepository,
     private val localRepo: eu.akoos.photos.domain.repository.LocalMediaRepository,
-    private val cloudRepo: eu.akoos.photos.domain.repository.DrivePhotoRepository,
-    private val reconcile: eu.akoos.photos.domain.usecase.ReconcileSyncStateUseCase,
     private val accountManager: AccountManager,
 ) : ViewModel() {
 
@@ -132,21 +130,20 @@ class FreeUpSpaceViewModel @Inject constructor(
             try {
                 // Check against Drive before deleting anything. This reclaims every backed-up photo,
                 // including copies the user downloaded back, so acting on a sync_state that nothing
-                // has verified lately could take a last copy. One listing refresh plus one reconcile
-                // pass is the entire check: the refresh drops rows for photos no longer on Drive,
-                // reconcile demotes their sync_state off SYNCED, and the sweep below only ever
-                // touches what is still SYNCED afterwards. A per-photo cloud call would ask thousands
-                // of times what these two ask once, and would lose reconcile's grace window for
-                // uploads the listing has not caught up with yet.
+                // has verified lately could take a last copy. The check confirms only the on-device
+                // candidates' cloud links are active right now (one batched call per 50), which is
+                // bounded by the on-device count. The refresh-plus-reconcile pass this replaced walked
+                // the entire Drive volume first, so on a large library it ran past the point the sweep
+                // could start and nothing was reclaimed.
                 //
-                // A failed refresh is deliberately NOT swallowed as best-effort: sweeping against a
-                // listing that could not be refreshed is the situation this exists to prevent, so it
-                // falls through to the catch and the sweep does not run.
-                cloudRepo.refreshCloudPhotos(userId, force = true)
-                reconcile(userId).collect {}
-                // Re-read after the check: the refresh can have dropped rows, so the set swept is the
-                // verified one and the grid settles onto it before a single file is deleted.
-                val verified = freeUpSpace.candidates(userId, Long.MAX_VALUE, protectDownloaded = false)
+                // A thrown transient error (a rate-limited verification batch) is deliberately NOT
+                // swallowed: sweeping against links that could not be confirmed is the situation this
+                // exists to prevent, so it falls through to the catch and the sweep does not run.
+                val candidates = freeUpSpace.candidates(userId, Long.MAX_VALUE, protectDownloaded = false)
+                val verified = freeUpSpace.verifyActiveBackups(userId, candidates)
+                // Settle the grid onto the confirmed set before a single file is deleted: only links
+                // that came back active survive here, so a candidate whose cloud copy is gone or
+                // trashed is dropped rather than reclaimed.
                 _uiState.update {
                     it.copy(
                         verifying = false,
@@ -156,10 +153,8 @@ class FreeUpSpaceViewModel @Inject constructor(
                         total = verified.size,
                     )
                 }
-                val result = freeUpSpace(
-                    userId = userId,
-                    olderThanMs = Long.MAX_VALUE,
-                    protectDownloaded = false,
+                val result = freeUpSpace.reclaimCandidates(
+                    candidates = verified,
                     onProgress = { done, total ->
                         _uiState.update { it.copy(done = done, total = total) }
                     },

@@ -94,6 +94,7 @@
     <string name="sign_in_unofficial_tag">Unofficial third-party app, not affiliated with Proton AG</string>
     <string name="sign_in_button">Sign in</string>
     <string name="sign_in_footer">Secure login with your Proton account</string>
+    <string name="sign_in_continue_without_account">Continue without account</string>
 
     <!-- Gallery -->
     <string name="gallery_empty_title">No photos yet</string>
@@ -161,6 +162,8 @@
     <string name="metadata_editor_date_mode_filename">From filename</string>
     <string name="metadata_editor_filename_hint">Sets each photo\'s date from the date written in its filename.</string>
     <string name="metadata_editor_filename_apply">Fix dates</string>
+    <string name="metadata_editor_filename_single">Its filename says %1$s</string>
+    <string name="metadata_editor_filename_use">Use this date</string>
     <plurals name="metadata_editor_filename_count">
         <item quantity="one">%1$d of %2$d selected photos has a date in its name</item>
         <item quantity="other">%1$d of %2$d selected photos have a date in their name</item>
@@ -394,6 +397,13 @@
     <string name="gallery_share_cloud_warning_continue">Share</string>
     <string name="gallery_add_to_album">Add to album</string>
     <string name="gallery_add_to_person">Add to person</string>
+    <string name="move_to_folder">Move to folder</string>
+    <string name="move_to_folder_new">New folder</string>
+    <string name="move_to_folder_title">Move to folder</string>
+    <string name="move_to_folder_name_hint">Folder name</string>
+    <string name="moved_to_folder">Moved to \"%1$s\"</string>
+    <string name="new_folder">New folder</string>
+    <string name="new_folder_create">Create</string>
     <string name="offline_make_available">Make available offline</string>
     <string name="offline_remove">Remove from offline</string>
     <string name="offline_card_subtitle">Photos saved for offline viewing</string>
@@ -533,6 +543,14 @@
     <string name="bg_sync_service_channel_desc">Lets the app react to new photos in the background.</string>
     <string name="bg_sync_service_title">Photo backup</string>
     <string name="bg_sync_service_text">Watching for new photos</string>
+    <!-- Face-indexing foreground service. LOW-importance progress notification shown while the
+         one-time People face grouping runs in the background. -->
+    <string name="face_index_service_channel_name">Face grouping</string>
+    <string name="face_index_service_channel_desc">Shows progress while photos are grouped by face.</string>
+    <string name="face_index_service_title">Grouping faces</string>
+    <string name="face_index_service_progress">%1$d of %2$d</string>
+    <string name="face_index_service_waiting">Waiting to continue</string>
+    <string name="face_index_service_stop">Stop</string>
 
     <!-- Delete bottom sheet -->
     <string name="delete_album_container_warning">This deletes the album but keeps your photos in Proton Drive.</string>
@@ -565,6 +583,7 @@
     <string name="settings_free_up_interval">Keep on device for</string>
     <string name="settings_free_up_interval_desc">How long a photo stays on this device after it is backed up.</string>
     <string name="settings_account_section">Account</string>
+    <string name="settings_sign_in_to_proton">Sign in to Proton</string>
     <string name="settings_sign_out">Sign out</string>
     <string name="settings_sign_out_desc">End this session on this device.</string>
     <string name="sign_out_dialog_title">Sign out?</string>
@@ -641,6 +660,12 @@
     <string name="trash_cloud_emptied">Emptied cloud trash</string>
     <string name="trash_cloud_empty_partial">Removed %1$d, %2$d couldn\'t be removed</string>
     <string name="trash_cloud_empty_failed">Couldn\'t empty cloud trash</string>
+    <!-- Retention countdown badge, device + cloud items -->
+    <plurals name="trash_deletes_in_days">
+        <item quantity="one">Deletes in %1$d day</item>
+        <item quantity="other">Deletes in %1$d days</item>
+    </plurals>
+    <string name="trash_deletes_soon">Deleting soon</string>
     <!-- Trash screen — device + cloud shared chrome -->
     <string name="trash_title">Recently Deleted</string>
     <string name="trash_restore">Restore</string>
@@ -698,7 +723,13 @@
     <string name="settings_ai_ocr_remove_keep">Keep</string>
     <string name="settings_ai_face_toggle">Face recognition</string>
     <string name="settings_ai_face_desc">Group photos by the people in them, on your device</string>
-    <string name="settings_ai_face_unavailable">Not available yet</string>
+    <string name="settings_ai_face_downloading">Downloading…</string>
+    <string name="settings_ai_face_download_failed">The face model could not be downloaded.</string>
+    <string name="settings_ai_face_download_retry">Turn the switch on again to retry.</string>
+    <string name="settings_ai_face_download_title">Download the face model?</string>
+    <string name="settings_ai_face_download_message">Face recognition needs a %1$s model download. It works on any connection, though Wi-Fi is recommended.</string>
+    <string name="settings_ai_face_download_confirm">Download</string>
+    <string name="settings_ai_face_model_missing">The face model isn\'t on this device.</string>
     <string name="settings_ai_face_remove_title">Remove face data?</string>
     <string name="settings_ai_face_remove_message">Face recognition is off. Remove the face model and every detected face and name from this device? Export them from the Recognized faces page first if you want to keep a copy.</string>
     <string name="settings_ai_face_remove_confirm">Remove</string>
@@ -712,11 +743,20 @@
     <string name="settings_face_clear_desc">Remove every found person and all face data from this phone.</string>
     <string name="settings_face_export_desc">Save a private copy you can reuse on another device.</string>
     <string name="settings_face_import_desc">Load a face index you saved before.</string>
+    <string name="settings_face_excluded">Excluded faces</string>
+    <string name="settings_face_excluded_desc">Review faces you removed from a person or dismissed</string>
+    <string name="face_excluded_empty">Nothing is excluded. Faces you remove from a person, or dismiss as not a person, appear here so you can undo them.</string>
+    <string name="face_excluded_not_person_section">Not this person: %1$s</string>
+    <string name="face_excluded_ignored_section">Ignored (not a person)</string>
+    <string name="face_excluded_undo">Undo</string>
     <string name="settings_ai_import_confirm_title">Import face index?</string>
     <string name="settings_ai_import_confirm_msg">This adds the faces and people from the file to this phone and regroups them. Your current faces are kept.</string>
     <string name="settings_ai_indexing_running">Scanning your photos</string>
     <string name="settings_ai_indexing_waiting">Waiting for the face model</string>
     <string name="settings_ai_indexing_paused">Paused</string>
+    <string name="settings_ai_indexing_paused_battery">Paused, battery low</string>
+    <string name="settings_ai_indexing_paused_warm">Paused, phone is warm</string>
+    <string name="settings_ai_indexing_paused_power_save">Paused, power saver is on</string>
     <string name="settings_ai_indexing_progress">%1$d of %2$d photos</string>
     <plurals name="settings_ai_indexing_people">
         <item quantity="one">%1$d person found</item>
@@ -730,10 +770,12 @@
     <string name="settings_ai_export_warn_title">Export face index?</string>
     <string name="settings_ai_export_warn_msg">This file holds the face fingerprints computed from your photos. Anyone who gets it could rebuild a face model of the people in your library, so keep it private and share it only with people you trust.</string>
     <string name="settings_ai_export_done">Face index exported (%1$d faces).</string>
+    <string name="settings_ai_export_empty">No faces to export yet.</string>
     <string name="settings_ai_import_done">Imported %1$d faces, %2$d people.</string>
     <string name="settings_ai_transfer_failed">Face index transfer failed.</string>
+    <string name="settings_ai_transfer_working">Working…</string>
     <string name="settings_ai_import_wrong_account">This face index belongs to a different account and cannot be opened here.</string>
-    <string name="settings_ai_import_wrong_model">This face index was made with a different face model, so it cannot be imported.</string>
+    <string name="settings_ai_import_reattach">This index used a different model. Its %1$d names will return to your photos as they are scanned.</string>
     <string name="settings_ai_rescan_confirm_title">Rescan all photos?</string>
     <string name="settings_ai_rescan_confirm_msg">Every photo is scanned for faces again at higher detail, which finds smaller and more distant faces. Your manually added photos are kept, but people are regrouped, so you may need to name a few again.</string>
     <string name="settings_ai_clear">Clear face data</string>
@@ -771,6 +813,9 @@
     <string name="settings_strip_software">Remove software info</string>
     <string name="settings_strip_software_desc">Strip software, comment, artist and copyright fields</string>
     <string name="settings_strip_authorship">Remove artist and copyright</string>
+    <string name="settings_strip_share">Remove metadata when sharing</string>
+    <string name="settings_strip_share_title">Metadata when sharing</string>
+    <string name="settings_strip_share_desc">Removes the selected fields from the shared copy only, never your original. For videos, only the location is removed.</string>
     <string name="settings_strip_format_note">Some formats, such as HEIC, cannot store metadata changes. When metadata removal is on, the uploaded copy of such a photo is converted to JPEG so the selected data is actually removed. The photo on your device stays unchanged.</string>
     <string name="settings_compress_upload_desc">Uploads a lighter version to save space. The copy on the phone stays full quality unless the local mirror below is on.</string>
     <string name="settings_compress_photos">Compress photos</string>
@@ -832,6 +877,7 @@
     <string name="timeline_filter_per_album_hint">Hide individual albums from the timeline. The switch above hides them all at once.</string>
     <string name="timeline_filter_hidden_album">Hidden album</string>
     <string name="timeline_filter_albums_header">Drive albums</string>
+    <string name="timeline_filter_more_settings">Further settings</string>
     <string name="settings_telemetry">Telemetry</string>
     <string name="settings_telemetry_desc">Controlled by your Proton account settings. Open account.proton.me to change.</string>
     <string name="settings_telemetry_on">On</string>
@@ -915,6 +961,11 @@
     <string name="palette_ruby">Ruby</string>
 
     <!-- AMOLED pure-black dark theme -->
+    <string name="settings_map_style">Classic map</string>
+    <string name="settings_map_style_summary">Use the classic OpenStreetMap tile map instead of the modern world map.</string>
+    <string name="map_style_prompt_title">Choose your map style</string>
+    <string name="map_style_modern">World map</string>
+    <string name="map_style_modern_summary">A modern globe you can spin to your places.</string>
     <string name="settings_amoled_black">Pure black (AMOLED)</string>
     <string name="settings_amoled_black_summary">Use true black backgrounds in dark mode to save power on OLED screens.</string>
 
@@ -1005,6 +1056,8 @@
     <string name="albums_delete_would_lose_body">People you shared this album with added photos that are not in your library. Deleting the album deletes those photos as well.</string>
     <string name="albums_delete_would_lose_action">Delete anyway</string>
     <string name="albums_renamed_to">Renamed to \"%1$s\"</string>
+    <string name="folder_rename">Rename folder</string>
+    <string name="folder_renamed">Renamed to \"%1$s\"</string>
 
     <!-- Share -->
     <string name="share_remove_member">Remove</string>
@@ -1073,9 +1126,10 @@
     <string name="filter_title">Filter</string>
     <string name="filter_type_label">Type</string>
     <string name="filter_type_videos">Videos</string>
-    <string name="filter_sync_label">Sync</string>
-    <string name="filter_sync_local">Local only</string>
+    <string name="filter_sync_label">Sync status</string>
+    <string name="filter_sync_local">On device</string>
     <string name="filter_sync_backedup">Backed up</string>
+    <string name="filter_sync_cloud">Cloud only</string>
     <string name="filter_year_label">Year</string>
     <string name="filter_any">Any</string>
     <string name="filter_whole_month">Whole month</string>
@@ -1084,6 +1138,10 @@
     <!-- Notification permission rationale -->
     <string name="notifications_blocked_snackbar">Notifications are off. You won\'t see upload or download progress.</string>
     <string name="notifications_blocked_open_settings">Settings</string>
+
+    <!-- Settings search -->
+    <string name="settings_search_hint">Search settings</string>
+    <string name="settings_search_no_results">No matching settings</string>
 
     <!-- Search -->
     <string name="search_title">Search</string>
@@ -1098,13 +1156,15 @@
 
     <!-- Map -->
     <string name="map_title">Map</string>
+    <string name="map_vector_title">World map</string>
     <string name="map_card_title">Map</string>
     <string name="map_card_subtitle_empty">No located photos yet</string>
     <string name="map_card_calendar_subtitle">A calendar view of your photos</string>
     <string name="map_search_places">Search places</string>
     <string name="map_search_no_places">No places yet</string>
+    <!-- Places -->
+    <string name="places_title">Places</string>
     <string name="map_osm_attribution" translatable="false">© OpenStreetMap contributors</string>
-
     <!-- Location detail -->
     <string name="location_save_as_album">Save as album</string>
     <string name="location_save_as_album_confirm_title">Save as album</string>
@@ -1113,14 +1173,18 @@
 
     <!-- Person detail -->
     <string name="person_detail_unnamed">Person</string>
+    <string name="person_unsorted">Unsorted</string>
+    <string name="person_unsorted_hint">Faces that could not be confidently matched to a person. Select photos to move a real person out, or mark the rest as not a person.</string>
+    <string name="person_unsorted_caption">Leftover faces that could not be matched. Open to sort them.</string>
     <string name="person_rename_title">Rename</string>
     <string name="person_rename_hint">Name</string>
     <string name="person_add_photos">Add photos</string>
     <string name="person_add_photos_title">Add to this person</string>
     <string name="person_add_needs_name">Name this person first, then add photos to them.</string>
     <string name="person_remove_from">Remove from person</string>
+    <string name="person_move_to_title">Move to another person</string>
     <string name="person_remove_confirm_title">Remove from this person?</string>
-    <string name="person_remove_confirm_body">The selected photos stop showing under this person and are not grouped here again on a rescan. The photos themselves are not deleted.</string>
+    <string name="person_remove_confirm_body">The selected photos leave this person, but their faces stay in face recognition so they can be grouped with the right person later. The photos themselves are not deleted.</string>
     <string name="person_remove_confirm">Remove</string>
     <string name="person_merge">Merge people</string>
     <string name="person_merge_suggest_title">Might be the same person</string>
@@ -1149,15 +1213,26 @@
     <string name="people_search_hint">Search people</string>
     <string name="people_card_subtitle">Browse your photos by person</string>
     <string name="person_set_cover">Set as cover</string>
+    <string name="person_set_cover_confirm_title">Set as cover?</string>
+    <string name="person_set_cover_confirm_body">Use this photo as the cover for this person.</string>
     <string name="person_cover_no_face">No detected face in that photo.</string>
+    <string name="person_msg_moved">Moved to another person</string>
+    <string name="person_msg_removed">Removed from person</string>
+    <string name="person_msg_not_person">Marked as not a person</string>
+    <string name="person_msg_added">Added to person</string>
+    <string name="person_msg_merged">People merged</string>
+    <string name="person_msg_renamed">Renamed</string>
+    <string name="person_msg_dismissed">Dismissed</string>
     <string name="person_merge_action">Merge</string>
     <string name="person_picker_search">Search or type a new name</string>
     <string name="person_picker_create">Create \"%1$s\"</string>
     <string name="person_picker_empty">No named people yet. Type a name above to create one.</string>
-    <string name="person_merge_name_title">Name these as one person</string>
+    <string name="person_merge_name_title">Merge into a person</string>
     <string name="person_not_a_person_title">Not a person?</string>
     <string name="person_not_a_person_body">The selected faces are dropped from People and skipped on every future scan. Use this for statues, posters and mistakes. The photos themselves are not deleted.</string>
     <string name="person_suggestions_review">Review suggestions</string>
+    <string name="person_suggestions_review_count">Review suggestions (%1$d)</string>
+    <string name="more_options">More options</string>
     <string name="person_suggestions_title">Suggestions</string>
     <string name="person_suggestion_question">Is this %1$s?</string>
     <string name="person_suggestion_yes">Yes</string>
@@ -1473,6 +1548,8 @@
     <string name="settings_backup_how_section">How backup runs</string>
     <string name="settings_theme_palette">Theme &amp; palette</string>
     <string name="settings_privacy_security">Privacy &amp; security</string>
+    <string name="settings_backup_storage_section">Backup &amp; storage</string>
+    <string name="settings_help_about_section">Help &amp; about</string>
     <string name="cd_scroll_to_top">Scroll to top</string>
     <string name="albums_filter_all">All</string>
     <string name="albums_filter_cloud">Cloud</string>
@@ -1482,6 +1559,7 @@
     <string name="albums_filter_remember_last">Remember last-used filter</string>
     <string name="albums_filter_remember_last_summary">Open albums with the filter you last selected</string>
     <string name="albums_sort_heading">Sort by</string>
+    <string name="albums_cover_size_heading">Cover size</string>
     <string name="albums_sort_custom">Custom</string>
     <string name="albums_sort_name">Name (A to Z)</string>
     <string name="albums_sort_activity">Last activity</string>
@@ -1682,6 +1760,8 @@
 
     <!-- News feed -->
     <string name="news_title">News</string>
+    <string name="news_banner">New news available</string>
+    <string name="news_new_badge">New</string>
     <string name="news_settings_desc">Messages and updates about the app</string>
     <string name="news_show_title">Show news</string>
     <string name="news_show_desc">A small dot shows when there is something new</string>
@@ -1689,9 +1769,9 @@
     <string name="news_read_more">Read more</string>
     <string name="news_feedback_heading">Questions or a bug?</string>
     <string name="news_feedback_body">Ask a question or report a bug.</string>
-    <string name="news_feedback_note">This opens the official Proton community Discord, where a small forum thread is used for feedback. Photos for Proton is not affiliated with Proton.</string>
+    <string name="news_feedback_note">This opens the Photos for Proton community Discord, where you can ask questions and report bugs.</string>
     <string name="news_feedback_button">Send feedback</string>
-    <string name="news_feedback_join">New to the Proton Discord? Join first</string>
+    <string name="news_feedback_join">Not on the Discord yet? Join first</string>
     <string name="news_feedback_email">Or email %1$s</string>
     <string name="whats_new_metadata_title">Edit a photo\'s details</string>
     <string name="whats_new_metadata_body">Set a photo\'s date and place, and add a description, so a shot taken on the wrong clock or with no location lands where it belongs.</string>
@@ -1721,10 +1801,24 @@
     <string name="whats_new_dupreview_body">The duplicate finder opens a group at full size and shows each copy\'s size, resolution, date and place, so you keep the right one.</string>
     <string name="whats_new_filedate_title">Fix dates from the filename</string>
     <string name="whats_new_filedate_body">Photos that carry the date in their name but not in their data can have it set in bulk, so they land in the right place on the timeline.</string>
-    <string name="whats_new_more_250">Plus the System theme now follows your phone, the backup banner gets out of the way as you scroll, and Sync on Wi-Fi only no longer uses mobile data in the background.</string>
+    <string name="whats_new_faces_title">Find people by face</string>
+    <string name="whats_new_faces_body">Photos are grouped by the faces in them, all on your device. Name someone to search and gather every photo of them, and turn it off to wipe it whenever you want.</string>
+    <string name="whats_new_map_title">The map, reworked</string>
+    <string name="whats_new_map_body">A spinnable world globe and a redesigned map show where your photos were taken, with a place browser by country and city. Choose the style on the map, and tap a spot to open its photos.</string>
+    <string name="whats_new_localonly_title">Use it without an account</string>
+    <string name="whats_new_localonly_body">Skip signing in to browse, organise and edit the photos already on your phone. Add a Proton account later whenever you want to back them up.</string>
+    <string name="whats_new_dupfinder_title">A clearer duplicate finder</string>
+    <string name="whats_new_dupfinder_body">Each copy shows which album it is in, and you can sort, filter and delete several at once.</string>
+    <string name="whats_new_albumcover_title">Set your album cover size</string>
+    <string name="whats_new_albumcover_body">Choose how large album covers appear, from two up to four across.</string>
+    <string name="whats_new_denser_title">A denser timeline</string>
+    <string name="whats_new_denser_body">The timeline zooms to two denser levels now, fitting up to eight photos per row.</string>
+    <string name="whats_new_section_new">New</string>
+    <string name="whats_new_section_improved">Improved</string>
     <string name="whats_new_more_240">Plus copied links stay hidden in the clipboard preview, file sizes match everywhere they appear, automatic free-up checks with Drive before removing a copy from your phone, and large albums and selections hold together better.</string>
     <string name="duplicates_filter_identical">Identical</string>
     <string name="duplicates_filter_similar">Similar</string>
+    <string name="duplicates_filter_match_label">Match type</string>
     <!-- Collage -->
     <string name="collage_save">Save</string>
     <string name="collage_aspect_original">Original</string>
@@ -1749,4 +1843,6 @@
     <string name="permissions_default_gallery_title">Set as default gallery</string>
     <string name="permissions_default_gallery_why">Open the system settings to make this app the default for opening photos and videos.</string>
     <string name="permissions_action_open">Open</string>
+    <string name="albums_search_hint">Search albums</string>
+    <string name="albums_search_no_results">No albums match your search.</string>
 </resources>

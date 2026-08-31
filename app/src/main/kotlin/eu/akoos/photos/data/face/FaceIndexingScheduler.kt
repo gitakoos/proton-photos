@@ -25,9 +25,12 @@ package eu.akoos.photos.data.face
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.media.MediaMetadataRetriever
 import androidx.exifinterface.media.ExifInterface
 import android.graphics.PointF
 import android.net.Uri
+import android.os.Build
+import android.os.SystemClock
 import android.util.Log
 import androidx.datastore.preferences.core.edit
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -43,22 +46,38 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.flowOn
+import eu.akoos.photos.BuildConfig
 import eu.akoos.photos.domain.model.FaceBoxNorm
+import eu.akoos.photos.domain.usecase.FACE_CLUSTER_THRESHOLD
 import eu.akoos.photos.domain.usecase.FACE_EMBEDDING_DIM
+import eu.akoos.photos.domain.usecase.FACE_MODEL_VERSION
+import eu.akoos.photos.domain.usecase.clusterFaces
 import eu.akoos.photos.domain.usecase.cosineSimilarity
+import eu.akoos.photos.domain.usecase.REATTACH_MIN_IOU
+import eu.akoos.photos.domain.usecase.ReattachFace
+import eu.akoos.photos.domain.usecase.ReattachLabel
+import eu.akoos.photos.domain.usecase.matchReattachLabels
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import me.proton.core.domain.entity.UserId
+import eu.akoos.photos.crypto.DecryptPriority
+import eu.akoos.photos.crypto.DecryptPriorityContext
 import eu.akoos.photos.data.db.dao.FaceDao
 import eu.akoos.photos.data.db.dao.FaceScanDao
+import eu.akoos.photos.data.db.dao.NotPersonDao
+import eu.akoos.photos.data.db.dao.PersonDao
+import eu.akoos.photos.data.db.dao.PersonManualPhotoDao
 import eu.akoos.photos.data.db.dao.PhotoListingDao
 import eu.akoos.photos.data.db.entity.FaceEntity
 import eu.akoos.photos.data.db.entity.FaceScanEntity
+import eu.akoos.photos.data.db.entity.NotPersonEntity
+import eu.akoos.photos.data.db.entity.PersonManualPhotoEntity
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.data.repository.drive.PhotoDownloadService
@@ -67,11 +86,14 @@ import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.usecase.ClusterFacesUseCase
 import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
+import eu.akoos.photos.service.FaceIndexingService
 import eu.akoos.photos.util.DeviceHealthPolicy
+import eu.akoos.photos.util.FaceDiagnostics
 import eu.akoos.photos.util.NetworkObserver
 import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
@@ -94,6 +116,19 @@ data class FaceIndexingProgress(
     val indexed: Int,
     val total: Int,
 )
+
+/** How large a not-yet-indexed backlog promotes the initial walk onto a foreground service with a
+ *  progress notification. Below it the walk stays on the plain in-process coroutine, so a handful of
+ *  incremental photos never posts a notification. */
+const val FACE_INDEX_FOREGROUND_THRESHOLD = 200
+
+/**
+ * Whether an about-to-run indexing pass of [pending] photos should host itself on the foreground
+ * service: only when the background switch is on and the backlog is at least
+ * [FACE_INDEX_FOREGROUND_THRESHOLD]. Pure so it is unit-tested without Android.
+ */
+fun shouldRunForegroundIndex(pending: Int, backgroundEnabled: Boolean): Boolean =
+    backgroundEnabled && pending >= FACE_INDEX_FOREGROUND_THRESHOLD
 
 /**
  * Walks the whole library once and records the faces in each photo, in the background, only while
@@ -135,6 +170,9 @@ class FaceIndexingScheduler @Inject constructor(
     @ApplicationContext private val context: Context,
     private val faceDao: FaceDao,
     private val faceScanDao: FaceScanDao,
+    private val personDao: PersonDao,
+    private val personManualPhotoDao: PersonManualPhotoDao,
+    private val notPersonDao: NotPersonDao,
     private val photoListingDao: PhotoListingDao,
     private val thumbnailScheduler: ThumbnailDecryptScheduler,
     private val photoDownloadService: PhotoDownloadService,
@@ -186,6 +224,9 @@ class FaceIndexingScheduler @Inject constructor(
 
     init {
         watchSettings()
+        // Mirror every progress emit into the copied diagnostics, so a scan standing still short of the
+        // end is legible there rather than a blind spot.
+        scope.launch { progress.collect { FaceDiagnostics.record(it.state.name, it.indexed, it.total) } }
     }
 
     /** Keep [aiEnabled] / [paused] current so a mid-walk toggle is seen on the next per-photo check. */
@@ -228,6 +269,13 @@ class FaceIndexingScheduler @Inject constructor(
                 return
             }
 
+            // The models are on the device and a walk is about to run, so this is the choke point to
+            // reconcile the stored embeddings' model version. On a recognition-model change the old
+            // rows are wiped once here, before anything reads them, and the walk below rebuilds every
+            // embedding with the current model.
+            runCatching { migrateFaceModelVersionIfNeeded(userId) }
+                .onFailure { Log.w(TAG, "face model version wipe failed: ${it.message}") }
+
             val items = runCatching { galleryItemsProvider.get().invoke(userId).first() }
                 .getOrDefault(emptyList())
             val alreadyScanned = runCatching { faceScanDao.scannedKeysForUser(userId.id).toHashSet() }
@@ -241,18 +289,39 @@ class FaceIndexingScheduler @Inject constructor(
             val scannedBefore = libraryTotal - total
             // Nothing left to scan: the library is fully drained, so this is the one place clustering
             // runs. Only when new faces were added since the last cluster, so a gallery re-entry that
-            // finds everything already grouped does no work.
+            // finds everything already grouped does no work. A debug build re-clusters every drained
+            // pass instead, so changing the cluster threshold and relaunching re-groups the stored
+            // embeddings with no re-embed; release keeps the new-faces-only guard.
             if (total == 0) {
-                if (faceDao.unclusteredCount(userId.id) > 0) cluster(userId)
+                // The library is fully re-detected, so any names a wipe or an import parked can now be
+                // put back on the faces before the groups form.
+                val reattached = reattachPendingLabels(userId)
+                if (BuildConfig.DEBUG || reattached || faceDao.unclusteredCount(userId.id) > 0) cluster(userId)
                 _progress.value = FaceIndexingProgress(FaceIndexingState.Done, libraryTotal, libraryTotal)
                 return
             }
             _progress.value = FaceIndexingProgress(FaceIndexingState.Running, scannedBefore, libraryTotal)
 
-            val detector = FaceDetector(detFile)
-            val embedder = FaceEmbedder(embFile)
+            // Promote a substantial initial backlog onto a foreground service so the walk survives the
+            // app being swiped from Recents; a few incremental photos stay on this coroutine with no
+            // notification. Idempotent across passes, and swallowed if a background start is disallowed.
+            if (shouldRunForegroundIndex(total, prefs[SettingsKeys.FACE_INDEX_BACKGROUND] != false)) {
+                FaceIndexingService.start(context, userId)
+            }
+
+            val detector = debugTimed("YuNet") { FaceDetector(detFile) }
+            val embedder = debugTimed("SFace") { FaceEmbedder(embFile) }
             val cursor = AtomicInteger(0)
             val processed = AtomicInteger(0)
+            val facesThisPass = AtomicInteger(0)
+            // Running tally of accepted detection scores, logged with the size-gate drop count at the
+            // pass end so the junk-vs-real score split is visible for tuning the threshold. Debug only.
+            val acceptedScores: MutableList<Float>? = if (BuildConfig.DEBUG) ArrayList() else null
+            // How many crops the blur gate dropped this pass, and the accepted crops' sharpness, logged
+            // together at the pass end so the reject floor can be raised from the real spread. Debug only.
+            val droppedTooBlurry = AtomicInteger(0)
+            val acceptedBlur: MutableList<Float>? = if (BuildConfig.DEBUG) ArrayList() else null
+            val passStart = SystemClock.elapsedRealtime()
             val decryptBudget = AtomicInteger(MAX_COLD_DECRYPTS_PER_PASS)
             // Photos this pass actually scanned (source loaded, detection ran), collected across the
             // workers and persisted as skip markers once the walk finishes; a deferred photo is never
@@ -269,6 +338,7 @@ class FaceIndexingScheduler @Inject constructor(
                                 // promptly, and so the models stay loaded across a short pause rather
                                 // than reloading them on every scroll.
                                 while (active() && !deviceHealth.heavyMlAllowed()) {
+                                    FaceDiagnostics.recordPark(deviceHealth.verdict().reason)
                                     delay(HEALTH_PAUSE_POLL_MS)
                                 }
                                 if (!active()) break
@@ -276,7 +346,7 @@ class FaceIndexingScheduler @Inject constructor(
                                 if (i >= total) break
                                 val item = pending[i]
                                 try {
-                                    indexOne(item, userId, detector, embedder, decryptBudget, sourcesLoaded, scannedKeys)
+                                    indexOne(item, userId, detector, embedder, decryptBudget, sourcesLoaded, scannedKeys, facesThisPass, acceptedScores, droppedTooBlurry, acceptedBlur)
                                 } catch (e: kotlinx.coroutines.CancellationException) {
                                     throw e
                                 } catch (e: Throwable) {
@@ -290,9 +360,23 @@ class FaceIndexingScheduler @Inject constructor(
                                         libraryTotal,
                                     )
                                 }
+                                if (BuildConfig.DEBUG && (done % DEBUG_PROGRESS_LOG_STRIDE == 0 || done >= total)) {
+                                    val elapsedS = (SystemClock.elapsedRealtime() - passStart) / 1000.0
+                                    val rate = if (elapsedS > 0.0) done / elapsedS else 0.0
+                                    Log.i(
+                                        TAG,
+                                        "indexed ${scannedBefore + scannedKeys.size}/$libraryTotal photos, " +
+                                            "faces found ${facesThisPass.get()}, " +
+                                            "rate ${String.format(Locale.US, "%.1f", rate)}/s",
+                                    )
+                                }
                             }
                         }
                     }
+                }
+                if (BuildConfig.DEBUG && acceptedScores != null) {
+                    logDetectionStats(acceptedScores, detector.droppedTooSmall.get())
+                    logBlurStats(acceptedBlur.orEmpty(), droppedTooBlurry.get())
                 }
             } finally {
                 runCatching { detector.close() }
@@ -388,7 +472,7 @@ class FaceIndexingScheduler @Inject constructor(
         if (!force && faceScanDao.isScanned(userId.id, item.stableId)) return false
         val detFile = (faceModelManager.prepare() as? FaceModelPreparation.Ready)?.file ?: return false
         val embFile = (faceEmbeddingModelManager.prepare() as? FaceModelPreparation.Ready)?.file ?: return false
-        val detector = if (force) FaceDetector(detFile, scoreThreshold = 0.3f, inputSize = 640) else FaceDetector(detFile)
+        val detector = if (force) FaceDetector(detFile, scoreThreshold = 0.5f, inputSize = 640) else FaceDetector(detFile)
         val embedder = FaceEmbedder(embFile)
         val scanned = ConcurrentHashMap.newKeySet<String>()
         try {
@@ -406,11 +490,21 @@ class FaceIndexingScheduler @Inject constructor(
     }
 
     /**
-     * "Find more photos of this person": re-scan the photos the walk found no face on, at the sensitive
+     * "Find more photos of this person": re-check the faceless photos at the sensitive high-resolution
      * detector setting, and stream back the faces whose mean-direction matches [centroid] over
-     * [matchThreshold]. Nothing is persisted here, so a candidate the user does not pick never enters
-     * the index; the caller keeps each match's raw outputs to write it only on add. Progress is emitted
-     * per photo so the screen can show how far the sweep has got. Runs off the main thread.
+     * [matchThreshold] so the screen can offer them for this person.
+     *
+     * The sweep is incremental and self-populating. Its candidate set is [FaceScanDao.hiResPendingKeys],
+     * the faceless photos not yet hi-res swept, so each faceless photo is looked at once ever and a
+     * repeat call gets progressively cheaper instead of re-scanning the whole faceless set from zero.
+     * Every face the hi-res pass detects is persisted as a normal [FaceEntity] (all of them, not only
+     * the current person's matches), exactly as the index walk writes them, so the faces enter
+     * clustering and surface for whichever person they belong to on their own, and the photo leaves the
+     * faceless set. A photo that still holds no face is marked hi-res swept with no face row, so it is
+     * never re-checked. Once the sweep drains, a clustering pass groups the newly persisted faces.
+     *
+     * Progress is emitted per photo so the screen can show how far the sweep has got. Runs off the main
+     * thread, and serialises its native inference through [mlLock] like the walk.
      */
     fun sweepFacelessForPerson(
         userId: UserId,
@@ -424,17 +518,21 @@ class FaceIndexingScheduler @Inject constructor(
         if (detFile == null || embFile == null || centroid.size != FACE_EMBEDDING_DIM) {
             send(FaceSweepEvent.Progress(0, 0)); return@channelFlow
         }
-        val facelessKeys = runCatching { faceScanDao.facelessPhotoKeys(userId.id) }.getOrDefault(emptyList()).toHashSet()
-        val items = runCatching { galleryItemsProvider.get().invoke(userId).first() }.getOrDefault(emptyList())
-            .filter { it.stableId in facelessKeys }
+        val items = runCatching {
+            val pending = faceScanDao.hiResPendingKeys(userId.id).toHashSet()
+            galleryItemsProvider.get().invoke(userId).first().filter { it.stableId in pending }
+        }.getOrDefault(emptyList())
         send(FaceSweepEvent.Progress(0, items.size))
         if (items.isEmpty()) return@channelFlow
         // The detector + embedder are shared; the mlLock below serialises their (native) inference, so
         // the workers overlap on decode and take turns on inference, matching how the walk parallelises.
-        val detector = FaceDetector(detFile, scoreThreshold = 0.4f, inputSize = 640)
+        val detector = FaceDetector(detFile, scoreThreshold = 0.6f, inputSize = 640)
         val embedder = FaceEmbedder(embFile)
         val cursor = AtomicInteger(0)
         val done = AtomicInteger(0)
+        // Faces the sweep persisted this run, so it clusters once at the end only when it actually
+        // added something (a run over truly faceless photos writes nothing and skips the recluster).
+        val newFaces = AtomicInteger(0)
         try {
             coroutineScope {
                 repeat(WORKER_COUNT) {
@@ -443,46 +541,92 @@ class FaceIndexingScheduler @Inject constructor(
                             val i = cursor.getAndIncrement()
                             if (i >= items.size) break
                             val item = items[i]
+                            val photoKey = item.stableId
                             val source = runCatching { loadSource(item, userId, AtomicInteger(2), force = true) }.getOrNull()
                             if (source != null) {
-                                // Collect the matches under the lock, then send them after releasing it,
-                                // so a slow collector never blocks another worker's inference.
-                                val matches = try {
+                                // Under the lock: detect + embed, build the rows to persist and the
+                                // matches to stream. The DB writes happen after the lock is released, so
+                                // the mlLock only ever holds native inference, exactly as the walk does.
+                                val (rows, matches) = try {
                                     mlLock.withLock {
                                         val sw = source.width.toFloat()
                                         val sh = source.height.toFloat()
+                                        val faceRows = ArrayList<FaceEntity>()
                                         val out = ArrayList<FaceSweepEvent.Match>()
                                         detector.detect(source).forEachIndexed { idx, face ->
                                             val aligned = FaceAlignment.alignFace(source, face.landmarks)
                                             val blur = runCatching { alignedBlur(aligned) }.getOrNull()
+                                            // Same hard blur gate as the index path: an extremely blurred
+                                            // crop is neither stored nor offered as a match.
+                                            if (blur != null && blur < MIN_SHARPNESS) {
+                                                if (!aligned.isRecycled) aligned.recycle()
+                                                return@forEachIndexed
+                                            }
                                             val emb = embedder.embed(aligned)
                                             if (!aligned.isRecycled) aligned.recycle()
+                                            val box = FaceBoxNorm(
+                                                left = if (sw > 0f) (face.box.left / sw).coerceIn(0f, 1f) else 0f,
+                                                top = if (sh > 0f) (face.box.top / sh).coerceIn(0f, 1f) else 0f,
+                                                right = if (sw > 0f) (face.box.right / sw).coerceIn(0f, 1f) else 1f,
+                                                bottom = if (sh > 0f) (face.box.bottom / sh).coerceIn(0f, 1f) else 1f,
+                                            )
+                                            val landmarks = encodeLandmarks(face.landmarks)
+                                            val embedding = packEmbedding(emb)
+                                            // A normal index row, built exactly as scanOnePhoto does
+                                            // (same id derivation, box, landmarks, score, blur, null
+                                            // personId/manualName), so the persisted face is
+                                            // indistinguishable from an index-time one and clusters
+                                            // the same. Adding it later just upserts personId onto it.
+                                            faceRows.add(
+                                                FaceEntity(
+                                                    id = "$photoKey#$idx",
+                                                    userId = userId.id,
+                                                    photoKey = photoKey,
+                                                    left = box.left,
+                                                    top = box.top,
+                                                    right = box.right,
+                                                    bottom = box.bottom,
+                                                    landmarks = landmarks,
+                                                    embedding = embedding,
+                                                    personId = null,
+                                                    score = face.score,
+                                                    blur = blur,
+                                                ),
+                                            )
                                             if (emb.size == FACE_EMBEDDING_DIM &&
                                                 cosineSimilarity(emb, centroid) >= matchThreshold
                                             ) {
                                                 out.add(
                                                     FaceSweepEvent.Match(
-                                                        photoKey = item.stableId,
+                                                        photoKey = photoKey,
                                                         index = idx,
-                                                        box = FaceBoxNorm(
-                                                            left = if (sw > 0f) (face.box.left / sw).coerceIn(0f, 1f) else 0f,
-                                                            top = if (sh > 0f) (face.box.top / sh).coerceIn(0f, 1f) else 0f,
-                                                            right = if (sw > 0f) (face.box.right / sw).coerceIn(0f, 1f) else 1f,
-                                                            bottom = if (sh > 0f) (face.box.bottom / sh).coerceIn(0f, 1f) else 1f,
-                                                        ),
-                                                        landmarks = encodeLandmarks(face.landmarks),
-                                                        embedding = packEmbedding(emb),
+                                                        box = box,
+                                                        landmarks = landmarks,
+                                                        embedding = embedding,
                                                         score = face.score,
                                                         blur = blur,
                                                     ),
                                                 )
                                             }
                                         }
-                                        out
+                                        faceRows to out
                                     }
                                 } finally {
                                     if (!source.isRecycled) source.recycle()
                                 }
+                                // Persist every detected face as a normal index row and drop this photo
+                                // from the faceless set, so it surfaces for the right person on its own
+                                // and a later sweep never looks at it again. Written after the lock so
+                                // the DB I/O never holds up another worker's inference.
+                                if (rows.isNotEmpty()) {
+                                    runCatching { faceDao.upsert(rows) }
+                                        .onFailure { Log.w(TAG, "sweep face upsert $photoKey failed: ${it.message}") }
+                                    newFaces.addAndGet(rows.size)
+                                }
+                                // Mark hi-res swept whether or not a face was found, so a truly faceless
+                                // photo is recorded as looked-at and never re-swept.
+                                runCatching { faceScanDao.markHiResScanned(userId.id, listOf(photoKey)) }
+                                    .onFailure { Log.w(TAG, "sweep mark $photoKey failed: ${it.message}") }
                                 matches.forEach { send(it) }
                             }
                             send(FaceSweepEvent.Progress(done.incrementAndGet(), items.size))
@@ -494,6 +638,10 @@ class FaceIndexingScheduler @Inject constructor(
             runCatching { detector.close() }
             runCatching { embedder.close() }
         }
+        // The sweep added faces to photos the walk had left faceless, so group them once the sweep
+        // drains: a newly persisted face then surfaces under the right person on its own, the same way
+        // the background walk clusters from its drained branch. Skipped when nothing was persisted.
+        if (newFaces.get() > 0) cluster(userId)
     }.flowOn(Dispatchers.Default)
 
     /**
@@ -505,7 +653,143 @@ class FaceIndexingScheduler @Inject constructor(
         stopRequested = true
         lastUserId = null
         _progress.value = FaceIndexingProgress(FaceIndexingState.Idle, 0, 0)
+        FaceDiagnostics.clear()
         runCatching { context.settingsDataStore.edit { it.remove(SettingsKeys.FACE_INDEXING_PAUSED) } }
+    }
+
+    /**
+     * Reconcile the stored embeddings' model version once. When the persisted marker differs from
+     * [FACE_MODEL_VERSION] (or is absent, an install from before the marker existed), every face, scan
+     * marker and "not this person" mark is dropped so the walk rebuilds the whole library with the
+     * current recognition model instead of comparing two incompatible embedding widths.
+     *
+     * The wipe is resumable and non-destructive. The names and exclusions the wipe would orphan are
+     * captured into a durable snapshot BEFORE the tables are cleared, and that snapshot is left in place
+     * until the re-detected library has actually carried them back. The marker is written LAST, so a
+     * crash between the wipe and the marker re-enters here with an empty face table and a live snapshot,
+     * which [reattachMigrationStep] reads as a migration to resume rather than a cue to re-capture an
+     * empty snapshot over the pending one (which would lose every name). A no-op once the marker already
+     * matches, so past the one-time migration a walk pays a single prefs read.
+     */
+    private suspend fun migrateFaceModelVersionIfNeeded(userId: UserId) {
+        val stored = context.settingsDataStore.data.first()[SettingsKeys.FACE_MODEL_VERSION_KEY]
+        if (stored == FACE_MODEL_VERSION) {
+            if (BuildConfig.DEBUG) Log.i(TAG, "face model version $FACE_MODEL_VERSION current, no wipe")
+            return
+        }
+        val account = userId.id
+        val faceTableEmpty = faceDao.facePhotoKeysForUser(account).isEmpty()
+        val snapshotPresent = reattachFile.isFile
+        when (reattachMigrationStep(faceTableEmpty, snapshotPresent)) {
+            // Faces still present: snapshot the names and exclusions the wipe is about to orphan, so the
+            // re-detected library can carry them again once it is rebuilt.
+            ReattachMigrationStep.Capture ->
+                runCatching { captureReattachSnapshot(account) }
+                    .onFailure { Log.w(TAG, "reattach snapshot failed: ${it.message}") }
+            // A snapshot still on disk holds curation an earlier migration has not reattached yet. Keep it
+            // and let the drained walk resume the reattach; capturing over it now would lose those names.
+            ReattachMigrationStep.Resume ->
+                if (BuildConfig.DEBUG) Log.i(TAG, "resuming a pending face model migration, keeping the snapshot")
+            ReattachMigrationStep.Skip ->
+                if (BuildConfig.DEBUG) Log.i(TAG, "no faces and no snapshot, nothing to preserve")
+        }
+        // Clear the faces, the scan markers and this account's "not this person" marks. The marks' ids
+        // are positional (photoKey#index), so a detector swap would leave them pointing at whatever new
+        // face reused the index; they are re-created by geometry from the snapshot once the library
+        // re-detects. Idempotent, so a resumed migration re-running the clears is a no-op.
+        val clearedFaces = faceDao.clearAll()
+        val clearedScans = faceScanDao.clearAll()
+        runCatching { notPersonDao.clearForUser(account) }
+            .onFailure { Log.w(TAG, "not-person clear failed: ${it.message}") }
+        // Marker last: only now is the wipe durably complete. The snapshot is left on disk for the
+        // drained reattach to consume, so a crash after this still finds it waiting.
+        context.settingsDataStore.edit { it[SettingsKeys.FACE_MODEL_VERSION_KEY] = FACE_MODEL_VERSION }
+        if (BuildConfig.DEBUG) {
+            Log.i(TAG, "face model version $stored -> $FACE_MODEL_VERSION, wiped $clearedFaces faces + $clearedScans scans")
+        }
+    }
+
+    /** App-private file holding the names waiting to be put back on the re-detected library. */
+    private val reattachFile: File get() = FaceReattachSnapshot.file(File(context.filesDir, FaceModelAssets.DIRECTORY))
+
+    /**
+     * Snapshot the model-independent curation a wipe would orphan (which face, in which photo, where),
+     * so a model swap does not lose it. Captures the named faces, the "not this person" marks and the
+     * removed ("not a person") faces, each with its box so it rebinds by geometry after a detector swap
+     * shifts the positional ids. Every read here joins the live face table, so it must run before the
+     * wipe. Nothing to preserve clears any stale snapshot; a capture from a live table is never an
+     * interrupted migration, so clearing here cannot destroy a pending reattach.
+     */
+    private suspend fun captureReattachSnapshot(account: String) {
+        val nameById = personDao.namedPeopleForUser(account)
+            .mapNotNull { p -> p.displayName?.takeIf { it.isNotBlank() }?.let { p.id to it } }
+            .toMap()
+        val members = faceDao.allFacesByScoreDesc(account).mapNotNull { f ->
+            val name = f.personId?.let { nameById[it] } ?: f.manualName?.takeIf { it.isNotBlank() }
+            name ?: return@mapNotNull null
+            ReattachLabel(f.id, f.photoKey, f.left, f.top, f.right, f.bottom, name)
+        }
+        val nots = notPersonDao.facesForUser(account).map {
+            ReattachLabel(it.faceId, it.photoKey, it.boxLeft, it.boxTop, it.boxRight, it.boxBottom, it.personName)
+        }
+        val rejected = faceDao.rejectedFacesForUser(account).map {
+            ReattachBox(it.photoKey, it.boxLeft, it.boxTop, it.boxRight, it.boxBottom)
+        }
+        if (members.isEmpty() && nots.isEmpty() && rejected.isEmpty()) {
+            FaceReattachSnapshot.clear(reattachFile)
+            return
+        }
+        FaceReattachSnapshot.write(reattachFile, FaceReattachData(members, emptyList(), nots, rejected))
+        if (BuildConfig.DEBUG) {
+            Log.i(TAG, "captured ${members.size} labels, ${nots.size} nots, ${rejected.size} rejected before wipe")
+        }
+    }
+
+    /**
+     * Put a pending snapshot's names and exclusions back on the freshly detected library, then let it
+     * go. Members bind to the re-detected faces by [matchReattachLabels] (same id first, then box
+     * overlap) and get the name as a manual label the clusterer then groups under; manual attachments are
+     * restored under their names, the "not this person" marks rebind to the new faces the same way, and
+     * the removed ("not a person") faces are re-rejected on whichever new face lands in their box. Runs
+     * once the library is fully re-detected and just before clustering, so the names are in place and the
+     * exclusions are honoured when the groups form. The snapshot is cleared only after everything has been
+     * applied, so a crash part way through resumes from the still-pending snapshot on the next drain.
+     */
+    private suspend fun reattachPendingLabels(userId: UserId): Boolean {
+        val data = FaceReattachSnapshot.read(reattachFile) ?: return false
+        val account = userId.id
+        val localFaces = faceDao.allFacesByScoreDesc(account).map {
+            ReattachFace(it.id, it.photoKey, it.left, it.top, it.right, it.bottom)
+        }
+        val labelled = matchReattachLabels(data.members, localFaces)
+        labelled.entries.groupBy({ it.value }, { it.key }).forEach { (name, ids) ->
+            faceDao.labelFacesByIds(ids, name)
+        }
+        if (data.manual.isNotEmpty()) {
+            personManualPhotoDao.add(data.manual.map { PersonManualPhotoEntity(account, it.name, it.photoKey) })
+        }
+        if (data.nots.isNotEmpty()) {
+            val marks = matchReattachLabels(data.nots, localFaces)
+            if (marks.isNotEmpty()) {
+                notPersonDao.add(marks.map { (faceId, name) -> NotPersonEntity(account, name, faceId) })
+            }
+        }
+        // Re-apply the removed faces by box overlap, at the same threshold the named-face reattach uses:
+        // the detector swap changed the positional ids, so the removal follows the geometry onto the new
+        // face and does not silently lapse.
+        if (data.rejected.isNotEmpty()) {
+            val toReject = matchRejectedByGeometry(data.rejected, localFaces, REATTACH_MIN_IOU)
+            if (toReject.isNotEmpty()) faceDao.rejectByIds(toReject)
+        }
+        FaceReattachSnapshot.clear(reattachFile)
+        if (BuildConfig.DEBUG) {
+            Log.i(
+                TAG,
+                "reattached ${labelled.size} labels, ${data.manual.size} manual, " +
+                    "${data.nots.size} nots, ${data.rejected.size} rejected",
+            )
+        }
+        return true
     }
 
     /** Detect + embed every face in one photo and write a row per face. On a source that loaded and
@@ -519,9 +803,17 @@ class FaceIndexingScheduler @Inject constructor(
         decryptBudget: AtomicInteger,
         sourcesLoaded: AtomicInteger,
         scannedKeys: MutableSet<String>,
+        facesFound: AtomicInteger,
+        acceptedScores: MutableList<Float>?,
+        droppedTooBlurry: AtomicInteger,
+        acceptedBlur: MutableList<Float>?,
     ) {
         if (!active()) return
-        scanOnePhoto(item, userId, detector, embedder, decryptBudget, sourcesLoaded, scannedKeys)
+        // Background face indexing yields the process-global crypto gate to interactive decrypts; the
+        // on-demand and faceless-sweep paths run scanOnePhoto/loadSource directly and stay foreground.
+        withContext(DecryptPriorityContext(DecryptPriority.BACKGROUND)) {
+            scanOnePhoto(item, userId, detector, embedder, decryptBudget, sourcesLoaded, scannedKeys, facesFound = facesFound, acceptedScores = acceptedScores, droppedTooBlurry = droppedTooBlurry, acceptedBlur = acceptedBlur)
+        }
     }
 
     /**
@@ -537,18 +829,41 @@ class FaceIndexingScheduler @Inject constructor(
         sourcesLoaded: AtomicInteger,
         scannedKeys: MutableSet<String>,
         force: Boolean = false,
+        facesFound: AtomicInteger? = null,
+        acceptedScores: MutableList<Float>? = null,
+        droppedTooBlurry: AtomicInteger? = null,
+        acceptedBlur: MutableList<Float>? = null,
     ) {
         val photoKey = item.stableId
-        val source = loadSource(item, userId, decryptBudget, force) ?: return
+        val source = loadSource(item, userId, decryptBudget, force) ?: run {
+            // A device-only item that still yields no source is neither a decodable image nor a
+            // decodable video (a corrupt or unsupported local file), and has no cloud original to try on
+            // a later pass. Record it scanned rather than leave it pending forever: once only such items
+            // remained, a pass would load nothing, the walk would not re-kick, and the count would stand
+            // still at "Running" for good. A cloud item returning null is a transient defer (off Wi-Fi or
+            // out of budget) and stays pending on purpose.
+            if (item is GalleryItem.LocalOnly) {
+                scannedKeys.add(photoKey)
+                FaceDiagnostics.recordUnloadableLocal()
+            }
+            return
+        }
         sourcesLoaded.incrementAndGet()
         try {
             mlLock.withLock {
                 val faces = detector.detect(source)
                 for ((index, face) in faces.withIndex()) {
                     val aligned = FaceAlignment.alignFace(source, face.landmarks)
-                    var blur: Float? = null
+                    val blur = runCatching { alignedBlur(aligned) }.getOrNull()
+                    // Hard quality gate: drop an extremely blurred crop before it costs an embed or a
+                    // stored row, mirroring the detector's min-size gate. The floor stays conservative so
+                    // only unusable faces are lost while the accepted-blur log calibrates where to raise it.
+                    if (blur != null && blur < MIN_SHARPNESS) {
+                        if (!aligned.isRecycled) aligned.recycle()
+                        if (BuildConfig.DEBUG) droppedTooBlurry?.incrementAndGet()
+                        continue
+                    }
                     val embedding = try {
-                        blur = alignedBlur(aligned)
                         embedder.embed(aligned)
                     } finally {
                         if (!aligned.isRecycled) aligned.recycle()
@@ -575,6 +890,11 @@ class FaceIndexingScheduler @Inject constructor(
                     )
                     runCatching { faceDao.upsert(entity) }
                         .onFailure { Log.w(TAG, "face upsert $photoKey#$index failed: ${it.message}") }
+                    if (BuildConfig.DEBUG) {
+                        facesFound?.incrementAndGet()
+                        acceptedScores?.add(face.score)
+                        blur?.let { acceptedBlur?.add(it) }
+                    }
                 }
             }
         } finally {
@@ -599,11 +919,46 @@ class FaceIndexingScheduler @Inject constructor(
         decryptBudget: AtomicInteger,
         force: Boolean = false,
     ): Bitmap? = when (item) {
+        // A device video decodes to no bitmap through BitmapFactory, so fall through to a still frame;
+        // an image takes the first branch and never opens the retriever.
         is GalleryItem.LocalOnly -> decodeLocalBounded(item.local.uri)
+            ?: decodeLocalVideoFrame(item.local.uri)
         is GalleryItem.Synced -> decodeLocalBounded(item.local.uri)
+            ?: decodeLocalVideoFrame(item.local.uri)
             ?: decodeCloud(item.cloud, userId, decryptBudget, force)
         is GalleryItem.CloudOnly -> decodeCloud(item.cloud, userId, decryptBudget, force)
     }
+
+    /**
+     * A bounded still frame from a device video, so a video that lives only on the phone is indexed from
+     * a face in it exactly as a cloud video is from its thumbnail. Tried only after [decodeLocalBounded]
+     * returns null (an image never reaches here). A near-start sync frame is scaled down on the way out
+     * of the decoder on API 27+, or decoded whole and left for the detector's own bound on API 26.
+     * Everything is wrapped: an unreadable or non-video file returns null, which the caller treats as a
+     * photo that cannot be sourced.
+     */
+    private fun decodeLocalVideoFrame(uri: String): Bitmap? = runCatching {
+        val u = Uri.parse(uri)
+        val retriever = MediaMetadataRetriever()
+        try {
+            retriever.setDataSource(context, u)
+            val vw = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 0
+            val vh = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1 && vw > 0 && vh > 0) {
+                val sample = sampleSizeFor(vw, vh)
+                retriever.getScaledFrameAtTime(
+                    0L,
+                    MediaMetadataRetriever.OPTION_CLOSEST_SYNC,
+                    (vw / sample).coerceAtLeast(1),
+                    (vh / sample).coerceAtLeast(1),
+                )
+            } else {
+                retriever.getFrameAtTime(0L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+            }
+        } finally {
+            runCatching { retriever.release() }
+        }
+    }.getOrNull()
 
     /** Route a cloud item: an image detects from its full-resolution bytes, a video from its
      *  still-frame thumbnail (BitmapFactory cannot decode a video container, and downloading one to
@@ -798,6 +1153,14 @@ class FaceIndexingScheduler @Inject constructor(
         _progress.value = FaceIndexingProgress(FaceIndexingState.Idle, 0, 0)
     }
 
+    /** Runs [block], and in a debug build logs how long it took under [label], so the ONNX session-open
+     *  cost (notably the ~37MB SFace load) is visible. A release build folds the timing away. */
+    private inline fun <T> debugTimed(label: String, block: () -> T): T {
+        if (!BuildConfig.DEBUG) return block()
+        val start = SystemClock.elapsedRealtime()
+        return block().also { Log.i(TAG, "$label session init ${SystemClock.elapsedRealtime() - start}ms") }
+    }
+
     /**
      * Group every stored face into people, once the library is fully scanned and is still permitted
      * to run. A clustering failure is logged and swallowed so it never fails the walk; cancellation
@@ -807,11 +1170,85 @@ class FaceIndexingScheduler @Inject constructor(
         if (!active()) return
         try {
             clusterFacesUseCase(userId)
+            if (BuildConfig.DEBUG) logClusterSweep(userId)
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (e: Throwable) {
             Log.w(TAG, "clustering failed: ${e.message}")
         }
+    }
+
+    /**
+     * Debug threshold sweep. Re-groups the real stored embeddings at a spread of cluster distances and
+     * logs each grouping's shape next to the one the real constant produces, so a good
+     * [FACE_CLUSTER_THRESHOLD] can be read off a logcat sweep with no re-embed. Measurement only: the
+     * stored grouping still comes from the real clustering call above; this writes nothing.
+     */
+    private suspend fun logClusterSweep(userId: UserId) {
+        runCatching {
+            val samples = clusterFacesUseCase.samplesForSweep(userId)
+            if (samples.isEmpty()) {
+                Log.i(TAG, "SWEEP no stored faces")
+                return
+            }
+            logGrouping("REAL", FACE_CLUSTER_THRESHOLD, clusterFaces(samples))
+            for (t in floatArrayOf(0.34f, 0.38f, 0.42f, 0.46f, 0.50f)) {
+                logGrouping("SWEEP", t, clusterFaces(samples, t, t))
+            }
+        }.onFailure { Log.w(TAG, "cluster sweep failed: ${it.message}") }
+    }
+
+    private fun logGrouping(label: String, threshold: Float, assignment: IntArray) {
+        val sizes = assignment.toList().groupingBy { it }.eachCount().values.sortedDescending()
+        Log.i(
+            TAG,
+            "$label t=${String.format(Locale.US, "%.2f", threshold)} -> clusters=${sizes.size}, " +
+                "faces=${assignment.size}, top5 sizes=[${sizes.take(5).joinToString(",")}]",
+        )
+    }
+
+    /**
+     * Debug summary of one pass's detections: the accepted faces' score spread beside how many boxes the
+     * min-size gate dropped, so the junk-vs-real score split shows in logcat for tuning the detector
+     * threshold. Measurement only, writes nothing.
+     */
+    private fun logDetectionStats(scores: List<Float>, rejectedSmall: Int) {
+        if (scores.isEmpty()) {
+            Log.i(TAG, "DET accepted=0, rejected_small=$rejectedSmall")
+            return
+        }
+        val sorted = scores.sorted()
+        val median = sorted[sorted.size / 2]
+        Log.i(
+            TAG,
+            "DET accepted=${sorted.size}, score min/median/max = " +
+                "${String.format(Locale.US, "%.3f", sorted.first())}/" +
+                "${String.format(Locale.US, "%.3f", median)}/" +
+                "${String.format(Locale.US, "%.3f", sorted.last())}, " +
+                "rejected_small=$rejectedSmall",
+        )
+    }
+
+    /**
+     * Debug summary of one pass's accepted-crop sharpness: the Laplacian-variance spread of the crops
+     * that cleared the blur gate beside how many the gate dropped, so the reject floor can be read off a
+     * logcat pass and raised from the real distribution. Measurement only, writes nothing.
+     */
+    private fun logBlurStats(blurs: List<Float>, rejectedBlur: Int) {
+        if (blurs.isEmpty()) {
+            Log.i(TAG, "BLUR accepted=0, rejected_blur=$rejectedBlur")
+            return
+        }
+        val sorted = blurs.sorted()
+        val median = sorted[sorted.size / 2]
+        Log.i(
+            TAG,
+            "BLUR accepted min/median/max = " +
+                "${String.format(Locale.US, "%.1f", sorted.first())}/" +
+                "${String.format(Locale.US, "%.1f", median)}/" +
+                "${String.format(Locale.US, "%.1f", sorted.last())}, " +
+                "rejected_blur=$rejectedBlur",
+        )
     }
 
     /** Claim one unit of the per-pass cold-decrypt budget, or false when it is spent. */
@@ -864,6 +1301,9 @@ class FaceIndexingScheduler @Inject constructor(
 
         /** Update the progress flow every this many photos, so a large pass does not churn the flow. */
         const val PROGRESS_STRIDE = 20
+
+        /** Debug builds log a progress line every this many photos during a pass. */
+        const val DEBUG_PROGRESS_LOG_STRIDE = 50
 
         /** Cold cloud thumbnails a single pass will decrypt inline, so the whole-library walk cannot
          *  flood the crypto service; the rest wait for a later pass once their thumbnail has warmed. */

@@ -25,6 +25,7 @@
 package eu.akoos.photos.presentation.search
 
 import android.app.Activity
+import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
@@ -36,6 +37,10 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.foundation.layout.PaddingValues
@@ -63,6 +68,8 @@ import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.DriveFileMove
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.DeleteOutline
@@ -90,16 +97,23 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -109,6 +123,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.GalleryItem
+import eu.akoos.photos.presentation.common.AppSearchField
+import eu.akoos.photos.presentation.common.IconBubble
 import eu.akoos.photos.presentation.common.SelectionAction
 import eu.akoos.photos.presentation.common.SelectionDrawer
 import eu.akoos.photos.presentation.common.favoriteSelectionAction
@@ -125,22 +141,24 @@ import eu.akoos.photos.presentation.common.ReturnToViewerPhoto
 import eu.akoos.photos.presentation.common.ScrollScrubber
 import androidx.compose.material.icons.filled.PrivacyTip
 import eu.akoos.photos.presentation.gallery.CategoryRail
+import eu.akoos.photos.presentation.gallery.LocalPeopleRail
+import eu.akoos.photos.presentation.gallery.PeopleRailData
 import eu.akoos.photos.presentation.gallery.ContentFilter
 import eu.akoos.photos.presentation.gallery.ContentFilterSheet
 import eu.akoos.photos.presentation.gallery.GalleryAddToAlbumDialog
 import eu.akoos.photos.presentation.gallery.GalleryFilter
 import eu.akoos.photos.presentation.gallery.GalleryMultiDeleteDialog
 import eu.akoos.photos.presentation.gallery.MetadataStripPickerDialog
+import eu.akoos.photos.presentation.gallery.MoveToFolderHost
 import eu.akoos.photos.presentation.gallery.MediaType
 import eu.akoos.photos.presentation.gallery.SyncStatusFilter
 import eu.akoos.photos.presentation.gallery.rememberDragMultiSelectModifier
-import eu.akoos.photos.presentation.memories.FloatingMemoriesHeader
 import eu.akoos.photos.presentation.search.components.CalendarPreviewCard
 import eu.akoos.photos.presentation.search.components.OfflinePreviewCard
 import eu.akoos.photos.presentation.search.components.PeoplePreviewCard
 import eu.akoos.photos.presentation.search.components.JumpToMonthHeader
 import eu.akoos.photos.presentation.search.components.MonthTileRow
-import eu.akoos.photos.presentation.search.components.MapPreviewCard
+import eu.akoos.photos.presentation.search.components.MapPreviewSwitcher
 import eu.akoos.photos.presentation.search.components.OnThisDayRow
 import eu.akoos.photos.presentation.search.components.RecentRow
 import eu.akoos.photos.presentation.search.components.MonthBucket
@@ -154,12 +172,6 @@ import kotlinx.coroutines.withContext
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.util.computeOnThisDay
 import java.util.Calendar
-
-// Shared rounded shape for the filter rail's pill controls. A real corner radius —
-// rather than a full-capsule RoundedCornerShape(50) — keeps the hairline border crisp
-// at the chip ends instead of breaking up into a faint, fragmented outline. Matches the
-// filter-sheet chip radius so the two surfaces read as the same control family.
-private val chipShape = RoundedCornerShape(10.dp)
 
 @Composable
 fun SearchScreen(
@@ -181,6 +193,10 @@ fun SearchScreen(
     val results by vm.results.collectAsStateWithLifecycle()
     val filter by vm.contentFilter.collectAsStateWithLifecycle()
     val selectedCategory by vm.selectedCategory.collectAsStateWithLifecycle()
+    val people by vm.people.collectAsStateWithLifecycle()
+    val selectedPersonId by vm.selectedPersonId.collectAsStateWithLifecycle()
+    // Whether the People face bar is revealed under the category rail (mirrors the timeline).
+    var peopleExpanded by remember { mutableStateOf(false) }
     val allItems by vm.allItems.collectAsStateWithLifecycle()
     val geotaggedPins by vm.geotaggedPins.collectAsStateWithLifecycle()
     val distinctCityCount by vm.distinctCityCount.collectAsStateWithLifecycle()
@@ -193,6 +209,7 @@ fun SearchScreen(
     val favoriteIds by vm.favoriteIds.collectAsStateWithLifecycle()
     val offlinePinIds by vm.offlinePinIds.collectAsStateWithLifecycle()
     val favoriteState by vm.favoriteState.collectAsStateWithLifecycle()
+    val isSignedIn by vm.isSignedIn.collectAsStateWithLifecycle()
 
     val isSelectionMode = selectedItems.isNotEmpty()
     // In selection mode the back button cancels the selection instead of leaving the screen.
@@ -245,6 +262,11 @@ fun SearchScreen(
     val addToAlbumSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     // The picker's own "New album" row, which names an album and then adds the selection to it.
     var showCreateAlbumInline by remember { mutableStateOf(false) }
+    // Move the device selection into another folder, logged-out, device-data only. The picker's
+    // targets and the write consent ride the shared host; the selection is snapshotted in the VM.
+    var showMoveSheet by remember { mutableStateOf(false) }
+    val moveTargetFolders by vm.moveTargetFolders.collectAsStateWithLifecycle()
+    val pendingMoveIntent by vm.pendingMoveIntent.collectAsStateWithLifecycle()
     // System trash-dialog launcher for a delete/hide that needs MANAGE_MEDIA on Android 11+.
     val deletePermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartIntentSenderForResult(),
@@ -294,9 +316,45 @@ fun SearchScreen(
     var showFilterSheet by remember { mutableStateOf(false) }
     val filterSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val resultsGridState = rememberLazyGridState()
-    // Hide the secondary filter rows once results are scrolled so browsing reclaims that
-    // vertical space; they slide back at the top. The search field + title stay put.
-    val filterRowsVisible by remember { derivedStateOf { resultsGridState.firstVisibleItemIndex == 0 } }
+    val idleListState = rememberLazyListState()
+    // The whole search header (back button, field, filter, categories) hides while the active list is
+    // scrolled DOWN, and slides back on a scroll up or once scrolling stops, like the timeline's chrome
+    // behaviour. Only one of the two lists is on screen at a time, so whichever is scrolling drives it.
+    var resultsScrollingDown by remember { mutableStateOf(false) }
+    LaunchedEffect(resultsGridState) {
+        var prevIndex = resultsGridState.firstVisibleItemIndex
+        var prevOffset = resultsGridState.firstVisibleItemScrollOffset
+        snapshotFlow { resultsGridState.firstVisibleItemIndex to resultsGridState.firstVisibleItemScrollOffset }
+            .collect { (idx, off) ->
+                resultsScrollingDown = idx > prevIndex || (idx == prevIndex && off > prevOffset)
+                prevIndex = idx
+                prevOffset = off
+            }
+    }
+    var idleScrollingDown by remember { mutableStateOf(false) }
+    LaunchedEffect(idleListState) {
+        var prevIndex = idleListState.firstVisibleItemIndex
+        var prevOffset = idleListState.firstVisibleItemScrollOffset
+        snapshotFlow { idleListState.firstVisibleItemIndex to idleListState.firstVisibleItemScrollOffset }
+            .collect { (idx, off) ->
+                idleScrollingDown = idx > prevIndex || (idx == prevIndex && off > prevOffset)
+                prevIndex = idx
+                prevOffset = off
+            }
+    }
+    // Match the timeline exactly: the header shows while the active list is scrolled UP or sits at the
+    // top, and hides while it is scrolled down. It does NOT pop back on a mere stop, which is what read
+    // as an instant, off-tempo reappearance.
+    val showingResults = rememberUpdatedState(results.isNotEmpty())
+    val headerVisible by remember {
+        derivedStateOf {
+            if (showingResults.value) {
+                !resultsScrollingDown || resultsGridState.firstVisibleItemIndex == 0
+            } else {
+                !idleScrollingDown || idleListState.firstVisibleItemIndex == 0
+            }
+        }
+    }
 
     Box(
         modifier = Modifier
@@ -306,117 +364,16 @@ fun SearchScreen(
       // Search content fills the screen; the floating header overlays it (added after this
       // Column in the Box so it draws on top). The status-bar inset plus a top pad clears
       // the collapsed header row so the search field never slips under the title pill.
-      Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .statusBarsPadding()
-            .padding(top = 52.dp),
-      ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            // Slim single-line search field (a plain OutlinedTextField sits at ~56dp and reads as
-            // two rows tall). Custom row keeps it compact and matches the filter button's height.
-            Row(
-                modifier = Modifier
-                    .weight(1f)
-                    .height(46.dp)
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(colors.chipUnselectedBg)
-                    .border(
-                        1.dp,
-                        if (query.isNotEmpty()) colors.accent else colors.line,
-                        RoundedCornerShape(14.dp),
-                    )
-                    .padding(start = 12.dp, end = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Icon(
-                    Icons.Filled.Search,
-                    contentDescription = null,
-                    tint = colors.fgDim,
-                    modifier = Modifier.size(20.dp),
-                )
-                Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
-                    if (query.isEmpty()) {
-                        Text(
-                            text = stringResource(R.string.search_placeholder),
-                            color = colors.fgMute,
-                            maxLines = 1,
-                        )
-                    }
-                    BasicTextField(
-                        value = query,
-                        onValueChange = vm::setQuery,
-                        singleLine = true,
-                        textStyle = TextStyle(color = colors.fgPrimary),
-                        cursorBrush = SolidColor(colors.accent),
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
-                if (query.isNotEmpty()) {
-                    Box(
-                        modifier = Modifier
-                            .size(32.dp)
-                            .clip(CircleShape)
-                            .clickable { vm.setQuery("") },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(
-                            Icons.Filled.Close,
-                            contentDescription = stringResource(R.string.cd_clear_search),
-                            tint = colors.fgDim,
-                            modifier = Modifier.size(18.dp),
-                        )
-                    }
-                }
-            }
-            // Filter button beside the search field — opens the sheet (sync status). Accent
-            // outline + tint when a sheet filter is active, so it reads as "filters applied".
-            val sheetFilterActive = filter.syncStatus != SyncStatusFilter.All
-            Box(
-                modifier = Modifier
-                    .size(46.dp)
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(if (sheetFilterActive) colors.accent.copy(alpha = 0.15f) else colors.chipUnselectedBg)
-                    .border(1.dp, if (sheetFilterActive) colors.accent else colors.line, RoundedCornerShape(14.dp))
-                    .clickable { showFilterSheet = true },
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    Icons.Filled.FilterList,
-                    contentDescription = stringResource(R.string.filter_title),
-                    tint = if (sheetFilterActive) colors.accent else colors.fgDim,
-                )
-            }
-        }
+      // The content fills the screen and scrolls up under the floating header. The header is drawn
+      // after the content (below) so it overlays it, and its measured height pads the content clear
+      // of it so the first row never starts hidden.
+      val density = LocalDensity.current
+      // Seed with an estimate so the very first frame already insets the content, instead of flashing
+      // it under the header for the frame before onSizeChanged reports the real height.
+      var headerHeightPx by remember { mutableIntStateOf(with(density) { 150.dp.roundToPx() }) }
+      val headerPad = with(density) { headerHeightPx.toDp() }
 
-        AnimatedVisibility(visible = filterRowsVisible) {
-            Column {
-                Spacer(modifier = Modifier.height(10.dp))
-
-                // Tap-to-filter category chips (same row as the timeline). Tapping a category
-                // narrows the results immediately, without opening the filter sheet.
-                CategoryRail(
-                    selectedFilter = selectedCategory,
-                    onFilterSelected = vm::onCategorySelected,
-                )
-
-                Spacer(modifier = Modifier.height(8.dp))
-            }
-        }
-
-        // People whose name matches the query, above the results so a name search reaches a person
-        // even when no photo filename matches the text.
-        if (query.isNotBlank() && peopleSuggestions.isNotEmpty()) {
-            PeopleSuggestionRow(people = peopleSuggestions, onOpenPerson = onOpenPerson)
-        }
-
+      Box(modifier = Modifier.fillMaxSize()) {
         val isIdle = query.isBlank() && filter == ContentFilter() && selectedCategory == GalleryFilter.All
         if (results.isEmpty() && isIdle) {
             // Idle empty state — surface "On this day" memories + a month-jump grid
@@ -437,7 +394,6 @@ fun SearchScreen(
                 value = withContext(Dispatchers.Default) { buildMonthBuckets(allItems) }
             }
             val recent = remember(allItems) { allItems.take(6) }
-            val idleListState = rememberLazyListState()
             val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
             Box(modifier = Modifier.fillMaxSize()) {
             LazyColumn(
@@ -445,10 +401,10 @@ fun SearchScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .navigationBarsPadding(),
-                contentPadding = PaddingValues(bottom = 24.dp),
+                contentPadding = PaddingValues(top = headerPad + 4.dp, bottom = 24.dp),
             ) {
                 item(key = "map_preview_section") {
-                    MapPreviewCard(
+                    MapPreviewSwitcher(
                         pins = geotaggedPins,
                         cityCount = distinctCityCount,
                         onOpenMap = onOpenMap,
@@ -531,14 +487,14 @@ fun SearchScreen(
             // month rows make the page long enough to be worth jumping.
             ScrollScrubber(
                 listState = idleListState,
-                topPadding = 8.dp,
+                topPadding = headerPad + 8.dp,
                 bottomPadding = 24.dp + navBottom,
                 minItemsToShow = 8,
             )
             }
         } else if (results.isEmpty()) {
             Box(
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier.fillMaxSize().padding(top = headerPad),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
@@ -582,7 +538,7 @@ fun SearchScreen(
                     contentPadding = PaddingValues(
                         start = if (seamless) 0.dp else 6.dp,
                         end = if (seamless) 0.dp else 6.dp,
-                        top = 4.dp,
+                        top = headerPad + 4.dp,
                         bottom = 12.dp,
                     ),
                     horizontalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 4.dp),
@@ -632,7 +588,7 @@ fun SearchScreen(
                     gridState = resultsGridState,
                     items = results,
                     grouping = TimelineGrouping.Month,
-                    topPadding = 8.dp,
+                    topPadding = headerPad + 8.dp,
                     bottomPadding = 24.dp,
                     keyOf = { keyOf(it) },
                 )
@@ -640,15 +596,123 @@ fun SearchScreen(
         }
       }
 
-        // Floating title pill — drops down to switch to the Map or Calendar view, like the
-        // Collection. It carries its own statusBarsPadding and floats over the search content.
-        // Hidden while selecting, so the screen belongs to the selection alone.
-        if (!isSelectionMode) {
-            FloatingMemoriesHeader(
-                title = stringResource(R.string.search_title),
-                onBack = onBack,
-            )
+      // Floating header, drawn after the content so it overlays and lets the grid scroll under it.
+      // The whole thing slides away on a downward scroll and returns on scroll up / stop, like the
+      // timeline chrome. Its measured height feeds `headerPad` above so the first row clears it; the
+      // height sticks while hidden, so the content padding does not jump as the header slides.
+      AnimatedVisibility(
+        visible = headerVisible,
+        enter = fadeIn() + slideInVertically { -it },
+        exit = fadeOut() + slideOutVertically { -it },
+      ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                // Measure the FULL header (status-bar inset + paddings + content) so the content inset
+                // matches the visible bar. onSizeChanged MUST sit above the paddings; below them it
+                // reports only the children, leaving the inset short and the content tucked under the bar.
+                .onSizeChanged { headerHeightPx = it.height }
+                // Scrim under the floating bar so buttons stay legible over photos: solid at the top,
+                // still darkening through the category row, fading out just below it.
+                .background(
+                    Brush.verticalGradient(
+                        0.0f to colors.bg0,
+                        0.55f to colors.bg0.copy(alpha = 0.82f),
+                        0.9f to colors.bg0.copy(alpha = 0.4f),
+                        1.0f to colors.bg0.copy(alpha = 0f),
+                    )
+                )
+                .statusBarsPadding()
+                .padding(top = 8.dp),
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                // Back button matches the search field's surface (not the darker pill) so the two
+                // read as one control row.
+                IconBubble(
+                    icon = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = stringResource(R.string.onboarding_back),
+                    onClick = { if (isSelectionMode) vm.clearSelection() else onBack() },
+                    background = colors.chipUnselectedBg,
+                    borderColor = colors.line,
+                )
+                AppSearchField(
+                    query = query,
+                    onQueryChange = vm::setQuery,
+                    placeholder = stringResource(R.string.search_placeholder),
+                    modifier = Modifier.weight(1f),
+                )
+                // Filter button beside the search field — opens the sheet (sync status). Accent
+                // outline + tint when a sheet filter is active, so it reads as "filters applied".
+                val sheetFilterActive = filter.syncStatus != SyncStatusFilter.All
+                Box(
+                    modifier = Modifier
+                        .size(46.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(if (sheetFilterActive) colors.accent.copy(alpha = 0.15f) else colors.chipUnselectedBg)
+                        .border(1.dp, if (sheetFilterActive) colors.accent else colors.line, RoundedCornerShape(14.dp))
+                        .clickable { showFilterSheet = true },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.Filled.FilterList,
+                        contentDescription = stringResource(R.string.filter_title),
+                        tint = if (sheetFilterActive) colors.accent else colors.fgDim,
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Tap-to-filter category chips (same row as the timeline). Tapping a category narrows the
+            // results immediately, without opening the filter sheet.
+            // The shared category rail also renders the People chip + face bar when a person is
+            // available, driven through the LocalPeopleRail CompositionLocal exactly like the timeline.
+            val peopleActive = peopleExpanded || selectedPersonId != null
+            val peopleRail = remember(people, selectedPersonId, peopleActive) {
+                PeopleRailData(
+                    people = people,
+                    selectedPersonId = selectedPersonId,
+                    active = peopleActive,
+                    onToggle = {
+                        if (peopleActive) {
+                            peopleExpanded = false
+                            vm.onPersonSelected(null)
+                        } else {
+                            peopleExpanded = true
+                        }
+                    },
+                    onPersonSelected = { id ->
+                        peopleExpanded = true
+                        vm.onPersonSelected(if (selectedPersonId == id) null else id)
+                    },
+                )
+            }
+            CompositionLocalProvider(LocalPeopleRail provides peopleRail) {
+                CategoryRail(
+                    selectedFilter = selectedCategory,
+                    onFilterSelected = vm::onCategorySelected,
+                    shape = RoundedCornerShape(14.dp),
+                )
+            }
+
+            // People whose name matches the query, above the results so a name search reaches a
+            // person even when no photo filename matches the text.
+            if (query.isNotBlank() && peopleSuggestions.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(8.dp))
+                PeopleSuggestionRow(people = peopleSuggestions, onOpenPerson = onOpenPerson)
+            }
+
+            // Breathing room below the header so the content clears the category bar instead of
+            // tucking right under it, and the scrim keeps a soft tail.
+            Spacer(modifier = Modifier.height(10.dp))
         }
+      }
 
         // A multi-select delete blocks the screen behind a progress drawer so a second tap can't
         // fire into a half-finished delete.
@@ -683,13 +747,27 @@ fun SearchScreen(
                     onClick = { vm.shareSelected() },
                 )
             )
-            add(
-                SelectionAction(
-                    icon = Icons.Default.PhotoAlbum,
-                    label = stringResource(R.string.gallery_add_to_album),
-                    onClick = { showAddToAlbumSheet = true },
+            // Add-to-album needs a Drive destination, so it stays behind a signed-in session.
+            if (isSignedIn) {
+                add(
+                    SelectionAction(
+                        icon = Icons.Default.PhotoAlbum,
+                        label = stringResource(R.string.gallery_add_to_album),
+                        onClick = { showAddToAlbumSheet = true },
+                    )
                 )
-            )
+            }
+            // Move the device selection into another folder, the logged-out counterpart to
+            // Add-to-album, offered only without an account and on the Android 10+ MediaStore floor.
+            if (!isSignedIn && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                add(
+                    SelectionAction(
+                        icon = Icons.AutoMirrored.Filled.DriveFileMove,
+                        label = stringResource(R.string.move_to_folder),
+                        onClick = { showMoveSheet = true },
+                    )
+                )
+            }
             // Favourite the whole result set in one press. Search is how a batch worth favouriting
             // gets assembled in the first place, so the action belongs where the results are rather
             // than one photo at a time in the viewer.
@@ -702,8 +780,9 @@ fun SearchScreen(
                     onClick = { vm.toggleSelectedFavorite() },
                 )
             )
-            // Back up the not-yet-uploaded (LocalOnly) photos in the selection.
-            if (anyLocalOnly(selectedItems)) {
+            // Back up the not-yet-uploaded (LocalOnly) photos in the selection. Needs a Drive
+            // destination, so it stays behind a signed-in session.
+            if (isSignedIn && anyLocalOnly(selectedItems)) {
                 add(
                     SelectionAction(
                         icon = Icons.Default.CloudUpload,
@@ -884,6 +963,22 @@ fun SearchScreen(
             )
         }
 
+        // Move-to-folder host: the picker, the new-folder name dialog, the write-consent launcher a
+        // foreign-file move needs and the completion snackbar, all logged-out and device-only. The
+        // selection is snapshotted in the ViewModel, so the host carries only the picked name.
+        MoveToFolderHost(
+            targetFolders = moveTargetFolders,
+            show = showMoveSheet,
+            pendingMoveIntent = pendingMoveIntent,
+            moveConfirmation = vm.moveConfirmation,
+            onPick = { vm.moveSelectedToFolder(it) },
+            onCreate = { vm.createFolderWithPhotos(it) },
+            onGranted = { vm.onMovePermissionGranted() },
+            onClear = { vm.clearPendingMove() },
+            onDismiss = { showMoveSheet = false },
+            snackbarHostState = snackbarHostState,
+        )
+
         eu.akoos.photos.presentation.common.ThemedSnackbarHost(
             snackbarHostState,
             modifier = Modifier.align(Alignment.BottomCenter),
@@ -894,7 +989,7 @@ fun SearchScreen(
         ModalBottomSheet(
             onDismissRequest = { showFilterSheet = false },
             sheetState = filterSheetState,
-            containerColor = colors.bg2,
+            containerColor = colors.sheetBg,
             scrimColor = Color.Black.copy(alpha = 0.5f),
         ) {
             ContentFilterSheet(

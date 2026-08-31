@@ -34,7 +34,7 @@ import androidx.room.PrimaryKey
  * (a cloud linkId or a device content URI, the GalleryItem.stableId keyspace), so a person filter
  * joins straight back to the timeline.
  *
- * [embedding] is the 512-d recognition vector packed little-endian, held as a plain blob in the
+ * [embedding] is the 128-d recognition vector packed little-endian, held as a plain blob in the
  * app-private, backup-excluded database, never synced anywhere, matching how a decrypted GPS fix
  * already sits plain in `photo_location`. It may arrive empty and be filled in once embedded.
  * [personId] is null until the face is clustered into a person.

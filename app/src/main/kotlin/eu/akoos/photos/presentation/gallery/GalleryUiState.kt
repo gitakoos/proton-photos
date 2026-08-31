@@ -48,6 +48,10 @@ data class GalleryUiState(
     val permissionState: PermissionState = PermissionState.NotRequested,
     val error: String? = null,
     val userInitial: String = "",
+    /** True while a Proton account is active. False in a local-only session (null userId), which
+     *  hides the cloud-account surfaces (avatar ring, Shared tab). Defaults true so a signed-in
+     *  session renders every surface unchanged. */
+    val isSignedIn: Boolean = true,
     val contentFilter: ContentFilter = ContentFilter(),
     val cloudUsedBytes: Long = 0L,
     val cloudMaxBytes: Long = 0L,
@@ -191,10 +195,13 @@ data class ContentFilter(
     val year: Int? = null,
     val month: Int? = null,
     val day: Int? = null,
+    // Inclusive end of a day range within (year, month); when set, [day] is the range start. A single
+    // day leaves this null. Only meaningful alongside a month, since a range is swept in one month grid.
+    val dayEnd: Int? = null,
 )
 
 enum class MediaType { All, PhotosOnly, VideosOnly }
-enum class SyncStatusFilter { All, LocalOnly, BackedUp }
+enum class SyncStatusFilter { All, LocalOnly, BackedUp, CloudOnly }
 
 enum class TimelineGrouping { None, Day, Month, Year }
 
@@ -213,6 +220,8 @@ data class PersonUi(
     val faceBox: FaceBox? = null,
     /** Cached number of faces assigned to the person; the album-style People card shows it as a count. */
     val faceCount: Int = 0,
+    /** True for the single "Unsorted" bucket, so a card can label it apart from a real person. */
+    val isOther: Boolean = false,
 )
 
 /** A face region as fractions (0..1) of its image, left/top/right/bottom. */
@@ -235,5 +244,6 @@ fun eu.akoos.photos.domain.model.PersonSummary.toPersonUi(): PersonUi? {
         coverPhotoKey = cover,
         faceBox = faceBox?.let { FaceBox(it.left, it.top, it.right, it.bottom) },
         faceCount = faceCount,
+        isOther = isOther,
     )
 }

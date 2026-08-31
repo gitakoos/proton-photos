@@ -32,6 +32,8 @@ package eu.akoos.photos.domain.model
  * [faceBox] is the cover face region as fractions (0..1) of the cover image so a tile can crop to the
  * face at any resolution, and is null when the cover photo's dimensions are unknown to the caller.
  * [faceCount] is the cached number of faces assigned to the person, the list's ordering key.
+ * [isOther] marks the single "Unsorted" bucket of faces the clusterer could not confidently place, so
+ * a surface can pin it apart from real people rather than list it as one.
  */
 data class PersonSummary(
     val personId: Long,
@@ -39,6 +41,7 @@ data class PersonSummary(
     val coverPhotoKey: String?,
     val faceBox: FaceBoxNorm?,
     val faceCount: Int,
+    val isOther: Boolean = false,
 )
 
 /** A face region as fractions (0..1) of its image, left/top/right/bottom. */

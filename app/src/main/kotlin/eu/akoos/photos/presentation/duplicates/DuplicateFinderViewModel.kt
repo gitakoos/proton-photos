@@ -166,26 +166,56 @@ class DuplicateFinderViewModel @Inject constructor(
     private var lastDupLocalHashRows: List<LocalHashRow>? = null
     private var lastDupResult: FindDuplicatesUseCase.Result? = null
 
+    /** photoLinkId -> the cloud album name (alphabetically first when a photo is in several) the copy
+     *  lives in, so each duplicate tile can show which album it belongs to and the right copy is easy
+     *  to pick. Backed by the shared, cached membership map (no per-photo network or crypto); empty
+     *  with no signed-in account and until the first resolve lands. */
+    private val _albumNames = MutableStateFlow<Map<String, String>>(emptyMap())
+    val albumNames: StateFlow<Map<String, String>> = _albumNames.asStateFlow()
+
     init {
+        // Resolve each photo's cloud album once per account so a duplicate copy can show its album at a
+        // glance. getAlbumMemberships shares one cached membership walk with the rest of the app, so
+        // this is a single resolve (the cold walk hits the network once, off the main thread), never a
+        // call per copy; it stays empty with no account (local-only) and degrades to empty on failure.
+        viewModelScope.launch {
+            accountManager.getPrimaryUserId().collect { userId ->
+                _albumNames.value = if (userId == null) {
+                    emptyMap()
+                } else {
+                    try {
+                        cloudRepo.getAlbumMemberships(userId)
+                    } catch (e: kotlinx.coroutines.CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        Log.w(TAG, "getAlbumMemberships failed: ${e.message}")
+                        emptyMap()
+                    }
+                }
+            }
+        }
         @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class, kotlinx.coroutines.FlowPreview::class)
         viewModelScope.launch {
             accountManager.getPrimaryUserId().flatMapLatest { userId ->
                 primaryUserId = userId
-                if (userId == null) {
-                    flowOf(Sources(emptyList(), emptyList(), emptyList(), emptySet()))
-                } else {
-                    // The combine wakes on EVERY background hash write (the scheduler fills the table
-                    // one row at a time on a large library), so its transform stays allocation-free and
-                    // only bundles the current source references. The lean projections keep a 50k
-                    // library from materialising the full SyncState / fingerprint entities here.
-                    combine(
-                        getGalleryItems.invoke(userId),
-                        syncStateDao.observeLocalHashes(userId.id),
-                        perceptualHashDao.observeLite(PerceptualHash.DHASH_ALGO_VERSION),
-                        recentlyDeleted,
-                    ) { items, localHashRows, hashRows, deleted ->
-                        Sources(items, localHashRows, hashRows, deleted)
-                    }
+                // The combine wakes on EVERY background hash write (the scheduler fills the table
+                // one row at a time on a large library), so its transform stays allocation-free and
+                // only bundles the current source references. The lean projections keep a 50k
+                // library from materialising the full SyncState / fingerprint entities here. Signed
+                // out the device's own media feeds the grouping; the local-content-hash rows are
+                // account scoped, so that source is empty then, while the perceptual-hash cache is
+                // algorithm-keyed and read the same either way.
+                val libraryFlow = if (userId == null) getGalleryItems.invokeLocalOnly()
+                    else getGalleryItems.invoke(userId)
+                val localHashesFlow = if (userId == null) flowOf(emptyList<LocalHashRow>())
+                    else syncStateDao.observeLocalHashes(userId.id)
+                combine(
+                    libraryFlow,
+                    localHashesFlow,
+                    perceptualHashDao.observeLite(PerceptualHash.DHASH_ALGO_VERSION),
+                    recentlyDeleted,
+                ) { items, localHashRows, hashRows, deleted ->
+                    Sources(items, localHashRows, hashRows, deleted)
                 }
             }
                 // The combined flow re-emits on every single background hash write; sample so a
@@ -468,6 +498,67 @@ class DuplicateFinderViewModel @Inject constructor(
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 // Any failure while deleting duplicates surfaces as a toast, never an app crash.
                 Log.e(TAG, "deleteExtras failed for ${toDelete.size} item(s)", e)
+                _uiState.update { it.copy(errorMessage = "delete") }
+            } finally {
+                _uiState.update { it.copy(isDeleting = false) }
+            }
+        }
+    }
+
+    /**
+     * Delete the chosen extras across SEVERAL groups in one pass. Each entry is a (group, keepIds)
+     * pair; the same per-group guard runs on each ([DuplicateDeletion.deletableExtras] keeps at least
+     * one copy of every group), then all the deletable copies go through ONE [deletePhotoUseCase] call.
+     * Batching matters for correctness as much as convenience: the device trash path carries a single
+     * pending-permission slot, so deleting group by group would let two device groups clobber each
+     * other's system dialog. One call means one dialog for every device copy at once.
+     */
+    fun deleteExtrasBatch(selections: List<Pair<FindDuplicatesUseCase.DuplicateGroup, Set<String>>>) {
+        // Thread each group's deletions into the next group's guard, so two cards that show the same
+        // pair with opposite keepers cannot each delete the copy the other kept. A single frozen
+        // snapshot across every group is what lets that happen; batchDeletableExtras accumulates.
+        val perGroupIds = DuplicateDeletion.batchDeletableExtras(
+            groups = selections.map { (group, keepIds) -> group.items.map { it.stableId } to keepIds },
+            alreadyDeleted = recentlyDeleted.value,
+        )
+        val perGroup = selections.zip(perGroupIds).mapNotNull { (selection, ids) ->
+            val (group, _) = selection
+            val idSet = ids.toSet()
+            val items = group.items.filter { it.stableId in idSet }
+            if (items.isEmpty()) null else group to items
+        }
+        val toDelete = perGroup.flatMap { it.second }
+        if (toDelete.isEmpty()) return
+
+        viewModelScope.launch {
+            val userId = primaryUserId ?: runCatching { accountManager.getPrimaryUserId().first() }.getOrNull()
+            if (userId == null) return@launch
+            _uiState.update { it.copy(isDeleting = true, errorMessage = null) }
+            try {
+                Log.d(TAG, "deleteExtrasBatch: groups=${perGroup.size}, toDelete=${toDelete.size}")
+                val result = deletePhotoUseCase(
+                    userId = userId,
+                    items = toDelete,
+                    freeUpSpace = true,
+                    deleteFromCloud = true,
+                )
+                when (result) {
+                    is DeletePhotoUseCase.Result.Success -> {
+                        perGroup.forEach { (group, items) ->
+                            removeFromGroup(group, items.map { it.stableId }.toSet())
+                        }
+                        markDeleted(toDelete)
+                    }
+                    is DeletePhotoUseCase.Result.NeedsMediaWritePermission -> {
+                        pendingPermissionResult = result
+                        _uiState.update { it.copy(pendingDeleteIntent = result.pendingIntent) }
+                    }
+                    is DeletePhotoUseCase.Result.CloudDeleteFailed ->
+                        _uiState.update { it.copy(errorMessage = "drive") }
+                }
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                Log.e(TAG, "deleteExtrasBatch failed for ${toDelete.size} item(s)", e)
                 _uiState.update { it.copy(errorMessage = "delete") }
             } finally {
                 _uiState.update { it.copy(isDeleting = false) }

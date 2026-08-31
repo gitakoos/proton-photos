@@ -58,6 +58,11 @@ interface PersonDao {
     @Query("SELECT * FROM person WHERE userId = :userId")
     suspend fun allForUser(userId: String): List<PersonEntity>
 
+    /** The account's single "Unsorted" bucket id, read before a rebuild so the leftover faces keep the
+     *  same person id across passes (an open screen keyed to it does not go stale). Null when none. */
+    @Query("SELECT id FROM person WHERE userId = :userId AND isOther = 1 LIMIT 1")
+    suspend fun otherPersonId(userId: String): Long?
+
     /** Renames a person, or clears the name back to null. */
     @Query("UPDATE person SET displayName = :name WHERE id = :id")
     suspend fun updateName(id: Long, name: String?)

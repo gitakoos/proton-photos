@@ -135,6 +135,7 @@ import eu.akoos.photos.presentation.editor.components.SaveOptionRow
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.Bg0
 import eu.akoos.photos.presentation.theme.Bg2
+import eu.akoos.photos.presentation.theme.SheetBg
 import eu.akoos.photos.presentation.theme.FgDim
 import eu.akoos.photos.presentation.theme.FgMute
 import eu.akoos.photos.presentation.theme.FgPrimary
@@ -592,7 +593,7 @@ fun VideoEditorScreen(
         ModalBottomSheet(
             onDismissRequest = { if (!state.isSaving) showSaveSheet = false },
             sheetState = saveSheetState,
-            containerColor = Bg2,
+            containerColor = SheetBg,
             scrimColor = Color.Black.copy(alpha = 0.5f),
         ) {
             VideoSaveSheet(

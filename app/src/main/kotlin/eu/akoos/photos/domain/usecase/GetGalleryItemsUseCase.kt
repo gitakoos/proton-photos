@@ -106,6 +106,22 @@ class GetGalleryItemsUseCase @Inject constructor(
                 .shareIn(appScope, SharingStarted.WhileSubscribed(5_000), replay = 1)
         }
 
+    /** Session-free gallery feed for the no-account (local-only) mode: the device's own media with
+     *  no Proton session. Merges the local source against zero cloud photos and empty sync state, so
+     *  it yields EXACTLY the [GalleryItem.LocalOnly] rows [invoke] produces, sorted identically. The
+     *  album-hide filter never removes a local-only item (those carry no cloud linkId), so the hidden
+     *  member source is not consulted here. Reads and writes no per-user cache and mints no UserId:
+     *  a structural null-session branch. */
+    fun invokeLocalOnly(): Flow<List<GalleryItem>> =
+        localRepo.observeLocalMedia()
+            .distinctUntilChanged()
+            .map { merge(it, emptyList(), emptyList()) }
+            // The merge/sort over the full library is CPU work that must not run on the collector's
+            // Main dispatcher, matching invoke()'s reasoning for the same local source.
+            .flowOn(Dispatchers.Default)
+            .distinctUntilChanged()
+            .retryOnDbTear("GetGalleryItemsLocalOnly")
+
     /** Bundles the four merge inputs so the sample+map pipeline carries them without a tuple type. */
     private data class MergeInput(
         val local: List<LocalMediaItem>,

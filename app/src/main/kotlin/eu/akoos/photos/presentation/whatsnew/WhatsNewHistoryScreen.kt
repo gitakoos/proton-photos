@@ -40,7 +40,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import eu.akoos.photos.R
 import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
-import eu.akoos.photos.presentation.memories.FloatingMemoriesHeader
+import eu.akoos.photos.presentation.common.FloatingHeader
 import eu.akoos.photos.presentation.settings.components.NavRow
 import eu.akoos.photos.presentation.settings.components.RowDivider
 import eu.akoos.photos.presentation.settings.components.SettingsCard
@@ -87,7 +87,7 @@ fun WhatsNewHistoryScreen(
             Spacer(Modifier.height(navBottom + 24.dp))
         }
 
-        FloatingMemoriesHeader(
+        FloatingHeader(
             title = stringResource(R.string.whats_new_title),
             onBack = onBack,
         )

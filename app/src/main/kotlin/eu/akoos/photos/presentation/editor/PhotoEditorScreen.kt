@@ -174,6 +174,7 @@ import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.Bg0
 import eu.akoos.photos.presentation.theme.Bg2
+import eu.akoos.photos.presentation.theme.SheetBg
 import eu.akoos.photos.presentation.theme.FgDim
 import eu.akoos.photos.presentation.theme.FgMute
 import eu.akoos.photos.presentation.theme.FgPrimary
@@ -181,6 +182,7 @@ import eu.akoos.photos.presentation.theme.PanelChip
 import eu.akoos.photos.presentation.theme.PillBg
 import eu.akoos.photos.presentation.theme.PillBgOpaque
 import eu.akoos.photos.presentation.theme.PillBorder
+import eu.akoos.photos.presentation.theme.pillShape
 import eu.akoos.photos.presentation.theme.TrackBg
 import eu.akoos.photos.util.ImageFit
 import eu.akoos.photos.util.fitImageInBox
@@ -188,11 +190,6 @@ import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
-
-// Match the photos page top filter row recipe verbatim — one shared shape token used
-// by every pill in the editor so the editor and gallery look like they share a
-// component library. Anything bigger than 999.dp is just a fully-rounded capsule.
-internal val pillShape = RoundedCornerShape(999.dp)
 
 private enum class Tool(@androidx.annotation.StringRes val labelRes: Int, val icon: ImageVector) {
     Adjust(R.string.editor_tool_adjust, Icons.Default.Tune),
@@ -810,7 +807,7 @@ fun PhotoEditorScreen(
         ModalBottomSheet(
             onDismissRequest = { showSaveSheet = false },
             sheetState = saveSheetState,
-            containerColor = Bg2,
+            containerColor = SheetBg,
             scrimColor = Color.Black.copy(alpha = 0.5f),
         ) {
             SaveSheet(

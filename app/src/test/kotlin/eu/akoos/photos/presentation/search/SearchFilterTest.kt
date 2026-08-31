@@ -126,10 +126,12 @@ class SearchFilterTest {
         category: GalleryFilter = GalleryFilter.All,
         offlinePinIds: Set<String> = emptySet(),
         favoriteIds: Set<String> = emptySet(),
+        personPhotoKeys: Set<String>? = null,
         months: List<String> = englishMonths,
     ): List<GalleryItem> = SearchFilter.apply(
         items = items, q = q, filter = filter, category = category, offlinePinIds = offlinePinIds,
-        favoriteIds = favoriteIds, foldedMonths = months, foldedCategoryNames = categoryNames,
+        favoriteIds = favoriteIds, personPhotoKeys = personPhotoKeys, foldedMonths = months,
+        foldedCategoryNames = categoryNames,
     )
 
     private fun namesFrom(items: List<GalleryItem>): List<String> = items.map { SearchFilter.displayNameOf(it) }
@@ -144,6 +146,28 @@ class SearchFilterTest {
     @Test
     fun `a query of nothing but spaces is the same as no query`() {
         assertTrue(search(listOf(local("a.jpg")), q = "   ").isEmpty())
+    }
+
+    // ── people filter ─────────────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `a selected person narrows to their photos even with nothing else asked`() {
+        val a = cloud("a.jpg"); val b = cloud("b.jpg"); val c = cloud("c.jpg")
+        val out = search(listOf(a, b, c), personPhotoKeys = setOf(a.stableId, c.stableId))
+        assertEquals(listOf("a.jpg", "c.jpg"), namesFrom(out))
+    }
+
+    @Test
+    fun `a null person set does not filter by person`() {
+        assertTrue(search(listOf(cloud("a.jpg")), personPhotoKeys = null).isEmpty())
+    }
+
+    @Test
+    fun `a person filter intersects with a query`() {
+        val a = cloud("beach.jpg"); val b = cloud("beach2.jpg"); val c = cloud("forest.jpg")
+        val out = search(listOf(a, b, c), q = "beach", personPhotoKeys = setOf(a.stableId, c.stableId))
+        // "beach" drops forest; the person set drops beach2; only beach.jpg is in both.
+        assertEquals(listOf("beach.jpg"), namesFrom(out))
     }
 
     @Test
@@ -324,11 +348,20 @@ class SearchFilterTest {
     }
 
     @Test
-    fun `the backed-up filter keeps both halves of a backed-up library`() {
+    fun `the backed-up filter keeps only what is on the device and backed up`() {
         val items = listOf(local("a.jpg"), synced("b.jpg"), cloud("c.jpg"))
         assertEquals(
-            listOf("b.jpg", "c.jpg"),
+            listOf("b.jpg"),
             namesFrom(search(items, filter = ContentFilter(syncStatus = SyncStatusFilter.BackedUp))),
+        )
+    }
+
+    @Test
+    fun `the cloud-only filter keeps only what lives in the cloud alone`() {
+        val items = listOf(local("a.jpg"), synced("b.jpg"), cloud("c.jpg"))
+        assertEquals(
+            listOf("c.jpg"),
+            namesFrom(search(items, filter = ContentFilter(syncStatus = SyncStatusFilter.CloudOnly))),
         )
     }
 

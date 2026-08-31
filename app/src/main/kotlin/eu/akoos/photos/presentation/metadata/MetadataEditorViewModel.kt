@@ -127,8 +127,9 @@ data class MetadataEditorUiState(
     /** True when more than one editable photo is bound: the date and place start unset and a chosen
      *  value applies to every editable item at once, rather than showing one photo's own values. */
     val bulk: Boolean = false,
-    /** How many bound photos this editor can edit (device files plus cloud images), and how many are
-     *  read-only here (backed up, cloud videos, shared), so the screen can label a mixed selection. */
+    /** How many bound photos this editor can edit (device files, cloud images, and stampable videos
+     *  whose date the replace can change), and how many are read-only here (backed up, shared), so the
+     *  screen can label a mixed selection. */
     val editableCount: Int = 0,
     val skippedCount: Int = 0,
     /** In bulk mode, whether the user has picked a date / place yet. A single photo seeds both true
@@ -154,6 +155,10 @@ data class MetadataEditorUiState(
      *  can offer to fill each one from its name (memes, screenshots, downloads that arrived with no
      *  EXIF). Zero hides that mode. */
     val filenameDateCount: Int = 0,
+    /** The capture date a single edited photo's own file name records, or null when the selection is not
+     *  exactly one photo or its name carries no date. Backs the one-tap "use the date in the name"
+     *  suggestion, where the bulk chip row would read wrong for a single photo. */
+    val filenameDateSingleMs: Long? = null,
     /** The descriptive text tags, each with its own value, stored value and lock. */
     val description: MetadataTextFieldState = MetadataTextFieldState(),
     val artist: MetadataTextFieldState = MetadataTextFieldState(),
@@ -246,8 +251,9 @@ internal fun staleLocationIds(items: List<GalleryItem>, savedUris: Set<String>):
  * place on the same basis the timeline shows, plus the descriptive text tags read from the file. Device
  * photos take edits in place through [WriteLocalPhotoMetadataUseCase]; a cloud-only IMAGE takes a date
  * or place edit through [WriteCloudPhotoMetadataUseCase], which replaces it with a corrected copy once
- * the user confirms. Cloud videos, backed-up photos and shared-with-me photos stay read-only, and the
- * descriptive text tags reach device files only.
+ * the user confirms. A cloud or synced VIDEO takes a capture-date edit the same way, its place and text
+ * staying locked. Shared-with-me photos stay read-only, and the descriptive text tags reach device
+ * files only.
  *
  * A single bound photo shows its own current values and edits them in place. Two or more editable
  * photos switch to a "set for all" mode: the date and place start unset, and a chosen value is
@@ -330,14 +336,22 @@ class MetadataEditorViewModel @Inject constructor(
         data class Text(val tag: MetadataTextTag, val value: String) : PendingAction
     }
 
-    /** The cloud IMAGE photos this editor can rewrite (cloud videos excluded): the targets a date or a
-     *  place edit replaces with a corrected copy. Every one is an EXIF-writable image, so the same set
-     *  serves both the cloud date and the cloud place edits. */
+    /** The cloud IMAGE photos this editor can rewrite: the targets a PLACE or TEXT edit replaces with a
+     *  corrected copy. Image-only, since a video carries no EXIF place or text; the cloud DATE edit uses
+     *  the wider [cloudDateTargets] instead. */
     private var cloudImageTargets: List<CloudPhoto> = emptyList()
 
     /** The SYNCED image photos this editor can rewrite: like [cloudImageTargets], but each also has a
      *  device file, so its cloud copy is replaced by uploading that already edited device file. */
     private var syncedImageTargets: List<CloudPhoto> = emptyList()
+
+    /** The cloud photos a DATE edit rewrites: [cloudImageTargets] plus the MP4-family videos whose mvhd
+     *  the corrected-copy replace stamps. A video reaches only this list, never the place or text ones. */
+    private var cloudDateTargets: List<CloudPhoto> = emptyList()
+
+    /** The synced photos a DATE edit rewrites: [syncedImageTargets] plus the MP4-family videos. Each has a
+     *  device file, edited in place first, whose corrected bytes the replacement re-uploads. */
+    private var syncedDateTargets: List<CloudPhoto> = emptyList()
 
     /** Each synced target's device-file uri, so a staged replacement knows which edited file to upload. */
     private var syncedDeviceUriByPhoto: Map<CloudPhoto, String> = emptyMap()
@@ -371,18 +385,25 @@ class MetadataEditorViewModel @Inject constructor(
 
         boundItems = items
         locallyUpdatedUris.clear()
-        // A device-only photo has a file this screen writes in place; a cloud-only IMAGE is editable
-        // too, by replacing it with a corrected copy (cloud videos stay read-only). Everything else
-        // (backed up, shared) is read-only here.
+        // A device-only photo has a file this screen writes in place; a cloud-only IMAGE is editable too,
+        // by replacing it with a corrected copy, and a cloud or synced VIDEO is date-editable the same
+        // way. Everything else (backed up, shared) is read-only here.
         val editable = items.filterIsInstance<GalleryItem.LocalOnly>()
         val cloudImages = items.filterIsInstance<GalleryItem.CloudOnly>()
             .filter { WriteLocalPhotoMetadataUseCase.isExifWritableImageMime(it.cloud.mimeType) }
         // A synced IMAGE has both a device file and a cloud copy: its device file is EXIF-edited in place
-        // on pick, and its cloud copy is replaced by uploading that edited file. A synced video stays
-        // read-only, matching the cloud-only rule.
+        // on pick, and its cloud copy is replaced by uploading that edited file.
         val syncedImages = items.filterIsInstance<GalleryItem.Synced>()
             .filter { WriteLocalPhotoMetadataUseCase.isExifWritableImageMime(it.local.mimeType) }
-        val editableCount = editable.size + cloudImages.size + syncedImages.size
+        // A cloud or synced MP4-family video is DATE-editable through the same corrected-copy replace: the
+        // capture date reaches Drive and the mvhd is stamped, so it joins the date targets below. Its place
+        // and text stay locked (no EXIF block), so it is kept out of the image-only place / text sets.
+        val cloudVideos = items.filterIsInstance<GalleryItem.CloudOnly>()
+            .filter { WriteLocalPhotoMetadataUseCase.isMvhdStampableMime(it.cloud.mimeType) }
+        val syncedVideos = items.filterIsInstance<GalleryItem.Synced>()
+            .filter { WriteLocalPhotoMetadataUseCase.isMvhdStampableMime(it.local.mimeType) }
+        val editableCount = editable.size + cloudImages.size + cloudVideos.size +
+            syncedImages.size + syncedVideos.size
         val skippedCount = items.size - editableCount
         // A lone editable item keeps the single-photo flow exactly; anything else with an editable
         // item is the "set for all" bulk mode.
@@ -402,7 +423,7 @@ class MetadataEditorViewModel @Inject constructor(
                     WriteLocalPhotoMetadataUseCase.isExifWritableImageMime(it.local.mimeType) ||
                     WriteLocalPhotoMetadataUseCase.isVideoMime(it.local.mimeType)
             }
-            .map { it.local.uri } + syncedImages.map { it.local.uri }
+            .map { it.local.uri } + (syncedImages + syncedVideos).map { it.local.uri }
         placeTargetUris = (editable
             .filter { WriteLocalPhotoMetadataUseCase.isExifWritableImageMime(it.local.mimeType) }
             .map { it.local.uri }) + syncedImages.map { it.local.uri }
@@ -410,15 +431,19 @@ class MetadataEditorViewModel @Inject constructor(
             .filter { WriteLocalPhotoMetadataUseCase.isExifWritableImageMime(it.local.mimeType) }
             .map { it.local.uri }) + syncedImages.map { it.local.uri }
         val anyEditableImage = placeTargetUris.isNotEmpty()
-        // Every cloud image is an EXIF-writable image (a cloud video was filtered out above), so the
-        // same set is both the cloud date target and the cloud place target.
+        // The image sets feed the cloud PLACE and TEXT edits; the date sets add the stampable videos, so a
+        // cloud or synced video reaches the date replace without ever joining a place or text write.
         cloudImageTargets = cloudImages.map { it.cloud }
         syncedImageTargets = syncedImages.map { it.cloud }
-        syncedDeviceUriByPhoto = syncedImages.associate { it.cloud to it.local.uri }
-        syncedDeviceUris = syncedImages.map { it.local.uri }.toSet()
-        // "Has a cloud image to replace" covers both a cloud-only image and a synced one, so the date and
-        // place locks below stay open for a selection that is only synced photos.
+        cloudDateTargets = (cloudImages + cloudVideos).map { it.cloud }
+        syncedDateTargets = (syncedImages + syncedVideos).map { it.cloud }
+        syncedDeviceUriByPhoto = (syncedImages + syncedVideos).associate { it.cloud to it.local.uri }
+        syncedDeviceUris = (syncedImages + syncedVideos).map { it.local.uri }.toSet()
+        // "Has a cloud image to replace" covers a cloud-only image and a synced one, keeping the PLACE and
+        // TEXT locks open for an image-only selection. The DATE lock reads the wider date-target check, so
+        // a cloud or synced video (no place / text, but a stampable date) leaves only the date open.
         val hasCloudImage = cloudImageTargets.isNotEmpty() || syncedImageTargets.isNotEmpty()
+        val hasCloudDateTarget = cloudDateTargets.isNotEmpty() || syncedDateTargets.isNotEmpty()
 
         // A shift needs each photo's own date to add its delta to, so it covers the date targets whose
         // date is real. Two of them is the least that makes a shift mean anything: on one photo a shift
@@ -430,31 +455,33 @@ class MetadataEditorViewModel @Inject constructor(
         // for the meme, screenshot and download that reached the device with no EXIF, and the durable
         // override a landed write records is what carries the date for the very images MediaStore
         // refuses a DATE_TAKEN column. So the offer is not narrowed to the EXIF-writable set.
-        filenameDateByUri = (editable.map { it.local } + syncedImages.map { it.local }).mapNotNull { li ->
-            FilenameDate.parse(li.displayName, System.currentTimeMillis())?.let { li.uri to it }
-        }.toMap()
-        filenameDateByCloud = cloudImages.mapNotNull { ci ->
+        filenameDateByUri = (editable.map { it.local } + (syncedImages + syncedVideos).map { it.local })
+            .mapNotNull { li ->
+                FilenameDate.parse(li.displayName, System.currentTimeMillis())?.let { li.uri to it }
+            }.toMap()
+        filenameDateByCloud = (cloudImages + cloudVideos).mapNotNull { ci ->
             FilenameDate.parse(ci.cloud.displayName, System.currentTimeMillis())?.let { ci.cloud to it }
         }.toMap()
 
         // A shared-with-me album outranks everything: both fields are read-only. With nothing editable
-        // (no device file and no cloud image) every target is backed up or a cloud video, so both fields
+        // (no device file, no cloud image, no stampable video) every target is backed up, so both fields
         // lock as CLOUD. Otherwise the date is editable as long as one container durably takes it: an
-        // editable device image or video, or a cloud image the replace rewrites. An all-HEIC device set
-        // with no cloud image has only the column, which the next scan reverts, so the date locks as
-        // DATE_FORMAT. The place is editable as long as one EXIF-writable image is present, device or
-        // cloud. With none, a device video set has no GPS block and locks as VIDEO, while an
-        // unwritable-image set (HEIC, GIF, RAW) locks as PLACE_FORMAT, since the message differs.
+        // editable device image or video, or a cloud / synced image or video the replace rewrites. An
+        // all-HEIC device set with nothing in the cloud has only the column, which the next scan reverts,
+        // so the date locks as DATE_FORMAT. The place is editable as long as one EXIF-writable image is
+        // present, device or cloud. With none, a selection that holds a video has no GPS block and locks
+        // as VIDEO, while an unwritable-image set (HEIC, GIF, RAW) locks as PLACE_FORMAT, since the
+        // message differs.
         val dateLock: EditLock?
         val placeLock: EditLock?
         when {
             isReadOnlyAlbum -> { dateLock = EditLock.SHARED; placeLock = EditLock.SHARED }
             editableCount == 0 -> { dateLock = EditLock.CLOUD; placeLock = EditLock.CLOUD }
             else -> {
-                dateLock = if (dateTargetUris.isNotEmpty() || hasCloudImage) null else EditLock.DATE_FORMAT
+                dateLock = if (dateTargetUris.isNotEmpty() || hasCloudDateTarget) null else EditLock.DATE_FORMAT
                 placeLock = when {
                     anyEditableImage || hasCloudImage -> null
-                    editable.any { it.local.mimeType.startsWith("video/") } -> EditLock.VIDEO
+                    items.any { WriteLocalPhotoMetadataUseCase.isVideoMime(mimeOf(it)) } -> EditLock.VIDEO
                     else -> EditLock.PLACE_FORMAT
                 }
             }
@@ -493,6 +520,9 @@ class MetadataEditorViewModel @Inject constructor(
             dateShiftAvailable = dateLock == null && dateShiftTargets.size >= 2,
             dateShiftSkippedCount = dateTargetUris.size - dateShiftTargets.size,
             filenameDateCount = filenameDateByUri.size + filenameDateByCloud.size,
+            filenameDateSingleMs =
+                if (editableCount == 1) (filenameDateByUri.values + filenameDateByCloud.values).firstOrNull()
+                else null,
             description = MetadataTextFieldState(lock = descriptionLock),
             artist = MetadataTextFieldState(lock = textLock, chosen = !bulk),
             copyright = MetadataTextFieldState(lock = textLock, chosen = !bulk),
@@ -566,7 +596,7 @@ class MetadataEditorViewModel @Inject constructor(
     fun setDate(ms: Long) {
         if (_state.value.dateLock != null) return
         performBatch(PendingAction.Date(ms), dateTargetUris)
-        val cloudTargets = cloudImageTargets + syncedImageTargets
+        val cloudTargets = cloudDateTargets + syncedDateTargets
         if (cloudTargets.isEmpty()) return
         stageCloudDate(cloudTargets.associateWith { ms })
         _state.update { it.copy(captureDateMs = ms, dateChosen = true) }
@@ -588,7 +618,7 @@ class MetadataEditorViewModel @Inject constructor(
         val deltaMs = DateShift.deltaFor(span, earliestMs)
         if (deltaMs == 0L) return
         performBatch(PendingAction.DateShift(deltaMs), dateShiftTargets.map { it.uri })
-        val cloudTargets = cloudImageTargets + syncedImageTargets
+        val cloudTargets = cloudDateTargets + syncedDateTargets
         if (cloudTargets.isEmpty()) return
         stageCloudDate(cloudTargets.associateWith { it.captureTimeMs + deltaMs })
         _state.update { it.copy(dateChosen = true) }
@@ -600,8 +630,8 @@ class MetadataEditorViewModel @Inject constructor(
     fun fixDatesFromName() {
         if (_state.value.dateLock != null) return
         performBatch(PendingAction.FilenameDate, filenameDateByUri.keys.toList())
-        val cloudDates = (cloudImageTargets.mapNotNull { p -> filenameDateByCloud[p]?.let { p to it } } +
-            syncedImageTargets.mapNotNull { p -> filenameDateByUri[syncedDeviceUriByPhoto[p]]?.let { p to it } })
+        val cloudDates = (cloudDateTargets.mapNotNull { p -> filenameDateByCloud[p]?.let { p to it } } +
+            syncedDateTargets.mapNotNull { p -> filenameDateByUri[syncedDeviceUriByPhoto[p]]?.let { p to it } })
             .toMap()
         if (cloudDates.isEmpty()) return
         stageCloudDate(cloudDates)

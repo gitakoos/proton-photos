@@ -56,45 +56,43 @@ data class FaceModelAsset(
 object FaceModelAssets {
 
     /**
-     * The SCRFD-500m detector: one ONNX network that finds where the faces are, not who they are. It
-     * is not published yet, so it is left unpinned (a blank digest and a zero length). Filling both in
-     * from the released asset flips the rail from side-load-only to a verified network fetch; nothing
-     * else here has to change.
+     * The YuNet detector: one ONNX network that finds where the faces are, not who they are. It is
+     * pinned to the exact bytes of the published release asset, so the rail fetches it over the network
+     * and verifies both its length and its digest before use.
      */
     val MODEL = FaceModelAsset(
-        fileName = "scrfd_500m.onnx",
-        sizeBytes = 0L,
-        sha256 = "",
+        fileName = "yunet.onnx",
+        sizeBytes = 232589L,
+        sha256 = "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4",
     )
 
     /**
-     * The buffalo_s recognition network: one ONNX model that turns an aligned 112x112 face crop into a
-     * 512-d embedding, the vector later pieces compare to decide who is who. It rides the same release
-     * and the same side-load directory as [MODEL] and is likewise left unpinned (a blank digest and a
-     * zero length) until it is published; filling both in flips it from side-load-only to a verified
-     * network fetch with nothing else here to change.
+     * The SFace recognition network: one ONNX model that turns an aligned 112x112 face crop into a
+     * face embedding, the vector later pieces compare to decide who is who. It rides the same release
+     * and the same side-load directory as [MODEL] and is pinned the same way, to the exact bytes of the
+     * published release asset.
      */
     val EMBED_MODEL = FaceModelAsset(
-        fileName = "w600k_mbf.onnx",
-        sizeBytes = 0L,
-        sha256 = "",
+        fileName = "sface.onnx",
+        sizeBytes = 38696353L,
+        sha256 = "0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79",
     )
 
-    /** Whether [MODEL] is pinned to exact bytes. Until it is, the rail is side-load only. */
-    val isPinned: Boolean get() = MODEL.isPinned
+    /** Whether both models are pinned to exact bytes. Until they are, the rail is side-load only. */
+    val isPinned: Boolean get() = MODEL.isPinned && EMBED_MODEL.isPinned
 
     /** What a consent prompt would quote, so the figure on screen is the figure that goes over the wire. */
-    val TOTAL_DOWNLOAD_BYTES: Long get() = MODEL.sizeBytes
+    val TOTAL_DOWNLOAD_BYTES: Long get() = MODEL.sizeBytes + EMBED_MODEL.sizeBytes
 
     /**
-     * Release the model asset is published under. Its own tag rather than an app release: the model
-     * changes on its own schedule and every app version that expects these exact bytes points at the
-     * same immutable asset.
+     * Release the model assets are published under, in the dedicated face-models repository. Its own tag
+     * rather than an app release: the models change on their own schedule and every app version that
+     * expects these exact bytes points at the same immutable assets.
      */
-    const val RELEASE_TAG = "face-models-v1"
+    const val RELEASE_TAG = "v1"
 
-    /** Where [MODEL] is fetched from; a file name appends directly to it. */
-    const val BASE_URL = "https://github.com/gitakoos/proton-photos/releases/download/$RELEASE_TAG/"
+    /** Where the models are fetched from; a file name appends directly to it. */
+    const val BASE_URL = "https://github.com/gitakoos/face-models/releases/download/$RELEASE_TAG/"
 
     /** Sub-directory holding the model, under app-private storage and under the side-load root. */
     const val DIRECTORY = "face"

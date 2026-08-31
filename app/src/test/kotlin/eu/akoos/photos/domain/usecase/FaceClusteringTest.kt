@@ -97,13 +97,13 @@ class FaceClusteringTest {
     @Test
     fun moderately_similar_faces_stay_apart_at_the_precision_threshold() {
         val v = unit(1f, 0f, 0f)
-        val w = unit(0.40f, 0.917f, 0f) // cosine to v is about 0.40
+        val w = unit(0.30f, 0.954f, 0f) // cosine to v is about 0.30
 
-        assertEquals("cosine 0.40 is below the precision floor", 2, clusterCount(cluster(listOf(v, w))))
+        assertEquals("cosine 0.30 is below the precision floor", 2, clusterCount(cluster(listOf(v, w))))
         assertEquals(
-            "the same pair collapses once the floor drops to 0.3",
+            "the same pair collapses once the floor drops to 0.25",
             1,
-            clusterCount(cluster(listOf(v, w), threshold = 0.3f)),
+            clusterCount(cluster(listOf(v, w), threshold = 0.25f)),
         )
     }
 
@@ -127,6 +127,84 @@ class FaceClusteringTest {
     }
 
     @Test
+    fun an_unconfirmed_weak_face_matching_nothing_is_left_unassigned() {
+        // A weak crop far from every cluster is not allowed to seed one: it is left unassigned (-1), so a
+        // run of junk detections cannot coalesce into a cluster. Merge off, so only the seed rule decides.
+        val anchor = unit(1f, 0f, 0f)
+        val junk = unit(0f, 1f, 0f) // orthogonal to the anchor, matches nothing
+        val assignment = clusterFaces(
+            listOf(FaceSample(anchor, 0.9f, confident = true), FaceSample(junk, 0.4f, confident = false)),
+            0.5f, 0.99f,
+        )
+        assertEquals("the confident anchor seeds its cluster", 0, assignment[0])
+        assertEquals("the unconfirmed weak face is left unassigned", -1, assignment[1])
+    }
+
+    @Test
+    fun a_confirmed_weak_face_matching_nothing_still_seeds_a_cluster() {
+        // A face the user confirmed seeds even when its crop is weak, so a named person is never lost to
+        // the Unsorted bucket for want of a confident crop.
+        val anchor = unit(1f, 0f, 0f)
+        val confirmedWeak = unit(0f, 1f, 0f)
+        val assignment = clusterFaces(
+            listOf(
+                FaceSample(anchor, 0.9f, confident = true),
+                FaceSample(confirmedWeak, 0.4f, confident = false, confirmed = true),
+            ),
+            0.5f, 0.99f,
+        )
+        assertTrue("the confirmed weak face is assigned, not left out", assignment[1] >= 0)
+        assertTrue("it forms its own cluster distinct from the anchor", assignment[0] != assignment[1])
+    }
+
+    @Test
+    fun a_weak_face_close_to_a_confident_cluster_still_joins_it() {
+        // The seed change does not strand a real weak face: one close enough to a confident cluster still
+        // joins it. Only a weak face matching NOTHING is left unassigned.
+        val anchor = unit(1f, 0f, 0f)
+        val near = unit(0.97f, 0.24f, 0f) // cosine about 0.97, clears the weak bar
+        val assignment = clusterFaces(
+            listOf(FaceSample(anchor, 0.9f, confident = true), FaceSample(near, 0.4f, confident = false)),
+            0.5f, 0.99f,
+        )
+        assertEquals("the weak but close face joins the confident cluster", assignment[0], assignment[1])
+        assertTrue("it is not left unassigned", assignment[1] >= 0)
+    }
+
+    @Test
+    fun the_unassigned_leftover_never_merges_into_a_real_cluster() {
+        // Two confident faces of one identity plus an unconfirmed weak junk face orthogonal to them: the
+        // junk stays -1 through the merge pass and is never pulled into the real cluster.
+        val a1 = unit(1f, 0f, 0f)
+        val a2 = unit(0.9f, 0.44f, 0f)
+        val junk = unit(0f, 0f, 1f)
+        val assignment = clusterFaces(
+            listOf(
+                FaceSample(a1, 0.9f, confident = true),
+                FaceSample(a2, 0.85f, confident = true),
+                FaceSample(junk, 0.3f, confident = false),
+            ),
+            0.5f, FACE_CLUSTER_MERGE_THRESHOLD,
+        )
+        assertEquals("the junk face is left unassigned", -1, assignment[2])
+        assertTrue("the two real faces are clustered", assignment[0] >= 0 && assignment[1] >= 0)
+        assertEquals("the two real faces fold into one person", assignment[0], assignment[1])
+    }
+
+    @Test
+    fun the_unassigned_leftover_is_never_given_a_name() {
+        // A confirmed face that landed in the -1 leftover must not turn -1 into a named cluster (which
+        // would then pull the person's faces into the Unsorted bucket). Cluster -1 gets no name.
+        val result = resolveClusterNames(
+            oldPersonIdPerFace = listOf(5L, 5L, 5L),
+            manualNamePerFace = listOf(null, null, "Ákos"),
+            clusterPerFace = intArrayOf(0, 0, -1),
+            names = mapOf(5L to "Ákos"),
+        )
+        assertEquals("the name follows the real cluster, never the -1 leftover", mapOf(0 to "Ákos"), result)
+    }
+
+    @Test
     fun a_merge_pass_folds_one_person_split_by_arrival_order_back_together() {
         // One identity whose crops arrive out of order: a1 seeds, a3 opens a second cluster, a2 joins
         // a1. The two clusters' mean directions are close, so the merge folds them into one person.
@@ -145,8 +223,9 @@ class FaceClusteringTest {
 
     @Test
     fun a_named_person_keeps_its_name_when_its_faces_stay_in_one_cluster() {
-        val result = carryNamesToClusters(
+        val result = resolveClusterNames(
             oldPersonIdPerFace = listOf(5L, 5L, 5L),
+            manualNamePerFace = listOf(null, null, null),
             clusterPerFace = intArrayOf(2, 2, 2),
             names = mapOf(5L to "Ákos"),
         )
@@ -157,8 +236,9 @@ class FaceClusteringTest {
     fun a_split_person_keeps_its_name_on_the_larger_fragment() {
         // Person 5's four faces land three in cluster 0 and one in cluster 1; the name follows the
         // majority so it does not chase the stray face into cluster 1.
-        val result = carryNamesToClusters(
+        val result = resolveClusterNames(
             oldPersonIdPerFace = listOf(5L, 5L, 5L, 5L),
+            manualNamePerFace = listOf(null, null, null, null),
             clusterPerFace = intArrayOf(0, 0, 0, 1),
             names = mapOf(5L to "Ákos"),
         )
@@ -169,8 +249,9 @@ class FaceClusteringTest {
     fun two_people_merged_into_one_cluster_do_not_both_claim_it() {
         // Persons 5 (three faces) and 6 (one face) both land in cluster 0. The larger claims the name;
         // the smaller has nowhere else to go, so its name drops rather than mislabel the cluster.
-        val result = carryNamesToClusters(
+        val result = resolveClusterNames(
             oldPersonIdPerFace = listOf(5L, 5L, 5L, 6L),
+            manualNamePerFace = listOf(null, null, null, null),
             clusterPerFace = intArrayOf(0, 0, 0, 0),
             names = mapOf(5L to "Ákos", 6L to "Béla"),
         )
@@ -179,8 +260,9 @@ class FaceClusteringTest {
 
     @Test
     fun two_named_people_in_separate_clusters_each_keep_their_name() {
-        val result = carryNamesToClusters(
+        val result = resolveClusterNames(
             oldPersonIdPerFace = listOf(5L, 6L),
+            manualNamePerFace = listOf(null, null),
             clusterPerFace = intArrayOf(0, 1),
             names = mapOf(5L to "Ákos", 6L to "Béla"),
         )
@@ -189,12 +271,40 @@ class FaceClusteringTest {
 
     @Test
     fun an_unnamed_or_unknown_face_produces_no_name() {
-        val result = carryNamesToClusters(
+        val result = resolveClusterNames(
             oldPersonIdPerFace = listOf(null, 9L),
+            manualNamePerFace = listOf(null, null),
             clusterPerFace = intArrayOf(0, 1),
             names = mapOf(5L to "Ákos"),
         )
         assertTrue("no named person's faces are present", result.isEmpty())
+    }
+
+    @Test
+    fun a_lone_confirmed_face_does_not_steal_the_name_from_the_person_bulk() {
+        // The base pass split one confirmed odd-angle face of person 5 ("Ákos") into its own cluster 1,
+        // while the person's 55 carried faces stay in cluster 0. The name must follow the 55, not chase
+        // the single confirmation into cluster 1 (the regression that emptied a named person after a
+        // suggestion was accepted).
+        val result = resolveClusterNames(
+            oldPersonIdPerFace = List(56) { 5L },
+            manualNamePerFace = List(56) { i -> if (i == 55) "Ákos" else null },
+            clusterPerFace = IntArray(56) { i -> if (i == 55) 1 else 0 },
+            names = mapOf(5L to "Ákos"),
+        )
+        assertEquals(mapOf(0 to "Ákos"), result)
+    }
+
+    @Test
+    fun a_confirmation_breaks_a_tie_between_equal_clusters() {
+        // Two clusters each hold two of person 5's faces; the one that also carries a confirmation wins.
+        val result = resolveClusterNames(
+            oldPersonIdPerFace = listOf(5L, 5L, 5L, 5L),
+            manualNamePerFace = listOf(null, null, null, "Ákos"),
+            clusterPerFace = intArrayOf(0, 0, 1, 1),
+            names = mapOf(5L to "Ákos"),
+        )
+        assertEquals(mapOf(1 to "Ákos"), result)
     }
 
     @Test
@@ -249,7 +359,7 @@ class FaceClusteringTest {
         val unnamed = listOf(
             30L to unit(0.95f, 0.31f, 0f), // close to A
             40L to unit(0.10f, 0.99f, 0f), // close to B
-            50L to unit(0.30f, 0.30f, 0.90f), // far from both, below the floor
+            50L to unit(0.15f, 0.15f, 0.98f), // far from both, below the floor
         )
         val res = suggestPersonMatches(named, unnamed, FACE_SUGGEST_THRESHOLD)
         val to = res.associate { it.second to it.first }
@@ -287,9 +397,15 @@ class FaceClusteringTest {
 
     @Test
     fun unpack_reads_the_little_endian_floats_the_indexer_packed() {
-        val vector = floatArrayOf(0.5f, -0.25f, 1.5f, 0f)
+        val vector = FloatArray(FACE_EMBEDDING_DIM) { (it - 5) * 0.01f }
         val buffer = ByteBuffer.allocate(vector.size * Float.SIZE_BYTES).order(ByteOrder.LITTLE_ENDIAN)
         for (value in vector) buffer.putFloat(value)
         assertArrayEquals(vector, unpackEmbedding(buffer.array()), 0f)
+    }
+
+    @Test
+    fun unpack_rejects_a_blob_of_the_wrong_width() {
+        val oldModelBlob = ByteArray(512 * Float.SIZE_BYTES)
+        assertTrue(unpackEmbedding(oldModelBlob).isEmpty())
     }
 }

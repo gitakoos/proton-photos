@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.presentation.folders
 
+import android.os.Build
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -37,6 +38,7 @@ import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Collections
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FolderOff
 import androidx.compose.material.icons.filled.PhotoAlbum
 import androidx.compose.material.icons.filled.PlayArrow
@@ -60,6 +62,7 @@ import eu.akoos.photos.presentation.albums.AlbumPhotoSortMode
 import eu.akoos.photos.presentation.common.ActionSheetRow
 import eu.akoos.photos.presentation.common.ActionSheetSectionHeading
 import eu.akoos.photos.presentation.theme.Bg2
+import eu.akoos.photos.presentation.theme.SheetBg
 import eu.akoos.photos.presentation.theme.FgPrimary
 import kotlinx.coroutines.launch
 
@@ -96,6 +99,8 @@ internal fun DeviceFolderActionsSheet(
      *  vault holds other photos from. The weaker [isHiddenFromTimeline] only keeps a folder's photos
      *  out of the main feed. */
     isHiddenCard: Boolean,
+    /** False in a local-only session, which drops the rows that act on the Drive copy. */
+    isSignedIn: Boolean = true,
     sortMode: AlbumPhotoSortMode,
     onDismiss: () -> Unit,
     onToggleMirrorAsAlbum: () -> Unit,
@@ -115,6 +120,10 @@ internal fun DeviceFolderActionsSheet(
     onBackUp: ((asMirror: Boolean) -> Unit)? = null,
     /** Null where the folder holds no photos, which drops the slideshow row. */
     onSlideshow: (() -> Unit)? = null,
+    /** Rename the folder, offered only in a logged-out session where there is no Drive album to rename
+     *  instead. A folder rename relocates its photos into a new DCIM directory, a scoped-storage move
+     *  that needs Android 10+, so the row is also held to that floor. Null hides it. */
+    onRename: (() -> Unit)? = null,
 ) {
     val scope = rememberCoroutineScope()
     // Slide the drawer away before the action lands, so a snackbar or system dialog never opens
@@ -129,7 +138,7 @@ internal fun DeviceFolderActionsSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = Bg2,
+        containerColor = SheetBg,
         scrimColor = Color.Black.copy(alpha = 0.5f),
     ) {
         // Height-capped + scroll so a short device never clips the last row.
@@ -152,13 +161,14 @@ internal fun DeviceFolderActionsSheet(
                 modifier = Modifier.padding(bottom = 16.dp),
             )
 
-            val hasPhotoActions = onBackUp != null || onSlideshow != null
+            // Backing up needs a Proton account, so its two rows are offered only when signed in.
+            val hasPhotoActions = (onBackUp != null && isSignedIn) || onSlideshow != null
             if (hasPhotoActions) {
                 ActionSheetSectionHeading(
                     stringResource(R.string.action_sheet_actions_heading),
                     first = true,
                 )
-                if (onBackUp != null) {
+                if (onBackUp != null && isSignedIn) {
                     // The two modes differ in what happens after this upload, which their titles
                     // alone cannot say, so both carry a second line.
                     ActionSheetRow(
@@ -182,7 +192,7 @@ internal fun DeviceFolderActionsSheet(
                     )
                 }
                 if (onSlideshow != null) {
-                    if (onBackUp != null) Spacer(Modifier.height(8.dp))
+                    if (onBackUp != null && isSignedIn) Spacer(Modifier.height(8.dp))
                     ActionSheetRow(
                         icon = Icons.Default.PlayArrow,
                         title = stringResource(R.string.viewer_play_slideshow),
@@ -195,22 +205,36 @@ internal fun DeviceFolderActionsSheet(
                 stringResource(R.string.action_sheet_settings_heading),
                 first = !hasPhotoActions,
             )
-            // Each of the three writes the same preference set its Settings picker does, so a change
-            // here and a change there are the same change. The tick is the current state.
-            ActionSheetRow(
-                icon = Icons.Default.Collections,
-                title = stringResource(R.string.device_folder_mirror_as_album),
-                onClick = { close(onToggleMirrorAsAlbum) },
-                showCheck = isMirroredAsAlbum,
-            )
-            Spacer(Modifier.height(8.dp))
-            ActionSheetRow(
-                icon = Icons.Default.CloudOff,
-                title = stringResource(R.string.device_folder_exclude_from_backup),
-                onClick = { close(onToggleExcludedFromBackup) },
-                showCheck = isExcludedFromBackup,
-            )
-            Spacer(Modifier.height(8.dp))
+            // Each writes the same preference set its Settings picker does, so a change here and a
+            // change there are the same change. The tick is the current state. Mirroring as an album
+            // and excluding from back-up both act on the Drive copy, so they need a signed-in account.
+            if (isSignedIn) {
+                ActionSheetRow(
+                    icon = Icons.Default.Collections,
+                    title = stringResource(R.string.device_folder_mirror_as_album),
+                    onClick = { close(onToggleMirrorAsAlbum) },
+                    showCheck = isMirroredAsAlbum,
+                )
+                Spacer(Modifier.height(8.dp))
+                ActionSheetRow(
+                    icon = Icons.Default.CloudOff,
+                    title = stringResource(R.string.device_folder_exclude_from_backup),
+                    onClick = { close(onToggleExcludedFromBackup) },
+                    showCheck = isExcludedFromBackup,
+                )
+                Spacer(Modifier.height(8.dp))
+            }
+            // Renaming a folder relocates its photos into a new directory, the local stand-in for
+            // renaming a Drive album. It is offered only in a logged-out session, and only where the
+            // scoped-storage move it performs is supported.
+            if (!isSignedIn && onRename != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                ActionSheetRow(
+                    icon = Icons.Default.Edit,
+                    title = stringResource(R.string.folder_rename),
+                    onClick = { close(onRename) },
+                )
+                Spacer(Modifier.height(8.dp))
+            }
             ActionSheetRow(
                 icon = Icons.Default.VisibilityOff,
                 title = stringResource(R.string.device_folder_hide_from_timeline),

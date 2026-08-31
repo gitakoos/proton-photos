@@ -22,12 +22,17 @@
 
 package eu.akoos.photos.presentation.people
 
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -37,12 +42,14 @@ import androidx.compose.material.icons.filled.CallMerge
 import androidx.compose.material.icons.filled.PersonOff
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -52,9 +59,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import eu.akoos.photos.R
 import eu.akoos.photos.presentation.common.ConfirmDialog
 import eu.akoos.photos.presentation.common.IconBubble
+import eu.akoos.photos.presentation.common.ShimmerBox
 import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
 import eu.akoos.photos.presentation.gallery.PersonCard
-import eu.akoos.photos.presentation.settings.components.SettingsPillHeader
+import eu.akoos.photos.presentation.common.FloatingHeader
 import eu.akoos.photos.presentation.theme.AppColors
 
 /**
@@ -71,9 +79,21 @@ fun ReviewSuggestionsScreen(
 ) {
     val colors = AppColors.current
     val clusters by viewModel.clusters.collectAsStateWithLifecycle()
+    // Null until the first cluster query returns, so loading is told apart from a genuinely empty set.
+    val loading = clusters == null
+    val resolvedClusters = clusters.orEmpty()
     val namedPeople by viewModel.namedPeople.collectAsStateWithLifecycle()
+    val message by viewModel.message.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    LaunchedEffect(message) {
+        message?.let {
+            Toast.makeText(context, context.getString(it), Toast.LENGTH_SHORT).show()
+            viewModel.clearMessage()
+        }
+    }
     var selection by remember { mutableStateOf(emptySet<Long>()) }
     var showMerge by remember { mutableStateOf(false) }
+    var pendingBulkMerge by remember { mutableStateOf<Pair<Set<Long>, String>?>(null) }
     var showNotPerson by remember { mutableStateOf(false) }
     val selecting = selection.isNotEmpty()
 
@@ -88,42 +108,97 @@ fun ReviewSuggestionsScreen(
             .fillMaxSize()
             .background(colors.pageBg),
     ) {
-        if (clusters.isEmpty()) {
-            Text(
-                text = stringResource(R.string.people_review_empty),
-                color = colors.fgMute,
-                fontSize = 14.sp,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.align(Alignment.Center).padding(horizontal = 40.dp),
-            )
-        } else {
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(2),
-                contentPadding = PaddingValues(
-                    start = 14.dp,
-                    end = 14.dp,
-                    top = floatingHeaderContentTopPadding(),
-                    bottom = 24.dp,
-                ),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-                modifier = Modifier.fillMaxSize(),
-            ) {
-                items(items = clusters, key = { it.personId }) { person ->
-                    PersonCard(
-                        person = person,
-                        selected = person.personId in selection,
-                        onClick = {
-                            if (selecting) toggle(person.personId) else onOpenCluster(person.personId)
-                        },
-                        onLongClick = { toggle(person.personId) },
-                    )
-                }
+        // Loading / empty / content phase, cross-faded so the empty message never flashes before the
+        // first cluster query returns.
+        val phase = when {
+            loading -> 0
+            resolvedClusters.isEmpty() -> 1
+            else -> 2
+        }
+        Crossfade(targetState = phase, label = "reviewContent", modifier = Modifier.fillMaxSize()) { p ->
+            when (p) {
+                0 ->
+                    // Skeleton grid matching the 2-column cluster layout so there is no jump when the
+                    // real cards arrive.
+                    LazyVerticalGrid(
+                        columns = GridCells.Fixed(2),
+                        contentPadding = PaddingValues(
+                            start = 14.dp,
+                            end = 14.dp,
+                            top = floatingHeaderContentTopPadding(),
+                            bottom = 24.dp,
+                        ),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.fillMaxSize(),
+                    ) {
+                        items(8) {
+                            ShimmerBox(
+                                modifier = Modifier.fillMaxWidth().aspectRatio(132f / 168f),
+                                cornerRadius = 16.dp,
+                            )
+                        }
+                    }
+                1 ->
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text(
+                            text = stringResource(R.string.people_review_empty),
+                            color = colors.fgMute,
+                            fontSize = 14.sp,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.padding(horizontal = 40.dp),
+                        )
+                    }
+                else ->
+                    LazyVerticalGrid(
+                        columns = GridCells.Fixed(2),
+                        contentPadding = PaddingValues(
+                            start = 14.dp,
+                            end = 14.dp,
+                            top = floatingHeaderContentTopPadding(),
+                            bottom = 24.dp,
+                        ),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.fillMaxSize(),
+                    ) {
+                        items(items = resolvedClusters, key = { it.personId }) { person ->
+                            val card: @Composable () -> Unit = {
+                                PersonCard(
+                                    person = person,
+                                    selected = person.personId in selection,
+                                    // The Unsorted bucket is opened to curate its faces one by one, never bulk-merged
+                                    // or bulk-rejected as a whole, so it always opens and cannot join a selection.
+                                    onClick = {
+                                        if (selecting && !person.isOther) toggle(person.personId)
+                                        else onOpenCluster(person.personId)
+                                    },
+                                    onLongClick = if (person.isOther) null else { { toggle(person.personId) } },
+                                )
+                            }
+                            // Only the Unsorted bucket carries a caption, so it reads as the leftover pile to sort
+                            // rather than a person the app recognised.
+                            if (person.isOther) {
+                                Column {
+                                    card()
+                                    Text(
+                                        text = stringResource(R.string.person_unsorted_caption),
+                                        color = colors.fgDim,
+                                        fontSize = 11.sp,
+                                        lineHeight = 15.sp,
+                                        modifier = Modifier.padding(top = 6.dp, start = 2.dp, end = 2.dp),
+                                    )
+                                }
+                            } else {
+                                card()
+                            }
+                        }
+                    }
             }
         }
 
         if (selecting) {
-            SettingsPillHeader(
+            FloatingHeader(
                 title = stringResource(R.string.album_picker_selected, selection.size),
                 onBack = { selection = emptySet() },
                 trailing = {
@@ -133,7 +208,7 @@ fun ReviewSuggestionsScreen(
                         onClick = { showMerge = true },
                         diameter = 40.dp,
                         iconSize = 18.dp,
-                        background = colors.surfaceWeak,
+                        background = colors.pillBg,
                         borderColor = colors.pillBorder,
                         tint = colors.fgPrimary,
                     )
@@ -143,15 +218,15 @@ fun ReviewSuggestionsScreen(
                         onClick = { showNotPerson = true },
                         diameter = 40.dp,
                         iconSize = 18.dp,
-                        background = colors.surfaceWeak,
+                        background = colors.pillBg,
                         borderColor = colors.pillBorder,
-                        tint = colors.fgDim,
+                        tint = colors.fgPrimary,
                         modifier = Modifier.padding(start = 8.dp),
                     )
                 },
             )
         } else {
-            SettingsPillHeader(
+            FloatingHeader(
                 title = stringResource(R.string.people_review_title),
                 onBack = onBack,
             )
@@ -163,9 +238,10 @@ fun ReviewSuggestionsScreen(
         PersonPickerSheet(
             title = stringResource(R.string.person_merge_name_title),
             people = namedPeople,
+            // Folding these clusters into an existing named person cannot be undone automatically, so
+            // confirm first. Naming a brand-new person is reversible by renaming, so it commits at once.
             onPick = { person ->
-                person.displayName?.let { viewModel.bulkMerge(sel, it) }
-                selection = emptySet()
+                person.displayName?.let { pendingBulkMerge = sel to it }
                 showMerge = false
             },
             onCreateNew = { name ->
@@ -174,6 +250,21 @@ fun ReviewSuggestionsScreen(
                 showMerge = false
             },
             onDismiss = { showMerge = false },
+        )
+    }
+
+    pendingBulkMerge?.let { (ids, name) ->
+        ConfirmDialog(
+            title = stringResource(R.string.person_merge_confirm_title),
+            message = stringResource(R.string.person_merge_confirm_body),
+            confirmLabel = stringResource(R.string.person_merge_confirm),
+            dismissLabel = stringResource(R.string.cancel),
+            onConfirm = {
+                viewModel.bulkMerge(ids, name)
+                selection = emptySet()
+                pendingBulkMerge = null
+            },
+            onDismiss = { pendingBulkMerge = null },
         )
     }
 

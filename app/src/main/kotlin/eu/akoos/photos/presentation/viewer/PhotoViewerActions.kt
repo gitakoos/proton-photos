@@ -86,6 +86,7 @@ import eu.akoos.photos.presentation.gallery.LocalThumbnailUrls
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.Bg0
 import eu.akoos.photos.presentation.theme.Bg2
+import eu.akoos.photos.presentation.theme.SheetBg
 import eu.akoos.photos.presentation.theme.CardBg
 import eu.akoos.photos.presentation.theme.CardBorder
 import eu.akoos.photos.presentation.theme.DeleteTint
@@ -254,6 +255,7 @@ internal fun RenameDialog(
                 enabled = !isWorking,
                 label = { Text(stringResource(R.string.rename_sheet_name_label)) },
                 modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp),
                 colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
                     focusedTextColor = FgPrimary,
                     unfocusedTextColor = FgPrimary,
@@ -441,7 +443,7 @@ internal fun AddToAlbumSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = Bg2,
+        containerColor = SheetBg,
         scrimColor = Color.Black.copy(alpha = 0.5f),
     ) {
         Column(

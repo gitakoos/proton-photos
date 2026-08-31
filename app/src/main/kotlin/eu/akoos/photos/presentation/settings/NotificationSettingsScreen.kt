@@ -56,6 +56,7 @@ fun NotificationSettingsScreen(
     viewModel: NotificationSettingsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val isSignedIn by viewModel.isSignedIn.collectAsStateWithLifecycle()
     val colors = AppColors.current
 
     SettingsSubPageScaffold(title = stringResource(R.string.notifications_title), onBack = onBack) {
@@ -68,27 +69,31 @@ fun NotificationSettingsScreen(
         )
 
         SettingsCard {
-            ToggleRow(
-                label = stringResource(R.string.notifications_backup_status),
-                description = stringResource(R.string.notifications_backup_status_desc),
-                checked = state.backupStatus,
-                onCheckedChange = viewModel::setBackupStatus,
-            )
-            RowDivider()
-            ToggleRow(
-                label = stringResource(R.string.notifications_album_download),
-                description = stringResource(R.string.notifications_album_download_desc),
-                checked = state.albumDownload,
-                onCheckedChange = viewModel::setAlbumDownload,
-            )
-            RowDivider()
-            ToggleRow(
-                label = stringResource(R.string.notifications_delete_reminder),
-                description = stringResource(R.string.notifications_delete_reminder_desc),
-                checked = state.deleteReminder,
-                onCheckedChange = viewModel::setDeleteReminder,
-            )
-            RowDivider()
+            // Backup, album-download and delete-reminder notifications concern cloud sync, so they
+            // stay hidden while signed out. The update-available check is local and always shows.
+            if (isSignedIn) {
+                ToggleRow(
+                    label = stringResource(R.string.notifications_backup_status),
+                    description = stringResource(R.string.notifications_backup_status_desc),
+                    checked = state.backupStatus,
+                    onCheckedChange = viewModel::setBackupStatus,
+                )
+                RowDivider()
+                ToggleRow(
+                    label = stringResource(R.string.notifications_album_download),
+                    description = stringResource(R.string.notifications_album_download_desc),
+                    checked = state.albumDownload,
+                    onCheckedChange = viewModel::setAlbumDownload,
+                )
+                RowDivider()
+                ToggleRow(
+                    label = stringResource(R.string.notifications_delete_reminder),
+                    description = stringResource(R.string.notifications_delete_reminder_desc),
+                    checked = state.deleteReminder,
+                    onCheckedChange = viewModel::setDeleteReminder,
+                )
+                RowDivider()
+            }
             ToggleRow(
                 label = stringResource(R.string.notifications_update_available),
                 description = stringResource(R.string.notifications_update_available_desc),

@@ -25,6 +25,7 @@ package eu.akoos.photos.presentation.util
 import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.TimeZone
+import kotlin.math.ceil
 
 /** The one byte formatter for every surface. Binary units (1024) to match how Proton
  *  reports storage, so a quota shown here equals the same quota on Proton's own pages. */
@@ -69,3 +70,17 @@ fun dayMonthYearFormat(): SimpleDateFormat = SimpleDateFormat("d MMMM yyyy", Loc
  *  only; callers keep their own per-thread instance. */
 fun isoDateFormat(): SimpleDateFormat =
     SimpleDateFormat("yyyy-MM-dd", Locale.US).apply { timeZone = TimeZone.getDefault() }
+
+/**
+ * Whole days from [nowMs] until a trashed item is permanently purged at [purgeAtMs], rounded UP:
+ * any fraction of a day still counts as a day, so a badge never claims fewer days than the reader
+ * actually has. Zero once the purge time is reached or past, which a caller renders as an
+ * imminent-deletion label rather than "0 days". Both arguments are epoch milliseconds — the device
+ * side passes DATE_EXPIRES times 1000, the cloud side a link's trashed time plus the retention
+ * window.
+ */
+fun daysUntilPurge(purgeAtMs: Long, nowMs: Long): Int {
+    val remaining = purgeAtMs - nowMs
+    if (remaining <= 0L) return 0
+    return ceil(remaining / 86_400_000.0).toInt()
+}

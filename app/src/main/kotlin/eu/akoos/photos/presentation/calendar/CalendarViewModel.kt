@@ -104,26 +104,28 @@ class CalendarViewModel @Inject constructor(
                 accountManager.getPrimaryUserId()
                     .flatMapLatest { userId ->
                         primaryUserId = userId?.id
-                        if (userId == null) {
-                            flowOf(emptyList<MonthBucket>())
-                        } else {
-                            // Build the month grid from the data sources only, so a thumbnail-decrypt
-                            // (store change) does not re-run the heavier buildMonths walk.
-                            combine(
-                                getGalleryItems.invoke(userId),
-                                dayMetaDao.observeAll(userId.id),
-                                hiddenUrisFlow,
-                            ) { items, metas, hiddenUris ->
-                                val visible = items.filter { item ->
-                                    val uri = when (item) {
-                                        is GalleryItem.LocalOnly -> item.local.uri
-                                        is GalleryItem.Synced -> item.local.uri
-                                        is GalleryItem.CloudOnly -> null
-                                    }
-                                    uri == null || uri !in hiddenUris
+                        // Build the month grid from the data sources only, so a thumbnail-decrypt
+                        // (store change) does not re-run the heavier buildMonths walk. Signed out the
+                        // grid is built from the device's own media; the day-meta overlay is account
+                        // scoped, so it is empty then.
+                        val libraryFlow = if (userId == null) getGalleryItems.invokeLocalOnly()
+                            else getGalleryItems.invoke(userId)
+                        val metasFlow = if (userId == null) flowOf(emptyList<DayMetaEntity>())
+                            else dayMetaDao.observeAll(userId.id)
+                        combine(
+                            libraryFlow,
+                            metasFlow,
+                            hiddenUrisFlow,
+                        ) { items, metas, hiddenUris ->
+                            val visible = items.filter { item ->
+                                val uri = when (item) {
+                                    is GalleryItem.LocalOnly -> item.local.uri
+                                    is GalleryItem.Synced -> item.local.uri
+                                    is GalleryItem.CloudOnly -> null
                                 }
-                                buildMonths(visible, metas)
+                                uri == null || uri !in hiddenUris
                             }
+                            buildMonths(visible, metas)
                         }
                     }
                     // The day tile draws its cover imperatively (a bitmap built outside any Compose

@@ -785,9 +785,9 @@ fun AlbumDetailScreen(
                 .padding(start = 16.dp, top = 10.dp),
             diameter = 40.dp,
             iconSize = 18.dp,
-            background = Color(0x99000000),
+            background = PillBg,
             borderColor = PillBorder,
-            tint = Color.White,
+            tint = appColors.fgPrimary,
         )
 
 
@@ -808,7 +808,7 @@ fun AlbumDetailScreen(
                 onClick = { scope.launch { gridState.animateScrollToItem(0) } },
                 diameter = 40.dp,
                 iconSize = 24.dp,
-                background = PillBgOpaque,
+                background = PillBg,
                 borderColor = PillBorder,
                 tint = appColors.fgPrimary,
             )

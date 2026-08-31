@@ -21,11 +21,11 @@
  */
 
 /*
- * The session handling and the NCHW input layout follow the detector rail in this project. The
- * (x - 127.5) / 128 RGB normalisation and the L2-normalised 512-d output follow the published
- * InsightFace ArcFace / MobileFaceNet recognition format, which is Apache-2.0 licensed:
+ * The session handling and the NCHW input layout follow the detector rail in this project. The BGR,
+ * raw 0-255 input and the L2-normalised 128-d output follow the published OpenCV Zoo SFace
+ * recognition format (the blobFromImage default), which is Apache-2.0 licensed:
  *
- *   Copyright (c) 2021 InsightFace
+ *   Copyright (c) 2023 OpenCV Zoo and contributors
  */
 
 package eu.akoos.photos.data.face
@@ -42,18 +42,16 @@ import java.nio.FloatBuffer
 import kotlin.math.sqrt
 
 /**
- * Turns one aligned face crop into a 512-d embedding by running the buffalo_s recognition network
- * once.
+ * Turns one aligned face crop into a [DIM]-d embedding by running the SFace recognition network once.
  *
  * One session per instance, opened from [modelFile] when the instance is built and released by
  * [close]; opening it costs far more than a run, so a caller holds the instance for as long as it
  * needs embeddings and closes it after. [embed] is not safe for concurrent runs and its owner
  * serialises them.
  *
- * The input is a 112x112 landmark-aligned RGB crop (see [FaceAlignment]); the output vector is
- * L2-normalised so two embeddings compare by a plain cosine (dot product). End-to-end numbers can
- * only be trusted once the real w600k_mbf asset is side-loaded or published; until then this codes
- * against ArcFace's documented input and output format.
+ * The input is a 112x112 landmark-aligned crop (see [FaceAlignment]), fed BGR and raw 0-255 as SFace
+ * expects; the output vector is L2-normalised so two embeddings compare by a plain cosine (dot
+ * product).
  */
 class FaceEmbedder(modelFile: File) : AutoCloseable {
 
@@ -67,6 +65,8 @@ class FaceEmbedder(modelFile: File) : AutoCloseable {
 
     private val inputName: String = session.inputNames.firstOrNull() ?: DEFAULT_INPUT
 
+    private val outputName: String = session.outputNames.firstOrNull() ?: DEFAULT_OUTPUT
+
     /**
      * The L2-normalised [DIM]-d embedding of [aligned], a 112x112 face crop. A recycled bitmap yields
      * a zero vector rather than throwing, so a caller iterating detected faces can skip a dead crop.
@@ -76,8 +76,8 @@ class FaceEmbedder(modelFile: File) : AutoCloseable {
         val tensor = toInputTensor(aligned)
         val embedding = try {
             session.run(mapOf(inputName to tensor)).use { result ->
-                val out = floats(result.get(0))
-                FloatArray(DIM) { i -> if (i < out.size) out[i] else 0f }
+                val named = result.get(outputName)
+                floats(if (named.isPresent) named.get() else result.get(0))
             }
         } finally {
             tensor.close()
@@ -86,9 +86,9 @@ class FaceEmbedder(modelFile: File) : AutoCloseable {
     }
 
     /**
-     * [aligned] as the network's input: scaled to [SIZE] square if it is not already, normalised per
-     * channel by (value - 127.5) / 128 in red, green, blue order and laid out channel-planes-first as
-     * a single (1, 3, SIZE, SIZE) batch, which is what ArcFace was trained on.
+     * [aligned] as the network's input: scaled to [SIZE] square if it is not already, read raw 0-255
+     * in blue, green, red channel order and laid out channel-planes-first as a single (1, 3, SIZE,
+     * SIZE) batch, which is what SFace was trained on.
      */
     private fun toInputTensor(aligned: Bitmap): OnnxTensor {
         val sized = if (aligned.width == SIZE && aligned.height == SIZE) {
@@ -103,9 +103,9 @@ class FaceEmbedder(modelFile: File) : AutoCloseable {
             val out = FloatArray(3 * plane)
             for (i in 0 until plane) {
                 val pixel = pixels[i]
-                out[i] = (((pixel shr 16) and 0xFF) - MEAN) / STD
-                out[plane + i] = (((pixel shr 8) and 0xFF) - MEAN) / STD
-                out[2 * plane + i] = ((pixel and 0xFF) - MEAN) / STD
+                out[i] = (pixel and 0xFF).toFloat()
+                out[plane + i] = ((pixel shr 8) and 0xFF).toFloat()
+                out[2 * plane + i] = ((pixel shr 16) and 0xFF).toFloat()
             }
             out
         } finally {
@@ -144,15 +144,14 @@ class FaceEmbedder(modelFile: File) : AutoCloseable {
     }
 
     private companion object {
-        const val DEFAULT_INPUT = "input.1"
+        const val DEFAULT_INPUT = "data"
+
+        const val DEFAULT_OUTPUT = "fc1"
 
         /** Square side the network reads. */
         const val SIZE = 112
 
         /** Length of the embedding the network emits. */
-        const val DIM = 512
-
-        const val MEAN = 127.5f
-        const val STD = 128.0f
+        const val DIM = 128
     }
 }

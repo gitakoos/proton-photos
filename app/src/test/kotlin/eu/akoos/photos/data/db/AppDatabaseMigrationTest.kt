@@ -723,6 +723,75 @@ class AppDatabaseMigrationTest {
     }
 
     @Test
+    fun migrate_v31_to_v32_addsHiResScannedColumn_defaultsZero_preservesMarker() {
+        // At v31 face_scan holds one marker per scanned photo (userId, photoKey). The migration adds
+        // the hi-res-swept flag the "find more photos" sweep reads, so a minimal v31 shape and a
+        // seeded marker cover what the ALTER has to preserve.
+        db.execSQL(
+            "CREATE TABLE `face_scan` (`userId` TEXT NOT NULL, `photoKey` TEXT NOT NULL, " +
+                "PRIMARY KEY(`userId`, `photoKey`))"
+        )
+        db.execSQL("INSERT INTO face_scan (userId, photoKey) VALUES ('u1','link-1')")
+
+        Migrations.MIGRATION_31_32.migrate(db)
+
+        // The marker survives and defaults to not-yet-hi-res-swept, so the first sweep after the
+        // upgrade re-checks the faceless photo once rather than treating it as already done.
+        db.query("SELECT userId, photoKey, hiResScanned FROM face_scan WHERE photoKey = 'link-1'")
+            .use { cur ->
+                assertTrue("expected the seeded marker to survive the migration", cur.moveToFirst())
+                assertEquals("u1", cur.getString(0))
+                assertEquals("link-1", cur.getString(1))
+                assertEquals("hiResScanned defaults to 0 on existing markers", 0, cur.getInt(2))
+            }
+
+        // The new column is writable: a sweep flags a photo hi-res swept so it is never re-checked.
+        db.execSQL("UPDATE face_scan SET hiResScanned = 1 WHERE photoKey = 'link-1'")
+        db.query("SELECT hiResScanned FROM face_scan WHERE photoKey = 'link-1'").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals(1, cur.getInt(0))
+        }
+    }
+
+    @Test
+    fun migrate_v32_to_v33_addsIsOtherColumn_defaultsZero_preservesPerson() {
+        // At v32 person holds one row per clustered person. The migration adds the isOther flag that
+        // marks the single "Unsorted" bucket, so a minimal v32 person and a seeded row cover what the
+        // ALTER has to preserve.
+        db.execSQL(
+            "CREATE TABLE `person` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                "`userId` TEXT NOT NULL, `displayName` TEXT, `coverFaceId` TEXT, " +
+                "`faceCount` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL)"
+        )
+        db.execSQL(
+            "INSERT INTO person (id, userId, displayName, coverFaceId, faceCount, updatedAt) " +
+                "VALUES (1, 'u1', 'Ákos', 'face-1', 12, 0)"
+        )
+
+        Migrations.MIGRATION_32_33.migrate(db)
+
+        // The named person survives and defaults to not-the-bucket, so an existing person is never
+        // mistaken for the Unsorted bucket after the upgrade.
+        db.query("SELECT userId, displayName, faceCount, isOther FROM person WHERE id = 1").use { cur ->
+            assertTrue("expected the seeded person to survive the migration", cur.moveToFirst())
+            assertEquals("u1", cur.getString(0))
+            assertEquals("Ákos", cur.getString(1))
+            assertEquals(12, cur.getInt(2))
+            assertEquals("isOther defaults to 0 on existing people", 0, cur.getInt(3))
+        }
+
+        // The new column is writable: the rebuild flags the leftover bucket as the Unsorted person.
+        db.execSQL(
+            "INSERT INTO person (id, userId, displayName, coverFaceId, faceCount, isOther, updatedAt) " +
+                "VALUES (2, 'u1', NULL, 'face-9', 40, 1, 0)"
+        )
+        db.query("SELECT isOther FROM person WHERE id = 2").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals(1, cur.getInt(0))
+        }
+    }
+
+    @Test
     fun migrate_v2_through_v4_chain_appliesBothMigrations() {
         // Seed a pure v2 row.
         db.execSQL(

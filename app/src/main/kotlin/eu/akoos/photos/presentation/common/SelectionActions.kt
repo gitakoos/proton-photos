@@ -59,17 +59,20 @@ fun anyCloudOnly(items: Collection<GalleryItem>): Boolean =
     items.any { it is GalleryItem.CloudOnly }
 
 /** The selection holds at least one photo whose metadata the editor can write: a device photo, a
- *  cloud image whose container takes an EXIF rewrite (replaced by a corrected copy), or a synced image
- *  (its device file is edited in place and its cloud copy replaced). A cloud or synced VIDEO stays out,
- *  so the Edit-metadata entry shows only when the editor has something it can change. Gates the
+ *  cloud image whose container takes an EXIF rewrite (replaced by a corrected copy), a synced image
+ *  (its device file is edited in place and its cloud copy replaced), or a cloud / synced MP4-family
+ *  video, whose capture DATE the same corrected-copy replace can change while its place and text stay
+ *  locked. So the Edit-metadata entry shows only when the editor has something it can change. Gates the
  *  multi-select Edit metadata action. */
 fun anyMetadataEditable(items: Collection<GalleryItem>): Boolean =
     items.any {
         it is GalleryItem.LocalOnly ||
             (it is GalleryItem.CloudOnly &&
-                WriteLocalPhotoMetadataUseCase.isExifWritableImageMime(it.cloud.mimeType)) ||
+                (WriteLocalPhotoMetadataUseCase.isExifWritableImageMime(it.cloud.mimeType) ||
+                    WriteLocalPhotoMetadataUseCase.isMvhdStampableMime(it.cloud.mimeType))) ||
             (it is GalleryItem.Synced &&
-                WriteLocalPhotoMetadataUseCase.isExifWritableImageMime(it.local.mimeType))
+                (WriteLocalPhotoMetadataUseCase.isExifWritableImageMime(it.local.mimeType) ||
+                    WriteLocalPhotoMetadataUseCase.isMvhdStampableMime(it.local.mimeType)))
     }
 
 /** Something in the selection can be pulled down from Drive. Mirrors [anyCloudOnly] — a cloud-only

@@ -31,7 +31,10 @@ import androidx.room.PrimaryKey
  * needs no id chosen up front, and each face points back to it through its own personId.
  * [displayName] is null until someone names the person, [coverFaceId] is the `face.id` shown on the
  * person's tile, and [faceCount] caches how many faces are assigned so the people list need not
- * aggregate on every read. [updatedAt] is an epoch-ms stamp a recluster can bump.
+ * aggregate on every read. [updatedAt] is an epoch-ms stamp a recluster can bump. [isOther] marks the
+ * single "Unsorted" bucket that collects the faces the clusterer could not confidently place (junk
+ * detections and uncertain crops); it is never a real named person, so it is pinned to the top of the
+ * review screen and excluded from suggestions and index export.
  */
 @Entity(
     tableName = "person",
@@ -44,4 +47,5 @@ data class PersonEntity(
     val coverFaceId: String? = null,
     val faceCount: Int = 0,
     val updatedAt: Long = 0,
+    val isOther: Boolean = false,
 )

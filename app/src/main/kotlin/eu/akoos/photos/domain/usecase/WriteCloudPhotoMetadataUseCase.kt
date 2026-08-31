@@ -30,6 +30,7 @@ import eu.akoos.photos.data.repository.drive.UploadXAttrMetadata
 import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.LocalMediaItem
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
+import eu.akoos.photos.util.isTransientApiError
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
@@ -135,7 +136,10 @@ class WriteCloudPhotoMetadataUseCase @Inject constructor(
         /** Neither the date nor the place was addressed, so nothing was uploaded or trashed. */
         data object NothingToDo : Result
 
-        data class Failed(val reason: String) : Result
+        /** [transient] marks a failure a retry could plausibly clear (network blip, 429/5xx) so the
+         *  caller can hold the edit for another attempt rather than discard it. False by default: a
+         *  failure not built from a classified network error stays permanent. */
+        data class Failed(val reason: String, val transient: Boolean = false) : Result
     }
 
     suspend operator fun invoke(
@@ -195,6 +199,9 @@ class WriteCloudPhotoMetadataUseCase @Inject constructor(
 
                 // Same displayName: this is a correction, not a copy, and the original is trashed right
                 // after a verified upload so the same-name window is brief.
+                // dims and duration come from the xAttr the rewriter derived from the corrected file
+                // (real values for a video, 0 for an image); the video's own already-known cloud duration
+                // is the fallback when the container could not be probed.
                 val item = LocalMediaItem(
                     uri = Uri.fromFile(file).toString(),
                     dateTaken = effectiveCaptureMs,
@@ -204,7 +211,7 @@ class WriteCloudPhotoMetadataUseCase @Inject constructor(
                     bucketName = null,
                     width = xAttr.displayWidth ?: 0,
                     height = xAttr.displayHeight ?: 0,
-                    duration = 0L,
+                    duration = xAttr.durationMillis ?: photo.durationMs ?: 0L,
                 )
 
                 // Hash exactly the bytes being uploaded, AFTER the EXIF write, because Drive's
@@ -220,7 +227,10 @@ class WriteCloudPhotoMetadataUseCase @Inject constructor(
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
-                    return@withContext Result.Failed("could not read album membership: ${e.message}")
+                    return@withContext Result.Failed(
+                        "could not read album membership: ${e.message}",
+                        transient = isTransientApiError(e),
+                    )
                 }
 
                 onPhase?.invoke(CloudSavePhase.UPLOADING)
@@ -230,7 +240,7 @@ class WriteCloudPhotoMetadataUseCase @Inject constructor(
                     throw e
                 } catch (e: Exception) {
                     Log.w(TAG, "upload failed for ${photo.linkId}: ${e.message}")
-                    return@withContext Result.Failed("upload failed: ${e.message}")
+                    return@withContext Result.Failed("upload failed: ${e.message}", transient = isTransientApiError(e))
                 }
                 if (newLinkId.isBlank()) return@withContext Result.Failed("upload returned no link id")
 
@@ -251,7 +261,10 @@ class WriteCloudPhotoMetadataUseCase @Inject constructor(
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
-                    return@withContext Result.Failed("could not read album membership: ${e.message}")
+                    return@withContext Result.Failed(
+                        "could not read album membership: ${e.message}",
+                        transient = isTransientApiError(e),
+                    )
                 }
                 albumIds = map[photo.linkId].orEmpty()
                 val alreadyJoined = map[newLinkId].orEmpty()
@@ -262,6 +275,9 @@ class WriteCloudPhotoMetadataUseCase @Inject constructor(
             // Re-add the new link to every album that still needs it. A re-add counts only when the
             // server confirms the new link joined; a crypto-partial or thrown add is a miss.
             val failedAlbums = mutableListOf<String>()
+            // A single transient miss makes the whole re-add worth retrying, so OR the classification
+            // across every swallowed per-album failure.
+            var anyTransientAlbumMiss = false
             for (albumId in toAdd) {
                 val joined = try {
                     cloudRepo.addPhotosToAlbum(userId, albumId, listOf(newLinkId))
@@ -270,6 +286,7 @@ class WriteCloudPhotoMetadataUseCase @Inject constructor(
                     throw e
                 } catch (e: Exception) {
                     Log.w(TAG, "album re-add failed for $albumId: ${e.message}")
+                    anyTransientAlbumMiss = anyTransientAlbumMiss || isTransientApiError(e)
                     false
                 }
                 if (!joined) failedAlbums.add(albumId)
@@ -281,6 +298,7 @@ class WriteCloudPhotoMetadataUseCase @Inject constructor(
             if (failedAlbums.isNotEmpty()) {
                 return@withContext Result.Failed(
                     "re-add failed for ${failedAlbums.size} of ${albumIds.size} album(s); original kept",
+                    transient = anyTransientAlbumMiss,
                 )
             }
             runCatching { cloudRepo.deleteFiles(userId, listOf(photo.linkId)) }
@@ -290,7 +308,7 @@ class WriteCloudPhotoMetadataUseCase @Inject constructor(
             throw e
         } catch (e: Exception) {
             Log.w(TAG, "metadata write failed for ${photo.linkId}: ${e.message}")
-            Result.Failed(e.message ?: "metadata write failed")
+            Result.Failed(e.message ?: "metadata write failed", transient = isTransientApiError(e))
         } finally {
             working?.delete()
         }

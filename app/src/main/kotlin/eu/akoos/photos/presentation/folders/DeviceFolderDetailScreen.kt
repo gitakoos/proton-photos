@@ -24,6 +24,7 @@ package eu.akoos.photos.presentation.folders
 
 import android.app.Activity
 import android.net.Uri
+import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
@@ -59,6 +60,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.DriveFileMove
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.EditNote
@@ -93,7 +95,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.GalleryItem
+import eu.akoos.photos.presentation.albums.AlbumRenameInput
 import eu.akoos.photos.presentation.common.ConfirmSheet
+import eu.akoos.photos.presentation.common.EditFieldSheet
 import eu.akoos.photos.presentation.common.HideConfirmSheet
 import eu.akoos.photos.presentation.common.IconBubble
 import eu.akoos.photos.presentation.common.ReturnToViewerPhoto
@@ -105,6 +109,7 @@ import eu.akoos.photos.presentation.common.favoriteTurnsOn
 import eu.akoos.photos.presentation.common.anyMetadataEditable
 import eu.akoos.photos.presentation.gallery.LocalThumbnailUrls
 import eu.akoos.photos.presentation.gallery.MetadataStripPickerDialog
+import eu.akoos.photos.presentation.gallery.MoveToFolderHost
 import eu.akoos.photos.presentation.gallery.PhotoCell
 import eu.akoos.photos.presentation.gallery.ScrollDateLabel
 import eu.akoos.photos.presentation.gallery.TimelineGrouping
@@ -202,9 +207,17 @@ fun DeviceFolderDetailScreen(
     val isExcludedFromBackup by viewModel.isExcludedFromBackup.collectAsStateWithLifecycle()
     val isHiddenFromTimeline by viewModel.isHiddenFromTimeline.collectAsStateWithLifecycle()
     val isHiddenCard by viewModel.isHiddenCard.collectAsStateWithLifecycle()
+    val isSignedIn by viewModel.isSignedIn.collectAsStateWithLifecycle()
     // Which direction the drawer's sort entries tick. The ViewModel reads the same preference for
     // the order itself, so this only has to say which one is active.
     val sortMode by viewModel.sortMode.collectAsStateWithLifecycle()
+
+    // Move the selection into another device folder, and rename this folder in place. Both are
+    // logged-out, device-data actions; the picker's targets and the move consent ride the shared host.
+    var showMoveSheet by remember { mutableStateOf(false) }
+    var showRenameSheet by remember { mutableStateOf(false) }
+    val moveTargetFolders by viewModel.moveTargetFolders.collectAsStateWithLifecycle()
+    val pendingMoveIntent by viewModel.pendingMoveIntent.collectAsStateWithLifecycle()
 
     // Back up every photo here, speaking up only when there was nothing to send: a started back-up
     // already shows in the progress pill. Shared by the drawer's rows and by a back-up the Albums
@@ -334,6 +347,13 @@ fun DeviceFolderDetailScreen(
     // Only a write Drive refused reaches here.
     LaunchedEffect(Unit) {
         viewModel.favoriteFailure.collect { snackbarHostState.showSnackbar(it) }
+    }
+    // A completed folder rename confirms the new name; the screen stays on the same photos.
+    val folderRenamedTpl = stringResource(R.string.folder_renamed)
+    LaunchedEffect(Unit) {
+        viewModel.folderRenameConfirmation.collect { newName ->
+            snackbarHostState.showSnackbar(folderRenamedTpl.format(newName))
+        }
     }
 
     // A multi-select delete blocks the screen behind a progress drawer so a second tap can't fire
@@ -637,9 +657,9 @@ fun DeviceFolderDetailScreen(
                 .padding(start = 16.dp, top = 10.dp),
             diameter = 40.dp,
             iconSize = 18.dp,
-            background = Color(0x99000000),
+            background = PillBg,
             borderColor = PillBorder,
-            tint = Color.White,
+            tint = FgPrimary,
         )
 
         // Selection drawer: the shared surface every multi-select uses, so a folder's bulk actions
@@ -704,13 +724,25 @@ fun DeviceFolderDetailScreen(
             }
             // Add selected to a cloud album - opens the gallery's picker sheet. An album add
             // uploads the photo, so it is offered on the photos that still have a device file
-            // and disappears for an all-vaulted selection.
-            if (selectedDeviceItems.isNotEmpty()) {
+            // and disappears for an all-vaulted selection. The upload needs a Proton account.
+            if (selectedDeviceItems.isNotEmpty() && isSignedIn) {
                 add(
                     SelectionAction(
                         icon = Icons.Default.PhotoAlbum,
                         label = stringResource(R.string.gallery_add_to_album),
                         onClick = { showAddToAlbumSheet = true },
+                    )
+                )
+            }
+            // Move selected into another device folder, the logged-out counterpart of "Add to album",
+            // relocating the files under DCIM/ with no cloud involved. Held to the scoped-storage move's
+            // Android 10+ floor and offered only on photos that still have a device file.
+            if (!isSignedIn && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && selectedDeviceItems.isNotEmpty()) {
+                add(
+                    SelectionAction(
+                        icon = Icons.AutoMirrored.Filled.DriveFileMove,
+                        label = stringResource(R.string.move_to_folder),
+                        onClick = { showMoveSheet = true },
                     )
                 )
             }
@@ -730,7 +762,7 @@ fun DeviceFolderDetailScreen(
             // that still needs backing up; an all-Synced selection is already on Drive, so the
             // action would upload nothing. A snackbar confirms either way since the progress
             // pill alone is easy to miss.
-            if (anyDeviceOnlySelected) {
+            if (anyDeviceOnlySelected && isSignedIn) {
                 add(
                     SelectionAction(
                         icon = Icons.Default.CloudUpload,
@@ -862,7 +894,8 @@ fun DeviceFolderDetailScreen(
             PhotoShareSheet(
                 sheetState = photoShareSheetState,
                 canCreateLink = false,
-                showPublicLink = selectedUris.size == 1,
+                // The public link is a Drive share, so it needs a signed-in account.
+                showPublicLink = selectedUris.size == 1 && isSignedIn,
                 showShareWithPeople = false,
                 localUploadEnabled = true,
                 onDismiss = { showPhotoShareSheet = false },
@@ -935,6 +968,22 @@ fun DeviceFolderDetailScreen(
                 },
             )
         }
+
+        // Move-to-folder host: the picker, the new-folder name dialog, the write-consent launcher a
+        // foreign-file move needs and the completion snackbar, all logged-out and device-only. The
+        // selection is snapshotted in the ViewModel, so the host carries only the picked name.
+        MoveToFolderHost(
+            targetFolders = moveTargetFolders,
+            show = showMoveSheet,
+            pendingMoveIntent = pendingMoveIntent,
+            moveConfirmation = viewModel.moveConfirmation,
+            onPick = { viewModel.moveSelectedToFolder(it) },
+            onCreate = { viewModel.createFolderWithPhotos(it) },
+            onGranted = { viewModel.onMovePermissionGranted() },
+            onClear = { viewModel.clearPendingMove() },
+            onDismiss = { showMoveSheet = false },
+            snackbarHostState = snackbarHostState,
+        )
 
         // Hide confirmations — the shared sheet every hide surface raises, worded from the split the
         // hide will really run on. The selection's and the whole folder's are separate taps.
@@ -1059,7 +1108,7 @@ fun DeviceFolderDetailScreen(
                 onClick = { scope.launch { gridState.animateScrollToItem(0) } },
                 diameter = 40.dp,
                 iconSize = 24.dp,
-                background = PillBgOpaque,
+                background = PillBg,
                 borderColor = PillBorder,
                 tint = FgPrimary,
             )
@@ -1086,6 +1135,7 @@ fun DeviceFolderDetailScreen(
             isExcludedFromBackup = isExcludedFromBackup,
             isHiddenFromTimeline = isHiddenFromTimeline,
             isHiddenCard = isHiddenCard,
+            isSignedIn = isSignedIn,
             sortMode = sortMode,
             onDismiss = { showFolderOverflow = false },
             onBackUp = if (hasPhotos) ({ asMirror -> backUpFolder(asMirror) }) else null,
@@ -1103,6 +1153,27 @@ fun DeviceFolderDetailScreen(
             // current sort order.
             onSlideshow = if (hasPhotos) ({ onSlideshowClick(items) }) else null,
             onSortSelected = viewModel::setSortMode,
+            // Logged-out only; the row renders behind the same gate in the sheet.
+            onRename = { showRenameSheet = true },
+        )
+    }
+
+    // Rename this folder in place: the same field the Albums grid's device-folder rename uses,
+    // prefilled with the current name. The rename relocates the folder's photos into a new DCIM
+    // directory and the screen follows them, so it never pops back to the grid.
+    if (showRenameSheet) {
+        EditFieldSheet(
+            title = stringResource(R.string.folder_rename),
+            hint = stringResource(R.string.albums_create_album_hint),
+            initialValue = bucketName,
+            singleLine = true,
+            confirmLabel = stringResource(R.string.album_rename_confirm),
+            canConfirm = { AlbumRenameInput.isAcceptable(it, bucketName) },
+            onDismiss = { showRenameSheet = false },
+            onSave = { entered ->
+                showRenameSheet = false
+                viewModel.renameFolder(entered)
+            },
         )
     }
 }

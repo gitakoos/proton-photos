@@ -41,8 +41,8 @@ android {
         // versionCode bumped per release tag — keep monotonically increasing.
         // versionName mirrors the GitHub release tag (e.g. v2.0.0 → "2.0.0") so the About
         // screen and the published APK report the same version the user downloaded.
-        versionCode = 264
-        versionName = "2.5.0-test2"
+        versionCode = 265
+        versionName = "2.5.0-test3"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -89,6 +89,14 @@ android {
             if (keystoreProps != null) {
                 signingConfig = signingConfigs.getByName("release")
             }
+        }
+        // A debug-signed build (installs over the debug app and keeps its data) with the debuggable
+        // flag OFF, so ART fully optimises and animations run close to release performance for
+        // on-device feel checks. No minify, so it builds almost as fast as debug.
+        create("profile") {
+            initWith(getByName("debug"))
+            isDebuggable = false
+            matchingFallbacks += "debug"
         }
     }
 

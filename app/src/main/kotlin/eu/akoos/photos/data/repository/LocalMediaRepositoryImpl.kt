@@ -472,6 +472,9 @@ class LocalMediaRepositoryImpl @Inject constructor(
             MediaStore.MediaColumns.WIDTH,
             MediaStore.MediaColumns.HEIGHT,
             MediaStore.MediaColumns.DURATION,
+            // Exact OS auto-purge time for a trashed row (epoch seconds). API 30+, which this
+            // query already requires; the shared cursor mapper reads it defensively.
+            MediaStore.MediaColumns.DATE_EXPIRES,
         )
         val queryArgs = android.os.Bundle().apply {
             putInt(MediaStore.QUERY_ARG_MATCH_TRASHED, MediaStore.MATCH_ONLY)
@@ -518,6 +521,9 @@ class LocalMediaRepositoryImpl @Inject constructor(
         val widthCol     = getColumnIndex(MediaStore.MediaColumns.WIDTH)
         val heightCol    = getColumnIndex(MediaStore.MediaColumns.HEIGHT)
         val durationCol  = getColumnIndex(MediaStore.MediaColumns.DURATION)
+        // -1 for every non-trashed query (the column isn't in that projection); present only for
+        // the trashed-media query. Read as absent when missing or non-positive.
+        val dateExpiresCol = getColumnIndex(MediaStore.MediaColumns.DATE_EXPIRES)
 
         val id = getLong(idCol)
         val root         = baseUri ?: MediaStore.Images.Media.EXTERNAL_CONTENT_URI
@@ -582,6 +588,7 @@ class LocalMediaRepositoryImpl @Inject constructor(
             tags        = cachedTags,
             userTags    = userTags,
             dateTakenIsExplicit = rawDateTaken > 0 || uriString in dateOverrides,
+            dateExpiresSec = if (dateExpiresCol >= 0) getLong(dateExpiresCol).takeIf { it > 0 } else null,
         )
     }
 }

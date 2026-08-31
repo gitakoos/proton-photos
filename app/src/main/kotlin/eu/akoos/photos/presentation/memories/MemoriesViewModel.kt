@@ -38,6 +38,8 @@ import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.model.PersonSummary
 import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
 import eu.akoos.photos.domain.usecase.ObservePeopleUseCase
+import eu.akoos.photos.domain.usecase.ObservePlacesUseCase
+import eu.akoos.photos.domain.usecase.PlaceCity
 import eu.akoos.photos.presentation.gallery.FaceBox
 import eu.akoos.photos.presentation.gallery.PersonUi
 import eu.akoos.photos.util.computeOnThisDay
@@ -64,9 +66,12 @@ data class SeasonBucket(
 )
 
 data class MemoriesUiState(
+    /** True until the first library emission is grouped; the screens show a skeleton while it holds. */
+    val isLoading: Boolean = true,
     val onThisDay: List<Pair<Int, List<GalleryItem>>> = emptyList(),
     val seasons: List<SeasonBucket> = emptyList(),
     val people: List<PersonUi> = emptyList(),
+    val places: List<PlaceCity> = emptyList(),
 )
 
 /** Backs the Memories screen: derives "On this day" milestones and per-season buckets from the
@@ -76,6 +81,7 @@ data class MemoriesUiState(
 class MemoriesViewModel @Inject constructor(
     getGalleryItems: GetGalleryItemsUseCase,
     observePeopleUseCase: ObservePeopleUseCase,
+    observePlacesUseCase: ObservePlacesUseCase,
     accountManager: AccountManager,
     private val thumbnailDecryptScheduler: ThumbnailDecryptScheduler,
     private val thumbnailUrlStore: ThumbnailUrlStore,
@@ -89,10 +95,13 @@ class MemoriesViewModel @Inject constructor(
     val uiState: StateFlow<MemoriesUiState> = accountManager.getPrimaryUserId()
         .flatMapLatest { userId ->
             if (userId == null) {
-                flowOf(MemoriesUiState())
+                // Signed out the Collection is derived from the device's own media. People clustering
+                // is account scoped (and behind the AI opt-in), so it stays empty here.
+                getGalleryItems.invokeLocalOnly()
+                    .map { all -> MemoriesUiState(isLoading = false, onThisDay = computeOnThisDay(all), seasons = buckets(all)) }
             } else {
                 val memories = getGalleryItems.invoke(userId)
-                    .map { all -> MemoriesUiState(onThisDay = computeOnThisDay(all), seasons = buckets(all)) }
+                    .map { all -> MemoriesUiState(isLoading = false, onThisDay = computeOnThisDay(all), seasons = buckets(all)) }
                 // People show in the Collection only with AI on, the same opt-in the rest of the
                 // grouping honours; the face crop needs the feed's original dimensions, so the use
                 // case is handed the same library flow.
@@ -122,6 +131,11 @@ class MemoriesViewModel @Inject constructor(
                     // a handful of items, so the extra re-emit per store change is cheap.
                     .combine(thumbnailUrlStore.urls) { state, urls -> state.withThumbnails(urls) }
             }
+        }
+        // The busiest cities ride alongside the day/season/people groupings. The use case does its own
+        // account gating, so a signed-out session simply yields no cities here.
+        .combine(observePlacesUseCase().map { it.cities.take(12) }) { state, cities ->
+            state.copy(places = cities)
         }
         .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), MemoriesUiState())

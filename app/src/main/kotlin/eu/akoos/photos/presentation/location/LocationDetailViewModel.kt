@@ -32,10 +32,13 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -44,18 +47,21 @@ import me.proton.core.domain.entity.UserId
 import eu.akoos.photos.R
 import eu.akoos.photos.data.db.dao.PhotoLocationDao
 import eu.akoos.photos.data.db.entity.PhotoLocationEntity
+import eu.akoos.photos.data.preferences.currentShareStripConfig
 import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.usecase.DownloadPhotosUseCase
 import eu.akoos.photos.domain.usecase.ForceUploadLocalUrisUseCase
 import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
+import eu.akoos.photos.presentation.common.MoveToFolderController
 import eu.akoos.photos.presentation.common.message
 import eu.akoos.photos.presentation.common.shareOutcome
 import eu.akoos.photos.util.OfflineGeocoder
 import eu.akoos.photos.util.ProtonPhotosStorage
 import eu.akoos.photos.util.friendlyNetworkError
 import eu.akoos.photos.util.sanitizeErrorMessage
+import eu.akoos.photos.util.stripForShareOrOriginal
 import javax.inject.Inject
 
 /** Determinate progress of a multi-item download / share over the location's photos. */
@@ -95,13 +101,13 @@ data class LocationDetailUiState(
 }
 
 /**
- * Backs [LocationDetailSheet]: an album-style drawer of every geotagged photo taken in one place
- * (city). The tapped pin's coordinates resolve to a "City, Country" label via [OfflineGeocoder];
- * the screen then shows every located photo whose own coordinates geocode to the SAME label,
- * resolved to its [GalleryItem] from the shared library merge so each cell opens the viewer with
- * the correct synced / cloud state. "Save as album" creates a real Drive album named after the
- * city and adds those photos (uploading any local-only ones first), reusing the same album-create +
- * add-to-album path as the gallery and device-folder surfaces.
+ * Backs the place page ([LocationPhotosContent] in [PlaceCityScreen]): an album-style view of every
+ * geotagged photo taken in one place (city). The coordinates resolve to a "City, Country" label via
+ * [OfflineGeocoder]; the screen then shows every located photo whose own coordinates geocode to the
+ * SAME label, resolved to its [GalleryItem] from the shared library merge so each cell opens the
+ * viewer with the correct synced / cloud state. "Save as album" creates a real Drive album named
+ * after the city and adds those photos (uploading any local-only ones first), reusing the same
+ * album-create + add-to-album path as the gallery and device-folder surfaces.
  */
 @HiltViewModel
 class LocationDetailViewModel @Inject constructor(
@@ -114,6 +120,7 @@ class LocationDetailViewModel @Inject constructor(
     private val downloadPhotos: DownloadPhotosUseCase,
     private val transferCenter: eu.akoos.photos.data.transfer.TransferCenter,
     private val albumListEvents: eu.akoos.photos.util.AlbumListEventBus,
+    private val moveController: MoveToFolderController,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(LocationDetailUiState())
@@ -122,6 +129,13 @@ class LocationDetailViewModel @Inject constructor(
     /** One-shot system-share intents emitted to the screen, which launches the chooser. */
     private val _shareIntent = MutableSharedFlow<android.content.Intent>(extraBufferCapacity = 1)
     val shareIntent: SharedFlow<android.content.Intent> = _shareIntent.asSharedFlow()
+
+    /** Whether a Proton account is signed in. A null-userId local-only session leaves the cloud
+     *  actions (add-to-album) without a destination, so the screen hides them. Defaults to signed-in
+     *  so nothing flickers before the first emit. */
+    val isSignedIn: StateFlow<Boolean> = accountManager.getPrimaryUserId()
+        .map { it != null }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, true)
 
     private var loadJob: Job? = null
 
@@ -135,10 +149,7 @@ class LocationDetailViewModel @Inject constructor(
         _uiState.update { it.copy(isLoading = true, error = null) }
         loadJob = viewModelScope.launch {
             try {
-                val userId = accountManager.getPrimaryUserId().first() ?: run {
-                    _uiState.update { it.copy(isLoading = false) }
-                    return@launch
-                }
+                val userId = accountManager.getPrimaryUserId().first()
                 // The tapped pin's place is the title. A null geocode (dataset missing) leaves the
                 // screen empty rather than guessing.
                 val target = OfflineGeocoder.reverseGeocode(context, latitude, longitude) ?: run {
@@ -149,7 +160,8 @@ class LocationDetailViewModel @Inject constructor(
 
                 // The merged library is the single source the gallery / search / calendar open the
                 // viewer with, so a resolved item carries the right synced / cloud state.
-                val libraryItems = getGalleryItems.invoke(userId).first()
+                val libraryItems = (if (userId == null) getGalleryItems.invokeLocalOnly()
+                    else getGalleryItems.invoke(userId)).first()
                 val itemByKey = HashMap<String, GalleryItem>(libraryItems.size * 2)
                 for (item in libraryItems) {
                     when (item) {
@@ -165,7 +177,10 @@ class LocationDetailViewModel @Inject constructor(
                 // Geocode every located row off the main thread; OfflineGeocoder caches its dataset so
                 // this is a sub-millisecond scan per row. Keep those matching the tapped place and map
                 // each to its library item by the entity id (local content uri or cloud linkId).
-                val located: List<PhotoLocationEntity> = photoLocationDao.observeForUser(userId.id).first()
+                // The located-photo table is account scoped, so a signed-out session has no rows to
+                // match against and the place resolves to no photos.
+                val located: List<PhotoLocationEntity> = if (userId == null) emptyList()
+                    else photoLocationDao.observeForUser(userId.id).first()
                 val matched = withContext(Dispatchers.Default) {
                     val seen = LinkedHashSet<String>()
                     val out = ArrayList<GalleryItem>()
@@ -219,6 +234,46 @@ class LocationDetailViewModel @Inject constructor(
     }
 
     fun clearError() = _uiState.update { it.copy(error = null) }
+
+    // ── Move to a device folder (logged-out, device data only) ──────────────────────────────────
+    // Delegated to the shared [MoveToFolderController], the same relocation the timeline offers, so a
+    // located selection can send its device photos into a DCIM folder.
+
+    /** Existing device folders offered as move targets, kept warm for the picker. */
+    val moveTargetFolders = moveController.targetFolders(viewModelScope)
+
+    /** One-shot system write-consent request a foreign-file move needs; the screen's host drives it. */
+    val pendingMoveIntent = moveController.pendingMoveIntent
+
+    /** Destination folder of a completed move, for the host's snackbar. */
+    val moveConfirmation = moveController.moveConfirmation
+
+    /** The selected photos that carry a device file, mapped to their uris; a cloud-only one has none. */
+    private fun selectedDeviceUris(): List<String> = selectedGalleryItems().mapNotNull { item ->
+        when (item) {
+            is GalleryItem.LocalOnly -> item.local.uri
+            is GalleryItem.Synced -> item.local.uri
+            is GalleryItem.CloudOnly -> null
+        }
+    }
+
+    /** Move every selected device photo into [folderName] under DCIM/, then drop the selection. */
+    fun moveSelectedToFolder(folderName: String) {
+        val uris = selectedDeviceUris()
+        moveController.move(viewModelScope, uris, folderName)
+        clearSelection()
+    }
+
+    /** Move the selection into a freshly named device folder, born with the photos the move lands there. */
+    fun createFolderWithPhotos(name: String) {
+        val uris = selectedDeviceUris()
+        moveController.createFolder(viewModelScope, name, uris)
+        clearSelection()
+    }
+
+    fun onMovePermissionGranted() = moveController.onPermissionGranted(viewModelScope)
+
+    fun clearPendingMove() = moveController.clearPending()
 
     // ── Download selected ──────────────────────────────────────────────────────
 
@@ -289,11 +344,13 @@ class LocationDetailViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(shareState = LocationOpState.Working(0, items.size)) }
             val userId = accountManager.getPrimaryUserId().first()
+            // Null when strip-on-share is off, so each resolved URI passes through untouched below.
+            val stripConfig = currentShareStripConfig(context)
             val uris = ArrayList<android.net.Uri>(items.size)
             var done = 0
             for (item in items) {
                 runCatching {
-                    when (item) {
+                    val resolved = when (item) {
                         is GalleryItem.LocalOnly -> android.net.Uri.parse(item.local.uri)
                         is GalleryItem.Synced -> android.net.Uri.parse(item.local.uri)
                         is GalleryItem.CloudOnly -> {
@@ -306,6 +363,8 @@ class LocationDetailViewModel @Inject constructor(
                             }
                         }
                     }
+                    val (mime, name) = eu.akoos.photos.util.ShareIntentBuilder.shareMimeAndName(item)
+                    stripForShareOrOriginal(context, resolved, mime, name, stripConfig)
                 }.onSuccess { uris.add(it) }
                     .onFailure { android.util.Log.w("LocationDetailVM", "share resolve failed: ${it.message}") }
                 done++

@@ -52,6 +52,12 @@ object OfflineGeocoder {
     /** An ISO country present in the dataset paired with its localized display name (see [countries]). */
     data class GeoCountry(val code: String, val displayName: String)
 
+    /** A reverse-geocode split into its parts, so a caller can group by country as well as show the
+     *  "City, Country" label. */
+    data class GeoLabel(val city: String, val countryCode: String, val countryName: String) {
+        val label: String get() = "$city, $countryName"
+    }
+
     /** A single parsed city. The forward-lookup helpers (search / centroid / country list) run over
      *  these rows; the reverse scan keeps a parallel [FloatArray] of the coordinates so its hot
      *  nearest-neighbour loop stays on primitives. */
@@ -76,31 +82,44 @@ object OfflineGeocoder {
      * subsequent calls are a pure in-memory scan.
      */
     suspend fun reverseGeocode(context: Context, latitude: Double, longitude: Double): String? =
+        reverseGeocodeDetailed(context, latitude, longitude)?.label
+
+    /**
+     * Nearest city to [latitude]/[longitude] split into city name, ISO country code and localized
+     * country name, or null if the dataset can't be loaded. Suspends: the first call reads + parses the
+     * bundled dataset on [Dispatchers.Default]; subsequent calls are a pure in-memory scan.
+     */
+    suspend fun reverseGeocodeDetailed(context: Context, latitude: Double, longitude: Double): GeoLabel? =
         withContext(Dispatchers.Default) {
             val d = ensureLoaded(context.applicationContext) ?: return@withContext null
-            // Equirectangular nearest-neighbour: a degree of longitude shrinks toward the poles, so
-            // scale the longitude delta by cos(latitude) before comparing. Squared distance is enough
-            // to rank; ~34k points is a sub-millisecond linear scan.
-            val cosLat = cos(Math.toRadians(latitude))
-            var best = -1
-            var bestDist = Double.MAX_VALUE
-            for (i in d.lat.indices) {
-                val dLat = d.lat[i] - latitude
-                val dLon = (d.lon[i] - longitude) * cosLat
-                val dist = dLat * dLat + dLon * dLon
-                if (dist < bestDist) {
-                    bestDist = dist
-                    best = i
-                }
-            }
-            if (best < 0) return@withContext null
-            val row = d.rows[best]
-            // ISO country code → localised country name via the platform (no extra dataset needed).
-            val countryName = Locale("", row.countryCode)
-                .getDisplayCountry(Locale.getDefault())
-                .ifBlank { row.countryCode }
-            "${row.name}, $countryName"
+            val row = nearestRow(d, latitude, longitude) ?: return@withContext null
+            GeoLabel(row.name, row.countryCode, countryDisplayName(row.countryCode))
         }
+
+    /**
+     * Equirectangular nearest-neighbour: a degree of longitude shrinks toward the poles, so scale the
+     * longitude delta by cos(latitude) before comparing. Squared distance is enough to rank; ~34k points
+     * is a sub-millisecond linear scan.
+     */
+    private fun nearestRow(d: Db, latitude: Double, longitude: Double): CityRow? {
+        val cosLat = cos(Math.toRadians(latitude))
+        var best = -1
+        var bestDist = Double.MAX_VALUE
+        for (i in d.lat.indices) {
+            val dLat = d.lat[i] - latitude
+            val dLon = (d.lon[i] - longitude) * cosLat
+            val dist = dLat * dLat + dLon * dLon
+            if (dist < bestDist) {
+                bestDist = dist
+                best = i
+            }
+        }
+        return if (best < 0) null else d.rows[best]
+    }
+
+    /** ISO country code → localised country name via the platform (no extra dataset needed). */
+    private fun countryDisplayName(code: String): String =
+        Locale("", code).getDisplayCountry(Locale.getDefault()).ifBlank { code }
 
     /**
      * The distinct countries present in the dataset, each with its localized display name, sorted by

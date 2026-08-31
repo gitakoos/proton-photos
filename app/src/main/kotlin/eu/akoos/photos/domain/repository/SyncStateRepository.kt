@@ -34,6 +34,18 @@ interface SyncStateRepository {
     fun countPendingUploads(userId: UserId): Flow<Int>
     suspend fun upsert(state: SyncState, userId: UserId)
     suspend fun upsertAll(states: List<SyncState>, userId: UserId)
+
+    /** Guarded domain-column write for reconcile: rewrites [state]'s domain columns UNLESS the row is
+     *  already a finished upload (SYNCED with a cloud id), returning the rows changed. Reconcile derives
+     *  a demotion from a snapshot that can go stale before it writes, so this leaves a row an upload
+     *  promoted in between untouched (0) while still refreshing a genuinely un-synced row (1). */
+    suspend fun updateDomainColumnsIfNotSyncedWithCloud(state: SyncState, userId: UserId): Int
+
+    /** Demote a SYNCED row to LOCAL_ONLY only while its cloudFileId still equals [expectedCloudId], the
+     *  id reconcile saw in its snapshot; returns the rows changed. A twin genuinely gone still carries
+     *  that id and is demoted (1); one an upload re-promoted carries a different id and is skipped (0). */
+    suspend fun demoteToLocalIfCloudIdMatches(localUri: String, expectedCloudId: String): Int
+
     suspend fun updateStatusAndDeleteLocal(localUri: String, newStatus: SyncStatus)
     suspend fun getByUri(localUri: String): SyncState?
     suspend fun getByCloudId(cloudFileId: String): SyncState?

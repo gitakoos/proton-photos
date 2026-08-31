@@ -116,7 +116,7 @@ import eu.akoos.photos.presentation.common.ThemedSnackbarHost
 import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
 import eu.akoos.photos.presentation.gallery.FilterChip
 import eu.akoos.photos.presentation.gallery.LocalThumbnailUrls
-import eu.akoos.photos.presentation.settings.components.SettingsPillHeader
+import eu.akoos.photos.presentation.common.FloatingHeader
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.util.OfflineGeocoder
 import java.time.Instant
@@ -282,7 +282,7 @@ fun MetadataEditorScreen(
             Spacer(Modifier.height(32.dp + navBottom))
         }
 
-        SettingsPillHeader(
+        FloatingHeader(
             title = stringResource(R.string.metadata_editor_title),
             onBack = { handleBack() },
             trailing = {
@@ -304,7 +304,7 @@ fun MetadataEditorScreen(
                         onClick = { viewModel.applyOrFinish() },
                         diameter = 40.dp,
                         iconSize = 18.dp,
-                        background = colors.surfaceWeak,
+                        background = colors.pillBg,
                         borderColor = colors.pillBorder,
                         tint = colors.accent,
                     )
@@ -577,6 +577,31 @@ private fun DateField(
                 fontSize = 12.sp,
             )
         }
+        // A single photo whose own file name records a different day than the one it now carries: offer
+        // that day in one tap. A screenshot or download often has no date but the one in its name, and a
+        // single photo has no use for the bulk "same date for all" chips. Applying runs the same path as
+        // picking the date by hand, so the field then shows the new day and this suggestion hides itself.
+        val nameDateMs = state.filenameDateSingleMs
+        if (!state.bulk && nameDateMs != null && nameDateMs != state.captureDateMs &&
+            state.dateLock == null && !state.isSaving
+        ) {
+            Spacer(Modifier.height(10.dp))
+            Text(
+                text = stringResource(
+                    R.string.metadata_editor_filename_single,
+                    remember(nameDateMs) { formatDateTime(nameDateMs) },
+                ),
+                color = colors.fgMute,
+                fontSize = 13.sp,
+            )
+            Spacer(Modifier.height(8.dp))
+            PrimaryButton(
+                label = stringResource(R.string.metadata_editor_filename_use),
+                onClick = { onPickDate(nameDateMs) },
+                enabled = !state.isSaving,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
     }
 
     // What the pickers open on: in shift mode the OLDEST photo's own instant, which is the one the user
@@ -795,6 +820,7 @@ private fun LocationEditor(
         OutlinedTextField(
             value = cityQuery,
             onValueChange = { cityQuery = it },
+            shape = RoundedCornerShape(14.dp),
             enabled = enabled,
             singleLine = true,
             placeholder = {
@@ -895,6 +921,7 @@ private fun CountryPickerDialog(
                 OutlinedTextField(
                     value = filter,
                     onValueChange = { filter = it },
+                    shape = RoundedCornerShape(14.dp),
                     singleLine = true,
                     placeholder = {
                         Text(stringResource(R.string.metadata_editor_country_search), color = colors.fgMute)
@@ -980,6 +1007,7 @@ private fun TextTagField(
             OutlinedTextField(
                 value = field.value,
                 onValueChange = onValueChange,
+                shape = RoundedCornerShape(14.dp),
                 enabled = !isSaving,
                 singleLine = maxLines == 1,
                 maxLines = maxLines,

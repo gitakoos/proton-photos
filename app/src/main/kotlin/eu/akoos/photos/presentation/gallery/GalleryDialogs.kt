@@ -71,36 +71,11 @@ import eu.akoos.photos.presentation.common.selectionCloudLinkIds
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.Bg2
+import eu.akoos.photos.presentation.theme.SheetBg
 import eu.akoos.photos.presentation.theme.FgMute
 import eu.akoos.photos.presentation.theme.FgPrimary
 import eu.akoos.photos.presentation.theme.Line2
 import eu.akoos.photos.presentation.theme.PillBg
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-internal fun GalleryContentFilterDialog(
-    currentFilter: ContentFilter,
-    currentCategory: GalleryFilter,
-    sheetState: SheetState,
-    onApply: (ContentFilter) -> Unit,
-    onCategorySelected: (GalleryFilter) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState,
-        containerColor = Bg2,
-        scrimColor = Color.Black.copy(alpha = 0.5f),
-    ) {
-        ContentFilterSheet(
-            currentFilter = currentFilter,
-            currentCategory = currentCategory,
-            onApply = onApply,
-            onCategorySelected = onCategorySelected,
-            onDismiss = onDismiss,
-        )
-    }
-}
 
 /** Shared-tab "Filter by person" picker. `onEmailSelected(null)` resets to "All". */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -114,7 +89,7 @@ internal fun GallerySharedEmailFilterDialog(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = Bg2,
+        containerColor = SheetBg,
         scrimColor = Color.Black.copy(alpha = 0.5f),
     ) {
         Column(
@@ -196,7 +171,7 @@ internal fun GalleryMultiDeleteDialog(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = Bg2,
+        containerColor = SheetBg,
         scrimColor = Color.Black.copy(alpha = 0.5f),
     ) {
         MultiDeleteSheet(
@@ -221,7 +196,7 @@ internal fun GalleryAddToAlbumDialog(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = Bg2,
+        containerColor = SheetBg,
         scrimColor = Color.Black.copy(alpha = 0.5f),
     ) {
         // Only cloud-backed items carry a linkId, so the picker offers cloud albums + New album.
@@ -269,7 +244,7 @@ internal fun GalleryAddToPersonSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = Bg2,
+        containerColor = SheetBg,
         scrimColor = Color.Black.copy(alpha = 0.5f),
     ) {
         Column(
@@ -323,7 +298,7 @@ internal fun GalleryNewAlbumDialog(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = Bg2,
+        containerColor = SheetBg,
         scrimColor = Color.Black.copy(alpha = 0.5f),
     ) {
         Column(
@@ -344,6 +319,7 @@ internal fun GalleryNewAlbumDialog(
                 placeholder = { Text(stringResource(R.string.albums_create_album_hint), color = FgMute) },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor   = Accent,
                     unfocusedBorderColor = Line2,

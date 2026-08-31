@@ -33,11 +33,14 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import me.proton.core.accountmanager.domain.AccountManager
@@ -106,6 +109,13 @@ class PhotoWidgetConfigViewModel @Inject constructor(
 
     private val _state = MutableStateFlow(WidgetConfigUiState())
     val state: StateFlow<WidgetConfigUiState> = _state.asStateFlow()
+
+    /** Whether a Proton account is signed in. Logged out, the cloud sources return nothing, so the
+     *  config screen hides the cloud-photo mode and the follow-a-cloud-album toggle. Defaults to
+     *  signed-in so nothing flickers before the first emit. */
+    val isSignedIn: StateFlow<Boolean> = accountManager.getPrimaryUserId()
+        .map { it != null }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, true)
 
     /** Tracks whether [loadFor] has already populated state from Glance, so we don't
      *  overwrite the user's in-progress edits when the screen recomposes. */

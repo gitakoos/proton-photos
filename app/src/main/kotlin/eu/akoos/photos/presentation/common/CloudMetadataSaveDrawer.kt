@@ -52,6 +52,7 @@ import eu.akoos.photos.domain.usecase.CloudSavePhase
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.Bg2
+import eu.akoos.photos.presentation.theme.SheetBg
 
 /**
  * The live status of the app-scoped cloud metadata save batch, as a bottom drawer. The editor hands
@@ -74,7 +75,7 @@ fun CloudMetadataSaveDrawer(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = Bg2,
+        containerColor = SheetBg,
         scrimColor = Color.Black.copy(alpha = 0.5f),
     ) {
         Column(

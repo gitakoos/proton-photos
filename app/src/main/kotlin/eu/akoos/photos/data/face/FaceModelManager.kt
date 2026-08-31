@@ -88,7 +88,7 @@ sealed interface FaceModelPreparation {
  *
  * While the asset is not pinned, that second path can never run: an unverifiable binary is never
  * fetched, because a download that cannot be size- and digest-checked is exactly what this rail
- * exists to refuse. So until the SCRFD asset is published and pinned, the only way onto a device is
+ * exists to refuse. So until the detector asset is published and pinned, the only way onto a device is
  * the side-load path, which is what a developer uses now. The streaming download, the length cap, and
  * the verify-then-promote-by-rename are all in place regardless, so the moment the digest is pinned
  * the network path is live with no further change here.

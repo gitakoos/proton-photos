@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.presentation.people
 
+import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -29,7 +30,9 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -38,6 +41,7 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.HowToReg
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
@@ -61,9 +65,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import eu.akoos.photos.R
 import eu.akoos.photos.presentation.common.IconBubble
 import eu.akoos.photos.presentation.common.SecondaryButton
+import eu.akoos.photos.presentation.common.ShimmerBox
 import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
 import eu.akoos.photos.presentation.gallery.PersonCard
-import eu.akoos.photos.presentation.settings.components.SettingsPillHeader
+import eu.akoos.photos.presentation.common.FloatingHeader
 import eu.akoos.photos.presentation.theme.AppColors
 
 /**
@@ -80,13 +85,20 @@ fun PeopleScreen(
     onPersonClick: (Long) -> Unit,
     onOpenAiSettings: () -> Unit,
     onReviewSuggestions: () -> Unit,
+    onOpenExcluded: () -> Unit,
     viewModel: PeopleViewModel = hiltViewModel(),
 ) {
     val colors = AppColors.current
     val people by viewModel.people.collectAsStateWithLifecycle()
+    // A null value is the pre-first-emission load; once resolved it is a (possibly empty) list.
+    val loading = people == null
+    val resolved = people.orEmpty()
     // This page shows only the people you have NAMED. Unnamed clusters are named, merged and dismissed
     // on the review screen (the overflow menu), so junk never clutters your named people.
-    val named = people.filter { !it.displayName.isNullOrBlank() }
+    val named = resolved.filter { !it.displayName.isNullOrBlank() }
+    // Unnamed clusters still waiting for a name, surfaced as a count on the review entry. The Unsorted
+    // leftover bucket is not a suggestion to name, so it is left out of the tally.
+    val suggestionCount = resolved.count { it.displayName.isNullOrBlank() && !it.isOther }
     var menuOpen by remember { mutableStateOf(false) }
     var showSearch by remember { mutableStateOf(false) }
 
@@ -95,45 +107,79 @@ fun PeopleScreen(
             .fillMaxSize()
             .background(colors.pageBg),
     ) {
-        if (named.isEmpty()) {
-            Column(
-                modifier = Modifier.align(Alignment.Center).padding(horizontal = 40.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Text(
-                    text = stringResource(R.string.people_none_named),
-                    color = colors.fgMute,
-                    fontSize = 14.sp,
-                    textAlign = TextAlign.Center,
-                )
-                Spacer(Modifier.height(14.dp))
-                SecondaryButton(
-                    label = stringResource(R.string.person_suggestions_review),
-                    onClick = onReviewSuggestions,
-                )
-            }
-        } else {
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(2),
-                contentPadding = PaddingValues(
-                    start = 14.dp,
-                    end = 14.dp,
-                    top = floatingHeaderContentTopPadding(),
-                    bottom = 24.dp,
-                ),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-                modifier = Modifier.fillMaxSize(),
-            ) {
-                items(items = named, key = { it.personId }) { person ->
-                    PersonCard(person = person, onClick = { onPersonClick(person.personId) })
-                }
+        // Loading / empty / content phase, cross-faded so the first Room emission never flashes the
+        // empty state before the named people arrive.
+        val phase = when {
+            loading -> 0
+            named.isEmpty() -> 1
+            else -> 2
+        }
+        Crossfade(targetState = phase, label = "peopleContent", modifier = Modifier.fillMaxSize()) { p ->
+            when (p) {
+                0 ->
+                    // Skeleton grid matching the 2-column PersonCard layout so there is no jump when
+                    // the real cards arrive.
+                    LazyVerticalGrid(
+                        columns = GridCells.Fixed(2),
+                        contentPadding = PaddingValues(
+                            start = 14.dp,
+                            end = 14.dp,
+                            top = floatingHeaderContentTopPadding(),
+                            bottom = 24.dp,
+                        ),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.fillMaxSize(),
+                    ) {
+                        items(8) {
+                            ShimmerBox(
+                                modifier = Modifier.fillMaxWidth().aspectRatio(132f / 168f),
+                                cornerRadius = 16.dp,
+                            )
+                        }
+                    }
+                1 ->
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Column(
+                            modifier = Modifier.padding(horizontal = 40.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                        ) {
+                            Text(
+                                text = stringResource(R.string.people_none_named),
+                                color = colors.fgMute,
+                                fontSize = 14.sp,
+                                textAlign = TextAlign.Center,
+                            )
+                            Spacer(Modifier.height(14.dp))
+                            SecondaryButton(
+                                label = stringResource(R.string.person_suggestions_review),
+                                onClick = onReviewSuggestions,
+                            )
+                        }
+                    }
+                else ->
+                    LazyVerticalGrid(
+                        columns = GridCells.Fixed(2),
+                        contentPadding = PaddingValues(
+                            start = 14.dp,
+                            end = 14.dp,
+                            top = floatingHeaderContentTopPadding(),
+                            bottom = 24.dp,
+                        ),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.fillMaxSize(),
+                    ) {
+                        items(items = named, key = { it.personId }) { person ->
+                            PersonCard(person = person, onClick = { onPersonClick(person.personId) })
+                        }
+                    }
             }
         }
 
         // Floating pill header (back + title), matching the app's other detail surfaces, with a
         // three-dot overflow that jumps straight to the AI settings.
-        SettingsPillHeader(
+        FloatingHeader(
             title = stringResource(R.string.gallery_category_people),
             onBack = onBack,
             trailing = {
@@ -145,22 +191,22 @@ fun PeopleScreen(
                         onClick = { showSearch = true },
                         diameter = 40.dp,
                         iconSize = 18.dp,
-                        background = colors.surfaceWeak,
+                        background = colors.pillBg,
                         borderColor = colors.pillBorder,
-                        tint = colors.fgDim,
+                        tint = colors.fgPrimary,
                         modifier = Modifier.padding(end = 8.dp),
                     )
                 }
                 Box {
                     IconBubble(
                         icon = Icons.Default.MoreVert,
-                        contentDescription = stringResource(R.string.settings_ai_section),
+                        contentDescription = stringResource(R.string.more_options),
                         onClick = { menuOpen = true },
                         diameter = 40.dp,
                         iconSize = 16.dp,
-                        background = colors.surfaceWeak,
+                        background = colors.pillBg,
                         borderColor = colors.pillBorder,
-                        tint = colors.fgDim,
+                        tint = colors.fgPrimary,
                     )
                     DropdownMenu(
                         expanded = menuOpen,
@@ -172,7 +218,12 @@ fun PeopleScreen(
                         DropdownMenuItem(
                             text = {
                                 Text(
-                                    stringResource(R.string.person_suggestions_review),
+                                    if (suggestionCount > 0)
+                                        stringResource(
+                                            R.string.person_suggestions_review_count,
+                                            suggestionCount,
+                                        )
+                                    else stringResource(R.string.person_suggestions_review),
                                     color = colors.fgPrimary,
                                 )
                             },
@@ -186,6 +237,25 @@ fun PeopleScreen(
                             onClick = {
                                 menuOpen = false
                                 onReviewSuggestions()
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    stringResource(R.string.settings_face_excluded),
+                                    color = colors.fgPrimary,
+                                )
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    Icons.Default.Block,
+                                    contentDescription = null,
+                                    tint = colors.fgDim,
+                                )
+                            },
+                            onClick = {
+                                menuOpen = false
+                                onOpenExcluded()
                             },
                         )
                         DropdownMenuItem(

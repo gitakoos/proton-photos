@@ -120,10 +120,8 @@ import eu.akoos.photos.presentation.theme.FgPrimary
 import eu.akoos.photos.presentation.theme.PillBg
 import eu.akoos.photos.presentation.theme.PillBgOpaque
 import eu.akoos.photos.presentation.theme.PillBorder
+import eu.akoos.photos.presentation.theme.pillShape
 import kotlin.math.roundToInt
-
-/** The house pill capsule, matching the shape the gallery and editor use for their action pills. */
-private val pillShape = RoundedCornerShape(999.dp)
 
 /** The bottom tab that decides which control row is shown: the layouts, the output shape, or the border. */
 private enum class CollageTab { LAYOUT, ASPECT, BORDER }

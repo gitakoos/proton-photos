@@ -49,6 +49,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CallMerge
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.PersonOff
 import androidx.compose.material.icons.filled.PersonRemove
 import androidx.compose.material.icons.filled.PersonSearch
@@ -58,6 +59,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -69,6 +71,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.GalleryItem
@@ -81,7 +84,7 @@ import eu.akoos.photos.presentation.gallery.PersonUi
 import eu.akoos.photos.presentation.gallery.PhotoCell
 import eu.akoos.photos.presentation.gallery.photoCellInputsFor
 import eu.akoos.photos.presentation.people.PersonPickerSheet
-import eu.akoos.photos.presentation.settings.components.SettingsPillHeader
+import eu.akoos.photos.presentation.common.FloatingHeader
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.FgMute
@@ -102,6 +105,7 @@ fun PersonDetailScreen(
     onRename: (String) -> Unit,
     onAddPhotos: () -> Unit,
     onRemovePhotos: (Set<String>) -> Unit,
+    onMoveSelectionToPerson: (Set<String>, String) -> Unit = { _, _ -> },
     onSetCover: (String) -> Unit = {},
     mergeCandidates: List<PersonUi> = emptyList(),
     onLoadMergeCandidates: () -> Unit = {},
@@ -121,12 +125,29 @@ fun PersonDetailScreen(
     var showIgnoreConfirm by remember { mutableStateOf(false) }
     var menuOpen by remember { mutableStateOf(false) }
     var showMergePicker by remember { mutableStateOf(false) }
+    var showMoveSelectionPicker by remember { mutableStateOf(false) }
+    var pendingCover by remember { mutableStateOf<String?>(null) }
     var pendingMerge by remember { mutableStateOf<PersonUi?>(null) }
     var selection by remember { mutableStateOf(emptySet<String>()) }
     val selecting = selection.isNotEmpty()
 
     fun toggle(key: String) {
         selection = if (key in selection) selection - key else selection + key
+    }
+
+    // Curation can empty a person: its last photos moved to someone else, removed, or marked not a
+    // person, and the Unsorted bucket empties the same way once every face is placed. An emptied grid
+    // is a dead end once photos have shown, so hand back to the caller's back target the moment it goes
+    // empty. A person still loading or opened already empty never pops.
+    var hadPhotos by remember { mutableStateOf(false) }
+    var leftOnEmpty by remember { mutableStateOf(false) }
+    LaunchedEffect(state.isLoading, state.items.isEmpty()) {
+        if (state.items.isNotEmpty()) {
+            hadPhotos = true
+        } else if (hadPhotos && !state.isLoading && !leftOnEmpty) {
+            leftOnEmpty = true
+            onBack()
+        }
     }
 
     BackHandler(enabled = selecting) { selection = emptySet() }
@@ -166,6 +187,21 @@ fun PersonDetailScreen(
                     verticalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 6.dp),
                     modifier = Modifier.fillMaxSize(),
                 ) {
+                    // The Unsorted bucket explains itself at the top of its grid, so it is never mistaken
+                    // for a person the app thinks it recognised.
+                    if (state.isOther && !selecting) {
+                        item(span = { GridItemSpan(maxLineSpan) }, key = "unsorted_hint") {
+                            Text(
+                                text = stringResource(R.string.person_unsorted_hint),
+                                color = appColors.fgDim,
+                                fontSize = 13.sp,
+                                lineHeight = 18.sp,
+                                modifier = Modifier
+                                    .padding(horizontal = if (seamless) 20.dp else 0.dp)
+                                    .padding(top = 2.dp, bottom = 10.dp),
+                            )
+                        }
+                    }
                     // The app's own merge prompt rides at the top of the grid as a full-width row, so it
                     // scrolls with the photos rather than covering them. Only shown in browse mode.
                     if (mergeSuggestion != null && !selecting) {
@@ -207,43 +243,73 @@ fun PersonDetailScreen(
         // Floating pill header: browse mode carries add + edit; selection mode carries a count and a
         // remove action, and its back arrow clears the selection.
         if (selecting) {
-            SettingsPillHeader(
+            FloatingHeader(
                 title = stringResource(R.string.album_picker_selected, selection.size),
                 onBack = { selection = emptySet() },
                 trailing = {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        // Choosing a cover needs exactly one photo picked.
-                        if (selection.size == 1) {
+                        // Choosing a cover needs exactly one photo picked AND a named person (the cover
+                        // is stored against the name); an unnamed cluster has nowhere to keep it, so the
+                        // button would silently do nothing there.
+                        if (selection.size == 1 && state.personName != null) {
                             IconBubble(
                                 icon = Icons.Default.AccountCircle,
                                 contentDescription = stringResource(R.string.person_set_cover),
-                                onClick = {
-                                    onSetCover(selection.first())
-                                    selection = emptySet()
-                                },
+                                onClick = { pendingCover = selection.first() },
                                 diameter = 40.dp,
                                 iconSize = 18.dp,
-                                background = appColors.surfaceWeak,
+                                background = appColors.pillBg,
                                 borderColor = appColors.pillBorder,
-                                tint = appColors.fgDim,
+                                tint = appColors.fgPrimary,
                             )
                         }
+                        // Reassign the picked photos to another person, or split them into a new one.
                         IconBubble(
-                            icon = Icons.Default.PersonRemove,
-                            contentDescription = stringResource(R.string.person_remove_from),
-                            onClick = { showRemoveConfirm = true },
+                            icon = Icons.Default.PersonAdd,
+                            contentDescription = stringResource(R.string.person_move_to_title),
+                            onClick = {
+                                onLoadMergeCandidates()
+                                showMoveSelectionPicker = true
+                            },
                             diameter = 40.dp,
                             iconSize = 16.dp,
-                            background = appColors.surfaceWeak,
+                            background = appColors.pillBg,
                             borderColor = appColors.pillBorder,
-                            tint = appColors.fgDim,
+                            tint = appColors.fgPrimary,
                         )
+                        // Removing photos from a person only makes sense for a named one; an unnamed
+                        // cluster has no person to keep the photos off of.
+                        if (state.personName != null) {
+                            IconBubble(
+                                icon = Icons.Default.PersonRemove,
+                                contentDescription = stringResource(R.string.person_remove_from),
+                                onClick = { showRemoveConfirm = true },
+                                diameter = 40.dp,
+                                iconSize = 16.dp,
+                                background = appColors.pillBg,
+                                borderColor = appColors.pillBorder,
+                                tint = appColors.fgPrimary,
+                            )
+                        }
                     }
                 },
             )
         } else {
-            SettingsPillHeader(
-                title = state.personName ?: stringResource(R.string.person_detail_unnamed),
+            // Show the person's photo tally beside the name so the header states how many photos this holds.
+            val photoCount = state.items.size
+            val baseTitle = when {
+                state.isOther -> stringResource(R.string.person_unsorted)
+                else -> state.personName ?: stringResource(R.string.person_detail_unnamed)
+            }
+            val headerTitle = if (photoCount > 0) {
+                baseTitle + " · " + pluralStringResource(
+                    R.plurals.count_photos_plural, photoCount, photoCount,
+                )
+            } else {
+                baseTitle
+            }
+            FloatingHeader(
+                title = headerTitle,
                 onBack = onBack,
                 trailing = {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -256,31 +322,36 @@ fun PersonDetailScreen(
                                 onClick = onAddPhotos,
                                 diameter = 40.dp,
                                 iconSize = 16.dp,
-                                background = appColors.surfaceWeak,
+                                background = appColors.pillBg,
                                 borderColor = appColors.pillBorder,
-                                tint = appColors.fgDim,
+                                tint = appColors.fgPrimary,
                             )
                         }
-                        IconBubble(
-                            icon = Icons.Default.Edit,
-                            contentDescription = stringResource(R.string.person_rename_title),
-                            onClick = { showRename = true },
-                            diameter = 40.dp,
-                            iconSize = 16.dp,
-                            background = appColors.surfaceWeak,
-                            borderColor = appColors.pillBorder,
-                            tint = appColors.fgDim,
-                        )
-                        Box {
+                        // The Unsorted bucket is never renamed (that would turn the junk pile into a
+                        // person) and never whole-merged: it is curated by selecting faces to move out or
+                        // reject, so neither the rename button nor the overflow is offered for it.
+                        if (!state.isOther) {
+                            IconBubble(
+                                icon = Icons.Default.Edit,
+                                contentDescription = stringResource(R.string.person_rename_title),
+                                onClick = { showRename = true },
+                                diameter = 40.dp,
+                                iconSize = 16.dp,
+                                background = appColors.pillBg,
+                                borderColor = appColors.pillBorder,
+                                tint = appColors.fgPrimary,
+                            )
+                        }
+                        if (!state.isOther) Box {
                             IconBubble(
                                 icon = Icons.Default.MoreVert,
-                                contentDescription = stringResource(R.string.person_merge),
+                                contentDescription = stringResource(R.string.more_options),
                                 onClick = { menuOpen = true },
                                 diameter = 40.dp,
                                 iconSize = 16.dp,
-                                background = appColors.surfaceWeak,
+                                background = appColors.pillBg,
                                 borderColor = appColors.pillBorder,
-                                tint = appColors.fgDim,
+                                tint = appColors.fgPrimary,
                             )
                             DropdownMenu(
                                 expanded = menuOpen,
@@ -332,25 +403,30 @@ fun PersonDetailScreen(
                                         showMergePicker = true
                                     },
                                 )
-                                DropdownMenuItem(
-                                    text = {
-                                        Text(
-                                            stringResource(R.string.person_not_a_person),
-                                            color = appColors.fgPrimary,
-                                        )
-                                    },
-                                    leadingIcon = {
-                                        Icon(
-                                            Icons.Default.PersonOff,
-                                            contentDescription = null,
-                                            tint = appColors.fgDim,
-                                        )
-                                    },
-                                    onClick = {
-                                        menuOpen = false
-                                        showIgnoreConfirm = true
-                                    },
-                                )
+                                // Only for an unnamed cluster: dismissing a whole named, confirmed person
+                                // as "not a person" makes no sense. A named person's stray photos are
+                                // taken off through "Remove from this person" in selection mode instead.
+                                if (state.personName == null) {
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(
+                                                stringResource(R.string.person_not_a_person),
+                                                color = appColors.fgPrimary,
+                                            )
+                                        },
+                                        leadingIcon = {
+                                            Icon(
+                                                Icons.Default.PersonOff,
+                                                contentDescription = null,
+                                                tint = appColors.fgDim,
+                                            )
+                                        },
+                                        onClick = {
+                                            menuOpen = false
+                                            showIgnoreConfirm = true
+                                        },
+                                    )
+                                }
                             }
                         }
                     }
@@ -389,11 +465,29 @@ fun PersonDetailScreen(
         )
     }
 
-    // Merge: pick another named person (or type a new name) to fold THIS person into.
+    pendingCover?.let { key ->
+        ConfirmDialog(
+            title = stringResource(R.string.person_set_cover_confirm_title),
+            message = stringResource(R.string.person_set_cover_confirm_body),
+            confirmLabel = stringResource(R.string.person_set_cover),
+            dismissLabel = stringResource(R.string.cancel),
+            onConfirm = {
+                onSetCover(key)
+                pendingCover = null
+                selection = emptySet()
+            },
+            onDismiss = { pendingCover = null },
+        )
+    }
+
+    // Merge: pick another named person to fold THIS person into (that fold confirms first, since it
+    // cannot be split back apart). Typing a new name only renames this person, which is reversible, so
+    // it commits at once the way a rename does elsewhere in the app.
     if (showMergePicker) {
         PersonPickerSheet(
             title = stringResource(R.string.person_merge_pick_title),
             people = mergeCandidates,
+            emptyText = stringResource(R.string.person_merge_empty),
             onPick = { picked ->
                 showMergePicker = false
                 pendingMerge = picked
@@ -403,6 +497,27 @@ fun PersonDetailScreen(
                 onMergeName(name)
             },
             onDismiss = { showMergePicker = false },
+        )
+    }
+
+    // Move a selection onto another person: pick an existing name to reassign those faces, or type a
+    // new name to split them off into a new person.
+    if (showMoveSelectionPicker) {
+        val toMove = selection
+        PersonPickerSheet(
+            title = stringResource(R.string.person_move_to_title),
+            people = mergeCandidates,
+            onPick = { picked ->
+                showMoveSelectionPicker = false
+                onMoveSelectionToPerson(toMove, picked.displayName ?: "")
+                selection = emptySet()
+            },
+            onCreateNew = { name ->
+                showMoveSelectionPicker = false
+                onMoveSelectionToPerson(toMove, name)
+                selection = emptySet()
+            },
+            onDismiss = { showMoveSelectionPicker = false },
         )
     }
 

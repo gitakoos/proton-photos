@@ -88,13 +88,19 @@ data class SettingsUiState(
     /** Per-feature opt-in for the face features (Hide faces and People), nested under
      *  [aiFeaturesEnabled]. Off by default. */
     val faceEnabled: Boolean = false,
-    /** Which face model drawer the AI panel is showing: [FaceModelPrompt.Remove] when the feature was
-     *  switched off, offering to delete the model and data it leaves behind, or [FaceModelPrompt.None]
-     *  for no drawer. */
+    /** Which face model drawer the AI panel is showing: [FaceModelPrompt.Download] when the feature was
+     *  switched on with no model on disk, [FaceModelPrompt.Remove] when it was switched off, offering to
+     *  delete the model and data it leaves behind, or [FaceModelPrompt.None] for no drawer. */
     val faceModelPrompt: FaceModelPrompt = FaceModelPrompt.None,
-    /** Whether both face models (the SCRFD detector and the embedder) are already on disk, so the face
-     *  toggle can present as usable rather than offering a switch with no model behind it. Resolved
-     *  once at load, network-free. */
+    /** True while an accepted face model download runs, so the toggle row reads as busy and holds its
+     *  switch until both the detector and the embedder land. */
+    val faceModelDownloading: Boolean = false,
+    /** True when the last face model download did not produce usable models, so the row can say so and
+     *  the feature stays off. */
+    val faceModelDownloadFailed: Boolean = false,
+    /** Whether both face models (the detector and the embedder) are already on disk. It no longer gates
+     *  the toggle, which stays usable so a missing model can be fetched or the feature switched off;
+     *  it only lets the row read as available. Resolved at load and after a download, network-free. */
     val faceRecognitionAvailable: Boolean = false,
     /** Which top-level tab the gallery opens on at app start. Default Photos. */
     val landingTab: LandingTab = LandingTab.Photos,
@@ -113,6 +119,10 @@ data class SettingsUiState(
     /** True until the account user Flow first emits — gates a shimmer over the avatar /
      *  name / email so a cold start shows a skeleton instead of a bare "?" placeholder. */
     val accountLoading: Boolean = true,
+    /** Whether a Proton account is signed in. False in the no-account local-only session, where the
+     *  Settings root offers a sign-in row and hides the account and backup surfaces. Defaults true so
+     *  a signed-in session renders unchanged. */
+    val isSignedIn: Boolean = true,
     /** True until the backed-up / pending counts first compute — gates a shimmer over the
      *  count values so a cold start shows a skeleton instead of "None" / 0. */
     val countsLoading: Boolean = true,
@@ -159,6 +169,14 @@ data class SettingsUiState(
     val stripCameraInfo: Boolean = false,
     val stripTimestamp: Boolean = false,
     val stripSoftwareInfo: Boolean = false,
+    // Metadata stripping on share. Independent from the upload-strip fields above; the shared copy is
+    // processed while the on-device original is left untouched. Defaults mirror the upload equivalents.
+    val stripOnShare: Boolean = false,
+    val stripShareGps: Boolean = true,
+    val stripShareCameraInfo: Boolean = false,
+    val stripShareTimestamp: Boolean = false,
+    val stripShareSoftwareInfo: Boolean = false,
+    val stripShareAuthorship: Boolean = false,
     // App lock
     val appLockEnabled: Boolean = false,
     /** Lock-on-return timeout in minutes. 0 = immediate; common picks: 5 / 10 / 15 / 60. */
@@ -247,7 +265,7 @@ enum class OcrModelPrompt { None, Download, Remove }
  * and name when the feature is switched off, and [ConfirmRemove] is the final are-you-sure before
  * anything is wiped; [None] shows no drawer.
  */
-enum class FaceModelPrompt { None, Remove, ConfirmRemove }
+enum class FaceModelPrompt { None, Download, Remove, ConfirmRemove }
 
 enum class ThemeMode(val storageKey: String, val labelRes: Int) {
     System("system", eu.akoos.photos.R.string.theme_mode_system),

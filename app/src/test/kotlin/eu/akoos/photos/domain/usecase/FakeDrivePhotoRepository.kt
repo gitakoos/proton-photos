@@ -72,6 +72,15 @@ internal class FakeDrivePhotoRepository : DrivePhotoRepository {
      *  Models a transient upload failure so a caller's restore / no-trash guard can be exercised. */
     var failUploadOnce = false
 
+    /** When non-null, the next [uploadFile] call throws this exact throwable before recording
+     *  anything, then clears it. Lets a caller's transient-vs-permanent classification be exercised
+     *  with a specific error TYPE (an [java.io.IOException] vs a plain non-network error). */
+    var uploadErrorOnce: Throwable? = null
+
+    /** When non-null, the next [addPhotosToAlbum] call throws this exact throwable, then clears it.
+     *  Same purpose as [uploadErrorOnce] for the album re-add path. */
+    var addPhotosErrorOnce: Throwable? = null
+
     /** When true, the next [uploadFile] call throws a [kotlinx.coroutines.CancellationException] before
      *  recording anything, then resets itself. Models the user cancelling a replace mid-upload so a
      *  caller's cancellation restore / no-trash guard can be exercised. */
@@ -120,6 +129,7 @@ internal class FakeDrivePhotoRepository : DrivePhotoRepository {
             cancelUploadOnce = false
             throw kotlinx.coroutines.CancellationException("simulated upload cancel")
         }
+        uploadErrorOnce?.let { uploadErrorOnce = null; throw it }
         if (failUploadOnce) {
             failUploadOnce = false
             error("simulated transient upload failure")
@@ -152,6 +162,7 @@ internal class FakeDrivePhotoRepository : DrivePhotoRepository {
         photoLinkIds: List<String>,
     ): DrivePhotoRepository.AddPhotosToAlbumResult {
         callLog += "ADD:$albumLinkId"
+        addPhotosErrorOnce?.let { addPhotosErrorOnce = null; throw it }
         if (failAddPhotosOnce) {
             failAddPhotosOnce = false
             error("simulated transient album-add failure")

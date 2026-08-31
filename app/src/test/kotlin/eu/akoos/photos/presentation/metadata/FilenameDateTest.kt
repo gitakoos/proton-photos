@@ -54,6 +54,12 @@ class FilenameDateTest {
         assertEquals(expected, parse("20230115-123456.jpg"))
     }
 
+    @Test fun `compact screenshot name with a copy suffix`() {
+        // The exact shape a duplicated Android screenshot carries: a Screenshot_ prefix, the compact
+        // yyyyMMdd-HHmmss, then a " (2)" copy marker after the time. The date is read, the marker ignored.
+        assertEquals(ms(2025, 10, 23, 6, 34, 22), parse("Screenshot_20251023-063422 (2).png"))
+    }
+
     @Test fun `separated date with time`() {
         assertEquals(ms(2023, 1, 15, 12, 34, 56), parse("Screenshot_2023-01-15-12-34-56.png"))
         assertEquals(ms(2023, 1, 15, 9, 5, 0), parse("2023-01-15 09-05.jpg"))
@@ -72,6 +78,18 @@ class FilenameDateTest {
     @Test fun `an invalid time falls back to the date`() {
         // Hour 25 is not a real time, so the date alone is read and lands at noon.
         assertEquals(ms(2023, 1, 15, 12, 0, 0), parse("20230115_256789.jpg"))
+    }
+
+    @Test fun `a contiguous date with a non-time counter falls back to the date`() {
+        // SquareQuick appends a counter, not a clock: 20191212 then 594755 (an impossible 59:47:55). With
+        // no separator the bare-date pattern cannot split the run, so the datetime match's date is read.
+        assertEquals(ms(2019, 12, 12, 12, 0, 0), parse("SquareQuick_20191212594755"))
+    }
+
+    @Test fun `a sub-second suffix after the time is tolerated`() {
+        // A 14-digit yyyyMMddHHmmss immediately followed by a 3-digit millisecond tail still reads.
+        assertEquals(ms(2020, 11, 13, 11, 55, 27), parse("20201113115527539.png"))
+        assertNull(parse("20209913115527539.png")) // month 99, even with a millis tail, stays rejected
     }
 
     @Test fun `no readable date returns null`() {

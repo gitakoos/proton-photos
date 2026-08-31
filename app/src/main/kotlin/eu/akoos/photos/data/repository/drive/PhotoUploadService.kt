@@ -112,6 +112,8 @@ enum class UploadPhase { Encrypting, Uploading }
  *  - [displayWidth]/[displayHeight]: rotation-corrected dimensions for xAttr Media — already
  *    W/H-swapped when the EXIF orientation or video rotation is 90/270. Null falls back to the
  *    MediaStore values on [eu.akoos.photos.domain.entity.LocalMediaItem].
+ *  - [durationMillis]: video length for xAttr Media, read from the source container. Null falls back
+ *    to the [eu.akoos.photos.domain.entity.LocalMediaItem] duration.
  */
 data class UploadXAttrMetadata(
     val latitude: Double? = null,
@@ -122,6 +124,7 @@ data class UploadXAttrMetadata(
     val subjectCoordinates: IntArray? = null,
     val displayWidth: Int? = null,
     val displayHeight: Int? = null,
+    val durationMillis: Long? = null,
 )
 
 /**
@@ -902,7 +905,7 @@ class PhotoUploadService @Inject constructor(
                     blockSizes           = plaintextBlockSizes,
                     width                = xAttrWidth,
                     height               = xAttrHeight,
-                    durationMillis       = item.duration,
+                    durationMillis       = xAttrMetadata.durationMillis ?: item.duration,
                     nodePublicKeyArmored = nodePublicKeyArmored,
                     signerKeyBytes       = signingKey.unlockedKeyBytes,
                     sha1HexDigest        = hash,

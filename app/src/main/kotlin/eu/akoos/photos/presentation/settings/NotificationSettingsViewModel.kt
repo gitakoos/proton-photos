@@ -35,11 +35,15 @@ import eu.akoos.photos.worker.SyncWorker
 import eu.akoos.photos.worker.UpdateCheckWorker
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import me.proton.core.accountmanager.domain.AccountManager
 import javax.inject.Inject
 
 /**
@@ -58,6 +62,7 @@ import javax.inject.Inject
 @HiltViewModel
 class NotificationSettingsViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
+    private val accountManager: AccountManager,
 ) : ViewModel() {
 
     data class UiState(
@@ -75,6 +80,12 @@ class NotificationSettingsViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow(UiState())
     val uiState: StateFlow<UiState> = _uiState.asStateFlow()
+
+    /** True while an account is signed in; gates the cloud notification toggles in the screen. */
+    val isSignedIn: StateFlow<Boolean> =
+        accountManager.getPrimaryUserId()
+            .map { it != null }
+            .stateIn(viewModelScope, SharingStarted.Eagerly, true)
 
     init {
         viewModelScope.launch {

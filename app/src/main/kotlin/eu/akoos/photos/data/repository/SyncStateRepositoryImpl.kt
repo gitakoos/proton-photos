@@ -53,6 +53,25 @@ class SyncStateRepositoryImpl @Inject constructor(
         dao.upsertAll(states.map { it.toEntity(userId.id) })
     }
 
+    override suspend fun updateDomainColumnsIfNotSyncedWithCloud(state: SyncState, userId: UserId): Int {
+        val entity = state.toEntity(userId.id)
+        return dao.updateDomainColumnsIfNotSyncedWithCloud(
+            localUri = entity.localUri,
+            userId = entity.userId,
+            cloudFileId = entity.cloudFileId,
+            localHash = entity.localHash,
+            cloudHash = entity.cloudHash,
+            status = entity.status,
+            lastSyncAttemptMs = entity.lastSyncAttemptMs,
+            lastSyncSuccessMs = entity.lastSyncSuccessMs,
+            backedUpAtMs = entity.backedUpAtMs,
+            sizeBytes = entity.sizeBytes,
+        )
+    }
+
+    override suspend fun demoteToLocalIfCloudIdMatches(localUri: String, expectedCloudId: String): Int =
+        dao.demoteToLocalIfCloudIdMatches(localUri, expectedCloudId)
+
     // Named for the caller's flow: the caller deletes the local MediaStore copy first, then this
     // flips the row's status (to CLOUD_ONLY). It does not itself delete anything.
     override suspend fun updateStatusAndDeleteLocal(localUri: String, newStatus: SyncStatus) {

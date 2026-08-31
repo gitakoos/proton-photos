@@ -85,7 +85,8 @@ fun UnifiedAlbumCard(
     metaText: String,
     shareBadge: AlbumShareBadge = AlbumShareBadge.None,
     cloudBadge: AlbumCloudBadge = AlbumCloudBadge.None,
-    /** Shows a "Folder" pill for bucket-derived local albums (rename/delete refused for these). */
+    /** Shows a folder glyph in the corner badge for bucket-derived local albums (rename/delete
+     *  refused for these). */
     isDeviceFolder: Boolean = false,
     /** False while a grid-wide mode owns the card's gestures. The clickable is dropped outright
      *  rather than pointed at no-op lambdas, so the card cannot ripple at a tap it will ignore. */
@@ -121,24 +122,10 @@ fun UnifiedAlbumCard(
                 )
             }
 
-            if (isDeviceFolder) {
-                Row(
-                    modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .padding(6.dp)
-                        .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(4.dp))
-                        .padding(horizontal = 5.dp, vertical = 3.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(3.dp),
-                ) {
-                    Icon(Icons.Default.Folder, null, tint = Color.White, modifier = Modifier.size(11.dp))
-                    Text(stringResource(R.string.album_card_folder_badge), color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Medium)
-                }
-            }
-
             CloudCornerBadge(
                 cloud = cloudBadge,
                 share = shareBadge,
+                folder = isDeviceFolder,
                 modifier = Modifier.align(Alignment.BottomEnd).padding(6.dp),
             )
         }
@@ -162,14 +149,17 @@ fun UnifiedAlbumCard(
     }
 }
 
-/** Bottom-end badge combining a sharing icon and the cloud/backup indicator in one pill. */
+/** Bottom-end badge combining a sharing icon, a device-folder marker, and the cloud/backup indicator
+ *  in one pill. A device folder shows the folder glyph here, in the same corner cloud albums use, so
+ *  the two read the same way instead of a text pill in the opposite corner. */
 @Composable
 private fun CloudCornerBadge(
     cloud: AlbumCloudBadge,
     share: AlbumShareBadge = AlbumShareBadge.None,
+    folder: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
-    if (cloud == AlbumCloudBadge.None && share == AlbumShareBadge.None) return
+    if (cloud == AlbumCloudBadge.None && share == AlbumShareBadge.None && !folder) return
     Row(
         modifier = modifier
             .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(4.dp))
@@ -179,6 +169,14 @@ private fun CloudCornerBadge(
     ) {
         if (share != AlbumShareBadge.None) {
             Icon(Icons.Default.People, null, tint = Color.White, modifier = Modifier.size(13.dp))
+        }
+        if (folder) {
+            Icon(
+                Icons.Default.Folder,
+                stringResource(R.string.album_card_folder_badge),
+                tint = Color.White,
+                modifier = Modifier.size(13.dp),
+            )
         }
         when (cloud) {
             AlbumCloudBadge.Cloud ->

@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.data.db.entity
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
 
@@ -34,6 +35,11 @@ import androidx.room.Index
  * [photoKey] is the same identity the gallery feed uses (a cloud linkId or a device content URI, the
  * GalleryItem.stableId keyspace and FaceEntity.photoKey), so the marker lines up with the timeline the
  * walk enumerates.
+ *
+ * [hiResScanned] records that the sensitive "find more photos" sweep has already re-checked this
+ * faceless photo at the high-resolution detector setting. The background walk leaves it false; the
+ * sweep sets it once it has looked, so each faceless photo is hi-res swept at most once ever and a
+ * repeat "find more" run does not re-scan the whole faceless set from zero.
  */
 @Entity(
     tableName = "face_scan",
@@ -43,4 +49,6 @@ import androidx.room.Index
 data class FaceScanEntity(
     val userId: String,
     val photoKey: String,
+    @ColumnInfo(defaultValue = "0")
+    val hiResScanned: Boolean = false,
 )

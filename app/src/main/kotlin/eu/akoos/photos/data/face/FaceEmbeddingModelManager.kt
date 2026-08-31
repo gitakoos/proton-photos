@@ -63,7 +63,7 @@ import java.util.concurrent.TimeUnit
  * be pinned to exact bytes (see [FaceModelAssets]) AND the user has to have agreed to the download.
  *
  * While the asset is not pinned that second path can never run: an unverifiable binary is never
- * fetched. So until the buffalo_s embedder is published and pinned, the only way onto a device is the
+ * fetched. So until the embedder is published and pinned, the only way onto a device is the
  * side-load path a developer uses now. The streaming download, the length cap, and the
  * verify-then-promote-by-rename are all in place regardless, so the moment the digest is pinned the
  * network path is live with no further change here. The shared [FaceModelPreparation] and

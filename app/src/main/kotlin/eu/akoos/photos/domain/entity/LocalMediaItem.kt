@@ -54,4 +54,7 @@ data class LocalMediaItem(
      *  actual capture date the file's own EXIF still carries. Default true so existing constructions
      *  keep their meaning. */
     val dateTakenIsExplicit: Boolean = true,
+    /** MediaStore DATE_EXPIRES (epoch seconds) — the exact time the OS auto-purges this file from
+     *  the device trash. Null for any non-trashed item; only the trashed-media query populates it. */
+    val dateExpiresSec: Long? = null,
 )

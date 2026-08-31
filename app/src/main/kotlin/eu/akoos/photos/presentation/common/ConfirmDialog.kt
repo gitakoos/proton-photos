@@ -40,6 +40,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.Bg2
+import eu.akoos.photos.presentation.theme.SheetBg
 
 /**
  * Single source of truth for simple confirmation dialogs across the app, shown as a bottom drawer (a
@@ -70,7 +71,7 @@ fun ConfirmDialog(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = Bg2,
+        containerColor = SheetBg,
         scrimColor = Color.Black.copy(alpha = 0.5f),
     ) {
         Column(

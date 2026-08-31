@@ -32,12 +32,15 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import me.proton.core.domain.entity.UserId
 import eu.akoos.photos.crypto.CryptoServiceClient
+import eu.akoos.photos.crypto.DecryptPriority
+import eu.akoos.photos.crypto.DecryptPriorityContext
 import eu.akoos.photos.data.db.dao.AlbumPhotoMembershipDao
 import eu.akoos.photos.data.db.dao.PhotoListingDao
 import eu.akoos.photos.data.db.entity.PhotoListingEntity
@@ -496,16 +499,25 @@ class ThumbnailDecryptScheduler @Inject constructor(
                     // once the queue drains — the woken worker just re-parks.
                     available.trySend(Unit)
                     val linkId = task.photo.linkId
+                    val background = task.band == Band.BACKGROUND
                     // Trickle the warm-up: BACKGROUND tasks wait out the shared pace gate BEFORE taking a
                     // permit, so the aggregate warm-up fetch rate stays gentle without ever occupying a
                     // worker permit a newly VISIBLE thumbnail needs. VISIBLE / PREFETCH skip the gate.
-                    if (task.band == Band.BACKGROUND) paceBackground()
+                    if (background) paceBackground()
                     try {
                         semaphore.withPermit {
                             // The whole-library warm-up (BACKGROUND band) rides the shared CDN cooldown so a
                             // 429 burst self-limits; VISIBLE / PREFETCH fetches stay responsive.
-                            runCatching { decryptOne(task.userId, task.photo, task.band == Band.BACKGROUND) }
-                                .onFailure { e -> Log.w(TAG, "decrypt $linkId failed: ${e.message}") }
+                            runCatching {
+                                if (background) {
+                                    // Warm-up yields the process-global crypto gate to interactive decrypts.
+                                    withContext(DecryptPriorityContext(DecryptPriority.BACKGROUND)) {
+                                        decryptOne(task.userId, task.photo, true)
+                                    }
+                                } else {
+                                    decryptOne(task.userId, task.photo, false)
+                                }
+                            }.onFailure { e -> Log.w(TAG, "decrypt $linkId failed: ${e.message}") }
                         }
                     } finally {
                         enqueued.remove(linkId)

@@ -25,6 +25,7 @@ package eu.akoos.photos.domain.usecase
 import androidx.room.withTransaction
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import eu.akoos.photos.util.SyncDiagnostics
 import me.proton.core.domain.entity.UserId
 import eu.akoos.photos.data.db.AppDatabase
 import eu.akoos.photos.data.db.dao.FaceDao
@@ -71,6 +72,14 @@ class ClusterFacesUseCase @Inject constructor(
         val oldNameById = personDao.namedPeopleForUser(account)
             .filter { !it.displayName.isNullOrBlank() }
             .associate { it.id to it.displayName!! }
+        // Reverse map, so the cluster that inherits a name REUSES that person's existing id instead of
+        // minting a fresh one. Without it every rebuild deletes the row an open person page (or the
+        // People rail) is keyed to, so the person looks emptied out until its faces are merged back onto
+        // the new id. Names are unique per person, so one id per name.
+        val oldIdByName = oldNameById.entries.associate { (id, name) -> name to id }
+        // The current "Unsorted" bucket id, read before the rebuild clears the table, so the leftover
+        // faces keep the same person id across passes (a review screen open on it does not go stale).
+        val oldOtherId = personDao.otherPersonId(account)
         // Manual photos by name (they survive a rebuild) plus a face-id to photo map, so each person's
         // count is the distinct photos across its faces AND any manually attached photos, not a raw
         // face tally.
@@ -109,8 +118,11 @@ class ClusterFacesUseCase @Inject constructor(
             // detected face on a manually attached photo is deliberately NOT treated as a confirmation:
             // when the person's own face is too distant to detect, that lone face is usually a bystander,
             // and trusting it poisons the person's centroid. Manual attachments stay display-only.
-            manualNames.add(face.manualName?.takeIf { it.isNotBlank() && it !in blocked })
-            samples.add(FaceSample(embedding, face.score, confident))
+            val confirmedName = face.manualName?.takeIf { it.isNotBlank() && it !in blocked }
+            manualNames.add(confirmedName)
+            // A confirmed face may seed a cluster even when its crop is weak, so a person the user has
+            // named is never left to fall into the Unsorted bucket for want of a confident crop.
+            samples.add(FaceSample(embedding, face.score, confident, confirmed = confirmedName != null))
         }
 
         // Cluster off the database (pure CPU), so the transaction below holds only the writes and
@@ -123,20 +135,9 @@ class ClusterFacesUseCase @Inject constructor(
         val nameForCluster = HashMap<Int, String>()
         var finalAssignment: IntArray? = null
         if (assignment != null) {
-            nameForCluster.putAll(carryNamesToClusters(oldPersonIds, assignment, oldNameById))
-            val seedVotes = HashMap<Int, HashMap<String, Int>>()
-            for (i in assignment.indices) {
-                val n = manualNames[i] ?: continue
-                seedVotes.getOrPut(assignment[i]) { HashMap() }.merge(n, 1, Int::plus)
-            }
-            for ((cluster, votes) in seedVotes) {
-                val name = votes.entries
-                    .sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key })
-                    .first().key
-                nameForCluster.entries.filter { it.value == name && it.key != cluster }
-                    .map { it.key }.forEach { nameForCluster.remove(it) }
-                nameForCluster[cluster] = name
-            }
+            // The name follows the cluster holding the most of each person's faces, carry and confirmations
+            // counted together, so a lone confirmed suggestion cannot strip the name off the person's bulk.
+            nameForCluster.putAll(resolveClusterNames(oldPersonIds, manualNames, assignment, oldNameById))
             // Teach from the confirmations: confirmed faces anchor their person and pull matching split
             // faces in, off the database (pure CPU).
             finalAssignment = attractToNamedClusters(
@@ -149,6 +150,13 @@ class ClusterFacesUseCase @Inject constructor(
                 blockedNames = blockedNames,
             )
         }
+
+        // Face-clustering diagnostics for Settings > Share diagnostics: capture each rebuild's shape
+        // (cluster count, named vs unnamed, how many kept a stable id vs got a fresh one), so an odd
+        // merge or split is visible after the fact. Filled inside the rewrite, logged after it commits.
+        val createdClusters = ArrayList<Triple<Long, Int, String?>>()
+        var keptIdCount = 0
+        var otherBucketSize = 0
 
         // One transaction for the whole rewrite: the people Flow sees a single final list instead of
         // an empty-then-repopulate burst, so the People surfaces do not flicker.
@@ -164,24 +172,114 @@ class ClusterFacesUseCase @Inject constructor(
             val clusterIds = LinkedHashMap<Int, MutableList<String>>()
             for (i in ids.indices) clusterIds.getOrPut(assign[i]) { ArrayList() }.add(ids[i])
 
+            // Keep an UNNAMED cluster's id stable across rebuilds, the way a named person's id is kept via
+            // oldIdByName: a new unnamed cluster reuses the id of the old unnamed cluster most of its faces
+            // came from. Without this every rebuild mints a fresh id, so any screen or rail keyed to an
+            // unnamed cluster goes stale (its grid empties, and an edit targets a now-dead id). Reuse needs
+            // a strict majority and never an id already claimed this pass or belonging to a named person.
+            val idToOldPerson = HashMap<String, Long>(ids.size)
+            for (i in ids.indices) oldPersonIds[i]?.let { idToOldPerson[ids[i]] = it }
+            val namedOldIds = oldNameById.keys
+            val usedPersonIds = HashSet<Long>()
+            // Reserve the old Unsorted-bucket id up front so no ordinary cluster's majority vote can
+            // claim it: only the leftover (-1) group below reuses it.
+            oldOtherId?.let { usedPersonIds.add(it) }
+
             for ((cluster, members) in clusterIds) {
+                // The unassigned leftover (-1): faces the clusterer could not confidently place. They go
+                // into the single stable "Unsorted" bucket, reusing its id across rebuilds, never a named
+                // person and (via isOther) excluded from suggestions and index export.
+                if (cluster < 0) {
+                    val photos = members.mapNotNullTo(HashSet()) { photoKeyById[it] }.size
+                    val otherId = personDao.insert(
+                        PersonEntity(
+                            id = oldOtherId ?: 0L,
+                            userId = account,
+                            displayName = null,
+                            coverFaceId = members.first(),
+                            faceCount = photos,
+                            isOther = true,
+                        ),
+                    )
+                    faceDao.assignPersonBatch(otherId, members)
+                    otherBucketSize = members.size
+                    continue
+                }
                 val name = nameForCluster[cluster]
-                val facePhotos = members.mapNotNullTo(HashSet()) { photoKeyById[it] }
+                // A face marked as NOT this person never rejoins it, even when the base pass groups
+                // it back into the person's cluster: drop those members so a "not this person" removal
+                // stays durable instead of the face silently reappearing on the next rebuild.
+                val kept = if (name == null) members
+                    else members.filter { name !in (notPersonByFace[it] ?: emptySet()) }
+                if (kept.isEmpty()) continue
+                val facePhotos = kept.mapNotNullTo(HashSet()) { photoKeyById[it] }
                 val manualPhotos = name?.let { manualByName[it] } ?: emptySet()
                 // Honour a user's chosen cover when its photo is still one of the person's faces;
                 // otherwise fall back to the clearest face (the score-descending first member).
                 val chosenCover = name?.let { coverByName[it] }
-                    ?.let { key -> members.firstOrNull { photoKeyById[it] == key } }
+                    ?.let { key -> kept.firstOrNull { photoKeyById[it] == key } }
+                val reuseId = if (name != null) {
+                    oldIdByName[name]
+                } else {
+                    val votes = HashMap<Long, Int>()
+                    for (fid in kept) {
+                        val oid = idToOldPerson[fid] ?: continue
+                        if (oid in namedOldIds) continue
+                        votes.merge(oid, 1, Int::plus)
+                    }
+                    votes.entries
+                        .filter { it.key !in usedPersonIds && it.value * 2 > kept.size }
+                        .maxByOrNull { it.value }?.key
+                }
+                if (reuseId != null) usedPersonIds.add(reuseId)
                 val personId = personDao.insert(
                     PersonEntity(
+                        // Keep a person's id stable across the rebuild (0 = a fresh cluster gets a new id).
+                        // AUTOINCREMENT means re-inserting an old id never collides with a new one.
+                        id = reuseId ?: 0L,
                         userId = account,
                         displayName = name,
-                        coverFaceId = chosenCover ?: members.first(),
+                        coverFaceId = chosenCover ?: kept.first(),
                         faceCount = (facePhotos + manualPhotos).size,
                     ),
                 )
-                faceDao.assignPersonBatch(personId, members)
+                faceDao.assignPersonBatch(personId, kept)
+                createdClusters.add(Triple(personId, kept.size, name))
+                if (reuseId != null) keptIdCount++
             }
+        }
+
+        val namedCount = createdClusters.count { it.third != null }
+        SyncDiagnostics.log(
+            "faces: rebuilt ${createdClusters.size} clusters from ${ids.size} faces " +
+                "($namedCount named, ${createdClusters.size - namedCount} unnamed, " +
+                "$keptIdCount kept id, ${createdClusters.size - keptIdCount} new)",
+        )
+        if (otherBucketSize > 0) SyncDiagnostics.log("  unsorted bucket: $otherBucketSize faces")
+        createdClusters.sortedByDescending { it.second }.take(15).forEach { (id, size, name) ->
+            SyncDiagnostics.log("  cluster $id: $size faces" + (name?.let { " = $it" } ?: ""))
+        }
+    }
+
+    /**
+     * The exact [FaceSample] list [invoke] clusters, so a debug threshold sweep can re-run
+     * [clusterFaces] over the real stored embeddings without a re-embed. Mirrors [invoke]'s per-face
+     * grading: rejected faces dropped, stale-width rows skipped, weak crops marked. Diagnostic only.
+     */
+    suspend fun samplesForSweep(userId: UserId): List<FaceSample> = withContext(Dispatchers.Default) {
+        faceDao.allFacesByScoreDesc(userId.id).mapNotNull { face ->
+            if (face.rejected) return@mapNotNull null
+            val embedding = unpackEmbedding(face.embedding)
+            if (embedding.size != FACE_EMBEDDING_DIM) return@mapNotNull null
+            FaceSample(
+                embedding = embedding,
+                score = face.score,
+                confident = isConfidentFace(
+                    detectionScore = face.score,
+                    blur = face.blur?.toDouble(),
+                    sideways = sidewaysFromEncoded(face.landmarks),
+                ),
+            )
         }
     }
 }

@@ -37,6 +37,7 @@ import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
@@ -47,6 +48,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -59,7 +61,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import eu.akoos.photos.R
 import eu.akoos.photos.data.api.model.NewsItem
 import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
-import eu.akoos.photos.presentation.memories.FloatingMemoriesHeader
+import eu.akoos.photos.presentation.common.FloatingHeader
 import eu.akoos.photos.presentation.settings.components.RowDivider
 import eu.akoos.photos.presentation.settings.components.SettingsCard
 import eu.akoos.photos.presentation.settings.components.ToggleRow
@@ -85,11 +87,12 @@ fun NewsScreen(onBack: () -> Unit) {
     val vm: NewsViewModel = hiltViewModel()
     val inbox by vm.inbox.collectAsStateWithLifecycle()
     val newsEnabled by vm.enabled.collectAsStateWithLifecycle()
+    // The entries that were new when this screen opened, so their "New" markers stay for the whole
+    // visit (the view model marks the feed read on open, which is what clears the settings dot).
+    val newAtOpen by vm.newAtOpen.collectAsStateWithLifecycle()
     val colors = AppColors.current
     val context = LocalContext.current
     val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-
-    LaunchedEffect(Unit) { vm.markAllRead() }
 
     fun openUrl(url: String) {
         runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, url.toUri())) }
@@ -207,6 +210,7 @@ fun NewsScreen(onBack: () -> Unit) {
                         if (index > 0) RowDivider()
                         NewsEntry(
                             item,
+                            isNew = item.id in newAtOpen,
                             onOpenItem = { openUrl(NEWS_WEBSITE_URL + "#" + it.id) },
                             onOpenLink = ::openUrl,
                         )
@@ -217,7 +221,7 @@ fun NewsScreen(onBack: () -> Unit) {
             Spacer(Modifier.height(navBottom + 24.dp))
         }
 
-        FloatingMemoriesHeader(
+        FloatingHeader(
             title = stringResource(R.string.news_title),
             onBack = onBack,
         )
@@ -227,6 +231,7 @@ fun NewsScreen(onBack: () -> Unit) {
 @Composable
 private fun NewsEntry(
     item: NewsItem,
+    isNew: Boolean,
     onOpenItem: (NewsItem) -> Unit,
     onOpenLink: (String) -> Unit,
 ) {
@@ -246,6 +251,22 @@ private fun NewsEntry(
                 modifier = Modifier.weight(1f),
             )
             Spacer(Modifier.width(10.dp))
+            if (isNew) {
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(colors.accent)
+                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                ) {
+                    Text(
+                        stringResource(R.string.news_new_badge),
+                        color = Color.White,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+                Spacer(Modifier.width(8.dp))
+            }
             Text("#${item.id}", color = colors.fgMute, fontSize = 11.5.sp)
         }
         if (item.date.isNotBlank()) {

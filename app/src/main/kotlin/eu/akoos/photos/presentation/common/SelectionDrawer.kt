@@ -107,6 +107,7 @@ import eu.akoos.photos.presentation.gallery.PhotoCellInputs
 import eu.akoos.photos.presentation.gallery.photoCellInputsFor
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.Bg2
+import eu.akoos.photos.presentation.theme.SheetBg
 import eu.akoos.photos.presentation.theme.FgDim
 import eu.akoos.photos.presentation.theme.Line2
 import eu.akoos.photos.presentation.theme.PillBorder
@@ -390,7 +391,7 @@ private fun SelectionDrawerBody(
         modifier = Modifier
             .fillMaxWidth()
             .clip(shape)
-            .background(Bg2)
+            .background(SheetBg)
             .border(0.5.dp, PillBorder, shape)
             .navigationBarsPadding()
             .then(detentDrag),

@@ -142,7 +142,7 @@ internal fun ShareAlbumSheet(
     ModalBottomSheet(
         onDismissRequest = { resetInputs(); onDismiss() },
         sheetState = sheetState,
-        containerColor = appColors.bg2,
+        containerColor = appColors.sheetBg,
         scrimColor = Color.Black.copy(alpha = 0.5f),
     ) {
         Column(
@@ -370,8 +370,8 @@ internal fun ShareAlbumSheet(
                     modifier = Modifier
                         .weight(1f)
                         .height(44.dp)
-                        .background(PillBg, RoundedCornerShape(12.dp))
-                        .border(0.5.dp, PillBorder, RoundedCornerShape(12.dp))
+                        .background(PillBg, RoundedCornerShape(14.dp))
+                        .border(0.5.dp, PillBorder, RoundedCornerShape(14.dp))
                         .padding(horizontal = 14.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -764,7 +764,7 @@ internal fun SharedWithMeInfoSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = AppColors.current.bg2,
+        containerColor = AppColors.current.sheetBg,
         scrimColor = Color.Black.copy(alpha = 0.5f),
     ) {
         Column(

@@ -38,6 +38,7 @@ import kotlinx.coroutines.withContext
 import me.proton.core.accountmanager.domain.AccountManager
 import eu.akoos.photos.data.db.dao.FaceDao
 import eu.akoos.photos.data.db.dao.PersonDao
+import eu.akoos.photos.data.db.dao.PersonManualPhotoDao
 import eu.akoos.photos.data.db.entity.FaceEntity
 import eu.akoos.photos.data.face.FaceIndexingScheduler
 import eu.akoos.photos.data.face.FaceSweepEvent
@@ -73,6 +74,7 @@ class FindMorePhotosViewModel @Inject constructor(
     private val accountManager: AccountManager,
     private val faceDao: FaceDao,
     private val personDao: PersonDao,
+    private val personManualPhotoDao: PersonManualPhotoDao,
     private val faceIndexingScheduler: FaceIndexingScheduler,
     private val getGalleryItems: GetGalleryItemsUseCase,
     @ApplicationContext private val context: Context,
@@ -112,6 +114,13 @@ class FindMorePhotosViewModel @Inject constructor(
             val library = runCatching { getGalleryItems.invoke(userId).first() }.getOrDefault(emptyList())
             val byKey = library.associateBy { it.stableId }
 
+            // Photos already on this person (their faces, plus any manually attached), so a photo the
+            // user has already added never reappears as a suggestion to add again.
+            val alreadyIn = buildSet {
+                addAll(faceDao.distinctPhotoKeysForPerson(account, personId))
+                if (!name.isNullOrBlank()) addAll(personManualPhotoDao.photoKeysForNameList(account, name))
+            }
+
             faceIndexingScheduler.sweepFacelessForPerson(userId, centroid, FACE_SUGGEST_THRESHOLD)
                 .collect { event ->
                     when (event) {
@@ -119,6 +128,7 @@ class FindMorePhotosViewModel @Inject constructor(
                             _uiState.value = _uiState.value.copy(done = event.done, total = event.total)
                         is FaceSweepEvent.Match -> {
                             val item = byKey[event.photoKey] ?: return@collect
+                            if (item.stableId in alreadyIn) return@collect
                             val faceId = "${event.photoKey}#${event.index}"
                             // One card per photo, keeping the first (clearest) match on it.
                             if (_uiState.value.found.none { it.item.stableId == item.stableId }) {
@@ -160,7 +170,11 @@ class FindMorePhotosViewModel @Inject constructor(
                 )
             }
             faceDao.upsert(rows)
-            val count = faceDao.distinctPhotoKeysForPerson(account, personId).size
+            // Count the person the same way every other path does: their face photos unioned with any
+            // manually attached ones, de-duplicated, so a person carrying manual adds is not under-counted.
+            val manual = if (name.isNullOrBlank()) emptyList()
+                else personManualPhotoDao.photoKeysForNameList(account, name)
+            val count = personPhotoCount(faceDao.distinctPhotoKeysForPerson(account, personId), manual)
             val cover = personDao.personById(personId)?.coverFaceId ?: faceDao.topFaceForPerson(account, personId)
             personDao.updateCoverAndCount(personId, cover, count)
         }

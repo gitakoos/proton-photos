@@ -35,6 +35,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import eu.akoos.photos.data.preferences.AlbumGridPrefsBoot
 import eu.akoos.photos.data.preferences.SeamlessGridPrefsBoot
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
@@ -53,6 +54,8 @@ import kotlin.math.max
 object GridZoom {
     /** (columns, grouping) per level — mirrors the pinch ladder, densest (most columns) first. */
     val LEVELS: List<Pair<Int, TimelineGrouping>> = listOf(
+        8 to TimelineGrouping.Year,
+        6 to TimelineGrouping.Year,
         5 to TimelineGrouping.Year,
         4 to TimelineGrouping.Month,
         3 to TimelineGrouping.Day,
@@ -112,6 +115,25 @@ fun rememberSeamlessGrid(): Boolean {
             .onEach { SeamlessGridPrefsBoot.write(context, it) }
     }.collectAsStateWithLifecycle(initialValue = initial)
     return seamless
+}
+
+/**
+ * Live album-cover column count for the Albums tab, seeded synchronously from [AlbumGridPrefsBoot] so
+ * the grid opens at the stored size on the first frame instead of flashing from 2 and letting the
+ * cover cards' item-placement animation reshuffle every time the tab is recomposed. DataStore stays
+ * canonical; the collector refreshes the mirror as the value changes. Default 2.
+ */
+@Composable
+fun rememberAlbumColumns(): Int {
+    val context = LocalContext.current
+    val initial = remember { AlbumGridPrefsBoot.read(context) }
+    val columns by remember {
+        context.settingsDataStore.data
+            .map { it[SettingsKeys.ALBUM_GRID_COLUMNS] ?: 2 }
+            .distinctUntilChanged()
+            .onEach { AlbumGridPrefsBoot.write(context, it) }
+    }.collectAsStateWithLifecycle(initialValue = initial)
+    return columns
 }
 
 /**

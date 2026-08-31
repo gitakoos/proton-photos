@@ -150,7 +150,8 @@ class UploadPendingUseCaseTest {
 
         useCase = UploadPendingUseCase(
             syncStateRepo, localRepo, cloudRepo, mockk(relaxed = true), networkObserver,
-            mockk(relaxed = true), uploadAlbumTargetDao, mockk(relaxed = true), mockk(relaxed = true), context,
+            mockk(relaxed = true), uploadAlbumTargetDao, mockk(relaxed = true), mockk(relaxed = true),
+            UploadStructuralStripper(context), context,
             kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Unconfined + kotlinx.coroutines.CoroutineExceptionHandler { _, _ -> }),
         )
     }

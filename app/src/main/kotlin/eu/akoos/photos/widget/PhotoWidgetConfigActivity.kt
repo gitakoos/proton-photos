@@ -154,6 +154,7 @@ class PhotoWidgetConfigActivity : ComponentActivity() {
             ProtonPhotosTheme(darkTheme = useDark, palette = palette) {
                 val viewModel: PhotoWidgetConfigViewModel = hiltViewModel()
                 val state by viewModel.state.collectAsStateWithLifecycle()
+                val isSignedIn by viewModel.isSignedIn.collectAsStateWithLifecycle()
 
                 // Pre-fill the form from the widget's existing Glance state. Lets the
                 // user re-edit a placed widget instead of remove + re-add.
@@ -171,6 +172,7 @@ class PhotoWidgetConfigActivity : ComponentActivity() {
 
                 WidgetConfigScreen(
                     state    = state,
+                    isSignedIn = isSignedIn,
                     onMode   = viewModel::setMode,
                     onInterval = viewModel::setInterval,
                     onUris   = viewModel::setSelectedUris,
@@ -192,6 +194,7 @@ class PhotoWidgetConfigActivity : ComponentActivity() {
 @Composable
 private fun WidgetConfigScreen(
     state: WidgetConfigUiState,
+    isSignedIn: Boolean,
     onMode: (WidgetMode) -> Unit,
     onInterval: (WidgetInterval) -> Unit,
     onUris: (List<String>) -> Unit,
@@ -262,12 +265,15 @@ private fun WidgetConfigScreen(
                             selected    = state.mode == WidgetMode.SELECTED,
                             onClick     = { onMode(WidgetMode.SELECTED) },
                         )
-                        ModeOption(
-                            title       = stringResource(R.string.widget_mode_cloud),
-                            description = stringResource(R.string.widget_mode_cloud_desc),
-                            selected    = state.mode == WidgetMode.CLOUD_SELECTED,
-                            onClick     = { onMode(WidgetMode.CLOUD_SELECTED) },
-                        )
+                        // Cloud photo selection needs an account; the source is empty logged out.
+                        if (isSignedIn) {
+                            ModeOption(
+                                title       = stringResource(R.string.widget_mode_cloud),
+                                description = stringResource(R.string.widget_mode_cloud_desc),
+                                selected    = state.mode == WidgetMode.CLOUD_SELECTED,
+                                onClick     = { onMode(WidgetMode.CLOUD_SELECTED) },
+                            )
+                        }
                         ModeOption(
                             title       = stringResource(R.string.widget_mode_album),
                             description = stringResource(R.string.widget_mode_album_desc),
@@ -586,11 +592,15 @@ private fun WidgetConfigScreen(
                                     selected = state.mode == WidgetMode.ALBUM,
                                     onClick  = { onMode(WidgetMode.ALBUM) },
                                 )
-                                IntervalChip(
-                                    label    = stringResource(R.string.widget_album_source_cloud),
-                                    selected = state.mode == WidgetMode.CLOUD_ALBUM,
-                                    onClick  = { onMode(WidgetMode.CLOUD_ALBUM) },
-                                )
+                                // Following a cloud album needs an account; hidden logged out so only
+                                // device folders remain selectable.
+                                if (isSignedIn) {
+                                    IntervalChip(
+                                        label    = stringResource(R.string.widget_album_source_cloud),
+                                        selected = state.mode == WidgetMode.CLOUD_ALBUM,
+                                        onClick  = { onMode(WidgetMode.CLOUD_ALBUM) },
+                                    )
+                                }
                             }
                             if (state.mode == WidgetMode.CLOUD_ALBUM) {
                                 if (state.cloudAlbums.isEmpty()) {

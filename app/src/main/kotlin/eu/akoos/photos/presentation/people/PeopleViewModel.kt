@@ -40,11 +40,10 @@ import kotlinx.coroutines.flow.stateIn
 import me.proton.core.accountmanager.domain.AccountManager
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
-import eu.akoos.photos.domain.model.PersonSummary
 import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
 import eu.akoos.photos.domain.usecase.ObservePeopleUseCase
-import eu.akoos.photos.presentation.gallery.FaceBox
 import eu.akoos.photos.presentation.gallery.PersonUi
+import eu.akoos.photos.presentation.gallery.toPersonUi
 import javax.inject.Inject
 
 /**
@@ -63,8 +62,9 @@ class PeopleViewModel @Inject constructor(
 ) : ViewModel() {
 
     // People resolve only while the master AI switch and the per-feature face switch are both on; with
-    // either off, or signed out, the screen shows nothing and reads no face data.
-    val people: StateFlow<List<PersonUi>> = combine(
+    // either off, or signed out, the screen shows nothing and reads no face data. The null seed marks
+    // the load before the first emission, so the screen shows a skeleton instead of the empty state.
+    val people: StateFlow<List<PersonUi>?> = combine(
         context.settingsDataStore.data
             .map { it[SettingsKeys.AI_FEATURES_ENABLED] == true && it[SettingsKeys.FACE_ENABLED] == true }
             .distinctUntilChanged(),
@@ -75,18 +75,5 @@ class PeopleViewModel @Inject constructor(
             else observePeopleUseCase(userId, getGalleryItems.invoke(userId))
                 .map { list -> list.mapNotNull { it.toPersonUi() } }
         }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), emptyList())
-
-    /** Adapt a domain [PersonSummary] to the gallery's [PersonUi]; a person with no resolvable cover is
-     *  dropped, matching how the People rail maps them. */
-    private fun PersonSummary.toPersonUi(): PersonUi? {
-        val cover = coverPhotoKey ?: return null
-        return PersonUi(
-            personId = personId,
-            displayName = displayName,
-            coverPhotoKey = cover,
-            faceBox = faceBox?.let { FaceBox(it.left, it.top, it.right, it.bottom) },
-            faceCount = faceCount,
-        )
-    }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), null)
 }

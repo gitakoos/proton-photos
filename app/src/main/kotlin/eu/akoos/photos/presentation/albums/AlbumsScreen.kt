@@ -22,8 +22,12 @@
 
 package eu.akoos.photos.presentation.albums
 
+import android.app.Activity
 import android.net.Uri
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.IntentSenderRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.EaseInOut
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
@@ -38,6 +42,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -119,6 +124,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
@@ -136,16 +142,19 @@ import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.usecase.moveInArrangement
 import eu.akoos.photos.presentation.folders.DeviceFolderActionsSheet
 import eu.akoos.photos.presentation.folders.DeviceFolderOpenAction
+import eu.akoos.photos.presentation.search.SearchFilter
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import eu.akoos.photos.R
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.Bg2
+import eu.akoos.photos.presentation.theme.SheetBg
 import eu.akoos.photos.presentation.theme.FgDim
 import eu.akoos.photos.presentation.theme.FgMute
 import eu.akoos.photos.presentation.theme.FgPrimary
 import eu.akoos.photos.presentation.theme.Line2
+import eu.akoos.photos.presentation.theme.PillBg
 import eu.akoos.photos.presentation.theme.PillBgOpaque
 import eu.akoos.photos.presentation.theme.PillBorder
 
@@ -257,9 +266,17 @@ fun AlbumsScreen(
     createRequestSignal: Int = 0,
     displayFilter: eu.akoos.photos.presentation.gallery.AlbumDisplayFilter =
         eu.akoos.photos.presentation.gallery.AlbumDisplayFilter.All,
+    /** Header search text. Blank shows the full grid; a non-blank query narrows both the cloud
+     *  albums and the device folders to name matches, in place, and hides the pinned Memories card. */
+    query: String = "",
+    /** Reports arrange mode to the host so the header can hide the search entry while it is on. */
+    onReorderModeChange: (Boolean) -> Unit = {},
+    /** How many album/folder covers sit per row (from the Albums filter sheet). Default 2. */
+    columns: Int = 2,
     viewModel: AlbumsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val isSignedIn by viewModel.isSignedIn.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val pullRefreshState = rememberPullToRefreshState()
     val scope = rememberCoroutineScope()
@@ -302,6 +319,11 @@ fun AlbumsScreen(
         reorderMode = false
         gridState.scrollToItem(0)
     }
+    // Scrolling the grid drops the search keyboard, so the results can be browsed with it out of the way.
+    val keyboardController = LocalSoftwareKeyboardController.current
+    LaunchedEffect(gridState.isScrollInProgress) {
+        if (gridState.isScrollInProgress) keyboardController?.hide()
+    }
     var albumToDelete by remember { mutableStateOf<Album?>(null) }
 
     // Cloud-album long-press surfaces a Rename + Delete bottom sheet. Holding the in-flight
@@ -314,6 +336,9 @@ fun AlbumsScreen(
     // carries so its preferences and its order are reachable from the grid too.
     var deviceFolderSheetFor by remember { mutableStateOf<DeviceFolder?>(null) }
     val deviceFolderSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    // The folder whose rename sheet is open, offered only in a logged-out session as the local
+    // counterpart of a cloud-album rename.
+    var deviceFolderRenameFor by remember { mutableStateOf<DeviceFolder?>(null) }
 
     /** Collect an [AlbumActionResult] flow once and snackbar the outcome. */
     suspend fun handleAlbumActionFlow(
@@ -340,22 +365,66 @@ fun AlbumsScreen(
         }
     }
 
+    // ── Device-folder rename write-permission launcher ────────────────────────
+    // A folder rename moves its photos into a new directory, and a file the app does not own needs a
+    // one-shot system write consent; RESULT_OK replays the move on the deferred URIs. The intent is an
+    // IntentSender straight from the use case, so it is launched directly. Mirrors GalleryScreen's
+    // move-to-folder launcher.
+    val pendingMoveIntent by viewModel.pendingMoveIntent.collectAsStateWithLifecycle()
+    val moveToFolderPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult(),
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) viewModel.onMovePermissionGranted()
+        else viewModel.clearPendingMove()
+    }
+    LaunchedEffect(pendingMoveIntent) {
+        val sender = pendingMoveIntent ?: return@LaunchedEffect
+        runCatching { moveToFolderPermissionLauncher.launch(IntentSenderRequest.Builder(sender).build()) }
+            .onFailure { viewModel.clearPendingMove() }
+    }
+
+    // A completed folder rename confirms where its photos landed. One-shot collect.
+    val folderRenamedTpl = stringResource(R.string.folder_renamed)
+    LaunchedEffect(Unit) {
+        viewModel.folderRenameConfirmation.collect { newName ->
+            snackbarHostState.showSnackbar(folderRenamedTpl.format(newName))
+        }
+    }
+
     // The ViewModel's list leads, except while an arrangement is open: then the local order holds
     // the cards in the slots the finger has put them in, so the reflow is visible under the finger
     // instead of a store round-trip later. An album that arrives mid-arrangement is unknown to that
     // order and trails, staying put until the mode is re-entered.
-    val albums = if (reorderMode && arrangedIds.isNotEmpty()) {
+    val orderedAlbums = if (reorderMode && arrangedIds.isNotEmpty()) {
         state.visibleCloudAlbums.sortedBy { album ->
             arrangedIds.indexOf(album.linkId).takeIf { it >= 0 } ?: Int.MAX_VALUE
         }
     } else {
         state.visibleCloudAlbums
     }
+    // A non-blank header query narrows both lists to name matches. filter preserves order, so a
+    // matching album keeps its sorted slot; the fold is accent-insensitive, the rule search uses.
+    val foldedQuery = SearchFilter.fold(query.trim())
+    val searching = foldedQuery.isNotEmpty()
+    val albums = if (searching) {
+        orderedAlbums.filter { SearchFilter.fold(it.name).contains(foldedQuery) }
+    } else {
+        orderedAlbums
+    }
     // Folders whose card the user hid are off the grid, exactly as a hidden cloud album is. The
     // folder itself is untouched and its photos stay in the timeline; only the card goes.
-    val deviceFolders = state.visibleDeviceFolders
+    val deviceFolders = if (searching) {
+        state.visibleDeviceFolders.filter { SearchFilter.fold(it.name).contains(foldedQuery) }
+    } else {
+        state.visibleDeviceFolders
+    }
+    // Search and arrange cannot share the rail: a query exits arrange mode, and the effect reports
+    // arrange mode up so the header can hide the search entry while it is on. Seed the arrangement
+    // from the unfiltered list so a query active at entry can never drop cards from it.
+    LaunchedEffect(searching) { if (searching) reorderMode = false }
     LaunchedEffect(reorderMode) {
-        arrangedIds = if (reorderMode) albums.map { it.linkId } else emptyList()
+        onReorderModeChange(reorderMode)
+        arrangedIds = if (reorderMode) state.visibleCloudAlbums.map { it.linkId } else emptyList()
     }
 
     /**
@@ -434,7 +503,12 @@ fun AlbumsScreen(
         }
     }
 
-    Box(modifier = Modifier.fillMaxSize()) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            // A tap on empty grid space drops the search keyboard, the same as a scroll does.
+            .pointerInput(Unit) { detectTapGestures { keyboardController?.hide() } },
+    ) {
         PullToRefreshBox(
             isRefreshing = state.isLoading,
             onRefresh = { viewModel.refresh() },
@@ -443,13 +517,13 @@ fun AlbumsScreen(
             indicator = {},
         ) {
             when {
-                state.isLoading && albums.isEmpty() ->
+                state.isLoading && albums.isEmpty() && !searching ->
                     // Skeleton placeholder grid — must use the SAME paddings, spacings, and
                     // header structure as the real grid below, otherwise the transition into
                     // real content reflows visibly (placeholders shift to new positions when
                     // the cards arrive).
                     LazyVerticalGrid(
-                        columns = GridCells.Fixed(2),
+                        columns = GridCells.Fixed(columns),
                         contentPadding = PaddingValues(
                             top = topPadding + 12.dp,
                             start = 20.dp,
@@ -465,7 +539,9 @@ fun AlbumsScreen(
                         }
                     }
 
-                // Nothing matches the active filter → centred empty state.
+                // Nothing to show for the active filter and query → centred empty state. While a
+                // query is present this is a search miss, so it carries the search-specific line
+                // instead of the "no albums yet" copy.
                 !(displayFilter != eu.akoos.photos.presentation.gallery.AlbumDisplayFilter.Local && albums.isNotEmpty()) &&
                     !(displayFilter != eu.akoos.photos.presentation.gallery.AlbumDisplayFilter.Cloud && deviceFolders.isNotEmpty()) ->
                     Column(
@@ -474,16 +550,23 @@ fun AlbumsScreen(
                             .padding(horizontal = 32.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
-                        // Device-only filter has no Drive albums, so the cloud-worded copy would be
-                        // wrong — show a device-folder line instead.
-                        val localOnly = displayFilter == eu.akoos.photos.presentation.gallery.AlbumDisplayFilter.Local
-                        Text(
-                            stringResource(if (localOnly) R.string.albums_empty_local else R.string.albums_empty_title),
-                            color = FgPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
-                        )
-                        if (!localOnly) {
-                            Spacer(Modifier.height(6.dp))
-                            Text(stringResource(R.string.albums_empty_subtitle), color = FgDim, fontSize = 14.sp)
+                        if (searching) {
+                            Text(
+                                stringResource(R.string.albums_search_no_results),
+                                color = FgDim, fontSize = 14.sp,
+                            )
+                        } else {
+                            // Device-only filter has no Drive albums, where the cloud-worded copy
+                            // would be wrong, so a device-folder line shows instead.
+                            val localOnly = displayFilter == eu.akoos.photos.presentation.gallery.AlbumDisplayFilter.Local
+                            Text(
+                                stringResource(if (localOnly) R.string.albums_empty_local else R.string.albums_empty_title),
+                                color = FgPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
+                            )
+                            if (!localOnly) {
+                                Spacer(Modifier.height(6.dp))
+                                Text(stringResource(R.string.albums_empty_subtitle), color = FgDim, fontSize = 14.sp)
+                            }
                         }
                     }
 
@@ -492,7 +575,7 @@ fun AlbumsScreen(
                 // the only grouping control now.
                 else ->
                     LazyVerticalGrid(
-                        columns = GridCells.Fixed(2),
+                        columns = GridCells.Fixed(columns),
                         state = gridState,
                         contentPadding = PaddingValues(
                             // The reorder bar floats over the grid, so the first row is pushed
@@ -506,8 +589,12 @@ fun AlbumsScreen(
                         verticalArrangement = Arrangement.spacedBy(20.dp),
                         modifier = Modifier.fillMaxSize(),
                     ) {
-                        item {
-                            MemoriesPinnedCard(onClick = onMemoriesClick)
+                        // Search results are albums only, so the pinned Memories card steps aside
+                        // while a query is present.
+                        if (!searching) {
+                            item {
+                                MemoriesPinnedCard(onClick = onMemoriesClick)
+                            }
                         }
                         if (displayFilter != eu.akoos.photos.presentation.gallery.AlbumDisplayFilter.Local) {
                             items(
@@ -651,7 +738,7 @@ fun AlbumsScreen(
                     onClick = { reorderMode = false },
                     diameter = 40.dp,
                     iconSize = 20.dp,
-                    background = PillBgOpaque,
+                    background = PillBg,
                     borderColor = PillBorder,
                     tint = FgPrimary,
                 )
@@ -685,7 +772,13 @@ fun AlbumsScreen(
             minItemsToShow = 12,
         )
 
-        eu.akoos.photos.presentation.common.ThemedSnackbarHost(snackbarHostState, modifier = Modifier.align(Alignment.BottomCenter))
+        eu.akoos.photos.presentation.common.ThemedSnackbarHost(
+            snackbarHostState,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(bottom = 96.dp),
+        )
     }
 
     // ── Delete Album confirmation dialog ──────────────────────────────────────
@@ -729,7 +822,7 @@ fun AlbumsScreen(
         var albumName by remember { mutableStateOf("") }
         ModalBottomSheet(
             onDismissRequest = { showCreateDialog = false; albumName = "" },
-            containerColor = Bg2,
+            containerColor = SheetBg,
             scrimColor = Color.Black.copy(alpha = 0.5f),
         ) {
             Column(
@@ -748,6 +841,7 @@ fun AlbumsScreen(
                     placeholder = { Text(stringResource(R.string.albums_create_album_hint), color = FgMute) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor   = Accent,
                         unfocusedBorderColor = Line2,
@@ -826,6 +920,7 @@ fun AlbumsScreen(
             // puts something away and is never already done — even where the vault holds more of the
             // same folder from an earlier hide.
             isHiddenCard = false,
+            isSignedIn = isSignedIn,
             sortMode = state.folderPrefs.sortMode,
             onDismiss = { deviceFolderSheetFor = null },
             onBackUp = { asMirror ->
@@ -841,6 +936,8 @@ fun AlbumsScreen(
             onToggleHiddenFromTimeline = { viewModel.toggleFolderHiddenFromTimeline(folder.name) },
             onToggleHiddenCard = { onHideDeviceFolder(folder.name) },
             onSortSelected = viewModel::setDeviceFolderSortMode,
+            // Held to a logged-out session inside the sheet, where there is no Drive album to rename.
+            onRename = { deviceFolderRenameFor = folder },
         )
     }
 
@@ -866,6 +963,23 @@ fun AlbumsScreen(
                     )
                 }
             },
+        )
+    }
+
+    // ── Device-folder rename sheet ───────────────────────────────────────────
+    // Logged-out counterpart of the cloud-album rename above: the same field prefilled with the
+    // folder's name, but the rename relocates its photos into a new DCIM directory. The confirmation
+    // snackbar rides folderRenameConfirmation once the move lands.
+    deviceFolderRenameFor?.let { folder ->
+        EditFieldSheet(
+            title = stringResource(R.string.folder_rename),
+            hint = stringResource(R.string.albums_create_album_hint),
+            initialValue = folder.name,
+            singleLine = true,
+            confirmLabel = stringResource(R.string.album_rename_confirm),
+            canConfirm = { AlbumRenameInput.isAcceptable(it, folder.name) },
+            onDismiss = { deviceFolderRenameFor = null },
+            onSave = { entered -> viewModel.renameDeviceFolder(folder.name, entered) },
         )
     }
 
@@ -932,7 +1046,7 @@ private fun CloudAlbumActionSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = colors.bg2,
+        containerColor = colors.sheetBg,
         scrimColor = Color.Black.copy(alpha = 0.5f),
     ) {
         // Height-capped + scroll so a short device never clips the last row.

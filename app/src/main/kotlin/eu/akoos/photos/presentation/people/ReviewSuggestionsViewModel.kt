@@ -28,8 +28,10 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.first
@@ -37,6 +39,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import me.proton.core.accountmanager.domain.AccountManager
+import eu.akoos.photos.R
 import eu.akoos.photos.data.db.dao.FaceDao
 import eu.akoos.photos.data.db.dao.NotPersonDao
 import eu.akoos.photos.data.db.dao.PersonDao
@@ -66,8 +69,15 @@ class ReviewSuggestionsViewModel @Inject constructor(
     private val notPersonDao: NotPersonDao,
 ) : ViewModel() {
 
-    /** Every unnamed cluster, most-photographed first, one card each. */
-    val clusters: StateFlow<List<PersonUi>> = accountManager.getPrimaryUserId()
+    /** One-shot user feedback (a string res id) for a bulk action that otherwise finishes with no
+     *  confirmation of its own. */
+    private val _message = MutableStateFlow<Int?>(null)
+    val message: StateFlow<Int?> = _message.asStateFlow()
+    fun clearMessage() { _message.value = null }
+
+    /** Every unnamed cluster, most-photographed first, one card each. Null until the first emission,
+     *  so the screen shows a skeleton rather than the empty state while it loads. */
+    val clusters: StateFlow<List<PersonUi>?> = accountManager.getPrimaryUserId()
         .flatMapLatest { userId ->
             if (userId == null) {
                 flowOf(emptyList())
@@ -75,11 +85,15 @@ class ReviewSuggestionsViewModel @Inject constructor(
                 observePeopleUseCase(userId, getGalleryItems.invoke(userId)).map { list ->
                     list.mapNotNull { it.toPersonUi() }
                         .filter { it.displayName.isNullOrBlank() }
-                        .sortedByDescending { it.faceCount }
+                        // The Unsorted bucket is pinned to the top, then the real unnamed clusters by size,
+                        // so the leftover pile is the first thing offered for curation but stays apart.
+                        .sortedWith(
+                            compareByDescending<PersonUi> { it.isOther }.thenByDescending { it.faceCount },
+                        )
                 }
             }
         }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), emptyList())
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), null)
 
     /** Already-named people, so a bulk merge can fold the selection into an EXISTING person, not only
      *  a new name. Feeds the shared person picker's list. */
@@ -125,6 +139,7 @@ class ReviewSuggestionsViewModel @Inject constructor(
             personDao.updateCoverAndCount(target, cover, count)
             for (id in clusterIds) if (id != target) personDao.updateCoverAndCount(id, null, 0)
             personDao.deleteEmpty(account)
+            _message.value = R.string.person_msg_merged
         }
     }
 
@@ -141,6 +156,7 @@ class ReviewSuggestionsViewModel @Inject constructor(
                 personDao.updateCoverAndCount(id, null, 0)
             }
             personDao.deleteEmpty(userId.id)
+            _message.value = R.string.person_msg_dismissed
         }
     }
 
@@ -152,6 +168,7 @@ class ReviewSuggestionsViewModel @Inject constructor(
             coverPhotoKey = cover,
             faceBox = faceBox?.let { FaceBox(it.left, it.top, it.right, it.bottom) },
             faceCount = faceCount,
+            isOther = isOther,
         )
     }
 }

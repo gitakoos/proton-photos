@@ -188,12 +188,8 @@ class ReconcileSyncStateUseCaseTest {
 
         useCase(userId).toList()
 
-        coVerify {
-            syncStateRepo.upsert(
-                match { it.localUri == "uri://1" && it.status == SyncStatus.LOCAL_ONLY },
-                userId,
-            )
-        }
+        // The demote runs through the id-CAS guard now, keyed on the cloud id the snapshot saw.
+        coVerify { syncStateRepo.demoteToLocalIfCloudIdMatches("uri://1", "old-link-id") }
     }
 
     @Test
@@ -336,7 +332,8 @@ class ReconcileSyncStateUseCaseTest {
     @Test
     fun `a stored hash that maps to no cloud ContentHash stays LOCAL_ONLY`() = runTest {
         // The row has a stored hash but the cloud photo's ContentHash doesn't match (different bytes),
-        // and there's no name/date fallback because the cloud photo HAS a hash. So: LOCAL_ONLY.
+        // and there's no name/date fallback because the cloud photo HAS a hash. So: LOCAL_ONLY. The row
+        // already existed in the snapshot, so its LOCAL_ONLY write goes through the clobber-guard.
         val local = localItem("uri://1", name = "shared.jpg", size = 2048L)
         val cloud = cloudPhoto("link-other", name = "shared.jpg", size = 2048L, contentHash = "OTHERHMAC", captureTime = 50L)
         val existing = syncState("uri://1", cloudId = null, status = SyncStatus.LOCAL_ONLY, localHash = "localsha1")
@@ -349,8 +346,8 @@ class ReconcileSyncStateUseCaseTest {
         useCase(userId).toList()
 
         coVerify {
-            syncStateRepo.upsertAll(
-                match { states -> states.any { it.localUri == "uri://1" && it.status == SyncStatus.LOCAL_ONLY } },
+            syncStateRepo.updateDomainColumnsIfNotSyncedWithCloud(
+                match { it.localUri == "uri://1" && it.status == SyncStatus.LOCAL_ONLY },
                 userId,
             )
         }
@@ -761,5 +758,79 @@ class ReconcileSyncStateUseCaseTest {
         // The demotion clears the spent intent, and the recovery must NOT re-queue the row.
         coVerify { syncStateRepo.clearQueuedForSynced(local.uri) }
         coVerify(exactly = 0) { syncStateRepo.markQueued(eq(local.uri), any(), any()) }
+    }
+
+    // ─── reconcile-vs-upload clobber guard ────────────────────────────────────
+
+    @Test
+    fun `a snapshot LOCAL_ONLY row an upload promoted mid-pass is guarded and not re-queued`() = runTest {
+        // The snapshot saw this in-scope row as LOCAL_ONLY and, with no cloud match, reconcile computes
+        // LOCAL_ONLY again. But a concurrent upload finished mid-pass and flipped the DB row to
+        // SYNCED+cloudFileId, so the guarded update reports 0 rows changed. Reconcile must route the
+        // write through that guard (never the plain batch, which would clobber the fresh pairing) AND
+        // must not re-queue the uri, since a finished upload is not queued for a duplicate.
+        val racing = localItem("uri://racing")
+        val snapshot = syncState("uri://racing", cloudId = null, status = SyncStatus.LOCAL_ONLY,
+            queued = false, queueSource = null)
+        every { localRepo.observeLocalMedia() } returns flowOf(listOf(racing))
+        every { cloudRepo.observeCloudPhotos(userId) } returns flowOf(emptyList())
+        every { syncStateRepo.observeAll(userId) } returns flowOf(listOf(snapshot))
+        coEvery { syncStateRepo.getByUri(any()) } returns snapshot
+        // The DB row is SYNCED now, so the guard no-ops (0 rows changed).
+        coEvery {
+            syncStateRepo.updateDomainColumnsIfNotSyncedWithCloud(match { it.localUri == "uri://racing" }, userId)
+        } returns 0
+
+        useCase(userId).toList()
+
+        // Routed through the guard, carrying the computed LOCAL_ONLY state ...
+        coVerify {
+            syncStateRepo.updateDomainColumnsIfNotSyncedWithCloud(
+                match { it.localUri == "uri://racing" && it.status == SyncStatus.LOCAL_ONLY },
+                userId,
+            )
+        }
+        // ... never through the unguarded batch ...
+        coVerify(exactly = 0) {
+            syncStateRepo.upsertAll(
+                match { states -> states.any { it.localUri == "uri://racing" } },
+                userId,
+            )
+        }
+        // ... and not re-queued, because the guard reported the row already finished uploading.
+        coVerify(exactly = 0) { syncStateRepo.markQueued(eq("uri://racing"), any(), any()) }
+    }
+
+    @Test
+    fun `a snapshot LOCAL_ONLY row still un-synced is guarded-updated and re-queued`() = runTest {
+        // Same shape, but the DB row is genuinely still LOCAL_ONLY, so the guard reports 1 row changed.
+        // Reconcile still routes through the guard, and because the row was not promoted it IS stamped
+        // queued=AUTO_FOLDER so the upload selector picks it up.
+        val pending = localItem("uri://pending")
+        val snapshot = syncState("uri://pending", cloudId = null, status = SyncStatus.LOCAL_ONLY,
+            queued = false, queueSource = null)
+        every { localRepo.observeLocalMedia() } returns flowOf(listOf(pending))
+        every { cloudRepo.observeCloudPhotos(userId) } returns flowOf(emptyList())
+        every { syncStateRepo.observeAll(userId) } returns flowOf(listOf(snapshot))
+        coEvery { syncStateRepo.getByUri(any()) } returns snapshot
+        coEvery {
+            syncStateRepo.updateDomainColumnsIfNotSyncedWithCloud(match { it.localUri == "uri://pending" }, userId)
+        } returns 1
+
+        useCase(userId).toList()
+
+        coVerify {
+            syncStateRepo.updateDomainColumnsIfNotSyncedWithCloud(
+                match { it.localUri == "uri://pending" && it.status == SyncStatus.LOCAL_ONLY },
+                userId,
+            )
+        }
+        coVerify {
+            syncStateRepo.markQueued(
+                "uri://pending",
+                eu.akoos.photos.domain.entity.QueueSource.AUTO_FOLDER,
+                any(),
+            )
+        }
     }
 }

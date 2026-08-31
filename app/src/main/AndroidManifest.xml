@@ -272,6 +272,14 @@
             android:exported="false"
             android:foregroundServiceType="dataSync" />
 
+        <!-- Initial face-indexing foreground host. Keeps the process alive so the one-time People
+             face-grouping walk runs to completion after the user swipes the app from Recents. LOW
+             channel importance; the walk still parks on the shared device-health policy. -->
+        <service
+            android:name=".service.FaceIndexingService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
         <!-- Opt-in screenshot quick-actions overlay, enabled from Settings. The specialUse foreground
              type needs a declared subtype on Android 14+; the property is harmless on older releases. -->
         <service

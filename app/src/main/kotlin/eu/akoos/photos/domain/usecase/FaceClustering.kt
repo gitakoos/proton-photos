@@ -28,7 +28,7 @@ import kotlin.math.sqrt
 
 /**
  * Exemplar-based face clustering with a quality-aware join and a merge pass, kept free of Android and
- * database types so the whole grouping rule runs in a plain JVM test. The embeddings are the 512-d,
+ * database types so the whole grouping rule runs in a plain JVM test. The embeddings are the 128-d,
  * L2-normalised recognition vectors the indexer stores, so a cosine similarity between two of them is
  * a plain dot product.
  *
@@ -43,8 +43,11 @@ import kotlin.math.sqrt
 
 /** Cosine-similarity floor for two confident faces to be treated as the same person. Tuned against
  *  full-resolution embeddings, where different people sit far below this and the same person across
- *  poses reaches it, so the floor favours recall without fusing identities. */
-internal const val FACE_CLUSTER_THRESHOLD = 0.42f
+ *  poses reaches it. SFace's same-identity cosine is compressed relative to ArcFace, so this floor sits
+ *  in a low absolute range; within it the value leans toward precision, so a stray non-face embedding
+ *  that lands near a real identity does not join it, at the cost of a hard same-identity crop
+ *  occasionally splitting off (recovered by naming or an explicit merge). */
+internal const val FACE_CLUSTER_THRESHOLD = 0.53f
 
 /** Extra cosine a weak face (low score, blurred, or turned) must clear to join, so a poor crop can
  *  still find an obvious match but cannot bridge two different people. Mirrors Ente's stricter
@@ -55,15 +58,20 @@ internal const val FACE_CLUSTER_STRICT_DELTA = 0.08f
  *  two, and are merged. Kept at the join floor: a merge more lenient than the join would fuse people
  *  the join deliberately kept apart. Duplicate clusters of one person are consolidated by naming one
  *  (the unnamed twins then stay hidden) or by an explicit merge, not by loosening this. */
-internal const val FACE_CLUSTER_MERGE_THRESHOLD = 0.42f
+internal const val FACE_CLUSTER_MERGE_THRESHOLD = 0.53f
 
 /** How close an unnamed cluster must sit to a named person to be OFFERED as "Is this <name>?". Set
  *  below the merge floor so plausible-but-not-certain matches surface for the user to confirm or
  *  reject, rather than being auto-merged or hidden. */
-internal const val FACE_SUGGEST_THRESHOLD = 0.36f
+internal const val FACE_SUGGEST_THRESHOLD = 0.40f
 
 /** Component count of a stored face embedding. */
-internal const val FACE_EMBEDDING_DIM = 512
+internal const val FACE_EMBEDDING_DIM = 128
+
+/** Face-pipeline generation the stored faces belong to. A bump means the stored rows were produced by
+ *  an older detector, recognition model, or quality gate, so the indexer clears the face rows once and
+ *  re-detects and re-embeds them with the current pipeline before any clustering reads them. */
+internal const val FACE_MODEL_VERSION = 4
 
 /** Highest detection score faces kept as a cluster's comparison anchors. */
 internal const val FACE_CLUSTER_EXEMPLARS = 5
@@ -77,14 +85,15 @@ const val MIN_FACES_TO_SHOW_PERSON = 2
 
 /**
  * The little-endian floats [bytes] packs, unpacked in the exact layout the indexer wrote them: a
- * [ByteBuffer] in little-endian order, one float per component. A blob whose length is not a whole
- * number of floats yields only the whole floats present, so a truncated or not-yet-embedded blob is
- * left for the caller to reject rather than throwing here.
+ * [ByteBuffer] in little-endian order, one float per component. A blob whose length is not exactly
+ * [FACE_EMBEDDING_DIM] floats (a truncated write, or a row an earlier model produced at a different
+ * width) yields an empty array, which every caller's dimension guard skips, so a stale-width row can
+ * neither crash nor poison clustering.
  */
 internal fun unpackEmbedding(bytes: ByteArray): FloatArray {
-    val count = bytes.size / Float.SIZE_BYTES
+    if (bytes.size != FACE_EMBEDDING_DIM * Float.SIZE_BYTES) return FloatArray(0)
     val buffer = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
-    return FloatArray(count) { buffer.float }
+    return FloatArray(FACE_EMBEDDING_DIM) { buffer.float }
 }
 
 /** Cosine similarity of two unit-length embeddings, i.e. their dot product. */
@@ -133,17 +142,27 @@ internal class ExemplarCluster(first: FloatArray, firstScore: Float) {
 }
 
 /**
- * One face handed to the clusterer: its embedding, the detector score that rates its clarity, and
- * whether it is a confident (clear, frontal, sharp) crop. A weak face joins under a stricter bar.
+ * One face handed to the clusterer: its embedding, the detector score that rates its clarity, whether
+ * it is a confident (clear, frontal, sharp) crop, and whether the user has confirmed it as a named
+ * person. A weak face joins under a stricter bar. Only a confident or a confirmed face may open a new
+ * cluster: an unconfirmed weak crop that matches nothing is left unassigned rather than seeding one, so
+ * false-positive detections (landscapes, backs of heads, non-faces) cannot pile into a junk cluster.
  */
-class FaceSample(val embedding: FloatArray, val score: Float, val confident: Boolean = true)
+class FaceSample(
+    val embedding: FloatArray,
+    val score: Float,
+    val confident: Boolean = true,
+    val confirmed: Boolean = false,
+)
 
 /**
  * Groups [samples] into identities. Faces are visited from the highest detection score down so the
  * clearest crop anchors each cluster; a confident face joins the cluster whose best anchor match
- * clears [threshold], a weak one must clear [threshold] plus [FACE_CLUSTER_STRICT_DELTA], otherwise it
- * opens a new cluster. A final merge pass folds clusters whose mean directions clear [mergeThreshold]
- * into one. Returns the cluster index per input, in the ORIGINAL input order. Deterministic.
+ * clears [threshold], a weak one must clear [threshold] plus [FACE_CLUSTER_STRICT_DELTA]. A face that
+ * matches nothing opens a new cluster only when it is confident or confirmed; an unconfirmed weak face
+ * that matches nothing is left unassigned (-1), so junk detections do not seed a cluster. A final merge
+ * pass folds clusters whose mean directions clear [mergeThreshold] into one, leaving the -1 group
+ * untouched. Returns the cluster index per input (or -1), in the ORIGINAL input order. Deterministic.
  */
 fun clusterFaces(
     samples: List<FaceSample>,
@@ -168,48 +187,64 @@ fun clusterFaces(
         if (bestCluster >= 0 && bestSimilarity >= need) {
             clusters[bestCluster].add(sample.embedding, sample.score)
             assignment[index] = bestCluster
-        } else {
+        } else if (sample.confident || sample.confirmed) {
             assignment[index] = clusters.size
             clusters.add(ExemplarCluster(sample.embedding, sample.score))
         }
+        // else: an unconfirmed weak face that matched no cluster stays unassigned (-1). It is not allowed
+        // to seed a cluster, so a run of low-quality false detections cannot coalesce into a junk cluster.
+        // The caller routes the leftover -1 faces into the "Unsorted" bucket.
     }
     return mergeSimilarClusters(assignment, samples, mergeThreshold)
 }
 
 /**
- * Carries user-given names across a rebuild: assigns each named person to the new cluster that holds
- * most of that person's faces. [oldPersonIdPerFace] and [clusterPerFace] are parallel, one entry per
- * clustered face, giving that face's previous person id (or null) and its new cluster index; [names]
- * maps a previous person id to its non-blank display name. The largest named person is placed first,
- * so a person split across clusters keeps its name on its main fragment, and two people merged into
- * one cluster do not both claim it (the smaller one's name drops rather than mislabel a different
- * cluster). Ties break by smallest id then smallest cluster index, so the result is deterministic.
- * Returns a map of new-cluster-index to the name it inherits.
+ * Assigns each given name to the cluster holding the most of that person's faces on a rebuild, counting
+ * BOTH the old grouping a face carried (its previous person) AND the faces the user confirmed. Counting
+ * the carry is what stops a single confirmed odd-angle face the base pass split into its own cluster from
+ * stripping the name off the cluster that holds the person's bulk: a lone confirmation cannot outvote the
+ * dozens of carried faces. Confirmations break ties, so a person deliberately re-anchored by many
+ * confirmations still follows them. [oldPersonIdPerFace], [manualNamePerFace] and [clusterPerFace] are
+ * parallel (one entry per clustered face): the face's previous person id (or null), the name the user
+ * confirmed it as (or null), and its new cluster index. [names] maps a previous person id to its
+ * non-blank display name. The largest person is placed first and each cluster is claimed at most once,
+ * so two people merged into one cluster do not both claim it; ties break by most confirmations then
+ * smallest cluster index, so the result is deterministic. Returns new-cluster-index to the name it gets.
  */
-fun carryNamesToClusters(
+fun resolveClusterNames(
     oldPersonIdPerFace: List<Long?>,
+    manualNamePerFace: List<String?>,
     clusterPerFace: IntArray,
     names: Map<Long, String>,
 ): Map<Int, String> {
-    if (names.isEmpty()) return emptyMap()
-    val votesByOld = HashMap<Long, HashMap<Int, Int>>()
+    class Evidence { var total = 0; var confirmed = 0 }
+    val evidenceByName = HashMap<String, HashMap<Int, Evidence>>()
     for (i in clusterPerFace.indices) {
-        val oldId = oldPersonIdPerFace[i] ?: continue
-        if (oldId !in names) continue
-        val perCluster = votesByOld.getOrPut(oldId) { HashMap() }
-        val cluster = clusterPerFace[i]
-        perCluster[cluster] = (perCluster[cluster] ?: 0) + 1
+        // The unassigned (-1) leftover is never a named cluster, so it can never become a name target
+        // that would pull a person's confirmed faces into the Unsorted bucket.
+        if (clusterPerFace[i] < 0) continue
+        val confirmed = manualNamePerFace[i]
+        val name = confirmed ?: oldPersonIdPerFace[i]?.let { names[it] } ?: continue
+        val ev = evidenceByName.getOrPut(name) { HashMap() }.getOrPut(clusterPerFace[i]) { Evidence() }
+        ev.total++
+        if (confirmed != null) ev.confirmed++
     }
     val nameForCluster = HashMap<Int, String>()
-    val orderedOld = votesByOld.entries.sortedWith(
-        compareByDescending<Map.Entry<Long, HashMap<Int, Int>>> { it.value.values.sum() }.thenBy { it.key },
+    val claimed = HashSet<Int>()
+    val orderedNames = evidenceByName.entries.sortedWith(
+        compareByDescending<Map.Entry<String, HashMap<Int, Evidence>>> { e -> e.value.values.sumOf { it.total } }
+            .thenBy { it.key },
     )
-    for ((oldId, perCluster) in orderedOld) {
-        val best = perCluster.entries
-            .filter { it.key !in nameForCluster }
-            .sortedWith(compareByDescending<Map.Entry<Int, Int>> { it.value }.thenBy { it.key })
-            .firstOrNull()?.key
-        if (best != null) nameForCluster[best] = names.getValue(oldId)
+    for ((name, byCluster) in orderedNames) {
+        val best = byCluster.entries
+            .filter { it.key !in claimed }
+            .sortedWith(
+                compareByDescending<Map.Entry<Int, Evidence>> { it.value.total }
+                    .thenByDescending { it.value.confirmed }
+                    .thenBy { it.key },
+            ).firstOrNull()?.key ?: continue
+        nameForCluster[best] = name
+        claimed.add(best)
     }
     return nameForCluster
 }
@@ -323,7 +358,9 @@ private fun mergeSimilarClusters(
     val result = assignment.copyOf()
     while (true) {
         val members = HashMap<Int, MutableList<Int>>()
-        for (i in result.indices) members.getOrPut(result[i]) { ArrayList() }.add(i)
+        // The unassigned (-1) leftover is not a cluster: never give it a centroid and never merge it,
+        // so junk faces cannot pull a real cluster into themselves.
+        for (i in result.indices) if (result[i] >= 0) members.getOrPut(result[i]) { ArrayList() }.add(i)
         val ids = members.keys.toList()
         if (ids.size < 2) break
         val centroids = HashMap<Int, FloatArray>()
@@ -346,8 +383,8 @@ private fun mergeSimilarClusters(
         for (i in result.indices) if (result[i] == mergeFrom) result[i] = mergeInto
     }
     val remap = HashMap<Int, Int>()
-    for (v in result) remap.getOrPut(v) { remap.size }
-    return IntArray(result.size) { remap.getValue(result[it]) }
+    for (v in result) if (v >= 0) remap.getOrPut(v) { remap.size }
+    return IntArray(result.size) { val v = result[it]; if (v < 0) -1 else remap.getValue(v) }
 }
 
 /** L2-normalised mean of the members' embeddings, a cluster's mean direction. */

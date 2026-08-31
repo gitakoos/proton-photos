@@ -144,11 +144,18 @@ internal fun DuplicateGroupReview(
     cancelDecrypt: (String) -> Unit,
     cloudFullRes: Map<String, CloudFullRes>,
     onRequestFullRes: (GalleryItem) -> Unit,
+    initialIndex: Int = 0,
+    albumNames: Map<String, String> = emptyMap(),
 ) {
     BackHandler { onClose() }
 
     val allIds = remember(group) { group.items.map { it.stableId }.toSet() }
-    val pagerState = rememberPagerState(pageCount = { group.items.size })
+    // Open on the copy the user tapped in the group (falls back to the first) so tapping a tile lands
+    // straight on it instead of always starting at the front.
+    val pagerState = rememberPagerState(
+        initialPage = initialIndex.coerceIn(0, (group.items.size - 1).coerceAtLeast(0)),
+        pageCount = { group.items.size },
+    )
     var showConfirm by remember(group) { mutableStateOf(false) }
     val context = LocalContext.current
     val density = LocalDensity.current
@@ -358,10 +365,30 @@ internal fun DuplicateGroupReview(
                 ) {
                     val exif = exifCache[currentItem.stableId]
 
+                    // Row order mirrors the photo viewer's own File-info section exactly (File, Size,
+                    // Type, Local folder, Cloud albums, Source) so the two details sheets read the same.
                     MetadataSection(label = stringResource(R.string.viewer_meta_section_file_info)) {
                         MetaRow(stringResource(R.string.viewer_meta_row_file), currentItem.reviewName())
-                        MetaRow(stringResource(R.string.viewer_meta_row_type), currentItem.reviewType())
                         MetaRow(stringResource(R.string.viewer_meta_row_size), currentItem.reviewSize(cloudFullRes))
+                        MetaRow(stringResource(R.string.viewer_meta_row_type), currentItem.reviewType())
+                        // Where the copy lives, matching the photo viewer's own details rows so the
+                        // review shows the same album/folder cue used to pick which copy to remove.
+                        val reviewFolder = when (val ci = currentItem) {
+                            is GalleryItem.LocalOnly -> ci.local.bucketName
+                            is GalleryItem.Synced -> ci.local.bucketName
+                            is GalleryItem.CloudOnly -> null
+                        }?.takeIf { it.isNotBlank() }
+                        reviewFolder?.let {
+                            MetaRow(stringResource(R.string.viewer_meta_row_local_folder), it)
+                        }
+                        val reviewAlbum = when (val ci = currentItem) {
+                            is GalleryItem.CloudOnly -> albumNames[ci.cloud.linkId]
+                            is GalleryItem.Synced -> albumNames[ci.cloud.linkId]
+                            is GalleryItem.LocalOnly -> null
+                        }?.takeIf { it.isNotBlank() }
+                        reviewAlbum?.let {
+                            MetaRow(stringResource(R.string.viewer_meta_row_cloud_albums), it)
+                        }
                         MetaRow(stringResource(R.string.viewer_meta_row_source), stringResource(currentItem.reviewSourceRes()))
                     }
 

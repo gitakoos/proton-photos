@@ -22,10 +22,15 @@
 
 package eu.akoos.photos.domain.usecase
 
+import io.mockk.every
 import io.mockk.mockk
+import io.mockk.verify
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.runBlocking
 import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.entity.LocalMediaItem
@@ -391,5 +396,39 @@ class GetGalleryItemsUseCaseTest {
         assertFalse(useCase.isInHiddenAlbum(GalleryItem.CloudOnly(cloudPhoto("other")), hidden))
         assertFalse(useCase.isInHiddenAlbum(GalleryItem.LocalOnly(localItem("uri://y")), hidden))
         assertFalse("an empty hidden set hides nothing", useCase.isInHiddenAlbum(GalleryItem.CloudOnly(cloudPhoto("h1")), emptySet()))
+    }
+
+    // ─── session-free local-only feed ─────────────────────────────────────────
+    // invokeLocalOnly() backs the no-account (local-only) mode: it maps the device's own media into
+    // GalleryItem.LocalOnly with no Proton session, so it must reach none of the userId-gated or
+    // session-scoped sources and yield exactly what invoke()'s LocalOnly rows would be.
+
+    @Test
+    fun `invokeLocalOnly emits only LocalOnly items and touches no session-scoped source`() = runBlocking {
+        val local = listOf(localItem("uri://old", dateTaken = 1_000L), localItem("uri://new", dateTaken = 9_000L))
+        val localRepo = mockk<LocalMediaRepository>()
+        every { localRepo.observeLocalMedia() } returns flowOf(local)
+        val cloudRepo = mockk<DrivePhotoRepository>()
+        val syncRepo = mockk<SyncStateRepository>()
+        val localOnlyUseCase = GetGalleryItemsUseCase(
+            localRepo,
+            cloudRepo,
+            syncRepo,
+            CoroutineScope(Dispatchers.Unconfined + CoroutineExceptionHandler { _, _ -> }),
+        )
+
+        val result = localOnlyUseCase.invokeLocalOnly().first()
+
+        assertEquals(2, result.size)
+        assertTrue("every item must be LocalOnly", result.all { it is GalleryItem.LocalOnly })
+        // Same capture-time-descending order invoke() applies, so a no-account user sees the identical
+        // arrangement a signed-in user's local-only items get.
+        assertEquals(
+            listOf("uri://new", "uri://old"),
+            result.filterIsInstance<GalleryItem.LocalOnly>().map { it.local.uri },
+        )
+        verify(exactly = 0) { cloudRepo.observeCloudPhotos(any()) }
+        verify(exactly = 0) { syncRepo.observeAll(any()) }
+        verify(exactly = 0) { cloudRepo.observeHiddenAlbumMemberLinkIds() }
     }
 }

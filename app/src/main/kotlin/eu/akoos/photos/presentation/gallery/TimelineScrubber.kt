@@ -77,18 +77,23 @@ import java.util.Locale
 import kotlin.math.roundToInt
 
 /**
- * Date-format used by both the scrubber drag tooltip and the floating scroll-date label, keyed on
- * the active timeline grouping so the two surfaces always read the same way. Flat (None) still uses
- * the month label, matching the scrubber tooltip's long-standing behaviour.
+ * Date-format shared by the scrubber drag tooltip and the floating scroll-date label so the two
+ * surfaces always read the same way. [columns] opts the timeline into density-based precision: at 6
+ * or more columns the tiles are too small for a single day to be a useful reference, so the label
+ * reads month + year, while 5 or fewer reads the full day. Callers that leave it null (albums,
+ * folders, search) keep the section-grouping format. Flat (None) always reads month + year.
  */
 @Composable
-internal fun rememberTimelineDateFormat(grouping: TimelineGrouping): SimpleDateFormat =
-    remember(grouping) {
-        when (grouping) {
-            TimelineGrouping.None  -> monthYearFormat()
-            TimelineGrouping.Day   -> dayMonthYearFormat()
-            TimelineGrouping.Month -> dayMonthYearFormat()
-            TimelineGrouping.Year  -> SimpleDateFormat("yyyy", Locale.getDefault())
+internal fun rememberTimelineDateFormat(grouping: TimelineGrouping, columns: Int? = null): SimpleDateFormat =
+    remember(grouping, columns) {
+        when {
+            grouping == TimelineGrouping.None -> monthYearFormat()
+            columns == null -> when (grouping) {
+                TimelineGrouping.Day, TimelineGrouping.Month -> dayMonthYearFormat()
+                else                                         -> SimpleDateFormat("yyyy", Locale.getDefault())
+            }
+            columns >= 6 -> monthYearFormat()
+            else         -> dayMonthYearFormat()
         }
     }
 
@@ -119,6 +124,9 @@ fun BoxScope.TimelineScrubber(
     grouping: TimelineGrouping,
     topPadding: Dp,
     bottomPadding: Dp,
+    // Column count the grid is currently showing, so the tooltip can read the date at the density the
+    // user picked (day at 5 or fewer, month at 6+). Null keeps the section-grouping format.
+    columns: Int? = null,
     // Maps an item to the grid cell key the host screen used, so the drag tooltip can resolve the
     // exact first-visible photo. Defaults to the main timeline's scheme; albums/search pass their own.
     keyOf: (GalleryItem) -> String = ::defaultScrubberKey,
@@ -176,14 +184,14 @@ fun BoxScope.TimelineScrubber(
             }
     }
 
-    val dateFormat = rememberTimelineDateFormat(grouping)
+    val dateFormat = rememberTimelineDateFormat(grouping, columns)
     // Grid cell key → item, mirroring PhotoGrid's keyOf. Built LAZILY (then cached) so steady
     // scroll — including the large-library decrypt re-emissions — never pays for a full-list map;
     // it materialises only when the user actually drags the scrubber and the exact date is wanted.
     val keyToItemLazy = remember(items, keyOf) {
         lazy { items.associateBy(keyOf) }
     }
-    val tooltipDate by remember(items, grouping) {
+    val tooltipDate by remember(items, grouping, columns) {
         derivedStateOf {
             if (!hasContent) ""
             else if (isDragging) {
@@ -195,7 +203,7 @@ fun BoxScope.TimelineScrubber(
                     .firstNotNullOfOrNull { info -> (info.key as? String)?.takeIf { it in map } }
                 key?.let { map[it]?.captureTimeMs }
                     ?.let { dateFormat.format(Date(it)) }
-                    ?: timelineDateLabel(firstVisibleIndex, totalGridItems, items, dateFormat)
+                    ?: ""
             } else {
                 // Tooltip is hidden when not dragging — a cheap grid-fraction approximation is fine.
                 timelineDateLabel(firstVisibleIndex, totalGridItems, items, dateFormat)
@@ -322,6 +330,9 @@ fun BoxScope.TimelineScrubberStaggered(
     grouping: TimelineGrouping,
     topPadding: Dp,
     bottomPadding: Dp,
+    // Column count the grid is currently showing, so the tooltip can read the date at the density the
+    // user picked (day at 5 or fewer, month at 6+). Null keeps the section-grouping format.
+    columns: Int? = null,
     keyOf: (GalleryItem) -> String = ::defaultScrubberKey,
     onDraggingChange: (Boolean) -> Unit = {},
 ) {
@@ -369,11 +380,11 @@ fun BoxScope.TimelineScrubberStaggered(
             }
     }
 
-    val dateFormat = rememberTimelineDateFormat(grouping)
+    val dateFormat = rememberTimelineDateFormat(grouping, columns)
     val keyToItemLazy = remember(items, keyOf) {
         lazy { items.associateBy(keyOf) }
     }
-    val tooltipDate by remember(items, grouping) {
+    val tooltipDate by remember(items, grouping, columns) {
         derivedStateOf {
             if (!hasContent) ""
             else if (isDragging) {
@@ -382,7 +393,7 @@ fun BoxScope.TimelineScrubberStaggered(
                     .firstNotNullOfOrNull { info -> (info.key as? String)?.takeIf { it in map } }
                 key?.let { map[it]?.captureTimeMs }
                     ?.let { dateFormat.format(Date(it)) }
-                    ?: timelineDateLabel(firstVisibleIndex, totalGridItems, items, dateFormat)
+                    ?: ""
             } else {
                 timelineDateLabel(firstVisibleIndex, totalGridItems, items, dateFormat)
             }

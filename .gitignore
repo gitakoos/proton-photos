@@ -23,5 +23,8 @@ keystore.properties
 docs/*.md
 docs/release-notes/
 
+# Local reference clones of upstream repos (Ente, Immich, Drive), for cross-checking only.
+temp*/
+
 # Gradle wrapper except the jar
 !gradle/wrapper/gradle-wrapper.jar

@@ -50,4 +50,26 @@ object DuplicateDeletion {
         if (survivingKeepers.isEmpty()) return emptyList()
         return groupIds.filter { it !in keepIds && it !in alreadyDeleted }
     }
+
+    /**
+     * The per-group ids to delete when several groups are deleted in one pass, one entry per input
+     * group and in order. Each group's deletions are threaded into the next group's [alreadyDeleted],
+     * exactly as calling [deletableExtras] sequentially would accumulate them.
+     *
+     * The threading is the whole point: the same pair can sit on two cards, and if both are measured
+     * against one frozen snapshot, keeping A on one card and B on the other lets each card delete the
+     * copy the other kept, taking the last one. Feeding each group the copies already claimed makes
+     * the second card see its keeper gone and stand down, so at least one copy always survives.
+     */
+    fun batchDeletableExtras(
+        groups: List<Pair<List<String>, Set<String>>>,
+        alreadyDeleted: Set<String>,
+    ): List<List<String>> {
+        val running = alreadyDeleted.toMutableSet()
+        return groups.map { (groupIds, keepIds) ->
+            val ids = deletableExtras(groupIds, keepIds, running)
+            running += ids
+            ids
+        }
+    }
 }

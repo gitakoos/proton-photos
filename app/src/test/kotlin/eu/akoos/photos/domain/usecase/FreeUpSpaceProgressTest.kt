@@ -81,7 +81,9 @@ class FreeUpSpaceProgressTest {
         context = mockk(relaxed = true)
         every { context.contentResolver } returns resolver
         repo = mockk(relaxed = true)
-        useCase = FreeUpSpaceUseCase(context, repo)
+        // The reclaim path exercised here never touches the cloud collaborators; the manual verify
+        // path is covered in FreeUpSpaceVerifyTest, so relaxed stand-ins are enough for construction.
+        useCase = FreeUpSpaceUseCase(context, repo, mockk(relaxed = true), mockk(relaxed = true))
     }
 
     @Test

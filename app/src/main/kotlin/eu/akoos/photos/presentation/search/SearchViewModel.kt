@@ -31,6 +31,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -39,8 +40,10 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
@@ -56,6 +59,7 @@ import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.data.transfer.TransferCenter
 import eu.akoos.photos.R
+import eu.akoos.photos.data.db.dao.FaceDao
 import eu.akoos.photos.data.db.dao.PhotoLocationDao
 import eu.akoos.photos.data.db.entity.PhotoLocationEntity
 import eu.akoos.photos.data.repository.drive.ThumbnailUrlStore
@@ -69,6 +73,7 @@ import eu.akoos.photos.domain.model.PersonSummary
 import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
 import eu.akoos.photos.domain.usecase.ObservePeopleUseCase
 import eu.akoos.photos.presentation.common.GalleryItemSelectionController
+import eu.akoos.photos.presentation.common.MoveToFolderController
 import eu.akoos.photos.presentation.gallery.ContentFilter
 import eu.akoos.photos.presentation.gallery.FaceBox
 import eu.akoos.photos.presentation.gallery.GalleryFilter
@@ -88,6 +93,8 @@ class SearchViewModel @Inject constructor(
     private val selectionFactory: GalleryItemSelectionController.Factory,
     private val thumbnailUrlStore: ThumbnailUrlStore,
     private val observePeopleUseCase: ObservePeopleUseCase,
+    private val faceDao: FaceDao,
+    private val moveController: MoveToFolderController,
     @ApplicationContext private val context: Context,
 ) : ViewModel() {
 
@@ -133,6 +140,13 @@ class SearchViewModel @Inject constructor(
             item
         }
 
+    /** Whether a Proton account is signed in. A null-userId local-only session leaves the cloud
+     *  selection actions without a destination, so the screen hides them. Defaults to signed-in so
+     *  nothing flickers before the first emit. */
+    val isSignedIn: StateFlow<Boolean> = accountManager.getPrimaryUserId()
+        .map { it != null }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, true)
+
     private val _query = MutableStateFlow("")
     val query: StateFlow<String> = _query.asStateFlow()
 
@@ -144,6 +158,14 @@ class SearchViewModel @Inject constructor(
     private val _selectedCategory = MutableStateFlow(GalleryFilter.All)
     val selectedCategory: StateFlow<GalleryFilter> = _selectedCategory.asStateFlow()
 
+    /** The person the People rail filters results to (id + their photo keys, loaded once on tap), or
+     *  empty when no person is selected. Held as one value so the id and its key set update atomically,
+     *  never leaving the results combine to see a new id against a stale key set. */
+    private data class PersonSelection(val id: Long? = null, val keys: Set<String> = emptySet())
+    private val _personSelection = MutableStateFlow(PersonSelection())
+    val selectedPersonId: StateFlow<Long?> =
+        _personSelection.map { it.id }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
     /**
      * Unfiltered gallery source. The search page's empty state surfaces "On this day"
      * memories and a "Jump to month" grid that must reflect the user's entire library
@@ -153,8 +175,9 @@ class SearchViewModel @Inject constructor(
      */
     val allItems: StateFlow<List<GalleryItem>> = accountManager.getPrimaryUserId()
         .flatMapLatest { userId ->
-            if (userId == null) flowOf(emptyList())
-            else combine(getGalleryItems.invoke(userId), hiddenUrisFlow) { all, hidden ->
+            val libraryFlow = if (userId == null) getGalleryItems.invokeLocalOnly()
+                else getGalleryItems.invoke(userId)
+            combine(libraryFlow, hiddenUrisFlow) { all, hidden ->
                 all.dropHidden(hidden)
             }
         }
@@ -178,14 +201,15 @@ class SearchViewModel @Inject constructor(
      *  that pin on the placeholder until the merge catches up. */
     val geotaggedPins: StateFlow<List<MapPin>> = accountManager.getPrimaryUserId()
         .flatMapLatest { userId ->
-            if (userId == null) flowOf(emptyList())
             // The mini-pin thumbnail is built imperatively (outside any Compose cell), so it can't
             // read the LocalThumbnailUrls CompositionLocal. Fold the store in and stamp each cloud
             // pin's freshly-decrypted URL onto the item so cloud-only fixes get a thumbnail again;
             // the set is bounded by the preview marker cap, so the extra re-emit is cheap.
-            else combine(
+            val libraryFlow = if (userId == null) getGalleryItems.invokeLocalOnly()
+                else getGalleryItems.invoke(userId)
+            combine(
                 geotaggedLocations,
-                getGalleryItems.invoke(userId),
+                libraryFlow,
                 thumbnailUrlStore.urls,
             ) { locs, library, urls ->
                 val itemByKey = HashMap<String, GalleryItem>(library.size * 2)
@@ -217,40 +241,68 @@ class SearchViewModel @Inject constructor(
      *  subtitle. Each fix is reverse-geocoded to a "City, Country" label off the main thread (the
      *  offline geocoder caches its dataset after the first lookup) and the distinct labels counted.
      *  Recomputes whenever [geotaggedLocations] changes; emits 0 until the first pass completes. */
+    private object CityCountCache {
+        @Volatile var last: Int = 0
+    }
+
     val distinctCityCount: StateFlow<Int> = geotaggedPins
         .mapLatest { resolved ->
+            // The count is stable across a session, but this view-model is recreated on every Search
+            // entry, so the last count is cached and used as the initial value. While the pins are still
+            // loading they read empty; keep the cached count then instead of recomputing from zero, so
+            // the card shows the number at once instead of only after the geocode finishes.
+            if (resolved.isEmpty()) return@mapLatest CityCountCache.last
             val labels = HashSet<String>()
             for (loc in resolved) {
                 OfflineGeocoder.reverseGeocode(context, loc.latitude, loc.longitude)
                     ?.let { labels.add(it) }
             }
-            labels.size
+            labels.size.also { CityCountCache.last = it }
         }
         .flowOn(Dispatchers.Default)
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), CityCountCache.last)
 
     /** The text field updates [_query] on every keystroke for instant echo, but the heavy
      *  per-item filter only needs to run once typing settles. Debouncing the query feed into
      *  [results] keeps the field responsive while sparing the library a full re-scan per key. */
     private val debouncedQuery = _query.debounce(250)
 
+    /** The chip-driven inputs folded into one value so the [results] combine stays within the typed
+     *  5-flow arity: the category chip, the Offline pin set, the Favourites device-heart set, and the
+     *  People rail's selected-person keys (null when no person is selected). */
+    private data class ChipState(
+        val category: GalleryFilter,
+        val pins: Set<String>,
+        val hearts: Set<String>,
+        val personKeys: Set<String>?,
+    )
+
     val results: StateFlow<List<GalleryItem>> = accountManager.getPrimaryUserId()
         .flatMapLatest { userId ->
-            if (userId == null) flowOf(emptyList())
-            else combine(
-                getGalleryItems.invoke(userId),
+            val libraryFlow = if (userId == null) getGalleryItems.invokeLocalOnly()
+                else getGalleryItems.invoke(userId)
+            combine(
+                libraryFlow,
                 debouncedQuery,
                 _contentFilter,
-                // Category + the two local id sets the chips read travel together so the later
-                // sources stay within the typed combine arity; the Offline chip filters on the
-                // pinned linkIds and the Favourites chip on the device hearts, both in applyAll.
-                combine(_selectedCategory, offlinePinIdsFlow, favoriteIdsFlow) { category, pins, hearts ->
-                    Triple(category, pins, hearts)
+                // Category, the two local id sets the chips read, and the selected person's photo keys
+                // travel together so the later sources stay within the typed combine arity; the Offline
+                // chip filters on the pinned linkIds, the Favourites chip on the device hearts, and the
+                // People rail on the person keys, all in applyAll.
+                combine(
+                    _selectedCategory,
+                    offlinePinIdsFlow,
+                    favoriteIdsFlow,
+                    _personSelection.map { if (it.id != null) it.keys else null },
+                ) { category, pins, hearts, personKeys ->
+                    ChipState(category, pins, hearts, personKeys)
                 },
                 hiddenUrisFlow,
-            ) { all, q, filter, chipSets, hidden ->
-                val (category, pins, hearts) = chipSets
-                applyAll(all.dropHidden(hidden), q, filter, category, pins, hearts)
+            ) { all, q, filter, chip, hidden ->
+                applyAll(
+                    all.dropHidden(hidden), q, filter,
+                    chip.category, chip.pins, chip.hearts, chip.personKeys,
+                )
             }
         }
         // Fold/normalize + per-item category checks over the whole library are heavy; run them off
@@ -277,6 +329,56 @@ class SearchViewModel @Inject constructor(
         }
         .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** All NAMED people for the People rail (the filter chip + face bar in the shared category rail),
+     *  independent of the query. Gated on the AI + face flags and a signed-in account, so a logged-out
+     *  or ML-off session shows no chip. Mirrors the timeline's people rail. */
+    val people: StateFlow<List<PersonUi>> = combine(
+        context.settingsDataStore.data
+            .map { it[SettingsKeys.AI_FEATURES_ENABLED] == true && it[SettingsKeys.FACE_ENABLED] == true }
+            .distinctUntilChanged(),
+        accountManager.getPrimaryUserId(),
+    ) { aiOn, userId -> aiOn to userId }
+        .flatMapLatest { (aiOn, userId) ->
+            if (!aiOn || userId == null) flowOf(emptyList())
+            else observePeopleUseCase(userId, allItems).map { summaries ->
+                summaries.filter { !it.displayName.isNullOrBlank() }.mapNotNull { it.toPersonUi() }
+            }
+        }
+        .flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    init {
+        // If the people list empties while a person filter is active (AI turned off, sign-out), drop
+        // the filter so results do not stay narrowed with no way back, mirroring the timeline.
+        viewModelScope.launch {
+            people.collectLatest { p ->
+                if (p.isEmpty() && _personSelection.value.id != null) {
+                    _personSelection.value = PersonSelection()
+                }
+            }
+        }
+    }
+
+    /** Select a person to filter results to (loads their photo keys once), or clear with null. The
+     *  shared rail provider passes null when the active person is tapped again. Mirrors the timeline. */
+    fun onPersonSelected(personId: Long?) {
+        viewModelScope.launch {
+            if (personId == null) {
+                _personSelection.value = PersonSelection()
+                return@launch
+            }
+            val userId = accountManager.getPrimaryUserId().first() ?: return@launch
+            val keys = try {
+                faceDao.photoKeysForPerson(userId.id, personId).first().toSet()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                emptySet<String>()
+            }
+            _personSelection.value = PersonSelection(personId, keys)
+        }
+    }
 
     /** Diacritic-folded, lowercased form so a name search like "akos" matches "Ákos". */
     private fun foldForMatch(s: String): String =
@@ -352,6 +454,46 @@ class SearchViewModel @Inject constructor(
     fun clearPendingStripIntent() = sel.clearPendingStripIntent()
     fun resetMultiStripState() = sel.resetMultiStripState()
 
+    // ── Move to a device folder (logged-out, device data only) ──────────────────────────────────
+    // Delegated to the shared [MoveToFolderController], the same relocation the timeline offers, so a
+    // search selection can send its device photos into a DCIM folder.
+
+    /** Existing device folders offered as move targets, kept warm for the picker. */
+    val moveTargetFolders = moveController.targetFolders(viewModelScope)
+
+    /** One-shot system write-consent request a foreign-file move needs; the screen's host drives it. */
+    val pendingMoveIntent = moveController.pendingMoveIntent
+
+    /** Destination folder of a completed move, for the host's snackbar. */
+    val moveConfirmation = moveController.moveConfirmation
+
+    /** The selected photos that carry a device file, mapped to their uris; a cloud-only one has none. */
+    private fun selectedDeviceUris(): List<String> = selectedItems.value.mapNotNull { item ->
+        when (item) {
+            is GalleryItem.LocalOnly -> item.local.uri
+            is GalleryItem.Synced -> item.local.uri
+            is GalleryItem.CloudOnly -> null
+        }
+    }
+
+    /** Move every selected device photo into [folderName] under DCIM/, then drop the selection. */
+    fun moveSelectedToFolder(folderName: String) {
+        val uris = selectedDeviceUris()
+        moveController.move(viewModelScope, uris, folderName)
+        clearSelection()
+    }
+
+    /** Move the selection into a freshly named device folder, born with the photos the move lands there. */
+    fun createFolderWithPhotos(name: String) {
+        val uris = selectedDeviceUris()
+        moveController.createFolder(viewModelScope, name, uris)
+        clearSelection()
+    }
+
+    fun onMovePermissionGranted() = moveController.onPermissionGranted(viewModelScope)
+
+    fun clearPendingMove() = moveController.clearPending()
+
     /** The narrowing itself lives in [SearchFilter], which needs no Android; only the localized
      *  month and category names are resolved here and handed to it. */
     private fun applyAll(
@@ -361,6 +503,7 @@ class SearchViewModel @Inject constructor(
         category: GalleryFilter,
         offlinePinIds: Set<String> = emptySet(),
         favoriteIds: Set<String> = emptySet(),
+        personPhotoKeys: Set<String>? = null,
     ): List<GalleryItem> = SearchFilter.apply(
         items = items,
         q = q,
@@ -368,6 +511,7 @@ class SearchViewModel @Inject constructor(
         category = category,
         offlinePinIds = offlinePinIds,
         favoriteIds = favoriteIds,
+        personPhotoKeys = personPhotoKeys,
         foldedMonths = foldedMonths,
         foldedCategoryNames = foldedCategoryNames,
     )

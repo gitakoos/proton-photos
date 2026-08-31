@@ -30,6 +30,7 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.hilt.work.HiltWorker
+import androidx.work.BackoffPolicy
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingWorkPolicy
 import androidx.work.ForegroundInfo
@@ -46,6 +47,8 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import eu.akoos.photos.R
 import eu.akoos.photos.data.db.dao.PendingMetadataEditDao
@@ -58,6 +61,34 @@ import eu.akoos.photos.domain.usecase.CloudSavePhase
 import eu.akoos.photos.domain.usecase.WriteCloudPhotoMetadataUseCase
 import eu.akoos.photos.domain.usecase.WriteSyncedPhotoMetadataUseCase
 
+/** What the drain should do with a row whose use case reported a failure. */
+enum class MetadataDrainDecision { DELETE_PERMANENT, KEEP_AND_RETRY, GIVE_UP_AFTER_MAX }
+
+/**
+ * Keep-or-drop for a failed metadata-edit row, decided purely from the failure's transience and the
+ * worker's attempt count so it can be pinned by a plain JVM test. A permanent failure is dropped at
+ * once; a transient one (a network / IO / rate-limit blip) is held for another WorkManager attempt
+ * until [maxAttempts] is reached, after which it is given up and surfaced like a permanent failure so a
+ * stuck edit cannot loop forever. [maxAttempts] of 3 mirrors [FreeUpSpaceWorker].
+ */
+internal fun metadataDrainDecision(
+    transient: Boolean,
+    runAttemptCount: Int,
+    maxAttempts: Int = 3,
+): MetadataDrainDecision = when {
+    !transient -> MetadataDrainDecision.DELETE_PERMANENT
+    runAttemptCount < maxAttempts -> MetadataDrainDecision.KEEP_AND_RETRY
+    else -> MetadataDrainDecision.GIVE_UP_AFTER_MAX
+}
+
+/** The terminal shapes a drained row can take, unified across the synced and cloud use cases so the
+ *  keep-or-delete decision reads the same for both. */
+private sealed interface RowResult {
+    data object Updated : RowResult
+    data object Nothing : RowResult
+    data class Failed(val transient: Boolean) : RowResult
+}
+
 /**
  * Drains the persisted cloud/synced metadata-edit queue as a foreground service, so a batch of
  * corrected re-uploads survives the editor closing AND a process kill. The queue is the DB table
@@ -65,8 +96,10 @@ import eu.akoos.photos.domain.usecase.WriteSyncedPhotoMetadataUseCase
  *
  * Each row re-fetches its photo by linkId, then runs the SAME dispatch as the in-memory
  * `CloudMetadataSaveController`: the synced device-file replacement when a deviceUri is set, the
- * cloud download-and-rewrite otherwise. A row is deleted ONLY after its use case returns, so a kill
- * mid-item leaves the row in place and WorkManager's re-run re-drains it exactly once more. The drain
+ * cloud download-and-rewrite otherwise. A successful or permanently-failed row is deleted once its use
+ * case returns; a transient failure (a network / rate-limit blip) is kept and the run ends in retry so
+ * WorkManager re-drains it with backoff, until an attempt budget is reached and it is dropped like a
+ * permanent failure. A kill mid-item likewise leaves the row in place for the re-run. The drain
  * re-queries after each pass, so a second batch appended while this one runs is handled by the same run.
  *
  * Unique work ([UNIQUE_NAME]) under a single FIXED notification id, since only one drain runs at a time.
@@ -126,6 +159,8 @@ class MetadataEditWorker @AssistedInject constructor(
         val failed = AtomicInteger(0)
         val done = AtomicInteger(0)
         val total = AtomicInteger(initialTotal)
+        // Set by any row held for a WorkManager retry, so the drain can end in Result.retry().
+        val kept = AtomicBoolean(false)
 
         // Best-effort progress publish reused by the phase callback (non-suspend) and the per-item
         // advance. setProgressAsync / setForegroundAsync are the non-suspend variants, so this is safe
@@ -175,49 +210,66 @@ class MetadataEditWorker @AssistedInject constructor(
                 transferCenter.setItemStatus(transferId, row.linkId, phaseLabel(ph))
             }
 
-            // The same dispatch + Result mapping as CloudMetadataSaveController.runItem: a synced
-            // item (a device file exists) uploads the edited device file and re-pairs; a cloud-only
-            // item downloads and rewrites. true = updated, false = reported failure, null = nothing.
-            // resumeUploadedLinkId carries a prior run's already-uploaded link (null on the first run);
-            // onUploaded persists the new link onto this row the moment the upload returns, so a kill
-            // before the re-add and trash resumes from that link instead of re-uploading a second copy.
-            val outcome: Boolean? = if (item.deviceUri != null) {
+            // The same dispatch as CloudMetadataSaveController.runItem: a synced item (a device file
+            // exists) uploads the edited device file and re-pairs; a cloud-only item downloads and
+            // rewrites. Both Results collapse to one shape so the keep-or-delete decision reads the same,
+            // and a Failed's transient bit is carried through to it. resumeUploadedLinkId carries a prior
+            // run's already-uploaded link (null on the first run); onUploaded persists the new link onto
+            // this row the moment the upload returns, so a kill before the re-add and trash resumes from
+            // that link instead of re-uploading a second copy.
+            val result: RowResult = if (item.deviceUri != null) {
                 when (
-                    writeSynced(
+                    val r = writeSynced(
                         item.photo, item.deviceUri, item.newCaptureMs, item.location,
                         item.description, item.artist, item.copyright, onPhase,
                         resumeUploadedLinkId = row.newLinkId,
                         onUploaded = { link -> dao.setNewLinkId(row.linkId, link) },
                     )
                 ) {
-                    WriteSyncedPhotoMetadataUseCase.Result.Success -> true
-                    is WriteSyncedPhotoMetadataUseCase.Result.Failed -> false
-                    WriteSyncedPhotoMetadataUseCase.Result.NothingToDo -> null
+                    WriteSyncedPhotoMetadataUseCase.Result.Success -> RowResult.Updated
+                    WriteSyncedPhotoMetadataUseCase.Result.NothingToDo -> RowResult.Nothing
+                    is WriteSyncedPhotoMetadataUseCase.Result.Failed -> RowResult.Failed(r.transient)
                 }
             } else {
                 when (
-                    writeCloud(
+                    val r = writeCloud(
                         item.photo, item.newCaptureMs, item.location,
                         item.description, item.artist, item.copyright, onPhase,
                         resumeUploadedLinkId = row.newLinkId,
                         onUploaded = { link -> dao.setNewLinkId(row.linkId, link) },
                     )
                 ) {
-                    WriteCloudPhotoMetadataUseCase.Result.Success -> true
-                    is WriteCloudPhotoMetadataUseCase.Result.Failed -> false
-                    WriteCloudPhotoMetadataUseCase.Result.NothingToDo -> null
+                    WriteCloudPhotoMetadataUseCase.Result.Success -> RowResult.Updated
+                    WriteCloudPhotoMetadataUseCase.Result.NothingToDo -> RowResult.Nothing
+                    is WriteCloudPhotoMetadataUseCase.Result.Failed -> RowResult.Failed(r.transient)
                 }
             }
-            when (outcome) {
-                true -> updated.incrementAndGet()
-                false -> failed.incrementAndGet()
-                null -> Unit
-            }
 
-            // Delete ONLY after the use case returns a terminal result. A process kill mid-item leaves
-            // the row undeleted, so WorkManager's re-run re-drains it; pre-deleting would drop the edit
-            // on a kill. A reported failure still deletes, so a permanently failing edit does not loop.
-            dao.deleteByLinkId(row.linkId)
+            // Keep-or-delete. Success and nothing-to-do delete the row as before. A failure consults the
+            // pure decision: a permanent failure, or a transient one past the attempt budget, deletes AND
+            // counts as failed (surfaced to the user); a transient failure still inside the budget KEEPS
+            // the row and flags the run for a WorkManager retry, where the newLinkId resume token makes
+            // the re-attempt idempotent. A process kill mid-item likewise leaves the row undeleted, so
+            // the re-run re-drains it; pre-deleting would drop the edit on a kill.
+            val deleteRow = when (result) {
+                RowResult.Updated -> {
+                    updated.incrementAndGet()
+                    true
+                }
+                RowResult.Nothing -> true
+                is RowResult.Failed -> when (metadataDrainDecision(result.transient, runAttemptCount)) {
+                    MetadataDrainDecision.DELETE_PERMANENT,
+                    MetadataDrainDecision.GIVE_UP_AFTER_MAX -> {
+                        failed.incrementAndGet()
+                        true
+                    }
+                    MetadataDrainDecision.KEEP_AND_RETRY -> {
+                        kept.set(true)
+                        false
+                    }
+                }
+            }
+            if (deleteRow) dao.deleteByLinkId(row.linkId)
             transferCenter.setItemStatus(transferId, row.linkId, null)
             done.incrementAndGet()
             runCatching { transferCenter.progress(transferId, done.get()) }
@@ -226,12 +278,16 @@ class MetadataEditWorker @AssistedInject constructor(
 
         return try {
             val gate = Semaphore(CONCURRENCY)
+            // Every linkId already attempted this run. A KEPT row (a transient failure held for a retry)
+            // stays in the DB, so without this filter getAll() would re-serve it every pass and spin it
+            // in a tight in-run loop; its retry belongs to a fresh WorkManager run, not this one.
+            val attemptedThisRun = mutableSetOf<String>()
             // Re-query after each pass so rows a second batch appends mid-drain are drained by this run.
             // Within a pass, up to CONCURRENCY rows run at once so their downloads and uploads overlap,
             // while each row stays fully atomic. The pass awaits all its rows before re-querying, so an
             // appended batch is picked up on the next pass.
             while (true) {
-                val rows = dao.getAll()
+                val rows = dao.getAll().filter { it.linkId !in attemptedThisRun }
                 if (rows.isEmpty()) break
                 // Grow the visible total when a later batch added rows, so the bar stays honest.
                 total.set(maxOf(total.get(), done.get() + rows.size))
@@ -239,8 +295,18 @@ class MetadataEditWorker @AssistedInject constructor(
                 coroutineScope {
                     rows.map { row -> async { gate.withPermit { processRow(row) } } }.awaitAll()
                 }
+                // Mark every processed row attempted regardless of outcome, so the next pass serves only
+                // rows an appended batch newly added, never a kept row again.
+                rows.forEach { attemptedThisRun.add(it.linkId) }
             }
-            Result.success(workDataOf(KEY_RESULT_UPDATED to updated.get(), KEY_RESULT_FAILED to failed.get()))
+            // A kept row means a transient failure is waiting for another attempt: ask WorkManager to
+            // reschedule (with backoff). The persisted rows re-drain next run and the newLinkId resume
+            // token keeps that idempotent. Otherwise the run drained cleanly; carry the counts for the UI.
+            if (kept.get()) {
+                Result.retry()
+            } else {
+                Result.success(workDataOf(KEY_RESULT_UPDATED to updated.get(), KEY_RESULT_FAILED to failed.get()))
+            }
         } catch (e: CancellationException) {
             // Cooperative cancellation (the Cancel action, or the controller's cancel path). WorkManager
             // treats it as cancelled. The remaining rows are left untouched here: the controller's cancel
@@ -342,6 +408,9 @@ class MetadataEditWorker @AssistedInject constructor(
                 ExistingWorkPolicy.APPEND_OR_REPLACE,
                 OneTimeWorkRequestBuilder<MetadataEditWorker>()
                     .addTag(TAG)
+                    // A run that kept a transient-failed row returns Result.retry(); back the reschedule
+                    // off so a persistent network blip is not hammered.
+                    .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
                     .build(),
             )
         }

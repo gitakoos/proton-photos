@@ -23,6 +23,9 @@
 package eu.akoos.photos.presentation.search.components
 
 import android.graphics.drawable.BitmapDrawable
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -37,12 +40,16 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Place
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -60,9 +67,15 @@ import androidx.core.graphics.drawable.toBitmap
 import coil.imageLoader
 import coil.request.ImageRequest
 import coil.request.SuccessResult
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.map
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import eu.akoos.photos.R
+import eu.akoos.photos.data.preferences.SettingsKeys
+import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.presentation.gallery.photoCellInputsFor
 import eu.akoos.photos.presentation.map.MapPin
+import eu.akoos.photos.presentation.map.vector.GlobePreview
 import eu.akoos.photos.presentation.map.ThumbnailPin
 import eu.akoos.photos.presentation.theme.AppColors
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
@@ -107,6 +120,10 @@ fun MapPreviewCard(
     val density = LocalDensity.current.density
     val isDark = !AppColors.current.isLight
     val shape = RoundedCornerShape(14.dp)
+
+    // Held false until the camera frames the located photos; the opaque cover reads from it so the
+    // one-time world-to-average re-centre lands behind a spinner instead of as a visible jump.
+    var centered by remember { mutableStateOf(false) }
 
     // Build the preview MapView once; the lifecycle bridge below resumes/pauses/detaches it.
     // Multitouch is off and an overlay swallows taps, so this map is strictly a still backdrop.
@@ -188,6 +205,8 @@ fun MapPreviewCard(
         mapView.controller.setZoom(PREVIEW_LOCATED_ZOOM)
         mapView.controller.setCenter(GeoPoint(avgLat, avgLon))
         mapView.invalidate()
+        // Camera now frames the photos; drop the cover to reveal the already-centred preview.
+        centered = true
 
         // Fill in thumbnails. Each pin's resolved library item supplies the same image source the
         // gallery cell uses — a local content uri or a cloud thumbnail, both decoded through Coil — so
@@ -210,6 +229,13 @@ fun MapPreviewCard(
         }
     }
 
+    // No loaded signal reaches this card, so an empty or slow account never hits the pins branch that
+    // lifts the cover. Reveal after a brief spinner regardless; fast pins set [centered] first, no jump.
+    LaunchedEffect(Unit) {
+        delay(450)
+        centered = true
+    }
+
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -223,6 +249,28 @@ fun MapPreviewCard(
             factory = { mapView },
             modifier = Modifier.fillMaxSize(),
         )
+
+        // Opaque cover over the map until the camera is centred, so the one-time re-centre lands behind
+        // it; fades out on [centered], revealing the framed preview. Clipped to the card's own corners.
+        AnimatedVisibility(
+            visible = !centered,
+            modifier = Modifier.fillMaxSize(),
+            exit = fadeOut(tween(240)),
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clip(shape)
+                    .background(AppColors.current.bg0),
+                contentAlignment = Alignment.Center,
+            ) {
+                CircularProgressIndicator(
+                    color = AppColors.current.accent,
+                    strokeWidth = 2.dp,
+                    modifier = Modifier.size(24.dp),
+                )
+            }
+        }
 
         // Transparent tap target over the map: osmdroid would otherwise consume the touch and pan
         // the preview. Routing the tap here opens the full map and leaves the backdrop static.
@@ -265,20 +313,7 @@ fun MapPreviewCard(
                     fontWeight = FontWeight.SemiBold,
                     letterSpacing = (-0.4).sp,
                 )
-                Text(
-                    text = if (pins.isEmpty()) {
-                        stringResource(R.string.map_card_subtitle_empty)
-                    } else {
-                        pluralStringResource(
-                            R.plurals.map_card_cities_count,
-                            cityCount,
-                            cityCount,
-                        )
-                    },
-                    color = Color.White.copy(alpha = 0.85f),
-                    fontSize = 13.sp,
-                    modifier = Modifier.padding(top = 2.dp),
-                )
+                MapCardSubtitle(pins = pins, cityCount = cityCount)
             }
         }
 
@@ -300,6 +335,134 @@ fun MapPreviewCard(
             )
         }
     }
+}
+
+/**
+ * Chooses the Search "Map" card by the user's map-style preference: the classic OpenStreetMap preview
+ * ([MapPreviewCard]) when the OSM map is selected, otherwise a preview of the modern vector globe.
+ */
+@Composable
+fun MapPreviewSwitcher(
+    pins: List<MapPin>,
+    cityCount: Int,
+    onOpenMap: () -> Unit,
+) {
+    val context = LocalContext.current
+    val mapStyleOsm by remember {
+        context.settingsDataStore.data.map { it[SettingsKeys.MAP_STYLE_OSM] ?: false }
+    }.collectAsStateWithLifecycle(initialValue = false)
+    if (mapStyleOsm) {
+        MapPreviewCard(pins = pins, cityCount = cityCount, onOpenMap = onOpenMap)
+    } else {
+        GlobePreviewCard(pins = pins, cityCount = cityCount, onOpenMap = onOpenMap)
+    }
+}
+
+/**
+ * The Search "Map" card for the modern globe: a fixed, non-interactive [GlobePreview] turned so the
+ * account's photos face the viewer, with the same title, count and tap-to-open behaviour as the OSM
+ * card. Tapping opens the full globe via [onOpenMap].
+ */
+@Composable
+private fun GlobePreviewCard(
+    pins: List<MapPin>,
+    cityCount: Int,
+    onOpenMap: () -> Unit,
+) {
+    val shape = RoundedCornerShape(14.dp)
+    val (cLat, cLng) = remember(pins) {
+        if (pins.isEmpty()) {
+            20f to 0f
+        } else {
+            (pins.sumOf { it.latitude } / pins.size).toFloat() to
+                (pins.sumOf { it.longitude } / pins.size).toFloat()
+        }
+    }
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp)
+            .padding(top = 12.dp, bottom = 4.dp)
+            .height(160.dp)
+            .clip(shape)
+            .border(1.dp, Color.Black.copy(alpha = 0.08f), shape)
+            .background(AppColors.current.bg0),
+    ) {
+        GlobePreview(
+            centerLat = cLat,
+            centerLng = cLng,
+            modifier = Modifier.fillMaxSize(),
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .clickable(onClick = onOpenMap),
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        0.45f to Color.Transparent,
+                        1f to Color.Black.copy(alpha = 0.85f),
+                    ),
+                ),
+        )
+        Row(
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                Icons.Filled.Place,
+                contentDescription = null,
+                tint = Color.White,
+                modifier = Modifier.size(18.dp),
+            )
+            Column(modifier = Modifier.padding(start = 6.dp)) {
+                Text(
+                    text = stringResource(R.string.map_card_title),
+                    color = Color.White,
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    letterSpacing = (-0.4).sp,
+                )
+                MapCardSubtitle(pins = pins, cityCount = cityCount)
+            }
+        }
+    }
+}
+
+/**
+ * The map card's second line: the located-city count. While the library is still loading, the pins and
+ * the geocoded count both read empty, which would flash the "no places" line before the count lands, so
+ * that line is held back briefly and a normal load goes straight to the count. Only a genuinely empty
+ * library shows the empty text.
+ */
+@Composable
+private fun MapCardSubtitle(pins: List<MapPin>, cityCount: Int) {
+    var showEmpty by remember { mutableStateOf(false) }
+    LaunchedEffect(pins.isEmpty(), cityCount) {
+        if (pins.isEmpty() && cityCount == 0) {
+            showEmpty = false
+            delay(500)
+            showEmpty = true
+        } else {
+            showEmpty = false
+        }
+    }
+    val text = when {
+        cityCount > 0 -> pluralStringResource(R.plurals.map_card_cities_count, cityCount, cityCount)
+        showEmpty -> stringResource(R.string.map_card_subtitle_empty)
+        else -> ""
+    }
+    Text(
+        text = text,
+        color = Color.White.copy(alpha = 0.85f),
+        fontSize = 13.sp,
+        modifier = Modifier.padding(top = 2.dp),
+    )
 }
 
 /**

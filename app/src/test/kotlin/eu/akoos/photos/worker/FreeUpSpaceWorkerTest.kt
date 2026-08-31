@@ -41,9 +41,10 @@ import org.junit.Test
  * interval of zero is ever offered.
  *
  * The constraint assertions are a tripwire: they fail loudly if a network constraint is re-added.
- * The whole reclaim path is local - [eu.akoos.photos.domain.usecase.FreeUpSpaceUseCase] takes only a
- * Context and a SyncStateRepository, whose implementation takes only a Room DAO - so a network
- * constraint fetches nothing and only stops the sweep running offline.
+ * The scheduled reclaim path is local - [eu.akoos.photos.domain.usecase.FreeUpSpaceUseCase.invoke]
+ * selects backed-up rows from Room and deletes their device copies with no network call - so a
+ * network constraint fetches nothing and only stops the sweep running offline. (The manual button
+ * adds a cloud verification step, but the scheduled worker never runs it.)
  *
  * No Android, no Robolectric, no WorkManager runtime: plain JVM assertions on the inputs.
  */

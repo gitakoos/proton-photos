@@ -60,6 +60,7 @@ import eu.akoos.photos.data.hidden.HiddenVaultDiagnostics
 import eu.akoos.photos.data.hidden.HiddenVaultJournal
 import eu.akoos.photos.data.offline.OfflineStorageManager
 import eu.akoos.photos.data.preferences.SettingsKeys
+import eu.akoos.photos.data.preferences.currentShareStripConfig
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.data.transfer.TransferCenter
 import eu.akoos.photos.domain.entity.Album
@@ -76,6 +77,7 @@ import eu.akoos.photos.util.ProtonPhotosStorage
 import eu.akoos.photos.util.ShareFileProvider
 import eu.akoos.photos.util.ShareIntentBuilder
 import eu.akoos.photos.util.StripResult
+import eu.akoos.photos.util.stripForShareOrOriginal
 
 /** Progress of a batch EXIF-strip. Lives here (not in a screen's UiState) so every grid that owns a
  *  [GalleryItemSelectionController] shares one definition. */
@@ -227,10 +229,12 @@ class GalleryItemSelectionController @AssistedInject constructor(
         if (items.isEmpty()) return
         scope.launch {
             val userId = accountManager.getPrimaryUserId().first()
+            // Null when strip-on-share is off, so each resolved URI passes through untouched below.
+            val stripConfig = currentShareStripConfig(context)
             val uris = ArrayList<Uri>(items.size)
             for (item in items) {
                 runCatching {
-                    when (item) {
+                    val resolved = when (item) {
                         is GalleryItem.LocalOnly -> Uri.parse(item.local.uri)
                         is GalleryItem.Synced    -> Uri.parse(item.local.uri)
                         is GalleryItem.CloudOnly -> {
@@ -243,6 +247,8 @@ class GalleryItemSelectionController @AssistedInject constructor(
                             }
                         }
                     }
+                    val (mime, name) = ShareIntentBuilder.shareMimeAndName(item)
+                    stripForShareOrOriginal(context, resolved, mime, name, stripConfig)
                 }.onSuccess { uris.add(it) }
                     .onFailure { Log.w(TAG, "share resolve failed: ${it.message}") }
             }

@@ -334,16 +334,25 @@ object ExifHelper {
      * Copies the file from [uri] to a temp file, strips the configured metadata fields,
      * and returns the temp file path. Caller must delete the temp file after use.
      * Returns null if nothing needs stripping or the operation fails.
+     *
+     * [targetDir] overrides where the temp is created; null keeps the default cacheDir root, so the
+     * upload path is unchanged. The share path passes `cacheDir/fullres` — the one cache root the
+     * share FileProvider exposes — so the stripped copy can be handed to another app directly.
      */
     @Suppress("DEPRECATION") // TAG_ISO_SPEED_RATINGS kept to wipe the legacy tag too.
-    fun stripToTempFile(context: Context, uri: String, config: MetadataStripConfig): File? {
+    fun stripToTempFile(
+        context: Context,
+        uri: String,
+        config: MetadataStripConfig,
+        targetDir: File? = null,
+    ): File? {
         if (config.isNoOp) return null
         val parsed = Uri.parse(uri)
         val inputStream = context.contentResolver.openInputStream(parsed) ?: return null
         // The temp must keep the source container's extension. A hardcoded ".jpg" mislabels
         // HEIC / RAW / motion-photo bytes, which then upload (and decode) under the wrong type.
         val suffix = tempSuffixFor(context, parsed)
-        val tmpFile = File.createTempFile("stripped_", suffix, context.cacheDir)
+        val tmpFile = File.createTempFile("stripped_", suffix, targetDir ?: context.cacheDir)
         // Once the temp exists, any later failure (copy / EXIF write) must delete it so a thrown
         // strip never orphans a cache file. The success path returns it for the caller to use+delete.
         return try {

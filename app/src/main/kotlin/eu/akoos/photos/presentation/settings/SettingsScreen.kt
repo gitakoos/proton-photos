@@ -27,9 +27,12 @@ import android.content.Intent
 import android.os.Build
 import android.provider.MediaStore
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -37,6 +40,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -45,6 +49,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -55,6 +60,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -77,6 +83,7 @@ import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
@@ -89,10 +96,14 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -100,10 +111,13 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -111,11 +125,12 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import eu.akoos.photos.BuildConfig
 import eu.akoos.photos.R
-import eu.akoos.photos.data.face.FaceIndexingProgress
 import eu.akoos.photos.data.face.FaceIndexingState
+import eu.akoos.photos.data.face.FaceModelAssets
 import eu.akoos.photos.data.ocr.OcrModelAssets
 import eu.akoos.photos.domain.entity.UploadCompressionTier
 import eu.akoos.photos.presentation.gallery.PersonTile
+import eu.akoos.photos.presentation.search.SearchFilter
 import eu.akoos.photos.presentation.common.ConfirmDialog
 import eu.akoos.photos.presentation.common.ConfirmSheet
 import eu.akoos.photos.presentation.common.PrimaryButton
@@ -125,6 +140,7 @@ import eu.akoos.photos.presentation.common.IconBubble
 import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
 import eu.akoos.photos.presentation.common.ShimmerBox
 import eu.akoos.photos.presentation.common.ShimmerTextLine
+import eu.akoos.photos.util.HealthBlockReason
 import eu.akoos.photos.util.sanitizeErrorMessage
 import eu.akoos.photos.presentation.settings.components.ActionRow
 import eu.akoos.photos.presentation.settings.components.AppLockTimeoutRow
@@ -144,6 +160,7 @@ import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.StatusError
 import eu.akoos.photos.presentation.theme.StatusPending
 import eu.akoos.photos.presentation.theme.StatusSynced
+import eu.akoos.photos.presentation.theme.pillShape
 import eu.akoos.photos.presentation.util.formatBytes
 
 private val cardShape = RoundedCornerShape(12.dp)
@@ -190,13 +207,44 @@ fun SettingsScreen(
     onAboutClick: () -> Unit = {},
     onFaqClick: () -> Unit = {},
     onAccountClick: () -> Unit = {},
+    onSignIn: () -> Unit = {},
     onCheckForUpdatesClick: () -> Unit = {},
     onWhatsNewClick: () -> Unit = {},
     onNewsClick: () -> Unit = {},
+    /** Opens a settings-search result by its NavGraph route (top-level pages and the query-string
+     *  destinations the index points at); the inline search resets when this fires. */
+    onOpenRoute: (String) -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val newsUnread by viewModel.newsUnread.collectAsStateWithLifecycle()
     val colors = AppColors.current
+    // Inline settings search, revealed by morphing the header search icon into a bar. Typing swaps the
+    // six groups for matching results in place. Query saved across config change; reset whenever a
+    // result opens so returning from a page shows the groups again.
+    var query by rememberSaveable { mutableStateOf("") }
+    // Hidden by default so opening Settings shows the groups and never raises the keyboard.
+    var searchActive by remember { mutableStateOf(false) }
+    val focusRequester = remember { FocusRequester() }
+    val focusManager = LocalFocusManager.current
+    // Focus the field only as it opens, never on a plain Settings open.
+    LaunchedEffect(searchActive) { if (searchActive) focusRequester.requestFocus() }
+    // Hoisted so scrolling the groups can collapse an empty search back to the icon.
+    val groupsScrollState = rememberScrollState()
+    LaunchedEffect(groupsScrollState.isScrollInProgress) {
+        if (groupsScrollState.isScrollInProgress && searchActive && query.isBlank()) {
+            searchActive = false
+            focusManager.clearFocus()
+        }
+    }
+    val searchIndex = remember { settingsSearchIndex() }
+    // Back closes the revealed field and clears the query before leaving Settings.
+    BackHandler(enabled = searchActive) { searchActive = false; query = "" }
+    val openSearchResult: (String) -> Unit = { route ->
+        onOpenRoute(route)
+        searchActive = false
+        query = ""
+    }
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
     // The suspend Clipboard API is unnecessary for a synchronous copy in a click handler.
@@ -265,6 +313,10 @@ fun SettingsScreen(
                 if (sync.isNotBlank()) {
                     if (isNotEmpty()) append("\n\n")
                     append("Sync:\n").append(sync)
+                }
+                run {
+                    if (isNotEmpty()) append("\n\n")
+                    append("Faces:\n").append(eu.akoos.photos.util.FaceDiagnostics.snapshot())
                 }
                 if (crashLog.isNotBlank()) {
                     if (isNotEmpty()) append("\n\n")
@@ -341,12 +393,28 @@ fun SettingsScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .navigationBarsPadding()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp)
-                .padding(bottom = 32.dp),
+                .padding(horizontal = 20.dp),
         ) {
-            // Clear the floating header that draws over this scrolling content.
-            Spacer(Modifier.height(contentTopPad))
+            // Groups vs results swap. A blank query shows the six setting groups; a non-blank one
+            // crossfades to the matching results. Both scrollers run full height so the content passes
+            // UNDER the floating header; the top inset lives inside each scroller, not as a fixed gap
+            // above the swap, so nothing shows a solid band under the pills.
+            Crossfade(
+                targetState = query.isBlank(),
+                modifier = Modifier.weight(1f),
+                label = "settingsContent",
+            ) { showGroups ->
+                if (showGroups) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .verticalScroll(groupsScrollState)
+                            .padding(bottom = 32.dp),
+                    ) {
+                    // Reserve the floating-header height inside the scroll, so the groups slide up
+                    // behind the pills instead of leaving a fixed band above them.
+                    Spacer(Modifier.height(contentTopPad))
+                    Spacer(Modifier.height(12.dp))
 
             // ── Account ───────────────────────────────────────────────────────
             // The whole row is now a tap target, opens AccountScreen with avatar,
@@ -356,6 +424,7 @@ fun SettingsScreen(
             // step.
             CollapsibleSection(label = stringResource(R.string.settings_account_section)) {
             SettingsCard {
+                if (state.isSignedIn) {
                 val debouncedAccountClick = rememberDebouncedAction { onAccountClick() }
                 Row(
                     modifier = Modifier.fillMaxWidth()
@@ -400,14 +469,75 @@ fun SettingsScreen(
                         modifier = Modifier.size(13.dp),
                     )
                 }
+                } else {
+                    // No account: a single sign-in row replaces the account card, same row style.
+                    Row(
+                        modifier = Modifier.fillMaxWidth()
+                            .clickable(onClick = onSignIn)
+                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = stringResource(R.string.settings_sign_in_to_proton),
+                            color = colors.fgPrimary,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowForwardIos,
+                            contentDescription = null,
+                            tint = colors.fgMute,
+                            modifier = Modifier.size(13.dp),
+                        )
+                    }
+                }
             }
+            }
+
+            // New-news banner: shown right under the account section while there is unread news (the
+            // same signal as the settings-icon dot, off when news is switched off). Tapping opens the
+            // News screen, which marks the feed read and clears both this banner and the dot.
+            if (newsUnread) {
+                Spacer(Modifier.height(12.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(colors.accent.copy(alpha = 0.12f))
+                        .border(1.dp, colors.accent.copy(alpha = 0.45f), RoundedCornerShape(14.dp))
+                        .clickable(onClick = onNewsClick)
+                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(Modifier.size(8.dp).clip(CircleShape).background(colors.accent))
+                    Spacer(Modifier.width(12.dp))
+                    Text(
+                        stringResource(R.string.news_banner),
+                        color = colors.fgPrimary,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowForwardIos,
+                        contentDescription = null,
+                        tint = colors.accent,
+                        modifier = Modifier.size(13.dp),
+                    )
+                }
             }
 
             Spacer(Modifier.height(20.dp))
 
-            // ── Sync (backup status, realtime) ────────────────────────────────
-            CollapsibleSection(label = stringResource(R.string.sync_section)) {
+            // ── Backup & Storage ──────────────────────────────────────────────
+            // Backup status + activity and the storage controls share one group:
+            // everything about where the library lives, on the device and on Drive.
+            CollapsibleSection(label = stringResource(R.string.settings_backup_storage_section)) {
             SettingsCard {
+                // Cloud-backed rows (backup status, activity, sync settings) need an account,
+                // so the local-only session hides them and keeps the on-device controls below.
+                if (state.isSignedIn) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -523,17 +653,10 @@ fun SettingsScreen(
                     description = stringResource(R.string.sync_open_settings_desc),
                     onClick = onSyncSettingsClick,
                 )
-            }
-            }
-
-            Spacer(Modifier.height(20.dp))
-
-            // ── Storage section ───────────────────────────────────────────────
-            // Recently Deleted + Storage nav grouped together, both are about
-            // "where my data lives on device + Drive". Kept above the device-config
-            // section so the user finds disk-space related controls without scrolling.
-            CollapsibleSection(label = stringResource(R.string.settings_storage_section)) {
-            SettingsCard {
+                RowDivider()
+                }
+                // Storage controls (device + Drive usage, recently deleted, duplicate
+                // finder) stay available without an account, so the local-only session keeps them.
                 NavRow(
                     label = stringResource(R.string.settings_storage_section),
                     description = stringResource(R.string.settings_storage_nav_desc),
@@ -573,8 +696,8 @@ fun SettingsScreen(
 
             Spacer(Modifier.height(20.dp))
 
-            // ── Settings nav rows ─────────────────────────────────────────────
-            CollapsibleSection(label = stringResource(R.string.settings_section_settings)) {
+            // ── Privacy & Security ────────────────────────────────────────────
+            CollapsibleSection(label = stringResource(R.string.settings_privacy_security)) {
             SettingsCard {
                 NavRow(
                     label = stringResource(R.string.settings_privacy_security),
@@ -592,35 +715,31 @@ fun SettingsScreen(
                     description = stringResource(R.string.notifications_nav_desc),
                     onClick = onNotificationsClick,
                 )
-                RowDivider()
-                // Appearance + Language merged into one entry, the destination is the
-                // unified appearance screen which now hosts theme + palette + language
-                // in a single scroll. Cuts an entire row from the Settings list.
+            }
+            }
+
+            Spacer(Modifier.height(20.dp))
+
+            // ── Appearance ────────────────────────────────────────────────────
+            // Appearance + Language merged into one entry, the destination is the
+            // unified appearance screen which now hosts theme + palette + language
+            // in a single scroll.
+            CollapsibleSection(label = stringResource(R.string.settings_appearance)) {
+            SettingsCard {
                 NavRow(
                     label = stringResource(R.string.settings_appearance),
                     description = stringResource(R.string.settings_appearance_desc),
                     onClick = onAppearanceClick,
-                )
-                RowDivider()
-                NavRow(
-                    label = stringResource(R.string.settings_copy_diagnostics),
-                    description = stringResource(R.string.settings_copy_diagnostics_desc),
-                    onClick = {
-                        // The vault snapshot is read on demand, so ask for it as the chooser opens
-                        // rather than keeping a directory walk live behind every settings change.
-                        viewModel.refreshVaultDiagnostics()
-                        showDiagnosticsChooser = true
-                    },
                 )
             }
             }
 
             Spacer(Modifier.height(20.dp))
 
-            // ── About ──────────────────────────────────────────────────────────
+            // ── Help & About ──────────────────────────────────────────────────
             // App identity, what's new, news, help, and the update check the version
-            // answers for, gathered as their own section rather than trailing the settings.
-            CollapsibleSection(label = stringResource(R.string.settings_section_about)) {
+            // answers for, plus the diagnostics export and the screenshot overlay.
+            CollapsibleSection(label = stringResource(R.string.settings_help_about_section)) {
             SettingsCard {
                 NavRow(
                     label = stringResource(R.string.whats_new_title),
@@ -654,16 +773,18 @@ fun SettingsScreen(
                     ),
                     onClick = onCheckForUpdatesClick,
                 )
-            }
-            }
-
-            Spacer(Modifier.height(20.dp))
-
-            // ── Extras ─────────────────────────────────────────────────────────
-            // Home for optional utility features that sit outside the core backup
-            // flow. The screenshot quick-action bar is the first entry here.
-            CollapsibleSection(label = stringResource(R.string.settings_section_extras)) {
-            SettingsCard {
+                RowDivider()
+                NavRow(
+                    label = stringResource(R.string.settings_copy_diagnostics),
+                    description = stringResource(R.string.settings_copy_diagnostics_desc),
+                    onClick = {
+                        // The vault snapshot is read on demand, so ask for it as the chooser opens
+                        // rather than keeping a directory walk live behind every settings change.
+                        viewModel.refreshVaultDiagnostics()
+                        showDiagnosticsChooser = true
+                    },
+                )
+                RowDivider()
                 // Screenshot quick actions is a utility bar over a fresh screenshot; enabling it
                 // needs the draw-over-other-apps grant, so the toggle routes through the launcher
                 // and only flips on once that permission actually landed.
@@ -701,6 +822,50 @@ fun SettingsScreen(
                 Spacer(Modifier.height(20.dp))
                 DeviceHealthDebugCard()
             }
+                    }
+                } else {
+                    // Resolve each entry's localized title + breadcrumb (a composable read), then keep
+                    // those whose folded title, breadcrumb or any keyword contains the folded query —
+                    // the same accent-insensitive rule the photo search uses.
+                    val folded = SearchFilter.fold(query.trim())
+                    val matches = searchIndex
+                        .map { entry ->
+                            Triple(entry, stringResource(entry.titleRes), stringResource(entry.breadcrumbRes))
+                        }
+                        .filter { (entry, title, breadcrumb) ->
+                            (state.isSignedIn || !entry.cloud) && (
+                                SearchFilter.fold(title).contains(folded) ||
+                                    SearchFilter.fold(breadcrumb).contains(folded) ||
+                                    entry.keywords.any { SearchFilter.fold(it).contains(folded) }
+                            )
+                        }
+                    if (matches.isEmpty()) {
+                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Text(
+                                stringResource(R.string.settings_search_no_results),
+                                color = colors.fgMute,
+                                fontSize = 14.sp,
+                            )
+                        }
+                    } else {
+                        LazyColumn(
+                            modifier = Modifier.fillMaxSize(),
+                            contentPadding = PaddingValues(top = contentTopPad + 12.dp, bottom = 32.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            items(matches, key = { "${it.first.titleRes}_${it.first.route}" }) { (entry, title, breadcrumb) ->
+                                SettingsCard {
+                                    NavRow(
+                                        label = title,
+                                        description = breadcrumb,
+                                        onClick = { openSearchResult(entry.route) },
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         eu.akoos.photos.presentation.common.ThemedSnackbarHost(snackbarHostState, modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding())
@@ -709,32 +874,111 @@ fun SettingsScreen(
         // title centered in a pill; the list scrolls under it.
         val debouncedClose = rememberDebouncedAction { onBack() }
         FloatingHeaderScrim()
-        Row(
+        BoxWithConstraints(
             modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(start = 12.dp, end = 12.dp, top = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
         ) {
+            // Tapping the search icon grows it sideways into a bar filling the row beside the close
+            // button, while the centered title fades out, so the header morphs rather than opening a
+            // field below it. Collapsed it is just the 40dp icon and the title is centered again.
+            val expandedSearchWidth = maxWidth - 48.dp
+            val searchWidth by animateDpAsState(
+                targetValue = if (searchActive) expandedSearchWidth else 40.dp,
+                animationSpec = tween(220),
+                label = "headerSearchWidth",
+            )
+            val titleAlpha by animateFloatAsState(
+                targetValue = if (searchActive) 0f else 1f,
+                animationSpec = tween(220),
+                label = "headerTitleAlpha",
+            )
+            val pillShape = RoundedCornerShape(20.dp)
+
+            // Centered title, still measured while faded so nothing reflows; the search bar draws over it.
+            Box(
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .alpha(titleAlpha)
+                    .clip(pillShape)
+                    .background(colors.pillBg, pillShape)
+                    .border(0.5.dp, colors.pillBorder, pillShape)
+                    .padding(horizontal = 16.dp, vertical = 9.dp),
+            ) {
+                Text(stringResource(R.string.settings_title), color = colors.fgPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            }
+
             IconBubble(
+                modifier = Modifier.align(Alignment.CenterStart),
                 icon = Icons.Default.Close,
                 contentDescription = stringResource(R.string.close),
                 onClick = debouncedClose,
                 diameter = 40.dp,
                 iconSize = 16.dp,
-                background = colors.surfaceWeak,
+                background = colors.pillBg,
                 borderColor = colors.pillBorder,
-                tint = colors.fgDim,
+                tint = colors.fgPrimary,
             )
-            Spacer(Modifier.weight(1f))
+
+            // Morphing search element: a 40dp icon bubble collapsed, the input bar filling the row open.
             Box(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(colors.surfaceWeak, RoundedCornerShape(20.dp))
-                    .border(0.5.dp, colors.pillBorder, RoundedCornerShape(20.dp))
-                    .padding(horizontal = 16.dp, vertical = 9.dp),
+                    .align(Alignment.CenterEnd)
+                    .width(searchWidth)
+                    .height(40.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(colors.pillBg, RoundedCornerShape(14.dp))
+                    .border(0.5.dp, if (query.isNotEmpty()) colors.accent else colors.pillBorder, RoundedCornerShape(14.dp))
+                    .clickable(enabled = !searchActive) { searchActive = true },
             ) {
-                Text(stringResource(R.string.settings_title), color = colors.fgPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                if (searchActive) {
+                    Row(
+                        modifier = Modifier.fillMaxSize().padding(start = 12.dp, end = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Icon(Icons.Filled.Search, contentDescription = null, tint = colors.fgDim, modifier = Modifier.size(18.dp))
+                        Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+                            if (query.isEmpty()) {
+                                Text(
+                                    stringResource(R.string.settings_search_hint),
+                                    color = colors.fgMute,
+                                    fontSize = 14.sp,
+                                    maxLines = 1,
+                                )
+                            }
+                            BasicTextField(
+                                value = query,
+                                onValueChange = { query = it },
+                                singleLine = true,
+                                textStyle = TextStyle(color = colors.fgPrimary, fontSize = 14.sp),
+                                cursorBrush = SolidColor(colors.accent),
+                                modifier = Modifier.fillMaxWidth().focusRequester(focusRequester),
+                            )
+                        }
+                        // Clears a non-empty query, then closes the field on the next tap.
+                        Box(
+                            modifier = Modifier
+                                .size(28.dp)
+                                .clip(CircleShape)
+                                .clickable { if (query.isNotEmpty()) query = "" else searchActive = false },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                Icons.Filled.Close,
+                                contentDescription = stringResource(R.string.cd_clear_search),
+                                tint = colors.fgDim,
+                                modifier = Modifier.size(18.dp),
+                            )
+                        }
+                    }
+                } else {
+                    Icon(
+                        Icons.Filled.Search,
+                        contentDescription = stringResource(R.string.settings_search_hint),
+                        tint = colors.fgDim,
+                        modifier = Modifier.align(Alignment.Center).size(16.dp),
+                    )
+                }
             }
-            Spacer(Modifier.weight(1f))
-            Spacer(Modifier.size(40.dp))
         }
     }
 
@@ -750,9 +994,11 @@ fun SettingsScreen(
 fun AiSettingsScreen(
     onBack: () -> Unit,
     onFaceRecognitionClick: () -> Unit,
+    onExcludedFacesClick: () -> Unit,
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val colors = AppColors.current
     SettingsSubPageScaffold(title = stringResource(R.string.settings_ai_section), onBack = onBack) {
         SettingsCard {
             ToggleRow(
@@ -783,14 +1029,45 @@ fun AiSettingsScreen(
                 RowDivider()
                 ToggleRow(
                     label = stringResource(R.string.settings_ai_face_toggle),
-                    description = stringResource(
-                        if (state.faceRecognitionAvailable) R.string.settings_ai_face_desc
-                        else R.string.settings_ai_face_unavailable,
-                    ),
+                    // While the model fetches the row reads as busy, a failed fetch is stated in place so
+                    // the switch staying off is explained, and a switched-on feature whose model is no
+                    // longer on the device says so rather than looking as if it were still working.
+                    description = when {
+                        state.faceModelDownloading ->
+                            stringResource(R.string.settings_ai_face_downloading)
+                        state.faceModelDownloadFailed ->
+                            stringResource(R.string.settings_ai_face_download_failed)
+                        state.faceEnabled && !state.faceRecognitionAvailable ->
+                            stringResource(R.string.settings_ai_face_model_missing)
+                        else -> stringResource(R.string.settings_ai_face_desc)
+                    },
                     checked = state.faceEnabled,
                     onCheckedChange = viewModel::setFaceEnabled,
-                    enabled = state.faceRecognitionAvailable,
+                    enabled = !state.faceModelDownloading,
                 )
+                // A spinner under the toggle makes the model fetch visibly in progress; a failed fetch
+                // adds a line saying the switch itself is the retry, so a stuck-looking row is explained.
+                if (state.faceModelDownloading) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = 16.dp, end = 16.dp, bottom = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp,
+                            color = colors.accent,
+                        )
+                    }
+                } else if (state.faceModelDownloadFailed) {
+                    Text(
+                        text = stringResource(R.string.settings_ai_face_download_retry),
+                        color = colors.fgMute,
+                        fontSize = 12.5.sp,
+                        modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 14.dp),
+                    )
+                }
             }
 
             // The face management entry only makes sense once the scan is switched on, so its live
@@ -804,6 +1081,12 @@ fun AiSettingsScreen(
                         label = stringResource(R.string.settings_face_section),
                         description = faceRowSubtitle(progress.state, peopleCount),
                         onClick = onFaceRecognitionClick,
+                    )
+                    RowDivider()
+                    NavRow(
+                        label = stringResource(R.string.settings_face_excluded),
+                        description = stringResource(R.string.settings_face_excluded_desc),
+                        onClick = onExcludedFacesClick,
                     )
                 }
             }
@@ -840,10 +1123,23 @@ fun AiSettingsScreen(
                 OcrModelPrompt.None -> Unit
             }
 
-            // The face-disable drawer, raised when Face recognition is switched off, in two stages so an
-            // accidental tap cannot delete: Remove asks for a final confirmation, ConfirmRemove then wipes
-            // the model files and every detected face and name. Keep, Cancel, or a swipe leaves both in place.
+            // The face model drawers. Download is the consent raised when the feature is switched on with
+            // no model on disk; the size quoted is the figure that goes over the wire. Remove and
+            // ConfirmRemove form the two-stage disable, so an accidental tap cannot delete: Remove asks
+            // for a final confirmation, ConfirmRemove then wipes the model files and every detected face
+            // and name. Keep, Cancel, or a swipe leaves everything in place.
             when (state.faceModelPrompt) {
+                FaceModelPrompt.Download -> ConfirmSheet(
+                    title = stringResource(R.string.settings_ai_face_download_title),
+                    message = stringResource(
+                        R.string.settings_ai_face_download_message,
+                        formatBytes(FaceModelAssets.TOTAL_DOWNLOAD_BYTES),
+                    ),
+                    confirmLabel = stringResource(R.string.settings_ai_face_download_confirm),
+                    dismissLabel = stringResource(R.string.cancel),
+                    onConfirm = viewModel::confirmFaceModelDownload,
+                    onDismiss = viewModel::dismissFaceModelPrompt,
+                )
                 FaceModelPrompt.Remove -> ConfirmSheet(
                     title = stringResource(R.string.settings_ai_face_remove_title),
                     message = stringResource(R.string.settings_ai_face_remove_message),
@@ -893,6 +1189,7 @@ fun FaceRecognitionScreen(
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val transferMsg by viewModel.faceTransferMsg.collectAsStateWithLifecycle()
+    val transferInProgress by viewModel.faceTransferInProgress.collectAsStateWithLifecycle()
     val transferCtx = LocalContext.current
     LaunchedEffect(transferMsg) {
         transferMsg?.let {
@@ -900,13 +1197,13 @@ fun FaceRecognitionScreen(
             viewModel.clearFaceTransferMsg()
         }
     }
-    val progress by viewModel.faceIndexingProgress.collectAsStateWithLifecycle()
+    val faceUi by viewModel.faceIndexingUi.collectAsStateWithLifecycle()
     val peopleCount by viewModel.peopleCount.collectAsStateWithLifecycle()
     val people by viewModel.people.collectAsStateWithLifecycle()
 
     SettingsSubPageScaffold(title = stringResource(R.string.settings_face_section), onBack = onBack) {
         FaceStatusCard(
-            progress = progress,
+            ui = faceUi,
             peopleCount = peopleCount,
             people = people,
             onSetPaused = viewModel::setFaceIndexingPaused,
@@ -919,6 +1216,7 @@ fun FaceRecognitionScreen(
         )
         Spacer(Modifier.height(20.dp))
         FaceTransferCard(
+            inProgress = transferInProgress,
             onExport = viewModel::exportFaceIndex,
             onImport = viewModel::importFaceIndex,
         )
@@ -933,24 +1231,37 @@ fun FaceRecognitionScreen(
  */
 @Composable
 private fun FaceStatusCard(
-    progress: FaceIndexingProgress,
+    ui: FaceIndexingUi,
     peopleCount: Int,
     people: List<eu.akoos.photos.presentation.gallery.PersonUi>,
     onSetPaused: (Boolean) -> Unit,
     onSeeAllPeople: () -> Unit,
 ) {
     val colors = AppColors.current
-    val state = progress.state
+    val state = ui.state
+    // While a walk is active or pending, a persistent device-health block is what has actually parked
+    // it: the scheduler keeps reporting Running when it stands down for a warm phone, a low battery or
+    // the power saver, so name that reason in place of the plain running / paused label.
+    val healthLabel = if (state == FaceIndexingState.Running || state == FaceIndexingState.Paused) {
+        when (ui.blockReason) {
+            HealthBlockReason.LOW_BATTERY -> stringResource(R.string.settings_ai_indexing_paused_battery)
+            HealthBlockReason.WARM -> stringResource(R.string.settings_ai_indexing_paused_warm)
+            HealthBlockReason.POWER_SAVE -> stringResource(R.string.settings_ai_indexing_paused_power_save)
+            else -> null
+        }
+    } else {
+        null
+    }
     // Indexing is automatic, so a status line only appears while something is actually happening; an
     // idle or finished scan shows just the people summary, with no "not started" wording.
-    val stateLabel = when (state) {
+    val stateLabel = healthLabel ?: when (state) {
         FaceIndexingState.Running -> stringResource(R.string.settings_ai_indexing_running)
         FaceIndexingState.WaitingModel -> stringResource(R.string.settings_ai_indexing_waiting)
         FaceIndexingState.Paused -> stringResource(R.string.settings_ai_indexing_paused)
         else -> null
     }
     val showBar = (state == FaceIndexingState.Running || state == FaceIndexingState.Paused) &&
-        progress.total > 0
+        ui.total > 0
 
     SettingsCard {
         Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
@@ -968,13 +1279,13 @@ private fun FaceStatusCard(
             if (showBar) {
                 Spacer(Modifier.height(12.dp))
                 LinearProgressIndicator(
-                    progress = { progress.indexed.toFloat() / progress.total },
+                    progress = { ui.indexed.toFloat() / ui.total },
                     modifier = Modifier.fillMaxWidth(),
                     color = colors.accent,
                 )
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    stringResource(R.string.settings_ai_indexing_progress, progress.indexed, progress.total),
+                    stringResource(R.string.settings_ai_indexing_progress, ui.indexed, ui.total),
                     color = colors.fgMute,
                     fontSize = 12.sp,
                 )
@@ -1003,6 +1314,7 @@ private fun FaceStatusCard(
                         label = stringResource(R.string.settings_ai_pause),
                         icon = Icons.Default.Pause,
                         onClick = { onSetPaused(true) },
+                        enabled = ui.actionEnabled,
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }
@@ -1012,6 +1324,7 @@ private fun FaceStatusCard(
                         label = stringResource(R.string.settings_ai_resume),
                         icon = Icons.Default.PlayArrow,
                         onClick = { onSetPaused(false) },
+                        enabled = ui.actionEnabled,
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }
@@ -1081,6 +1394,7 @@ private fun FaceMaintenanceCard(
  */
 @Composable
 private fun FaceTransferCard(
+    inProgress: Boolean,
     onExport: (android.net.Uri) -> Unit,
     onImport: (android.net.Uri) -> Unit,
 ) {
@@ -1098,16 +1412,20 @@ private fun FaceTransferCard(
     SettingsCard {
         ActionRow(
             label = stringResource(R.string.settings_ai_export),
-            description = stringResource(R.string.settings_face_export_desc),
+            description = if (inProgress) stringResource(R.string.settings_ai_transfer_working)
+                else stringResource(R.string.settings_face_export_desc),
             icon = Icons.Default.Upload,
             onClick = { showExportWarn = true },
+            enabled = !inProgress,
         )
         RowDivider()
         ActionRow(
             label = stringResource(R.string.settings_ai_import),
-            description = stringResource(R.string.settings_face_import_desc),
+            description = if (inProgress) stringResource(R.string.settings_ai_transfer_working)
+                else stringResource(R.string.settings_face_import_desc),
             icon = Icons.Default.Download,
             onClick = { showImportConfirm = true },
+            enabled = !inProgress,
         )
     }
 
@@ -1138,30 +1456,109 @@ private fun FaceTransferCard(
 @Composable
 fun SyncSettingsScreen(
     onBack: () -> Unit,
-    onBackupContentClick: () -> Unit = {},
-    onBackupBehaviorClick: () -> Unit = {},
-    onNetworkClick: () -> Unit = {},
+    onBackupFoldersClick: () -> Unit = {},
+    onExcludedFoldersClick: () -> Unit = {},
+    onProcessingClick: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val colors = AppColors.current
     SettingsSubPageScaffold(title = stringResource(R.string.sync_section), onBack = onBack) {
-        // Hub: each backup concern opens its own focused sub-page instead of one
-        // long mixed scroll (what gets backed up / how it runs / network usage).
+        // ── What gets backed up ──────────────────────────────────────────────
+        SectionLabel(stringResource(R.string.settings_what_backed_up_section))
+        Spacer(Modifier.height(8.dp))
+        SettingsCard {
+            ToggleRow(
+                label = stringResource(R.string.settings_backup_everything),
+                description = stringResource(R.string.settings_backup_everything_desc),
+                checked = state.backupEverything,
+                onCheckedChange = viewModel::setBackupEverything,
+                enabled = state.autoSync,
+            )
+            // Include/exclude drilldown is mutually exclusive on the everything-toggle.
+            if (state.backupEverything) {
+                RowDivider()
+                val excludedCount = state.excludedFolderNames.size
+                val excludedDesc = when (excludedCount) {
+                    0 -> stringResource(R.string.settings_excluded_folders_desc_none)
+                    1 -> stringResource(R.string.settings_excluded_folders_desc_singular)
+                    else -> stringResource(R.string.settings_excluded_folders_desc_count, excludedCount)
+                }
+                IndentedNavRow(
+                    label = stringResource(R.string.settings_excluded_folders),
+                    description = excludedDesc,
+                    onClick = onExcludedFoldersClick,
+                    enabled = state.autoSync,
+                )
+            } else {
+                RowDivider()
+                IndentedNavRow(
+                    label = stringResource(R.string.settings_backup_folders),
+                    description = stringResource(R.string.settings_backup_folders_desc),
+                    onClick = onBackupFoldersClick,
+                    enabled = state.autoSync,
+                )
+            }
+        }
+
+        Spacer(Modifier.height(20.dp))
+
+        // ── How backup runs ──────────────────────────────────────────────────
+        SectionLabel(stringResource(R.string.settings_backup_how_section))
+        Spacer(Modifier.height(8.dp))
+        SettingsCard {
+            ToggleRow(
+                label = stringResource(R.string.settings_continuous_backup),
+                description = stringResource(R.string.settings_continuous_backup_desc),
+                checked = state.autoSync,
+                onCheckedChange = viewModel::setAutoSync,
+            )
+            RowDivider()
+            ToggleRow(
+                label = stringResource(R.string.settings_delete_after_backup),
+                description = stringResource(R.string.settings_delete_after_backup_desc),
+                checked = state.deleteLocalAfterBackup,
+                onCheckedChange = viewModel::setDeleteLocalAfterBackup,
+                indented = true,
+                enabled = state.autoSync,
+            )
+        }
+
+        Spacer(Modifier.height(20.dp))
+
+        // ── Upload processing ────────────────────────────────────────────────
+        // File name, metadata and quality controls live one level down, so the
+        // common backup switches aren't buried under them.
         SettingsCard {
             NavRow(
-                label = stringResource(R.string.settings_what_backed_up_section),
-                onClick = onBackupContentClick,
+                label = stringResource(R.string.settings_metadata),
+                description = stringResource(R.string.settings_metadata_desc),
+                onClick = onProcessingClick,
+            )
+        }
+
+        Spacer(Modifier.height(20.dp))
+
+        // ── Network usage ────────────────────────────────────────────────────
+        SectionLabel(stringResource(R.string.settings_network_section))
+        Spacer(Modifier.height(8.dp))
+        SettingsCard {
+            // Sync Wi-Fi only gates backing UP to Drive (meaningful only while continuous
+            // backup is on); full-res Wi-Fi only gates downloading full-resolution photos
+            // for the viewer. Both are network-consumption choices, grouped here.
+            ToggleRow(
+                label = stringResource(R.string.settings_sync_wifi_only),
+                description = stringResource(R.string.settings_sync_wifi_desc),
+                checked = state.syncWifiOnly,
+                onCheckedChange = viewModel::setSyncWifiOnly,
+                enabled = state.autoSync,
             )
             RowDivider()
-            NavRow(
-                label = stringResource(R.string.settings_backup_how_section),
-                onClick = onBackupBehaviorClick,
-            )
-            RowDivider()
-            NavRow(
-                label = stringResource(R.string.settings_network_section),
-                onClick = onNetworkClick,
+            ToggleRow(
+                label = stringResource(R.string.settings_fullres_wifi_only),
+                description = stringResource(R.string.settings_fullres_wifi_only_desc),
+                checked = state.fullresWifiOnly,
+                onCheckedChange = viewModel::setFullresWifiOnly,
             )
         }
 
@@ -1200,265 +1597,26 @@ fun SyncSettingsScreen(
     }
 }
 
-// ── Backup content sub-page (what gets backed up) ────────────────────────────
+// ── Backup processing sub-page ────────────────────────────────────────────────
 
+/**
+ * The advanced upload-processing controls, one level under the backup page: how the uploaded copy is
+ * named, what metadata it keeps, and how far it is re-encoded. The common backup switches stay on the
+ * parent page; these three sections moved here so they no longer bury them.
+ */
 @Composable
-fun BackupContentSettingsScreen(
-    onBack: () -> Unit,
-    onBackupFoldersClick: () -> Unit = {},
-    onExcludedFoldersClick: () -> Unit = {},
-    viewModel: SettingsViewModel = hiltViewModel(),
-) {
-    val state by viewModel.uiState.collectAsStateWithLifecycle()
-    SettingsSubPageScaffold(title = stringResource(R.string.settings_what_backed_up_section), onBack = onBack) {
-        SettingsCard {
-            ToggleRow(
-                label = stringResource(R.string.settings_backup_everything),
-                description = stringResource(R.string.settings_backup_everything_desc),
-                checked = state.backupEverything,
-                onCheckedChange = viewModel::setBackupEverything,
-                enabled = state.autoSync,
-            )
-            // Include/exclude drilldown is mutually exclusive on the everything-toggle.
-            if (state.backupEverything) {
-                RowDivider()
-                val excludedCount = state.excludedFolderNames.size
-                val excludedDesc = when (excludedCount) {
-                    0 -> stringResource(R.string.settings_excluded_folders_desc_none)
-                    1 -> stringResource(R.string.settings_excluded_folders_desc_singular)
-                    else -> stringResource(R.string.settings_excluded_folders_desc_count, excludedCount)
-                }
-                IndentedNavRow(
-                    label = stringResource(R.string.settings_excluded_folders),
-                    description = excludedDesc,
-                    onClick = onExcludedFoldersClick,
-                    enabled = state.autoSync,
-                )
-            } else {
-                RowDivider()
-                IndentedNavRow(
-                    label = stringResource(R.string.settings_backup_folders),
-                    description = stringResource(R.string.settings_backup_folders_desc),
-                    onClick = onBackupFoldersClick,
-                    enabled = state.autoSync,
-                )
-            }
-        }
-    }
-}
-
-// ── Backup behaviour sub-page (how backup runs) ───────────────────────────────
-
-@Composable
-fun BackupBehaviorSettingsScreen(
-    onBack: () -> Unit,
-    onUploadProcessingClick: () -> Unit = {},
-    viewModel: SettingsViewModel = hiltViewModel(),
-) {
-    val state by viewModel.uiState.collectAsStateWithLifecycle()
-    SettingsSubPageScaffold(title = stringResource(R.string.settings_backup_how_section), onBack = onBack) {
-        SettingsCard {
-            ToggleRow(
-                label = stringResource(R.string.settings_continuous_backup),
-                description = stringResource(R.string.settings_continuous_backup_desc),
-                checked = state.autoSync,
-                onCheckedChange = viewModel::setAutoSync,
-            )
-            RowDivider()
-            ToggleRow(
-                label = stringResource(R.string.settings_delete_after_backup),
-                description = stringResource(R.string.settings_delete_after_backup_desc),
-                checked = state.deleteLocalAfterBackup,
-                onCheckedChange = viewModel::setDeleteLocalAfterBackup,
-                indented = true,
-                enabled = state.autoSync,
-            )
-        }
-
-        Spacer(Modifier.height(20.dp))
-
-        // Rename/strip/compress all happen as a photo is backed up, so the processing hub
-        // sits with the other backup-behaviour controls.
-        SettingsCard {
-            NavRow(
-                label = stringResource(R.string.settings_metadata),
-                description = stringResource(R.string.settings_metadata_desc),
-                onClick = onUploadProcessingClick,
-            )
-        }
-    }
-}
-
-// ── Backup network sub-page (network usage) ───────────────────────────────────
-
-@Composable
-fun BackupNetworkSettingsScreen(
+fun BackupProcessingScreen(
     onBack: () -> Unit,
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
-    SettingsSubPageScaffold(title = stringResource(R.string.settings_network_section), onBack = onBack) {
-        SettingsCard {
-            // Sync Wi-Fi only gates backing UP to Drive (meaningful only while continuous
-            // backup is on); full-res Wi-Fi only gates downloading full-resolution photos
-            // for the viewer. Both are network-consumption choices, grouped here.
-            ToggleRow(
-                label = stringResource(R.string.settings_sync_wifi_only),
-                description = stringResource(R.string.settings_sync_wifi_desc),
-                checked = state.syncWifiOnly,
-                onCheckedChange = viewModel::setSyncWifiOnly,
-                enabled = state.autoSync,
-            )
-            RowDivider()
-            ToggleRow(
-                label = stringResource(R.string.settings_fullres_wifi_only),
-                description = stringResource(R.string.settings_fullres_wifi_only_desc),
-                checked = state.fullresWifiOnly,
-                onCheckedChange = viewModel::setFullresWifiOnly,
-            )
-        }
-    }
-}
-
-// ── Storage Settings sub-page ─────────────────────────────────────────────────
-
-@Composable
-fun StorageSettingsScreen(
-    onBack: () -> Unit,
-    onOpenTrash: (cloud: Boolean) -> Unit = {},
-    onFreeUpSpace: () -> Unit = {},
-    viewModel: SettingsViewModel = hiltViewModel(),
-) {
-    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val context = LocalContext.current
     val colors = AppColors.current
-    LaunchedEffect(Unit) { viewModel.refreshLocalStorage() }
-
-    SettingsSubPageScaffold(title = stringResource(R.string.settings_storage_section), onBack = onBack) {
-        // Manual refresh sits top-right; the two storage groups label themselves below.
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.End,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(24.dp)
-                    .clip(CircleShape)
-                    .clickable { viewModel.refresh() },
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Refresh,
-                    contentDescription = stringResource(R.string.settings_storage_refresh),
-                    tint = colors.fgMute,
-                    modifier = Modifier.size(14.dp),
-                )
-            }
-        }
-        Spacer(Modifier.height(8.dp))
-        StorageContent(
-            state = state,
-            onFreeUp = onFreeUpSpace,
-            onClearCache = { viewModel.clearAppCache() },
-            onClearOffline = { viewModel.clearOfflineStorage() },
-            onOpenTrash = onOpenTrash,
-        )
-
-        Spacer(Modifier.height(20.dp))
-
-        // The recurring counterpart to the manual "Free up" action on the device gauge above,
-        // so it sits with it rather than under backup behaviour.
-        SectionLabel(stringResource(R.string.settings_free_up_auto_section))
-        Spacer(Modifier.height(8.dp))
-        SettingsCard {
-            ToggleRow(
-                label = stringResource(R.string.settings_free_up_auto),
-                description = stringResource(R.string.settings_free_up_auto_desc),
-                checked = state.autoFreeUp,
-                onCheckedChange = viewModel::setAutoFreeUp,
-            )
-            RowDivider()
-            SelectRow(
-                label = stringResource(R.string.settings_free_up_interval),
-                description = stringResource(R.string.settings_free_up_interval_desc),
-                selected = state.freeUpInterval,
-                onSelected = viewModel::setFreeUpInterval,
-                indented = true,
-                enabled = state.autoFreeUp,
-            )
-        }
-    }
-}
-
-// ── Privacy & Security hub ────────────────────────────────────────────────────
-
-/** Hub that groups the privacy/metadata and security sub-pages under one Settings entry. */
-@Composable
-fun PrivacySecuritySettingsScreen(
-    onBack: () -> Unit,
-    onPrivacyClick: () -> Unit,
-    onSecurityClick: () -> Unit,
-) {
-    SettingsSubPageScaffold(title = stringResource(R.string.settings_privacy_security), onBack = onBack) {
-        SettingsCard {
-            NavRow(
-                label = stringResource(R.string.settings_privacy),
-                description = stringResource(R.string.settings_privacy_desc),
-                onClick = onPrivacyClick,
-            )
-            RowDivider()
-            NavRow(
-                label = stringResource(R.string.settings_security),
-                description = stringResource(R.string.settings_security_desc),
-                onClick = onSecurityClick,
-            )
-        }
-    }
-}
-
-// ── Metadata Settings sub-page (under Backup) ─────────────────────────────────
-// Rename + EXIF stripping happen when a photo is backed up, so these controls live under
-// Sync/Backup alongside the other backup options.
-
-@Composable
-fun MetadataSettingsScreen(
-    onBack: () -> Unit,
-    onOpenFileName: () -> Unit = {},
-    onOpenMetadata: () -> Unit = {},
-    onOpenQuality: () -> Unit = {},
-) {
     SettingsSubPageScaffold(title = stringResource(R.string.settings_metadata), onBack = onBack) {
-        // Hub: each processing concern opens its own focused sub-page (file name / metadata /
-        // quality and size) instead of one long mixed scroll.
-        SettingsCard {
-            NavRow(
-                label = stringResource(R.string.settings_section_file_name),
-                onClick = onOpenFileName,
-            )
-            RowDivider()
-            NavRow(
-                label = stringResource(R.string.settings_privacy_section_metadata),
-                onClick = onOpenMetadata,
-            )
-            RowDivider()
-            NavRow(
-                label = stringResource(R.string.settings_section_quality_size),
-                onClick = onOpenQuality,
-            )
-        }
-    }
-}
-
-// ── Upload processing: File name sub-page ─────────────────────────────────────
-// How the uploaded copy is named. The on-device file keeps its own name.
-
-@Composable
-fun UploadFileNameSettingsScreen(
-    onBack: () -> Unit,
-    viewModel: SettingsViewModel = hiltViewModel(),
-) {
-    val state by viewModel.uiState.collectAsStateWithLifecycle()
-    SettingsSubPageScaffold(title = stringResource(R.string.settings_section_file_name), onBack = onBack) {
+        // ── File name ────────────────────────────────────────────────────────
+        // How the uploaded copy is named. The on-device file keeps its own name.
+        SectionLabel(stringResource(R.string.settings_section_file_name))
+        Spacer(Modifier.height(8.dp))
         SettingsCard {
             ToggleRow(
                 label = stringResource(R.string.settings_rename_on_upload),
@@ -1467,21 +1625,13 @@ fun UploadFileNameSettingsScreen(
                 onCheckedChange = viewModel::setRenameToCaptureDate,
             )
         }
-    }
-}
 
-// ── Upload processing: Metadata sub-page ──────────────────────────────────────
-// EXIF stripping on the uploaded copy, with an optional mirror to the original.
+        Spacer(Modifier.height(20.dp))
 
-@Composable
-fun UploadMetadataSettingsScreen(
-    onBack: () -> Unit,
-    viewModel: SettingsViewModel = hiltViewModel(),
-) {
-    val state by viewModel.uiState.collectAsStateWithLifecycle()
-    val context = LocalContext.current
-    val colors = AppColors.current
-    SettingsSubPageScaffold(title = stringResource(R.string.settings_privacy_section_metadata), onBack = onBack) {
+        // ── Metadata ─────────────────────────────────────────────────────────
+        // EXIF stripping on the uploaded copy, with an optional mirror to the original.
+        SectionLabel(stringResource(R.string.settings_privacy_section_metadata))
+        Spacer(Modifier.height(8.dp))
         SettingsCard {
             ToggleRow(
                 label = stringResource(R.string.settings_strip_metadata_upload),
@@ -1575,23 +1725,16 @@ fun UploadMetadataSettingsScreen(
                 modifier = Modifier.padding(horizontal = 4.dp),
             )
         }
-    }
-}
 
-// ── Upload processing: Quality and size sub-page ──────────────────────────────
-// Re-encode the uploaded copy smaller, with an optional mirror to the original.
+        Spacer(Modifier.height(20.dp))
 
-@Composable
-fun UploadQualitySettingsScreen(
-    onBack: () -> Unit,
-    viewModel: SettingsViewModel = hiltViewModel(),
-) {
-    val state by viewModel.uiState.collectAsStateWithLifecycle()
-    val context = LocalContext.current
-    SettingsSubPageScaffold(title = stringResource(R.string.settings_section_quality_size), onBack = onBack) {
-        // The on-device mirror is a standalone toggle in its own card at the top: shrinking the copy
-        // kept on this device applies to whichever of photos/videos is being compressed, and unlike
-        // the type toggles below it reveals no tier list. The gap to the next card is the separator.
+        // ── Quality and size ─────────────────────────────────────────────────
+        // Re-encode the uploaded copy smaller, with an optional mirror to the original.
+        SectionLabel(stringResource(R.string.settings_section_quality_size))
+        Spacer(Modifier.height(8.dp))
+        // The on-device mirror is a standalone toggle in its own card: shrinking the copy kept on this
+        // device applies to whichever of photos/videos is being compressed, and unlike the type toggles
+        // below it reveals no tier list. The gap to the next card is the separator.
         SettingsCard {
             ToggleRow(
                 label = stringResource(R.string.settings_mirror_compress_local),
@@ -1656,6 +1799,245 @@ fun UploadQualitySettingsScreen(
     }
 }
 
+// ── Storage Settings sub-page ─────────────────────────────────────────────────
+
+@Composable
+fun StorageSettingsScreen(
+    onBack: () -> Unit,
+    onOpenTrash: (cloud: Boolean) -> Unit = {},
+    onFreeUpSpace: () -> Unit = {},
+    viewModel: SettingsViewModel = hiltViewModel(),
+) {
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val colors = AppColors.current
+    LaunchedEffect(Unit) { viewModel.refreshLocalStorage() }
+
+    SettingsSubPageScaffold(title = stringResource(R.string.settings_storage_section), onBack = onBack) {
+        // Manual refresh sits top-right; the two storage groups label themselves below.
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(24.dp)
+                    .clip(CircleShape)
+                    .clickable { viewModel.refresh() },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Refresh,
+                    contentDescription = stringResource(R.string.settings_storage_refresh),
+                    tint = colors.fgMute,
+                    modifier = Modifier.size(14.dp),
+                )
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        StorageContent(
+            state = state,
+            onFreeUp = onFreeUpSpace,
+            onClearCache = { viewModel.clearAppCache() },
+            onClearOffline = { viewModel.clearOfflineStorage() },
+            onOpenTrash = onOpenTrash,
+        )
+
+        // The recurring counterpart to the manual "Free up" action on the device gauge above acts
+        // on backed-up copies, so it belongs to a signed-in session.
+        if (state.isSignedIn) {
+            Spacer(Modifier.height(20.dp))
+
+            SectionLabel(stringResource(R.string.settings_free_up_auto_section))
+            Spacer(Modifier.height(8.dp))
+            SettingsCard {
+                ToggleRow(
+                    label = stringResource(R.string.settings_free_up_auto),
+                    description = stringResource(R.string.settings_free_up_auto_desc),
+                    checked = state.autoFreeUp,
+                    onCheckedChange = viewModel::setAutoFreeUp,
+                )
+                RowDivider()
+                SelectRow(
+                    label = stringResource(R.string.settings_free_up_interval),
+                    description = stringResource(R.string.settings_free_up_interval_desc),
+                    selected = state.freeUpInterval,
+                    onSelected = viewModel::setFreeUpInterval,
+                    indented = true,
+                    enabled = state.autoFreeUp,
+                )
+            }
+        }
+    }
+}
+
+// ── Privacy & Security (single scrolling page) ────────────────────────────────
+
+/** Privacy and security on one page: a Privacy section (device-side data plus the
+ *  offline-photos drilldown) followed by a Security section (app lock plus the
+ *  hidden-vault drilldown). */
+@Composable
+fun PrivacySecuritySettingsScreen(
+    onBack: () -> Unit,
+    onOfflinePhotosClick: () -> Unit = {},
+    onHiddenAlbumClick: () -> Unit = {},
+    onShareMetadataClick: () -> Unit = {},
+    viewModel: SettingsViewModel = hiltViewModel(),
+) {
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    SettingsSubPageScaffold(title = stringResource(R.string.settings_privacy_security), onBack = onBack) {
+        // ── Privacy ──────────────────────────────────────────────────────────
+        // Device-side privacy: what this device keeps locally after close (the cache
+        // and the offline copies) plus the read-only telemetry mirror.
+        SectionLabel(stringResource(R.string.settings_privacy))
+        Spacer(Modifier.height(8.dp))
+        SettingsCard {
+            ToggleRow(
+                label = stringResource(R.string.settings_clear_cache_on_close),
+                description = stringResource(R.string.settings_clear_cache_on_close_desc),
+                checked = state.clearCacheOnAppClose,
+                onCheckedChange = viewModel::setClearCacheOnAppClose,
+            )
+            RowDivider()
+            NavRow(
+                label = stringResource(R.string.settings_strip_share),
+                onClick = onShareMetadataClick,
+            )
+            RowDivider()
+            if (state.isSignedIn) {
+                NavRow(
+                    label = stringResource(R.string.settings_offline_photos),
+                    description = stringResource(R.string.offline_screen_empty),
+                    onClick = onOfflinePhotosClick,
+                )
+                RowDivider()
+            }
+            // Telemetry events fired by the embedded ProtonCore stack are gated by
+            // IsTelemetryEnabledImpl, which reads the server side `Telemetry`
+            // preference. This is surfaced as a read-only mirror so the control's
+            // location is discoverable; the actual switch lives in the Proton
+            // account settings.
+            InfoRow(
+                label = stringResource(R.string.settings_telemetry),
+                description = stringResource(R.string.settings_telemetry_desc),
+                value = when (state.telemetryEnabled) {
+                    true -> stringResource(R.string.settings_telemetry_on)
+                    false -> stringResource(R.string.settings_telemetry_off)
+                    // Unresolved stays neutral: the gate defaults to enabled when the
+                    // account setting is unreadable, so "Off" would be a false assurance.
+                    null -> stringResource(R.string.settings_telemetry_checking)
+                },
+            )
+        }
+        // Footnote: the map draws its background from a public tile endpoint, which is the
+        // one place the app reaches a server outside Proton.
+        Spacer(Modifier.height(10.dp))
+        Text(
+            stringResource(R.string.settings_privacy_map_tiles_note),
+            color = AppColors.current.fgMute,
+            fontSize = 12.5.sp,
+            modifier = Modifier.padding(horizontal = 4.dp),
+        )
+
+        Spacer(Modifier.height(20.dp))
+
+        // ── Security ─────────────────────────────────────────────────────────
+        SectionLabel(stringResource(R.string.settings_security))
+        Spacer(Modifier.height(8.dp))
+        SettingsCard {
+            ToggleRow(
+                label = stringResource(R.string.settings_app_lock),
+                description = stringResource(R.string.settings_app_lock_desc),
+                checked = state.appLockEnabled,
+                onCheckedChange = { viewModel.setAppLockEnabled(it) },
+            )
+            if (state.appLockEnabled) {
+                RowDivider()
+                AppLockTimeoutRow(
+                    label = stringResource(R.string.settings_app_lock_timeout),
+                    description = stringResource(R.string.settings_app_lock_timeout_desc),
+                    selectedMinutes = state.appLockTimeoutMinutes,
+                    onSelected = viewModel::setAppLockTimeoutMinutes,
+                )
+            }
+        }
+
+        Spacer(Modifier.height(20.dp))
+        // Hidden vault, a lock/biometric-gated photo collection, so it belongs with the app lock.
+        SettingsCard {
+            NavRow(
+                label = stringResource(R.string.settings_hidden_photos),
+                description = stringResource(R.string.settings_hidden_photos_desc),
+                onClick = onHiddenAlbumClick,
+            )
+        }
+    }
+}
+
+// ── Remove metadata when sharing (sub-page) ───────────────────────────────────
+
+/** Per-field control over what a shared copy carries. A master toggle plus, once it is on, the five
+ *  field choices. The labels are reused from the upload stripper, but the config written here is a
+ *  separate one that only the share paths consult; the on-device original is never modified. */
+@Composable
+fun ShareMetadataScreen(
+    onBack: () -> Unit,
+    viewModel: SettingsViewModel = hiltViewModel(),
+) {
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    SettingsSubPageScaffold(title = stringResource(R.string.settings_strip_share_title), onBack = onBack) {
+        SettingsCard {
+            ToggleRow(
+                label = stringResource(R.string.settings_strip_share),
+                description = stringResource(R.string.settings_strip_share_desc),
+                checked = state.stripOnShare,
+                onCheckedChange = viewModel::setStripOnShare,
+            )
+            if (state.stripOnShare) {
+                RowDivider()
+                ToggleRow(
+                    label = stringResource(R.string.settings_strip_gps),
+                    description = stringResource(R.string.settings_strip_gps_desc),
+                    checked = state.stripShareGps,
+                    onCheckedChange = viewModel::setStripShareGps,
+                    indented = true,
+                )
+                RowDivider()
+                ToggleRow(
+                    label = stringResource(R.string.settings_strip_camera),
+                    description = stringResource(R.string.settings_strip_camera_desc),
+                    checked = state.stripShareCameraInfo,
+                    onCheckedChange = viewModel::setStripShareCameraInfo,
+                    indented = true,
+                )
+                RowDivider()
+                ToggleRow(
+                    label = stringResource(R.string.settings_strip_timestamp),
+                    description = stringResource(R.string.settings_strip_timestamp_desc),
+                    checked = state.stripShareTimestamp,
+                    onCheckedChange = viewModel::setStripShareTimestamp,
+                    indented = true,
+                )
+                RowDivider()
+                ToggleRow(
+                    label = stringResource(R.string.settings_strip_software),
+                    description = stringResource(R.string.settings_strip_software_desc),
+                    checked = state.stripShareSoftwareInfo,
+                    onCheckedChange = viewModel::setStripShareSoftwareInfo,
+                    indented = true,
+                )
+                RowDivider()
+                ToggleRow(
+                    label = stringResource(R.string.settings_strip_authorship),
+                    checked = state.stripShareAuthorship,
+                    onCheckedChange = viewModel::setStripShareAuthorship,
+                    indented = true,
+                )
+            }
+        }
+    }
+}
+
 /** Single-choice row for the upload-compression tier picker. Mirrors the landing-tab radio row
  *  style (a filled check on the selected entry) but carries a one-line tradeoff description under
  *  the label, and sits indented under the "Compress uploads" toggle. */
@@ -1691,106 +2073,6 @@ private fun CompressTierRow(
                     modifier = Modifier.size(14.dp),
                 )
             }
-        }
-    }
-}
-
-// ── Privacy Settings sub-page ─────────────────────────────────────────────────
-
-@Composable
-fun PrivacySettingsScreen(
-    onBack: () -> Unit,
-    onOfflinePhotosClick: () -> Unit = {},
-    viewModel: SettingsViewModel = hiltViewModel(),
-) {
-    val state by viewModel.uiState.collectAsStateWithLifecycle()
-    SettingsSubPageScaffold(title = stringResource(R.string.settings_privacy), onBack = onBack) {
-        // ── Device-side privacy card ─────────────────────────────────────────
-        // What this device keeps locally after close: the cache, the offline copies,
-        // and the read-only telemetry mirror.
-        CollapsibleSection(label = stringResource(R.string.settings_privacy_section_device)) {
-        SettingsCard {
-            ToggleRow(
-                label = stringResource(R.string.settings_clear_cache_on_close),
-                description = stringResource(R.string.settings_clear_cache_on_close_desc),
-                checked = state.clearCacheOnAppClose,
-                onCheckedChange = viewModel::setClearCacheOnAppClose,
-            )
-            RowDivider()
-            NavRow(
-                label = stringResource(R.string.settings_offline_photos),
-                description = stringResource(R.string.offline_screen_empty),
-                onClick = onOfflinePhotosClick,
-            )
-            RowDivider()
-            // Telemetry events fired by the embedded ProtonCore stack are gated by
-            // IsTelemetryEnabledImpl, which reads the server side `Telemetry`
-            // preference. This is surfaced as a read-only mirror so the control's
-            // location is discoverable; the actual switch lives in the Proton
-            // account settings.
-            InfoRow(
-                label = stringResource(R.string.settings_telemetry),
-                description = stringResource(R.string.settings_telemetry_desc),
-                value = when (state.telemetryEnabled) {
-                    true -> stringResource(R.string.settings_telemetry_on)
-                    false -> stringResource(R.string.settings_telemetry_off)
-                    // Unresolved stays neutral: the gate defaults to enabled when the
-                    // account setting is unreadable, so "Off" would be a false assurance.
-                    null -> stringResource(R.string.settings_telemetry_checking)
-                },
-            )
-        }
-        }
-        // Footnote: the map draws its background from a public tile endpoint, which is the
-        // one place the app reaches a server outside Proton.
-        Spacer(Modifier.height(10.dp))
-        Text(
-            stringResource(R.string.settings_privacy_map_tiles_note),
-            color = AppColors.current.fgMute,
-            fontSize = 12.5.sp,
-            modifier = Modifier.padding(horizontal = 4.dp),
-        )
-    }
-}
-
-// ── Security Settings sub-page ────────────────────────────────────────────────
-
-@Composable
-fun SecuritySettingsScreen(
-    onBack: () -> Unit,
-    onHiddenAlbumClick: () -> Unit = {},
-    viewModel: SettingsViewModel = hiltViewModel(),
-) {
-    val state by viewModel.uiState.collectAsStateWithLifecycle()
-    SettingsSubPageScaffold(title = stringResource(R.string.settings_security), onBack = onBack) {
-        CollapsibleSection(label = stringResource(R.string.settings_security_section_lock)) {
-            SettingsCard {
-                ToggleRow(
-                    label = stringResource(R.string.settings_app_lock),
-                    description = stringResource(R.string.settings_app_lock_desc),
-                    checked = state.appLockEnabled,
-                    onCheckedChange = { viewModel.setAppLockEnabled(it) },
-                )
-                if (state.appLockEnabled) {
-                    RowDivider()
-                    AppLockTimeoutRow(
-                        label = stringResource(R.string.settings_app_lock_timeout),
-                        description = stringResource(R.string.settings_app_lock_timeout_desc),
-                        selectedMinutes = state.appLockTimeoutMinutes,
-                        onSelected = viewModel::setAppLockTimeoutMinutes,
-                    )
-                }
-            }
-        }
-
-        Spacer(Modifier.height(20.dp))
-        // Hidden vault, a lock/biometric-gated photo collection, so it belongs with the app lock.
-        SettingsCard {
-            NavRow(
-                label = stringResource(R.string.settings_hidden_photos),
-                description = stringResource(R.string.settings_hidden_photos_desc),
-                onClick = onHiddenAlbumClick,
-            )
         }
     }
 }
@@ -1898,7 +2180,6 @@ private fun UploadEventRow(evt: UploadEvent) {
     // Each row is a standalone pill: PillBg + 0.5dp PillBorder + 999.dp corner radius,
     // matching the gallery filter pills and the editor adjustment pills. Read-only -
     // no clickable modifier, so the row only communicates status, never invites taps.
-    val pillShape = RoundedCornerShape(999.dp)
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -2034,34 +2315,40 @@ private fun StorageContent(
     val deviceTotal = state.deviceTotalBytes
     val deviceUsed = (deviceTotal - state.deviceFreeBytes).coerceAtLeast(0L)
 
-    SectionLabel(stringResource(R.string.settings_storage_proton))
-    Spacer(Modifier.height(8.dp))
-    StorageCarousel(pageCount = 2) { page ->
-        if (page == 0) {
-            StorageGaugeCard(
-                icon = Icons.Default.Cloud,
-                label = stringResource(R.string.settings_storage_proton),
-                value = formatBytes(state.cloudUsedBytes),
-                detail = if (state.cloudMaxBytes > 0L)
-                    stringResource(R.string.settings_storage_used_of, formatBytes(state.cloudUsedBytes), formatBytes(state.cloudMaxBytes))
-                else formatBytes(state.cloudUsedBytes),
-            )
-        } else {
-            StorageTrashCard(
-                label = stringResource(R.string.settings_recently_deleted),
-                count = state.cloudTrashCount ?: 0,
-                onOpen = { onOpenTrash(true) },
-            )
+    // Cloud storage group is hidden for a local-only (signed-out) session.
+    if (state.isSignedIn) {
+        SectionLabel(stringResource(R.string.settings_storage_proton))
+        Spacer(Modifier.height(8.dp))
+        StorageCarousel(pageCount = 2) { page ->
+            if (page == 0) {
+                StorageGaugeCard(
+                    icon = Icons.Default.Cloud,
+                    label = stringResource(R.string.settings_storage_proton),
+                    value = formatBytes(state.cloudUsedBytes),
+                    detail = if (state.cloudMaxBytes > 0L)
+                        stringResource(R.string.settings_storage_used_of, formatBytes(state.cloudUsedBytes), formatBytes(state.cloudMaxBytes))
+                    else formatBytes(state.cloudUsedBytes),
+                )
+            } else {
+                StorageTrashCard(
+                    label = stringResource(R.string.settings_recently_deleted),
+                    count = state.cloudTrashCount ?: 0,
+                    onOpen = { onOpenTrash(true) },
+                )
+            }
         }
-    }
 
-    Spacer(Modifier.height(20.dp))
+        Spacer(Modifier.height(20.dp))
+    }
 
     SectionLabel(stringResource(R.string.settings_storage_device))
     Spacer(Modifier.height(8.dp))
-    StorageCarousel(pageCount = 4) { page ->
-        when (page) {
-            0 -> StorageGaugeCard(
+    // Offline copies and the device free-up act on synced copies, so both stay signed-in only;
+    // app cache, device storage and device trash remain for every session. The page list is built
+    // conditionally so its indices never point at a dropped page.
+    val devicePages = buildList<@Composable () -> Unit> {
+        add {
+            StorageGaugeCard(
                 icon = Icons.Default.Storage,
                 label = stringResource(R.string.settings_storage_app_cache),
                 value = formatBytes(state.appCacheBytes),
@@ -2075,33 +2362,46 @@ private fun StorageContent(
                     )
                 },
             )
-            1 -> StorageGaugeCard(
-                icon = Icons.Default.OfflinePin,
-                label = stringResource(R.string.settings_offline_storage_title),
-                value = formatBytes(state.offlineBytes),
-                detail = stringResource(R.string.settings_offline_storage_subtitle),
-                action = {
-                    StorageClearAction(
-                        enabled = state.offlineBytes > 0L,
-                        dialogTitle = stringResource(R.string.settings_offline_storage_clear_dialog_title),
-                        dialogMessage = stringResource(R.string.settings_offline_storage_clear_dialog_message, formatBytes(state.offlineBytes)),
-                        onConfirm = onClearOffline,
-                    )
-                },
-            )
-            2 -> StorageGaugeCard(
+        }
+        if (state.isSignedIn) {
+            add {
+                StorageGaugeCard(
+                    icon = Icons.Default.OfflinePin,
+                    label = stringResource(R.string.settings_offline_storage_title),
+                    value = formatBytes(state.offlineBytes),
+                    detail = stringResource(R.string.settings_offline_storage_subtitle),
+                    action = {
+                        StorageClearAction(
+                            enabled = state.offlineBytes > 0L,
+                            dialogTitle = stringResource(R.string.settings_offline_storage_clear_dialog_title),
+                            dialogMessage = stringResource(R.string.settings_offline_storage_clear_dialog_message, formatBytes(state.offlineBytes)),
+                            onConfirm = onClearOffline,
+                        )
+                    },
+                )
+            }
+        }
+        add {
+            StorageGaugeCard(
                 icon = Icons.Default.PhoneAndroid,
                 label = stringResource(R.string.settings_storage_device),
                 value = formatBytes(state.deviceFreeBytes),
                 detail = stringResource(R.string.settings_storage_device_free, formatBytes(state.deviceFreeBytes), formatBytes(deviceTotal)),
-                action = { StorageFreeUpAction(onFreeUp = onFreeUp) },
+                action = if (state.isSignedIn) {
+                    { StorageFreeUpAction(onFreeUp = onFreeUp) }
+                } else null,
             )
-            else -> StorageTrashCard(
+        }
+        add {
+            StorageTrashCard(
                 label = stringResource(R.string.settings_recently_deleted),
                 count = state.trashedCount,
                 onOpen = { onOpenTrash(false) },
             )
         }
+    }
+    StorageCarousel(pageCount = devicePages.size) { page ->
+        devicePages[page]()
     }
 }
 

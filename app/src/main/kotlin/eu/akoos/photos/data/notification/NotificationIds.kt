@@ -57,6 +57,9 @@ object NotificationIds {
     /** The cloud metadata-save worker's foreground notification. */
     const val METADATA_EDIT = 4248
 
+    /** The initial face-indexing foreground service's progress notification. */
+    const val FACE_INDEXING = 4249
+
     /**
      * Reserved for album downloads, which take one id per run so two concurrent downloads keep
      * separate entries in the shade instead of overwriting each other. No fixed id may fall in here.

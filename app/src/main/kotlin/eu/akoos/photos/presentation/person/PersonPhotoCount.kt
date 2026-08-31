@@ -20,17 +20,13 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-package eu.akoos.photos.presentation.map
+package eu.akoos.photos.presentation.person
 
 /**
- * One place the account has located photos in, backing the map's city-search overlay. [name] is the
- * "City, Country" label the offline geocoder resolves the place's fixes to; [latitude]/[longitude]
- * are a representative coordinate (the mean of that place's fixes) the map animates to when the row
- * is tapped; [count] is how many located photos fall in the place, used to rank and label the row.
+ * A person's photo tally: the photos their faces appear in unioned with any manually attached photos,
+ * counted once each. The two key lists overlap when a manual add lands on a photo a face already
+ * covers, so the union is de-duplicated. Shared by the detail screen's curation paths and the
+ * find-more sweep, so every path that refreshes the cached count reports the same figure.
  */
-data class CityEntry(
-    val name: String,
-    val latitude: Double,
-    val longitude: Double,
-    val count: Int,
-)
+internal fun personPhotoCount(faceKeys: List<String>, manualKeys: List<String>): Int =
+    (faceKeys + manualKeys).toHashSet().size

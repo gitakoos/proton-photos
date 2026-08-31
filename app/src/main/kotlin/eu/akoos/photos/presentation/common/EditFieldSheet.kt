@@ -30,6 +30,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.ModalBottomSheet
@@ -111,7 +112,7 @@ fun EditFieldSheet(
     ModalBottomSheet(
         sheetState = sheetState,
         onDismissRequest = onDismiss,
-        containerColor = colors.bg2,
+        containerColor = colors.sheetBg,
         scrimColor = Color.Black.copy(alpha = 0.5f),
     ) {
         Column(
@@ -141,6 +142,7 @@ fun EditFieldSheet(
                 minLines = if (singleLine) 1 else 3,
                 maxLines = if (singleLine) 1 else 8,
                 modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor   = colors.accent,
                     unfocusedBorderColor = colors.line2,

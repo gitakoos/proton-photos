@@ -195,6 +195,8 @@
 
     <!-- Settings -->
     <string name="settings_title">Einstellungen</string>
+    <string name="settings_search_hint">Einstellungen durchsuchen</string>
+    <string name="settings_search_no_results">Keine passenden Einstellungen</string>
     <string name="settings_sync_wifi_only">Nur über WLAN synchronisieren</string>
     <string name="settings_sync_now">Jetzt synchronisieren</string>
     <string name="settings_storage_section">Speicher</string>
@@ -211,6 +213,7 @@
     <string name="settings_delete_after_backup">Gerätedatei nach Sicherung löschen</string>
     <string name="settings_delete_after_backup_desc">Entfernt die lokale Kopie vom Gerät, sobald Drive den Upload hat. Unter Android 11+ wandert sie zuerst in den Geräte-Papierkorb, wo du sie noch etwa einen Monat wiederherstellen kannst.</string>
     <string name="settings_account_section">Konto</string>
+    <string name="settings_sign_in_to_proton">Bei Proton anmelden</string>
     <string name="settings_sign_out">Abmelden</string>
     <string name="settings_sign_out_desc">Sitzung auf diesem Gerät beenden.</string>
     <string name="sign_out_dialog_title">Abmelden?</string>
@@ -281,6 +284,11 @@
         <item quantity="one">%1$d Foto wiederhergestellt</item>
         <item quantity="other">%1$d Fotos wiederhergestellt</item>
     </plurals>
+    <plurals name="trash_deletes_in_days">
+        <item quantity="one">Wird in %1$d Tag gelöscht</item>
+        <item quantity="other">Wird in %1$d Tagen gelöscht</item>
+    </plurals>
+    <string name="trash_deletes_soon">Wird bald gelöscht</string>
     <string name="trash_cloud_restore_partial">%1$d wiederhergestellt, %2$d konnten nicht wiederhergestellt werden</string>
     <string name="trash_cloud_restore_refresh_failed">Wiederhergestellt – zum Aktualisieren in der Galerie nach unten ziehen</string>
     <string name="trash_cloud_restore_failed">Wiederherstellen fehlgeschlagen</string>
@@ -328,6 +336,9 @@
     <string name="settings_strip_software">Software-Informationen entfernen</string>
     <string name="settings_strip_software_desc">Software-, Kommentar-, Urheber- und Copyright-Felder entfernen</string>
     <string name="settings_strip_authorship">Urheber und Copyright entfernen</string>
+    <string name="settings_strip_share">Metadaten beim Teilen entfernen</string>
+    <string name="settings_strip_share_title">Metadaten beim Teilen</string>
+    <string name="settings_strip_share_desc">Entfernt die ausgewählten Felder nur aus der geteilten Kopie, niemals aus dem Original. Bei Videos wird nur der Standort entfernt.</string>
     <string name="settings_strip_format_note">Manche Formate, etwa HEIC, können Metadaten-Änderungen nicht speichern. Wenn das Entfernen von Metadaten aktiviert ist, wird die hochgeladene Kopie eines solchen Fotos in JPEG umgewandelt, damit die ausgewählten Daten tatsächlich entfernt werden. Das Foto auf dem Gerät bleibt unverändert.</string>
     <string name="settings_compress_upload_desc">Lädt eine leichtere Version hoch, um Speicher zu sparen. Die Kopie auf dem Gerät bleibt in voller Qualität, solange die lokale Spiegelung unten nicht aktiv ist.</string>
     <string name="settings_compress_photos">Fotos komprimieren</string>
@@ -389,6 +400,7 @@
     <string name="timeline_filter_per_album_hint">Einzelne Alben aus der Timeline ausblenden. Der Schalter oben blendet alle auf einmal aus.</string>
     <string name="timeline_filter_hidden_album">Ausgeblendetes Album</string>
     <string name="timeline_filter_albums_header">Drive-Alben</string>
+    <string name="timeline_filter_more_settings">Weitere Einstellungen</string>
     <string name="settings_telemetry">Telemetrie</string>
     <string name="settings_telemetry_desc">Wird über die Einstellungen deines Proton Kontos gesteuert. Öffne account.proton.me zum Ändern.</string>
     <string name="settings_telemetry_on">Ein</string>
@@ -482,6 +494,11 @@
     <string name="palette_ruby">Rubin</string>
 
     <!-- AMOLED pure-black dark theme -->
+    <string name="settings_map_style">Klassische Karte</string>
+    <string name="settings_map_style_summary">Die klassische OpenStreetMap-Kachelkarte anstelle der modernen Weltkarte verwenden.</string>
+    <string name="map_style_prompt_title">Kartenstil wählen</string>
+    <string name="map_style_modern">Weltkarte</string>
+    <string name="map_style_modern_summary">Ein moderner Globus, den du zu deinen Orten drehen kannst.</string>
     <string name="settings_amoled_black">Reines Schwarz (AMOLED)</string>
     <string name="settings_amoled_black_summary">Im dunklen Modus echtes Schwarz als Hintergrund verwenden, um auf OLED-Displays Strom zu sparen.</string>
 
@@ -607,9 +624,10 @@
     <string name="filter_title">Filter</string>
     <string name="filter_type_label">Typ</string>
     <string name="filter_type_videos">Videos</string>
-    <string name="filter_sync_label">Synchronisierung</string>
-    <string name="filter_sync_local">Nur lokal</string>
+    <string name="filter_sync_label">Sync-Status</string>
+    <string name="filter_sync_local">Auf dem Gerät</string>
     <string name="filter_sync_backedup">Gesichert</string>
+    <string name="filter_sync_cloud">Nur Cloud</string>
     <string name="filter_year_label">Jahr</string>
     <string name="filter_any">Beliebig</string>
     <string name="filter_whole_month">Ganzer Monat</string>
@@ -806,16 +824,24 @@
     <string name="bg_sync_service_channel_desc">Ermöglicht der App, im Hintergrund auf neue Fotos zu reagieren.</string>
     <string name="bg_sync_service_title">Fotosicherung</string>
     <string name="bg_sync_service_text">Überwacht neue Fotos</string>
+    <string name="face_index_service_channel_name">Gesichter gruppieren</string>
+    <string name="face_index_service_channel_desc">Zeigt den Fortschritt, während Fotos nach Gesichtern gruppiert werden.</string>
+    <string name="face_index_service_title">Gesichter werden gruppiert</string>
+    <string name="face_index_service_progress">%1$d von %2$d</string>
+    <string name="face_index_service_waiting">Warten auf Fortsetzung</string>
+    <string name="face_index_service_stop">Beenden</string>
     <string name="search_section_on_this_day">An diesem Tag</string>
     <string name="search_section_on_this_day_years">Vor %1$d Jahr</string>
     <string name="search_section_on_this_day_years_plural">Vor %1$d Jahren</string>
     <string name="search_section_jump_to_month">Zum Monat springen</string>
     <string name="search_section_recent">Zuletzt</string>
     <string name="map_title">Karte</string>
+    <string name="map_vector_title">Weltkarte</string>
     <string name="map_card_title">Karte</string>
     <string name="map_card_subtitle_empty">Noch keine verorteten Fotos</string>
     <string name="map_card_calendar_subtitle">Deine Fotos in der Kalenderansicht</string>
     <string name="map_search_places">Orte suchen</string>
+    <string name="places_title">Orte</string>
     <string name="map_search_no_places">Noch keine Orte</string>
 
     <!-- Location detail -->
@@ -941,6 +967,8 @@
     <string name="settings_backup_how_section">Wie gesichert wird</string>
     <string name="settings_theme_palette">Design &amp; Palette</string>
     <string name="settings_privacy_security">Datenschutz &amp; Sicherheit</string>
+    <string name="settings_backup_storage_section">Sicherung &amp; Speicher</string>
+    <string name="settings_help_about_section">Hilfe &amp; Info</string>
     <string name="cd_scroll_to_top">Nach oben scrollen</string>
     <string name="albums_filter_all">Alle</string>
     <string name="albums_filter_cloud">Cloud</string>
@@ -950,6 +978,7 @@
     <string name="albums_filter_remember_last">Zuletzt verwendeten Filter merken</string>
     <string name="albums_filter_remember_last_summary">Alben mit dem zuletzt gewählten Filter öffnen</string>
     <string name="albums_sort_heading">Sortieren nach</string>
+    <string name="albums_cover_size_heading">Covergröße</string>
     <string name="albums_sort_custom">Benutzerdefiniert</string>
     <string name="albums_sort_name">Name (A-Z)</string>
     <string name="albums_sort_activity">Letzte Aktivität</string>
@@ -1317,6 +1346,7 @@
     <string name="offline_card_subtitle">Für die Offline-Ansicht gespeicherte Fotos</string>
     <string name="duplicates_filter_identical">Identisch</string>
     <string name="duplicates_filter_similar">Ähnlich</string>
+    <string name="duplicates_filter_match_label">Übereinstimmung</string>
     <string name="duplicates_badge_cloud">Cloud</string>
     <string name="duplicates_badge_device">Gerät</string>
     <string name="onboarding_all_files_subtitle">Empfohlen. Lässt die App wieder eingeblendete Fotos zurück in ihren ursprünglichen Ordner legen (zum Beispiel den Medienordner einer Chat-App, nicht nur Bilder) und Änderungen direkt in deine lokalen Dateien schreiben. Tippe, um die Systemeinstellungen zu öffnen.</string>
@@ -1467,7 +1497,13 @@
     <string name="settings_ai_ocr_remove_keep">Behalten</string>
     <string name="settings_ai_face_toggle">Gesichtserkennung</string>
     <string name="settings_ai_face_desc">Fotos nach den Personen darauf gruppieren, auf deinem Gerät</string>
-    <string name="settings_ai_face_unavailable">Noch nicht verfügbar</string>
+    <string name="settings_ai_face_downloading">Wird heruntergeladen…</string>
+    <string name="settings_ai_face_download_failed">Das Gesichtsmodell konnte nicht heruntergeladen werden.</string>
+    <string name="settings_ai_face_download_retry">Schalter erneut einschalten, um es noch einmal zu versuchen.</string>
+    <string name="settings_ai_face_download_title">Gesichtsmodell herunterladen?</string>
+    <string name="settings_ai_face_download_message">Gesichtserkennung benötigt einen Modell-Download von %1$s. Es funktioniert über jede Verbindung, WLAN wird jedoch empfohlen.</string>
+    <string name="settings_ai_face_download_confirm">Herunterladen</string>
+    <string name="settings_ai_face_model_missing">Das Gesichtsmodell ist nicht auf diesem Gerät.</string>
     <string name="settings_ai_face_remove_title">Gesichtsdaten entfernen?</string>
     <string name="settings_ai_face_remove_message">Die Gesichtserkennung ist aus. Das Gesichtsmodell und alle erkannten Gesichter und Namen von diesem Gerät entfernen? Exportiere sie zuerst auf der Seite Erkannte Gesichter, wenn du eine Kopie behalten möchtest.</string>
     <string name="settings_ai_face_remove_confirm">Entfernen</string>
@@ -1486,6 +1522,9 @@
     <string name="settings_ai_indexing_running">Deine Fotos werden durchsucht</string>
     <string name="settings_ai_indexing_waiting">Warten auf das Gesichtsmodell</string>
     <string name="settings_ai_indexing_paused">Pausiert</string>
+    <string name="settings_ai_indexing_paused_battery">Pausiert, Akku niedrig</string>
+    <string name="settings_ai_indexing_paused_warm">Pausiert, Telefon ist warm</string>
+    <string name="settings_ai_indexing_paused_power_save">Pausiert, Energiesparmodus ist an</string>
     <string name="settings_ai_indexing_progress">%1$d von %2$d Fotos</string>
     <plurals name="settings_ai_indexing_people">
         <item quantity="one">%1$d Person gefunden</item>
@@ -1500,7 +1539,16 @@
     <string name="people_search_hint">Personen suchen</string>
     <string name="people_card_subtitle">Durchstöbere deine Fotos nach Person</string>
     <string name="person_set_cover">Als Titelbild festlegen</string>
+    <string name="person_set_cover_confirm_title">Set as cover?</string>
+    <string name="person_set_cover_confirm_body">Use this photo as the cover for this person.</string>
     <string name="person_cover_no_face">Auf diesem Foto wurde kein Gesicht erkannt.</string>
+    <string name="person_msg_moved">Zu einer anderen Person verschoben</string>
+    <string name="person_msg_removed">Von Person entfernt</string>
+    <string name="person_msg_not_person">Als keine Person markiert</string>
+    <string name="person_msg_added">Zur Person hinzugefügt</string>
+    <string name="person_msg_merged">Personen zusammengeführt</string>
+    <string name="person_msg_renamed">Umbenannt</string>
+    <string name="person_msg_dismissed">Verworfen</string>
     <string name="people_add_names">Namen hinzufügen</string>
     <string name="people_none_named">Du hast noch niemanden benannt. Öffne die Überprüfung, um die von der App gefundenen Personen zu benennen, zusammenzuführen und aufzuräumen.</string>
     <string name="people_review_empty">Gerade keine unbenannten Personen. Während deine Fotos durchsucht werden, erscheinen hier Gruppen zum Benennen und Zusammenführen.</string>
@@ -1526,7 +1574,7 @@
     <string name="person_merge_confirm_body">Die Fotos der gewählten Person werden mit dieser zusammengeführt, und beide gelten ab jetzt als dieselbe Person. Dies kann nicht automatisch wieder getrennt werden.</string>
     <string name="person_merge_confirm_title">Personen zusammenführen?</string>
     <string name="person_merge_empty">Es gibt keine anderen Personen zum Zusammenführen.</string>
-    <string name="person_merge_name_title">Diese als eine Person benennen</string>
+    <string name="person_merge_name_title">Mit einer Person zusammenführen</string>
     <string name="person_merge_pick_title">Wähle die Person zum Zusammenführen</string>
     <string name="person_not_a_person">Das ist keine Person</string>
     <string name="person_not_a_person_body">Die ausgewählten Gesichter werden aus Personen entfernt und bei jedem künftigen Scan übersprungen. Verwende dies für Statuen, Poster und Fehler. Die Fotos selbst werden nicht gelöscht.</string>
@@ -1538,18 +1586,22 @@
     <string name="person_picker_empty">Noch keine benannten Personen. Gib oben einen Namen ein, um eine zu erstellen.</string>
     <string name="person_picker_search">Suchen oder neuen Namen eingeben</string>
     <string name="person_remove_confirm">Entfernen</string>
-    <string name="person_remove_confirm_body">Die ausgewählten Fotos werden nicht mehr unter dieser Person angezeigt und bei einem erneuten Scan nicht wieder hier gruppiert. Die Fotos selbst werden nicht gelöscht.</string>
+    <string name="person_remove_confirm_body">Die ausgewählten Fotos werden von dieser Person entfernt, aber ihre Gesichter bleiben in der Gesichtserkennung, sodass sie später der richtigen Person zugeordnet werden können. Die Fotos selbst werden nicht gelöscht.</string>
     <string name="person_remove_confirm_title">Von dieser Person entfernen?</string>
     <string name="person_remove_from">Von Person entfernen</string>
+    <string name="person_move_to_title">Zu einer anderen Person verschieben</string>
     <string name="person_suggestion_no">Nein</string>
     <string name="person_suggestion_question">Ist das %1$s?</string>
     <string name="person_suggestion_skip">Überspringen</string>
     <string name="person_suggestion_yes">Ja</string>
     <string name="person_suggestions_empty">Gerade keine Vorschläge. Während deine Fotos durchsucht werden, erscheinen hier wahrscheinliche Übereinstimmungen mit den von dir benannten Personen zur Bestätigung.</string>
     <string name="person_suggestions_review">Vorschläge prüfen</string>
+    <string name="person_suggestions_review_count">Vorschläge prüfen (%1$d)</string>
+    <string name="more_options">Weitere Optionen</string>
     <string name="person_suggestions_title">Vorschläge</string>
     <string name="settings_ai_export">Gesichtsindex exportieren</string>
     <string name="settings_ai_export_done">Gesichtsindex exportiert (%1$d Gesichter).</string>
+    <string name="settings_ai_export_empty">Noch keine Gesichter zum Exportieren.</string>
     <string name="settings_ai_export_warn_msg">Diese Datei enthält die aus deinen Fotos berechneten Gesichtsfingerabdrücke. Wer sie erhält, könnte ein Gesichtsmodell der Personen in deiner Bibliothek nachbilden, halte sie daher privat und teile sie nur mit Menschen, denen du vertraust.</string>
     <string name="settings_ai_export_warn_title">Gesichtsindex exportieren?</string>
     <string name="settings_ai_import">Gesichtsindex importieren</string>
@@ -1558,13 +1610,16 @@
     <string name="settings_ai_rescan_confirm_msg">Jedes Foto wird mit höherem Detailgrad erneut auf Gesichter gescannt, wodurch kleinere und weiter entfernte Gesichter gefunden werden. Deine manuell hinzugefügten Fotos bleiben erhalten, aber Personen werden neu gruppiert, sodass du einige eventuell erneut benennen musst.</string>
     <string name="settings_ai_rescan_confirm_title">Alle Fotos erneut scannen?</string>
     <string name="settings_ai_transfer_failed">Übertragung des Gesichtsindex fehlgeschlagen.</string>
+    <string name="settings_ai_transfer_working">Wird ausgeführt…</string>
     <string name="settings_ai_import_wrong_account">Dieser Gesichtsindex gehört zu einem anderen Konto und kann hier nicht geöffnet werden.</string>
-    <string name="settings_ai_import_wrong_model">Dieser Gesichtsindex wurde mit einem anderen Gesichtsmodell erstellt und kann daher nicht importiert werden.</string>
+    <string name="settings_ai_import_reattach">Dieser Index nutzte ein anderes Modell. Seine %1$d Namen kehren zu Ihren Fotos zurück, sobald sie erneut durchsucht werden.</string>
     <plurals name="person_suggestions_left">
         <item quantity="one">%1$d zu überprüfen</item>
         <item quantity="other">%1$d zu überprüfen</item>
     </plurals>
     <string name="news_title">News</string>
+    <string name="news_banner">Neue Neuigkeiten</string>
+    <string name="news_new_badge">Neu</string>
     <string name="news_settings_desc">Nachrichten und Neuigkeiten zur App</string>
     <string name="news_show_title">News anzeigen</string>
     <string name="news_show_desc">Ein kleiner Punkt erscheint, wenn es etwas Neues gibt</string>
@@ -1572,9 +1627,9 @@
     <string name="news_read_more">Mehr lesen</string>
     <string name="news_feedback_heading">Fragen oder ein Fehler?</string>
     <string name="news_feedback_body">Stelle eine Frage oder melde einen Fehler.</string>
-    <string name="news_feedback_note">Das öffnet den offiziellen Community-Discord von Proton, wo ein kleiner Forum-Thread für Feedback genutzt wird. Photos for Proton ist nicht mit Proton verbunden.</string>
+    <string name="news_feedback_note">Öffnet den Photos-for-Proton-Community-Discord, wo du Fragen stellen und Fehler melden kannst.</string>
     <string name="news_feedback_button">Feedback senden</string>
-    <string name="news_feedback_join">Neu im Proton Discord? Zuerst beitreten</string>
+    <string name="news_feedback_join">Noch nicht im Discord? Tritt zuerst bei</string>
     <string name="news_feedback_email">Oder per E-Mail an %1$s</string>
     <string name="whats_new_metadata_title">Fotodetails bearbeiten</string>
     <string name="whats_new_metadata_body">Lege Datum und Ort eines Fotos fest und füge eine Beschreibung hinzu, damit ein Foto mit falsch gestellter Uhr oder ohne Standort dort landet, wo es hingehört.</string>
@@ -1592,6 +1647,8 @@
     <string name="metadata_editor_date_mode_filename">Aus Dateiname</string>
     <string name="metadata_editor_filename_hint">Setzt das Datum jedes Fotos anhand des im Dateinamen enthaltenen Datums.</string>
     <string name="metadata_editor_filename_apply">Daten korrigieren</string>
+    <string name="metadata_editor_filename_single">Laut Dateiname: %1$s</string>
+    <string name="metadata_editor_filename_use">Dieses Datum verwenden</string>
     <plurals name="metadata_editor_filename_count">
         <item quantity="one">%1$d von %2$d ausgewählten Fotos hat ein Datum im Namen</item>
         <item quantity="other">%1$d von %2$d ausgewählten Fotos haben ein Datum im Namen</item>
@@ -1714,13 +1771,47 @@
     <string name="whats_new_dupreview_body">Die Duplikatsuche öffnet eine Gruppe in voller Größe und zeigt Größe, Auflösung, Datum und Ort jeder Kopie, damit du die richtige behältst.</string>
     <string name="whats_new_filedate_title">Datumsangaben aus dem Dateinamen korrigieren</string>
     <string name="whats_new_filedate_body">Bei Fotos, die das Datum im Namen tragen, aber nicht in den Metadaten, lässt es sich stapelweise setzen, damit sie an der richtigen Stelle in der Zeitleiste landen.</string>
-    <string name="whats_new_more_250">Außerdem folgt das Design „System“ jetzt deinem Telefon, das Backup-Banner geht beim Scrollen aus dem Weg, und „Nur über WLAN synchronisieren“ verbraucht im Hintergrund keine mobilen Daten mehr.</string>
+    <string name="whats_new_faces_title">Personen per Gesicht finden</string>
+    <string name="whats_new_faces_body">Fotos werden anhand der Gesichter darauf gruppiert, komplett auf deinem Gerät. Benenne eine Person, um zu suchen und all ihre Fotos zu sammeln, und schalte es jederzeit aus, um es zu löschen.</string>
+    <string name="whats_new_map_title">Die überarbeitete Karte</string>
+    <string name="whats_new_map_body">Ein drehbarer Weltglobus und eine neu gestaltete Karte zeigen, wo deine Fotos entstanden sind, mit einem Ortsverzeichnis nach Land und Stadt. Den Stil wählst du direkt auf der Karte, und ein Tippen auf einen Ort öffnet seine Fotos.</string>
+    <string name="whats_new_localonly_title">Ohne Konto nutzen</string>
+    <string name="whats_new_localonly_body">Überspringe die Anmeldung, um die bereits auf deinem Telefon vorhandenen Fotos zu durchsuchen, zu ordnen und zu bearbeiten. Füge später jederzeit ein Proton-Konto hinzu, um sie zu sichern.</string>
+    <string name="whats_new_dupfinder_title">Ein klarerer Duplikat-Finder</string>
+    <string name="whats_new_dupfinder_body">Jede Kopie zeigt, in welchem Album sie liegt, und du kannst sortieren, filtern und mehrere auf einmal löschen.</string>
+    <string name="whats_new_albumcover_title">Größe der Albumcover</string>
+    <string name="whats_new_albumcover_body">Wähle, wie groß die Albumcover erscheinen, von zwei bis vier pro Reihe.</string>
+    <string name="whats_new_denser_title">Eine dichtere Zeitleiste</string>
+    <string name="whats_new_denser_body">Die Zeitleiste lässt sich jetzt auf zwei dichtere Stufen zoomen, bis zu acht Fotos pro Reihe.</string>
+    <string name="whats_new_section_new">Neu</string>
+    <string name="whats_new_section_improved">Verbesserungen</string>
 
     <!-- Person detail -->
     <string name="person_detail_unnamed">Person</string>
+    <string name="person_unsorted">Unsortiert</string>
+    <string name="person_unsorted_hint">Gesichter, die keiner Person eindeutig zugeordnet werden konnten. Wähle Fotos aus, um eine echte Person herauszunehmen, oder markiere den Rest als „keine Person“.</string>
+    <string name="person_unsorted_caption">Übrige Gesichter, die nicht zugeordnet werden konnten. Zum Sortieren öffnen.</string>
     <string name="person_rename_title">Umbenennen</string>
     <string name="person_rename_hint">Name</string>
     <string name="permissions_default_gallery_title">Als Standardgalerie festlegen</string>
     <string name="permissions_default_gallery_why">Öffne die Systemeinstellungen, um diese App als Standard zum Öffnen von Fotos und Videos festzulegen.</string>
     <string name="permissions_action_open">Öffnen</string>
+    <string name="sign_in_continue_without_account">Ohne Konto fortfahren</string>
+    <string name="move_to_folder">In Ordner verschieben</string>
+    <string name="move_to_folder_new">Neuer Ordner</string>
+    <string name="move_to_folder_title">In Ordner verschieben</string>
+    <string name="move_to_folder_name_hint">Ordnername</string>
+    <string name="moved_to_folder">Verschoben nach \"%1$s\"</string>
+    <string name="new_folder">Neuer Ordner</string>
+    <string name="new_folder_create">Erstellen</string>
+    <string name="folder_rename">Ordner umbenennen</string>
+    <string name="folder_renamed">Umbenannt in \"%1$s\"</string>
+    <string name="settings_face_excluded">Excluded faces</string>
+    <string name="settings_face_excluded_desc">Review faces you removed from a person or dismissed</string>
+    <string name="face_excluded_empty">Nothing is excluded. Faces you remove from a person, or dismiss as not a person, appear here so you can undo them.</string>
+    <string name="face_excluded_not_person_section">Not this person: %1$s</string>
+    <string name="face_excluded_ignored_section">Ignored (not a person)</string>
+    <string name="face_excluded_undo">Undo</string>
+    <string name="albums_search_hint">Alben durchsuchen</string>
+    <string name="albums_search_no_results">Keine Alben entsprechen der Suche.</string>
 </resources>

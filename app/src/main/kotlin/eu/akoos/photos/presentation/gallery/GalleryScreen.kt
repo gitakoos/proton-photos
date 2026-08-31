@@ -203,6 +203,7 @@ import eu.akoos.photos.presentation.common.deleteRowTitleRes
 import eu.akoos.photos.presentation.common.ConfirmSheet
 import eu.akoos.photos.presentation.common.HideConfirmSheet
 import eu.akoos.photos.presentation.common.DenseGridWarningDialog
+import eu.akoos.photos.presentation.common.EditFieldSheet
 import eu.akoos.photos.presentation.common.EmptyState
 import eu.akoos.photos.presentation.common.ErrorPopup
 import eu.akoos.photos.presentation.common.CloudMetadataSaveDrawer
@@ -235,12 +236,11 @@ import eu.akoos.photos.presentation.theme.Line2
 import eu.akoos.photos.presentation.theme.PillBg
 import eu.akoos.photos.presentation.theme.PillBgOpaque
 import eu.akoos.photos.presentation.theme.PillBorder
+import eu.akoos.photos.presentation.theme.pillShape
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
-
-internal val pillShape = RoundedCornerShape(999.dp)
 
 internal fun formatCount(n: Int): String = when {
     n >= 1_000_000 -> "${n / 1_000_000}M"
@@ -261,6 +261,7 @@ internal fun buildContentFilterSummary(
     videosLabel: String,
     localLabel: String,
     backedUpLabel: String,
+    cloudLabel: String,
 ): String? {
     if (filter == ContentFilter()) return null
     val parts = buildList {
@@ -272,6 +273,7 @@ internal fun buildContentFilterSummary(
         when (filter.syncStatus) {
             SyncStatusFilter.LocalOnly -> add(localLabel)
             SyncStatusFilter.BackedUp  -> add(backedUpLabel)
+            SyncStatusFilter.CloudOnly -> add(cloudLabel)
             else -> {}
         }
         if (filter.year != null) add("${filter.year}")
@@ -279,7 +281,13 @@ internal fun buildContentFilterSummary(
             val monthName = java.text.SimpleDateFormat("MMM", java.util.Locale.getDefault()).format(
                 java.util.Calendar.getInstance().apply { set(java.util.Calendar.MONTH, filter.month - 1) }.time
             )
-            add(if (filter.day != null) "$monthName ${filter.day}" else monthName)
+            add(
+                when {
+                    filter.day != null && filter.dayEnd != null -> "$monthName ${filter.day}-${filter.dayEnd}"
+                    filter.day != null -> "$monthName ${filter.day}"
+                    else -> monthName
+                }
+            )
         }
     }
     return parts.joinToString(" · ").ifEmpty { null }
@@ -344,6 +352,14 @@ fun GalleryScreen(
      *  selection (matching the Strip action), so every handed item is editable. */
     onEditMetadata: (items: List<GalleryItem>) -> Unit = {},
     onCreateCollage: (items: List<GalleryItem>) -> Unit = {},
+    /** Opens the device photo picker for the logged-out "New folder" flow, carrying the folder name
+     *  the user just typed. The picked device photos come back via [newFolderPickedItems]. */
+    onStartNewFolderPick: (String) -> Unit = {},
+    /** The device photos the picker returned for the new folder, paired with [newFolderPickedName].
+     *  Consumed once into a move, then cleared via [onNewFolderPickConsumed]. */
+    newFolderPickedItems: List<GalleryItem>? = null,
+    newFolderPickedName: String? = null,
+    onNewFolderPickConsumed: () -> Unit = {},
     /** Non-null when the user tapped the home-screen photo widget. The screen waits for
      *  the items flow to populate, finds the matching item, and forwards to
      *  [onPhotoClick]. [onPendingWidgetPhotoConsumed] is invoked exactly once after
@@ -397,7 +413,8 @@ fun GalleryScreen(
     val tabScope = rememberCoroutineScope()
     // Three top-level tabs (Photos / Albums / Shared), hosted in a pager so they can be swiped
     // between as well as tapped. Seeded from the saved tab so a config change restores the page.
-    val pagerState = rememberPagerState(initialPage = selectedTab) { 3 }
+    // A local-only session (no account) drops the cloud-only Shared page, leaving Photos + Albums.
+    val pagerState = rememberPagerState(initialPage = selectedTab) { if (state.isSignedIn) 3 else 2 }
     // Two-way sync between the pager and [selectedTab] (which drives the header rail + dock highlight).
     // Settling on a page — by swipe or by the dock's animateScrollToPage — adopts it as the active tab;
     // a tap path updates selectedTab and animates the pager below.
@@ -414,7 +431,7 @@ fun GalleryScreen(
         if (landingTabApplied) return@LaunchedEffect
         landingTabApplied = true
         val landing = context.settingsDataStore.data
-            .map { (it[SettingsKeys.LANDING_TAB] ?: 0).coerceIn(0, 2) }
+            .map { (it[SettingsKeys.LANDING_TAB] ?: 0).coerceIn(0, if (state.isSignedIn) 2 else 1) }
             .first()
         if (landing != selectedTab) {
             selectedTab = landing
@@ -426,10 +443,17 @@ fun GalleryScreen(
     // has to stay current, so picking another landing tab in Settings retargets back straight away
     // rather than at the next start. Initial 0 matches the seeding default.
     val landingTab by remember {
-        context.settingsDataStore.data.map { (it[SettingsKeys.LANDING_TAB] ?: 0).coerceIn(0, 2) }
+        context.settingsDataStore.data.map { (it[SettingsKeys.LANDING_TAB] ?: 0).coerceIn(0, if (state.isSignedIn) 2 else 1) }
     }.collectAsState(initial = 0)
     var sharedFilter by remember { mutableStateOf(SharedFilter.SharedWithMe) }
     var albumFilter by remember { mutableStateOf(AlbumDisplayFilter.All) }
+    // Albums-tab inline search: the typed query (kept across a config change) and whether the rail's
+    // search bar is open. Hoisted beside the filter so the header rail and the Albums page read one
+    // source. Arranging takes the whole rail, so it and the search are mutually exclusive: opening the
+    // arrange mode clears an open search, and while it is on the rail hides the search entry.
+    var albumQuery by rememberSaveable { mutableStateOf("") }
+    var albumSearchActive by remember { mutableStateOf(false) }
+    var albumReorderActive by remember { mutableStateOf(false) }
     // Albums-tab view filter: default narrowing, a remember-last toggle, and the last picked value.
     val albumsDefaultFilter by remember {
         context.settingsDataStore.data.map { it[SettingsKeys.ALBUMS_DEFAULT_FILTER] ?: 0 }
@@ -444,6 +468,10 @@ fun GalleryScreen(
     val albumsSortMode by remember {
         context.settingsDataStore.data.map { AlbumSortMode.fromOrdinal(it[SettingsKeys.ALBUMS_SORT_MODE]) }
     }.collectAsState(initial = AlbumSortMode.Default)
+    // How many album covers sit per row on the Albums tab (default 2). Seeded from the synchronous
+    // boot mirror so returning to the tab opens at the stored size on the first frame instead of
+    // flashing 2 columns and letting the cover cards' animateItem reshuffle into the real layout.
+    val albumColumns = rememberAlbumColumns()
     // Re-resolve the filter each time the pager reaches the Albums page: last-used when remembering,
     // otherwise the configured default. Leaving and returning therefore resets to the default
     // (remember-last off) or restores the last pick (remember-last on), rather than holding whatever
@@ -748,6 +776,23 @@ fun GalleryScreen(
             .onFailure { viewModel.clearPendingStripIntent() }
     }
 
+    // ── Move-to-folder write-permission launcher ──────────────────────────────
+    // Moving a file the app does not own needs a one-shot system write consent; RESULT_OK replays
+    // the move on the deferred URIs (mirrors the delete + strip launchers above). The intent here is
+    // an IntentSender straight from the use case, not a PendingIntent, so it is launched directly.
+    val pendingMoveIntent by viewModel.pendingMoveIntent.collectAsStateWithLifecycle()
+    val moveToFolderPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) viewModel.onMovePermissionGranted()
+        else viewModel.clearPendingMove()
+    }
+    LaunchedEffect(pendingMoveIntent) {
+        val sender = pendingMoveIntent ?: return@LaunchedEffect
+        runCatching { moveToFolderPermissionLauncher.launch(IntentSenderRequest.Builder(sender).build()) }
+            .onFailure { viewModel.clearPendingMove() }
+    }
+
     // ── Multi-select delete sheet ─────────────────────────────────────────────
     var showMultiDeleteSheet by remember { mutableStateOf(false) }
     // The selection's hide split while its confirmation is up, null when none is. Holding the split
@@ -866,6 +911,14 @@ fun GalleryScreen(
         viewModel.favoriteFailure.collect { snackbarHostState.showSnackbar(it) }
     }
 
+    // A completed move to a device folder confirms where the files landed. One-shot collect.
+    val movedToFolderTpl = stringResource(R.string.moved_to_folder)
+    LaunchedEffect(Unit) {
+        viewModel.moveConfirmation.collect { folderName ->
+            snackbarHostState.showSnackbar(movedToFolderTpl.format(folderName))
+        }
+    }
+
     // ── Unified share drawer (selection) ──────────────────────────────────────
     // The toolbar Share opens the same menu the viewer uses: Send to another app,
     // Share with people (→ add-to-album), and — only for a single cloud-backed photo —
@@ -903,6 +956,36 @@ fun GalleryScreen(
     var showCreateAlbumInline by remember { mutableStateOf(false) }
     val addToAlbumSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val addToPersonSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    // ── Move-to-folder multi-action ───────────────────────────────────────────
+    // The target picker (existing folders + New folder) and the typed-name dialog it hands off to.
+    var showMoveToFolderSheet by remember { mutableStateOf(false) }
+    var showNewFolderDialog by remember { mutableStateOf(false) }
+    val moveTargetFolders by viewModel.moveTargetFolders.collectAsStateWithLifecycle()
+
+    // ── New device folder (logged-out) ────────────────────────────────────────
+    // The Albums-tab "New folder" pill opens a name dialog; on confirm the device photo picker opens,
+    // and the picked photos come back via newFolderPickedItems to be moved into DCIM/<name>/.
+    var showNewFolderNameDialog by remember { mutableStateOf(false) }
+
+    // Move the device photos the picker handed back into the just-named folder, then clear the carrier
+    // so a back-pop doesn't replay it. Mirrors the collage pendingAdd handoff; only LocalOnly/Synced
+    // carry a device uri to move.
+    LaunchedEffect(newFolderPickedItems) {
+        val items = newFolderPickedItems
+        val name = newFolderPickedName
+        if (items != null && name != null) {
+            val uris = items.mapNotNull {
+                when (it) {
+                    is GalleryItem.LocalOnly -> it.local.uri
+                    is GalleryItem.Synced -> it.local.uri
+                    else -> null
+                }
+            }
+            if (uris.isNotEmpty()) viewModel.createFolderWithPhotos(name, uris)
+            onNewFolderPickConsumed()
+        }
+    }
 
     // No MediaStore consent dialog: add-to-album is a DataStore append, not a file move.
 
@@ -1085,6 +1168,7 @@ fun GalleryScreen(
             1 -> AlbumsScreen(
                 topPadding = headerHeightDp,
                 gridState = albumsGridState,
+                columns = albumColumns,
                 onAlbumClick = onAlbumClick,
                 onAlbumShareClick = onAlbumShareClick,
                 onAlbumActionClick = onAlbumActionClick,
@@ -1094,6 +1178,12 @@ fun GalleryScreen(
                 onMemoriesClick = onMemoriesClick,
                 createRequestSignal = albumCreateSignal,
                 displayFilter = albumFilter,
+                query = albumQuery,
+                onReorderModeChange = { active ->
+                    albumReorderActive = active
+                    // Search and arrange cannot share the rail; opening arrange closes an open search.
+                    if (active) { albumSearchActive = false; albumQuery = "" }
+                },
             )
             2 -> SharedScreen(
                 topPadding = headerHeightDp,
@@ -1154,9 +1244,11 @@ fun GalleryScreen(
                         onCalendarClick = onCalendarClick,
                         onClearContentFilter = { viewModel.setContentFilter(ContentFilter()) },
                         onHiddenAlbumClick = onHiddenAlbumClick,
-                        // The Photos-tab filter pill opens the Timeline filter screen.
-                        onShowAlbumsFilterSheet = onOpenTimelineFilter,
+                        // The Photos-tab filter icon opens the content-filter drawer (sync status
+                        // + date), the same sheet the Search screen shows.
+                        onShowAlbumsFilterSheet = { showFilterSheet = true },
                         onNewAlbumClick = { albumCreateSignal++ },
+                        onNewLocalFolder = { showNewFolderNameDialog = true },
                         albumFilter = albumFilter,
                         onAlbumFilterSelected = { picked ->
                             albumFilter = picked
@@ -1165,6 +1257,12 @@ fun GalleryScreen(
                             }
                         },
                         onOpenAlbumsFilterSheet = { showAlbumsFilterSheet = true },
+                        albumQuery = albumQuery,
+                        onAlbumQueryChange = { albumQuery = it },
+                        albumSearchActive = albumSearchActive,
+                        onAlbumSearchActiveChange = { albumSearchActive = it },
+                        // Arranging owns the whole rail, so entering it closes any open search first.
+                        albumReorderActive = albumReorderActive,
                         onSharedFilterSelected = { filter ->
                             sharedFilter = filter
                             activeEmailFilter = null
@@ -1201,6 +1299,7 @@ fun GalleryScreen(
             addToAlbumState = addToAlbumState,
             allSelected = state.filteredItems.isNotEmpty() &&
                 state.selectedItems.size == state.filteredItems.size,
+            isSignedIn = state.isSignedIn,
             onSelectAll = {
                 val all = state.filteredItems.toSet()
                 viewModel.setSelection(if (state.selectedItems.size == all.size) emptySet() else all)
@@ -1226,6 +1325,7 @@ fun GalleryScreen(
             onStripMetadata = viewModel::stripMetadataSelected,
             onEditMetadata = { onEditMetadata(state.selectedItems.toList()) },
             onCreateCollage = { onCreateCollage(state.selectedItems.toList()) },
+            onRequestMoveToFolder = { showMoveToFolderSheet = true },
         )
         SelectionDrawer(
             visible = state.isSelectionMode,
@@ -1331,6 +1431,8 @@ fun GalleryScreen(
             BottomDock(
                 // The live fractional page position drives the sliding highlight, so it follows a swipe.
                 position = pagerState.currentPage + pagerState.currentPageOffsetFraction,
+                // A local-only session has no account, so the cloud-only Shared tab is omitted.
+                showShared = state.isSignedIn,
                 onTabSelected = { tab ->
                     // Re-tapping the active tab always returns it to the visual top (item 0). Switching
                     // to a different tab also resets to the top, unless "keep place when switching tabs"
@@ -1388,14 +1490,27 @@ fun GalleryScreen(
 
     // ── Bottom sheets — extracted to GalleryDialogs.kt for JIT-blob shrink ────
     if (showFilterSheet) {
-        GalleryContentFilterDialog(
-            currentFilter = state.contentFilter,
-            currentCategory = state.selectedFilter,
+        ModalBottomSheet(
+            onDismissRequest = { showFilterSheet = false },
             sheetState = filterSheetState,
-            onApply = { filter -> viewModel.setContentFilter(filter) },
-            onCategorySelected = { cat -> viewModel.onFilterSelected(cat) },
-            onDismiss = { showFilterSheet = false },
-        )
+            containerColor = AppColors.current.sheetBg,
+            scrimColor = Color.Black.copy(alpha = 0.5f),
+        ) {
+            ContentFilterSheet(
+                currentFilter = state.contentFilter,
+                currentCategory = state.selectedFilter,
+                onApply = { filter -> viewModel.setContentFilter(filter) },
+                onCategorySelected = { cat -> viewModel.onFilterSelected(cat) },
+                onDismiss = { showFilterSheet = false },
+                // Categories + media type live inline in the timeline rail, so the drawer keeps the
+                // sync-status + date pickers only, matching the Search screen's sheet.
+                showCategorySection = false,
+                showMediaTypeSection = false,
+                showDateSection = false,
+                // Timeline-only bottom row into the full layout / categories / folders screen.
+                onOpenTimelineSettings = onOpenTimelineFilter,
+            )
+        }
     }
     if (showEmailFilterSheet) {
         GallerySharedEmailFilterDialog(
@@ -1414,6 +1529,7 @@ fun GalleryScreen(
             default = AlbumDisplayFilter.entries[albumsDefaultFilter.coerceIn(0, AlbumDisplayFilter.entries.lastIndex)],
             rememberLast = albumsRememberLastFilter,
             sortMode = albumsSortMode,
+            columns = albumColumns,
             onDefaultChange = { picked ->
                 // Show it now, not only on the next visit. The sheet writes the filter the Albums
                 // tab opens on, and picking one while looking at that tab is a statement about the
@@ -1433,6 +1549,11 @@ fun GalleryScreen(
             onSortModeChange = { picked ->
                 tabScope.launch {
                     context.settingsDataStore.edit { it[SettingsKeys.ALBUMS_SORT_MODE] = picked.ordinal }
+                }
+            },
+            onColumnsChange = { picked ->
+                tabScope.launch {
+                    context.settingsDataStore.edit { it[SettingsKeys.ALBUM_GRID_COLUMNS] = picked }
                 }
             },
             onDismiss = { showAlbumsFilterSheet = false },
@@ -1542,6 +1663,48 @@ fun GalleryScreen(
             },
         )
     }
+    // ── Move-to-folder picker + new-folder name dialog ────────────────────────
+    if (showMoveToFolderSheet && state.selectedItems.isNotEmpty()) {
+        MoveToFolderSheet(
+            folders = moveTargetFolders,
+            onPick = { name ->
+                showMoveToFolderSheet = false
+                viewModel.moveSelectedToFolder(name)
+            },
+            onNewFolder = {
+                showMoveToFolderSheet = false
+                showNewFolderDialog = true
+            },
+            onDismiss = { showMoveToFolderSheet = false },
+        )
+    }
+    if (showNewFolderDialog) {
+        NewFolderNameDialog(
+            onConfirm = { name ->
+                showNewFolderDialog = false
+                viewModel.moveSelectedToFolder(name)
+            },
+            onDismiss = { showNewFolderDialog = false },
+        )
+    }
+    // Logged-out "New folder": name the folder in the shared edit sheet, then hand off to the device
+    // photo picker. The picked photos come back via newFolderPickedItems and are moved into
+    // DCIM/<name>/ by the LaunchedEffect above; the moveConfirmation snackbar reports where they landed.
+    if (showNewFolderNameDialog) {
+        EditFieldSheet(
+            title = stringResource(R.string.new_folder),
+            hint = stringResource(R.string.move_to_folder_name_hint),
+            initialValue = "",
+            singleLine = true,
+            confirmLabel = stringResource(R.string.new_folder_create),
+            onDismiss = { showNewFolderNameDialog = false },
+            onSave = { name ->
+                showNewFolderNameDialog = false
+                onStartNewFolderPick(name.trim())
+            },
+            canConfirm = { it.isNotBlank() },
+        )
+    }
 
     // ── Unified share drawer ──────────────────────────────────────────────────
     if (showShareSheet && state.selectedItems.isNotEmpty()) {
@@ -1550,7 +1713,8 @@ fun GalleryScreen(
             // Offer the Public link row for any single selection (like the viewer); only a
             // backed-up cloud photo can actually mint a link, a local one shows the back-up note.
             canCreateLink = shareSinglePhotoHasLink,
-            showPublicLink = shareSingleSelected,
+            showPublicLink = shareSingleSelected && state.isSignedIn,
+            showShareWithPeople = state.isSignedIn,
             localUploadEnabled = true,
             onDismiss = { showShareSheet = false },
             onSendToApp = {

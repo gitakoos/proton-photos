@@ -44,6 +44,7 @@ import eu.akoos.photos.R
 import eu.akoos.photos.data.hidden.HiddenFolderRecords
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.Bg2
+import eu.akoos.photos.presentation.theme.SheetBg
 
 /**
  * Bottom-sheet ("drawer") equivalent of [ConfirmDialog], matching the app's other sliding sheets:
@@ -77,7 +78,7 @@ fun ConfirmSheet(
     ModalBottomSheet(
         onDismissRequest = onOutsideDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = Bg2,
+        containerColor = SheetBg,
         scrimColor = Color.Black.copy(alpha = 0.5f),
     ) {
         Column(

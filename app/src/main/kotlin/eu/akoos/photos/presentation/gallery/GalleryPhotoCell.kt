@@ -308,7 +308,8 @@ internal fun PhotoCell(
     // play icon is not a badge and stays for every video regardless of tier.
     //   <= 3 columns (big tiles):  show every badge, as before.
     //   == 4 columns (compact):    cloud badge + exactly ONE highest-priority secondary.
-    //   >= 5 columns (minimal):    cloud badge only.
+    //   == 5 columns (minimal):    cloud badge only.
+    //   >= 6 columns (dense):      no corner badge at all, so the tiny tiles stay clean.
     // Secondary priority (high to low): video duration > offline pin > type badge > favorite.
     val isDurationSecondary = isVideo && durationMs != null && durationMs > 0
     val compactSecondary: CompactSecondary = when {
@@ -334,6 +335,9 @@ internal fun PhotoCell(
             compactSecondary == CompactSecondary.Favorite
         else         -> false
     }
+    // On the very dense grids the tiles are too small for even the cloud/status badge to read, so it is
+    // dropped there too, leaving the thumbnails clean.
+    val allowStatusBadge = columns < 6
 
     Box(
         modifier = Modifier
@@ -471,9 +475,11 @@ internal fun PhotoCell(
         // the user downloaded it but the static item snapshot still reads CloudOnly. Mirrors the
         // same upgrade the photo viewer applies. A vaulted LocalOnly tile upgrades the same way when
         // the vault records a Drive copy for it.
-        when {
-            showSyncedBadge -> SyncedCloudBadge()
-            showCloudBadge  -> CloudBadge()
+        if (allowStatusBadge) {
+            when {
+                showSyncedBadge -> SyncedCloudBadge()
+                showCloudBadge  -> CloudBadge()
+            }
         }
 
         // Bottom-start overlays: the offline-pin badge and the video duration pill share one Row

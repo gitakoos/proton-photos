@@ -25,6 +25,7 @@ package eu.akoos.photos.presentation.theme
 import androidx.compose.foundation.IndicationNodeFactory
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.interaction.InteractionSource
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
@@ -43,6 +44,7 @@ import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontVariation
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
 import eu.akoos.photos.R
 import eu.akoos.photos.presentation.settings.ThemePalette
 
@@ -119,12 +121,18 @@ val StatusSynced  = Color(0xFF30D158)  // green — uploaded, backed up
 val StatusPending = Color(0xFFFF9F0A)  // amber — waiting
 val StatusError   = Color(0xFFFF453A)  // red — failure
 
+// Full-capsule pill shape shared by every floating pill, chip and button (theme-invariant).
+val pillShape = RoundedCornerShape(999.dp)
+
 // ── Semantic color tokens — switch based on theme mode ───────────────────────────
 data class AppColorsTokens(
     val isLight: Boolean,
     val bg0: Color,
     val bg1: Color,
     val bg2: Color,
+    // Bottom-sheet / drawer surface. Matches bg2 in every theme except AMOLED, where it drops to
+    // true black so full-width drawers sit flush on the black page instead of a near-black step.
+    val sheetBg: Color,
     val pageBg: Color,
     val cardBg: Color,
     val cardBorder: Color,
@@ -191,6 +199,7 @@ private fun lightAccentFor(palette: ThemePalette): Pair<Color, Color> = when (pa
 private val Bg0Amoled = Color(0xFF000000)
 private val Bg1Amoled = Color(0xFF000000)
 private val Bg2Amoled = Color(0xFF101010)
+private val SheetBgAmoled = Color(0xFF000000)
 private val PageBgAmoled = Color(0xFF000000)
 private val CardBgAmoled = Color(0xFF0C0C0D)
 
@@ -201,6 +210,7 @@ private fun darkAppColors(palette: ThemePalette, amoled: Boolean = false): AppCo
         bg0            = if (amoled) Bg0Amoled else Bg0Dark,
         bg1            = if (amoled) Bg1Amoled else Bg1Dark,
         bg2            = if (amoled) Bg2Amoled else Bg2Dark,
+        sheetBg        = if (amoled) SheetBgAmoled else Bg2Dark,
         pageBg         = if (amoled) PageBgAmoled else Color(0xFF0E0E0F),
         cardBg         = if (amoled) CardBgAmoled else Color(0xFF1C1C1E),
         cardBorder     = Color(0xFF2C2C2E),
@@ -236,6 +246,7 @@ private fun lightAppColors(palette: ThemePalette): AppColorsTokens {
         bg0            = Bg0Light,
         bg1            = Bg1Light,
         bg2            = Bg2Light,
+        sheetBg        = Bg2Light,
         pageBg         = Color(0xFFF2F2F5),
         cardBg         = Color(0xFFFFFFFF),
         cardBorder     = Color(0xFFD8D8DC),
@@ -345,6 +356,10 @@ val Bg1: Color
 val Bg2: Color
     @Composable @ReadOnlyComposable
     get() = LocalAppColors.current.bg2
+
+val SheetBg: Color
+    @Composable @ReadOnlyComposable
+    get() = LocalAppColors.current.sheetBg
 
 val FgPrimary: Color
     @Composable @ReadOnlyComposable

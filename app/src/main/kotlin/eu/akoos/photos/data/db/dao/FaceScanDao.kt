@@ -55,6 +55,26 @@ interface FaceScanDao {
     )
     suspend fun facelessPhotoKeys(userId: String): List<String>
 
+    /** The faceless photos a "find more" sweep has not yet re-checked at the high-resolution setting:
+     *  [facelessPhotoKeys] narrowed to markers still flagged not hi-res swept. This is what makes a
+     *  repeat sweep progressively cheaper, since a landscape looked at once is never re-scanned. */
+    @Query(
+        "SELECT photoKey FROM face_scan WHERE userId = :userId AND hiResScanned = 0 " +
+            "AND photoKey NOT IN (SELECT photoKey FROM face WHERE userId = :userId)",
+    )
+    suspend fun hiResPendingKeys(userId: String): List<String>
+
+    /**
+     * Flags [photoKeys] as hi-res swept, so a later "find more" sweep skips a photo an earlier sweep
+     * already looked at whether or not it turned up a face. Chunked one host variable per key, against
+     * the per-statement cap a select-all can exceed.
+     */
+    suspend fun markHiResScanned(userId: String, photoKeys: Collection<String>) =
+        photoKeys.forEachSqlChunk { markHiResScannedChunk(userId, it) }
+
+    @Query("UPDATE face_scan SET hiResScanned = 1 WHERE userId = :userId AND photoKey IN (:photoKeys)")
+    suspend fun markHiResScannedChunk(userId: String, photoKeys: List<String>)
+
     /**
      * Drops the scan markers for [photoKeys], the invalidation a removed or re-indexed photo needs so
      * it is scanned afresh. Chunked one host variable per key, against the per-statement cap a
@@ -69,4 +89,10 @@ interface FaceScanDao {
     /** Removes every scan marker for the account, for the sign-out wipe. */
     @Query("DELETE FROM face_scan WHERE userId = :userId")
     suspend fun clearForUser(userId: String)
+
+    /** Removes every scan marker for every account, so a recognition-model re-index wipe forces the
+     *  whole library to be re-scanned and re-embedded with the current model. Returns the row count
+     *  deleted. */
+    @Query("DELETE FROM face_scan")
+    suspend fun clearAll(): Int
 }

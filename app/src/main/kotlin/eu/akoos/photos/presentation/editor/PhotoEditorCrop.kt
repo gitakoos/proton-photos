@@ -77,6 +77,7 @@ import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.FgPrimary
 import eu.akoos.photos.presentation.theme.PillBg
 import eu.akoos.photos.presentation.theme.PillBorder
+import eu.akoos.photos.presentation.theme.pillShape
 import eu.akoos.photos.util.FitBox
 import eu.akoos.photos.util.fitImageInBox
 import kotlin.math.min

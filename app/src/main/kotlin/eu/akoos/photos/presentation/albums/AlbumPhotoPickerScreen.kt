@@ -127,6 +127,10 @@ fun AlbumPhotoPickerScreen(
     onBack: () -> Unit,
     onAdded: () -> Unit = {},
     onPick: ((List<GalleryItem>) -> Unit)? = null,
+    // Device-only mode for the logged-out "New folder" flow: the grid offers only photos with a device
+    // original (LocalOnly + Synced), since a folder move relocates a device file, and the
+    // All/Cloud/Device filter row is hidden because the source is locked to Device.
+    deviceOnly: Boolean = false,
     // Header title when nothing is picked yet. Defaults to the "Add to album" wording; a return-mode
     // caller (collage, person) passes its own so the picker reads for its context.
     titleRes: Int = R.string.album_picker_title,
@@ -150,17 +154,21 @@ fun AlbumPhotoPickerScreen(
 
     // Drop photos already in this album, and photos hidden on this device, so the picker only
     // offers addable new ones. A hidden photo re-added to an album would un-hide it.
-    val basePhotos = remember(allItems, excludeLinkIds, excludeKeys, hiddenCloudLinkIds) {
-        if (excludeLinkIds.isEmpty() && excludeKeys.isEmpty() && hiddenCloudLinkIds.isEmpty()) allItems
-        else allItems.filter { item ->
-            val cloudId = when (item) {
-                is GalleryItem.CloudOnly -> item.cloud.linkId
-                is GalleryItem.Synced    -> item.cloud.linkId
-                is GalleryItem.LocalOnly -> null
+    val basePhotos = remember(allItems, excludeLinkIds, excludeKeys, hiddenCloudLinkIds, deviceOnly) {
+        val filtered =
+            if (excludeLinkIds.isEmpty() && excludeKeys.isEmpty() && hiddenCloudLinkIds.isEmpty()) allItems
+            else allItems.filter { item ->
+                val cloudId = when (item) {
+                    is GalleryItem.CloudOnly -> item.cloud.linkId
+                    is GalleryItem.Synced    -> item.cloud.linkId
+                    is GalleryItem.LocalOnly -> null
+                }
+                val cloudOk = cloudId == null || (cloudId !in excludeLinkIds && cloudId !in hiddenCloudLinkIds)
+                cloudOk && AlbumPhotoPickerViewModel.stableKeyOf(item) !in excludeKeys
             }
-            val cloudOk = cloudId == null || (cloudId !in excludeLinkIds && cloudId !in hiddenCloudLinkIds)
-            cloudOk && AlbumPhotoPickerViewModel.stableKeyOf(item) !in excludeKeys
-        }
+        // Device-only mode keeps only photos with a device original, since a folder move relocates a
+        // device file; a cloud-only photo has nothing on disk to move.
+        if (deviceOnly) filtered.filter { it is GalleryItem.LocalOnly || it is GalleryItem.Synced } else filtered
     }
     // Type filter (#40): narrow the mixed library to cloud-backed photos (CloudOnly + Synced) or
     // on-device-only photos (LocalOnly), so it is clear which source a photo comes from. The
@@ -388,37 +396,40 @@ fun AlbumPhotoPickerScreen(
 
         // Type filter — a centered segmented control: All / Cloud / Device inside one pill, each
         // its own segment, so a big mixed library can be narrowed to one source. Sits just below the
-        // back-pill row; the grid content inset clears both.
-        Row(
-            modifier = Modifier
-                .statusBarsPadding()
-                .fillMaxWidth()
-                .padding(top = 56.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
+        // back-pill row; the grid content inset clears both. Hidden in device-only mode, where the
+        // source is locked to Device.
+        if (!deviceOnly) {
             Row(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(PillBg, RoundedCornerShape(20.dp))
-                    .border(0.5.dp, PillBorder, RoundedCornerShape(20.dp))
-                    .padding(3.dp),
-                horizontalArrangement = Arrangement.spacedBy(2.dp),
+                    .statusBarsPadding()
+                    .fillMaxWidth()
+                    .padding(top = 56.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                PickerFilterSegment(stringResource(R.string.picker_filter_all), pickerFilter == PickerFilter.All) {
-                    pickerFilter = PickerFilter.All
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(PillBg, RoundedCornerShape(20.dp))
+                        .border(0.5.dp, PillBorder, RoundedCornerShape(20.dp))
+                        .padding(3.dp),
+                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    PickerFilterSegment(stringResource(R.string.picker_filter_all), pickerFilter == PickerFilter.All) {
+                        pickerFilter = PickerFilter.All
+                    }
+                    PickerFilterSegment(stringResource(R.string.picker_filter_cloud), pickerFilter == PickerFilter.Cloud) {
+                        pickerFilter = PickerFilter.Cloud
+                    }
+                    PickerFilterSegment(stringResource(R.string.picker_filter_device), pickerFilter == PickerFilter.Device) {
+                        pickerFilter = PickerFilter.Device
+                    }
                 }
-                PickerFilterSegment(stringResource(R.string.picker_filter_cloud), pickerFilter == PickerFilter.Cloud) {
-                    pickerFilter = PickerFilter.Cloud
-                }
-                PickerFilterSegment(stringResource(R.string.picker_filter_device), pickerFilter == PickerFilter.Device) {
-                    pickerFilter = PickerFilter.Device
-                }
+                // Its own pill rather than a fourth segment: the control beside it picks a SOURCE, while
+                // this picks a filed status. They are independent axes, so folding them into one
+                // one-of-N control would make a combination like "cloud AND unfiled" unexpressible.
+                PickerUnfiledToggle(unfiledOnly) { unfiledOnly = !unfiledOnly }
             }
-            // Its own pill rather than a fourth segment: the control beside it picks a SOURCE, while
-            // this picks a filed status. They are independent axes, so folding them into one
-            // one-of-N control would make a combination like "cloud AND unfiled" unexpressible.
-            PickerUnfiledToggle(unfiledOnly) { unfiledOnly = !unfiledOnly }
         }
 
         // Confirm bar — "Add (N)". Disabled until at least one photo is picked.
@@ -471,7 +482,7 @@ fun AlbumPhotoPickerScreen(
                 onClick = { scope.launch { gridState.animateScrollToItem(0) } },
                 diameter = 40.dp,
                 iconSize = 24.dp,
-                background = PillBgOpaque,
+                background = PillBg,
                 borderColor = PillBorder,
                 tint = appColors.fgPrimary,
             )

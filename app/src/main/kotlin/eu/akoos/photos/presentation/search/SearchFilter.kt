@@ -84,11 +84,16 @@ internal object SearchFilter {
         category: GalleryFilter,
         offlinePinIds: Set<String> = emptySet(),
         favoriteIds: Set<String> = emptySet(),
+        personPhotoKeys: Set<String>? = null,
         foldedMonths: List<String>,
         foldedCategoryNames: Map<Int, String>,
     ): List<GalleryItem> {
         val qTrimmed = q.trim()
-        if (qTrimmed.isEmpty() && filter == ContentFilter() && category == GalleryFilter.All) {
+        // A selected person is itself a filter, so an otherwise-untouched page still narrows to their
+        // photos instead of falling through to the empty "nothing asked for" result.
+        if (qTrimmed.isEmpty() && filter == ContentFilter() && category == GalleryFilter.All &&
+            personPhotoKeys == null
+        ) {
             return emptyList()
         }
         var out = items
@@ -132,6 +137,11 @@ internal object SearchFilter {
                 else -> category.tagId?.let { id -> out.filter { CategorizeItem.belongsTo(it, id) } } ?: out
             }
         }
+        // People filter: narrow to the selected person's photos (their face-table keys), composing
+        // with every other active filter exactly like the timeline's people rail.
+        if (personPhotoKeys != null) {
+            out = out.filter { it.stableId in personPhotoKeys }
+        }
         return out
     }
 
@@ -145,7 +155,8 @@ internal object SearchFilter {
         out = when (filter.syncStatus) {
             SyncStatusFilter.All       -> out
             SyncStatusFilter.LocalOnly -> out.filter { it is GalleryItem.LocalOnly }
-            SyncStatusFilter.BackedUp  -> out.filter { it is GalleryItem.Synced || it is GalleryItem.CloudOnly }
+            SyncStatusFilter.BackedUp  -> out.filter { it is GalleryItem.Synced }
+            SyncStatusFilter.CloudOnly -> out.filter { it is GalleryItem.CloudOnly }
         }
         // Every date part that is set narrows on its own, which is what the timeline's own filter
         // does. Hanging the whole branch off the year made a month or a day without one inert here
@@ -155,13 +166,15 @@ internal object SearchFilter {
         val year = filter.year
         val month = filter.month
         val day = filter.day
+        val dayEnd = filter.dayEnd
         if (year != null || month != null || day != null) {
             val cal = Calendar.getInstance()
             out = out.filter {
                 cal.timeInMillis = it.captureTimeMs
+                val dom = cal.get(Calendar.DAY_OF_MONTH)
                 (year == null || cal.get(Calendar.YEAR) == year) &&
                     (month == null || cal.get(Calendar.MONTH) + 1 == month) &&
-                    (day == null || cal.get(Calendar.DAY_OF_MONTH) == day)
+                    (day == null || (if (dayEnd != null) dom in day..dayEnd else dom == day))
             }
         }
         return out

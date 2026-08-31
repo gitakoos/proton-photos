@@ -22,6 +22,8 @@
 
 package eu.akoos.photos.presentation.gallery
 
+import android.os.Build
+import androidx.activity.compose.BackHandler
 import androidx.datastore.preferences.core.edit
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -34,6 +36,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -46,15 +49,18 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.CallMade
 import androidx.compose.material.icons.automirrored.filled.CallReceived
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Collections
+import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Lock
@@ -93,11 +99,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
@@ -109,6 +118,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
@@ -125,10 +135,12 @@ import eu.akoos.photos.presentation.theme.ArcTrack
 import eu.akoos.photos.presentation.theme.Bg2
 import eu.akoos.photos.presentation.theme.ErrorColor
 import eu.akoos.photos.presentation.theme.FgDim
+import eu.akoos.photos.presentation.theme.FgMute
 import eu.akoos.photos.presentation.theme.FgPrimary
 import eu.akoos.photos.presentation.theme.PillBg
 import eu.akoos.photos.presentation.theme.PillBgOpaque
 import eu.akoos.photos.presentation.theme.PillBorder
+import eu.akoos.photos.presentation.theme.pillShape
 import android.graphics.Bitmap
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -162,9 +174,127 @@ internal val LocalPeopleRail = compositionLocalOf { PeopleRailData() }
 internal fun AlbumsFilterRail(
     onHiddenAlbumClick: () -> Unit = {},
     onNewAlbumClick: () -> Unit = {},
+    /** Logged-out only: create a real device folder from picked local photos (Android 10+). */
+    onNewLocalFolder: () -> Unit = {},
     selectedFilter: AlbumDisplayFilter = AlbumDisplayFilter.All,
     onFilterSelected: (AlbumDisplayFilter) -> Unit = {},
     onOpenSheet: () -> Unit = {},
+    isSignedIn: Boolean = true,
+    /** Albums-tab inline search, hoisted in the gallery and threaded through the header. */
+    searchQuery: String = "",
+    onSearchQueryChange: (String) -> Unit = {},
+    searchActive: Boolean = false,
+    onSearchActiveChange: (Boolean) -> Unit = {},
+    /** True while the page arranges albums; hides the search entry so the two never share the rail. */
+    reorderActive: Boolean = false,
+    modifier: Modifier = Modifier,
+) {
+    // Focus the field only as the bar opens, never on a plain tab visit.
+    val focusRequester = remember { FocusRequester() }
+    LaunchedEffect(searchActive) { if (searchActive) focusRequester.requestFocus() }
+    // Back closes the bar and clears the query before it leaves the tab.
+    BackHandler(enabled = searchActive) { onSearchActiveChange(false); onSearchQueryChange("") }
+
+    BoxWithConstraints(modifier = modifier) {
+        // The rail is the weighted half of the header row, so it already stops before the avatar: the
+        // open bar fills the whole rail width, collapsed it is one 38dp icon pinned at the end.
+        val searchWidth by animateDpAsState(
+            targetValue = if (searchActive) maxWidth else 38.dp,
+            animationSpec = tween(220),
+            label = "albumsSearchWidth",
+        )
+        // Filter, Hidden and New pills, taken off the rail while the bar is open so none is pressed by
+        // accident. The avatar beside the rail stays in place throughout.
+        if (!searchActive) {
+            AlbumsRailPills(
+                onHiddenAlbumClick = onHiddenAlbumClick,
+                onNewAlbumClick = onNewAlbumClick,
+                onNewLocalFolder = onNewLocalFolder,
+                selectedFilter = selectedFilter,
+                onFilterSelected = onFilterSelected,
+                onOpenSheet = onOpenSheet,
+                isSignedIn = isSignedIn,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        // Morphing search element: a 38dp icon collapsed, the input bar filling the rail open. Gone
+        // while arranging, which takes the whole rail for its own bar.
+        if (!reorderActive) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .width(searchWidth)
+                    .height(38.dp)
+                    .clip(pillShape)
+                    .background(PillBg, pillShape)
+                    .border(0.5.dp, if (searchQuery.isNotEmpty()) Accent else PillBorder, pillShape)
+                    .clickable(enabled = !searchActive) { onSearchActiveChange(true) },
+            ) {
+                if (searchActive) {
+                    Row(
+                        modifier = Modifier.fillMaxSize().padding(start = 12.dp, end = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Icon(Icons.Default.Search, contentDescription = null, tint = FgDim, modifier = Modifier.size(18.dp))
+                        Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+                            if (searchQuery.isEmpty()) {
+                                Text(
+                                    stringResource(R.string.albums_search_hint),
+                                    color = FgMute,
+                                    fontSize = 14.sp,
+                                    maxLines = 1,
+                                )
+                            }
+                            BasicTextField(
+                                value = searchQuery,
+                                onValueChange = onSearchQueryChange,
+                                singleLine = true,
+                                textStyle = TextStyle(color = FgPrimary, fontSize = 14.sp),
+                                cursorBrush = SolidColor(Accent),
+                                modifier = Modifier.fillMaxWidth().focusRequester(focusRequester),
+                            )
+                        }
+                        // Clears a non-empty query, then closes the bar on the next tap.
+                        Box(
+                            modifier = Modifier
+                                .size(28.dp)
+                                .clip(CircleShape)
+                                .clickable { if (searchQuery.isNotEmpty()) onSearchQueryChange("") else onSearchActiveChange(false) },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                Icons.Default.Close,
+                                contentDescription = stringResource(R.string.cd_clear_search),
+                                tint = FgDim,
+                                modifier = Modifier.size(18.dp),
+                            )
+                        }
+                    }
+                } else {
+                    Icon(
+                        Icons.Default.Search,
+                        contentDescription = stringResource(R.string.search_title),
+                        tint = FgDim,
+                        modifier = Modifier.align(Alignment.Center).size(18.dp),
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** The Albums rail's fixed pills (view filter, Hidden, New), lifted out so the search bar can take
+ *  their place while it is open without re-indenting or duplicating them. */
+@Composable
+private fun AlbumsRailPills(
+    onHiddenAlbumClick: () -> Unit,
+    onNewAlbumClick: () -> Unit,
+    onNewLocalFolder: () -> Unit,
+    selectedFilter: AlbumDisplayFilter,
+    onFilterSelected: (AlbumDisplayFilter) -> Unit,
+    onOpenSheet: () -> Unit,
+    isSignedIn: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -178,10 +308,12 @@ internal fun AlbumsFilterRail(
     ]
     val hiddenLabel = stringResource(R.string.gallery_filter_hidden)
     val newAlbumLabel = stringResource(R.string.albums_new_album)
+    val newFolderLabel = stringResource(R.string.new_folder)
     LazyRow(
         modifier = modifier,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
-        contentPadding = PaddingValues(end = 8.dp),
+        // Room at the end so a pill never slides under the collapsed search icon.
+        contentPadding = PaddingValues(end = 46.dp),
     ) {
         // All / Cloud / Local view filter. Tapping the label cycles All to Cloud to Local; the
         // filter icon after the separator opens the sheet (default + remember-last). Highlighted
@@ -254,17 +386,37 @@ internal fun AlbumsFilterRail(
                 Icon(Icons.Default.Lock, hiddenLabel, tint = FgDim, modifier = Modifier.size(15.dp))
             }
         }
-        // New album: compact icon button that opens the create-album dialog.
-        item(key = "new_album") {
-            Box(
-                modifier = Modifier
-                    .size(38.dp)
-                    .background(PillBg, pillShape)
-                    .border(0.5.dp, PillBorder, pillShape)
-                    .clickable { onNewAlbumClick() },
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(Icons.Default.Add, newAlbumLabel, tint = FgDim, modifier = Modifier.size(17.dp))
+        // New album: compact icon button that opens the create-album dialog. A local-only session
+        // has no cloud to create an album in, so the pill is present only when signed in.
+        if (isSignedIn) {
+            item(key = "new_album") {
+                Box(
+                    modifier = Modifier
+                        .size(38.dp)
+                        .background(PillBg, pillShape)
+                        .border(0.5.dp, PillBorder, pillShape)
+                        .clickable { onNewAlbumClick() },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Default.CreateNewFolder, newAlbumLabel, tint = FgDim, modifier = Modifier.size(17.dp))
+                }
+            }
+        }
+        // New folder: the logged-out counterpart in the same spot. A local-only session has no cloud
+        // album to create, but it can make a real device folder from picked photos; the in-place move
+        // that fills it is a scoped-storage write, so the pill needs Android 10+.
+        if (!isSignedIn && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            item(key = "new_local_folder") {
+                Box(
+                    modifier = Modifier
+                        .size(38.dp)
+                        .background(PillBg, pillShape)
+                        .border(0.5.dp, PillBorder, pillShape)
+                        .clickable { onNewLocalFolder() },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Default.CreateNewFolder, newFolderLabel, tint = FgDim, modifier = Modifier.size(17.dp))
+                }
             }
         }
     }
@@ -527,9 +679,10 @@ internal fun FilterRail(
     val videosLabel = stringResource(R.string.filter_type_videos)
     val localLabel = stringResource(R.string.filter_sync_local)
     val backedUpLabel = stringResource(R.string.filter_sync_backedup)
+    val cloudLabel = stringResource(R.string.filter_sync_cloud)
     val allLabel = stringResource(R.string.gallery_filter_all)
-    val filterSummary = remember(contentFilter, photosLabel, videosLabel, localLabel, backedUpLabel) {
-        buildContentFilterSummary(contentFilter, photosLabel, videosLabel, localLabel, backedUpLabel)
+    val filterSummary = remember(contentFilter, photosLabel, videosLabel, localLabel, backedUpLabel, cloudLabel) {
+        buildContentFilterSummary(contentFilter, photosLabel, videosLabel, localLabel, backedUpLabel, cloudLabel)
     }
 
     LazyRow(
@@ -576,9 +729,9 @@ internal fun FilterRail(
                         )
                     }
                 }
-                // Hairline separator + filter button. Opens the Timeline filter (hide device
-                // folders / albums from the timeline) right here, so it is discoverable from the
-                // timeline instead of only from Settings.
+                // Hairline separator + filter button. Opens the content-filter drawer (sync status
+                // + date) right here, so it is discoverable from the timeline instead of only from
+                // Settings.
                 Box(
                     modifier = Modifier
                         .height(18.dp)
@@ -667,6 +820,7 @@ internal fun CategoryRail(
     selectedFilter: GalleryFilter,
     onFilterSelected: (GalleryFilter) -> Unit,
     modifier: Modifier = Modifier,
+    shape: Shape = pillShape,
 ) {
     val context = LocalContext.current
     val peopleRail = LocalPeopleRail.current
@@ -689,9 +843,9 @@ internal fun CategoryRail(
                 Row(
                     modifier = Modifier
                         .height(34.dp)
-                        .clip(pillShape)
-                        .background(chipBg, pillShape)
-                        .then(if (!selected) Modifier.border(0.5.dp, PillBorder, pillShape) else Modifier)
+                        .clip(shape)
+                        .background(chipBg, shape)
+                        .then(if (!selected) Modifier.border(0.5.dp, PillBorder, shape) else Modifier)
                         .clickable { onFilterSelected(if (selected) GalleryFilter.All else cat) }
                         .padding(horizontal = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -717,9 +871,9 @@ internal fun CategoryRail(
                     Row(
                         modifier = Modifier
                             .height(34.dp)
-                            .clip(pillShape)
-                            .background(chipBg, pillShape)
-                            .then(if (!selected) Modifier.border(0.5.dp, PillBorder, pillShape) else Modifier)
+                            .clip(shape)
+                            .background(chipBg, shape)
+                            .then(if (!selected) Modifier.border(0.5.dp, PillBorder, shape) else Modifier)
                             .clickable { peopleRail.onToggle() }
                             .padding(horizontal = 12.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -862,7 +1016,10 @@ internal fun PersonCard(
             .apply { person.faceBox?.let { transformations(FaceCropTransformation(it)) } }
             .build()
     }
-    val name = person.displayName ?: stringResource(R.string.person_detail_unnamed)
+    val name = when {
+        person.isOther -> stringResource(R.string.person_unsorted)
+        else -> person.displayName ?: stringResource(R.string.person_detail_unnamed)
+    }
     val countLabel = pluralStringResource(
         R.plurals.count_photos_plural, person.faceCount, person.faceCount,
     )
@@ -1079,7 +1236,7 @@ internal fun CategoryReorderList(modifier: Modifier = Modifier) {
 // ── Bottom dock ───────────────────────────────────────────────────────────────
 
 @Composable
-internal fun BottomDock(position: Float, onTabSelected: (Int) -> Unit) {
+internal fun BottomDock(position: Float, onTabSelected: (Int) -> Unit, showShared: Boolean = true) {
     val density = LocalDensity.current
     // Each tab's measured left offset + size (labels differ in width), so the single highlight can slide
     // to the selected one instead of the fill just snapping between tabs.
@@ -1113,7 +1270,10 @@ internal fun BottomDock(position: Float, onTabSelected: (Int) -> Unit) {
         Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
             DockTab(Icons.Default.Photo, stringResource(R.string.gallery_tab_photos), selectedTab == 0, { onTabSelected(0) }) { x, w, h -> tabX[0] = x; tabW[0] = w; tabH = h }
             DockTab(Icons.Default.Collections, stringResource(R.string.gallery_tab_albums), selectedTab == 1, { onTabSelected(1) }) { x, w, h -> tabX[1] = x; tabW[1] = w; tabH = h }
-            DockTab(Icons.Default.Share, stringResource(R.string.gallery_tab_shared), selectedTab == 2, { onTabSelected(2) }) { x, w, h -> tabX[2] = x; tabW[2] = w; tabH = h }
+            // Cloud-only: a local-only session omits the Shared tab, leaving a two-tab control.
+            if (showShared) {
+                DockTab(Icons.Default.Share, stringResource(R.string.gallery_tab_shared), selectedTab == 2, { onTabSelected(2) }) { x, w, h -> tabX[2] = x; tabW[2] = w; tabH = h }
+            }
         }
     }
 }

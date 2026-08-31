@@ -30,10 +30,13 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import me.proton.core.domain.entity.UserId
 import eu.akoos.photos.crypto.CryptoServiceClient
+import eu.akoos.photos.crypto.DecryptPriority
+import eu.akoos.photos.crypto.DecryptPriorityContext
 import eu.akoos.photos.data.crypto.parsePhotoDuration
 import eu.akoos.photos.data.db.dao.PhotoListingDao
 import eu.akoos.photos.data.db.entity.PhotoListingEntity
@@ -380,10 +383,14 @@ class VideoDurationBackfillScheduler @Inject constructor(
         val encNodeKey = row.encNodeKey ?: return null
         val encNodePass = row.encNodePassphrase ?: return null
         val parentLinkId = row.parentLinkId ?: return null
-        val parentKey = getParentKeyBytes(userId, parentLinkId, row.volumeId) ?: return null
-        val nodeKeyBytes = cryptoServiceClient.decryptNodeKey(encNodeKey, encNodePass, parentKey)
-        val json = cryptoServiceClient.decryptXAttr(encXAttr, nodeKeyBytes) ?: return null
-        return parsePhotoDuration(json)
+        // Background duration backfill yields the process-global crypto gate to interactive decrypts,
+        // the parent-key resolution included since it decrypts on a cache miss.
+        return withContext(DecryptPriorityContext(DecryptPriority.BACKGROUND)) {
+            val parentKey = getParentKeyBytes(userId, parentLinkId, row.volumeId) ?: return@withContext null
+            val nodeKeyBytes = cryptoServiceClient.decryptNodeKey(encNodeKey, encNodePass, parentKey)
+            val json = cryptoServiceClient.decryptXAttr(encXAttr, nodeKeyBytes) ?: return@withContext null
+            parsePhotoDuration(json)
+        }
     }
 
     /**

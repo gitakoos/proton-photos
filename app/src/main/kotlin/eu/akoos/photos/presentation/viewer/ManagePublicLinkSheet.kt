@@ -80,6 +80,7 @@ import androidx.compose.ui.unit.sp
 import eu.akoos.photos.R
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.Bg2
+import eu.akoos.photos.presentation.theme.SheetBg
 import eu.akoos.photos.presentation.theme.ErrorColor
 import eu.akoos.photos.presentation.theme.FgDim
 import eu.akoos.photos.presentation.theme.FgMute
@@ -112,7 +113,7 @@ internal fun ManagePublicLinkSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = Bg2,
+        containerColor = SheetBg,
         scrimColor = Color.Black.copy(alpha = 0.5f),
     ) {
         val maxSheetHeight = (LocalConfiguration.current.screenHeightDp * 0.7f).dp
@@ -270,6 +271,7 @@ private fun ActiveLinkBody(
         OutlinedTextField(
             value = password,
             onValueChange = { password = it },
+            shape = RoundedCornerShape(14.dp),
             singleLine = true,
             placeholder = {
                 Text(stringResource(R.string.share_password_hint), color = FgMute)

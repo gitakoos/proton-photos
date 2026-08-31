@@ -253,38 +253,51 @@ class DriveCryptoHelper @Inject constructor(
         sharePassphraseArmored: String,
     ): ByteArray {
         shareKeyCache[userId.id]?.let { return it }
-        val addresses = userAddressRepository.getAddresses(userId, false)
-            .filter { it.enabled && it.keys.isNotEmpty() }
-            .sortedBy { it.order }
-        if (addresses.isEmpty()) error("No active address for userId=${userId.id}")
 
-        // Try every active address: the share passphrase is encrypted to ONE of them, not always
-        // the primary (aliases, multi-address, changed primary all hit "Cannot decrypt with
-        // provided Key list" otherwise). The WHOLE attempt (decrypt + unlock) must be in one
-        // runCatching — a non-matching address can decrypt to bytes that only fail at unlock(), and
-        // wrapping just decryptData would let that throw escape the loop instead of trying the next.
         var lastError: Throwable? = null
-        for (address in addresses) {
-            val attempt = runCatching {
-                // useKeys + unlock both enter libgojni; lock so the post-login burst doesn't race.
-                cryptoLock.withLock {
-                    val passphraseBytes = address.useKeys(cryptoContext) {
-                        decryptData(sharePassphraseArmored)
+        // Try every active address in one fetch of the address list. The share passphrase is encrypted
+        // to ONE of them, not always the primary (aliases, multi-address, a changed primary all hit
+        // "Cannot decrypt with provided Key list" otherwise). The WHOLE attempt (decrypt + unlock) stays
+        // in one runCatching, because a non-matching address can decrypt to bytes that only fail at
+        // unlock(), so wrapping just decryptData would let that throw escape the loop instead of trying
+        // the next. Returns the key bytes, or null when no active address matched (the last real failure
+        // is kept in [lastError] so the caller can surface a reason).
+        suspend fun tryAddresses(refresh: Boolean): ByteArray? {
+            val addresses = userAddressRepository.getAddresses(userId, refresh)
+                .filter { it.enabled && it.keys.isNotEmpty() }
+                .sortedBy { it.order }
+            for (address in addresses) {
+                val attempt = runCatching {
+                    // useKeys + unlock both enter libgojni; lock so the post-login burst doesn't race.
+                    cryptoLock.withLock {
+                        val passphraseBytes = address.useKeys(cryptoContext) {
+                            decryptData(sharePassphraseArmored)
+                        }
+                        val unlockedKey = cryptoContext.pgpCrypto.unlock(shareKeyArmored, passphraseBytes)
+                        val keyBytes = unlockedKey.value.copyOf()
+                        unlockedKey.close()
+                        keyBytes
                     }
-                    val unlockedKey = cryptoContext.pgpCrypto.unlock(shareKeyArmored, passphraseBytes)
-                    val keyBytes = unlockedKey.value.copyOf()
-                    unlockedKey.close()
-                    keyBytes
                 }
+                if (attempt.isSuccess) return attempt.getOrThrow()
+                val e = attempt.exceptionOrNull()
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                lastError = e
             }
-            if (attempt.isSuccess) {
-                val keyBytes = attempt.getOrThrow()
-                shareKeyCache[userId.id] = keyBytes
-                return keyBytes
-            }
-            lastError = attempt.exceptionOrNull()
+            return null
         }
-        throw lastError ?: error("Share passphrase did not match any address key")
+
+        // Steady state uses the locally cached addresses (refresh=false). If none decrypt, that cache
+        // may be stale versus the passphrase's real recipient key (a key rotation, an address added on
+        // Drive web, or an incomplete post-login fetch), which otherwise leaves the root link key
+        // unavailable and blanks every album surface (the viewer's cloud-albums row, add-to-album, the
+        // duplicate caption) until a logout or a full data wipe. Force ONE network refresh of the
+        // address list and retry before giving up, so a stale cache self-heals in place.
+        (tryAddresses(refresh = false) ?: tryAddresses(refresh = true))?.let { keyBytes ->
+            shareKeyCache[userId.id] = keyBytes
+            return keyBytes
+        }
+        throw lastError ?: error("getOrDecryptShareKey: no active address matched for userId=${userId.id}")
     }
 
     fun decryptNodeKey(

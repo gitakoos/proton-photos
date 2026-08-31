@@ -83,6 +83,7 @@ fun PersonPickerSheet(
     onDismiss: () -> Unit,
     onCreateNew: ((String) -> Unit)? = null,
     searchPlaceholder: String? = null,
+    emptyText: String? = null,
 ) {
     val colors = AppColors.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -90,6 +91,9 @@ fun PersonPickerSheet(
     // Pure-search callers (no create) pass their own hint so the field does not read "or type a new
     // name" when there is nothing to create; merge callers keep the default.
     val placeholderText = searchPlaceholder ?: stringResource(R.string.person_picker_search)
+    // The whole-person merge passes its own empty line ("no other people to merge"); the assign and
+    // search callers keep the default.
+    val emptyStateText = emptyText ?: stringResource(R.string.person_picker_empty)
 
     val q = query.trim()
     val filtered = remember(people, query) {
@@ -101,7 +105,7 @@ fun PersonPickerSheet(
     ModalBottomSheet(
         sheetState = sheetState,
         onDismissRequest = onDismiss,
-        containerColor = colors.bg2,
+        containerColor = colors.sheetBg,
         scrimColor = Color.Black.copy(alpha = 0.5f),
     ) {
         Column(
@@ -122,6 +126,7 @@ fun PersonPickerSheet(
             OutlinedTextField(
                 value = query,
                 onValueChange = { query = it },
+                shape = RoundedCornerShape(14.dp),
                 placeholder = { Text(placeholderText, color = colors.fgMute) },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
@@ -163,7 +168,7 @@ fun PersonPickerSheet(
 
             if (filtered.isEmpty() && q.isEmpty()) {
                 Text(
-                    stringResource(R.string.person_picker_empty),
+                    emptyStateText,
                     color = colors.fgMute,
                     fontSize = 14.sp,
                 )

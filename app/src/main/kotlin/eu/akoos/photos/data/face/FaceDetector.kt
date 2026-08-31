@@ -21,12 +21,12 @@
  */
 
 /*
- * The session handling and the NCHW input layout follow the OCR rail in this project. The SCRFD
- * anchor decode (distance-to-box, distance-to-keypoint, and the row-major anchor-centre layout) and
- * the (x - 127.5) / 128 RGB normalisation follow the published InsightFace SCRFD detection format,
- * which is MIT licensed:
+ * The session handling and the NCHW input layout follow the OCR rail in this project. The YuNet prior
+ * decode (grid-cell centres, the centre-offset-and-exponent box form, the per-cell keypoint offsets,
+ * and the class-times-objectness score) and the raw BGR 0-255 input follow the published OpenCV Zoo
+ * YuNet face-detection format, which is MIT licensed:
  *
- *   Copyright (c) 2021 InsightFace
+ *   Copyright (c) 2023 OpenCV Zoo, Shiqi Yu and contributors
  */
 
 package eu.akoos.photos.data.face
@@ -44,12 +44,15 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.nio.FloatBuffer
+import java.util.concurrent.atomic.AtomicInteger
+import kotlin.math.exp
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
+import kotlin.math.sqrt
 
 /**
- * Finds where the faces are in a still bitmap by running the SCRFD-500m network once.
+ * Finds where the faces are in a still bitmap by running the YuNet detector network once.
  *
  * One session per instance, opened from [modelFile] when the instance is built and released by
  * [close]; opening it costs far more than a run, so a caller holds the instance for as long as it
@@ -61,8 +64,8 @@ import kotlin.math.roundToInt
  * and right, mapping a result back to the source is a single divide by the letterbox scale with no
  * offset to undo.
  *
- * End-to-end numbers can only be trusted once the real SCRFD-500m asset is side-loaded or published;
- * until then this codes against SCRFD's documented input and output format.
+ * End-to-end numbers can only be trusted once the real YuNet asset is side-loaded or published; until
+ * then this codes against YuNet's documented input and output format.
  */
 class FaceDetector(
     modelFile: File,
@@ -70,9 +73,8 @@ class FaceDetector(
      *  precision; an on-demand pass on one photo the user asked about can drop it to catch a face the
      *  walk missed, since the few extra false positives are on that one photo and are reviewed. */
     private val scoreThreshold: Float = SCORE_THRESHOLD,
-    /** The square the frame is letterboxed into before detection. The walk uses [INPUT]; an on-demand
-     *  pass can use the model's native 640, which recovers real faces a 1024 frame downsizes past the
-     *  detector (SCRFD-500m was trained at 640). The model input is dynamic, so the anchor grid adapts. */
+    /** The square the frame is letterboxed into before detection. YuNet's input is fixed at [INPUT],
+     *  so a run always uses [INPUT]; the parameter stays only so a caller can name the size it feeds. */
     private val inputSize: Int = INPUT,
 ) : AutoCloseable {
 
@@ -85,6 +87,11 @@ class FaceDetector(
     private val session: OrtSession = environment.createSession(modelFile.absolutePath, sessionOptions)
 
     private val inputName: String = session.inputNames.firstOrNull() ?: DEFAULT_INPUT
+
+    /** Running count of boxes the min-size gate has dropped since this instance was built. The library
+     *  walk opens a fresh detector per pass and reads this at the pass end to log the junk-size split;
+     *  it never changes what [detect] returns. */
+    val droppedTooSmall = AtomicInteger(0)
 
     /** The faces in [bitmap], in its own pixel coordinates. Empty when there is nothing to find. */
     suspend fun detect(bitmap: Bitmap): List<DetectedFace> = withContext(Dispatchers.Default) {
@@ -104,14 +111,20 @@ class FaceDetector(
 
         val candidates = decode(heads)
         if (candidates.isEmpty()) return@withContext emptyList()
-        mapBack(nms(candidates), scale, sourceWidth.toFloat(), sourceHeight.toFloat())
+        val mapped = mapBack(nms(candidates), scale, sourceWidth.toFloat(), sourceHeight.toFloat())
+        // Drop a box whose shorter edge falls under the min-size floor (an absolute pixel floor and a
+        // fraction of the frame), so a tiny distant face is rejected rather than embedded as noise.
+        val minEdge = max(MIN_FACE_PX.toFloat(), MIN_FACE_FRACTION * min(sourceWidth, sourceHeight))
+        val kept = mapped.filter { min(it.box.width(), it.box.height()) >= minEdge }
+        droppedTooSmall.addAndGet(mapped.size - kept.size)
+        kept
     }
 
     /**
      * [bitmap] letterboxed into a fixed [INPUT] square: scaled to fit with the aspect ratio kept, the
-     * picture at the top-left origin, and the remainder padded black. Pixels are normalised per
-     * channel by (value - 127.5) / 128 in red, green, blue order and laid out channel-planes-first as
-     * a single (1, 3, INPUT, INPUT) batch, which is what SCRFD was trained on.
+     * picture at the top-left origin, and the remainder padded black. Pixels are laid out
+     * channel-planes-first as a single (1, 3, INPUT, INPUT) batch in blue, green, red order at their
+     * raw 0-255 values with no normalisation, which is what YuNet reads.
      */
     private fun toInputTensor(bitmap: Bitmap, scale: Float): OnnxTensor {
         val fittedWidth = (bitmap.width * scale).roundToInt().coerceIn(1, inputSize)
@@ -129,9 +142,9 @@ class FaceDetector(
             val out = FloatArray(3 * plane)
             for (i in 0 until plane) {
                 val pixel = pixels[i]
-                out[i] = (((pixel shr 16) and 0xFF) - MEAN) / STD
-                out[plane + i] = (((pixel shr 8) and 0xFF) - MEAN) / STD
-                out[2 * plane + i] = ((pixel and 0xFF) - MEAN) / STD
+                out[i] = (pixel and 0xFF).toFloat()
+                out[plane + i] = ((pixel shr 8) and 0xFF).toFloat()
+                out[2 * plane + i] = ((pixel shr 16) and 0xFF).toFloat()
             }
             out
         } finally {
@@ -144,43 +157,48 @@ class FaceDetector(
     }
 
     /**
-     * The nine output tensors as one triplet (score, bbox, kps) per stride.
+     * The twelve output tensors as one quadruplet (cls, obj, bbox, kps) per stride.
      *
-     * Bound by name when the session exposes SCRFD's `score_s` / `bbox_s` / `kps_s` outputs; otherwise
-     * by order, which the reference export lays out as every score, then every bbox, then every kps,
-     * each group ordered by ascending stride. An export that carries no keypoint heads yields nothing.
+     * Bound by name when the session exposes YuNet's `cls_s` / `obj_s` / `bbox_s` / `kps_s` outputs;
+     * otherwise by order, taken as every cls, then every obj, then every bbox, then every kps, each
+     * group ascending by stride. An export missing any head yields nothing.
      */
     private fun readHeads(result: OrtSession.Result): List<RawHead> {
         val groups = STRIDES.size
         val byName = STRIDES.all { stride ->
-            result.get(scoreName(stride)).isPresent &&
+            result.get(clsName(stride)).isPresent &&
+                result.get(objName(stride)).isPresent &&
                 result.get(bboxName(stride)).isPresent &&
                 result.get(kpsName(stride)).isPresent
         }
-        if (!byName && result.size() < groups * 3) return emptyList()
+        if (!byName && result.size() < groups * 4) return emptyList()
         return STRIDES.mapIndexed { index, stride ->
             if (byName) {
                 RawHead(
-                    score = floats(result.get(scoreName(stride)).get()),
+                    cls = floats(result.get(clsName(stride)).get()),
+                    obj = floats(result.get(objName(stride)).get()),
                     bbox = floats(result.get(bboxName(stride)).get()),
                     kps = floats(result.get(kpsName(stride)).get()),
                 )
             } else {
                 RawHead(
-                    score = floats(result.get(index)),
-                    bbox = floats(result.get(index + groups)),
-                    kps = floats(result.get(index + groups * 2)),
+                    cls = floats(result.get(index)),
+                    obj = floats(result.get(index + groups)),
+                    bbox = floats(result.get(index + groups * 2)),
+                    kps = floats(result.get(index + groups * 3)),
                 )
             }
         }
     }
 
     /**
-     * Turns each stride's heads into candidate faces above [SCORE_THRESHOLD], in the letterboxed
-     * square's coordinates. Anchors run row-major over the stride's grid cells, then the [NUM_ANCHORS]
-     * anchors of a cell, so anchor `a` sits in cell `a / NUM_ANCHORS` whose centre is `(gx*s, gy*s)`.
-     * A box is that centre pushed out by its four distances, a landmark that centre plus its offset,
-     * every distance in grid units and so multiplied by the stride.
+     * Turns each stride's heads into candidate faces above [scoreThreshold], in the letterboxed
+     * square's coordinates. YuNet places one prior at each grid cell, row-major, so prior `i` lands in
+     * cell (col, row) with col = i modulo the grid side and row = i over it, and its centre is at
+     * (col*s, row*s). The score is the geometric mean of the clamped class and objectness outputs. A
+     * box is that cell pushed by its predicted centre offset and sized by the exponential of its width
+     * and height; a landmark is that cell plus its predicted offset. Every distance is in grid units
+     * and so multiplied by the stride.
      */
     private fun decode(heads: List<RawHead>): List<Candidate> {
         val candidates = mutableListOf<Candidate>()
@@ -188,34 +206,38 @@ class FaceDetector(
             val head = heads[index]
             val gridSide = inputSize / stride
             val count = minOf(
-                gridSide * gridSide * NUM_ANCHORS,
-                head.score.size,
+                gridSide * gridSide,
+                head.cls.size,
+                head.obj.size,
                 head.bbox.size / 4,
                 head.kps.size / (LANDMARKS * 2),
             )
-            for (anchor in 0 until count) {
-                val score = head.score[anchor]
+            for (i in 0 until count) {
+                val score = sqrt(head.cls[i].coerceIn(0f, 1f) * head.obj[i].coerceIn(0f, 1f))
                 if (score < scoreThreshold) continue
 
-                val cell = anchor / NUM_ANCHORS
-                val centreX = (cell % gridSide * stride).toFloat()
-                val centreY = (cell / gridSide * stride).toFloat()
+                val col = (i % gridSide).toFloat()
+                val row = (i / gridSide).toFloat()
 
-                val box = anchor * 4
+                val box = i * 4
+                val centreX = (col + head.bbox[box]) * stride
+                val centreY = (row + head.bbox[box + 1]) * stride
+                val width = exp(head.bbox[box + 2].toDouble()).toFloat() * stride
+                val height = exp(head.bbox[box + 3].toDouble()).toFloat() * stride
                 val face = RectF(
-                    centreX - head.bbox[box] * stride,
-                    centreY - head.bbox[box + 1] * stride,
-                    centreX + head.bbox[box + 2] * stride,
-                    centreY + head.bbox[box + 3] * stride,
+                    centreX - width / 2f,
+                    centreY - height / 2f,
+                    centreX + width / 2f,
+                    centreY + height / 2f,
                 )
 
-                val point = anchor * LANDMARKS * 2
+                val point = i * LANDMARKS * 2
                 val landmarks = ArrayList<PointF>(LANDMARKS)
                 for (k in 0 until LANDMARKS) {
                     landmarks.add(
                         PointF(
-                            centreX + head.kps[point + 2 * k] * stride,
-                            centreY + head.kps[point + 2 * k + 1] * stride,
+                            (col + head.kps[point + 2 * k]) * stride,
+                            (row + head.kps[point + 2 * k + 1]) * stride,
                         ),
                     )
                 }
@@ -284,7 +306,9 @@ class FaceDetector(
         return out
     }
 
-    private fun scoreName(stride: Int): String = "score_$stride"
+    private fun clsName(stride: Int): String = "cls_$stride"
+
+    private fun objName(stride: Int): String = "obj_$stride"
 
     private fun bboxName(stride: Int): String = "bbox_$stride"
 
@@ -296,41 +320,45 @@ class FaceDetector(
     }
 
     /** One stride's raw output floats, still in the network's grid units. */
-    private class RawHead(val score: FloatArray, val bbox: FloatArray, val kps: FloatArray)
+    private class RawHead(
+        val cls: FloatArray,
+        val obj: FloatArray,
+        val bbox: FloatArray,
+        val kps: FloatArray,
+    )
 
     /** A survivor of thresholding, in the letterboxed square's coordinates, awaiting suppression. */
     private class Candidate(val box: RectF, val landmarks: List<PointF>, val score: Float)
 
     private companion object {
-        const val DEFAULT_INPUT = "input.1"
+        const val DEFAULT_INPUT = "input"
 
-        /** Square side the network reads; the input is letterboxed into it. 640 is the model's native
-         *  scale and finds marginally more real faces, but a smaller input also fires more false
-         *  positives on textured non-face content across a whole library. 1024 trades a little raw
-         *  recall for noticeably cleaner clusters, which matters more in practice; distant faces the
-         *  1024 pass misses are recovered by manual add and the suggestion review, not by shrinking
-         *  the input. */
-        const val INPUT = 1024
+        /** Square side the network reads; the input is letterboxed into it. YuNet's input is fixed at
+         *  this size, so it is the only size a run uses. */
+        const val INPUT = 640
 
-        /** Anchors per grid cell, and the count of keypoints SCRFD emits per face. */
-        const val NUM_ANCHORS = 2
+        /** The count of keypoints YuNet emits per face. */
         const val LANDMARKS = 5
 
         /** Below this on either side there is nothing worth detecting; skip the run. */
         const val MIN_SIDE = 24
 
-        const val MEAN = 127.5f
-        const val STD = 128.0f
-
-        /** Minimum detector confidence to keep a face. Held at 0.5: dropping to 0.3 does raise
-         *  self-photo recall (~57% to ~81%) but floods a full library with false-positive detections
-         *  on buildings, landscapes and textures, which then form junk clusters and pollute people. A
-         *  clean, precise set of faces is worth more than raw recall; a person's genuinely distant
-         *  faces are added through manual add and the suggestion review instead. */
-        const val SCORE_THRESHOLD = 0.5f
+        /** Minimum detector confidence to keep a face. Held at 0.6: dropping lower does raise
+         *  self-photo recall but floods a full library with false-positive detections on buildings,
+         *  landscapes and textures, which then form junk clusters and pollute people. A clean, precise
+         *  set of faces is worth more than raw recall; a person's genuinely distant faces are added
+         *  through manual add and the suggestion review instead. */
+        const val SCORE_THRESHOLD = 0.6f
         const val NMS_IOU = 0.4f
 
-        /** Feature-map strides, ascending; each contributes one score/bbox/kps triplet. */
+        /** Absolute floor, in source pixels, on a kept face box's shorter edge. */
+        const val MIN_FACE_PX = 40
+
+        /** Relative floor on a kept face box's shorter edge, as a fraction of the source's shorter edge.
+         *  The gate keeps the larger of this and [MIN_FACE_PX], so a tiny distant face is dropped. */
+        const val MIN_FACE_FRACTION = 0.03f
+
+        /** Feature-map strides, ascending; each contributes one cls/obj/bbox/kps quadruplet. */
         val STRIDES = intArrayOf(8, 16, 32)
     }
 }

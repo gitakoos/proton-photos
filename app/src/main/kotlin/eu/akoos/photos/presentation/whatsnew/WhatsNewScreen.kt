@@ -41,11 +41,13 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Smartphone
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
@@ -76,7 +78,7 @@ import eu.akoos.photos.R
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
-import eu.akoos.photos.presentation.memories.FloatingMemoriesHeader
+import eu.akoos.photos.presentation.common.FloatingHeader
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.PillBg
 import kotlinx.coroutines.launch
@@ -110,26 +112,67 @@ class WhatsNewViewModel @Inject constructor(
 private val WhatsNewCardEstimate: Dp = 112.dp
 
 /**
- * Greedily packs [count] feature cards onto pages, fitting as many whole cards as [pageHeight]
- * allows: a taller screen takes more per page, a shorter one fewer. Each card is treated as
- * [cardHeight] tall with [spacing] between cards, and a page closes once the next card would
- * overflow. Cards pack in order, so each page is a contiguous index range.
+ * Splits [count] feature cards into contiguous pages that are evenly balanced. It first finds how
+ * many whole cards a page of [pageHeight] can hold (each [cardHeight] tall with [spacing] between,
+ * always at least one), then uses the fewest pages that fit and spreads the cards evenly across them.
+ * So six cards on a tall screen read as two pages of three, not one crammed page of five and a lonely
+ * page of one. Cards keep their order, so each page is a contiguous index range.
  */
-private fun packFeaturePages(count: Int, pageHeight: Dp, cardHeight: Dp, spacing: Dp): List<IntRange> {
+internal fun packFeaturePages(count: Int, pageHeight: Dp, cardHeight: Dp, spacing: Dp): List<IntRange> {
+    if (count <= 0) return emptyList()
+    // The most whole cards that fit in one page: one card is cardHeight, each further card adds
+    // spacing + cardHeight. At least one, so a very short screen still shows a card (the page's own
+    // scroll is the final guard against clipping).
+    var perPage = 1
+    while (cardHeight + (spacing + cardHeight) * perPage <= pageHeight) perPage++
+    val pageCount = (count + perPage - 1) / perPage
+    val base = count / pageCount
+    val remainder = count % pageCount
     val pages = mutableListOf<IntRange>()
     var start = 0
-    var used = 0.dp
-    for (i in 0 until count) {
-        val add = if (i == start) cardHeight else spacing + cardHeight
-        if (i != start && used + add > pageHeight) {
-            pages.add(start until i)
-            start = i
-            used = cardHeight
-        } else {
-            used += add
+    for (page in 0 until pageCount) {
+        // The first `remainder` pages take one extra card, so the split is as even as it can be.
+        val size = base + if (page < remainder) 1 else 0
+        pages.add(start until start + size)
+        start += size
+    }
+    return pages
+}
+
+/** Rough on-screen height of a section label plus the gap to the first card under it, subtracted from
+ *  a page before its cards are packed so a labeled page holds one fewer card than a bare one. */
+private val WhatsNewSectionHeaderHeight: Dp = 40.dp
+
+/** One packed page of feature cards: the section label to draw above them (null when the release is
+ *  not split into sections), and the cards on that page. */
+internal class WhatsNewFeaturePage(val headerRes: Int?, val features: List<WhatsNewFeature>)
+
+/**
+ * Lays a release's feature cards out into pages. A release whose cards span more than one category is
+ * split into labeled sections (New first, then Improved), each packed on its own so a section starts a
+ * fresh page and never shares one with the next; the label's [headerHeight] is taken off the page
+ * first. A single-category release packs as one unlabeled run, exactly as older entries did.
+ */
+internal fun categoryFeaturePages(
+    release: WhatsNewRelease,
+    pageHeight: Dp,
+    cardHeight: Dp,
+    spacing: Dp,
+    headerHeight: Dp,
+): List<WhatsNewFeaturePage> {
+    val categories = release.features.map { it.category }.distinct()
+    if (categories.size <= 1) {
+        return packFeaturePages(release.features.size, pageHeight, cardHeight, spacing)
+            .map { range -> WhatsNewFeaturePage(null, release.features.slice(range)) }
+    }
+    val pages = mutableListOf<WhatsNewFeaturePage>()
+    for (category in categories) {
+        val items = release.features.filter { it.category == category }
+        val available = (pageHeight - headerHeight).coerceAtLeast(cardHeight)
+        for (range in packFeaturePages(items.size, available, cardHeight, spacing)) {
+            pages.add(WhatsNewFeaturePage(category.titleRes, items.slice(range)))
         }
     }
-    if (start < count) pages.add(start until count)
     return pages
 }
 
@@ -178,7 +221,7 @@ fun WhatsNewScreen(
             val bottomBandHeight = 108.dp + navBottom
             val pageHeight = (maxHeight - contentTopPad - bottomBandHeight).coerceAtLeast(160.dp)
             val featurePages = remember(pageHeight, release) {
-                packFeaturePages(release.features.size, pageHeight, WhatsNewCardEstimate, 12.dp)
+                categoryFeaturePages(release, pageHeight, WhatsNewCardEstimate, 12.dp, WhatsNewSectionHeaderHeight)
             }
             // A headline card, where the release has one, takes page 0 on its own; the feature
             // pages follow. A release without one starts straight at its features.
@@ -195,38 +238,52 @@ fun WhatsNewScreen(
                         .fillMaxWidth(),
                     verticalAlignment = Alignment.Top,
                 ) { page ->
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .verticalScroll(rememberScrollState())
-                            .padding(horizontal = 16.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        if (heroPages == 1 && page == 0) {
-                            when (release.hero) {
-                                WhatsNewHero.Hide -> WhatsNewHideCard()
-                                WhatsNewHero.AlbumOrder -> WhatsNewAlbumOrderCard()
-                                null -> Unit
+                    val pageScroll = rememberScrollState()
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .verticalScroll(pageScroll)
+                                .padding(horizontal = 16.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            if (heroPages == 1 && page == 0) {
+                                when (release.hero) {
+                                    WhatsNewHero.Hide -> WhatsNewHideCard()
+                                    WhatsNewHero.AlbumOrder -> WhatsNewAlbumOrderCard()
+                                    null -> Unit
+                                }
+                            } else {
+                                val featurePage = featurePages[page - heroPages]
+                                featurePage.headerRes?.let { headerRes ->
+                                    WhatsNewSectionHeader(stringResource(headerRes))
+                                }
+                                for (feature in featurePage.features) {
+                                    WhatsNewCard(
+                                        icon = feature.icon,
+                                        title = stringResource(feature.titleRes),
+                                        body = stringResource(feature.bodyRes),
+                                    )
+                                }
                             }
-                        } else {
-                            for (idx in featurePages[page - heroPages]) {
-                                val feature = release.features[idx]
-                                WhatsNewCard(
-                                    icon = feature.icon,
-                                    title = stringResource(feature.titleRes),
-                                    body = stringResource(feature.bodyRes),
+                            // The closing line comes from the release being read, not from the app, so
+                            // an older release cannot advertise changes that shipped after it.
+                            val moreRes = release.moreRes
+                            if (moreRes != null && page == pageCount - 1) {
+                                Text(
+                                    stringResource(moreRes),
+                                    color = colors.fgMute, fontSize = 13.sp,
+                                    modifier = Modifier.padding(top = 4.dp, start = 4.dp, end = 4.dp),
                                 )
                             }
+                            // A little breathing room so the last card clears the scroll hint.
+                            Spacer(Modifier.height(20.dp))
                         }
-                        // The closing line comes from the release being read, not from the app, so
-                        // an older release cannot advertise changes that shipped after it.
-                        val moreRes = release.moreRes
-                        if (moreRes != null && page == pageCount - 1) {
-                            Text(
-                                stringResource(moreRes),
-                                color = colors.fgMute, fontSize = 13.sp,
-                                modifier = Modifier.padding(top = 4.dp, start = 4.dp, end = 4.dp),
-                            )
+                        // A downward chevron while this page can still scroll down, so a page taller
+                        // than the screen (a long card, or a large font scale) reads as scrollable
+                        // instead of looking cut off. It disappears once the bottom is reached.
+                        if (pageScroll.canScrollForward) {
+                            WhatsNewScrollHint(Modifier.align(Alignment.BottomCenter))
                         }
                     }
                 }
@@ -261,7 +318,7 @@ fun WhatsNewScreen(
 
         // Floating pill header (matches the other secondary screens): title pill + a back button
         // that dismisses exactly like Got-it. Back marks the version seen too.
-        FloatingMemoriesHeader(
+        FloatingHeader(
             title = stringResource(R.string.whats_new_title),
             onBack = {
                 viewModel.markSeen()
@@ -292,6 +349,42 @@ private fun WhatsNewPagerDots(current: Int, count: Int) {
             )
         }
     }
+}
+
+/** The "there is more below" affordance: a downward chevron in a soft accent chip, shown at the
+ *  bottom of a page only while it can still scroll down. */
+@Composable
+private fun WhatsNewScrollHint(modifier: Modifier = Modifier) {
+    val colors = AppColors.current
+    Box(
+        modifier = modifier
+            .padding(bottom = 6.dp)
+            .size(28.dp)
+            .clip(CircleShape)
+            .background(colors.accent.copy(alpha = 0.16f)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            Icons.Default.KeyboardArrowDown,
+            contentDescription = null,
+            tint = colors.accent,
+            modifier = Modifier.size(20.dp),
+        )
+    }
+}
+
+/** A section label above a group of cards ("New" / "Improved"), in the accent colour so it reads as a
+ *  divider between the release's brand-new features and its improvements, not as another card. */
+@Composable
+private fun WhatsNewSectionHeader(text: String) {
+    val colors = AppColors.current
+    Text(
+        text,
+        color = colors.accent,
+        fontSize = 13.sp,
+        fontWeight = FontWeight.SemiBold,
+        modifier = Modifier.padding(start = 4.dp, top = 2.dp),
+    )
 }
 
 /** One feature highlight: a leading icon chip, a bold title, and a short description. */

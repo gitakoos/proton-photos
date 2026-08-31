@@ -410,9 +410,10 @@ internal fun PhotoGrid(
                 // Pinch-OUT (fingers spread, ratio > 1) zooms IN — bigger tiles, finer
                 // day-level navigation. Pinch-IN (ratio < 1) zooms OUT — smaller tiles,
                 // broader year-level overview. levelIndex grows as columns SHRINK in
-                // the zoomLevels list (L0=6 cols flat, L5=1 col day-grouped), so
-                // pinch-out increments toward L5. After each snap refDist is reset so
-                // the same gesture can roll through multiple levels.
+                // the zoomLevels list (L0 is the densest, most columns; the last level is
+                // 1 column, day-grouped), so pinch-out increments toward the last level.
+                // After each snap refDist is reset so the same gesture can roll through
+                // multiple levels.
                 when {
                     ratio >= 1.30f && levelIndex < zoomLevels.lastIndex -> {
                         levelIndex += 1
@@ -665,6 +666,8 @@ internal fun PhotoGrid(
             gridState = gridState,
             items = orderedItems,
             grouping = effectiveGrouping,
+            columns = columnCount,
+            keyOf = keyOf,
             topPadding = topContentPadding + 8.dp,
             bottomPadding = 120.dp,
             onDraggingChange = { scrubberDragging = it },
@@ -678,6 +681,8 @@ internal fun PhotoGrid(
                 gridState = gridState,
                 items = orderedItems,
                 grouping = effectiveGrouping,
+                columns = columnCount,
+                keyOf = keyOf,
                 topPadding = topContentPadding + 12.dp,
                 suppressed = scrubberDragging,
                 modifier = Modifier.align(Alignment.TopCenter),
@@ -904,6 +909,8 @@ private fun MosaicPhotoGrid(
             gridState = staggeredState,
             items = orderedItems,
             grouping = effectiveGrouping,
+            columns = columnCount,
+            keyOf = keyOf,
             topPadding = topContentPadding + 8.dp,
             bottomPadding = 120.dp,
             onDraggingChange = { scrubberDragging = it },
@@ -914,6 +921,8 @@ private fun MosaicPhotoGrid(
                 gridState = staggeredState,
                 items = orderedItems,
                 grouping = effectiveGrouping,
+                columns = columnCount,
+                keyOf = keyOf,
                 topPadding = topContentPadding + 12.dp,
                 suppressed = scrubberDragging,
                 modifier = Modifier.align(Alignment.TopCenter),
@@ -940,24 +949,50 @@ private fun BoxScope.ScrollDateLabelStaggered(
     grouping: TimelineGrouping,
     topPadding: Dp,
     suppressed: Boolean,
+    columns: Int? = null,
+    keyOf: ((GalleryItem) -> String)? = null,
     modifier: Modifier = Modifier,
 ) {
-    val dateFormat = rememberTimelineDateFormat(grouping)
+    val dateFormat = rememberTimelineDateFormat(grouping, columns)
+    // Timeline callers pass keyOf so the label reads the EXACT first visible photo (no drift); a null
+    // keyOf keeps the lightweight scroll-fraction estimate.
+    val keyToItem = remember(items, keyOf) { keyOf?.let { k -> items.associateBy(k) } }
 
     var label by remember { mutableStateOf("") }
     var scrolling by remember { mutableStateOf(false) }
 
-    LaunchedEffect(gridState, items, dateFormat) {
-        snapshotFlow { gridState.firstVisibleItemIndex }
-            .distinctUntilChanged()
-            .collect { firstIndex ->
-                label = timelineDateLabel(
-                    firstIndex,
-                    gridState.layoutInfo.totalItemsCount,
-                    items,
-                    dateFormat,
-                )
+    LaunchedEffect(gridState, items, dateFormat, keyToItem) {
+        val map = keyToItem
+        if (map == null) {
+            // Albums / folders: the lightweight scroll-fraction estimate, on first-visible-index change.
+            snapshotFlow { gridState.firstVisibleItemIndex }
+                .distinctUntilChanged()
+                .collect { firstIndex ->
+                    label = timelineDateLabel(
+                        firstIndex, gridState.layoutInfo.totalItemsCount, items, dateFormat,
+                    )
+                }
+        } else {
+            // Timeline: snapshot the capture time of the photo that FILLS the top of the screen, not the
+            // one leaving it. Resolving inside snapshotFlow keeps the label in step with the frame on
+            // screen (no index-vs-layout skew), and requiring the cell to be at least half in view from
+            // the top makes it track the section now dominating rather than lagging a section behind on
+            // the sliver still exiting up top. Header / memories-row cells carry non-photo keys, skipped.
+            snapshotFlow {
+                val layout = gridState.layoutInfo
+                val viewportTop = layout.viewportStartOffset
+                layout.visibleItemsInfo.firstNotNullOfOrNull { info ->
+                    val key = info.key as? String
+                    if (key != null && info.offset.y + info.size.height / 2 >= viewportTop) {
+                        map[key]?.captureTimeMs
+                    } else {
+                        null
+                    }
+                }
             }
+                .distinctUntilChanged()
+                .collect { ts -> if (ts != null) label = dateFormat.format(Date(ts)) }
+        }
     }
     LaunchedEffect(gridState) {
         snapshotFlow { gridState.isScrollInProgress }
@@ -1010,26 +1045,52 @@ internal fun BoxScope.ScrollDateLabel(
     grouping: TimelineGrouping,
     topPadding: Dp,
     suppressed: Boolean,
+    columns: Int? = null,
+    keyOf: ((GalleryItem) -> String)? = null,
     modifier: Modifier = Modifier,
 ) {
-    val dateFormat = rememberTimelineDateFormat(grouping)
+    val dateFormat = rememberTimelineDateFormat(grouping, columns)
+    // Timeline callers pass keyOf so the label reads the EXACT first visible photo (no drift); a null
+    // keyOf keeps the lightweight scroll-fraction estimate.
+    val keyToItem = remember(items, keyOf) { keyOf?.let { k -> items.associateBy(k) } }
 
     var label by remember { mutableStateOf("") }
     var scrolling by remember { mutableStateOf(false) }
 
     // Recompute the label off-composition whenever the first visible grid index changes, mapping that
     // grid index (headers + memories row included) to the photo's capture date via the shared helper.
-    LaunchedEffect(gridState, items, dateFormat) {
-        snapshotFlow { gridState.firstVisibleItemIndex }
-            .distinctUntilChanged()
-            .collect { firstIndex ->
-                label = timelineDateLabel(
-                    firstIndex,
-                    gridState.layoutInfo.totalItemsCount,
-                    items,
-                    dateFormat,
-                )
+    LaunchedEffect(gridState, items, dateFormat, keyToItem) {
+        val map = keyToItem
+        if (map == null) {
+            // Albums / folders: the lightweight scroll-fraction estimate, on first-visible-index change.
+            snapshotFlow { gridState.firstVisibleItemIndex }
+                .distinctUntilChanged()
+                .collect { firstIndex ->
+                    label = timelineDateLabel(
+                        firstIndex, gridState.layoutInfo.totalItemsCount, items, dateFormat,
+                    )
+                }
+        } else {
+            // Timeline: snapshot the capture time of the photo that FILLS the top of the screen, not the
+            // one leaving it. Resolving inside snapshotFlow keeps the label in step with the frame on
+            // screen (no index-vs-layout skew), and requiring the cell to be at least half in view from
+            // the top makes it track the section now dominating rather than lagging a section behind on
+            // the sliver still exiting up top. Header / memories-row cells carry non-photo keys, skipped.
+            snapshotFlow {
+                val layout = gridState.layoutInfo
+                val viewportTop = layout.viewportStartOffset
+                layout.visibleItemsInfo.firstNotNullOfOrNull { info ->
+                    val key = info.key as? String
+                    if (key != null && info.offset.y + info.size.height / 2 >= viewportTop) {
+                        map[key]?.captureTimeMs
+                    } else {
+                        null
+                    }
+                }
             }
+                .distinctUntilChanged()
+                .collect { ts -> if (ts != null) label = dateFormat.format(Date(ts)) }
+        }
     }
     // Visibility tracks the grid's scroll activity, with a short tail so the label lingers briefly
     // after a fling settles instead of blinking out the instant motion stops.

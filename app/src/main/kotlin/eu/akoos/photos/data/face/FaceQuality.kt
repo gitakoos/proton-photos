@@ -109,6 +109,11 @@ const val FACE_MIN_CONFIDENT_SCORE = 0.62f
 const val FACE_MIN_CONFIDENT_BLUR = 12.0
 const val FACE_MAX_CONFIDENT_SIDEWAYS = 0.18f
 
+/** Hard sharpness floor: a crop whose Laplacian variance falls below this is dropped at index time
+ *  rather than stored, the tier below the soft [FACE_MIN_CONFIDENT_BLUR] confidence bar. Held low so
+ *  only extreme blur is lost while the indexer's accepted-blur log calibrates where to raise it. */
+const val MIN_SHARPNESS = 2.0f
+
 /**
  * A face clear enough to anchor a person and to merge at the normal distance. A weak one (low score,
  * blurred, or turned) is not dropped: the caller holds it to a stricter distance instead, so it can

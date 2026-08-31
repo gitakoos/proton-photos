@@ -30,6 +30,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -38,10 +39,13 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.AccountCircle
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.OfflinePin
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -81,12 +85,15 @@ internal fun ContentFilterSheet(
     onDismiss: () -> Unit,
     showCategorySection: Boolean = true,
     showMediaTypeSection: Boolean = true,
+    showDateSection: Boolean = true,
+    onOpenTimelineSettings: (() -> Unit)? = null,
 ) {
     var mediaType by remember { mutableStateOf(currentFilter.mediaType) }
     var syncStatus by remember { mutableStateOf(currentFilter.syncStatus) }
     var year by remember { mutableStateOf(currentFilter.year) }
     var month by remember { mutableStateOf(currentFilter.month) }
     var day by remember { mutableStateOf(currentFilter.day) }
+    var dayEnd by remember { mutableStateOf(currentFilter.dayEnd) }
     var category by remember { mutableStateOf(currentCategory) }
 
     fun applyNow(
@@ -95,7 +102,8 @@ internal fun ContentFilterSheet(
         y: Int? = year,
         m: Int? = month,
         d: Int? = day,
-    ) = onApply(ContentFilter(mediaType = mt, syncStatus = ss, year = y, month = m, day = d))
+        de: Int? = dayEnd,
+    ) = onApply(ContentFilter(mediaType = mt, syncStatus = ss, year = y, month = m, day = d, dayEnd = de))
 
     val currentYear = remember { Calendar.getInstance().get(Calendar.YEAR) }
     val years = remember { (currentYear downTo currentYear - 10).toList() }
@@ -132,10 +140,10 @@ internal fun ContentFilterSheet(
                     fontWeight = FontWeight.Medium,
                     modifier = Modifier.clickable {
                         mediaType = MediaType.All; syncStatus = SyncStatusFilter.All
-                        year = null; month = null; day = null
+                        year = null; month = null; day = null; dayEnd = null
                         category = GalleryFilter.All
                         onCategorySelected(GalleryFilter.All)
-                        applyNow(mt = MediaType.All, ss = SyncStatusFilter.All, y = null, m = null, d = null)
+                        applyNow(mt = MediaType.All, ss = SyncStatusFilter.All, y = null, m = null, d = null, de = null)
                     },
                 )
             }
@@ -197,37 +205,94 @@ internal fun ContentFilterSheet(
         }
 
         // ── Sync status ──────────────────────────────────────────────────────
+        // No "All" chip: the chips toggle and span the sheet width, edge to edge with the calendar.
+        // The active chip carries its own X, so tapping it (a second press) clears back to All.
         FilterSectionLabel(stringResource(R.string.filter_sync_label))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            listOf(
-                SyncStatusFilter.All to stringResource(R.string.gallery_filter_all),
-                SyncStatusFilter.LocalOnly to stringResource(R.string.filter_sync_local),
-                SyncStatusFilter.BackedUp to stringResource(R.string.filter_sync_backedup),
-            ).forEach { (status, label) ->
+        val syncOptions = listOf(
+            SyncStatusFilter.LocalOnly to stringResource(R.string.filter_sync_local),
+            SyncStatusFilter.BackedUp to stringResource(R.string.filter_sync_backedup),
+            SyncStatusFilter.CloudOnly to stringResource(R.string.filter_sync_cloud),
+        )
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            syncOptions.forEach { (status, label) ->
                 FilterChip(
                     label = label,
                     selected = syncStatus == status,
-                    onClick = { syncStatus = status; applyNow(ss = status) },
+                    accentWhenSelected = true,
+                    trailingClear = true,
+                    modifier = Modifier.weight(1f),
+                    onClick = {
+                        val newStatus = if (syncStatus == status) SyncStatusFilter.All else status
+                        syncStatus = newStatus
+                        applyNow(ss = newStatus)
+                    },
                 )
             }
         }
 
         // ── Date (calendar — year, optional month, optional day) ───────────────
-        DateFilterCalendar(
-            year = year,
-            month = month,
-            day = day,
-            years = years,
-            onPick = { y, m, d ->
-                year = y; month = m; day = d
-                applyNow(y = y, m = m, d = d)
-            },
-        )
+        if (showDateSection) {
+            DateFilterCalendar(
+                year = year,
+                month = month,
+                day = day,
+                dayEnd = dayEnd,
+                years = years,
+                onPick = { y, m, d, de ->
+                    year = y; month = m; day = d; dayEnd = de
+                    applyNow(y = y, m = m, d = d, de = de)
+                },
+            )
+        }
+
+        // ── Further settings ──────────────────────────────────────────────────
+        // The timeline drawer alone shows this row, a way into the full layout /
+        // categories / folders screen. Search leaves the callback null.
+        val openTimelineSettings = onOpenTimelineSettings
+        if (openTimelineSettings != null) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(0.5.dp)
+                    .background(PillBorder),
+            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        onDismiss()
+                        openTimelineSettings()
+                    }
+                    .padding(vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Icon(
+                    Icons.Filled.Tune,
+                    contentDescription = null,
+                    tint = FgDim,
+                    modifier = Modifier.size(20.dp),
+                )
+                Text(
+                    text = stringResource(R.string.timeline_filter_more_settings),
+                    color = FgPrimary,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.weight(1f),
+                )
+                Icon(
+                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    contentDescription = null,
+                    tint = FgMute,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+        }
     }
 }
 
 @Composable
-private fun FilterSectionLabel(text: String) {
+internal fun FilterSectionLabel(text: String) {
     Text(
         text = text.uppercase(),
         color = FgMute,
@@ -242,18 +307,34 @@ internal fun FilterChip(
     label: String,
     selected: Boolean,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
     leadingIcon: (@Composable (Color) -> Unit)? = null,
+    accentWhenSelected: Boolean = false,
+    trailingClear: Boolean = false,
 ) {
     val colors = AppColors.current
-    val contentColor = if (selected) FgPrimary else FgDim
+    val useAccent = accentWhenSelected && selected
+    val contentColor = when {
+        useAccent -> Accent
+        selected -> FgPrimary
+        else -> FgDim
+    }
     Box(
-        modifier = Modifier
+        modifier = modifier
             .background(
-                if (selected) colors.chipSelectedBg else colors.chipUnselectedBg,
+                when {
+                    useAccent -> Accent.copy(alpha = 0.15f)
+                    selected -> colors.chipSelectedBg
+                    else -> colors.chipUnselectedBg
+                },
                 filterChipShape,
             )
             .then(
-                if (!selected) Modifier.border(0.5.dp, PillBorder, filterChipShape) else Modifier
+                when {
+                    useAccent -> Modifier.border(1.dp, Accent, filterChipShape)
+                    !selected -> Modifier.border(0.5.dp, PillBorder, filterChipShape)
+                    else -> Modifier
+                }
             )
             .clickable(onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 9.dp),
@@ -270,6 +351,14 @@ internal fun FilterChip(
                 fontSize = 13.sp,
                 fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
             )
+            if (trailingClear && selected) {
+                Icon(
+                    Icons.Filled.Close,
+                    contentDescription = null,
+                    tint = contentColor,
+                    modifier = Modifier.size(14.dp),
+                )
+            }
         }
     }
 }

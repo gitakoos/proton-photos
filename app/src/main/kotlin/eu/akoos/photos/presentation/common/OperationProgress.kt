@@ -190,7 +190,7 @@ fun BlockingOperationSheet(progress: OperationProgress?) {
     ModalBottomSheet(
         onDismissRequest = {},
         sheetState = sheetState,
-        containerColor = colors.bg2,
+        containerColor = colors.sheetBg,
         scrimColor = Color.Black.copy(alpha = 0.5f),
     ) {
         Column(

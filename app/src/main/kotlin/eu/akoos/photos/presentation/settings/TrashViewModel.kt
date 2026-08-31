@@ -32,10 +32,13 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import me.proton.core.accountmanager.domain.AccountManager
@@ -95,6 +98,13 @@ class TrashViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow(UiState())
     val uiState: StateFlow<UiState> = _uiState.asStateFlow()
+
+    /** Whether a Proton account is signed in. A local-only session has no cloud trash, so the
+     *  screen hides the Device/Cloud toggle and stays on the device tab. Defaults to signed-in
+     *  so the toggle doesn't flicker before the first emit. */
+    val isSignedIn: StateFlow<Boolean> = accountManager.getPrimaryUserId()
+        .map { it != null }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, true)
 
     private val cacheTtlMs = 5L * 60L * 1000L
 

@@ -24,11 +24,9 @@
 
 package eu.akoos.photos.presentation.map
 
-import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
-import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.data.db.dao.PhotoLocationDao
 import eu.akoos.photos.data.db.entity.PhotoLocationEntity
 import eu.akoos.photos.data.repository.LocalExifBackfillScheduler
@@ -36,7 +34,8 @@ import eu.akoos.photos.data.repository.drive.ThumbnailUrlStore
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
-import eu.akoos.photos.util.OfflineGeocoder
+import eu.akoos.photos.domain.usecase.ObservePlacesUseCase
+import eu.akoos.photos.domain.usecase.PlaceCity
 import eu.akoos.photos.util.retryOnDbTear
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
@@ -47,7 +46,6 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -57,17 +55,17 @@ import javax.inject.Inject
 /**
  * Backs the map page. Streams the persisted [PhotoLocationEntity] rows for the primary account
  * straight from [PhotoLocationDao] so the screen can plot every located photo, and kicks the
- * one-shot GPS backfill once the permission is in hand (see [startBackfill]).
+ * one-shot GPS backfill once the permission is in hand (see [startLocalBackfill]).
  */
 @HiltViewModel
 class MapViewModel @Inject constructor(
-    @ApplicationContext private val context: Context,
     private val accountManager: AccountManager,
     private val photoLocationDao: PhotoLocationDao,
     private val localExifBackfillScheduler: LocalExifBackfillScheduler,
     private val drivePhotoRepository: DrivePhotoRepository,
     private val getGalleryItems: GetGalleryItemsUseCase,
     private val thumbnailUrlStore: ThumbnailUrlStore,
+    observePlaces: ObservePlacesUseCase,
 ) : ViewModel() {
 
     /** Live stream of every located photo for the primary account — the map's marker source. */
@@ -88,15 +86,16 @@ class MapViewModel @Inject constructor(
      */
     val pins: StateFlow<List<MapPin>> = accountManager.getPrimaryUserId()
         .flatMapLatest { userId ->
-            if (userId == null) flowOf(emptyList())
             // The marker thumbnail is built imperatively (outside any Compose cell), so the
             // LocalThumbnailUrls CompositionLocal can't reach it. Fold the store map into the flow
             // and stamp each cloud pin's freshly-decrypted URL onto the item, so a cloud-only fix
             // has a thumbnail source again and a decrypt that lands later repaints the pin. The set
             // is bounded by the marker cap, so the extra re-emit per store change is cheap.
-            else combine(
+            val libraryFlow = if (userId == null) getGalleryItems.invokeLocalOnly()
+                else getGalleryItems.invoke(userId)
+            combine(
                 locations,
-                getGalleryItems.invoke(userId),
+                libraryFlow,
                 thumbnailUrlStore.urls,
             ) { locs, library, urls ->
                 val itemByKey = itemsByKey(library)
@@ -112,34 +111,23 @@ class MapViewModel @Inject constructor(
         .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    private val places = observePlaces()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), null)
+
     /**
-     * The distinct cities the account's located photos were taken in — the source for the city
-     * search overlay. Every [PhotoLocationEntity] is reverse-geocoded to a "City, Country" label off
-     * the main thread (the geocoder caches its dataset after the first lookup), grouped by that label
-     * into a [CityEntry] carrying a representative coordinate (the mean of the group's fixes) and the
-     * photo count, sorted by count descending so the busiest places lead. Derived from [pins] (the
-     * resolved set), so a deleted location drops out of the city list too; emits empty until the
-     * first pass completes.
+     * The distinct cities the account's located photos were taken in, from the shared places grouping,
+     * backing the bottom place search. Reuses [ObservePlacesUseCase] so the map and the Places screen
+     * search the identical set; empty when signed out or before the first group completes.
      */
-    val cities: StateFlow<List<CityEntry>> = pins
-        .mapLatest { pinList ->
-            val byLabel = LinkedHashMap<String, MutableList<MapPin>>()
-            for (pin in pinList) {
-                val label = OfflineGeocoder.reverseGeocode(context, pin.latitude, pin.longitude)
-                    ?: continue
-                byLabel.getOrPut(label) { ArrayList() }.add(pin)
-            }
-            byLabel.map { (label, rows) ->
-                CityEntry(
-                    name = label,
-                    latitude = rows.sumOf { it.latitude } / rows.size,
-                    longitude = rows.sumOf { it.longitude } / rows.size,
-                    count = rows.size,
-                )
-            }.sortedByDescending { it.count }
-        }
-        .flowOn(Dispatchers.Default)
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val cities: StateFlow<List<PlaceCity>> = places
+        .map { it?.cities.orEmpty() }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), emptyList())
+
+    /** True once the places query has produced its first result, so the map can hold its reveal until
+     *  the camera is centred on real data and open already framed instead of jumping from the world view. */
+    val placesLoaded: StateFlow<Boolean> = places
+        .map { it != null }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), false)
 
     /**
      * On-device EXIF backfill — reads GPS from local photos, which needs the ACCESS_MEDIA_LOCATION
@@ -167,11 +155,6 @@ class MapViewModel @Inject constructor(
         }
     }
 
-    /**
-     * Index the merged library by the keys a `photo_location` id can carry — a local content uri and
-     * a cloud linkId — so a located row resolves to its [GalleryItem] by id. A Synced item is reachable
-     * by both keys; mirrors the resolver in the location-detail screen.
-     */
     /** Overlay the store's freshly-decrypted thumbnail URL onto a cloud-only item so its pin has an
      *  image source (the lite feed no longer carries the URL). A Local/Synced fix already paints from
      *  its local uri, so it is returned untouched. */
@@ -184,6 +167,11 @@ class MapViewModel @Inject constructor(
             item
         }
 
+    /**
+     * Index the merged library by the keys a `photo_location` id can carry (a local content uri and
+     * a cloud linkId), so a located row resolves to its [GalleryItem] by id. A Synced item is reachable
+     * by both keys; mirrors the resolver in the location-detail screen.
+     */
     private fun itemsByKey(library: List<GalleryItem>): Map<String, GalleryItem> {
         val itemByKey = HashMap<String, GalleryItem>(library.size * 2)
         for (item in library) {

@@ -118,6 +118,7 @@ class ObservePeopleUseCase @Inject constructor(
                 coverPhotoKey = face.photoKey,
                 faceBox = normalizedFaceBox(face, coverDims[face.photoKey]),
                 faceCount = person.faceCount,
+                isOther = person.isOther,
             )
         }
     }

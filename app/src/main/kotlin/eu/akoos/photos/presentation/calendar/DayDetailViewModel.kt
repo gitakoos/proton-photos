@@ -87,15 +87,17 @@ class DayDetailViewModel @Inject constructor(
                         flowOf(DayLoadData(emptyList(), null, null, emptySet()))
                     } else {
                         userIdFlow.flatMapLatest { userId ->
-                            if (userId == null) {
-                                flowOf(DayLoadData(emptyList(), null, date, emptySet()))
-                            } else {
-                                combine(
-                                    getGalleryItems.invoke(userId),
-                                    dayMetaDao.observeByDate(userId.id, date),
-                                    hiddenUrisFlow,
-                                ) { items, meta, hidden -> DayLoadData(items, meta, date, hidden) }
-                            }
+                            // Signed out the day is filled from the device's own media; the day-meta
+                            // row (description, cover) is account scoped, so it is absent then.
+                            val libraryFlow = if (userId == null) getGalleryItems.invokeLocalOnly()
+                                else getGalleryItems.invoke(userId)
+                            val metaFlow = if (userId == null) flowOf<DayMetaEntity?>(null)
+                                else dayMetaDao.observeByDate(userId.id, date)
+                            combine(
+                                libraryFlow,
+                                metaFlow,
+                                hiddenUrisFlow,
+                            ) { items, meta, hidden -> DayLoadData(items, meta, date, hidden) }
                         }
                     }
                 }

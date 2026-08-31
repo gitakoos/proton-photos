@@ -353,4 +353,75 @@ class SyncStateDaoTest {
 
         assertNull(dao.getQueueSource("uri://1"))
     }
+
+    // ── updateDomainColumnsIfNotSyncedWithCloud: reconcile cannot clobber a just-promoted upload ──
+
+    /** The guarded domain write reconcile uses for a demotion: same columns as updateDomainColumns,
+     *  but it skips a row an upload just promoted to SYNCED + cloudFileId. */
+    private suspend fun guardedUpdate(
+        uri: String,
+        status: SyncStatus,
+        cloudFileId: String?,
+        localHash: String = "",
+    ): Int = dao.updateDomainColumnsIfNotSyncedWithCloud(
+        localUri = uri,
+        userId = "user1",
+        cloudFileId = cloudFileId,
+        localHash = localHash,
+        cloudHash = null,
+        status = status,
+        lastSyncAttemptMs = 0L,
+        lastSyncSuccessMs = null,
+        backedUpAtMs = null,
+        sizeBytes = 1024L,
+    )
+
+    @Test
+    fun `the guarded write leaves a row an upload just promoted to SYNCED with a cloud id alone`() = runTest {
+        dao.upsert(entity("uri://1", status = SyncStatus.SYNCED, cloudFileId = "cloud-1"))
+
+        // Reconcile derived LOCAL_ONLY from a stale snapshot; the guard must refuse the clobber.
+        val changed = guardedUpdate("uri://1", status = SyncStatus.LOCAL_ONLY, cloudFileId = null)
+
+        assertEquals(0, changed)
+        val row = dao.getByUri("uri://1")
+        assertEquals(SyncStatus.SYNCED, row?.status)
+        assertEquals("cloud-1", row?.cloudFileId)
+    }
+
+    @Test
+    fun `the guarded write still rewrites a genuinely local-only row`() = runTest {
+        dao.upsert(entity("uri://1", status = SyncStatus.LOCAL_ONLY))
+
+        val changed = guardedUpdate("uri://1", status = SyncStatus.LOCAL_ONLY, cloudFileId = null, localHash = "fresh")
+
+        assertEquals(1, changed)
+        assertEquals("fresh", dao.getByUri("uri://1")?.localHash)
+    }
+
+    // ── demoteToLocalIfCloudIdMatches: demote the vanished twin, skip an upload's re-promotion ────
+
+    @Test
+    fun `an expected-id demote drops the pairing when the cloud id still matches the snapshot`() = runTest {
+        dao.upsert(entity("uri://1", status = SyncStatus.SYNCED, cloudFileId = "A"))
+
+        val changed = dao.demoteToLocalIfCloudIdMatches("uri://1", "A")
+
+        assertEquals(1, changed)
+        val row = dao.getByUri("uri://1")
+        assertEquals(SyncStatus.LOCAL_ONLY, row?.status)
+        assertNull(row?.cloudFileId)
+    }
+
+    @Test
+    fun `an expected-id demote skips a row an upload re-promoted under a different cloud id`() = runTest {
+        dao.upsert(entity("uri://1", status = SyncStatus.SYNCED, cloudFileId = "B"))
+
+        val changed = dao.demoteToLocalIfCloudIdMatches("uri://1", "A")
+
+        assertEquals(0, changed)
+        val row = dao.getByUri("uri://1")
+        assertEquals(SyncStatus.SYNCED, row?.status)
+        assertEquals("B", row?.cloudFileId)
+    }
 }

@@ -109,6 +109,42 @@ interface SyncStateDao {
         sizeBytes: Long,
     )
 
+    /**
+     * Guarded twin of [updateDomainColumns]: writes the same domain columns UNLESS the row is
+     * already a finished upload (SYNCED with a real cloudFileId), returning the rows changed.
+     * Reconcile derives a row's new state from a snapshot that can be stale by the time it writes,
+     * so a LOCAL_ONLY demotion it computed could otherwise clobber a row an upload promoted to
+     * SYNCED in between, dropping the fresh cloud pairing. The guard leaves such a row untouched
+     * (returns 0) while still rewriting a genuinely un-synced row (returns 1).
+     */
+    @Query(
+        """
+        UPDATE sync_state SET
+            userId = :userId,
+            cloudFileId = :cloudFileId,
+            localHash = :localHash,
+            cloudHash = :cloudHash,
+            status = :status,
+            lastSyncAttemptMs = :lastSyncAttemptMs,
+            lastSyncSuccessMs = :lastSyncSuccessMs,
+            backedUpAtMs = :backedUpAtMs,
+            sizeBytes = :sizeBytes
+        WHERE localUri = :localUri AND NOT (status = 'SYNCED' AND cloudFileId IS NOT NULL)
+        """
+    )
+    suspend fun updateDomainColumnsIfNotSyncedWithCloud(
+        localUri: String,
+        userId: String,
+        cloudFileId: String?,
+        localHash: String,
+        cloudHash: String?,
+        status: SyncStatus,
+        lastSyncAttemptMs: Long,
+        lastSyncSuccessMs: Long?,
+        backedUpAtMs: Long?,
+        sizeBytes: Long,
+    ): Int
+
     @Transaction
     suspend fun upsert(entity: SyncStateEntity) {
         val inserted = insertIgnore(entity)
@@ -171,6 +207,16 @@ interface SyncStateDao {
      *  to an album then uploads it fresh instead of trying to re-link the trashed id and doing nothing. */
     @Query("UPDATE sync_state SET status = 'LOCAL_ONLY', cloudFileId = NULL WHERE cloudFileId IN (:cloudFileIds) AND status = 'SYNCED'")
     suspend fun demoteSyncedByCloudIds(cloudFileIds: List<String>)
+
+    /**
+     * Demote a SYNCED row to LOCAL_ONLY ONLY while its cloudFileId still equals [expectedCloudId] -
+     * the id reconcile saw in its snapshot - returning the rows changed. A twin that genuinely
+     * vanished still carries that id and is demoted (returns 1); a row an upload re-promoted in
+     * between now carries a DIFFERENT id and is skipped (returns 0), so the newer pairing is not
+     * dropped. Same demotion write as [demoteSyncedByCloudIds]: status + cloudFileId only.
+     */
+    @Query("UPDATE sync_state SET status = 'LOCAL_ONLY', cloudFileId = NULL WHERE localUri = :localUri AND status = 'SYNCED' AND cloudFileId = :expectedCloudId")
+    suspend fun demoteToLocalIfCloudIdMatches(localUri: String, expectedCloudId: String): Int
 
     // Only rows this app actually uploaded carry a backedUpAtMs, so requiring it non-null keeps
     // Free-up-space from deleting a local file that was merely name/size-paired to a cloud photo

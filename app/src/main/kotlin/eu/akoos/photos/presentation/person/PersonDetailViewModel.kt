@@ -46,12 +46,12 @@ import eu.akoos.photos.data.db.dao.PersonCoverDao
 import eu.akoos.photos.data.db.dao.PersonDao
 import eu.akoos.photos.data.db.dao.PersonManualPhotoDao
 import eu.akoos.photos.data.db.entity.PersonCoverEntity
+import eu.akoos.photos.data.db.entity.PersonEntity
 import eu.akoos.photos.data.db.entity.PersonManualPhotoEntity
 import eu.akoos.photos.data.db.entity.NotPersonEntity
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.entity.GalleryItem
-import eu.akoos.photos.domain.model.PersonSummary
 import eu.akoos.photos.domain.usecase.FACE_EMBEDDING_DIM
 import eu.akoos.photos.domain.usecase.FACE_SUGGEST_THRESHOLD
 import eu.akoos.photos.domain.usecase.MIN_FACES_TO_SHOW_PERSON
@@ -59,8 +59,8 @@ import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
 import eu.akoos.photos.domain.usecase.ObservePeopleUseCase
 import eu.akoos.photos.domain.usecase.cosineSimilarity
 import eu.akoos.photos.domain.usecase.unpackEmbedding
-import eu.akoos.photos.presentation.gallery.FaceBox
 import eu.akoos.photos.presentation.gallery.PersonUi
+import eu.akoos.photos.presentation.gallery.toPersonUi
 import javax.inject.Inject
 import kotlin.math.sqrt
 
@@ -69,6 +69,9 @@ data class PersonDetailUiState(
     val personName: String? = null,
     val isLoading: Boolean = true,
     val items: List<GalleryItem> = emptyList(),
+    /** True for the single "Unsorted" bucket, so the screen labels it, explains it, and offers only
+     *  curation (move a real person out, mark the rest not a person) rather than naming the whole pile. */
+    val isOther: Boolean = false,
 )
 
 /**
@@ -143,8 +146,9 @@ class PersonDetailViewModel @Inject constructor(
                     _uiState.update { it.copy(isLoading = false, items = emptyList()) }
                     return@launch
                 }
-                val name = personDao.personById(personId)?.displayName
-                _uiState.update { it.copy(personName = name) }
+                val person = personDao.personById(personId)
+                val name = person?.displayName
+                _uiState.update { it.copy(personName = name, isOther = person?.isOther == true) }
 
                 val manualKeys = if (name.isNullOrBlank()) flowOf(emptyList())
                     else personManualPhotoDao.photoKeysForName(userId.id, name)
@@ -219,7 +223,12 @@ class PersonDetailViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             val account = accountManager.getPrimaryUserId().first()?.id ?: return@launch
             val target = foldPersonInto(account, personId, name)
-            if (target == personId) _uiState.update { it.copy(personName = name) }
+            if (target == personId) {
+                _uiState.update { it.copy(personName = name) }
+                _message.value = R.string.person_msg_renamed
+            } else {
+                _message.value = R.string.person_msg_merged
+            }
         }
     }
 
@@ -244,6 +253,9 @@ class PersonDetailViewModel @Inject constructor(
             val account = userId.id
             val name = personDao.personById(personId)?.displayName
             if (name.isNullOrBlank()) { _mergeSuggestion.value = null; return@launch }
+            // The Unsorted bucket is a mixed pile of junk, so its mean face is meaningless: never offer it
+            // as a "might also be this person" merge, which would fold the whole pile into a named person.
+            val otherId = personDao.otherPersonId(account)
             val bestId = withContext(Dispatchers.Default) {
                 val faces = faceDao.allFacesByScoreDesc(account)
                 val centroids = centroidsByPerson(faces)
@@ -260,6 +272,7 @@ class PersonDetailViewModel @Inject constructor(
                 var bestSim = FACE_SUGGEST_THRESHOLD
                 for ((pid, c) in centroids) {
                     if (pid == personId) continue
+                    if (pid == otherId) continue
                     // Never re-offer a cluster the user already said is not this person.
                     if (faceIdsByPerson[pid]?.any { it in rejectedFaceIds } == true) continue
                     val s = cosineSimilarity(target, c)
@@ -326,23 +339,22 @@ class PersonDetailViewModel @Inject constructor(
         return out
     }
 
-    private fun PersonSummary.toPersonUi(): PersonUi? {
-        val cover = coverPhotoKey ?: return null
-        return PersonUi(
-            personId = personId,
-            displayName = displayName,
-            coverPhotoKey = cover,
-            faceBox = faceBox?.let { FaceBox(it.left, it.top, it.right, it.bottom) },
-            faceCount = faceCount,
-        )
-    }
-
     /** Rename the person, clearing the name back to null on empty input. Moves any manual memberships
      *  onto the new name so added photos follow the rename, then re-observes under it. */
-    fun rename(personId: Long, newName: String) {
+    fun rename(personId: Long, newName: String, onMergedAway: () -> Unit = {}) {
         val trimmed = newName.trim().ifEmpty { null }
         viewModelScope.launch(Dispatchers.IO) {
             val userId = accountManager.getPrimaryUserId().first() ?: return@launch
+            // Renaming onto a name another person already holds is a merge, not a duplicate: fold this
+            // person into that one (same name = same person) so a rebuild cannot silently collapse two
+            // same-named rows and lose the smaller. The caller navigates away, since this person is gone.
+            if (trimmed != null && personDao.namedPeopleForUser(userId.id)
+                    .any { it.displayName == trimmed && it.id != personId }
+            ) {
+                foldPersonInto(userId.id, personId, trimmed)
+                withContext(Dispatchers.Main) { onMergedAway() }
+                return@launch
+            }
             val old = personDao.personById(personId)?.displayName
             personDao.updateName(personId, trimmed)
             if (!old.isNullOrBlank() && !trimmed.isNullOrBlank() && old != trimmed) {
@@ -350,6 +362,15 @@ class PersonDetailViewModel @Inject constructor(
                 faceDao.renameManualName(userId.id, old, trimmed)
                 notPersonDao.rename(userId.id, old, trimmed)
                 personCoverDao.rename(userId.id, old, trimmed)
+            }
+            // Anchor the person's current faces to the name as confirmations (like a fold does), so a
+            // later rebuild that splits the person keeps every face together instead of orphaning the
+            // smaller shard. Setting the display name alone would leave the person held together
+            // by the auto-grouping alone. Clearing on un-name stops the old name resurrecting.
+            val faceIds = faceDao.faceIdsForPerson(userId.id, personId)
+            if (faceIds.isNotEmpty()) {
+                if (trimmed != null) faceDao.labelFacesByIds(faceIds, trimmed)
+                else faceDao.clearManualNameByIds(faceIds)
             }
             _uiState.update { it.copy(personName = trimmed) }
             load(personId)
@@ -377,10 +398,42 @@ class PersonDetailViewModel @Inject constructor(
             if (!name.isNullOrBlank()) personManualPhotoDao.remove(userId.id, name, photoKeys)
             val manual = if (name.isNullOrBlank()) emptyList()
                 else personManualPhotoDao.photoKeysForNameList(userId.id, name)
-            val count = (faceDao.distinctPhotoKeysForPerson(userId.id, personId) + manual).toHashSet().size
+            val count = personPhotoCount(faceDao.distinctPhotoKeysForPerson(userId.id, personId), manual)
             val cover = resolveCover(userId.id, personId, name)
             personDao.updateCoverAndCount(personId, cover, count)
+            _message.value = R.string.person_msg_removed
         }
+    }
+
+    /** Move the given selected photos' faces from this person onto the person named [rawName] (an existing
+     *  one of that name, else a new person), confirming them there so the assignment survives the next
+     *  rebuild. Picking an existing name reassigns; a brand-new name splits the faces into a new person. */
+    fun moveSelectedToPerson(fromPersonId: Long, photoKeys: Collection<String>, rawName: String) {
+        val name = rawName.trim()
+        if (name.isEmpty() || photoKeys.isEmpty()) return
+        viewModelScope.launch(Dispatchers.IO) {
+            val account = accountManager.getPrimaryUserId().first()?.id ?: return@launch
+            val faceIds = faceDao.faceIdsForPersonInPhotos(account, fromPersonId, photoKeys)
+            if (faceIds.isEmpty()) return@launch
+            val target = personDao.namedPeopleForUser(account)
+                .firstOrNull { it.displayName == name && it.id != fromPersonId }?.id
+                ?: personDao.insert(PersonEntity(userId = account, displayName = name))
+            faceDao.reassignFacesToPerson(faceIds, target)   // move immediately
+            faceDao.labelFacesByIds(faceIds, name)            // confirm -> anchors across a rebuild
+            // Refresh both people's cached cover + count (same union pattern removePhotos uses).
+            refreshPersonCoverAndCount(account, fromPersonId, personDao.personById(fromPersonId)?.displayName)
+            refreshPersonCoverAndCount(account, target, name)
+            personDao.deleteEmpty(account)
+            _message.value = R.string.person_msg_moved
+        }
+    }
+
+    private suspend fun refreshPersonCoverAndCount(account: String, personId: Long, name: String?) {
+        val manual = if (name.isNullOrBlank()) emptyList()
+            else personManualPhotoDao.photoKeysForNameList(account, name)
+        val count = personPhotoCount(faceDao.distinctPhotoKeysForPerson(account, personId), manual)
+        val cover = resolveCover(account, personId, name)
+        personDao.updateCoverAndCount(personId, cover, count)
     }
 
     /** "This is not a person": reject every face in the cluster so it never groups again, drop the
@@ -413,6 +466,13 @@ class PersonDetailViewModel @Inject constructor(
             val name = personDao.personById(personId)?.displayName
             if (name.isNullOrBlank()) return@launch
             personManualPhotoDao.add(photoKeys.map { PersonManualPhotoEntity(userId.id, name, it) })
+            // Refresh the cached count so the People tile matches the grid (which observes the manual
+            // keys live); otherwise the tile stays stale until the next clustering rebuild.
+            val manual = personManualPhotoDao.photoKeysForNameList(userId.id, name)
+            val count = personPhotoCount(faceDao.distinctPhotoKeysForPerson(userId.id, personId), manual)
+            val cover = resolveCover(userId.id, personId, name)
+            personDao.updateCoverAndCount(personId, cover, count)
+            _message.value = R.string.person_msg_added
         }
     }
 

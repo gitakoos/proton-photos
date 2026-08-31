@@ -82,7 +82,7 @@ import eu.akoos.photos.presentation.gallery.photoCellInputsFor
 import eu.akoos.photos.presentation.gallery.rememberDefaultGridColumns
 import eu.akoos.photos.presentation.gallery.rememberSeamlessGrid
 import eu.akoos.photos.presentation.gallery.rememberDragMultiSelectModifier
-import eu.akoos.photos.presentation.memories.FloatingMemoriesHeader
+import eu.akoos.photos.presentation.common.FloatingHeader
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.Bg0
 import eu.akoos.photos.presentation.theme.FgDim
@@ -260,7 +260,7 @@ fun OfflinePhotosScreen(
                 }
             }
         } else {
-            FloatingMemoriesHeader(
+            FloatingHeader(
                 title = stringResource(R.string.offline_screen_title),
                 onBack = onBack,
             )

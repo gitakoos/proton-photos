@@ -70,6 +70,22 @@ data class HealthVerdict(
 )
 
 /**
+ * The specific condition standing heavy on-device work down, mirroring [evaluateDeviceHealth]'s
+ * precedence so a caller can name the block the same way the gate decides it. [NONE] means heavy work
+ * is permitted. [INTERACTION] is transient and clears once the user stops touching the screen, while
+ * [LOW_BATTERY], [WARM] and [POWER_SAVE] persist until the condition or the setting changes, so the
+ * settings card treats those three as the blocks a pause or resume cannot lift.
+ */
+enum class HealthBlockReason {
+    NONE, LOW_BATTERY, WARM, POWER_SAVE, INTERACTION;
+
+    /** True for a block that will not clear on its own, so the face card disables its pause / resume
+     *  control while one holds; a transient interaction pause and [NONE] leave it live. */
+    val isPersistent: Boolean
+        get() = this == LOW_BATTERY || this == WARM || this == POWER_SAVE
+}
+
+/**
  * Decides what a snapshot permits. Pure and Android-free so it can be unit-tested directly.
  *
  * Two levels, because the two kinds of background work tolerate different conditions:
@@ -115,6 +131,33 @@ fun evaluateDeviceHealth(
 }
 
 /**
+ * Which condition, in [evaluateDeviceHealth]'s exact precedence, is standing heavy ML down, or
+ * [HealthBlockReason.NONE] when it is permitted. Shares [evaluateDeviceHealth]'s thresholds and order
+ * so the two never drift: a hot battery and thermal throttling both fold to [HealthBlockReason.WARM],
+ * the single "phone is warm" story the card tells. Pure and Android-free, so it is unit-tested directly.
+ */
+fun heavyMlBlockReason(
+    snapshot: HealthSnapshot,
+    lowBatteryPercent: Int = LOW_BATTERY_PERCENT,
+    hotBatteryCelsius: Float = HOT_BATTERY_CELSIUS,
+): HealthBlockReason {
+    val batteryOk = snapshot.charging ||
+        snapshot.batteryPercent < 0 ||
+        snapshot.batteryPercent > lowBatteryPercent
+    val temperatureOk = snapshot.batteryTempCelsius.isNaN() ||
+        snapshot.batteryTempCelsius <= hotBatteryCelsius
+    val thermalOk = snapshot.thermal != ThermalState.THROTTLING
+    return when {
+        !batteryOk -> HealthBlockReason.LOW_BATTERY
+        !temperatureOk -> HealthBlockReason.WARM
+        !thermalOk -> HealthBlockReason.WARM
+        snapshot.powerSaveOn -> HealthBlockReason.POWER_SAVE
+        snapshot.interacting -> HealthBlockReason.INTERACTION
+        else -> HealthBlockReason.NONE
+    }
+}
+
+/**
  * Whether a deferrable WorkManager maintenance job should skip this run to let the phone cool.
  *
  * Thermal throttling is the one physical-stress signal a WorkManager `Constraints` block cannot
@@ -134,7 +177,9 @@ const val HOT_BATTERY_CELSIUS = 42f
  *  within a second without a busy loop. */
 const val HEALTH_PAUSE_POLL_MS = 1_000L
 
-private const val INTERACTION_WINDOW_MS = 15_000L
+// Face indexing yields to an active touch but resumes quickly after it, so a brief tap does not stall
+// the walk: heavy ML stands down only while a touch is fresh, then picks straight back up.
+private const val INTERACTION_WINDOW_MS = 3_000L
 
 /**
  * One place every background tier asks "is now a good time?", so a single component owns the device

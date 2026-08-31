@@ -165,6 +165,7 @@ class UploadPipelineIntegrationTest {
             uploadAlbumTargetDao = targetDao,
             pendingMetadataEditDao = db.pendingMetadataEditDao(),
             photoLocationDao = db.photoLocationDao(),
+            structuralStripper = UploadStructuralStripper(context),
             context = context,
             appScope = appScope,
         )

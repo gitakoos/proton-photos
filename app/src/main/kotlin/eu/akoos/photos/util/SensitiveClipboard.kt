@@ -53,3 +53,23 @@ fun copySensitiveText(context: Context, label: String, text: String) {
     clip.description.extras = PersistableBundle().apply { putBoolean(sensitiveKey, true) }
     clipboard.setPrimaryClip(clip)
 }
+
+/**
+ * Re-flags whatever is currently on the clipboard as sensitive.
+ *
+ * Some copies are made by machinery this app does not own: the photo text reader lets the platform's
+ * selection write the picked text to the clipboard itself, so [copySensitiveText] cannot be used.
+ * Calling this right after that copy adds the same display guard, leaving the copied text untouched,
+ * so a phone number, ID or password lifted off a photo is not shown back in the clipboard preview.
+ */
+fun markPrimaryClipSensitive(context: Context) {
+    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager ?: return
+    val clip = clipboard.primaryClip ?: return
+    val sensitiveKey =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) ClipDescription.EXTRA_IS_SENSITIVE
+        else "android.content.extra.IS_SENSITIVE"
+    clip.description.extras = (clip.description.extras ?: PersistableBundle()).apply {
+        putBoolean(sensitiveKey, true)
+    }
+    clipboard.setPrimaryClip(clip)
+}

@@ -917,8 +917,8 @@ class AlbumService @Inject constructor(
         val nameHash = cryptoHelper.computeNameHash(name, rootNodeHashKey)
 
         // xAttr — Drive Android's CreateFolderInfo always emits an encrypted +
-        // signed XAttr blob on album-create (tempandroid-drive
-        // .../CreateFolderInfo.kt:83 calls encryptAndSignXAttr unconditionally).
+        // signed XAttr blob on album-create (its create path calls
+        // encryptAndSignXAttr unconditionally).
         // Drive web treats it as optional on the wire but expects the full
         // signature chain anchored at the album to be intact on shared-with-me
         // reads. Sending null left a hole in that chain and Drive web's
@@ -1565,8 +1565,7 @@ class AlbumService @Inject constructor(
                 // hard reject — every photo gets dropped from the batch with that
                 // exact error text.
                 // Drive Android's Link.signatureEmail()/nodePassphraseSignature()
-                // (tempandroid-drive .../Link.kt:30-44) gate on
-                // `signatureEmail.isEmpty() || nameSignatureEmail.isNullOrEmpty()`.
+                // gate on `signatureEmail.isEmpty() || nameSignatureEmail.isNullOrEmpty()`.
                 // Both fields must be checked: a source photo with a present
                 // signatureEmail but a missing nameSignatureEmail (some legacy
                 // upload paths) still counts as anonymous, so it needs a fresh

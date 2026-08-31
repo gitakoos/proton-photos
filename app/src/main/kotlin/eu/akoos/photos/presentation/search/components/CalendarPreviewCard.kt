@@ -145,7 +145,7 @@ private fun MiniMonthGrid() {
                     Box(
                         modifier = Modifier
                             .size(cell)
-                            .clip(RoundedCornerShape(50))
+                            .clip(RoundedCornerShape(999.dp))
                             .background(
                                 if (isHighlight) colors.accent
                                 else colors.fgDim.copy(alpha = 0.22f),

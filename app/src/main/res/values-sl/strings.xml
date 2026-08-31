@@ -363,13 +363,16 @@
     <string name="sync_worker_notification_progress">%1$d od %2$d naloženih</string>
     <string name="sync_worker_notification_checking">Preverjanje novih fotografij…</string>
     <string name="sync_worker_notification_cancel">Prekliči</string>
-    <!-- Background sync service. LOW-importance, idle ContentObserver only — keeps the
-         process alive on Samsung One UI so OS-level MediaStore triggers still wake the
-         upload pipeline after the user closes the app. -->
     <string name="bg_sync_service_channel_name">Varnostno kopiranje fotografij v ozadju</string>
     <string name="bg_sync_service_channel_desc">Aplikaciji omogoča, da se v ozadju odzove na nove fotografije.</string>
     <string name="bg_sync_service_title">Varnostno kopiranje fotografij</string>
     <string name="bg_sync_service_text">Spremljanje novih fotografij</string>
+    <string name="face_index_service_channel_name">Razvrščanje obrazov</string>
+    <string name="face_index_service_channel_desc">Prikazuje potek med razvrščanjem fotografij po obrazih.</string>
+    <string name="face_index_service_title">Razvrščanje obrazov</string>
+    <string name="face_index_service_progress">%1$d od %2$d</string>
+    <string name="face_index_service_waiting">Čakanje na nadaljevanje</string>
+    <string name="face_index_service_stop">Ustavi</string>
 
     <!-- Delete bottom sheet -->
     <string name="delete_album_container_warning">S tem izbrišete album, vaše fotografije pa ostanejo v Proton Drive.</string>
@@ -388,6 +391,8 @@
 
     <!-- Settings -->
     <string name="settings_title">Nastavitve</string>
+    <string name="settings_search_hint">Iskanje nastavitev</string>
+    <string name="settings_search_no_results">Ni ujemajočih se nastavitev</string>
     <string name="settings_sync_wifi_only">Sinhroniziraj samo prek Wi‑Fi</string>
     <string name="settings_sync_now">Sinhroniziraj zdaj</string>
     <string name="settings_storage_section">Shramba</string>
@@ -402,6 +407,7 @@
     <string name="settings_free_up_interval">Obdrži v napravi</string>
     <string name="settings_free_up_interval_desc">Kako dolgo fotografija po varnostnem kopiranju ostane v tej napravi.</string>
     <string name="settings_account_section">Račun</string>
+    <string name="settings_sign_in_to_proton">Prijava v Proton</string>
     <string name="settings_sign_out">Odjava</string>
     <string name="settings_sign_out_desc">Končaj to sejo v tej napravi.</string>
     <string name="sign_out_dialog_title">Odjava?</string>
@@ -480,6 +486,13 @@
         <item quantity="few">Obnovljene %1$d fotografije</item>
         <item quantity="other">Obnovljenih %1$d fotografij</item>
     </plurals>
+    <plurals name="trash_deletes_in_days">
+        <item quantity="one">Izbris čez %1$d dan</item>
+        <item quantity="two">Izbris čez %1$d dneva</item>
+        <item quantity="few">Izbris čez %1$d dnevi</item>
+        <item quantity="other">Izbris čez %1$d dni</item>
+    </plurals>
+    <string name="trash_deletes_soon">Kmalu bo izbrisano</string>
     <string name="trash_cloud_restore_partial">Obnovljeno %1$d, %2$d ni bilo mogoče obnoviti</string>
     <string name="trash_cloud_restore_refresh_failed">Obnovljeno. Za osvežitev povlecite navzdol v galeriji</string>
     <string name="trash_cloud_restore_failed">Obnovitev ni uspela</string>
@@ -553,6 +566,9 @@
     <string name="settings_strip_software">Odstrani podatke o programski opremi</string>
     <string name="settings_strip_software_desc">Odstrani polja za programsko opremo, opombo, avtorja in avtorske pravice</string>
     <string name="settings_strip_authorship">Odstrani avtorja in avtorske pravice</string>
+    <string name="settings_strip_share">Odstrani metapodatke ob deljenju</string>
+    <string name="settings_strip_share_title">Metapodatki ob deljenju</string>
+    <string name="settings_strip_share_desc">Odstrani izbrana polja samo iz deljene kopije, nikoli iz izvirnika. Pri videoposnetkih se odstrani samo lokacija.</string>
     <string name="settings_strip_format_note">Nekateri formati, na primer HEIC, ne morejo shraniti sprememb metapodatkov. Ko je odstranjevanje metapodatkov vklopljeno, se naložena kopija take fotografije pretvori v JPEG, da se izbrani podatki dejansko odstranijo. Fotografija v napravi ostane nespremenjena.</string>
     <string name="settings_compress_upload_desc">Naloži lažjo različico za prihranek prostora. Kopija v telefonu ostane v polni kakovosti, razen če je spodaj vklopljeno lokalno zrcaljenje.</string>
     <string name="settings_compress_photos">Stisni fotografije</string>
@@ -614,6 +630,7 @@
     <string name="timeline_filter_per_album_hint">Posamezne albume skrijte s časovnice. Stikalo zgoraj jih skrije vse naenkrat.</string>
     <string name="timeline_filter_hidden_album">Skrit album</string>
     <string name="timeline_filter_albums_header">Albumi Drive</string>
+    <string name="timeline_filter_more_settings">Več nastavitev</string>
     <string name="settings_telemetry">Telemetrija</string>
     <string name="settings_telemetry_desc">Nadzorovano z nastavitvami vašega računa Proton. Za spremembo odprite account.proton.me.</string>
     <string name="settings_telemetry_on">Vklopljena</string>
@@ -669,6 +686,11 @@
     <string name="palette_ruby">Rubin</string>
 
     <!-- AMOLED pure-black dark theme -->
+    <string name="settings_map_style">Klasični zemljevid</string>
+    <string name="settings_map_style_summary">Uporabi klasični ploščni zemljevid OpenStreetMap namesto sodobnega zemljevida sveta.</string>
+    <string name="map_style_prompt_title">Izberite slog zemljevida</string>
+    <string name="map_style_modern">Zemljevid sveta</string>
+    <string name="map_style_modern_summary">Sodoben globus, ki ga lahko zavrtite do svojih krajev.</string>
     <string name="settings_amoled_black">Čisto črna (AMOLED)</string>
     <string name="settings_amoled_black_summary">V temnem načinu uporabi pravo črno ozadje za varčevanje z energijo na zaslonih OLED.</string>
 
@@ -810,9 +832,10 @@
     <string name="filter_title">Filter</string>
     <string name="filter_type_label">Vrsta</string>
     <string name="filter_type_videos">Videoposnetki</string>
-    <string name="filter_sync_label">Sinhronizacija</string>
-    <string name="filter_sync_local">Samo lokalno</string>
+    <string name="filter_sync_label">Stanje sinhronizacije</string>
+    <string name="filter_sync_local">V napravi</string>
     <string name="filter_sync_backedup">Varnostno kopirano</string>
+    <string name="filter_sync_cloud">Samo v oblaku</string>
     <string name="filter_year_label">Leto</string>
     <string name="filter_any">Poljubno</string>
     <string name="filter_whole_month">Cel mesec</string>
@@ -835,10 +858,12 @@
 
     <!-- Map -->
     <string name="map_title">Zemljevid</string>
+    <string name="map_vector_title">Zemljevid sveta</string>
     <string name="map_card_title">Zemljevid</string>
     <string name="map_card_subtitle_empty">Še ni lociranih fotografij</string>
     <string name="map_card_calendar_subtitle">Koledarski pogled vaših fotografij</string>
     <string name="map_search_places">Iskanje krajev</string>
+    <string name="places_title">Kraji</string>
     <string name="map_search_no_places">Še ni krajev</string>
 
     <!-- Location detail -->
@@ -1167,6 +1192,8 @@
     <string name="settings_backup_how_section">Kako poteka varnostno kopiranje</string>
     <string name="settings_theme_palette">Tema in paleta</string>
     <string name="settings_privacy_security">Zasebnost in varnost</string>
+    <string name="settings_backup_storage_section">Varnostno kopiranje in shramba</string>
+    <string name="settings_help_about_section">Pomoč in informacije</string>
     <string name="cd_scroll_to_top">Pomakni se na vrh</string>
     <string name="albums_filter_all">Vse</string>
     <string name="albums_filter_cloud">Oblak</string>
@@ -1176,6 +1203,7 @@
     <string name="albums_filter_remember_last">Zapomni si nazadnje uporabljeni filter</string>
     <string name="albums_filter_remember_last_summary">Albume odpiraj z nazadnje izbranim filtrom</string>
     <string name="albums_sort_heading">Razvrsti po</string>
+    <string name="albums_cover_size_heading">Velikost naslovnice</string>
     <string name="albums_sort_custom">Po meri</string>
     <string name="albums_sort_name">Ime (A-Z)</string>
     <string name="albums_sort_activity">Zadnja dejavnost</string>
@@ -1393,6 +1421,7 @@
     <string name="offline_card_subtitle">Fotografije, shranjene za ogled brez povezave</string>
     <string name="duplicates_filter_identical">Enake</string>
     <string name="duplicates_filter_similar">Podobne</string>
+    <string name="duplicates_filter_match_label">Ujemanje</string>
 
     <!-- Duplicate badges (single-word source-of-copy chips) -->
     <string name="duplicates_badge_cloud">Oblak</string>
@@ -1551,7 +1580,13 @@
     <string name="settings_ai_ocr_remove_keep">Obdrži</string>
     <string name="settings_ai_face_toggle">Prepoznavanje obrazov</string>
     <string name="settings_ai_face_desc">Razvrsti fotografije po osebah na njih, v vaši napravi</string>
-    <string name="settings_ai_face_unavailable">Še ni na voljo</string>
+    <string name="settings_ai_face_downloading">Prenašanje…</string>
+    <string name="settings_ai_face_download_failed">Modela obrazov ni bilo mogoče prenesti.</string>
+    <string name="settings_ai_face_download_retry">Za ponovni poskus znova vklopite stikalo.</string>
+    <string name="settings_ai_face_download_title">Prenesem model obrazov?</string>
+    <string name="settings_ai_face_download_message">Prepoznavanje obrazov potrebuje prenos modela velikosti %1$s. Deluje prek katere koli povezave, priporočljiv pa je Wi-Fi.</string>
+    <string name="settings_ai_face_download_confirm">Prenesi</string>
+    <string name="settings_ai_face_model_missing">Modela obrazov ni v tej napravi.</string>
     <string name="settings_ai_face_remove_title">Odstranim podatke obrazov?</string>
     <string name="settings_ai_face_remove_message">Prepoznavanje obrazov je izklopljeno. Ali naj s te naprave odstranim model obrazov ter vse zaznane obraze in imena? Če želite obdržati kopijo, jih najprej izvozite na strani Prepoznani obrazi.</string>
     <string name="settings_ai_face_remove_confirm">Odstrani</string>
@@ -1570,6 +1605,9 @@
     <string name="settings_ai_indexing_running">Pregledovanje fotografij</string>
     <string name="settings_ai_indexing_waiting">Čakanje na model obrazov</string>
     <string name="settings_ai_indexing_paused">Zaustavljeno</string>
+    <string name="settings_ai_indexing_paused_battery">Zaustavljeno, nizka baterija</string>
+    <string name="settings_ai_indexing_paused_warm">Zaustavljeno, telefon je topel</string>
+    <string name="settings_ai_indexing_paused_power_save">Zaustavljeno, varčevanje z energijo je vklopljeno</string>
     <string name="settings_ai_indexing_progress">%1$d od %2$d fotografij</string>
     <plurals name="settings_ai_indexing_people">
         <item quantity="one">Najdena %1$d oseba</item>
@@ -1586,7 +1624,16 @@
     <string name="people_search_hint">Iskanje oseb</string>
     <string name="people_card_subtitle">Prebrskajte fotografije po osebah</string>
     <string name="person_set_cover">Nastavi kot naslovnico</string>
+    <string name="person_set_cover_confirm_title">Set as cover?</string>
+    <string name="person_set_cover_confirm_body">Use this photo as the cover for this person.</string>
     <string name="person_cover_no_face">Na tej fotografiji ni zaznanega obraza.</string>
+    <string name="person_msg_moved">Premaknjeno k drugi osebi</string>
+    <string name="person_msg_removed">Odstranjeno od osebe</string>
+    <string name="person_msg_not_person">Označeno kot ni oseba</string>
+    <string name="person_msg_added">Dodano osebi</string>
+    <string name="person_msg_merged">Osebe združene</string>
+    <string name="person_msg_renamed">Preimenovano</string>
+    <string name="person_msg_dismissed">Opuščeno</string>
     <string name="people_add_names">Dodaj imena</string>
     <string name="people_none_named">Nikogar še niste poimenovali. Odprite pregled, da poimenujete, združite in uredite osebe, ki jih je našla aplikacija.</string>
     <string name="people_review_empty">Trenutno ni nepoimenovanih oseb. Med pregledovanjem vaših fotografij se tukaj pojavijo skupine za poimenovanje in združevanje.</string>
@@ -1612,7 +1659,7 @@
     <string name="person_merge_confirm_body">Fotografije izbrane osebe se pridružijo tej, obe pa se odslej obravnavata kot ista oseba. Tega ni mogoče samodejno razdružiti nazaj.</string>
     <string name="person_merge_confirm_title">Združi osebe?</string>
     <string name="person_merge_empty">Ni drugih oseb za združevanje.</string>
-    <string name="person_merge_name_title">Poimenuj jih kot eno osebo</string>
+    <string name="person_merge_name_title">Združi z osebo</string>
     <string name="person_merge_pick_title">Izberi osebo za združitev</string>
     <string name="person_not_a_person">To ni oseba</string>
     <string name="person_not_a_person_body">Izbrani obrazi se odstranijo iz Oseb in se preskočijo pri vsakem prihodnjem pregledu. Uporabite to za kipe, plakate in napake. Same fotografije se ne izbrišejo.</string>
@@ -1624,18 +1671,22 @@
     <string name="person_picker_empty">Še ni poimenovanih oseb. Zgoraj vnesite ime, da ustvarite novo.</string>
     <string name="person_picker_search">Iščite ali vnesite novo ime</string>
     <string name="person_remove_confirm">Odstrani</string>
-    <string name="person_remove_confirm_body">Izbrane fotografije se pri tej osebi nehajo prikazovati in se ob ponovnem pregledu ne združijo več sem. Same fotografije se ne izbrišejo.</string>
+    <string name="person_remove_confirm_body">Izbrane fotografije se odstranijo s te osebe, vendar njihovi obrazi ostanejo v prepoznavi obrazov, tako da jih je mogoče pozneje razvrstiti k pravi osebi. Same fotografije se ne izbrišejo.</string>
     <string name="person_remove_confirm_title">Odstraniti od te osebe?</string>
     <string name="person_remove_from">Odstrani od osebe</string>
+    <string name="person_move_to_title">Premakni k drugi osebi</string>
     <string name="person_suggestion_no">Ne</string>
     <string name="person_suggestion_question">Je to %1$s?</string>
     <string name="person_suggestion_skip">Preskoči</string>
     <string name="person_suggestion_yes">Da</string>
     <string name="person_suggestions_empty">Trenutno ni predlogov. Med pregledovanjem vaših fotografij se tukaj za potrditev pojavijo verjetna ujemanja z osebami, ki ste jih poimenovali.</string>
     <string name="person_suggestions_review">Preglej predloge</string>
+    <string name="person_suggestions_review_count">Preglej predloge (%1$d)</string>
+    <string name="more_options">Več možnosti</string>
     <string name="person_suggestions_title">Predlogi</string>
     <string name="settings_ai_export">Izvozi indeks obrazov</string>
     <string name="settings_ai_export_done">Indeks obrazov izvožen (%1$d obrazov).</string>
+    <string name="settings_ai_export_empty">Zaenkrat ni obrazov za izvoz.</string>
     <string name="settings_ai_export_warn_msg">Ta datoteka vsebuje prstne odtise obrazov, izračunane iz vaših fotografij. Kdor koli, ki jo pridobi, bi lahko znova sestavil model obrazov oseb v vaši knjižnici, zato jo hranite zasebno in jo delite le z ljudmi, ki jim zaupate.</string>
     <string name="settings_ai_export_warn_title">Izvoziti indeks obrazov?</string>
     <string name="settings_ai_import">Uvozi indeks obrazov</string>
@@ -1644,8 +1695,9 @@
     <string name="settings_ai_rescan_confirm_msg">Vsaka fotografija se znova pregleda za obraze z več podrobnostmi, kar najde manjše in bolj oddaljene obraze. Vaše ročno dodane fotografije se ohranijo, osebe pa se znova združijo, zato boste morda morali nekatere znova poimenovati.</string>
     <string name="settings_ai_rescan_confirm_title">Znova pregledati vse fotografije?</string>
     <string name="settings_ai_transfer_failed">Prenos indeksa obrazov ni uspel.</string>
+    <string name="settings_ai_transfer_working">Poteka…</string>
     <string name="settings_ai_import_wrong_account">Ta indeks obrazov pripada drugemu računu in ga tukaj ni mogoče odpreti.</string>
-    <string name="settings_ai_import_wrong_model">Ta indeks obrazov je bil ustvarjen z drugim modelom obrazov, zato ga ni mogoče uvoziti.</string>
+    <string name="settings_ai_import_reattach">Ta indeks je uporabljal drug model. Njegovih %1$d imen se bo vrnilo na vaše fotografije, ko bodo pregledane.</string>
     <plurals name="person_suggestions_left">
         <item quantity="one">%1$d za pregled</item>
         <item quantity="two">%1$d za pregled</item>
@@ -1653,6 +1705,8 @@
         <item quantity="other">%1$d za pregled</item>
     </plurals>
     <string name="news_title">Novice</string>
+    <string name="news_banner">Nove novice</string>
+    <string name="news_new_badge">Novo</string>
     <string name="news_settings_desc">Sporočila in posodobitve o aplikaciji</string>
     <string name="news_show_title">Pokaži novice</string>
     <string name="news_show_desc">Majhna pika se prikaže, ko je kaj novega</string>
@@ -1660,9 +1714,9 @@
     <string name="news_read_more">Preberi več</string>
     <string name="news_feedback_heading">Vprašanja ali napaka?</string>
     <string name="news_feedback_body">Zastavi vprašanje ali prijavi napako.</string>
-    <string name="news_feedback_note">To odpre uradni Discord skupnosti Proton, kjer se za povratne informacije uporablja majhna forumska tema. Photos for Proton ni povezan s podjetjem Proton.</string>
+    <string name="news_feedback_note">Odpre skupnostni Discord Photos for Proton, kjer lahko postavljate vprašanja in prijavljate napake.</string>
     <string name="news_feedback_button">Pošlji povratne informacije</string>
-    <string name="news_feedback_join">Prvič na strežniku Proton Discord? Najprej se pridruži</string>
+    <string name="news_feedback_join">Še niste na Discordu? Najprej se pridružite</string>
     <string name="news_feedback_email">Ali piši na %1$s</string>
     <string name="whats_new_metadata_title">Uredi podrobnosti fotografije</string>
     <string name="whats_new_metadata_body">Nastavi datum in kraj fotografije ter dodaj opis, da posnetek z napačno nastavljeno uro ali brez lokacije pristane tam, kamor sodi.</string>
@@ -1680,6 +1734,8 @@
     <string name="metadata_editor_date_mode_filename">Iz imena datoteke</string>
     <string name="metadata_editor_filename_hint">Nastavi datum vsake fotografije glede na datum, zapisan v imenu datoteke.</string>
     <string name="metadata_editor_filename_apply">Popravi datume</string>
+    <string name="metadata_editor_filename_single">Ime datoteke navaja %1$s</string>
+    <string name="metadata_editor_filename_use">Uporabi ta datum</string>
     <plurals name="metadata_editor_filename_count">
         <item quantity="one">%1$d od %2$d izbranih fotografij ima datum v imenu</item>
         <item quantity="two">%1$d od %2$d izbranih fotografij ima datum v imenu</item>
@@ -1805,13 +1861,47 @@
     <string name="whats_new_dupreview_body">Iskalnik dvojnikov odpre skupino v polni velikosti in pokaže velikost, ločljivost, datum in kraj vsake kopije, tako da obdržiš pravo.</string>
     <string name="whats_new_filedate_title">Popravi datume iz imena datoteke</string>
     <string name="whats_new_filedate_body">Fotografijam, ki imajo datum v imenu, ne pa v podatkih, ga lahko nastaviš naenkrat, tako da pristanejo na pravo mesto na časovnici.</string>
-    <string name="whats_new_more_250">Poleg tega sistemska tema zdaj sledi telefonu, pasica za varnostno kopiranje se med drsenjem umakne, možnost Sinhroniziraj samo prek Wi-Fi pa v ozadju ne porablja več mobilnih podatkov.</string>
+    <string name="whats_new_faces_title">Poiščite ljudi po obrazu</string>
+    <string name="whats_new_faces_body">Fotografije so združene po obrazih na njih, vse v vaši napravi. Poimenujte osebo, da poiščete in zberete vse njene fotografije, in to kadar koli izklopite ter izbrišete.</string>
+    <string name="whats_new_map_title">Prenovljen zemljevid</string>
+    <string name="whats_new_map_body">Vrtljiv zemeljski globus in preoblikovan zemljevid prikazujeta, kje so bile posnete vaše fotografije, z brskalnikom krajev po državi in mestu. Slog izberete na zemljevidu, s tapom na kraj pa odprete njegove fotografije.</string>
+    <string name="whats_new_localonly_title">Uporabljajte brez računa</string>
+    <string name="whats_new_localonly_body">Preskočite prijavo in brskajte, urejajte ter organizirajte fotografije, ki so že v telefonu. Račun Proton dodajte pozneje, ko jih boste želeli varnostno kopirati.</string>
+    <string name="whats_new_dupfinder_title">Preglednejši iskalnik dvojnikov</string>
+    <string name="whats_new_dupfinder_body">Vsaka kopija pokaže, v katerem albumu je, razvrščate, filtrirate in izbrišete pa lahko več naenkrat.</string>
+    <string name="whats_new_albumcover_title">Velikost naslovnic albumov</string>
+    <string name="whats_new_albumcover_body">Izberite, kako velike so naslovnice albumov, od dveh do štirih v vrsti.</string>
+    <string name="whats_new_denser_title">Gostejša časovnica</string>
+    <string name="whats_new_denser_body">Časovnica zdaj doseže dve gostejši ravni, do osem fotografij v vrsti.</string>
+    <string name="whats_new_section_new">Novo</string>
+    <string name="whats_new_section_improved">Izboljšave</string>
 
     <!-- Person detail -->
     <string name="person_detail_unnamed">Oseba</string>
+    <string name="person_unsorted">Nerazvrščeno</string>
+    <string name="person_unsorted_hint">Obrazi, ki jih ni bilo mogoče zanesljivo povezati z osebo. Izberi fotografije, da izločiš pravo osebo, ali preostale označi kot »ni oseba«.</string>
+    <string name="person_unsorted_caption">Preostali obrazi, ki jih ni bilo mogoče povezati. Odprite za razvrščanje.</string>
     <string name="person_rename_title">Preimenuj</string>
     <string name="person_rename_hint">Ime</string>
     <string name="permissions_default_gallery_title">Nastavi kot privzeto galerijo</string>
     <string name="permissions_default_gallery_why">Odprite sistemske nastavitve in nastavite to aplikacijo kot privzeto za odpiranje fotografij in videoposnetkov.</string>
     <string name="permissions_action_open">Odpri</string>
+    <string name="sign_in_continue_without_account">Nadaljuj brez računa</string>
+    <string name="move_to_folder">Premakni v mapo</string>
+    <string name="move_to_folder_new">Nova mapa</string>
+    <string name="move_to_folder_title">Premakni v mapo</string>
+    <string name="move_to_folder_name_hint">Ime mape</string>
+    <string name="moved_to_folder">Premaknjeno v \"%1$s\"</string>
+    <string name="new_folder">Nova mapa</string>
+    <string name="new_folder_create">Ustvari</string>
+    <string name="folder_rename">Preimenuj mapo</string>
+    <string name="folder_renamed">Preimenovano v \"%1$s\"</string>
+    <string name="settings_face_excluded">Excluded faces</string>
+    <string name="settings_face_excluded_desc">Review faces you removed from a person or dismissed</string>
+    <string name="face_excluded_empty">Nothing is excluded. Faces you remove from a person, or dismiss as not a person, appear here so you can undo them.</string>
+    <string name="face_excluded_not_person_section">Not this person: %1$s</string>
+    <string name="face_excluded_ignored_section">Ignored (not a person)</string>
+    <string name="face_excluded_undo">Undo</string>
+    <string name="albums_search_hint">Iskanje albumov</string>
+    <string name="albums_search_no_results">Noben album se ne ujema z iskanjem.</string>
 </resources>

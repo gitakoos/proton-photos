@@ -20,6 +20,8 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
+@file:OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+
 package eu.akoos.photos.presentation.folders
 
 import android.content.Context
@@ -38,6 +40,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -60,8 +63,10 @@ import eu.akoos.photos.util.MetadataStripConfig
 import eu.akoos.photos.util.ProtonPhotosStorage
 import eu.akoos.photos.util.ExifHelper
 import eu.akoos.photos.util.StripResult
+import eu.akoos.photos.util.stripForShareOrOriginal
 import eu.akoos.photos.presentation.albums.AlbumPhotoSortMode
 import eu.akoos.photos.presentation.common.FavoriteActionState
+import eu.akoos.photos.presentation.common.MoveToFolderController
 import eu.akoos.photos.presentation.common.MultiStripState
 import eu.akoos.photos.presentation.common.PhotoSortOrder
 import eu.akoos.photos.presentation.common.favoriteTurnsOn
@@ -72,6 +77,7 @@ import android.provider.MediaStore
 import android.os.Build
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
+import eu.akoos.photos.data.preferences.currentShareStripConfig
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.entity.GalleryItem
@@ -111,6 +117,7 @@ class DeviceFolderDetailViewModel @Inject constructor(
     private val upload: eu.akoos.photos.domain.usecase.UploadPendingUseCase,
     private val undoController: UndoController,
     private val favoriteWriter: eu.akoos.photos.presentation.common.FavoriteWriter,
+    private val moveController: MoveToFolderController,
 ) : ViewModel() {
 
     private val _items = MutableStateFlow<List<GalleryItem>>(emptyList())
@@ -133,6 +140,13 @@ class DeviceFolderDetailViewModel @Inject constructor(
      *  "Add to album" picker has albums to show without a network round-trip. */
     private val _albums = MutableStateFlow<List<Album>>(emptyList())
     val albums: StateFlow<List<Album>> = _albums.asStateFlow()
+
+    /** Whether a Proton account is signed in. A local-only session has no Drive, so the selection
+     *  bar's cloud actions and the folder drawer's cloud rows drop out. Defaults to signed-in so
+     *  nothing flickers before the first emit. */
+    val isSignedIn: StateFlow<Boolean> = accountManager.getPrimaryUserId()
+        .map { it != null }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, true)
 
     /** URIs the user has selected. Selection mode is active whenever this is non-empty. */
     private val selection = SelectionState<String>()
@@ -468,28 +482,36 @@ class DeviceFolderDetailViewModel @Inject constructor(
      * Show [bucketName]. [fromVault] is which card opened this screen, and therefore which of the
      * folder's two sides it answers for — see [openedFromVault].
      */
-    fun load(bucketName: String, fromVault: Boolean = false) {
-        this.bucketName.value = bucketName
+    fun load(initialBucket: String, fromVault: Boolean = false) {
+        this.bucketName.value = initialBucket
         this.openedFromVault.value = fromVault
         loadAlbums()
         loadJob?.cancel()
         loadJob = viewModelScope.launch {
-            val userId = accountManager.getPrimaryUserId().first() ?: return@launch
-            val vaultFlow = context.settingsDataStore.data
-                .map { prefs ->
+            // The current bucket name rides the records so the filter below follows it: a rename
+            // relocates the photos and repoints [bucketName], and this combine re-emits with the new
+            // name so the same photos stay listed rather than the screen emptying under the old one.
+            val vaultFlow = combine(context.settingsDataStore.data, bucketName) { prefs, name ->
                     VaultRecords(
+                        bucketName = name,
                         vaultedUris = prefs[SettingsKeys.HIDDEN_PHOTO_URIS] ?: emptySet(),
                         sourceFolders = prefs[SettingsKeys.HIDDEN_URI_SOURCE_FOLDER_MAP] ?: emptySet(),
                         originalNames = prefs[SettingsKeys.HIDDEN_URI_ORIGINAL_NAME_MAP] ?: emptySet(),
                         pairedUris = HiddenVaultRecords.pairedUris(
                             prefs[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] ?: emptySet(),
                         ),
-                        isFolderHidden = bucketName in (prefs[SettingsKeys.HIDDEN_FOLDER_NAMES] ?: emptySet()),
+                        isFolderHidden = name in (prefs[SettingsKeys.HIDDEN_FOLDER_NAMES] ?: emptySet()),
                     )
                 }
                 .distinctUntilChanged()
+            // Re-subscribe on the account so a local-only session (no userId) still lists the device
+            // folder's photos, and a later sign-in swaps in the full feed. A signed-in user emits one
+            // stable id, so the folder contents are unchanged for them.
+            val itemsFlow = accountManager.getPrimaryUserId().flatMapLatest { userId ->
+                if (userId != null) getGalleryItems.invoke(userId) else getGalleryItems.invokeLocalOnly()
+            }
             combine(
-                getGalleryItems.invoke(userId),
+                itemsFlow,
                 vaultFlow,
                 sortModeFlow,
             ) { all, vault, sort ->
@@ -499,13 +521,13 @@ class DeviceFolderDetailViewModel @Inject constructor(
                         is GalleryItem.Synced -> item.local.uri to item.local.bucketName
                         is GalleryItem.CloudOnly -> return@mapNotNull null
                     }
-                    if (bucket != bucketName || uri in vault.vaultedUris) return@mapNotNull null
+                    if (bucket != vault.bucketName || uri in vault.vaultedUris) return@mapNotNull null
                     item
                 }
                 // Only the vault side resolves the vault records: on the device side that costs a
                 // lookup per record for photos the screen does not list.
                 val showsVault = fromVault && vault.isFolderHidden
-                val vaulted = if (showsVault) vaultedItemsOf(bucketName, vault) else emptyList()
+                val vaulted = if (showsVault) vaultedItemsOf(vault.bucketName, vault) else emptyList()
                 // Ordered on captureTimeMs, the value the screen's month headers and the scrubber
                 // read. A synced photo's device DATE_TAKEN can differ from its Drive capture time —
                 // a downloaded file is dated at download — so ordering on the raw device date would
@@ -530,6 +552,7 @@ class DeviceFolderDetailViewModel @Inject constructor(
      *  emission carries a consistent view of the sets and of the folder's own hidden state — read
      *  apart, they could describe a hidden folder's contents with the folder still listed as open. */
     private data class VaultRecords(
+        val bucketName: String,
         val vaultedUris: Set<String>,
         val sourceFolders: Set<String>,
         val originalNames: Set<String>,
@@ -701,10 +724,19 @@ class DeviceFolderDetailViewModel @Inject constructor(
         if (uris.isEmpty()) return
         val uriSet = uris.toSet() - _vaultedUris.value
         val items = _items.value.filter { localUriOf(it) in uriSet }
-        val parsed = items.mapNotNull { localUriOf(it)?.let(android.net.Uri::parse) }
-        if (parsed.isEmpty()) return
-        val mime = eu.akoos.photos.util.ShareIntentBuilder.shareableMime(items)
-        _shareIntent.tryEmit(eu.akoos.photos.util.ShareIntentBuilder.buildSendIntent(context, parsed, mime))
+        if (items.isEmpty()) return
+        viewModelScope.launch {
+            // Null when strip-on-share is off, so each device URI passes through untouched below.
+            val stripConfig = currentShareStripConfig(context)
+            val parsed = items.mapNotNull { item ->
+                val local = localUriOf(item) ?: return@mapNotNull null
+                val (mime, name) = eu.akoos.photos.util.ShareIntentBuilder.shareMimeAndName(item)
+                stripForShareOrOriginal(context, android.net.Uri.parse(local), mime, name, stripConfig)
+            }
+            if (parsed.isEmpty()) return@launch
+            val mime = eu.akoos.photos.util.ShareIntentBuilder.shareableMime(items)
+            _shareIntent.tryEmit(eu.akoos.photos.util.ShareIntentBuilder.buildSendIntent(context, parsed, mime))
+        }
     }
 
     // ── Public link for the single selected (local) photo — delegated to the shared
@@ -775,6 +807,50 @@ class DeviceFolderDetailViewModel @Inject constructor(
     /** The selected uris that still have a device file, for the actions that take uris rather than
      *  items. */
     private fun selectedDeviceUris(): List<String> = (selection.value - _vaultedUris.value).toList()
+
+    // ── Move to a device folder / rename this folder (logged-out, device data only) ──────────────
+    // Delegated to the shared [MoveToFolderController], the same relocation the timeline offers, so a
+    // folder detail can send its selection into another DCIM folder or rename itself in place.
+
+    /** Existing device folders offered as move targets, kept warm for the picker. */
+    val moveTargetFolders = moveController.targetFolders(viewModelScope)
+
+    /** One-shot system write-consent request a foreign-file move needs; the screen's launcher drives it. */
+    val pendingMoveIntent = moveController.pendingMoveIntent
+
+    /** Destination folder of a completed move, for the host's snackbar. */
+    val moveConfirmation = moveController.moveConfirmation
+
+    /** Move every selected device photo (device-only + synced, vaulted skipped) into [folderName]. */
+    fun moveSelectedToFolder(folderName: String) {
+        val uris = selectedDeviceUris()
+        moveController.move(viewModelScope, uris, folderName)
+        selection.clear()
+    }
+
+    /** Move the selection into a freshly named device folder, born with the photos the move lands there. */
+    fun createFolderWithPhotos(name: String) {
+        val uris = selectedDeviceUris()
+        moveController.createFolder(viewModelScope, name, uris)
+        selection.clear()
+    }
+
+    fun onMovePermissionGranted() = moveController.onPermissionGranted(viewModelScope)
+
+    fun clearPendingMove() = moveController.clearPending()
+
+    /** One-shot confirmation for a completed folder rename, carrying the new name for the snackbar. */
+    private val _folderRenameConfirmation = MutableSharedFlow<String>(replay = 0, extraBufferCapacity = 1)
+    val folderRenameConfirmation: SharedFlow<String> = _folderRenameConfirmation.asSharedFlow()
+
+    /** Rename this folder by relocating its photos into [newName] under DCIM/. Repointing [bucketName]
+     *  keeps the screen on the same photos as they follow into the renamed folder, with no nav-pop. */
+    fun renameFolder(newName: String) {
+        moveController.rename(viewModelScope, bucketName.value, newName) { renamed ->
+            bucketName.value = renamed
+            _folderRenameConfirmation.tryEmit(renamed)
+        }
+    }
 
     /**
      * Return every selected vaulted photo to the device.

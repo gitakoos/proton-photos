@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.presentation.memories
 
+import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -65,6 +66,8 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.GalleryItem
+import eu.akoos.photos.presentation.common.FloatingHeader
+import eu.akoos.photos.presentation.common.ShimmerBox
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.PillBg
 import eu.akoos.photos.presentation.theme.PillBorder
@@ -74,8 +77,8 @@ import java.util.Calendar
 /**
  * "See all" sub-page for a single [MemoryCategory]. Same floating back-bar scaffold and theming as
  * [MemoriesScreen], titled with the category name, with every card of that category laid out as a
- * two-column album-style grid. Reuses the shared [MemoriesViewModel] — its data is cached, so
- * re-deriving here is free. Each card routes its photos into the shared viewer via [onPhotoClick].
+ * two-column album-style grid. Backed by its own [MemoriesViewModel] instance, which re-derives the
+ * groupings for this page. Each card routes its photos into the shared viewer via [onPhotoClick].
  * The Seasons page adds a newest/oldest-first sort toggle.
  */
 @Composable
@@ -127,6 +130,27 @@ fun MemoryCategoryScreen(
         // view "jumping" — snap back to the top whenever the sort flips so it stays put.
         LaunchedEffect(sortNewestFirst) { gridState.scrollToItem(0) }
 
+        Crossfade(targetState = state.isLoading, label = "memoryCategoryContent", modifier = Modifier.fillMaxSize()) { loading ->
+        if (loading) {
+            // Skeleton grid matching the 2-column card layout so there is no jump when the real cards
+            // arrive.
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(2),
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(
+                    start = 14.dp, end = 14.dp, top = contentTopPad, bottom = 24.dp,
+                ),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                items(8) {
+                    ShimmerBox(
+                        modifier = Modifier.size(width = 132.dp, height = 168.dp),
+                        cornerRadius = 16.dp,
+                    )
+                }
+            }
+        } else {
         LazyVerticalGrid(
             columns = GridCells.Fixed(2),
             state = gridState,
@@ -164,9 +188,11 @@ fun MemoryCategoryScreen(
                 }
             }
         }
+        }
+        }
 
         // Floating pills — back, title, and (Seasons only) the sort toggle, all in the same top row.
-        FloatingMemoriesHeader(
+        FloatingHeader(
             title = title,
             onBack = onBack,
             menuItems = switchMenu,
@@ -174,9 +200,9 @@ fun MemoryCategoryScreen(
                 {
                     Row(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(50))
-                            .background(PillBg, RoundedCornerShape(50))
-                            .border(0.5.dp, PillBorder, RoundedCornerShape(50))
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(PillBg, RoundedCornerShape(999.dp))
+                            .border(0.5.dp, PillBorder, RoundedCornerShape(999.dp))
                             .clickable { sortNewestFirst = !sortNewestFirst }
                             .padding(horizontal = 12.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,

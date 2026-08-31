@@ -54,10 +54,12 @@ import androidx.datastore.preferences.core.edit
 import me.proton.core.accountmanager.domain.AccountManager
 import eu.akoos.photos.R
 import eu.akoos.photos.data.preferences.SettingsKeys
+import eu.akoos.photos.data.preferences.currentShareStripConfig
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.GalleryItem
+import eu.akoos.photos.presentation.common.MoveToFolderController
 import eu.akoos.photos.presentation.common.UndoAction
 import eu.akoos.photos.presentation.common.UndoController
 import eu.akoos.photos.presentation.common.buildHideUndoAction
@@ -87,6 +89,7 @@ import eu.akoos.photos.util.MotionPhotoUtil
 import eu.akoos.photos.util.PhotoGpsResolver
 import eu.akoos.photos.util.PhotoMetadata
 import eu.akoos.photos.util.UserPhotoTags
+import eu.akoos.photos.util.stripForShareOrOriginal
 import eu.akoos.photos.util.friendlyNetworkError
 import eu.akoos.photos.util.originalUriForExif
 import eu.akoos.photos.util.retryOnDbTear
@@ -186,6 +189,7 @@ class PhotoViewerViewModel @Inject constructor(
     private val undoController: UndoController,
     private val thumbnailUrlStore: eu.akoos.photos.data.repository.drive.ThumbnailUrlStore,
     private val cloudTrashService: eu.akoos.photos.data.repository.drive.CloudTrashService,
+    private val moveController: MoveToFolderController,
 ) : ViewModel() {
 
     private companion object {
@@ -474,13 +478,20 @@ class PhotoViewerViewModel @Inject constructor(
         val sourceAlbumLinkId: String?,
     )
 
+    /** Whether a Proton account is signed in. The null-userId local-only session leaves the per-photo
+     *  cloud actions without a destination, so the screen hides them. Defaults to signed-in so nothing
+     *  flickers before the first emit. */
+    val isSignedIn: StateFlow<Boolean> = accountManager.getPrimaryUserId()
+        .map { it != null }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, true)
+
     /** Live gallery list backing the viewer's reconciliation. The screen re-resolves each item in
      *  its passed-in static `items` snapshot against this by identity so a photo finishing upload
      *  (LocalOnly → Synced) or any metadata refresh reflects in the open viewer instead of staying
      *  frozen at click time. Empty until the merge first emits. */
     val liveItems: StateFlow<List<GalleryItem>> = flow {
         val userId = accountManager.getPrimaryUserId().first()
-        if (userId == null) { emit(emptyList()); return@flow }
+        if (userId == null) { emitAll(getGalleryItems.invokeLocalOnly()); return@flow }
         emitAll(getGalleryItems.invoke(userId))
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
@@ -1972,6 +1983,8 @@ class PhotoViewerViewModel @Inject constructor(
     fun shareItem(item: GalleryItem) {
         viewModelScope.launch {
             _isSharing.value = true
+            // Null when strip-on-share is off, so the resolved URI passes through untouched below.
+            val stripConfig = currentShareStripConfig(context)
             runCatching {
                 val uri: Uri = when (item) {
                     is GalleryItem.LocalOnly -> localShareUri(item.local)
@@ -2006,8 +2019,10 @@ class PhotoViewerViewModel @Inject constructor(
                         }
                     }
                 }
+                val (itemMime, itemName) = eu.akoos.photos.util.ShareIntentBuilder.shareMimeAndName(item)
+                val shareUri = stripForShareOrOriginal(context, uri, itemMime, itemName, stripConfig)
                 val mime = eu.akoos.photos.util.ShareIntentBuilder.shareableMime(listOf(item))
-                eu.akoos.photos.util.ShareIntentBuilder.buildSendIntent(context, listOf(uri), mime)
+                eu.akoos.photos.util.ShareIntentBuilder.buildSendIntent(context, listOf(shareUri), mime)
             }.onSuccess { intent ->
                 _shareIntent.tryEmit(intent)
             }.onFailure { e ->
@@ -2071,6 +2086,32 @@ class PhotoViewerViewModel @Inject constructor(
 
     /** Clear any per-photo public-link state so a stale link can't show on the next photo. */
     private fun resetPublicLinkState() = publicLink.reset()
+
+    // ── Move the viewed photo to a device folder (logged-out, single on-device photo) ────────────
+    // Delegated to the shared [MoveToFolderController], the same relocation the timeline and the
+    // device-folder detail offer, so the viewer can send the one photo it is showing into another
+    // DCIM folder. Only the photo's own device uri moves; nothing cloud is touched.
+
+    /** Existing device folders offered as move targets, kept warm for the picker. */
+    val moveTargetFolders = moveController.targetFolders(viewModelScope)
+
+    /** One-shot system write-consent request a foreign-file move needs; the host's launcher drives it. */
+    val pendingMoveIntent = moveController.pendingMoveIntent
+
+    /** Destination folder of a completed move, for the host's snackbar. */
+    val moveConfirmation = moveController.moveConfirmation
+
+    /** Move the single viewed device photo into [folderName] under DCIM/. */
+    fun moveToFolder(uri: String, folderName: String) =
+        moveController.move(viewModelScope, listOf(uri), folderName)
+
+    /** Move the single viewed device photo into a freshly named device folder, born with it. */
+    fun createFolderWith(uri: String, name: String) =
+        moveController.createFolder(viewModelScope, name, listOf(uri))
+
+    fun onMovePermissionGranted() = moveController.onPermissionGranted(viewModelScope)
+
+    fun clearPendingMove() = moveController.clearPending()
 
     fun loadCloud(photo: CloudPhoto) {
         resetMotionState()

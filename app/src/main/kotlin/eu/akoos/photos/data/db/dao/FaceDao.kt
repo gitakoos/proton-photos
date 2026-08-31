@@ -29,6 +29,27 @@ import eu.akoos.photos.data.db.entity.FaceEntity
 import eu.akoos.photos.util.forEachSqlChunk
 import kotlinx.coroutines.flow.Flow
 
+/**
+ * One dismissed ("not a person") face reduced to the photo and box a crop needs. The embedding blob is
+ * deliberately left out so listing the exclusions never loads the heavy recognition vectors.
+ */
+data class RejectedFace(
+    val id: String,
+    val photoKey: String,
+    val boxLeft: Float,
+    val boxTop: Float,
+    val boxRight: Float,
+    val boxBottom: Float,
+)
+
+/** A face's stable id paired with the name the user confirmed it as, projected so a caller can spot an
+ *  imported face that this device has already confirmed as a different person. Only confirmed faces are
+ *  returned (a null [manualName] is filtered out by the query). */
+data class FaceManualName(
+    val id: String,
+    val manualName: String,
+)
+
 @Dao
 interface FaceDao {
 
@@ -114,6 +135,38 @@ interface FaceDao {
     @Query("UPDATE face SET manualName = :name, rejected = 0 WHERE id IN (:faceIds)")
     suspend fun labelFacesByIdsChunk(faceIds: List<String>, name: String)
 
+    /** Clear a set of faces' confirmed name (by id), used when a named person is un-named so the old
+     *  name does not resurrect as a confirmation on the next rebuild. */
+    suspend fun clearManualNameByIds(faceIds: Collection<String>) =
+        faceIds.forEachSqlChunk { clearManualNameByIdsChunk(it) }
+
+    @Query("UPDATE face SET manualName = NULL WHERE id IN (:faceIds)")
+    suspend fun clearManualNameByIdsChunk(faceIds: List<String>)
+
+    /** The confirmed names for the given face ids (only faces that carry one), so an import can keep a
+     *  face this device already confirmed as a different person instead of relabelling it. Chunked for
+     *  the SQL host-variable limit. */
+    suspend fun manualNamesForIds(faceIds: Collection<String>): List<FaceManualName> {
+        val out = ArrayList<FaceManualName>()
+        faceIds.forEachSqlChunk { out += manualNamesForIdsChunk(it) }
+        return out
+    }
+
+    @Query("SELECT id, manualName FROM face WHERE id IN (:faceIds) AND manualName IS NOT NULL")
+    suspend fun manualNamesForIdsChunk(faceIds: List<String>): List<FaceManualName>
+
+    /** Which of the given face ids this device currently holds as removed ("rejected"), so an import
+     *  keeps a locally removed face removed instead of resurrecting it from an older or foreign index.
+     *  Chunked for the SQL host-variable limit. */
+    suspend fun rejectedIdsAmong(faceIds: Collection<String>): List<String> {
+        val out = ArrayList<String>()
+        faceIds.forEachSqlChunk { out += rejectedIdsAmongChunk(it) }
+        return out
+    }
+
+    @Query("SELECT id FROM face WHERE id IN (:faceIds) AND rejected = 1")
+    suspend fun rejectedIdsAmongChunk(faceIds: List<String>): List<String>
+
     /** Face ids assigned to a person (kept faces), so a suggestion can record its whole cluster. */
     @Query("SELECT id FROM face WHERE userId = :userId AND personId = :personId AND rejected = 0")
     suspend fun faceIdsForPerson(userId: String, personId: Long): List<String>
@@ -149,6 +202,28 @@ interface FaceDao {
      *  its faces never group again. */
     @Query("UPDATE face SET rejected = 1 WHERE userId = :userId AND personId = :personId")
     suspend fun rejectAllForPerson(userId: String, personId: Long)
+
+    /** Every face the user dismissed as "not a person" (rejected), with the photo + box to render a
+     *  crop, the excluded faces screen's source. Projected so the embedding blob is never loaded. */
+    @Query(
+        "SELECT id, photoKey, `left` AS boxLeft, `top` AS boxTop, `right` AS boxRight, " +
+            "`bottom` AS boxBottom FROM face WHERE userId = :userId AND rejected = 1 ORDER BY photoKey",
+    )
+    suspend fun rejectedFacesForUser(userId: String): List<RejectedFace>
+
+    /** Undo a "not a person" dismissal: clear the reject flag and the stale person link so the face
+     *  reads as freshly detected and is regrouped on the next clustering pass. */
+    @Query("UPDATE face SET rejected = 0, personId = NULL WHERE id = :faceId")
+    suspend fun unrejectFace(faceId: String)
+
+    /** Mark a set of faces (by id) as removed from People, dropping each from any person and from every
+     *  future clustering pass. The model-swap reattach uses this to re-apply the exclusions it carried by
+     *  geometry onto the freshly detected faces. Chunked for the SQL host-variable limit. */
+    suspend fun rejectByIds(faceIds: Collection<String>) =
+        faceIds.forEachSqlChunk { rejectByIdsChunk(it) }
+
+    @Query("UPDATE face SET rejected = 1, personId = NULL WHERE id IN (:faceIds)")
+    suspend fun rejectByIdsChunk(faceIds: List<String>)
 
     /** Re-key confirmed faces when a person is renamed, so a confirmed face follows the new name. */
     @Query("UPDATE face SET manualName = :newName WHERE userId = :userId AND manualName = :oldName")
@@ -213,4 +288,10 @@ interface FaceDao {
     /** Removes every face for the account, for the sign-out wipe. */
     @Query("DELETE FROM face WHERE userId = :userId")
     suspend fun clearForUser(userId: String)
+
+    /** Removes every face for every account, the recognition-model re-index wipe: a model change
+     *  invalidates all stored embeddings regardless of which account produced them. Returns the row
+     *  count deleted. */
+    @Query("DELETE FROM face")
+    suspend fun clearAll(): Int
 }

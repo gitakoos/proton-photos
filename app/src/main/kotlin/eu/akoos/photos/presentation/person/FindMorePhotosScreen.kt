@@ -58,7 +58,7 @@ import eu.akoos.photos.presentation.common.IconBubble
 import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
 import eu.akoos.photos.presentation.gallery.PhotoCell
 import eu.akoos.photos.presentation.gallery.photoCellInputsFor
-import eu.akoos.photos.presentation.settings.components.SettingsPillHeader
+import eu.akoos.photos.presentation.common.FloatingHeader
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.FgMute
@@ -158,7 +158,7 @@ fun FindMorePhotosScreen(
             }
         }
 
-        SettingsPillHeader(
+        FloatingHeader(
             title = state.personName?.let { stringResource(R.string.find_more_title_named, it) }
                 ?: stringResource(R.string.find_more_title),
             onBack = onBack,

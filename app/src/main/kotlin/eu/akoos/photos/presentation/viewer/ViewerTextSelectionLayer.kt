@@ -36,6 +36,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalTextToolbar
 import androidx.compose.ui.platform.TextToolbar
@@ -49,6 +50,7 @@ import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Density
 import eu.akoos.photos.domain.ocr.RecognizedTextBlock
 import eu.akoos.photos.presentation.theme.Accent
+import eu.akoos.photos.util.markPrimaryClipSensitive
 import eu.akoos.photos.util.ImageFit
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -120,8 +122,13 @@ fun ViewerTextSelectionLayer(
         )
     }
     val platformToolbar = LocalTextToolbar.current
-    val toolbar = remember(platformToolbar, selection) {
-        ViewerSelectionToolbar(platformToolbar) { shown -> selection.active = shown }
+    val context = LocalContext.current
+    val toolbar = remember(platformToolbar, selection, context) {
+        ViewerSelectionToolbar(
+            platformToolbar,
+            onShownChange = { shown -> selection.active = shown },
+            onCopied = { markPrimaryClipSensitive(context) },
+        )
     }
     CompositionLocalProvider(
         LocalTextSelectionColors provides selectionColors,
@@ -196,6 +203,7 @@ fun ViewerTextSelectionLayer(
 private class ViewerSelectionToolbar(
     private val delegate: TextToolbar,
     private val onShownChange: (Boolean) -> Unit,
+    private val onCopied: () -> Unit,
 ) : TextToolbar {
 
     override val status: TextToolbarStatus get() = delegate.status
@@ -207,9 +215,13 @@ private class ViewerSelectionToolbar(
         onCutRequested: (() -> Unit)?,
         onSelectAllRequested: (() -> Unit)?,
     ) {
+        // The platform writes the picked text to the clipboard when Copy is tapped; re-flag it as
+        // sensitive right after, so an ID or password lifted off a photo gets the same clipboard
+        // display guard a share link does.
+        val copyThenGuard = onCopyRequested?.let { orig -> { orig(); onCopied() } }
         delegate.showMenu(
             rect,
-            onCopyRequested,
+            copyThenGuard,
             onPasteRequested,
             onCutRequested,
             onSelectAllRequested,

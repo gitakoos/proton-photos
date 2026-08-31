@@ -34,24 +34,15 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Panorama
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.automirrored.filled.VolumeOff
-import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.mutableLongStateOf
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
@@ -65,9 +56,7 @@ import androidx.compose.foundation.gestures.rememberTransformableState
 import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -84,17 +73,13 @@ import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.union
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.DriveFileMove
 import androidx.compose.material.icons.filled.BrokenImage
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Edit
@@ -105,7 +90,6 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MotionPhotosOn
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
@@ -127,9 +111,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.res.stringResource
 import eu.akoos.photos.R
-import eu.akoos.photos.presentation.common.ConfirmDialog
 import eu.akoos.photos.presentation.common.anyMetadataEditable
 import eu.akoos.photos.presentation.gallery.MetadataStripPickerDialog
+import eu.akoos.photos.presentation.gallery.MoveToFolderHost
 import eu.akoos.photos.presentation.common.SecureScreenEffect
 import eu.akoos.photos.presentation.common.UndoAction
 import androidx.compose.ui.Alignment
@@ -149,7 +133,6 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import coil.compose.AsyncImagePainter
 import coil.request.ImageRequest
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import androidx.compose.material.icons.filled.Favorite
@@ -174,26 +157,15 @@ import eu.akoos.photos.domain.usecase.DeletePhotoUseCase
 import eu.akoos.photos.presentation.gallery.LocalThumbnailUrls
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.Bg0
-import eu.akoos.photos.presentation.theme.Bg2
-import eu.akoos.photos.presentation.theme.CardBg
-import eu.akoos.photos.presentation.theme.CardBorder
-import eu.akoos.photos.presentation.theme.DeleteTint
+import eu.akoos.photos.presentation.theme.SheetBg
 import eu.akoos.photos.presentation.theme.ErrorColor
 import eu.akoos.photos.presentation.theme.FgDim
 import eu.akoos.photos.presentation.theme.FgMute
 import eu.akoos.photos.presentation.theme.FgPrimary
-import eu.akoos.photos.presentation.theme.Line2
-import eu.akoos.photos.presentation.theme.PanelChip
 import eu.akoos.photos.presentation.theme.PillBg
 import eu.akoos.photos.presentation.theme.PillBorder
 import eu.akoos.photos.presentation.util.findActivity
-import eu.akoos.photos.presentation.util.formatVideoTime
-import eu.akoos.photos.util.MetadataStripConfig
-import eu.akoos.photos.util.PhotoMetadata
 import eu.akoos.photos.util.copySensitiveText
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 internal val bubbleShape = CircleShape
 internal val infoPillShape = RoundedCornerShape(999.dp)
@@ -464,6 +436,8 @@ fun PhotoViewerScreen(
     val isHidden by viewModel.isHidden.collectAsStateWithLifecycle()
     val isFavorite by viewModel.isFavorite.collectAsStateWithLifecycle()
     val isOffline by viewModel.isOffline.collectAsStateWithLifecycle()
+    // Null userId is the local-only session; ANDed into the cloud-only viewer actions below.
+    val isSignedIn by viewModel.isSignedIn.collectAsStateWithLifecycle()
     val isMotionPhoto by viewModel.isMotionPhoto.collectAsStateWithLifecycle()
     val motionVideoFile by viewModel.motionVideoFile.collectAsStateWithLifecycle()
     val isExtractingMotion by viewModel.isExtractingMotion.collectAsStateWithLifecycle()
@@ -1002,6 +976,8 @@ fun PhotoViewerScreen(
     // the pager happens to sit by then.
     var pendingRemoval by remember { mutableStateOf<String?>(null) }
     var showAddToAlbumSheet by remember { mutableStateOf(false) }
+    // Logged-out "Move to folder" for the single on-device photo the viewer is showing.
+    var showMoveSheet by remember { mutableStateOf(false) }
     val addToAlbumSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     // Set when "New album" is tapped in the add-to-album sheet: holds the photo to drop into the
     // album the create dialog makes.
@@ -1750,7 +1726,7 @@ fun PhotoViewerScreen(
                     // and our path doesn't bridge across the recipient/owner volume
                     // boundary. A vaulted photo is left out too: a Drive album add uploads the
                     // device-only file first, which is the one thing the vault exists to prevent.
-                    if (settledItem != null && !isReadOnlyAlbum && outbound.addToAlbum) {
+                    if (settledItem != null && !isReadOnlyAlbum && outbound.addToAlbum && isSignedIn) {
                         ViewerBubble(onClick = { showAddToAlbumSheet = true }) {
                             if (isAddingToAlbum) {
                                 CircularProgressIndicator(color = Accent, strokeWidth = 2.dp,
@@ -1759,6 +1735,20 @@ fun PhotoViewerScreen(
                                 Icon(Icons.Default.LibraryAdd, stringResource(R.string.gallery_add_to_album),
                                     tint = FgDim, modifier = Modifier.size(18.dp))
                             }
+                        }
+                    }
+
+                    // Move to folder, the logged-out counterpart of Add to album: with no account
+                    // there is no Drive album to add to, so a device photo is relocated into another
+                    // DCIM folder instead. Q+ only (the relocation uses MediaStore), and only for an
+                    // item with a device file (LocalOnly / Synced); a cloud-only photo has none.
+                    val isOnDeviceItem = settledItem is GalleryItem.LocalOnly ||
+                        settledItem is GalleryItem.Synced
+                    if (!isSignedIn && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && isOnDeviceItem) {
+                        ViewerBubble(onClick = { showMoveSheet = true }) {
+                            Icon(Icons.AutoMirrored.Filled.DriveFileMove,
+                                stringResource(R.string.move_to_folder),
+                                tint = FgDim, modifier = Modifier.size(18.dp))
                         }
                     }
 
@@ -1838,7 +1828,7 @@ fun PhotoViewerScreen(
                             // People in this photo: detect the faces on this photo (if not already) and
                             // pin their name tags, or take them down. The reliable path when a long
                             // press is awkward, and the only one on a photo not yet scanned.
-                            if (aiFeaturesEnabled && faceEnabled) {
+                            if (aiFeaturesEnabled && faceEnabled && isSignedIn) {
                                 androidx.compose.material3.DropdownMenuItem(
                                     text = { Text(stringResource(R.string.viewer_people_in_photo),
                                         color = FgPrimary) },
@@ -1875,9 +1865,9 @@ fun PhotoViewerScreen(
                                 },
                             )
                             // Edit the capture date and place. Offered when the item is editable (a
-                            // device photo, or a cloud or backed-up image the corrected-copy replace can
-                            // rewrite) outside a shared-with-me album; a cloud or synced video, which the
-                            // editor cannot change, is left out, matching the multi-select gate.
+                            // device photo, a cloud or backed-up image the corrected-copy replace can
+                            // rewrite, or a cloud / synced video whose capture date it can change) outside
+                            // a shared-with-me album, matching the multi-select gate.
                             val editItem = settledItem
                             if (editItem != null && !isReadOnlyAlbum &&
                                 anyMetadataEditable(listOf(editItem))
@@ -1965,7 +1955,7 @@ fun PhotoViewerScreen(
                             // LocalOnly qualifies; Synced / CloudOnly are already on Drive.
                             // A vaulted photo never does: uploading it undoes the hide. Same
                             // wording the selection drawers give the same action.
-                            if (settledItem is GalleryItem.LocalOnly && outbound.backUpToDrive) {
+                            if (settledItem is GalleryItem.LocalOnly && outbound.backUpToDrive && isSignedIn) {
                                 androidx.compose.material3.DropdownMenuItem(
                                     text = { Text(stringResource(R.string.sel_label_back_up),
                                         color = FgPrimary) },
@@ -2342,7 +2332,7 @@ fun PhotoViewerScreen(
         ModalBottomSheet(
             onDismissRequest = { showMetadata = false },
             sheetState = metadataSheetState,
-            containerColor = Bg2,
+            containerColor = SheetBg,
             scrimColor = Color.Black.copy(alpha = 0.5f),
         ) {
             PhotoMetadataSheet(
@@ -2376,8 +2366,8 @@ fun PhotoViewerScreen(
                     }
                 },
                 // Edit date + place. Null on a shared-with-me album, and null for an item the editor
-                // cannot change (a cloud or synced video), so the row hides exactly where the
-                // multi-select entry would also be absent.
+                // cannot change, so the row shows exactly where the multi-select entry does (a cloud or
+                // synced video included, whose capture date it can change).
                 onEditMetadata = if (isReadOnlyAlbum || item == null ||
                     !anyMetadataEditable(listOf(item))
                 ) null else {
@@ -2477,6 +2467,36 @@ fun PhotoViewerScreen(
         )
     }
 
+    // ── Move to folder host (logged-out, single on-device photo) ──────────────────
+    // The picker, the new-folder name dialog, the write-consent launcher a foreign-file move needs
+    // and the completion snackbar, all device-only. Mounts only while logged out and the settled
+    // photo has a device file, so a signed-in viewer subscribes none of it and relocates that one
+    // photo's uri.
+    run {
+        val settledItem = items.getOrNull(pagerState.settledPage)
+        val currentUri = when (settledItem) {
+            is GalleryItem.LocalOnly -> settledItem.local.uri
+            is GalleryItem.Synced    -> settledItem.local.uri
+            else -> null
+        }
+        if (!isSignedIn && currentUri != null) {
+            val moveTargetFolders by viewModel.moveTargetFolders.collectAsStateWithLifecycle()
+            val pendingMoveIntent by viewModel.pendingMoveIntent.collectAsStateWithLifecycle()
+            MoveToFolderHost(
+                targetFolders = moveTargetFolders,
+                show = showMoveSheet,
+                pendingMoveIntent = pendingMoveIntent,
+                moveConfirmation = viewModel.moveConfirmation,
+                onPick = { name -> viewModel.moveToFolder(currentUri, name) },
+                onCreate = { name -> viewModel.createFolderWith(currentUri, name) },
+                onGranted = { viewModel.onMovePermissionGranted() },
+                onClear = { viewModel.clearPendingMove() },
+                onDismiss = { showMoveSheet = false },
+                snackbarHostState = snackbarHostState,
+            )
+        }
+    }
+
     // ── Share drawer ────────────────────────────────────────────────────────────
     if (showShareSheet) {
         val settledItem = items.getOrNull(pagerState.settledPage)
@@ -2494,8 +2514,8 @@ fun PhotoViewerScreen(
             // owner's call, and Drive refuses it from a guest. The album's own selection dock
             // draws the same line. A vaulted photo comes down to the same one row for a different
             // reason: both of the others upload it before they can share it at all.
-            showPublicLink = !isReadOnlyAlbum && outbound.publicLink,
-            showShareWithPeople = !isReadOnlyAlbum && outbound.shareWithPeople,
+            showPublicLink = !isReadOnlyAlbum && outbound.publicLink && isSignedIn,
+            showShareWithPeople = !isReadOnlyAlbum && outbound.shareWithPeople && isSignedIn,
             onDismiss = { showShareSheet = false },
             onSendToApp = {
                 showShareSheet = false
@@ -2551,7 +2571,7 @@ fun PhotoViewerScreen(
             ModalBottomSheet(
                 onDismissRequest = { showDeleteSheet = false },
                 sheetState = deleteSheetState,
-                containerColor = Bg2,
+                containerColor = SheetBg,
                 scrimColor = Color.Black.copy(alpha = 0.5f),
             ) {
                 DeleteConfirmSheet(

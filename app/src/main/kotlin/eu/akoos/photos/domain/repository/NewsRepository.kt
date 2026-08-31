@@ -52,6 +52,10 @@ interface NewsRepository {
     /** Just the unread count, for the settings-icon dot. Always 0 while news is switched off. */
     fun observeUnreadCount(): Flow<Int>
 
+    /** The ids unread right now (the feed minus the read set), captured for the News screen's per-item
+     *  "new" markers at open, before [markAllRead] clears them. Empty while news is switched off. */
+    suspend fun snapshotUnreadIds(): Set<String>
+
     /** Mark every entry currently in the feed as seen, which clears the dot until a new entry lands. */
     suspend fun markAllRead()
 

@@ -32,6 +32,7 @@ import eu.akoos.photos.domain.entity.QueueSource
 import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.SyncStateRepository
+import eu.akoos.photos.util.isTransientApiError
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
@@ -72,7 +73,10 @@ class WriteSyncedPhotoMetadataUseCase @Inject constructor(
         /** Neither the date nor the place was addressed, so nothing was uploaded or trashed. */
         data object NothingToDo : Result
 
-        data class Failed(val reason: String) : Result
+        /** [transient] marks a failure a retry could plausibly clear (network blip, 429/5xx) so the
+         *  caller can hold the edit for another attempt rather than discard it. False by default: a
+         *  failure not built from a classified network error stays permanent. */
+        data class Failed(val reason: String, val transient: Boolean = false) : Result
     }
 
     suspend operator fun invoke(
@@ -119,7 +123,10 @@ class WriteSyncedPhotoMetadataUseCase @Inject constructor(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                return@withContext Result.Failed("could not read album membership: ${e.message}")
+                return@withContext Result.Failed(
+                    "could not read album membership: ${e.message}",
+                    transient = isTransientApiError(e),
+                )
             }
             val albumIds = map[oldLinkId].orEmpty()
             val alreadyJoined = map[resumeUploadedLinkId].orEmpty()
@@ -127,6 +134,9 @@ class WriteSyncedPhotoMetadataUseCase @Inject constructor(
 
             onPhase?.invoke(CloudSavePhase.FINISHING)
             val failedAlbums = mutableListOf<String>()
+            // A single transient miss makes the whole re-add worth retrying, so OR the classification
+            // across every swallowed per-album failure.
+            var anyTransientAlbumMiss = false
             for (albumId in toAdd) {
                 val joined = try {
                     cloudRepo.addPhotosToAlbum(userId, albumId, listOf(resumeUploadedLinkId))
@@ -135,6 +145,7 @@ class WriteSyncedPhotoMetadataUseCase @Inject constructor(
                     throw e
                 } catch (e: Exception) {
                     Log.w(TAG, "album re-add failed for $albumId: ${e.message}")
+                    anyTransientAlbumMiss = anyTransientAlbumMiss || isTransientApiError(e)
                     false
                 }
                 if (!joined) failedAlbums.add(albumId)
@@ -142,6 +153,7 @@ class WriteSyncedPhotoMetadataUseCase @Inject constructor(
             if (failedAlbums.isNotEmpty()) {
                 return@withContext Result.Failed(
                     "re-add failed for ${failedAlbums.size} of ${albumIds.size} album(s); original kept",
+                    transient = anyTransientAlbumMiss,
                 )
             }
 
@@ -209,12 +221,18 @@ class WriteSyncedPhotoMetadataUseCase @Inject constructor(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            return@withContext Result.Failed("could not read album membership: ${e.message}")
+            return@withContext Result.Failed(
+                "could not read album membership: ${e.message}",
+                transient = isTransientApiError(e),
+            )
         }
 
         // 5. The xAttr for the corrected copy (read-only over the already-edited device file), and the
         //    upload item carrying it. Same displayName: this is a correction, not a copy.
         val xAttr = exifRewriter.xAttrFor(deviceUri, cloudPhoto.mimeType, effectiveCaptureMs, location)
+        // dims and duration come from the xAttr the rewriter read off the already-edited device file
+        // (real values for a video, 0 for an image); the video's own already-known cloud duration is the
+        // fallback when the container could not be probed.
         val item = LocalMediaItem(
             uri = deviceUri,
             dateTaken = effectiveCaptureMs,
@@ -224,7 +242,7 @@ class WriteSyncedPhotoMetadataUseCase @Inject constructor(
             bucketName = null,
             width = xAttr.displayWidth ?: 0,
             height = xAttr.displayHeight ?: 0,
-            duration = 0L,
+            duration = xAttr.durationMillis ?: cloudPhoto.durationMs ?: 0L,
         )
 
         // Steps 6-10 mutate the sync row and the cloud, so they run under one guard. Any cancellation
@@ -267,7 +285,7 @@ class WriteSyncedPhotoMetadataUseCase @Inject constructor(
             } catch (e: Exception) {
                 Log.w(TAG, "synced upload failed for $oldLinkId: ${e.message}")
                 restore()
-                return@withContext Result.Failed("upload failed: ${e.message}")
+                return@withContext Result.Failed("upload failed: ${e.message}", transient = isTransientApiError(e))
             }
             if (newLinkId.isBlank()) {
                 restore()
@@ -285,6 +303,9 @@ class WriteSyncedPhotoMetadataUseCase @Inject constructor(
             //    trash.
             onPhase?.invoke(CloudSavePhase.FINISHING)
             val failedAlbums = mutableListOf<String>()
+            // A single transient miss makes the whole re-add worth retrying, so OR the classification
+            // across every swallowed per-album failure.
+            var anyTransientAlbumMiss = false
             for (albumId in albumIds) {
                 val joined = try {
                     cloudRepo.addPhotosToAlbum(userId, albumId, listOf(newLinkId))
@@ -293,6 +314,7 @@ class WriteSyncedPhotoMetadataUseCase @Inject constructor(
                     throw e
                 } catch (e: Exception) {
                     Log.w(TAG, "album re-add failed for $albumId: ${e.message}")
+                    anyTransientAlbumMiss = anyTransientAlbumMiss || isTransientApiError(e)
                     false
                 }
                 if (!joined) failedAlbums.add(albumId)
@@ -301,6 +323,7 @@ class WriteSyncedPhotoMetadataUseCase @Inject constructor(
                 restore()
                 return@withContext Result.Failed(
                     "re-add failed for ${failedAlbums.size} of ${albumIds.size} album(s); original kept",
+                    transient = anyTransientAlbumMiss,
                 )
             }
 
@@ -341,7 +364,7 @@ class WriteSyncedPhotoMetadataUseCase @Inject constructor(
             // own non-cancellation errors, and the trash swallows its own), reachable only before the
             // re-pair, so the row is still on the original link; restore it and report the failure.
             restore()
-            return@withContext Result.Failed(e.message ?: "synced metadata write failed")
+            return@withContext Result.Failed(e.message ?: "synced metadata write failed", transient = isTransientApiError(e))
         }
     }
 

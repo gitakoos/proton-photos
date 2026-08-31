@@ -26,12 +26,16 @@ import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import eu.akoos.photos.util.MetadataStripConfig
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 
 val Context.settingsDataStore: DataStore<Preferences> by preferencesDataStore(name = "settings")
 
@@ -134,6 +138,15 @@ object SettingsKeys {
      * base surfaces. Default false so existing installs keep the near-black dark theme.
      */
     val AMOLED_BLACK = booleanPreferencesKey("amoled_black")
+
+    /** true = the classic OpenStreetMap tile map; false (default) = the modern world map. */
+    val MAP_STYLE_OSM = booleanPreferencesKey("map_style_osm")
+
+    /** True once the one-time map-style chooser has been answered or dismissed, the first time a map
+     *  entry point is opened. Absent/false = the chooser still surfaces on the next map open, so the
+     *  choice between the modern world map and the classic tile map is offered at the moment it
+     *  matters instead of only living in Settings. */
+    val MAP_STYLE_PROMPTED = booleanPreferencesKey("map_style_prompted")
     val LAST_SYNC_MS = longPreferencesKey("last_sync_ms")
 
     /** Wall-clock millis of the last successful GitHub release check. Used to throttle
@@ -183,6 +196,9 @@ object SettingsKeys {
     val GRID_REMEMBER_LAST = booleanPreferencesKey("grid_remember_last")
     /** Last pinched timeline zoom level index; restored on launch when [GRID_REMEMBER_LAST] is on. */
     val GRID_LAST_LEVEL = intPreferencesKey("grid_last_level")
+    /** Albums tab: how many album/folder COVERS sit per row (default 2). Distinct from
+     *  [GRID_DEFAULT_COLUMNS], which is the PHOTO density inside an album / folder / hidden. */
+    val ALBUM_GRID_COLUMNS = intPreferencesKey("album_grid_columns")
 
     /** When on, tapping a different bottom tab keeps that page where it was last scrolled; only
      *  re-tapping the already-active tab returns it to the top. Off by default, so any tab tap
@@ -438,6 +454,16 @@ object SettingsKeys {
     val STRIP_TIMESTAMP = booleanPreferencesKey("strip_timestamp")
     val STRIP_SOFTWARE_INFO = booleanPreferencesKey("strip_software_info")
     val STRIP_ON_UPLOAD = booleanPreferencesKey("strip_on_upload")
+
+    // Metadata stripping — which fields to strip from the shared copy when sharing. A separate,
+    // independent config from the upload keys above so the two never influence each other; the
+    // per-field defaults mirror the upload equivalents (authorship follows software there).
+    val STRIP_ON_SHARE = booleanPreferencesKey("strip_on_share")
+    val STRIP_SHARE_GPS = booleanPreferencesKey("strip_share_gps")
+    val STRIP_SHARE_CAMERA_INFO = booleanPreferencesKey("strip_share_camera_info")
+    val STRIP_SHARE_TIMESTAMP = booleanPreferencesKey("strip_share_timestamp")
+    val STRIP_SHARE_SOFTWARE_INFO = booleanPreferencesKey("strip_share_software_info")
+    val STRIP_SHARE_AUTHORSHIP = booleanPreferencesKey("strip_share_authorship")
     /** When true, the upload pipeline re-encodes each photo to a lighter JPEG before sending it to
      *  Drive, trading some image quality for a smaller cloud footprint. The on-device original is
      *  never touched. Off by default. The [COMPRESS_UPLOAD_TIER] ordinal picks how aggressive the
@@ -524,6 +550,12 @@ object SettingsKeys {
      * out / sign back in by the same user does NOT replay the wizard.
      */
     val ONBOARDING_COMPLETE = booleanPreferencesKey("onboarding_complete")
+
+    /** True once the user chose to use the app without signing in to a Proton account (local-only
+     *  mode): the gallery shows the device's own photos and the sign-in step is skipped. Absent
+     *  reads as false, so a fresh install still starts on the normal sign-in flow. Persists per
+     *  install; signing in later clears it. */
+    val CONTINUE_WITHOUT_ACCOUNT = booleanPreferencesKey("continue_without_account")
 
     /**
      * Highest BuildConfig.VERSION_CODE for which the one-time "What's new" screen has
@@ -689,6 +721,23 @@ object SettingsKeys {
     val FACE_INDEXING_PAUSED = booleanPreferencesKey("face_indexing_paused")
 
     /**
+     * When true (the default), a substantial initial face-indexing backlog runs under a foreground
+     * service with a progress notification, so the walk keeps going after the app is swiped from
+     * Recents. When false the walk stays on the in-process coroutine with no notification. A handful
+     * of incremental photos never promotes either way; only the large first pass does.
+     */
+    val FACE_INDEX_BACKGROUND = booleanPreferencesKey("face_index_background")
+
+    /**
+     * Recognition-model generation the stored face embeddings were produced by, compared against
+     * [eu.akoos.photos.domain.usecase.FACE_MODEL_VERSION] as an indexing walk starts. When it differs
+     * or is absent, the indexer clears the face tables once and rebuilds every embedding with the
+     * current model, so two incompatible embedding widths are never compared. Written only after the
+     * wipe lands, so an interrupted wipe retries on the next walk.
+     */
+    val FACE_MODEL_VERSION_KEY = intPreferencesKey("face_model_version")
+
+    /**
      * DEBUG-only large-library simulator size. N synthetic photo_listing rows are generated
      * (0 = off / not simulating). Only read by the BuildConfig.DEBUG-gated simulator UI +
      * [eu.akoos.photos.data.repository.drive.LargeLibrarySimulator]; the production
@@ -714,4 +763,33 @@ suspend fun syncEffectivelyEnabled(context: Context): Boolean {
     val backupEverything = prefs[SettingsKeys.BACKUP_EVERYTHING] ?: false
     val folders = prefs[SettingsKeys.SYNC_FOLDER_NAMES]
     return autoSync && (backupEverything || !folders.isNullOrEmpty())
+}
+
+/**
+ * The metadata-strip config a share should apply to each shared copy, or null when the
+ * [SettingsKeys.STRIP_ON_SHARE] master is off — in which case the share goes out as the original,
+ * byte-for-byte. Independent of the upload-strip keys; the per-field defaults match the share
+ * settings screen (location on, the rest off). One reader for every share call-site so the
+ * pref-reading lives in a single place.
+ */
+suspend fun currentShareStripConfig(context: Context): MetadataStripConfig? {
+    val prefs = context.settingsDataStore.data.first()
+    if (prefs[SettingsKeys.STRIP_ON_SHARE] != true) return null
+    return MetadataStripConfig(
+        stripGps = prefs[SettingsKeys.STRIP_SHARE_GPS] ?: true,
+        stripCameraInfo = prefs[SettingsKeys.STRIP_SHARE_CAMERA_INFO] ?: false,
+        stripTimestamp = prefs[SettingsKeys.STRIP_SHARE_TIMESTAMP] ?: false,
+        stripSoftwareInfo = prefs[SettingsKeys.STRIP_SHARE_SOFTWARE_INFO] ?: false,
+        stripAuthorship = prefs[SettingsKeys.STRIP_SHARE_AUTHORSHIP] ?: false,
+    )
+}
+
+/** True when the user chose to use the app without a Proton account (local-only mode). Absent reads
+ *  as false, so a fresh install still starts on the normal sign-in flow. */
+val Context.continueWithoutAccount: Flow<Boolean>
+    get() = settingsDataStore.data.map { it[SettingsKeys.CONTINUE_WITHOUT_ACCOUNT] ?: false }
+
+/** Persists the local-only choice read by [continueWithoutAccount]. */
+suspend fun Context.setContinueWithoutAccount(value: Boolean) {
+    settingsDataStore.edit { it[SettingsKeys.CONTINUE_WITHOUT_ACCOUNT] = value }
 }

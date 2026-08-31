@@ -23,15 +23,16 @@
 package eu.akoos.photos.presentation.location
 
 import android.net.Uri
+import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -50,6 +51,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.DriveFileMove
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.LibraryAdd
@@ -76,6 +78,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -86,6 +89,7 @@ import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.presentation.common.ConfirmDialog
 import eu.akoos.photos.presentation.common.IconBubble
 import eu.akoos.photos.presentation.gallery.LocalThumbnailUrls
+import eu.akoos.photos.presentation.gallery.MoveToFolderHost
 import eu.akoos.photos.presentation.gallery.PhotoCell
 import eu.akoos.photos.presentation.gallery.photoCellInputsFor
 import eu.akoos.photos.presentation.viewer.PhotoShareSheet
@@ -98,35 +102,25 @@ import eu.akoos.photos.presentation.theme.PillBgOpaque
 import eu.akoos.photos.presentation.theme.PillBorder
 
 /**
- * Drawer content for the location detail, raised as a bottom sheet over the photo map when a pin is
- * tapped. Mirrors the device-folder / album detail layout: a hero header with the resolved
- * "City, Country" title + a photo count, a grid keyed by local uri (cloud-only by linkId) with
- * long-press drag multi-select, a selection bar carrying share / add-to-album / download, and a tap
- * opening the viewer on the same merged-library items the gallery uses. "Save as album" creates a
- * real Drive album named after the place and adds every photo here to it.
- *
- * Sits inside the host's `ModalBottomSheet` column rather than a full-screen Box: the content takes
- * a tall fixed height so the map peeks above, and the selection bar + action dock are re-parented
- * within the sheet bounds. A photo tap (non-selection mode) calls [onPhotoClick]; the host closes
- * the sheet first so the viewer rises over the map.
+ * The located-photos body behind the full-screen place page ([PlaceCityScreen]): the hero header,
+ * the photo grid with drag multi-select, the selection and action docks, and the save-as-album /
+ * share / add-to-album / move flows. [modifier] shapes the host, [contentTopPadding] clears a
+ * floating header, [headerOverlay] draws one on top, and [showDragHandle] adds a pull-down grip.
  */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
-fun LocationDetailSheet(
-    latitude: Double,
-    longitude: Double,
+fun LocationPhotosContent(
     onPhotoClick: (items: List<GalleryItem>, index: Int) -> Unit,
+    modifier: Modifier = Modifier,
+    backgroundColor: Color = Bg0,
+    contentTopPadding: Dp = 0.dp,
+    showDragHandle: Boolean = false,
+    headerOverlay: (@Composable BoxScope.() -> Unit)? = null,
     viewModel: LocationDetailViewModel = hiltViewModel(),
 ) {
-    // Clear any prior selection on load so a fresh pin opens unselected; keyed on the coords so
-    // re-entering a different pin reloads cleanly.
-    LaunchedEffect(latitude, longitude) {
-        viewModel.clearSelection()
-        viewModel.load(latitude, longitude)
-    }
-
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val albums by viewModel.albums.collectAsStateWithLifecycle()
+    val isSignedIn by viewModel.isSignedIn.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val gridState = rememberLazyGridState()
@@ -141,6 +135,11 @@ fun LocationDetailSheet(
     val addToAlbumSheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)
     // The picker's own "New album" row, which names an album and then adds the selection to it.
     var showCreateAlbumInline by remember { mutableStateOf(false) }
+    // Move the device selection into another folder, logged-out, device-data only. The shared host
+    // owns the picker + its own write-consent launcher; the selection is snapshotted in the VM.
+    var showMoveSheet by remember { mutableStateOf(false) }
+    val moveTargetFolders by viewModel.moveTargetFolders.collectAsStateWithLifecycle()
+    val pendingMoveIntent by viewModel.pendingMoveIntent.collectAsStateWithLifecycle()
     var showPhotoShareSheet by remember { mutableStateOf(false) }
     val photoShareSheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
@@ -224,13 +223,10 @@ fun LocationDetailSheet(
         }
     }
 
-    // Tall-but-not-full drawer surface: the map peeks above the sheet. The grid fills + scrolls
-    // inside; the selection bar and action dock sit within these bounds.
+    // The host modifier shapes the surface (a tall sheet band or a full-screen page); the grid fills
+    // and scrolls inside, with the selection bar and action dock within these bounds.
     Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .fillMaxHeight(0.9f)
-            .background(Bg0),
+        modifier = modifier.background(backgroundColor),
     ) {
         val cols = eu.akoos.photos.presentation.gallery.rememberDefaultGridColumns()
         val seamless = eu.akoos.photos.presentation.gallery.rememberSeamlessGrid()
@@ -266,6 +262,7 @@ fun LocationDetailSheet(
             contentPadding = PaddingValues(
                 start = if (seamless) 0.dp else 20.dp,
                 end = if (seamless) 0.dp else 20.dp,
+                top = contentTopPadding,
                 bottom = 24.dp,
             ),
             horizontalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 6.dp),
@@ -280,6 +277,10 @@ fun LocationDetailSheet(
                     coverModel = coverModel,
                     title = state.placeName,
                     photoCountText = countLabel,
+                    coverParallax = {
+                        if (gridState.firstVisibleItemIndex == 0)
+                            gridState.firstVisibleItemScrollOffset.toFloat() else 0f
+                    },
                     titleActions = if (state.items.isNotEmpty()) {
                         {
                             // Create a Drive album from this place — a progress ring while the
@@ -380,10 +381,10 @@ fun LocationDetailSheet(
             }
         }
 
-        // The sheet's default drag handle sat on a separate surface band that clashed with the cover
-        // (worst in dark mode). Instead the cover runs to the very top; a slim handle floats over a
-        // faint top scrim so it reads as pull-down-to-dismiss without a colour break.
-        if (!state.isSelectionMode) {
+        // The sheet's pull-down grip: the cover runs to the very top and a slim handle floats over a
+        // faint top scrim so it reads as pull-down-to-dismiss without a colour break. Only the sheet
+        // host shows it; the full-screen page relies on its header's back button instead.
+        if (showDragHandle && !state.isSelectionMode) {
             Box(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
@@ -501,20 +502,41 @@ fun LocationDetailSheet(
                 horizontalArrangement = Arrangement.spacedBy(2.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                // Add selected to a cloud album — opens the gallery's picker sheet.
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(999.dp))
-                        .clickable { showAddToAlbumSheet = true }
-                        .padding(horizontal = 14.dp, vertical = 10.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        Icons.Default.PhotoAlbum,
-                        contentDescription = stringResource(R.string.gallery_add_to_album),
-                        tint = Accent,
-                        modifier = Modifier.size(20.dp),
-                    )
+                // Add selected to a cloud album via the gallery's picker sheet. Needs a Drive
+                // destination, so it stays behind a signed-in session.
+                if (isSignedIn) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(999.dp))
+                            .clickable { showAddToAlbumSheet = true }
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            Icons.Default.PhotoAlbum,
+                            contentDescription = stringResource(R.string.gallery_add_to_album),
+                            tint = Accent,
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
+                }
+                // Move the device selection into another folder, the logged-out counterpart to
+                // add-to-album, on the Android 10+ MediaStore floor.
+                if (!isSignedIn && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(999.dp))
+                            .clickable { showMoveSheet = true }
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.DriveFileMove,
+                            contentDescription = stringResource(R.string.move_to_folder),
+                            tint = Accent,
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
                 }
                 // Download selected to the device, mirroring the gallery's multi-download.
                 Box(
@@ -559,7 +581,7 @@ fun LocationDetailSheet(
                 onClick = { scope.launch { gridState.animateScrollToItem(0) } },
                 diameter = 44.dp,
                 iconSize = 24.dp,
-                background = PillBgOpaque,
+                background = PillBg,
                 borderColor = PillBorder,
                 tint = FgPrimary,
             )
@@ -587,6 +609,10 @@ fun LocationDetailSheet(
             snackbarHostState,
             modifier = Modifier.align(Alignment.BottomCenter),
         )
+
+        // A full-screen host draws its floating pill header last so it sits above the grid; the sheet
+        // passes none and shows the pull-down grip instead.
+        headerOverlay?.invoke(this)
     }
 
     // Unified share drawer for the selection — Send to app only, since a located set has no album
@@ -669,4 +695,20 @@ fun LocationDetailSheet(
             onDismiss = { showSaveAsAlbumConfirm = false },
         )
     }
+
+    // Move-to-folder host: the picker, the new-folder name dialog, its own write-consent launcher and
+    // the completion snackbar, all logged-out and device-only. The selection is snapshotted in the
+    // ViewModel, so the host carries only the picked name.
+    MoveToFolderHost(
+        targetFolders = moveTargetFolders,
+        show = showMoveSheet,
+        pendingMoveIntent = pendingMoveIntent,
+        moveConfirmation = viewModel.moveConfirmation,
+        onPick = { viewModel.moveSelectedToFolder(it) },
+        onCreate = { viewModel.createFolderWithPhotos(it) },
+        onGranted = { viewModel.onMovePermissionGranted() },
+        onClear = { viewModel.clearPendingMove() },
+        onDismiss = { showMoveSheet = false },
+        snackbarHostState = snackbarHostState,
+    )
 }

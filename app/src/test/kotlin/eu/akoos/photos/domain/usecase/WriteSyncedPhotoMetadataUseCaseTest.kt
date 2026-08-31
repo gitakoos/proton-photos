@@ -98,6 +98,19 @@ class WriteSyncedPhotoMetadataUseCaseTest {
         revisionId = "rev-$linkId",
     )
 
+    private fun videoCloudPhoto(linkId: String, durationMs: Long? = null) = CloudPhoto(
+        linkId = linkId,
+        shareId = "share",
+        volumeId = "vol1",
+        captureTime = originalCaptureSec,
+        displayName = "VID_1234.mp4",
+        mimeType = "video/mp4",
+        sizeBytes = 8192L,
+        thumbnailUrl = null,
+        revisionId = "rev-$linkId",
+        durationMs = durationMs,
+    )
+
     private fun syncedRow(uri: String, cloudId: String, localHash: String) = SyncState(
         localUri = uri,
         cloudFileId = cloudId,
@@ -235,6 +248,47 @@ class WriteSyncedPhotoMetadataUseCaseTest {
         assertEquals(SyncStatus.SYNCED, row.status)
         assertEquals("orig", row.cloudFileId)
         assertFalse(row.queued)
+    }
+
+    @Test
+    fun `a transient album re-add failure is flagged transient`() = runTest {
+        val original = cloudPhoto("orig")
+        cloud.add(original)
+        cloud.albumIdsByPhoto = mapOf("orig" to setOf("albumA"))
+        val deviceUri = "content://media/60"
+        registerContent(deviceUri, "t".toByteArray())
+        sync.seed(syncedRow(deviceUri, "orig", localHash = "old-hash"))
+        // A network-level album-add blip: the swallowed per-album miss must carry the transient signal
+        // out through the re-add's aggregate Failed (the audit's exact "album blip" case).
+        cloud.addPhotosErrorOnce = java.io.IOException("album add reset")
+
+        val result = useCase(original, deviceUri, newCaptureMs = newCaptureMs, location = LocationEdit.Unchanged)
+
+        assertTrue("must report failure", result is WriteSyncedPhotoMetadataUseCase.Result.Failed)
+        assertTrue(
+            "a transient album blip must be flagged transient",
+            (result as WriteSyncedPhotoMetadataUseCase.Result.Failed).transient,
+        )
+    }
+
+    @Test
+    fun `a permanent album re-add failure is not flagged transient`() = runTest {
+        val original = cloudPhoto("orig")
+        cloud.add(original)
+        cloud.albumIdsByPhoto = mapOf("orig" to setOf("albumA"))
+        val deviceUri = "content://media/61"
+        registerContent(deviceUri, "n".toByteArray())
+        sync.seed(syncedRow(deviceUri, "orig", localHash = "old-hash"))
+        // failAddPhotosOnce throws an IllegalStateException: no network signal, so it stays permanent.
+        cloud.failAddPhotosOnce = true
+
+        val result = useCase(original, deviceUri, newCaptureMs = newCaptureMs, location = LocationEdit.Unchanged)
+
+        assertTrue("must report failure", result is WriteSyncedPhotoMetadataUseCase.Result.Failed)
+        assertFalse(
+            "a non-network album failure stays permanent",
+            (result as WriteSyncedPhotoMetadataUseCase.Result.Failed).transient,
+        )
     }
 
     @Test
@@ -412,6 +466,48 @@ class WriteSyncedPhotoMetadataUseCaseTest {
         assertFalse("the editor queue intent must be cleared once paired", row.queued)
     }
 
+    @Test
+    fun `a synced video date correction carries the real duration and dimensions and trashes the original`() = runTest {
+        val original = videoCloudPhoto("orig")
+        cloud.add(original)
+        cloud.albumIdsByPhoto = mapOf("orig" to setOf("albumA"))
+        val deviceUri = "content://media/video/70"
+        registerContent(deviceUri, "edited-video-bytes".toByteArray())
+        sync.seed(syncedRow(deviceUri, "orig", localHash = "old-hash"))
+        // The rewriter reports the device video's real stream dims + duration (its xAttr video branch),
+        // which the use case must thread onto the upload item so the replaced copy is a real video.
+        val videoRewriter = FakeExifRewriter(
+            UploadXAttrMetadata(displayWidth = 1920, displayHeight = 1080, durationMillis = 5_000L),
+        )
+        val videoUseCase = WriteSyncedPhotoMetadataUseCase(context, cloud, accountManager, sync, videoRewriter)
+
+        val result = videoUseCase(original, deviceUri, newCaptureMs = newCaptureMs, location = LocationEdit.Unchanged)
+
+        assertEquals(WriteSyncedPhotoMetadataUseCase.Result.Success, result)
+        // The rewriter is asked only for the xAttr over the already-edited device file (video mime).
+        val call = videoRewriter.calls.single()
+        assertEquals("video/mp4", call.mimeType)
+        assertEquals(deviceUri, call.uri)
+        // The uploaded item is the device file, carrying the corrected date and the real duration + dims.
+        val item = cloud.uploadedItems.single()
+        assertEquals(deviceUri, item.uri)
+        assertEquals(newCaptureMs, item.dateTaken)
+        assertEquals(5_000L, item.duration)
+        assertEquals(1920, item.width)
+        assertEquals(1080, item.height)
+        // Trash safety is unchanged for a video: album re-added, upload precedes trash, original gone, and
+        // the row re-paired to the new link.
+        assertEquals(listOf(cloud.uploadedLinkIds.single()), cloud.albumMembers("albumA"))
+        assertTrue(
+            "upload must precede trash",
+            cloud.callLog.indexOf("UPLOAD") < cloud.callLog.indexOf("DELETE"),
+        )
+        assertTrue("original must be trashed", cloud.photos.value.none { it.linkId == "orig" })
+        val row = sync.getByUri(deviceUri)!!
+        assertEquals(SyncStatus.SYNCED, row.status)
+        assertEquals(cloud.uploadedLinkIds.single(), row.cloudFileId)
+    }
+
     /** Records the arguments each xAttr build receives and returns a canned xAttr, so the orchestration
      *  is exercised without a real Android EXIF read. */
     private class FakeExifRewriter(
@@ -482,6 +578,8 @@ class WriteSyncedPhotoMetadataUseCaseTest {
         override fun countPendingUploads(userId: UserId): Flow<Int> =
             MutableStateFlow(0).asStateFlow()
         override suspend fun upsertAll(states: List<SyncState>, userId: UserId) {}
+        override suspend fun updateDomainColumnsIfNotSyncedWithCloud(state: SyncState, userId: UserId): Int = 0
+        override suspend fun demoteToLocalIfCloudIdMatches(localUri: String, expectedCloudId: String): Int = 0
         override suspend fun updateStatusAndDeleteLocal(localUri: String, newStatus: SyncStatus) {}
         override suspend fun getByCloudId(cloudFileId: String): SyncState? = null
         override suspend fun cloudPairedLinkIds(userId: UserId, localUris: List<String>): Map<String, String> = emptyMap()

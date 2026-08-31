@@ -51,8 +51,9 @@ object FilenameDate {
     private val SEPARATED = Regex(
         """(?<!\d)(\d{4})[-._](\d{1,2})[-._](\d{1,2})(?:[ _tT-](\d{1,2})[-._:](\d{1,2})(?:[-._:](\d{1,2}))?)?(?!\d)""",
     )
-    /** `yyyyMMdd` immediately followed (optional single separator) by `HHmmss`. */
-    private val COMPACT_DATETIME = Regex("""(?<!\d)(\d{4})(\d{2})(\d{2})[ _tT.-]?(\d{2})(\d{2})(\d{2})(?!\d)""")
+    /** `yyyyMMdd` immediately followed (optional single separator) by `HHmmss`, tolerating an optional
+     *  sub-second suffix (e.g. `...539`) so a millisecond tail does not block the match. */
+    private val COMPACT_DATETIME = Regex("""(?<!\d)(\d{4})(\d{2})(\d{2})[ _tT.-]?(\d{2})(\d{2})(\d{2})(?:[.,]?\d{1,3})?(?!\d)""")
     /** A bare `yyyyMMdd` run bounded by non-digits. */
     private val COMPACT_DATE = Regex("""(?<!\d)(\d{4})(\d{2})(\d{2})(?!\d)""")
 
@@ -65,12 +66,16 @@ object FilenameDate {
         val stem = name.substringBeforeLast('.', name).trim()
         if (stem.isEmpty()) return null
 
-        // Separated first, so a `2023-01-15` form is never half-eaten by the compact patterns.
+        // Separated first, so a `2023-01-15` form is never half-eaten by the compact patterns. A run
+        // whose time is out of range (a counter, not a clock, such as SquareQuick's `..594755`) still
+        // yields its date, so the fallback re-reads the same valid `yyyyMMdd` at noon.
         SEPARATED.find(stem)?.groupValues?.let { g ->
-            toEpoch(g[1], g[2], g[3], g[4], g[5], g[6], zone, nowMs)?.let { return it }
+            (toEpoch(g[1], g[2], g[3], g[4], g[5], g[6], zone, nowMs)
+                ?: toEpoch(g[1], g[2], g[3], "", "", "", zone, nowMs))?.let { return it }
         }
         COMPACT_DATETIME.find(stem)?.groupValues?.let { g ->
-            toEpoch(g[1], g[2], g[3], g[4], g[5], g[6], zone, nowMs)?.let { return it }
+            (toEpoch(g[1], g[2], g[3], g[4], g[5], g[6], zone, nowMs)
+                ?: toEpoch(g[1], g[2], g[3], "", "", "", zone, nowMs))?.let { return it }
         }
         COMPACT_DATE.find(stem)?.groupValues?.let { g ->
             toEpoch(g[1], g[2], g[3], "", "", "", zone, nowMs)?.let { return it }

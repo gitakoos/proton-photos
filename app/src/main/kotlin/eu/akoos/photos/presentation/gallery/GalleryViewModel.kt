@@ -35,6 +35,7 @@ import eu.akoos.photos.presentation.common.buildHideUndoAction
 import eu.akoos.photos.presentation.common.message
 import eu.akoos.photos.presentation.common.stripOutcome
 import android.content.Context
+import android.content.IntentSender
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
@@ -55,9 +56,11 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.retryWhen
@@ -67,6 +70,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import androidx.datastore.preferences.core.edit
 import me.proton.core.accountmanager.domain.AccountManager
@@ -100,6 +104,8 @@ import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
 import eu.akoos.photos.domain.usecase.InvalidateStrippedLocationsUseCase
 import eu.akoos.photos.domain.usecase.MIN_FACES_TO_SHOW_PERSON
+import eu.akoos.photos.domain.usecase.MoveToFolderUseCase
+import eu.akoos.photos.domain.usecase.PendingMove
 import eu.akoos.photos.domain.usecase.ReconcileSyncStateUseCase
 import eu.akoos.photos.domain.usecase.UploadPendingUseCase
 import eu.akoos.photos.domain.usecase.ForceUploadLocalUrisUseCase
@@ -198,6 +204,7 @@ class GalleryViewModel @Inject constructor(
     private val faceDao: eu.akoos.photos.data.db.dao.FaceDao,
     private val observePeopleUseCase: eu.akoos.photos.domain.usecase.ObservePeopleUseCase,
     private val addPhotosToPersonUseCase: eu.akoos.photos.domain.usecase.AddPhotosToPersonUseCase,
+    private val moveToFolder: MoveToFolderUseCase,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(GalleryUiState())
@@ -222,6 +229,39 @@ class GalleryViewModel @Inject constructor(
      *  (the hearts do), so only a refused write emits here. */
     private val _favoriteFailure = MutableSharedFlow<String>(replay = 0, extraBufferCapacity = 1)
     val favoriteFailure: SharedFlow<String> = _favoriteFailure.asSharedFlow()
+
+    /** Existing device folders the "Move to folder" picker offers as targets, grouped from the local
+     *  photos already in the feed (device-only + synced), most-populated first, one row per bucket.
+     *  The whole chain runs off-Main so regrouping a large library never touches the collector's
+     *  thread, and it only recomputes when the item set genuinely changes (same-reference emissions
+     *  short-circuit), so keeping it warm for the picker costs nothing between changes. */
+    val moveTargetFolders: StateFlow<List<DeviceFolderChoice>> =
+        uiState.map { it.items }
+            .distinctUntilChanged()
+            .map { items ->
+                deviceFolderChoices(
+                    items.mapNotNull { item ->
+                        when (item) {
+                            is GalleryItem.LocalOnly -> item.local
+                            is GalleryItem.Synced -> item.local
+                            is GalleryItem.CloudOnly -> null
+                        }
+                    },
+                )
+            }
+            .flowOn(Dispatchers.Default)
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** One-shot carrier for the system write-consent request a move needs when the selection holds a
+     *  file the app does not own. [GalleryScreen] launches it and calls [onMovePermissionGranted] on
+     *  approval; null the rest of the time. */
+    private val _pendingMoveIntent = MutableStateFlow<IntentSender?>(null)
+    val pendingMoveIntent: StateFlow<IntentSender?> = _pendingMoveIntent.asStateFlow()
+
+    /** One-shot confirmation for a completed move, carrying the destination folder name for the
+     *  snackbar. Mirrors [favoriteFailure]: replay=0 + single buffer so a paused screen never blocks. */
+    private val _moveConfirmation = MutableSharedFlow<String>(replay = 0, extraBufferCapacity = 1)
+    val moveConfirmation: SharedFlow<String> = _moveConfirmation.asSharedFlow()
 
     /** True when the device has a validated internet connection. Drives the avatar
      *  offline badge in [GalleryScreen] and gates every cloud-side refresh below. */
@@ -330,7 +370,10 @@ class GalleryViewModel @Inject constructor(
 
     private fun observePrimaryUserId() {
         viewModelScope.launch {
-            accountManager.getPrimaryUserId().collect { primaryUserId = it }
+            accountManager.getPrimaryUserId().collect { userId ->
+                primaryUserId = userId
+                _uiState.update { it.copy(isSignedIn = userId != null) }
+            }
         }
     }
 
@@ -672,190 +715,198 @@ class GalleryViewModel @Inject constructor(
 
     private fun observeGallery() {
         viewModelScope.launch {
-            val userId = accountManager.getPrimaryUserId().first() ?: return@launch
-
-            // Prime the thumbnail-URL store from the DB once, off the Main thread, so cells decrypted in
-            // a previous session paint immediately (the timeline projection no longer carries the URL).
-            // Detached so it never delays the item stream below; the DAO read is off-Main already.
-            launch(Dispatchers.Default) {
-                runCatching { reconcileThumbnailCacheThenSeed(userId) }
+            // Re-subscribe when the primary account changes rather than capturing the first value: a
+            // signed-in user emits one stable id (the pipeline below is unchanged), but a no-account
+            // session starts null and a later sign-in swaps the feed in place. collectLatest cancels the
+            // previous run and rebuilds against the new id.
+            accountManager.getPrimaryUserId().distinctUntilChanged().collectLatest { userId ->
+                observeGalleryForUser(userId)
             }
-
-            val hiddenUrisFlow = context.settingsDataStore.data.map {
-                it[SettingsKeys.HIDDEN_PHOTO_URIS] ?: emptySet()
-            }.catch {
-                // A DataStore read hiccup degrades to "nothing hidden" rather than
-                // throwing into combine and killing the whole timeline.
-                android.util.Log.w("GalleryVM", "hiddenUris source failed: ${it.message}")
-                emit(emptySet())
-            }
-
-            // SyncStateRepo rows with HIDDEN status carry the cloud linkId of a photo whose
-            // local twin lives in the Hidden vault. The gallery shows those cloud photos but
-            // marks them with a crossed-out eye overlay so the user can see which cloud
-            // entries are "hidden on this device" without opening the Hidden screen.
-            val hiddenCloudLinkIdsFlow = syncStateRepo.observeAll(userId).map { states ->
-                states.asSequence()
-                    .filter { it.status == SyncStatus.HIDDEN && it.cloudFileId != null }
-                    .map { it.cloudFileId!! }
-                    .toSet()
-            }.catch {
-                // A transient DAO read during a write burst degrades to "no overlays"
-                // instead of throwing into combine.
-                android.util.Log.w("GalleryVM", "hiddenCloudLinkIds source failed: ${it.message}")
-                emit(emptySet())
-            }
-
-            val hideInAlbumsFlow = context.settingsDataStore.data.map {
-                it[SettingsKeys.HIDE_PHOTOS_IN_ALBUMS] == true
-            }
-            // Cloud album linkIds the user hid individually (per-album timeline toggle), separate
-            // from the master "hide all album photos" switch above.
-            val excludedAlbumIdsFlow = context.settingsDataStore.data.map {
-                it[SettingsKeys.TIMELINE_EXCLUDED_ALBUM_IDS] ?: emptySet()
-            }
-            // Cloud linkIds to drop from the timeline: the master toggle hides every photo in any
-            // album; otherwise only photos in the individually-hidden albums. Master OFF + no
-            // per-album hides short-circuits to emptySet() so non-users pay zero query cost.
-            val cloudAlbumHideSetFlow = combine(hideInAlbumsFlow, excludedAlbumIdsFlow) { hideAll, excludedIds ->
-                hideAll to excludedIds
-            }.flatMapLatest { (hideAll, excludedIds) ->
-                when {
-                    hideAll -> albumPhotoMembershipDao.observeAllAssociatedPhotoLinkIds().map { it.toSet() }
-                    excludedIds.isNotEmpty() ->
-                        albumPhotoMembershipDao.observeAssociatedPhotoLinkIdsForAlbums(excludedIds).map { it.toSet() }
-                    else -> flowOf(emptySet())
-                }
-            }.catch {
-                // The membership cross-table is written in bursts when the Albums tab
-                // prefetches; a read landing mid-burst degrades to "hide nothing" rather
-                // than throwing into combine and tearing the timeline down.
-                android.util.Log.w("GalleryVM", "albumHideSet source failed: ${it.message}")
-                emit(emptySet())
-            }
-
-            // Bucket display names the user chose to hide from the timeline. Display-only:
-            // matching items stay on the device and keep backing up — they're just dropped
-            // from every tab below. A DataStore read hiccup degrades to "exclude nothing".
-            val timelineExcludedBucketsFlow = context.settingsDataStore.data.map {
-                it[SettingsKeys.TIMELINE_EXCLUDED_FOLDER_NAMES] ?: emptySet()
-            }.distinctUntilChanged().catch {
-                android.util.Log.w("GalleryVM", "timelineExcludedBuckets source failed: ${it.message}")
-                emit(emptySet())
-            }
-
-            // Coalesce bursts of single-row DAO mutations (e.g. 50 thumbnail decrypts
-            // landing during a Gallery first-load) into one emit per ~300 ms. Without this,
-            // every decrypt completion re-emits the full items list, invalidates the
-            // LazyVerticalGrid, and recomposes every cell — scroll stutters until decrypts
-            // quiet down. `sample` (not `debounce`) is required: a debounce only emits after
-            // a quiet gap, so a continuous decrypt burst (a completion every ~100-200 ms)
-            // keeps resetting the timer and the grid never repaints until the burst ends or
-            // an unrelated recomposition forces it. `sample` emits the latest snapshot every
-            // 300 ms regardless, so freshly-decrypted thumbnails appear live throughout the
-            // burst. It sits on the items flow ALONE, not the combined result: the
-            // hidden-vault, hide-in-albums toggle and album-membership flows propagate
-            // immediately so flipping the toggle re-filters the grid in the very next pass.
-            val itemsFlow = getGalleryItems.invoke(userId).sample(300)
-
-            combine(
-                itemsFlow,
-                hiddenUrisFlow,
-                hiddenCloudLinkIdsFlow,
-                cloudAlbumHideSetFlow,
-                timelineExcludedBucketsFlow,
-            ) { items, hiddenUris, hiddenCloudLinkIds, cloudInAlbum, timelineExcludedBuckets ->
-                GallerySources(items, hiddenUris, hiddenCloudLinkIds, cloudInAlbum, timelineExcludedBuckets)
-            }
-                .distinctUntilChanged()
-                .retryWhen { cause, attempt ->
-                    // A throw in any combined source (e.g. itemsFlow's native crypto, or a
-                    // DAO read landing mid-write-burst) must NOT permanently empty the
-                    // timeline. `catch` would terminate the flow here, freezing the grid
-                    // until a new ViewModel is created; `retryWhen` re-subscribes the whole
-                    // pipeline so the stream keeps running and the grid refills on the next
-                    // emission. Surface the failure as an error frame without dropping the
-                    // current items, then back off (capped) so a persistently-failing source
-                    // can't spin the CPU in a tight re-subscribe loop.
-                    android.util.Log.w("GalleryVM", "gallery stream failed (attempt $attempt), retrying: ${cause.message}")
-                    _uiState.update { it.copy(isLoading = false, error = cause.message) }
-                    delay((500L * (attempt + 1)).coerceAtMost(5_000L))
-                    true
-                }
-                .collect { sources ->
-                    // Hidden-vault filter (always applied) — items whose local URI is in the
-                    // Hidden vault are dropped from the gallery; cloud counterparts stay in
-                    // the listing with a dim overlay (see hiddenCloudLinkIds usage in
-                    // CloudPhotoCell). Album-hide is NOT applied here — it's applied inside
-                    // [applyFilter] so non-All tabs (Favorites, Screenshots, Videos, …) can
-                    // bypass it. When the user explicitly picks a tab they expect to see
-                    // every item that matches, album membership notwithstanding.
-                    // The hidden/folder filter plus applyContentFilter + applyFilter (three passes
-                    // over the full library) run on Default, off the collector's Main thread; only
-                    // the finished lists reach the Main-thread state update. A thumbnail-decrypt
-                    // re-emission therefore can't stall the UI thread with filtering work.
-                    // contentFilter/selectedFilter/favoriteIds are snapshotted from the current
-                    // state — the dedicated filter-change handlers recompute filteredItems
-                    // themselves, so last-writer-wins here is unchanged from the inline version.
-                    val snapshot = _uiState.value
-                    val computed = withContext(Dispatchers.Default) {
-                        val items = sources.items.filter { item ->
-                            // Both the hidden-vault and the timeline-folder filters read off the
-                            // local twin; CloudOnly has neither a local URI nor a bucket so it's
-                            // never dropped by either. The folder filter is display-only — excluded
-                            // buckets still back up and stay browsable, they just don't show here.
-                            val local = when (item) {
-                                is GalleryItem.LocalOnly -> item.local
-                                is GalleryItem.Synced -> item.local
-                                is GalleryItem.CloudOnly -> null
-                            }
-                            val notHidden = local == null || local.uri !in sources.hiddenUris
-                            val bucket = local?.bucketName
-                            // Backed-up photos (Synced) show through the folder filter even from a hidden
-                            // folder; only not-yet-uploaded locals are hidden. Otherwise seeing one photo
-                            // you uploaded from a hidden folder would force un-hiding the whole folder.
-                            val notExcludedBucket = item is GalleryItem.Synced ||
-                                bucket == null || bucket !in sources.timelineExcludedBuckets
-                            notHidden && notExcludedBucket
-                        }
-                        val filtered = applyFilter(
-                            applyContentFilter(items, snapshot.contentFilter),
-                            snapshot.selectedFilter,
-                            snapshot.favoriteIds,
-                            sources.cloudInAlbum,
-                            snapshot.offlinePinIds,
-                        )
-                        // Month- and day-bucket the filtered list and compute "On this day" here, off
-                        // the Main thread, rather than inside Compose composition on every list
-                        // re-emission (which costs a ~680 ms hitch from a thumbnail-decrypt burst at
-                        // 8500+ photos). Day feeds the 3-column default zoom; month feeds the 4-col
-                        // level. The label format/locale, item field and encounter order are kept
-                        // identical to the grid's expected grouping, so the rendered timeline is
-                        // unchanged. groupBy yields a LinkedHashMap, preserving first-seen order.
-                        // "On this day" reads the unfiltered [items] to match the carousel's
-                        // filter-independent source (the grid binds allItems = state.items).
-                        val monthGroups = groupByMonth(filtered)
-                        val dayGroups = groupByDay(filtered)
-                        val onThisDay = computeOnThisDay(items)
-                        GalleryComputed(items, filtered, monthGroups, dayGroups, onThisDay)
-                    }
-                    // Feed the library size into the perf diagnostics buffer (count only, no content)
-                    // so a tester's copied diagnostics show the heap against the library it walked.
-                    eu.akoos.photos.util.PerfDiagnostics.libraryPhotoCount = computed.items.size
-                    _uiState.update { state ->
-                        state.copy(
-                            isLoading = false,
-                            items = computed.items,
-                            filteredItems = computed.filtered,
-                            monthGroups = computed.monthGroups,
-                            dayGroups = computed.dayGroups,
-                            onThisDayGroups = computed.onThisDay,
-                            hiddenCloudLinkIds = sources.hiddenCloudLinkIds,
-                            albumHideCloudIds = sources.cloudInAlbum,
-                        )
-                    }
-                }
         }
+    }
+
+    private suspend fun observeGalleryForUser(userId: me.proton.core.domain.entity.UserId?) = coroutineScope {
+        // Prime the thumbnail-URL store from the DB once, off the Main thread, so cells decrypted in
+        // a previous session paint immediately (the timeline projection no longer carries the URL).
+        // Detached so it never delays the item stream below; the DAO read is off-Main already.
+        if (userId != null) launch(Dispatchers.Default) {
+            runCatching { reconcileThumbnailCacheThenSeed(userId) }
+        }
+
+        val hiddenUrisFlow = context.settingsDataStore.data.map {
+            it[SettingsKeys.HIDDEN_PHOTO_URIS] ?: emptySet()
+        }.catch {
+            // A DataStore read hiccup degrades to "nothing hidden" rather than
+            // throwing into combine and killing the whole timeline.
+            android.util.Log.w("GalleryVM", "hiddenUris source failed: ${it.message}")
+            emit(emptySet())
+        }
+
+        // SyncStateRepo rows with HIDDEN status carry the cloud linkId of a photo whose
+        // local twin lives in the Hidden vault. The gallery shows those cloud photos but
+        // marks them with a crossed-out eye overlay so the user can see which cloud
+        // entries are "hidden on this device" without opening the Hidden screen.
+        val hiddenCloudLinkIdsFlow = if (userId != null) syncStateRepo.observeAll(userId).map { states ->
+            states.asSequence()
+                .filter { it.status == SyncStatus.HIDDEN && it.cloudFileId != null }
+                .map { it.cloudFileId!! }
+                .toSet()
+        }.catch {
+            // A transient DAO read during a write burst degrades to "no overlays"
+            // instead of throwing into combine.
+            android.util.Log.w("GalleryVM", "hiddenCloudLinkIds source failed: ${it.message}")
+            emit(emptySet())
+        } else flowOf(emptySet())
+
+        val hideInAlbumsFlow = context.settingsDataStore.data.map {
+            it[SettingsKeys.HIDE_PHOTOS_IN_ALBUMS] == true
+        }
+        // Cloud album linkIds the user hid individually (per-album timeline toggle), separate
+        // from the master "hide all album photos" switch above.
+        val excludedAlbumIdsFlow = context.settingsDataStore.data.map {
+            it[SettingsKeys.TIMELINE_EXCLUDED_ALBUM_IDS] ?: emptySet()
+        }
+        // Cloud linkIds to drop from the timeline: the master toggle hides every photo in any
+        // album; otherwise only photos in the individually-hidden albums. Master OFF + no
+        // per-album hides short-circuits to emptySet() so non-users pay zero query cost.
+        val cloudAlbumHideSetFlow = combine(hideInAlbumsFlow, excludedAlbumIdsFlow) { hideAll, excludedIds ->
+            hideAll to excludedIds
+        }.flatMapLatest { (hideAll, excludedIds) ->
+            when {
+                hideAll -> albumPhotoMembershipDao.observeAllAssociatedPhotoLinkIds().map { it.toSet() }
+                excludedIds.isNotEmpty() ->
+                    albumPhotoMembershipDao.observeAssociatedPhotoLinkIdsForAlbums(excludedIds).map { it.toSet() }
+                else -> flowOf(emptySet())
+            }
+        }.catch {
+            // The membership cross-table is written in bursts when the Albums tab
+            // prefetches; a read landing mid-burst degrades to "hide nothing" rather
+            // than throwing into combine and tearing the timeline down.
+            android.util.Log.w("GalleryVM", "albumHideSet source failed: ${it.message}")
+            emit(emptySet())
+        }
+
+        // Bucket display names the user chose to hide from the timeline. Display-only:
+        // matching items stay on the device and keep backing up — they're just dropped
+        // from every tab below. A DataStore read hiccup degrades to "exclude nothing".
+        val timelineExcludedBucketsFlow = context.settingsDataStore.data.map {
+            it[SettingsKeys.TIMELINE_EXCLUDED_FOLDER_NAMES] ?: emptySet()
+        }.distinctUntilChanged().catch {
+            android.util.Log.w("GalleryVM", "timelineExcludedBuckets source failed: ${it.message}")
+            emit(emptySet())
+        }
+
+        // Coalesce bursts of single-row DAO mutations (e.g. 50 thumbnail decrypts
+        // landing during a Gallery first-load) into one emit per ~300 ms. Without this,
+        // every decrypt completion re-emits the full items list, invalidates the
+        // LazyVerticalGrid, and recomposes every cell — scroll stutters until decrypts
+        // quiet down. `sample` (not `debounce`) is required: a debounce only emits after
+        // a quiet gap, so a continuous decrypt burst (a completion every ~100-200 ms)
+        // keeps resetting the timer and the grid never repaints until the burst ends or
+        // an unrelated recomposition forces it. `sample` emits the latest snapshot every
+        // 300 ms regardless, so freshly-decrypted thumbnails appear live throughout the
+        // burst. It sits on the items flow ALONE, not the combined result: the
+        // hidden-vault, hide-in-albums toggle and album-membership flows propagate
+        // immediately so flipping the toggle re-filters the grid in the very next pass.
+        val itemsFlow = if (userId != null) getGalleryItems.invoke(userId).sample(300) else getGalleryItems.invokeLocalOnly().sample(300)
+
+        combine(
+            itemsFlow,
+            hiddenUrisFlow,
+            hiddenCloudLinkIdsFlow,
+            cloudAlbumHideSetFlow,
+            timelineExcludedBucketsFlow,
+        ) { items, hiddenUris, hiddenCloudLinkIds, cloudInAlbum, timelineExcludedBuckets ->
+            GallerySources(items, hiddenUris, hiddenCloudLinkIds, cloudInAlbum, timelineExcludedBuckets)
+        }
+            .distinctUntilChanged()
+            .retryWhen { cause, attempt ->
+                // A throw in any combined source (e.g. itemsFlow's native crypto, or a
+                // DAO read landing mid-write-burst) must NOT permanently empty the
+                // timeline. `catch` would terminate the flow here, freezing the grid
+                // until a new ViewModel is created; `retryWhen` re-subscribes the whole
+                // pipeline so the stream keeps running and the grid refills on the next
+                // emission. Surface the failure as an error frame without dropping the
+                // current items, then back off (capped) so a persistently-failing source
+                // can't spin the CPU in a tight re-subscribe loop.
+                android.util.Log.w("GalleryVM", "gallery stream failed (attempt $attempt), retrying: ${cause.message}")
+                _uiState.update { it.copy(isLoading = false, error = cause.message) }
+                delay((500L * (attempt + 1)).coerceAtMost(5_000L))
+                true
+            }
+            .collect { sources ->
+                // Hidden-vault filter (always applied) — items whose local URI is in the
+                // Hidden vault are dropped from the gallery; cloud counterparts stay in
+                // the listing with a dim overlay (see hiddenCloudLinkIds usage in
+                // CloudPhotoCell). Album-hide is NOT applied here — it's applied inside
+                // [applyFilter] so non-All tabs (Favorites, Screenshots, Videos, …) can
+                // bypass it. When the user explicitly picks a tab they expect to see
+                // every item that matches, album membership notwithstanding.
+                // The hidden/folder filter plus applyContentFilter + applyFilter (three passes
+                // over the full library) run on Default, off the collector's Main thread; only
+                // the finished lists reach the Main-thread state update. A thumbnail-decrypt
+                // re-emission therefore can't stall the UI thread with filtering work.
+                // contentFilter/selectedFilter/favoriteIds are snapshotted from the current
+                // state — the dedicated filter-change handlers recompute filteredItems
+                // themselves, so last-writer-wins here is unchanged from the inline version.
+                val snapshot = _uiState.value
+                val computed = withContext(Dispatchers.Default) {
+                    val items = sources.items.filter { item ->
+                        // Both the hidden-vault and the timeline-folder filters read off the
+                        // local twin; CloudOnly has neither a local URI nor a bucket so it's
+                        // never dropped by either. The folder filter is display-only — excluded
+                        // buckets still back up and stay browsable, they just don't show here.
+                        val local = when (item) {
+                            is GalleryItem.LocalOnly -> item.local
+                            is GalleryItem.Synced -> item.local
+                            is GalleryItem.CloudOnly -> null
+                        }
+                        val notHidden = local == null || local.uri !in sources.hiddenUris
+                        val bucket = local?.bucketName
+                        // Backed-up photos (Synced) show through the folder filter even from a hidden
+                        // folder; only not-yet-uploaded locals are hidden. Otherwise seeing one photo
+                        // you uploaded from a hidden folder would force un-hiding the whole folder.
+                        val notExcludedBucket = item is GalleryItem.Synced ||
+                            bucket == null || bucket !in sources.timelineExcludedBuckets
+                        notHidden && notExcludedBucket
+                    }
+                    val filtered = applyFilter(
+                        applyContentFilter(items, snapshot.contentFilter),
+                        snapshot.selectedFilter,
+                        snapshot.favoriteIds,
+                        sources.cloudInAlbum,
+                        snapshot.offlinePinIds,
+                    )
+                    // Month- and day-bucket the filtered list and compute "On this day" here, off
+                    // the Main thread, rather than inside Compose composition on every list
+                    // re-emission (which costs a ~680 ms hitch from a thumbnail-decrypt burst at
+                    // 8500+ photos). Day feeds the 3-column default zoom; month feeds the 4-col
+                    // level. The label format/locale, item field and encounter order are kept
+                    // identical to the grid's expected grouping, so the rendered timeline is
+                    // unchanged. groupBy yields a LinkedHashMap, preserving first-seen order.
+                    // "On this day" reads the unfiltered [items] to match the carousel's
+                    // filter-independent source (the grid binds allItems = state.items).
+                    val monthGroups = groupByMonth(filtered)
+                    val dayGroups = groupByDay(filtered)
+                    val onThisDay = computeOnThisDay(items)
+                    GalleryComputed(items, filtered, monthGroups, dayGroups, onThisDay)
+                }
+                // Feed the library size into the perf diagnostics buffer (count only, no content)
+                // so a tester's copied diagnostics show the heap against the library it walked.
+                eu.akoos.photos.util.PerfDiagnostics.libraryPhotoCount = computed.items.size
+                _uiState.update { state ->
+                    state.copy(
+                        isLoading = false,
+                        items = computed.items,
+                        filteredItems = computed.filtered,
+                        monthGroups = computed.monthGroups,
+                        dayGroups = computed.dayGroups,
+                        onThisDayGroups = computed.onThisDay,
+                        hiddenCloudLinkIds = sources.hiddenCloudLinkIds,
+                        albumHideCloudIds = sources.cloudInAlbum,
+                    )
+                }
+            }
     }
 
     /**
@@ -868,8 +919,9 @@ class GalleryViewModel @Inject constructor(
      */
     private fun observePendingUploadCount() {
         viewModelScope.launch {
-            val userId = accountManager.getPrimaryUserId().first() ?: return@launch
-            syncStateRepo.countPendingUploads(userId).collect { count ->
+            accountManager.getPrimaryUserId().distinctUntilChanged().flatMapLatest { userId ->
+                if (userId != null) syncStateRepo.countPendingUploads(userId) else flowOf(0)
+            }.collect { count ->
                 _uiState.update { it.copy(pendingUploadCount = count) }
             }
         }
@@ -930,8 +982,9 @@ class GalleryViewModel @Inject constructor(
         // onto that same in-flight one (the walk is single-flighted) — no second refresh.
         photoStreamService.setGentleSync(false)
         viewModelScope.launch {
-            val userId = accountManager.getPrimaryUserId().first() ?: return@launch
-            doSync(userId)
+            accountManager.getPrimaryUserId().filterNotNull().distinctUntilChanged().collectLatest { userId ->
+                doSync(userId)
+            }
         }
     }
 
@@ -1199,6 +1252,79 @@ class GalleryViewModel @Inject constructor(
      *  follows from [items] becoming non-empty / empty. */
     fun setSelection(items: Set<GalleryItem>) {
         _uiState.update { it.copy(selectedItems = items) }
+    }
+
+    // ── Move to a device folder ───────────────────────────────────────────────
+    // Physically relocates the selected device photos into DCIM/<name>/ so other gallery apps see
+    // them there. Works signed-in and out; cloud-only photos have no device file and are skipped.
+
+    /** The write-consent request stashed while the user approves the system dialog, replayed by
+     *  [onMovePermissionGranted] and dropped by [clearPendingMove]. */
+    private var stashedMove: PendingMove? = null
+
+    /** Move the selected device photos (device-only + synced, cloud-only skipped) into [folderName]
+     *  under DCIM/. A blank name or a selection with no device file is a no-op. */
+    fun moveSelectedToFolder(folderName: String) {
+        if (folderName.isBlank()) return
+        val uris = _uiState.value.selectedItems.mapNotNull { item ->
+            when (item) {
+                is GalleryItem.LocalOnly -> item.local.uri
+                is GalleryItem.Synced -> item.local.uri
+                is GalleryItem.CloudOnly -> null
+            }
+        }
+        if (uris.isEmpty()) return
+        viewModelScope.launch {
+            handleMoveResult(moveToFolder(uris, folderName), folderName)
+        }
+    }
+
+    /**
+     * Create a real device folder "born with photos" for the logged-out Albums-tab pill: move the
+     * picked local [uris] into DCIM/[name]/ through the very same [MoveToFolderUseCase] path
+     * [moveSelectedToFolder] uses, so the write-consent request and the completion snackbar are shared
+     * (routed through [handleMoveResult]). A blank name or an empty selection is a no-op. There is no
+     * DB table; the folder exists purely because MediaStore now holds files under that bucket.
+     */
+    fun createFolderWithPhotos(name: String, uris: List<String>) {
+        if (name.isBlank() || uris.isEmpty()) return
+        viewModelScope.launch {
+            handleMoveResult(moveToFolder(uris, name), name)
+        }
+    }
+
+    /** Replay the deferred move on the foreign files after the user granted the system write request. */
+    fun onMovePermissionGranted() {
+        val pending = stashedMove ?: run { _pendingMoveIntent.value = null; return }
+        viewModelScope.launch {
+            handleMoveResult(moveToFolder.completeAfterPermissionGranted(pending), pending.folderName)
+        }
+    }
+
+    /** User cancelled the system write dialog; drop the deferred files, nothing moves. */
+    fun clearPendingMove() {
+        stashedMove = null
+        _pendingMoveIntent.value = null
+    }
+
+    private suspend fun handleMoveResult(result: MoveToFolderUseCase.Result, folderName: String) {
+        when (result) {
+            is MoveToFolderUseCase.Result.Moved -> {
+                stashedMove = null
+                _pendingMoveIntent.value = null
+                _uiState.update { it.copy(selectedItems = emptySet()) }
+                _moveConfirmation.emit(folderName)
+            }
+            is MoveToFolderUseCase.Result.NeedsPermission -> {
+                stashedMove = result.pending
+                _pendingMoveIntent.value = result.intentSender
+            }
+            is MoveToFolderUseCase.Result.Failed,
+            MoveToFolderUseCase.Result.NothingToDo -> {
+                stashedMove = null
+                _pendingMoveIntent.value = null
+            }
+        }
     }
 
     /**
@@ -2437,9 +2563,10 @@ class GalleryViewModel @Inject constructor(
 
         // Sync status
         result = when (filter.syncStatus) {
-            SyncStatusFilter.All      -> result
+            SyncStatusFilter.All       -> result
             SyncStatusFilter.LocalOnly -> result.filterIsInstance<GalleryItem.LocalOnly>()
-            SyncStatusFilter.BackedUp  -> result.filter { it is GalleryItem.Synced || it is GalleryItem.CloudOnly }
+            SyncStatusFilter.BackedUp  -> result.filterIsInstance<GalleryItem.Synced>()
+            SyncStatusFilter.CloudOnly -> result.filterIsInstance<GalleryItem.CloudOnly>()
         }
 
         // Media type
@@ -2467,9 +2594,11 @@ class GalleryViewModel @Inject constructor(
         if (filter.year != null || filter.month != null || filter.day != null) {
             result = result.filter { item ->
                 val cal = java.util.Calendar.getInstance().apply { timeInMillis = item.captureTimeMs }
+                val dom = cal.get(java.util.Calendar.DAY_OF_MONTH)
                 val yearMatch  = filter.year  == null || cal.get(java.util.Calendar.YEAR) == filter.year
                 val monthMatch = filter.month == null || (cal.get(java.util.Calendar.MONTH) + 1) == filter.month
-                val dayMatch   = filter.day   == null || cal.get(java.util.Calendar.DAY_OF_MONTH) == filter.day
+                val dayMatch   = filter.day   == null ||
+                    (if (filter.dayEnd != null) dom in filter.day..filter.dayEnd else dom == filter.day)
                 yearMatch && monthMatch && dayMatch
             }
         }

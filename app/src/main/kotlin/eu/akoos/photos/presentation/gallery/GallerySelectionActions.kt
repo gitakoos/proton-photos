@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.presentation.gallery
 
+import android.os.Build
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -31,6 +32,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CloudUpload
+import androidx.compose.material.icons.automirrored.filled.DriveFileMove
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.FileDownload
@@ -69,6 +71,7 @@ import eu.akoos.photos.presentation.common.allLocalOnly
 import eu.akoos.photos.presentation.common.anyCloudOnly
 import eu.akoos.photos.presentation.common.anyLocalOnly
 import eu.akoos.photos.presentation.common.anyMetadataEditable
+import eu.akoos.photos.presentation.common.anyOnDevice
 import eu.akoos.photos.presentation.common.favoriteSelectionAction
 import eu.akoos.photos.presentation.common.favoriteTurnsOn
 import eu.akoos.photos.presentation.common.hasDownloadable
@@ -105,6 +108,7 @@ fun rememberGallerySelectionActions(
     multiStripState: MultiStripState,
     addToAlbumState: AddToAlbumState,
     allSelected: Boolean,
+    isSignedIn: Boolean = true,
     onSelectAll: () -> Unit,
     onShare: () -> Unit,
     onHide: () -> Unit,
@@ -118,6 +122,7 @@ fun rememberGallerySelectionActions(
     onStripMetadata: (MetadataStripConfig) -> Unit,
     onEditMetadata: () -> Unit,
     onCreateCollage: () -> Unit,
+    onRequestMoveToFolder: () -> Unit = {},
 ): List<SelectionAction> {
     val sharing = multiShareState as? MultiShareState.Working
     val isAddingToAlbum = addToAlbumState is AddToAlbumState.Working
@@ -153,22 +158,26 @@ fun rememberGallerySelectionActions(
                 onClick = onShare,
             )
         )
-        add(
-            SelectionAction(
-                icon = Icons.Default.PhotoAlbum,
-                label = stringResource(R.string.gallery_add_to_album),
-                working = isAddingToAlbum,
-                enabled = !isAddingToAlbum,
-                onClick = onRequestAddToAlbum,
+        if (isSignedIn) {
+            add(
+                SelectionAction(
+                    icon = Icons.Default.PhotoAlbum,
+                    label = stringResource(R.string.gallery_add_to_album),
+                    working = isAddingToAlbum,
+                    enabled = !isAddingToAlbum,
+                    onClick = onRequestAddToAlbum,
+                )
             )
-        )
-        add(
-            SelectionAction(
-                icon = Icons.Default.Person,
-                label = stringResource(R.string.gallery_add_to_person),
-                onClick = onRequestAddToPerson,
+        }
+        if (isSignedIn) {
+            add(
+                SelectionAction(
+                    icon = Icons.Default.Person,
+                    label = stringResource(R.string.gallery_add_to_person),
+                    onClick = onRequestAddToPerson,
+                )
             )
-        )
+        }
         add(
             favoriteSelectionAction(
                 turnsOn = remember(selectedItems, favoriteIds) {
@@ -190,7 +199,7 @@ fun rememberGallerySelectionActions(
             )
         }
         // Back up the not-yet-uploaded (LocalOnly) photos in the selection.
-        if (anyLocalOnly(selectedItems)) {
+        if (isSignedIn && anyLocalOnly(selectedItems)) {
             add(
                 SelectionAction(
                     icon = Icons.Default.CloudUpload,
@@ -247,6 +256,18 @@ fun rememberGallerySelectionActions(
                     working = isStripping,
                     enabled = !isStripping,
                     onClick = { showStripPicker = true },
+                )
+            )
+        }
+        // Move the selected on-device photos into a real DCIM/<name>/ folder other gallery apps can
+        // see. Offered only in local-only (signed-out) mode, where every photo is a device file and
+        // no cloud pairing is in play; it is an in-place scoped-storage relocation, so Android 10+ only.
+        if (!isSignedIn && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && anyOnDevice(selectedItems)) {
+            add(
+                SelectionAction(
+                    icon = Icons.AutoMirrored.Filled.DriveFileMove,
+                    label = stringResource(R.string.move_to_folder),
+                    onClick = onRequestMoveToFolder,
                 )
             )
         }

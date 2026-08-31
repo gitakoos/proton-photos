@@ -31,6 +31,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.SheetState
 import androidx.compose.material3.Text
@@ -46,6 +47,8 @@ import eu.akoos.photos.R
 import eu.akoos.photos.domain.usecase.AlbumSortMode
 import eu.akoos.photos.presentation.settings.components.ToggleRow
 import eu.akoos.photos.presentation.theme.Bg2
+import eu.akoos.photos.presentation.theme.Line2
+import eu.akoos.photos.presentation.theme.SheetBg
 import eu.akoos.photos.presentation.theme.FgMute
 import eu.akoos.photos.presentation.theme.FgPrimary
 
@@ -60,15 +63,17 @@ fun AlbumsFilterSheet(
     default: AlbumDisplayFilter,
     rememberLast: Boolean,
     sortMode: AlbumSortMode,
+    columns: Int,
     onDefaultChange: (AlbumDisplayFilter) -> Unit,
     onRememberLastChange: (Boolean) -> Unit,
     onSortModeChange: (AlbumSortMode) -> Unit,
+    onColumnsChange: (Int) -> Unit,
     onDismiss: () -> Unit,
 ) {
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = Bg2,
+        containerColor = SheetBg,
         scrimColor = Color.Black.copy(alpha = 0.5f),
     ) {
         Column(
@@ -85,6 +90,20 @@ fun AlbumsFilterSheet(
                 fontSize = 17.sp,
                 fontWeight = FontWeight.SemiBold,
             )
+
+            // Cover size first: it is the most visible thing this sheet controls.
+            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                Text(
+                    text = stringResource(R.string.albums_cover_size_heading),
+                    color = FgMute,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
+                    letterSpacing = 0.6.sp,
+                )
+                AlbumColumnsChipRow(selected = columns, onSelected = onColumnsChange)
+            }
+
+            HorizontalDivider(color = Line2)
 
             // Default section: greyed and non-interactive while remember-last owns the value.
             val defaultAlpha = if (rememberLast) 0.38f else 1f
@@ -113,6 +132,8 @@ fun AlbumsFilterSheet(
                 onCheckedChange = onRememberLastChange,
             )
 
+            HorizontalDivider(color = Line2)
+
             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 Text(
                     text = stringResource(R.string.albums_sort_heading),
@@ -123,6 +144,28 @@ fun AlbumsFilterSheet(
                 )
                 AlbumSortChipRow(selected = sortMode, onSelected = onSortModeChange)
             }
+        }
+    }
+}
+
+/** Chips for how many album covers sit per row: more columns = smaller covers. The labels are the
+ *  counts themselves, so nothing here needs translating. */
+@Composable
+private fun AlbumColumnsChipRow(
+    selected: Int,
+    onSelected: (Int) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        listOf(2, 3, 4).forEach { cols ->
+            FilterChip(
+                label = cols.toString(),
+                selected = selected == cols,
+                onClick = { onSelected(cols) },
+                modifier = Modifier.weight(1f),
+            )
         }
     }
 }

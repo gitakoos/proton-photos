@@ -69,7 +69,9 @@ import eu.akoos.photos.data.db.dao.PersonManualPhotoDao
 import eu.akoos.photos.data.face.FaceEmbeddingModelManager
 import eu.akoos.photos.data.face.FaceIndexingProgress
 import eu.akoos.photos.data.face.FaceIndexingScheduler
+import eu.akoos.photos.data.face.FaceIndexingState
 import eu.akoos.photos.data.face.FaceModelManager
+import eu.akoos.photos.data.face.FaceModelPreparation
 import eu.akoos.photos.data.ocr.OcrModelComponent
 import eu.akoos.photos.data.ocr.OcrModelManager
 import eu.akoos.photos.data.ocr.OcrModelOutcome
@@ -88,6 +90,7 @@ import eu.akoos.photos.domain.entity.UploadCompressionTier
 import kotlinx.coroutines.flow.combine
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.LocalMediaRepository
+import eu.akoos.photos.domain.repository.NewsRepository
 import eu.akoos.photos.domain.repository.SyncStateRepository
 import eu.akoos.photos.domain.model.PersonSummary
 import eu.akoos.photos.domain.usecase.ClusterFacesUseCase
@@ -96,17 +99,33 @@ import eu.akoos.photos.domain.usecase.FaceIndexImportOutcome
 import eu.akoos.photos.domain.usecase.ImportFaceIndexUseCase
 import eu.akoos.photos.domain.usecase.FreeUpSpaceUseCase
 import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
-import eu.akoos.photos.domain.usecase.MIN_FACES_TO_SHOW_PERSON
 import eu.akoos.photos.domain.usecase.ObservePeopleUseCase
 import eu.akoos.photos.domain.usecase.ReconcileSyncStateUseCase
 import eu.akoos.photos.domain.usecase.UploadPendingUseCase
 import eu.akoos.photos.domain.usecase.UploadStatus
 import eu.akoos.photos.presentation.gallery.FaceBox
 import eu.akoos.photos.presentation.gallery.PersonUi
+import eu.akoos.photos.util.DeviceHealthPolicy
+import eu.akoos.photos.util.HealthBlockReason
+import eu.akoos.photos.util.heavyMlBlockReason
 import eu.akoos.photos.util.retryOnDbTear
 import eu.akoos.photos.worker.FreeUpSpaceWorker
 import eu.akoos.photos.worker.SyncWorker
 import javax.inject.Inject
+
+/**
+ * The face card's state after folding [FaceIndexingProgress] together with the live device health.
+ * [blockReason] names why heavy indexing is parked, which the scheduler alone cannot tell the card: it
+ * keeps reporting [FaceIndexingState.Running] while it stands down for health. [actionEnabled] is false
+ * while a persistent block holds, so the card greys out a pause / resume that would not lift it.
+ */
+data class FaceIndexingUi(
+    val state: FaceIndexingState,
+    val indexed: Int,
+    val total: Int,
+    val blockReason: HealthBlockReason,
+    val actionEnabled: Boolean,
+)
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
@@ -128,6 +147,7 @@ class SettingsViewModel @Inject constructor(
     private val hiddenStorage: eu.akoos.photos.data.hidden.HiddenStorageManager,
     private val hiddenVaultJournal: HiddenVaultJournal,
     private val faceIndexingScheduler: FaceIndexingScheduler,
+    private val deviceHealth: DeviceHealthPolicy,
     private val personDao: PersonDao,
     private val faceDao: FaceDao,
     private val faceScanDao: FaceScanDao,
@@ -139,10 +159,17 @@ class SettingsViewModel @Inject constructor(
     private val importFaceIndexUseCase: ImportFaceIndexUseCase,
     private val observePeopleUseCase: ObservePeopleUseCase,
     private val getGalleryItems: GetGalleryItemsUseCase,
+    private val newsRepository: NewsRepository,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SettingsUiState())
     val uiState: StateFlow<SettingsUiState> = _uiState.asStateFlow()
+
+    /** True while there is unread news, for the banner above the Settings page's News row. Mirrors the
+     *  settings-icon dot (0 while news is off), so reading the news clears both. */
+    val newsUnread: StateFlow<Boolean> = newsRepository.observeUnreadCount()
+        .map { it > 0 }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), false)
 
     /** Model-presence checks for the per-feature AI gates. Built from [context] rather than injected,
      *  matching the editor and the indexing scheduler, since they carry no state worth sharing and are
@@ -155,16 +182,36 @@ class SettingsViewModel @Inject constructor(
      *  settings panel can label its state and offer pause / resume. */
     val faceIndexingProgress: StateFlow<FaceIndexingProgress> = faceIndexingScheduler.progress
 
+    /** The face card's view, folding the scheduler's progress together with the live device health so
+     *  the card can name a health pause the walk itself never reports (it keeps emitting
+     *  [FaceIndexingState.Running] while parked for health) and grey out a control that pressing would
+     *  not help. A persistent block (low battery, warm, power saver) disables the action; a transient
+     *  interaction pause or a clear device leaves it enabled. */
+    val faceIndexingUi: StateFlow<FaceIndexingUi> =
+        combine(faceIndexingScheduler.progress, deviceHealth.snapshot) { p, snap ->
+            val blockReason = heavyMlBlockReason(snap)
+            FaceIndexingUi(
+                state = p.state,
+                indexed = p.indexed,
+                total = p.total,
+                blockReason = blockReason,
+                actionEnabled = !blockReason.isPersistent,
+            )
+        }.stateIn(
+            viewModelScope,
+            SharingStarted.WhileSubscribed(5_000L),
+            FaceIndexingUi(FaceIndexingState.Idle, 0, 0, HealthBlockReason.NONE, actionEnabled = true),
+        )
+
     /** How many people the face clustering has grouped for the active account, 0 when signed out.
      *  Re-resolves on an account switch so the panel never carries the previous account's count. */
     val peopleCount: StateFlow<Int> = accountManager.getPrimaryUserId()
         .flatMapLatest { userId ->
             if (userId != null) {
-                // Count the people-clusters worth showing (named plus unnamed ones with enough faces),
-                // so the settings figure matches what the People page lists instead of reading 0 while
-                // the grid clearly holds clusters the user has not named yet.
+                // Count exactly the named people the tiles beside this figure show, so the header and
+                // the row agree: unnamed clusters have no tile, and the Unsorted bucket is not a person.
                 personDao.observePeopleForUser(userId.id)
-                    .map { list -> list.count { !it.displayName.isNullOrBlank() || it.faceCount >= MIN_FACES_TO_SHOW_PERSON } }
+                    .map { namedPeopleCount(it) }
             } else {
                 flowOf(0)
             }
@@ -556,11 +603,13 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             accountManager.getPrimaryUserId()
                 .flatMapLatest { userId ->
-                    if (userId != null) observeUser(userId) else flowOf(null)
+                    val userFlow = if (userId != null) observeUser(userId) else flowOf(null)
+                    userFlow.map { user -> userId to user }
                 }
-                .collectLatest { user ->
+                .collectLatest { (userId, user) ->
                     _uiState.update {
                         it.copy(
+                            isSignedIn = userId != null,
                             userDisplayName = user?.displayName?.takeIf { n -> n.isNotBlank() }
                                 ?: user?.name?.takeIf { n -> n.isNotBlank() }
                                 ?: "",
@@ -778,6 +827,12 @@ class SettingsViewModel @Inject constructor(
                     stripCameraInfo = migratedPrefs[SettingsKeys.STRIP_CAMERA_INFO] ?: false,
                     stripTimestamp = migratedPrefs[SettingsKeys.STRIP_TIMESTAMP] ?: false,
                     stripSoftwareInfo = migratedPrefs[SettingsKeys.STRIP_SOFTWARE_INFO] ?: false,
+                    stripOnShare = migratedPrefs[SettingsKeys.STRIP_ON_SHARE] ?: false,
+                    stripShareGps = migratedPrefs[SettingsKeys.STRIP_SHARE_GPS] ?: true,
+                    stripShareCameraInfo = migratedPrefs[SettingsKeys.STRIP_SHARE_CAMERA_INFO] ?: false,
+                    stripShareTimestamp = migratedPrefs[SettingsKeys.STRIP_SHARE_TIMESTAMP] ?: false,
+                    stripShareSoftwareInfo = migratedPrefs[SettingsKeys.STRIP_SHARE_SOFTWARE_INFO] ?: false,
+                    stripShareAuthorship = migratedPrefs[SettingsKeys.STRIP_SHARE_AUTHORSHIP] ?: false,
                     appLockEnabled = migratedPrefs[SettingsKeys.APP_LOCK_ENABLED] ?: false,
                     appLockTimeoutMinutes = migratedPrefs[SettingsKeys.APP_LOCK_TIMEOUT_MINUTES] ?: 0,
                     clearCacheOnAppClose = migratedPrefs[SettingsKeys.CLEAR_CACHE_ON_APP_CLOSE] ?: false,
@@ -1000,6 +1055,7 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+
     /**
      * Persist the master AI-features opt-in. Off keeps every on-device model unfetched and hides the
      * Copy text and Hide faces entry points; the People grouping added later reads the same gate. The
@@ -1115,20 +1171,103 @@ class SettingsViewModel @Inject constructor(
     }
 
     /**
-     * The face-features per-feature opt-in. Enabling persists at once and starts a scan. Disabling is
-     * decided in the drawer instead: flipping the switch off opens it while the feature stays on, so a
-     * tap outside leaves everything as it was; the drawer's Keep or Remove are what actually switch it
-     * off. Independent of the master switch, so it gates the face pipeline on its own.
+     * The face-features per-feature opt-in, managing the models rather than just flipping a flag.
+     * Turning it on with the models on disk enables at once and starts a scan; without them it raises
+     * the download-consent drawer instead of switching on against models that are not there. Turning it
+     * off with the models on disk opens the Keep-or-Remove drawer; with no models on disk there is
+     * nothing to remove, so it just switches off. Independent of the master switch, so it gates the face
+     * pipeline on its own.
      */
     fun setFaceEnabled(enabled: Boolean) {
-        if (enabled) {
-            viewModelScope.launch {
-                context.settingsDataStore.edit { it[SettingsKeys.FACE_ENABLED] = true }
-                _uiState.update { it.copy(faceEnabled = true, faceModelPrompt = FaceModelPrompt.None) }
-                accountManager.getPrimaryUserId().first()?.let { faceIndexingScheduler.requestIndex(it) }
+        if (enabled) enableFace() else disableFace()
+    }
+
+    /** Both models on disk already: flip face recognition on and start a scan. Otherwise hold it off and
+     *  ask to fetch the models first, so the switch never turns on against models that are not there. */
+    private fun enableFace() {
+        viewModelScope.launch {
+            val present = withContext(Dispatchers.IO) {
+                faceModelManager.onDisk() != null && faceEmbeddingModelManager.onDisk() != null
             }
-        } else {
-            _uiState.update { it.copy(faceModelPrompt = FaceModelPrompt.Remove) }
+            if (present) {
+                context.settingsDataStore.edit { it[SettingsKeys.FACE_ENABLED] = true }
+                _uiState.update {
+                    it.copy(
+                        faceEnabled = true,
+                        faceRecognitionAvailable = true,
+                        faceModelPrompt = FaceModelPrompt.None,
+                        faceModelDownloadFailed = false,
+                    )
+                }
+                accountManager.getPrimaryUserId().first()?.let { faceIndexingScheduler.requestIndex(it) }
+            } else {
+                _uiState.update {
+                    it.copy(faceModelPrompt = FaceModelPrompt.Download, faceModelDownloadFailed = false)
+                }
+            }
+        }
+    }
+
+    /** Flipping face recognition off with the models on disk opens the Keep-or-Remove drawer while the
+     *  feature stays on, so a tap outside leaves everything as it was. With no models on disk there is
+     *  nothing to remove, so it switches off at once, which is also the way out of a stranded on state
+     *  left by a model that is no longer there. */
+    private fun disableFace() {
+        viewModelScope.launch {
+            val present = withContext(Dispatchers.IO) {
+                faceModelManager.onDisk() != null && faceEmbeddingModelManager.onDisk() != null
+            }
+            if (present) {
+                _uiState.update { it.copy(faceModelPrompt = FaceModelPrompt.Remove) }
+            } else {
+                context.settingsDataStore.edit { it[SettingsKeys.FACE_ENABLED] = false }
+                faceIndexingScheduler.reset()
+                _uiState.update {
+                    it.copy(
+                        faceEnabled = false,
+                        faceRecognitionAvailable = false,
+                        faceModelPrompt = FaceModelPrompt.None,
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * Accept the face model download. Records the consent the scanner itself also checks, fetches both
+     * the detector and the embedder off the main thread while the row shows progress, and turns the
+     * feature on only once both verify. The small detector comes first, so the larger embedder is not
+     * fetched when the detector cannot be. A failed fetch leaves it off and surfaces the failure on the row.
+     */
+    fun confirmFaceModelDownload() {
+        _uiState.update {
+            it.copy(
+                faceModelPrompt = FaceModelPrompt.None,
+                faceModelDownloading = true,
+                faceModelDownloadFailed = false,
+            )
+        }
+        viewModelScope.launch {
+            context.settingsDataStore.edit { it[SettingsKeys.FACE_MODEL_DOWNLOAD_ALLOWED] = true }
+            val ready = withContext(Dispatchers.IO) {
+                faceModelManager.prepare() is FaceModelPreparation.Ready &&
+                    faceEmbeddingModelManager.prepare() is FaceModelPreparation.Ready
+            }
+            if (ready) {
+                context.settingsDataStore.edit { it[SettingsKeys.FACE_ENABLED] = true }
+                _uiState.update {
+                    it.copy(
+                        faceEnabled = true,
+                        faceRecognitionAvailable = true,
+                        faceModelDownloading = false,
+                    )
+                }
+                accountManager.getPrimaryUserId().first()?.let { faceIndexingScheduler.requestIndex(it) }
+            } else {
+                _uiState.update {
+                    it.copy(faceModelDownloading = false, faceModelDownloadFailed = true)
+                }
+            }
         }
     }
 
@@ -1235,17 +1374,27 @@ class SettingsViewModel @Inject constructor(
 
     fun clearFaceTransferMsg() { _faceTransferMsg.value = null }
 
+    /** True while an export or import runs, so the transfer rows read as busy and cannot be tapped
+     *  again mid-run. */
+    private val _faceTransferInProgress = MutableStateFlow(false)
+    val faceTransferInProgress: StateFlow<Boolean> = _faceTransferInProgress.asStateFlow()
+
     /** Write the account's portable face index to [uri] (a document the user just chose). Reports the
      *  face count, or a failure, through [faceTransferMsg]. */
     fun exportFaceIndex(uri: Uri) {
         viewModelScope.launch {
-            val count = runCatching {
-                context.contentResolver.openOutputStream(uri)?.use { exportFaceIndexUseCase(it) } ?: -1
-            }.getOrElse { -1 }
-            _faceTransferMsg.value = if (count >= 0) {
-                context.getString(R.string.settings_ai_export_done, count)
-            } else {
-                context.getString(R.string.settings_ai_transfer_failed)
+            _faceTransferInProgress.value = true
+            try {
+                val count = runCatching {
+                    context.contentResolver.openOutputStream(uri)?.use { exportFaceIndexUseCase(it) } ?: -1
+                }.getOrElse { -1 }
+                _faceTransferMsg.value = when {
+                    count > 0 -> context.getString(R.string.settings_ai_export_done, count)
+                    count == 0 -> context.getString(R.string.settings_ai_export_empty)
+                    else -> context.getString(R.string.settings_ai_transfer_failed)
+                }
+            } finally {
+                _faceTransferInProgress.value = false
             }
         }
     }
@@ -1254,30 +1403,47 @@ class SettingsViewModel @Inject constructor(
      *  form people. Reports the counts, or a failure, through [faceTransferMsg]. */
     fun importFaceIndex(uri: Uri) {
         viewModelScope.launch {
-            val userId = accountManager.getPrimaryUserId().firstOrNull() ?: return@launch
-            // Stand any in-flight walk down first, so it cannot re-detect and overwrite the faces we are
-            // about to import (which would wipe their name labels), mirroring rescan's order.
-            faceIndexingScheduler.reset()
-            val result = runCatching {
-                context.contentResolver.openInputStream(uri)?.use { importFaceIndexUseCase(it) }
-            }.getOrNull()
-            if (result is FaceIndexImportOutcome.Success) {
-                clusterFacesUseCase(userId)
-                _faceTransferMsg.value = context.getString(
-                    R.string.settings_ai_import_done, result.faces, result.people,
-                )
-                // Resume indexing: the imported photos are marked scanned, so the walk skips them and only
-                // picks up anything new, reclustering at the end without disturbing the imported faces.
-                faceIndexingScheduler.requestIndex(userId)
-            } else {
-                // Each refusal names its own cause: a wrong account or a wrong model is a mismatch the
-                // user can act on, unlike the generic failure an unreadable or missing file gets.
-                val message = when (result) {
-                    FaceIndexImportOutcome.WrongAccount -> R.string.settings_ai_import_wrong_account
-                    FaceIndexImportOutcome.WrongModel -> R.string.settings_ai_import_wrong_model
-                    else -> R.string.settings_ai_transfer_failed
+            _faceTransferInProgress.value = true
+            try {
+                val userId = accountManager.getPrimaryUserId().firstOrNull() ?: return@launch
+                // Stand any in-flight walk down first, so it cannot re-detect and overwrite the faces we are
+                // about to import (which would wipe their name labels), mirroring rescan's order.
+                faceIndexingScheduler.reset()
+                val result = runCatching {
+                    context.contentResolver.openInputStream(uri)?.use { importFaceIndexUseCase(it) }
+                }.getOrNull()
+                when (result) {
+                    is FaceIndexImportOutcome.Success -> {
+                        clusterFacesUseCase(userId)
+                        _faceTransferMsg.value = context.getString(
+                            R.string.settings_ai_import_done, result.faces, result.people,
+                        )
+                        // Resume indexing: the imported photos are marked scanned, so the walk skips them and
+                        // only picks up anything new, reclustering at the end without disturbing the faces.
+                        faceIndexingScheduler.requestIndex(userId)
+                    }
+                    is FaceIndexImportOutcome.ReattachScheduled -> {
+                        // A different model: the names are staged, and a fresh scan puts them back on this
+                        // device's own faces by where each one sat, so start indexing and say what will happen.
+                        _faceTransferMsg.value =
+                            context.getString(R.string.settings_ai_import_reattach, result.people)
+                        faceIndexingScheduler.requestIndex(userId)
+                    }
+                    // A wrong account is a mismatch the user can act on, unlike the generic failure an
+                    // unreadable or missing file (a null result) gets.
+                    FaceIndexImportOutcome.WrongAccount -> {
+                        _faceTransferMsg.value = context.getString(R.string.settings_ai_import_wrong_account)
+                        // A refused import folded in no faces, so re-arm the walk the reset above stood
+                        // down; otherwise a rejected file leaves indexing idle.
+                        faceIndexingScheduler.requestIndex(userId)
+                    }
+                    else -> {
+                        _faceTransferMsg.value = context.getString(R.string.settings_ai_transfer_failed)
+                        faceIndexingScheduler.requestIndex(userId)
+                    }
                 }
-                _faceTransferMsg.value = context.getString(message)
+            } finally {
+                _faceTransferInProgress.value = false
             }
         }
     }
@@ -1419,6 +1585,48 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             context.settingsDataStore.edit { it[SettingsKeys.STRIP_SOFTWARE_INFO] = enabled }
             _uiState.update { it.copy(stripSoftwareInfo = enabled) }
+        }
+    }
+
+    fun setStripOnShare(enabled: Boolean) {
+        viewModelScope.launch {
+            context.settingsDataStore.edit { it[SettingsKeys.STRIP_ON_SHARE] = enabled }
+            _uiState.update { it.copy(stripOnShare = enabled) }
+        }
+    }
+
+    fun setStripShareGps(enabled: Boolean) {
+        viewModelScope.launch {
+            context.settingsDataStore.edit { it[SettingsKeys.STRIP_SHARE_GPS] = enabled }
+            _uiState.update { it.copy(stripShareGps = enabled) }
+        }
+    }
+
+    fun setStripShareCameraInfo(enabled: Boolean) {
+        viewModelScope.launch {
+            context.settingsDataStore.edit { it[SettingsKeys.STRIP_SHARE_CAMERA_INFO] = enabled }
+            _uiState.update { it.copy(stripShareCameraInfo = enabled) }
+        }
+    }
+
+    fun setStripShareTimestamp(enabled: Boolean) {
+        viewModelScope.launch {
+            context.settingsDataStore.edit { it[SettingsKeys.STRIP_SHARE_TIMESTAMP] = enabled }
+            _uiState.update { it.copy(stripShareTimestamp = enabled) }
+        }
+    }
+
+    fun setStripShareSoftwareInfo(enabled: Boolean) {
+        viewModelScope.launch {
+            context.settingsDataStore.edit { it[SettingsKeys.STRIP_SHARE_SOFTWARE_INFO] = enabled }
+            _uiState.update { it.copy(stripShareSoftwareInfo = enabled) }
+        }
+    }
+
+    fun setStripShareAuthorship(enabled: Boolean) {
+        viewModelScope.launch {
+            context.settingsDataStore.edit { it[SettingsKeys.STRIP_SHARE_AUTHORSHIP] = enabled }
+            _uiState.update { it.copy(stripShareAuthorship = enabled) }
         }
     }
 

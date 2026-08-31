@@ -86,6 +86,15 @@ class NewsRepositoryImpl @Inject constructor(
             parse(prefs[SettingsKeys.NEWS_CACHE_JSON]).items.count { it.id !in read }
         }
 
+    override suspend fun snapshotUnreadIds(): Set<String> {
+        val prefs = context.settingsDataStore.data.first()
+        if (prefs[SettingsKeys.NEWS_ENABLED] == false) return emptySet()
+        val read = prefs[SettingsKeys.NEWS_READ_IDS] ?: emptySet()
+        return parse(prefs[SettingsKeys.NEWS_CACHE_JSON]).items
+            .mapNotNull { item -> item.id.takeIf { it !in read } }
+            .toSet()
+    }
+
     override suspend fun markAllRead() {
         val feed = parse(context.settingsDataStore.data.first()[SettingsKeys.NEWS_CACHE_JSON])
         // Set the read set to exactly the current feed's ids, so it stays bounded to the feed and a

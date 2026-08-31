@@ -69,6 +69,7 @@ import eu.akoos.photos.data.hidden.HiddenVaultDecisions
 import eu.akoos.photos.data.hidden.HiddenVaultDiagnostics
 import eu.akoos.photos.data.hidden.HiddenVaultJournal
 import eu.akoos.photos.data.preferences.SettingsKeys
+import eu.akoos.photos.data.preferences.currentShareStripConfig
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.presentation.common.FavoriteActionState
 import eu.akoos.photos.presentation.common.FavoriteWriter
@@ -89,6 +90,7 @@ import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.SyncStateRepository
 import eu.akoos.photos.util.friendlyNetworkError
 import eu.akoos.photos.util.retryOnDbTear
+import eu.akoos.photos.util.stripForShareOrOriginal
 import eu.akoos.photos.util.sanitizeErrorMessage
 import eu.akoos.photos.worker.AlbumDownloadWorker
 import javax.inject.Inject
@@ -1636,12 +1638,14 @@ class AlbumDetailViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(shareState = AlbumShareState.Working(0, selected.size)) }
             val userId = accountManager.getPrimaryUserId().first()
+            // Null when strip-on-share is off, so each resolved URI passes through untouched below.
+            val stripConfig = currentShareStripConfig(context)
             val uris = ArrayList<Uri>(selected.size)
             var done = 0
             for (photo in selected) {
                 runCatching {
                     val local = state.localUriByLinkId[photo.linkId]
-                    if (local != null) {
+                    val resolved = if (local != null) {
                         Uri.parse(local)
                     } else {
                         val uid = userId ?: error("Not signed in")
@@ -1653,6 +1657,7 @@ class AlbumDetailViewModel @Inject constructor(
                             eu.akoos.photos.util.ShareFileProvider.putDisplayName(it, photo.displayName)
                         }
                     }
+                    stripForShareOrOriginal(context, resolved, photo.mimeType, photo.displayName, stripConfig)
                 }.onSuccess { uris.add(it) }
                     .onFailure { Log.w("AlbumDetailVM", "share resolve failed: ${it.message}") }
                 done++

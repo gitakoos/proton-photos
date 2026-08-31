@@ -23,14 +23,19 @@
 package eu.akoos.photos.presentation.albums
 
 import android.content.Context
+import android.content.IntentSender
 import androidx.datastore.preferences.core.edit
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
@@ -39,6 +44,7 @@ import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import me.proton.core.accountmanager.domain.AccountManager
@@ -49,6 +55,8 @@ import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.LocalMediaRepository
 import eu.akoos.photos.domain.usecase.AlbumSortMode
+import eu.akoos.photos.domain.usecase.MoveToFolderUseCase
+import eu.akoos.photos.domain.usecase.PendingMove
 import eu.akoos.photos.domain.usecase.decodeAlbumOrder
 import eu.akoos.photos.domain.usecase.encodeAlbumOrder
 import eu.akoos.photos.domain.usecase.sortAlbums
@@ -135,12 +143,35 @@ class AlbumsViewModel @Inject constructor(
     private val accountManager: AccountManager,
     private val driveRepo: DrivePhotoRepository,
     private val localMediaRepo: LocalMediaRepository,
+    private val moveToFolder: MoveToFolderUseCase,
     private val networkObserver: eu.akoos.photos.util.NetworkObserver,
     private val albumListEvents: eu.akoos.photos.util.AlbumListEventBus,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(AlbumsUiState())
     val uiState: StateFlow<AlbumsUiState> = _uiState.asStateFlow()
+
+    /** Whether a Proton account is signed in. A local-only session has no Drive to back up to, so the
+     *  device-folder drawer drops its cloud rows. Defaults to signed-in so nothing flickers before the
+     *  first emit. */
+    val isSignedIn: StateFlow<Boolean> = accountManager.getPrimaryUserId()
+        .map { it != null }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, true)
+
+    /** One-shot carrier for the system write-consent request a device-folder rename needs when the
+     *  folder holds a file the app does not own. [AlbumsScreen] launches it and calls
+     *  [onMovePermissionGranted] on approval; null the rest of the time. */
+    private val _pendingMoveIntent = MutableStateFlow<IntentSender?>(null)
+    val pendingMoveIntent: StateFlow<IntentSender?> = _pendingMoveIntent.asStateFlow()
+
+    /** One-shot confirmation for a completed device-folder rename, carrying the new folder name for
+     *  the snackbar. replay=0 + single buffer so a paused screen never blocks the emit. */
+    private val _folderRenameConfirmation = MutableSharedFlow<String>(replay = 0, extraBufferCapacity = 1)
+    val folderRenameConfirmation: SharedFlow<String> = _folderRenameConfirmation.asSharedFlow()
+
+    /** The write-consent request stashed while the user approves the system dialog, replayed by
+     *  [onMovePermissionGranted] and dropped by [clearPendingMove]. */
+    private var stashedMove: PendingMove? = null
 
     /** The grid order in force. Every album list this ViewModel publishes goes through [applySort],
      *  so the cached paint and the network refresh can never disagree about the order. */
@@ -568,6 +599,57 @@ class AlbumsViewModel @Inject constructor(
                 val current = prefs[SettingsKeys.TIMELINE_EXCLUDED_ALBUM_IDS] ?: emptySet()
                 prefs[SettingsKeys.TIMELINE_EXCLUDED_ALBUM_IDS] =
                     AlbumTimelineHide.toggled(current, albumLinkId)
+            }
+        }
+    }
+
+    // ── Rename a device folder ────────────────────────────────────────────────
+    // Android has no folder-rename under scoped storage, so a folder rename physically relocates every
+    // photo in the bucket into DCIM/<newName>/ via [MoveToFolderUseCase]. Offered only in a logged-out
+    // session, the local counterpart of [renameCloudAlbum]; a foreign file needs one-shot write consent,
+    // handled exactly like the timeline's move.
+
+    /** Rename the device folder [bucketName] by moving its photos into [newName] under DCIM/. A blank
+     *  or unchanged name is a no-op, as is a folder with no readable device file. */
+    fun renameDeviceFolder(bucketName: String, newName: String) {
+        val trimmed = newName.trim()
+        if (trimmed.isEmpty() || trimmed == bucketName) return
+        viewModelScope.launch {
+            val uris = localMediaRepo.queryByBucket(bucketName).map { it.uri }
+            if (uris.isEmpty()) return@launch
+            handleRenameResult(moveToFolder(uris, trimmed), trimmed)
+        }
+    }
+
+    /** Replay the deferred move on the foreign files after the user granted the system write request. */
+    fun onMovePermissionGranted() {
+        val pending = stashedMove ?: run { _pendingMoveIntent.value = null; return }
+        viewModelScope.launch {
+            handleRenameResult(moveToFolder.completeAfterPermissionGranted(pending), pending.folderName)
+        }
+    }
+
+    /** User cancelled the system write dialog; drop the deferred files, nothing moves. */
+    fun clearPendingMove() {
+        stashedMove = null
+        _pendingMoveIntent.value = null
+    }
+
+    private suspend fun handleRenameResult(result: MoveToFolderUseCase.Result, newName: String) {
+        when (result) {
+            is MoveToFolderUseCase.Result.Moved -> {
+                stashedMove = null
+                _pendingMoveIntent.value = null
+                _folderRenameConfirmation.emit(newName)
+            }
+            is MoveToFolderUseCase.Result.NeedsPermission -> {
+                stashedMove = result.pending
+                _pendingMoveIntent.value = result.intentSender
+            }
+            is MoveToFolderUseCase.Result.Failed,
+            MoveToFolderUseCase.Result.NothingToDo -> {
+                stashedMove = null
+                _pendingMoveIntent.value = null
             }
         }
     }

@@ -28,9 +28,12 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import me.proton.core.domain.entity.UserId
+import eu.akoos.photos.crypto.DecryptPriority
+import eu.akoos.photos.crypto.DecryptPriorityContext
 import eu.akoos.photos.data.db.dao.PhotoListingDao
 import eu.akoos.photos.data.db.dao.PhotoLocationDao
 import eu.akoos.photos.data.db.entity.PhotoListingEntity
@@ -160,8 +163,11 @@ class CloudGpsBackfillScheduler @Inject constructor(
                         launch {
                             try {
                                 semaphore.withPermit {
-                                    photoLocationResolver.locate(userId, row, resolved.byLinkId[row.linkId])
-                                        ?.let { located.add(it) }
+                                    // Background GPS backfill yields the process-global crypto gate to
+                                    // interactive decrypts; the on-demand export path stays foreground.
+                                    withContext(DecryptPriorityContext(DecryptPriority.BACKGROUND)) {
+                                        photoLocationResolver.locate(userId, row, resolved.byLinkId[row.linkId])
+                                    }?.let { located.add(it) }
                                 }
                             } catch (e: CancellationException) {
                                 throw e
