@@ -580,6 +580,91 @@
     <string name="metadata_edit_channel_desc">A fotóadatok Proton Drive-ra mentésének állapotát mutatja.</string>
     <string name="metadata_edit_notification_title">Fotóadatok mentése…</string>
     <string name="metadata_edit_notification_progress">%1$d / %2$d</string>
+    <!-- Google Takeout import notification. -->
+    <string name="import_channel_name">Fotóimportálás</string>
+    <string name="import_channel_desc">Egy Google Takeout-export Proton Drive-ra importálásának állapotát mutatja.</string>
+    <string name="import_notification_title">Fotók importálása…</string>
+    <string name="import_notification_progress">%1$d / %2$d</string>
+    <string name="import_notification_done_title">Az importálás kész</string>
+    <string name="import_notification_done_text">%1$d importálva, %2$d kihagyva, %3$d sikertelen</string>
+    <!-- Import staging notification. -->
+    <string name="import_stage_notification_title">Az importálás előkészítése…</string>
+    <string name="import_stage_progress">%1$d / %2$d</string>
+    <!-- Google Takeout import screen. -->
+    <string name="import_title">Fotók importálása</string>
+    <string name="import_row_desc">Egy Google Photos- vagy Ente-export áthozása a Proton Drive-ra</string>
+    <string name="import_explainer">Importálj egy Google Takeout- vagy Ente-exportot .zip-ként. A fotóid az eredeti dátumukkal és helyükkel töltődnek fel a Proton Drive-ra.</string>
+    <string name="import_choose_zip">Takeout .zip kiválasztása</string>
+    <string name="import_scanning">Az export beolvasása…</string>
+    <string name="import_progress_count">%1$d / %2$d</string>
+    <string name="import_done_title">Az importálás kész</string>
+    <string name="import_done_summary">%1$d importálva, %2$d kihagyva, %3$d sikertelen</string>
+    <string name="import_done_button">Kész</string>
+    <string name="import_failed_title">Az importálás sikertelen</string>
+    <string name="import_failed_msg">Hiba történt az importálás során. Válaszd ki a fájlt, és próbáld újra.</string>
+    <!-- Import review queue. -->
+    <string name="import_staging_title">Az importálás előkészítése</string>
+    <string name="import_uploading_title">Fotók feltöltése</string>
+    <string name="import_review_title">Az importálás áttekintése</string>
+    <string name="import_review_confirm">%1$d fotó importálása</string>
+    <string name="import_review_discard">Elvetés</string>
+    <string name="import_review_discard_title">Elveted ezt az importálást?</string>
+    <string name="import_review_discard_message">Az előkészített fotók kikerülnek az áttekintésből. Még semmi sem lett feltöltve.</string>
+    <string name="import_review_remove">%1$d eltávolítása</string>
+    <string name="import_review_restore">Visszaállítás</string>
+    <string name="import_review_selected_count">%1$d kijelölve</string>
+    <string name="import_review_no_date">Nincs dátum</string>
+    <string name="import_review_removed">Eltávolítva</string>
+    <string name="import_review_meta_section">Részletek</string>
+    <string name="import_review_detail_date">Dátum</string>
+    <string name="import_review_detail_location">Hely</string>
+    <string name="import_review_detail_description">Leírás</string>
+    <string name="import_review_detail_filename">Fájlnév</string>
+    <string name="import_review_detail_source">Forrás</string>
+    <string name="import_review_source">Google Photos- vagy Ente-export</string>
+    <!-- Recent imports history. -->
+    <string name="import_history_title">Legutóbbi importálások</string>
+    <string name="import_history_row">%1$d importálva</string>
+    <string name="import_history_row_extra">%1$d kihagyva, %2$d sikertelen</string>
+    <!-- Recent import detail + undo. -->
+    <string name="import_detail_title">Az importálás részletei</string>
+    <string name="import_detail_empty">Ezek a fotók már nincsenek a Drive-on.</string>
+    <string name="import_undo">Az importálás visszavonása</string>
+    <string name="import_undo_confirm_title">Visszavonod ezt az importálást?</string>
+    <string name="import_undo_confirm_message">Az importálás által hozzáadott fotók a Drive kukájába kerülnek. Minden, amit azóta módosítottál, megmarad.</string>
+    <string name="import_undo_running">Az importált fotók eltávolítása…</string>
+    <string name="import_undo_result">%1$d eltávolítva, %2$d módosított megtartva, %3$d sikertelen</string>
+    <string name="import_done_all_present">Ezek a fotók már a Drive-odon vannak, így semmi sem lett importálva.</string>
+    <string name="import_detail_already_badge">Már a Drive-on</string>
+    <string name="import_review_already_badge">Már a Drive-on</string>
+    <string name="import_review_nothing_new">Nincs új importálnivaló</string>
+    <string name="import_review_add_to_albums">Albumokhoz adás</string>
+    <string name="import_album_mode_label">Albumok</string>
+    <string name="import_album_mode_none">Csak fotók</string>
+    <string name="import_album_mode_shells">Üres albumok létrehozása</string>
+    <string name="import_album_mode_photos">Fotók albumokban</string>
+    <string name="import_albums_section">Albumok</string>
+    <string name="import_done_view_photos">Importált fotók megtekintése</string>
+    <string name="import_stat_date">Dátum</string>
+    <string name="import_stat_to_import">Importálandó</string>
+    <string name="import_stat_imported">Importálva</string>
+    <string name="import_stat_already">Már a Drive-on</string>
+    <string name="import_stat_skipped">Kihagyva</string>
+    <string name="import_stat_failed">Sikertelen</string>
+    <string name="import_confirm_title">Importálod a Drive-ra?</string>
+    <string name="import_confirm_button">Importálás</string>
+    <string name="import_confirm_albums_only">A kiválasztott fotók bekerülnek a saját albumaikba.</string>
+    <string name="import_history_delete_title">Importálási bejegyzés törlése</string>
+    <string name="import_history_delete_message">Ez eltávolítja a bejegyzést a Legutóbbi importálások közül a visszavonási lehetőségével együtt. Az importált fotók és az albumok a Drive-odon maradnak.</string>
+    <string name="import_history_delete_confirm">Törlés</string>
+    <plurals name="import_confirm_message">
+        <item quantity="one">%1$d fotó feltöltődik a Proton Drive-odra.</item>
+        <item quantity="other">%1$d fotó feltöltődik a Proton Drive-odra.</item>
+    </plurals>
+    <plurals name="import_album_photo_count">
+        <item quantity="one">%1$d fotó</item>
+        <item quantity="other">%1$d fotó</item>
+    </plurals>
     <string name="album_download_notification_cancel">Mégse</string>
     <string name="download_started_background">Letöltés a háttérben, a folyamatot a Tevékenység nézetben követheted</string>
     <!-- Backup utáni törlés engedélykérés értesítés -->
@@ -614,6 +699,7 @@
     <string name="share_role_can_view">megtekintheti</string>
     <string name="share_role_can_edit">szerkesztheti</string>
     <string name="share_role_pending">függőben</string>
+    <string name="share_role_external">meghívva (külső)</string>
     <string name="share_stop_sharing">Megosztás leállítása</string>
     <string name="shared_stop_sharing_confirm_body">A nyilvános hivatkozások megszűnnek, és a fotók többé nem lesznek megosztva.</string>
     <string name="share_close">Bezárás</string>
@@ -627,6 +713,7 @@
     <string name="share_invite_email_duplicate">Már hozzáadva</string>
     <string name="share_invite_summary_partial">%1$d elküldve, %2$d nem sikerült</string>
     <string name="share_invite_summary_all_failed">A meghívókat nem sikerült elküldeni</string>
+    <string name="share_invite_self">Nem hívhatod meg a saját fiókodat</string>
     <!-- Album-sharing + album action error fallbacks (raw exception text stays in the log) -->
     <string name="share_revoke_failed">Nem sikerült visszavonni a meghívót</string>
     <string name="share_remove_member_failed">Nem sikerült eltávolítani a tagot</string>
@@ -1501,6 +1588,8 @@
     <string name="settings_ai_face_download_retry">A kapcsoló ismételt bekapcsolásával újrapróbálható.</string>
     <string name="settings_ai_face_download_title">Letölti az arcmodellt?</string>
     <string name="settings_ai_face_download_message">Az arcfelismeréshez le kell tölteni egy %1$s méretű modellt. Bármilyen kapcsolaton működik, de a Wi-Fi ajánlott.</string>
+    <string name="settings_ai_face_download_message_metered">Az arcfelismeréshez le kell tölteni egy %1$s méretű modellt. A Wi-Fi nincs csatlakoztatva, ezért ez a letöltés mobiladatot használ.</string>
+    <string name="settings_ai_face_downloading_progress">%1$s / %2$s</string>
     <string name="settings_ai_face_download_confirm">Letöltés</string>
     <string name="settings_ai_face_model_missing">Az arcmodell nincs ezen az eszközön.</string>
     <string name="settings_ai_face_remove_title">Eltávolítja az arcadatokat?</string>
@@ -1782,11 +1871,24 @@
     <string name="whats_new_albumcover_body">Beállíthatod, mekkorák legyenek az album-borítók, kettőtől négy oszlopig.</string>
     <string name="whats_new_denser_title">Sűrűbb idővonal</string>
     <string name="whats_new_denser_body">Az idővonal mostantól két lépéssel sűrűbbre nagyítható, soronként akár nyolc fotóig.</string>
+    <string name="whats_new_import_title">Importálás Google Photosból vagy Entéből</string>
+    <string name="whats_new_import_body">Hozz át egy exportált gyűjteményt a Proton Drive-ba a dátumaival, helyeivel és felirataival együtt, előbb nézd át, majd hagyd a háttérben futni.</string>
+    <string name="whats_new_share_email_title">Album megosztása e-mailben</string>
+    <string name="whats_new_share_email_body">Bárkit meghívhatsz e-mailben, akár Proton-fiók nélkül is, és bármikor visszavonhatod a hozzáférést.</string>
+    <string name="whats_new_video_faces_title">Arcok a videókon</string>
+    <string name="whats_new_video_faces_body">A névcímkék mostantól megjelennek a videó felett, így látod és megnyithatod, ki van rajta.</string>
+    <string name="whats_new_faces_rework_title">Pontosabb arcfelismerés</string>
+    <string name="whats_new_faces_rework_body">Sokkal kevesebb hibás csoport, áttekinthetőbb Emberek képernyő, és egy elkószált arc egyetlen koppintással javítható.</string>
+    <string name="whats_new_guest_title">Több működik fiók nélkül</string>
+    <string name="whats_new_guest_body">Az arcfelismerés, a térkép, a naptárjegyzetek és a duplikátumkereső mostantól mind bejelentkezés nélkül is működik.</string>
+    <string name="whats_new_dup_nobackup_title">Duplikátumok biztonsági mentés nélkül</string>
+    <string name="whats_new_dup_nobackup_body">A duplikátumkereső mostantól a készülékeden lévő fotókat vizsgálja, fiók és biztonsági mentés nélkül.</string>
     <string name="whats_new_section_new">Új</string>
     <string name="whats_new_section_improved">Fejlesztések</string>
 
     <!-- Person detail -->
-    <string name="person_detail_unnamed">Személy</string>
+    <string name="person_detail_unnamed">Névtelen</string>
+    <string name="person_add_name">Név hozzáadása</string>
     <string name="person_unsorted">Rendezetlen</string>
     <string name="person_unsorted_hint">Arcok, amelyeket nem sikerült biztosan senkihez kötni. Jelölj ki képeket, hogy kihúzz egy valódi embert, a többit pedig jelöld meg mint nem személy.</string>
     <string name="person_unsorted_caption">Megmaradt arcok, amelyeket nem sikerült hozzárendelni. Nyisd meg a rendezésükhöz.</string>

@@ -107,6 +107,12 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
         // (WorkManager schedules, lifecycle observer, receivers, Coil) to avoid duplicate workers.
         if (!isMainProcess()) return
         delegatingFactory.addFactory(workerFactory)
+        // Drop crash records left over from a version this build replaced, so a diagnostics bundle copied
+        // after an update carries only this build's crashes rather than a prior version's history. Keeps
+        // this version's own blocks, so a real crash from an earlier session on this build survives.
+        appScope.launch {
+            runCatching { eu.akoos.photos.util.CrashLogStore.pruneToVersion(filesDir, BuildConfig.VERSION_CODE) }
+        }
         if (BuildConfig.DEBUG) {
             android.os.StrictMode.setVmPolicy(
                 android.os.StrictMode.VmPolicy.Builder()
@@ -185,11 +191,10 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
      *  into a shared log (mirrors the SyncDiagnostics rule). No device/app header here; the Settings
      *  copy adds the model and version. */
     private fun writeCrashLog(throwable: Throwable) {
-        val dir = java.io.File(filesDir, "diagnostics").apply { mkdirs() }
-        val file = java.io.File(dir, "last_crash.txt")
+        val file = eu.akoos.photos.util.CrashLogStore.file(filesDir).apply { parentFile?.mkdirs() }
         if (file.length() > 128L * 1024) file.writeText("")
         val text = buildString {
-            append("---- crash v").append(BuildConfig.VERSION_CODE).append(" ----\n")
+            append(eu.akoos.photos.util.CrashLogStore.blockHeader(BuildConfig.VERSION_CODE))
             var t: Throwable? = throwable
             var depth = 0
             while (t != null && depth < 8) {
@@ -445,7 +450,8 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
      * Privacy opt-in ([SettingsKeys.CLEAR_CACHE_ON_APP_CLOSE]): wipe disk caches when the whole
      * process backgrounds. Process-level ON_STOP is the right hook — it fires only when all
      * Activities leave the started state, not on rotation / picker round-trips. Wipes fullres,
-     * thumbnails, and coil_cache; deliberately leaves in-flight upload block dirs and DataStore alone.
+     * thumbnails, coil_cache, and import_thumbs; deliberately leaves in-flight upload block dirs and
+     * DataStore alone.
      */
     private fun registerCacheCleanupOnBackground() {
         androidx.lifecycle.ProcessLifecycleOwner.get().lifecycle.addObserver(
@@ -458,7 +464,7 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
                         if (!enabled) return@launch
                         runCatching {
                             listOf(
-                                "fullres", "thumbnails", "coil_cache",
+                                "fullres", "thumbnails", "coil_cache", "import_thumbs",
                             ).forEach { sub ->
                                 java.io.File(cacheDir, sub).deleteRecursively()
                             }

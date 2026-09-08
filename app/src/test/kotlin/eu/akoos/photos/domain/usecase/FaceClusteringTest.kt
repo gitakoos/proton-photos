@@ -24,6 +24,7 @@ package eu.akoos.photos.domain.usecase
 
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.nio.ByteBuffer
@@ -56,6 +57,32 @@ class FaceClusteringTest {
     )
 
     private fun clusterCount(assignment: IntArray): Int = assignment.toSet().size
+
+    private fun norm(v: FloatArray): Float {
+        var sumSq = 0.0
+        for (x in v) sumSq += x.toDouble() * x
+        return sqrt(sumSq).toFloat()
+    }
+
+    @Test
+    fun nameable_cluster_rule_matches_the_people_grid_and_the_review_badge() {
+        // A named person is never a "to name" suggestion.
+        assertFalse("a named person is not nameable", isNameableCluster("Ada", isOther = false, faceCount = 9))
+        // The Unsorted leftover bucket is never offered for naming, at any size.
+        assertFalse("the Unsorted bucket is not nameable", isNameableCluster(null, isOther = true, faceCount = 40))
+        // A one-off detection stays below the photo-count floor, so it is held back from People.
+        assertFalse("a single-photo cluster is below the floor", isNameableCluster(null, isOther = false, faceCount = 1))
+        assertTrue(
+            "a blank name reads as unnamed, so it stays nameable",
+            isNameableCluster("  ", isOther = false, faceCount = 5),
+        )
+        // A recurring unnamed face at or above the floor is surfaced to be named.
+        assertTrue(
+            "an unnamed cluster at the floor is nameable",
+            isNameableCluster(null, isOther = false, faceCount = MIN_FACES_TO_SHOW_PERSON),
+        )
+        assertTrue("a larger unnamed cluster is nameable", isNameableCluster(null, isOther = false, faceCount = 12))
+    }
 
     @Test
     fun two_well_separated_groups_form_exactly_two_clusters() {
@@ -396,6 +423,56 @@ class FaceClusteringTest {
     }
 
     @Test
+    fun assign_incremental_places_a_close_face_on_the_matching_centroid() {
+        val centroids = listOf(unit(1f, 0f, 0f))
+        val near = unit(0.95f, 0.31f, 0f) // cosine about 0.95, well above the join floor
+        val result = assignIncremental(listOf(FaceSample(near, 1f, confident = true)), centroids)
+        assertEquals("a face close to a centroid joins it", 0, result[0])
+    }
+
+    @Test
+    fun assign_incremental_leaves_a_far_face_unassigned() {
+        val centroids = listOf(unit(1f, 0f, 0f))
+        val far = unit(0f, 1f, 0f) // orthogonal to the centroid, cosine 0, below the floor
+        val result = assignIncremental(listOf(FaceSample(far, 1f, confident = true)), centroids)
+        assertEquals("a face matching no centroid is left unassigned", -1, result[0])
+    }
+
+    @Test
+    fun assign_incremental_holds_a_weak_face_to_the_stricter_bar() {
+        // Cosine 0.62 sits above the 0.58 confident floor but below the 0.66 weak floor
+        // (FACE_CLUSTER_THRESHOLD + FACE_CLUSTER_STRICT_DELTA), so the same match joins when confident
+        // and is held out when weak.
+        val centroids = listOf(unit(1f, 0f, 0f))
+        val candidate = unit(0.62f, 0.785f, 0f)
+        val confident = assignIncremental(listOf(FaceSample(candidate, 1f, confident = true)), centroids)
+        assertEquals("a confident face clears the join floor", 0, confident[0])
+        val weak = assignIncremental(listOf(FaceSample(candidate, 1f, confident = false)), centroids)
+        assertEquals("a weak face must clear the stricter bar, so it stays unassigned", -1, weak[0])
+    }
+
+    @Test
+    fun assign_incremental_picks_the_nearest_of_several_centroids() {
+        val centroids = listOf(unit(1f, 0f, 0f), unit(0f, 1f, 0f), unit(0f, 0f, 1f))
+        val face = unit(0.6f, 0.8f, 0f) // cosine 0.6 to the first centroid, 0.8 to the second
+        val result = assignIncremental(listOf(FaceSample(face, 1f, confident = true)), centroids)
+        assertEquals("the face joins its closest centroid, not the first it clears", 1, result[0])
+    }
+
+    @Test
+    fun incremental_centroid_stays_unit_length() {
+        val updated = incrementalCentroid(unit(1f, 0f, 0f), count = 3, add = unit(0f, 1f, 0f))
+        assertEquals("the updated centroid is L2-normalised", 1f, norm(updated), 1e-4f)
+    }
+
+    @Test
+    fun incremental_centroid_is_stable_under_a_repeated_identical_vector() {
+        val v = unit(0.30f, 0.60f, 0.75f)
+        val updated = incrementalCentroid(v, count = 5, add = v)
+        assertArrayEquals("folding in the same direction leaves the centroid unmoved", v, updated, 1e-4f)
+    }
+
+    @Test
     fun unpack_reads_the_little_endian_floats_the_indexer_packed() {
         val vector = FloatArray(FACE_EMBEDDING_DIM) { (it - 5) * 0.01f }
         val buffer = ByteBuffer.allocate(vector.size * Float.SIZE_BYTES).order(ByteOrder.LITTLE_ENDIAN)
@@ -405,7 +482,7 @@ class FaceClusteringTest {
 
     @Test
     fun unpack_rejects_a_blob_of_the_wrong_width() {
-        val oldModelBlob = ByteArray(512 * Float.SIZE_BYTES)
+        val oldModelBlob = ByteArray(128 * Float.SIZE_BYTES)
         assertTrue(unpackEmbedding(oldModelBlob).isEmpty())
     }
 }

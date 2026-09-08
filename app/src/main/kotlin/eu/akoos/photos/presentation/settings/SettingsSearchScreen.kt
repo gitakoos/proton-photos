@@ -53,6 +53,7 @@ fun settingsSearchIndex(): List<SettingsSearchEntry> = listOf(
         R.string.settings_account_section, R.string.settings_title,
         listOf("account", "profile", "sign out", "log out", "subscription", "fiók", "kijelentkezés"),
         Screen.Account.route,
+        cloud = true,
     ),
 
     // ── Backup & storage ───────────────────────────────────────────────────────

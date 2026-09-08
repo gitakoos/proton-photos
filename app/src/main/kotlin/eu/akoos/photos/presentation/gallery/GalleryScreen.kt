@@ -622,8 +622,12 @@ fun GalleryScreen(
 
     LaunchedEffect(Unit) {
         permissionLauncher.launch(mediaPermissions)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        // Ask for the notification permission at most once per install. Re-launching on every return
+        // to the gallery re-fired an instant denial (no dialog once the user has chosen), which
+        // re-showed the "notifications off" snackbar on every tab switch or photo open.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && viewModel.shouldAskNotificationPermission()) {
             notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            viewModel.markNotificationPermissionAsked()
         }
     }
 
@@ -1300,6 +1304,9 @@ fun GalleryScreen(
             allSelected = state.filteredItems.isNotEmpty() &&
                 state.selectedItems.size == state.filteredItems.size,
             isSignedIn = state.isSignedIn,
+            // Offer Add-to-person to a guest too, once there are people to add to; the account-only
+            // actions in the same list stay behind isSignedIn.
+            showAddToPerson = state.isSignedIn || state.people.isNotEmpty(),
             onSelectAll = {
                 val all = state.filteredItems.toSet()
                 viewModel.setSelection(if (state.selectedItems.size == all.size) emptySet() else all)
@@ -1507,6 +1514,8 @@ fun GalleryScreen(
                 showCategorySection = false,
                 showMediaTypeSection = false,
                 showDateSection = false,
+                // Signed out there is only on-device media, so the backed-up / cloud chips are hidden.
+                showSyncStatusSection = state.isSignedIn,
                 // Timeline-only bottom row into the full layout / categories / folders screen.
                 onOpenTimelineSettings = onOpenTimelineFilter,
             )

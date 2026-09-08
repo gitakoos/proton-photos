@@ -66,7 +66,9 @@ import eu.akoos.photos.data.db.dao.PersonDao
 import eu.akoos.photos.data.db.dao.NotPersonDao
 import eu.akoos.photos.data.db.dao.PersonCoverDao
 import eu.akoos.photos.data.db.dao.PersonManualPhotoDao
+import eu.akoos.photos.data.db.entity.PhotoLocationEntity
 import eu.akoos.photos.data.face.FaceEmbeddingModelManager
+import eu.akoos.photos.data.face.FaceModelAssets
 import eu.akoos.photos.data.face.FaceIndexingProgress
 import eu.akoos.photos.data.face.FaceIndexingScheduler
 import eu.akoos.photos.data.face.FaceIndexingState
@@ -106,6 +108,7 @@ import eu.akoos.photos.domain.usecase.UploadStatus
 import eu.akoos.photos.presentation.gallery.FaceBox
 import eu.akoos.photos.presentation.gallery.PersonUi
 import eu.akoos.photos.util.DeviceHealthPolicy
+import eu.akoos.photos.util.NetworkObserver
 import eu.akoos.photos.util.HealthBlockReason
 import eu.akoos.photos.util.heavyMlBlockReason
 import eu.akoos.photos.util.retryOnDbTear
@@ -160,6 +163,7 @@ class SettingsViewModel @Inject constructor(
     private val observePeopleUseCase: ObservePeopleUseCase,
     private val getGalleryItems: GetGalleryItemsUseCase,
     private val newsRepository: NewsRepository,
+    private val networkObserver: NetworkObserver,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SettingsUiState())
@@ -203,28 +207,26 @@ class SettingsViewModel @Inject constructor(
             FaceIndexingUi(FaceIndexingState.Idle, 0, 0, HealthBlockReason.NONE, actionEnabled = true),
         )
 
-    /** How many people the face clustering has grouped for the active account, 0 when signed out.
-     *  Re-resolves on an account switch so the panel never carries the previous account's count. */
+    /** How many people the face clustering has grouped for the active account, or for the guest's
+     *  local partition when signed out. Re-resolves on an account switch so the panel never carries
+     *  the previous account's count. */
     val peopleCount: StateFlow<Int> = accountManager.getPrimaryUserId()
         .flatMapLatest { userId ->
-            if (userId != null) {
-                // Count exactly the named people the tiles beside this figure show, so the header and
-                // the row agree: unnamed clusters have no tile, and the Unsorted bucket is not a person.
-                personDao.observePeopleForUser(userId.id)
-                    .map { namedPeopleCount(it) }
-            } else {
-                flowOf(0)
-            }
+            // Count exactly the named people the tiles beside this figure show, so the header and the
+            // row agree: unnamed clusters have no tile, and the Unsorted bucket is not a person. A guest
+            // counts under the local partition, so the header matches the tiles it sits over.
+            personDao.observePeopleForUser(userId?.id ?: PhotoLocationEntity.LOCAL_USER)
+                .map { namedPeopleCount(it) }
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), 0)
 
-    /** The active account's clustered people resolved to face-crop tiles for the AI panel, empty when
-     *  signed out. Feeds the gallery's own [ObservePeopleUseCase] against the shared library, so the
-     *  panel shows the same faces the People rail does, and re-resolves on an account switch. */
+    /** The clustered people resolved to face-crop tiles for the AI panel. Feeds the gallery's own
+     *  [ObservePeopleUseCase] against the shared library, so the panel shows the same faces the People
+     *  rail does, and re-resolves on an account switch. Runs on-device, so a guest's local partition
+     *  is grouped here too. */
     val people: StateFlow<List<PersonUi>> = accountManager.getPrimaryUserId()
         .flatMapLatest { userId ->
-            if (userId == null) flowOf(emptyList())
-            else observePeopleUseCase(userId, getGalleryItems.invoke(userId))
+            observePeopleUseCase(userId, if (userId == null) getGalleryItems.invokeLocalOnly() else getGalleryItems.invoke(userId))
                 .map { list -> list.mapNotNull { it.toPersonUi() }.filter { !it.displayName.isNullOrBlank() } }
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), emptyList())
@@ -485,14 +487,21 @@ class SettingsViewModel @Inject constructor(
                 _uiState.update { current ->
                     when (evt.status) {
                         UploadStatus.Idle -> {
-                            // End-of-batch: KEEP the events list visible so the user can
-                            // re-enter Settings and see what was just uploaded. Clear only
-                            // the live counters (bytes/sec, in-flight tally). The next
-                            // Uploading event with doneIdx=0 will reset the panel for a
-                            // fresh batch.
+                            // End-of-batch: consume the closing frame's done/total (both = the batch
+                            // total) so the card reads complete. Without this it kept the last per-file
+                            // count, which stuck on "2 of 4" when queued photos were deleted before
+                            // they uploaded (a gone photo advances neither counter mid-batch). It also
+                            // re-arms new-batch detection below, which needs done >= total. KEEP the
+                            // events list visible so the user can still see what was just uploaded;
+                            // clear only the live counters (bytes/sec, in-flight tally).
                             batchStartMs = 0L
                             uploadedBytesByUri.clear()
-                            current.copy(uploadBytesPerSecond = null, uploadDeferReason = null)
+                            current.copy(
+                                uploadDoneCount = evt.doneIdx,
+                                uploadTotalCount = evt.totalCount,
+                                uploadBytesPerSecond = null,
+                                uploadDeferReason = null,
+                            )
                         }
                         UploadStatus.WaitingForWifi,
                         UploadStatus.PreparingBackup,
@@ -647,13 +656,21 @@ class SettingsViewModel @Inject constructor(
      *
      * A failure keeps `null` (placeholder), never `false`: [IsTelemetryEnabled] itself falls back
      * to enabled when it cannot read the setting, so rendering "Off" would assure the user of a
-     * privacy state they do not actually have.
+     * privacy state they do not actually have. A null primary user is different: with no session
+     * nothing is emitted at all, so it renders a definite "Off" rather than the placeholder.
      */
     private fun observeTelemetryEnabled() {
         viewModelScope.launch {
             accountManager.getPrimaryUserId()
                 .distinctUntilChanged()
                 .collectLatest { userId ->
+                    // No signed-in user means no session and nothing emitted, so "Off" is accurate
+                    // rather than a false assurance. (IsTelemetryEnabled short-circuits a null user to
+                    // enabled=true, which surfaced as a misleading "On" in local-only mode.)
+                    if (userId == null) {
+                        _uiState.update { it.copy(telemetryEnabled = false) }
+                        return@collectLatest
+                    }
                     _uiState.update { it.copy(telemetryEnabled = null) }
                     val enabled = try {
                         isTelemetryEnabled(userId)
@@ -1069,7 +1086,7 @@ class SettingsViewModel @Inject constructor(
             if (enabled) {
                 // Opt-in begins indexing straight away, so there is no separate manual start step: new
                 // photos are then picked up automatically by the library's own indexing trigger.
-                accountManager.getPrimaryUserId().first()?.let { faceIndexingScheduler.requestIndex(it) }
+                faceIndexingScheduler.requestIndex(accountManager.getPrimaryUserId().first())
             } else {
                 // Turning AI off stands any running scan down promptly rather than waiting for its next
                 // per-photo check to notice the flag.
@@ -1199,10 +1216,17 @@ class SettingsViewModel @Inject constructor(
                         faceModelDownloadFailed = false,
                     )
                 }
-                accountManager.getPrimaryUserId().first()?.let { faceIndexingScheduler.requestIndex(it) }
+                faceIndexingScheduler.requestIndex(accountManager.getPrimaryUserId().first())
             } else {
+                // Note the connection now so the drawer can say the fetch will use mobile data when
+                // Wi-Fi is not there, the same gate sync applies before it moves large data.
+                val onWifi = networkObserver.currentlyOnWifi()
                 _uiState.update {
-                    it.copy(faceModelPrompt = FaceModelPrompt.Download, faceModelDownloadFailed = false)
+                    it.copy(
+                        faceModelPrompt = FaceModelPrompt.Download,
+                        faceModelDownloadFailed = false,
+                        faceModelOnWifi = onWifi,
+                    )
                 }
             }
         }
@@ -1245,13 +1269,29 @@ class SettingsViewModel @Inject constructor(
                 faceModelPrompt = FaceModelPrompt.None,
                 faceModelDownloading = true,
                 faceModelDownloadFailed = false,
+                faceModelDownloadedBytes = 0L,
             )
         }
         viewModelScope.launch {
             context.settingsDataStore.edit { it[SettingsKeys.FACE_MODEL_DOWNLOAD_ALLOWED] = true }
+            // The detector lands first, so the embedder's byte count carries on from the detector's
+            // size to keep the bar climbing across both halves toward the quoted total.
+            val embedderBase = FaceModelAssets.MODEL.sizeBytes
+            val step = 256L * 1024
+            var lastShown = -1L
+            val report: (Long) -> Unit = { cumulative ->
+                // Coalesce the per-chunk callbacks so the panel is not recomposed on every 64 KB; the
+                // bar still climbs smoothly across the download.
+                if (cumulative - lastShown >= step || cumulative >= FaceModelAssets.TOTAL_DOWNLOAD_BYTES) {
+                    lastShown = cumulative
+                    _uiState.update { it.copy(faceModelDownloadedBytes = cumulative) }
+                }
+            }
             val ready = withContext(Dispatchers.IO) {
-                faceModelManager.prepare() is FaceModelPreparation.Ready &&
-                    faceEmbeddingModelManager.prepare() is FaceModelPreparation.Ready
+                faceModelManager.prepare(onProgress = { report(it) }) is FaceModelPreparation.Ready &&
+                    faceEmbeddingModelManager.prepare(
+                        onProgress = { report(embedderBase + it) },
+                    ) is FaceModelPreparation.Ready
             }
             if (ready) {
                 context.settingsDataStore.edit { it[SettingsKeys.FACE_ENABLED] = true }
@@ -1260,12 +1300,17 @@ class SettingsViewModel @Inject constructor(
                         faceEnabled = true,
                         faceRecognitionAvailable = true,
                         faceModelDownloading = false,
+                        faceModelDownloadedBytes = 0L,
                     )
                 }
-                accountManager.getPrimaryUserId().first()?.let { faceIndexingScheduler.requestIndex(it) }
+                faceIndexingScheduler.requestIndex(accountManager.getPrimaryUserId().first())
             } else {
                 _uiState.update {
-                    it.copy(faceModelDownloading = false, faceModelDownloadFailed = true)
+                    it.copy(
+                        faceModelDownloading = false,
+                        faceModelDownloadFailed = true,
+                        faceModelDownloadedBytes = 0L,
+                    )
                 }
             }
         }
@@ -1292,14 +1337,13 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             context.settingsDataStore.edit { it[SettingsKeys.FACE_ENABLED] = false }
             faceIndexingScheduler.reset()
-            accountManager.getPrimaryUserId().first()?.let { userId ->
-                faceDao.clearForUser(userId.id)
-                personDao.clearForUser(userId.id)
-                faceScanDao.clearForUser(userId.id)
-                personManualPhotoDao.clearForUser(userId.id)
-                notPersonDao.clearForUser(userId.id)
-                personCoverDao.clearForUser(userId.id)
-            }
+            val account = accountManager.getPrimaryUserId().first()?.id ?: PhotoLocationEntity.LOCAL_USER
+            faceDao.clearForUser(account)
+            personDao.clearForUser(account)
+            faceScanDao.clearForUser(account)
+            personManualPhotoDao.clearForUser(account)
+            notPersonDao.clearForUser(account)
+            personCoverDao.clearForUser(account)
             faceModelManager.deleteAll()
             faceEmbeddingModelManager.deleteAll()
             _uiState.update { it.copy(faceEnabled = false, faceRecognitionAvailable = false) }
@@ -1340,14 +1384,18 @@ class SettingsViewModel @Inject constructor(
      */
     fun clearFaceIndex() {
         viewModelScope.launch {
-            val userId = accountManager.getPrimaryUserId().first() ?: return@launch
+            val userId = accountManager.getPrimaryUserId().first()
+            val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
             faceIndexingScheduler.reset()
-            faceDao.clearForUser(userId.id)
-            personDao.clearForUser(userId.id)
-            faceScanDao.clearForUser(userId.id)
-            personManualPhotoDao.clearForUser(userId.id)
-            notPersonDao.clearForUser(userId.id)
-            personCoverDao.clearForUser(userId.id)
+            faceDao.clearForUser(account)
+            personDao.clearForUser(account)
+            faceScanDao.clearForUser(account)
+            personManualPhotoDao.clearForUser(account)
+            notPersonDao.clearForUser(account)
+            personCoverDao.clearForUser(account)
+            // Face recognition stays on, and indexing is automatic, so a fresh walk starts right after
+            // the wipe rather than leaving a bare "0 people" until the gallery is next opened.
+            faceIndexingScheduler.requestIndex(userId)
         }
     }
 
@@ -1359,11 +1407,12 @@ class SettingsViewModel @Inject constructor(
      */
     fun rescanFaces() {
         viewModelScope.launch {
-            val userId = accountManager.getPrimaryUserId().first() ?: return@launch
+            val userId = accountManager.getPrimaryUserId().first()
+            val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
             faceIndexingScheduler.reset()
-            faceDao.clearForUser(userId.id)
-            personDao.clearForUser(userId.id)
-            faceScanDao.clearForUser(userId.id)
+            faceDao.clearForUser(account)
+            personDao.clearForUser(account)
+            faceScanDao.clearForUser(account)
             // person_manual_photo and not_person are intentionally kept (name-keyed curation).
             faceIndexingScheduler.requestIndex(userId)
         }
@@ -1747,6 +1796,7 @@ class SettingsViewModel @Inject constructor(
                         loader.diskCache?.clear()
                         eu.akoos.photos.util.SyncDiagnostics.clear()
                         eu.akoos.photos.util.PerfDiagnostics.clear()
+                        eu.akoos.photos.util.ImportDiagnostics.clear()
                         File(context.filesDir, "diagnostics").deleteRecursively()
                         // Drop the Glance state still pointing at the swept bitmaps so each widget
                         // redraws its placeholder now rather than on its next natural tick.

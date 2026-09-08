@@ -50,6 +50,40 @@ data class FaceManualName(
     val manualName: String,
 )
 
+/**
+ * One not-yet-grouped face reduced to what the incremental clustering pass needs to place it: its id,
+ * its recognition [embedding], and the three quality signals ([score], [blur], [landmarks]) the
+ * confident-versus-weak grading reads. The heavy per-row columns the pass does not need (box, photoKey,
+ * person link) are left out, so matching a fresh import loads only these few fields for the unclustered
+ * remainder rather than the whole face table.
+ */
+data class UnclusteredFace(
+    val id: String,
+    val embedding: ByteArray,
+    val score: Float,
+    val blur: Float?,
+    val landmarks: String,
+) {
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is UnclusteredFace) return false
+        return id == other.id &&
+            embedding.contentEquals(other.embedding) &&
+            score == other.score &&
+            blur == other.blur &&
+            landmarks == other.landmarks
+    }
+
+    override fun hashCode(): Int {
+        var result = id.hashCode()
+        result = 31 * result + embedding.contentHashCode()
+        result = 31 * result + score.hashCode()
+        result = 31 * result + (blur?.hashCode() ?: 0)
+        result = 31 * result + landmarks.hashCode()
+        return result
+    }
+}
+
 @Dao
 interface FaceDao {
 
@@ -274,6 +308,27 @@ interface FaceDao {
     // scheduler would re-cluster forever chasing faces the user removed on purpose.
     @Query("SELECT COUNT(*) FROM face WHERE userId = :userId AND personId IS NULL AND rejected = 0")
     suspend fun unclusteredCount(userId: String): Int
+
+    /** How many of the account's faces are grouped into a person (kept, not removed). The incremental
+     *  pass compares this against the cached centroids' total member count: a mismatch means a curation
+     *  edit drifted the assignments, so the cache is stale and a full rebuild reconciles it. */
+    @Query("SELECT COUNT(*) FROM face WHERE userId = :userId AND personId IS NOT NULL AND rejected = 0")
+    suspend fun assignedFaceCount(userId: String): Int
+
+    /** The not-yet-grouped faces for the account, projected to the fields the incremental pass needs.
+     *  Only the unclustered remainder is read (not the whole face table), so placing a fresh import
+     *  against the cached centroids never loads every stored embedding at once. */
+    @Query("SELECT id, embedding, score, blur, landmarks FROM face WHERE userId = :userId AND personId IS NULL AND rejected = 0")
+    suspend fun unclusteredFaces(userId: String): List<UnclusteredFace>
+
+    /** One page of the account's KEPT faces (not removed), id + embedding, for the hide-similar sweep so
+     *  dismissing a junk cluster can also reject its look-alikes that landed in other clusters, without
+     *  loading every stored embedding at once. Ordered by id so paging stays stable. */
+    @Query(
+        "SELECT id, embedding, score, blur, landmarks FROM face WHERE userId = :userId AND rejected = 0 " +
+            "ORDER BY id LIMIT :limit OFFSET :offset",
+    )
+    suspend fun keptFacesPaged(userId: String, limit: Int, offset: Int): List<UnclusteredFace>
 
     /**
      * Drops every face belonging to [photoKeys], the invalidation a removed or re-indexed photo

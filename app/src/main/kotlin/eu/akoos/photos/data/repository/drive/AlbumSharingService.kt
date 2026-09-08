@@ -42,9 +42,11 @@ import eu.akoos.photos.data.api.DriveApiService
 import eu.akoos.photos.data.api.dto.AcceptInvitationRequest
 import eu.akoos.photos.data.api.dto.AlbumDto
 import eu.akoos.photos.data.api.dto.BatchLinksRequest
+import eu.akoos.photos.data.api.dto.CreateExternalInvitationRequest
 import eu.akoos.photos.data.api.dto.CreateInvitationRequest
 import eu.akoos.photos.data.api.dto.CreateShareRequest
 import eu.akoos.photos.data.api.dto.CreateShareUrlRequest
+import eu.akoos.photos.data.api.dto.ExternalInvitationBodyDto
 import eu.akoos.photos.data.api.dto.GlobalInvitationDto
 import eu.akoos.photos.data.api.dto.InvitationBodyDto
 import eu.akoos.photos.data.api.dto.LinkCoreDto
@@ -56,6 +58,7 @@ import eu.akoos.photos.data.db.dao.PhotoListingDao
 import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.entity.AlbumShareLink
 import eu.akoos.photos.domain.entity.PendingInvitation
+import eu.akoos.photos.domain.entity.ShareExternalInvitation
 import eu.akoos.photos.domain.entity.ShareInvitation
 import eu.akoos.photos.domain.entity.ShareMember
 import eu.akoos.photos.domain.entity.SharedPhoto
@@ -785,8 +788,9 @@ class AlbumSharingService @Inject constructor(
         val publicAddressInfo = runCatching {
             publicAddressRepository.getPublicAddressInfo(userId, email)
         }.getOrElse { e ->
-            // Only claim "not a Proton account" when the error matches a known unknown-recipient
-            // shape; anything else is transient and surfaces the raw cause without blaming the user.
+            // A known unknown-recipient shape means the address has no Proton account: that is the
+            // signal to send an external invitation (#54), not an error. Anything else is transient
+            // and surfaces the raw cause without blaming the user.
             val raw = e.message.orEmpty()
             val isNotProton = raw.contains("does not exist", ignoreCase = true) ||
                 raw.contains("invalid recipient", ignoreCase = true) ||
@@ -799,8 +803,41 @@ class AlbumSharingService @Inject constructor(
                 raw.contains("Expected start of the object", ignoreCase = true) ||
                 raw.contains("<html", ignoreCase = true) ||
                 raw.contains("but had '<'", ignoreCase = true)
+            if (isNotProton) {
+                // #54: the recipient has no Proton address, so there is no published key to seal the
+                // share session key to. Fall back to an EXTERNAL invitation. The inviter SIGNS (but
+                // does not encrypt) the invitee-email|session-key binding with the share OWNER's key,
+                // and the server emails the recipient a prompt to open the album with a new account.
+                val externalSignature = cryptoHelper.signExternalInvitation(
+                    inviteeEmail   = email,
+                    sessionKey     = shareSessionKey,
+                    signerKeyBytes = inviterSigningKey.unlockedKeyBytes,
+                )
+                val externalRequest = CreateExternalInvitationRequest(
+                    externalInvitation = ExternalInvitationBodyDto(
+                        inviterAddressId            = inviterSigningKey.addressId,
+                        inviteeEmail                = email,
+                        permissions                 = permissions,
+                        externalInvitationSignature = externalSignature,
+                    ),
+                    // The album name lives encrypted on the link; decrypting it only to title the
+                    // notification email is not worth a round-trip, so send no EmailDetails.
+                    emailDetails = null,
+                )
+                try {
+                    semaphore.withPermit {
+                        manager.invoke { inviteExternalToShare(albumShareId, externalRequest) }.valueOrThrow
+                    }
+                } catch (ex: Exception) {
+                    if (ex is kotlinx.coroutines.CancellationException) throw ex
+                    Log.e(TAG, "inviteToAlbum: external invitation failed: shareId=$albumShareId msg=${ex.message}", ex)
+                    throw ex
+                }
+                Log.d(TAG, "inviteToAlbum: sent external invitation on share $albumShareId (non-Proton recipient)")
+                return@withContext albumShareId
+            }
+            // Genuine failures still surface; a bad-recipient message never swallows a real error.
             val friendly = when {
-                isNotProton -> "Couldn't send the invite to this address. Please check it and try again."
                 isHtmlResponse -> "Couldn't reach the directory for $email — try again in a moment or double-check the address"
                 else -> "Could not invite $email: ${raw.take(140)}"
             }
@@ -1418,6 +1455,26 @@ class AlbumSharingService @Inject constructor(
             manager.invoke { revokeInvitation(shareId, invitationId) }.valueOrThrow
         }
         Log.d(TAG, "revokeShareInvitation: revoked $invitationId from share $shareId")
+    }
+
+    // #54: external (non-Proton) invitations sent when a recipient has no Proton address. Listed and
+    // revoked alongside the internal invitations in the album's "Who has access" list.
+    suspend fun listExternalInvitations(userId: UserId, shareId: String): List<ShareExternalInvitation> = withContext(Dispatchers.IO) {
+        val manager = apiProvider.get<DriveApiService>(userId)
+        val resp = semaphore.withPermit {
+            manager.invoke { listExternalInvitations(shareId) }.valueOrThrow
+        }
+        resp.externalInvitations.map {
+            ShareExternalInvitation(it.externalInvitationId, it.inviteeEmail, it.permissions, it.state)
+        }
+    }
+
+    suspend fun revokeExternalInvitation(userId: UserId, shareId: String, invitationId: String): Unit = withContext(Dispatchers.IO) {
+        val manager = apiProvider.get<DriveApiService>(userId)
+        semaphore.withPermit {
+            manager.invoke { revokeExternalInvitation(shareId, invitationId) }.valueOrThrow
+        }
+        Log.d(TAG, "revokeExternalInvitation: revoked $invitationId from share $shareId")
     }
 
     suspend fun loadShareMembers(userId: UserId, shareId: String): List<ShareMember> = withContext(Dispatchers.IO) {

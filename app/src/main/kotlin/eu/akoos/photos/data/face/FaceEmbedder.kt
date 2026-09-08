@@ -21,11 +21,11 @@
  */
 
 /*
- * The session handling and the NCHW input layout follow the detector rail in this project. The BGR,
- * raw 0-255 input and the L2-normalised 128-d output follow the published OpenCV Zoo SFace
- * recognition format (the blobFromImage default), which is Apache-2.0 licensed:
+ * The session handling follows the detector rail in this project. The RGB, (value - 127.5) / 128
+ * normalised NHWC input and the L2-normalised 512-d output follow the GhostFaceNet recognition
+ * model, which is MIT licensed:
  *
- *   Copyright (c) 2023 OpenCV Zoo and contributors
+ *   Copyright (c) 2022 HamadYA (GhostFaceNets)
  */
 
 package eu.akoos.photos.data.face
@@ -42,16 +42,17 @@ import java.nio.FloatBuffer
 import kotlin.math.sqrt
 
 /**
- * Turns one aligned face crop into a [DIM]-d embedding by running the SFace recognition network once.
+ * Turns one aligned face crop into a [DIM]-d embedding by running the GhostFaceNet recognition
+ * network once.
  *
  * One session per instance, opened from [modelFile] when the instance is built and released by
  * [close]; opening it costs far more than a run, so a caller holds the instance for as long as it
  * needs embeddings and closes it after. [embed] is not safe for concurrent runs and its owner
  * serialises them.
  *
- * The input is a 112x112 landmark-aligned crop (see [FaceAlignment]), fed BGR and raw 0-255 as SFace
- * expects; the output vector is L2-normalised so two embeddings compare by a plain cosine (dot
- * product).
+ * The input is a 112x112 landmark-aligned crop (see [FaceAlignment]), fed RGB and normalised by
+ * (value - 127.5) / 128 as GhostFaceNet expects; the output vector is L2-normalised so two
+ * embeddings compare by a plain cosine (dot product).
  */
 class FaceEmbedder(modelFile: File) : AutoCloseable {
 
@@ -86,9 +87,9 @@ class FaceEmbedder(modelFile: File) : AutoCloseable {
     }
 
     /**
-     * [aligned] as the network's input: scaled to [SIZE] square if it is not already, read raw 0-255
-     * in blue, green, red channel order and laid out channel-planes-first as a single (1, 3, SIZE,
-     * SIZE) batch, which is what SFace was trained on.
+     * [aligned] as the network's input: scaled to [SIZE] square if it is not already, read in red,
+     * green, blue channel order, normalised by (value - 127.5) / 128, and laid out pixel-interleaved
+     * as a single (1, SIZE, SIZE, 3) NHWC batch, which is what GhostFaceNet was trained on.
      */
     private fun toInputTensor(aligned: Bitmap): OnnxTensor {
         val sized = if (aligned.width == SIZE && aligned.height == SIZE) {
@@ -99,20 +100,20 @@ class FaceEmbedder(modelFile: File) : AutoCloseable {
         val values = try {
             val pixels = IntArray(SIZE * SIZE)
             sized.getPixels(pixels, 0, SIZE, 0, 0, SIZE, SIZE)
-            val plane = SIZE * SIZE
-            val out = FloatArray(3 * plane)
-            for (i in 0 until plane) {
+            val out = FloatArray(SIZE * SIZE * 3)
+            var j = 0
+            for (i in 0 until SIZE * SIZE) {
                 val pixel = pixels[i]
-                out[i] = (pixel and 0xFF).toFloat()
-                out[plane + i] = ((pixel shr 8) and 0xFF).toFloat()
-                out[2 * plane + i] = ((pixel shr 16) and 0xFF).toFloat()
+                out[j++] = (((pixel shr 16) and 0xFF) - 127.5f) / 128f
+                out[j++] = (((pixel shr 8) and 0xFF) - 127.5f) / 128f
+                out[j++] = ((pixel and 0xFF) - 127.5f) / 128f
             }
             out
         } finally {
             // createScaledBitmap hands back the same instance when nothing needs scaling.
             if (sized !== aligned && !sized.isRecycled) sized.recycle()
         }
-        val shape = longArrayOf(1, 3, SIZE.toLong(), SIZE.toLong())
+        val shape = longArrayOf(1, SIZE.toLong(), SIZE.toLong(), 3)
         return OnnxTensor.createTensor(environment, FloatBuffer.wrap(values), shape)
     }
 
@@ -144,14 +145,14 @@ class FaceEmbedder(modelFile: File) : AutoCloseable {
     }
 
     private companion object {
-        const val DEFAULT_INPUT = "data"
+        const val DEFAULT_INPUT = "input_1:0"
 
-        const val DEFAULT_OUTPUT = "fc1"
+        const val DEFAULT_OUTPUT = "Identity:0"
 
         /** Square side the network reads. */
         const val SIZE = 112
 
         /** Length of the embedding the network emits. */
-        const val DIM = 128
+        const val DIM = 512
     }
 }

@@ -36,14 +36,15 @@ import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
 import eu.akoos.photos.domain.usecase.ObservePlacesUseCase
 import eu.akoos.photos.domain.usecase.PlaceCity
+import eu.akoos.photos.domain.usecase.PlaceCountry
 import eu.akoos.photos.util.retryOnDbTear
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
-import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -71,8 +72,8 @@ class MapViewModel @Inject constructor(
     /** Live stream of every located photo for the primary account — the map's marker source. */
     val locations: StateFlow<List<PhotoLocationEntity>> = accountManager.getPrimaryUserId()
         .flatMapLatest { userId ->
-            if (userId == null) flowOf(emptyList())
-            else photoLocationDao.observeForUser(userId.id)
+            // Read the local partition when signed out, so a guest's on-device GPS fixes plot too.
+            photoLocationDao.observeForUser(userId?.id ?: PhotoLocationEntity.LOCAL_USER)
         }
         .retryOnDbTear("MapLocations")
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
@@ -114,6 +115,32 @@ class MapViewModel @Inject constructor(
     private val places = observePlaces()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), null)
 
+    init {
+        // A local photo can sit in the library with no pin: a fresh capture, or one revealed from the
+        // vault, which comes back under a NEW MediaStore id and leaves the old id's location fix
+        // behind. A one-shot walk on first open misses it, so re-read EXIF every time the local photo
+        // set changes and the new id gets its fix on this view instead of only after a restart. The
+        // scheduler's skip-set keeps the walk to the newcomers, and this watches the library (never the
+        // location table it writes) so a fix it stores cannot re-trigger the walk.
+        viewModelScope.launch {
+            accountManager.getPrimaryUserId()
+                .flatMapLatest { userId ->
+                    (if (userId == null) getGalleryItems.invokeLocalOnly() else getGalleryItems.invoke(userId))
+                        .map { items ->
+                            items.mapNotNullTo(HashSet()) { item ->
+                                when (item) {
+                                    is GalleryItem.LocalOnly -> item.local.uri
+                                    is GalleryItem.Synced -> item.local.uri
+                                    is GalleryItem.CloudOnly -> null
+                                }
+                            }
+                        }
+                }
+                .distinctUntilChanged()
+                .collect { startLocalBackfill() }
+        }
+    }
+
     /**
      * The distinct cities the account's located photos were taken in, from the shared places grouping,
      * backing the bottom place search. Reuses [ObservePlacesUseCase] so the map and the Places screen
@@ -129,6 +156,11 @@ class MapViewModel @Inject constructor(
         .map { it != null }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), false)
 
+    /** The distinct countries the account's located photos were taken in, highlighted on the globe. */
+    val countries: StateFlow<List<PlaceCountry>> = places
+        .map { it?.countries.orEmpty() }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), emptyList())
+
     /**
      * On-device EXIF backfill — reads GPS from local photos, which needs the ACCESS_MEDIA_LOCATION
      * grant, so the screen calls this only once the permission is in hand. Writes `photo_location`
@@ -137,8 +169,13 @@ class MapViewModel @Inject constructor(
      */
     fun startLocalBackfill() {
         viewModelScope.launch {
-            val userId = accountManager.getPrimaryUserId().first() ?: return@launch
-            withContext(Dispatchers.IO) { localExifBackfillScheduler.backfillAll(userId) }
+            // No account needed: the on-device EXIF-GPS walk reads local files and stores fixes under
+            // the local partition, so a guest's map fills too. The screen secures ACCESS_MEDIA_LOCATION
+            // before calling this.
+            val userId = accountManager.getPrimaryUserId().first()
+            // respectHealthGate = false: the user opened the map and wants their pins now, so the walk
+            // runs even on a low battery instead of being deferred like the background sync's call.
+            withContext(Dispatchers.IO) { localExifBackfillScheduler.backfillAll(userId, respectHealthGate = false) }
         }
     }
 

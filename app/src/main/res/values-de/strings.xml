@@ -557,6 +557,91 @@
     <string name="metadata_edit_channel_desc">Zeigt den Fortschritt beim Speichern von Änderungen an Fotodetails auf Proton Drive.</string>
     <string name="metadata_edit_notification_title">Fotodetails werden gespeichert…</string>
     <string name="metadata_edit_notification_progress">%1$d von %2$d</string>
+    <!-- Google Takeout import notification. -->
+    <string name="import_channel_name">Fotoimport</string>
+    <string name="import_channel_desc">Zeigt den Fortschritt beim Importieren eines Google Takeout-Exports zu Proton Drive.</string>
+    <string name="import_notification_title">Fotos werden importiert…</string>
+    <string name="import_notification_progress">%1$d von %2$d</string>
+    <string name="import_notification_done_title">Import abgeschlossen</string>
+    <string name="import_notification_done_text">%1$d importiert, %2$d übersprungen, %3$d fehlgeschlagen</string>
+    <!-- Import staging notification. -->
+    <string name="import_stage_notification_title">Import wird vorbereitet…</string>
+    <string name="import_stage_progress">%1$d von %2$d</string>
+    <!-- Google Takeout import screen. -->
+    <string name="import_title">Fotos importieren</string>
+    <string name="import_row_desc">Einen Google Photos- oder Ente-Export in Proton Drive übertragen</string>
+    <string name="import_explainer">Importiere einen Google Takeout- oder Ente-Export als .zip. Deine Fotos werden mit ihrem ursprünglichen Datum und Ort zu Proton Drive hochgeladen.</string>
+    <string name="import_choose_zip">Takeout .zip auswählen</string>
+    <string name="import_scanning">Export wird gelesen…</string>
+    <string name="import_progress_count">%1$d / %2$d</string>
+    <string name="import_done_title">Import abgeschlossen</string>
+    <string name="import_done_summary">%1$d importiert, %2$d übersprungen, %3$d fehlgeschlagen</string>
+    <string name="import_done_button">Fertig</string>
+    <string name="import_failed_title">Import fehlgeschlagen</string>
+    <string name="import_failed_msg">Beim Import ist etwas schiefgelaufen. Wähle die Datei aus und versuche es erneut.</string>
+    <!-- Import review queue. -->
+    <string name="import_staging_title">Import wird vorbereitet</string>
+    <string name="import_uploading_title">Fotos werden hochgeladen</string>
+    <string name="import_review_title">Import prüfen</string>
+    <string name="import_review_confirm">%1$d Fotos importieren</string>
+    <string name="import_review_discard">Verwerfen</string>
+    <string name="import_review_discard_title">Diesen Import verwerfen?</string>
+    <string name="import_review_discard_message">Die vorbereiteten Fotos verlassen die Prüfung. Es wurde noch nichts hochgeladen.</string>
+    <string name="import_review_remove">%1$d entfernen</string>
+    <string name="import_review_restore">Wiederherstellen</string>
+    <string name="import_review_selected_count">%1$d ausgewählt</string>
+    <string name="import_review_no_date">Kein Datum</string>
+    <string name="import_review_removed">Entfernt</string>
+    <string name="import_review_meta_section">Details</string>
+    <string name="import_review_detail_date">Datum</string>
+    <string name="import_review_detail_location">Ort</string>
+    <string name="import_review_detail_description">Beschreibung</string>
+    <string name="import_review_detail_filename">Dateiname</string>
+    <string name="import_review_detail_source">Quelle</string>
+    <string name="import_review_source">Google Photos- oder Ente-Export</string>
+    <!-- Recent imports history. -->
+    <string name="import_history_title">Letzte Importe</string>
+    <string name="import_history_row">%1$d importiert</string>
+    <string name="import_history_row_extra">%1$d übersprungen, %2$d fehlgeschlagen</string>
+    <!-- Recent import detail + undo. -->
+    <string name="import_detail_title">Importdetails</string>
+    <string name="import_detail_empty">Diese Fotos sind nicht mehr auf Drive.</string>
+    <string name="import_undo">Diesen Import rückgängig machen</string>
+    <string name="import_undo_confirm_title">Diesen Import rückgängig machen?</string>
+    <string name="import_undo_confirm_message">Die von diesem Import hinzugefügten Fotos wandern in den Papierkorb von Drive. Alles, was du seitdem geändert hast, bleibt erhalten.</string>
+    <string name="import_undo_running">Importierte Fotos werden entfernt…</string>
+    <string name="import_undo_result">%1$d entfernt, %2$d geänderte behalten, %3$d fehlgeschlagen</string>
+    <string name="import_done_all_present">Diese Fotos sind bereits in deinem Drive, daher wurde nichts importiert.</string>
+    <string name="import_detail_already_badge">Bereits in Drive</string>
+    <string name="import_review_already_badge">Bereits in Drive</string>
+    <string name="import_review_nothing_new">Nichts Neues zu importieren</string>
+    <string name="import_review_add_to_albums">Zu Alben hinzufügen</string>
+    <string name="import_album_mode_label">Alben</string>
+    <string name="import_album_mode_none">Nur Fotos</string>
+    <string name="import_album_mode_shells">Leere Alben erstellen</string>
+    <string name="import_album_mode_photos">Fotos in Alben</string>
+    <string name="import_albums_section">Alben</string>
+    <string name="import_done_view_photos">Importierte Fotos ansehen</string>
+    <string name="import_stat_date">Datum</string>
+    <string name="import_stat_to_import">Zu importieren</string>
+    <string name="import_stat_imported">Importiert</string>
+    <string name="import_stat_already">Bereits in Drive</string>
+    <string name="import_stat_skipped">Übersprungen</string>
+    <string name="import_stat_failed">Fehlgeschlagen</string>
+    <string name="import_confirm_title">Zu Drive importieren?</string>
+    <string name="import_confirm_button">Importieren</string>
+    <string name="import_confirm_albums_only">Die ausgewählten Fotos werden zu ihren Alben hinzugefügt.</string>
+    <string name="import_history_delete_title">Importeintrag löschen</string>
+    <string name="import_history_delete_message">Dadurch wird der Eintrag aus den letzten Importen entfernt, zusammen mit der Möglichkeit, ihn rückgängig zu machen. Die importierten Fotos und alle Alben bleiben in deinem Drive.</string>
+    <string name="import_history_delete_confirm">Löschen</string>
+    <plurals name="import_confirm_message">
+        <item quantity="one">%1$d Foto wird zu deinem Proton Drive hochgeladen.</item>
+        <item quantity="other">%1$d Fotos werden zu deinem Proton Drive hochgeladen.</item>
+    </plurals>
+    <plurals name="import_album_photo_count">
+        <item quantity="one">%1$d Foto</item>
+        <item quantity="other">%1$d Fotos</item>
+    </plurals>
     <string name="album_download_notification_cancel">Abbrechen</string>
     <string name="download_started_background">Download läuft im Hintergrund, den Fortschritt siehst du unter Aktivität</string>
     <!-- Benachrichtigung für Lösch-Berechtigung nach Sicherung -->
@@ -591,6 +676,7 @@
     <string name="share_role_can_view">kann ansehen</string>
     <string name="share_role_can_edit">kann bearbeiten</string>
     <string name="share_role_pending">ausstehend</string>
+    <string name="share_role_external">eingeladen (extern)</string>
     <string name="share_stop_sharing">Freigabe beenden</string>
     <string name="shared_stop_sharing_confirm_body">Die öffentlichen Links funktionieren nicht mehr und die Fotos werden nicht länger geteilt.</string>
     <string name="share_close">Schließen</string>
@@ -604,6 +690,7 @@
     <string name="share_invite_email_duplicate">Bereits hinzugefügt</string>
     <string name="share_invite_summary_partial">%1$d gesendet, %2$d fehlgeschlagen</string>
     <string name="share_invite_summary_all_failed">Die Einladungen konnten nicht gesendet werden</string>
+    <string name="share_invite_self">Du kannst dein eigenes Konto nicht einladen</string>
     <!-- Album-sharing + album action error fallbacks (raw exception text stays in the log) -->
     <string name="share_revoke_failed">Einladung konnte nicht zurückgezogen werden</string>
     <string name="share_remove_member_failed">Mitglied konnte nicht entfernt werden</string>
@@ -1502,6 +1589,8 @@
     <string name="settings_ai_face_download_retry">Schalter erneut einschalten, um es noch einmal zu versuchen.</string>
     <string name="settings_ai_face_download_title">Gesichtsmodell herunterladen?</string>
     <string name="settings_ai_face_download_message">Gesichtserkennung benötigt einen Modell-Download von %1$s. Es funktioniert über jede Verbindung, WLAN wird jedoch empfohlen.</string>
+    <string name="settings_ai_face_download_message_metered">Gesichtserkennung benötigt einen Modell-Download von %1$s. WLAN ist nicht verbunden, daher nutzt dieser Download mobile Daten.</string>
+    <string name="settings_ai_face_downloading_progress">%1$s / %2$s</string>
     <string name="settings_ai_face_download_confirm">Herunterladen</string>
     <string name="settings_ai_face_model_missing">Das Gesichtsmodell ist nicht auf diesem Gerät.</string>
     <string name="settings_ai_face_remove_title">Gesichtsdaten entfernen?</string>
@@ -1783,11 +1872,24 @@
     <string name="whats_new_albumcover_body">Wähle, wie groß die Albumcover erscheinen, von zwei bis vier pro Reihe.</string>
     <string name="whats_new_denser_title">Eine dichtere Zeitleiste</string>
     <string name="whats_new_denser_body">Die Zeitleiste lässt sich jetzt auf zwei dichtere Stufen zoomen, bis zu acht Fotos pro Reihe.</string>
+    <string name="whats_new_import_title">Import aus Google Photos oder Ente</string>
+    <string name="whats_new_import_body">Bring eine exportierte Mediathek mit erhaltenen Datumsangaben, Orten und Bildunterschriften in Proton Drive, sieh sie zuerst durch und lass sie im Hintergrund laufen.</string>
+    <string name="whats_new_share_email_title">Ein Album per E-Mail teilen</string>
+    <string name="whats_new_share_email_body">Lade jeden per E-Mail ein, auch ohne Proton-Konto, und entziehe den Zugriff jederzeit.</string>
+    <string name="whats_new_video_faces_title">Gesichter in Videos</string>
+    <string name="whats_new_video_faces_body">Namensschilder erscheinen jetzt über einem Video, damit du sehen und öffnen kannst, wer darauf zu sehen ist.</string>
+    <string name="whats_new_faces_rework_title">Schärfere Gesichtserkennung</string>
+    <string name="whats_new_faces_rework_body">Weit weniger falsche Gruppen, eine klarere Personen-Ansicht und ein Tippen, um ein verirrtes Gesicht zu korrigieren.</string>
+    <string name="whats_new_guest_title">Mehr funktioniert ohne Konto</string>
+    <string name="whats_new_guest_body">Gesichtserkennung, die Karte, die Kalendernotizen und der Duplikat-Finder funktionieren jetzt alle ohne Anmeldung.</string>
+    <string name="whats_new_dup_nobackup_title">Duplikate ohne Backup</string>
+    <string name="whats_new_dup_nobackup_body">Der Duplikat-Finder durchsucht jetzt die Fotos auf deinem Gerät, ganz ohne Konto oder Backup.</string>
     <string name="whats_new_section_new">Neu</string>
     <string name="whats_new_section_improved">Verbesserungen</string>
 
     <!-- Person detail -->
-    <string name="person_detail_unnamed">Person</string>
+    <string name="person_detail_unnamed">Unbenannt</string>
+    <string name="person_add_name">Namen hinzufügen</string>
     <string name="person_unsorted">Unsortiert</string>
     <string name="person_unsorted_hint">Gesichter, die keiner Person eindeutig zugeordnet werden konnten. Wähle Fotos aus, um eine echte Person herauszunehmen, oder markiere den Rest als „keine Person“.</string>
     <string name="person_unsorted_caption">Übrige Gesichter, die nicht zugeordnet werden konnten. Zum Sortieren öffnen.</string>

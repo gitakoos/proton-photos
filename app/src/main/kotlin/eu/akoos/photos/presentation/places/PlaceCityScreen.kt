@@ -49,6 +49,8 @@ fun PlaceCityScreen(
     longitude: Double,
     onPhotoClick: (items: List<GalleryItem>, index: Int) -> Unit,
     onBack: () -> Unit,
+    /** Opens the date + place editor for the current selection, matching the timeline's entry. */
+    onEditMetadata: (items: List<GalleryItem>) -> Unit = {},
     viewModel: LocationDetailViewModel = hiltViewModel(),
 ) {
     // Resolve the coordinate to its place and photos on entry; keyed on the coords so a fresh place
@@ -68,6 +70,7 @@ fun PlaceCityScreen(
         // No top inset, so the cover fills to the very top and the pill header floats over it, the way
         // the album and person detail pages open (rather than sitting below a solid header band).
         contentTopPadding = 0.dp,
+        onEditMetadata = onEditMetadata,
         headerOverlay = {
             FloatingHeader(
                 title = state.placeName,

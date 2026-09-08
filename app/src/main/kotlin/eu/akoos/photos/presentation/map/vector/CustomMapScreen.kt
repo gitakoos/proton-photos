@@ -22,7 +22,11 @@
 
 package eu.akoos.photos.presentation.map.vector
 
+import android.Manifest
 import android.net.Uri
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -88,6 +92,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.imageLoader
@@ -95,6 +100,7 @@ import coil.request.ImageRequest
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.usecase.PlaceCity
+import eu.akoos.photos.presentation.map.MapViewModel
 import eu.akoos.photos.presentation.map.ThumbnailPin
 import eu.akoos.photos.presentation.places.PlaceSearchSheet
 import eu.akoos.photos.presentation.common.FloatingHeader
@@ -129,14 +135,40 @@ fun CustomMapScreen(
     onCountryClick: (countryCode: String) -> Unit,
     onCityClick: (latitude: Double, longitude: Double) -> Unit,
     onSwitchStyle: () -> Unit = {},
-    vm: CustomMapViewModel = hiltViewModel(),
+    vm: MapViewModel = hiltViewModel(),
 ) {
     val colors = AppColors.current
     val context = LocalContext.current
     val density = LocalDensity.current.density
     val countries by vm.countries.collectAsStateWithLifecycle()
     val cities by vm.cities.collectAsStateWithLifecycle()
-    val placesLoaded by vm.loaded.collectAsStateWithLifecycle()
+    val placesLoaded by vm.placesLoaded.collectAsStateWithLifecycle()
+
+    // Permission gate: ACCESS_MEDIA_LOCATION only exists on Android 10+. On older OS versions
+    // EXIF GPS is readable without it, so we treat the grant as implicitly present and go
+    // straight to the backfill.
+    val needsMediaLocation = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        // The on-device EXIF half needs the grant; a denial just leaves it un-run (the cloud half
+        // already started below). A grant fills the table from local GPS tags.
+        if (granted) vm.startLocalBackfill()
+    }
+
+    LaunchedEffect(Unit) {
+        // Cloud photos carry their GPS in the encrypted XAttr, so no permission is needed; start that
+        // half immediately and unconditionally. The on-device EXIF half is gated on the grant below.
+        vm.startCloudBackfill()
+        val alreadyGranted = !needsMediaLocation || ContextCompat.checkSelfPermission(
+            context, Manifest.permission.ACCESS_MEDIA_LOCATION,
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        if (alreadyGranted) {
+            vm.startLocalBackfill()
+        } else {
+            permissionLauncher.launch(Manifest.permission.ACCESS_MEDIA_LOCATION)
+        }
+    }
 
     val world by produceState<WorldMap?>(null) { value = WorldMapData.load(context) }
     val shapeByIso = remember(world) { world?.countries?.associateBy { it.iso2 }.orEmpty() }

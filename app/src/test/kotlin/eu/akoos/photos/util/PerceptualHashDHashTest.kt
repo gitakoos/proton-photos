@@ -46,7 +46,7 @@ import org.junit.Test
  *
  * The uniform-image blind spot is pinned as DOCUMENTED behaviour, not as a defect: a flat frame has
  * no left-to-right differences to read, so every flat frame fingerprints identically and the finder
- * groups them. That is the known cost of the 8/64 threshold.
+ * groups them. That is the known cost of the 12/64 threshold.
  */
 class PerceptualHashDHashTest {
 
@@ -147,7 +147,7 @@ class PerceptualHashDHashTest {
     @Test
     fun `a photo with no left-to-right change fingerprints as zero whatever its brightness`() {
         // The documented blind spot: black, white and every flat grey between them are one and the
-        // same fingerprint, so the finder groups them. Deliberate, and the reason a threshold of 8
+        // same fingerprint, so the finder groups them. Deliberate, and the reason a threshold of 12
         // is safe for real photos.
         assertEquals(0L, hashOf(flat(0)))
         assertEquals(0L, hashOf(flat(255)))
@@ -230,6 +230,6 @@ class PerceptualHashDHashTest {
     @Test
     fun `the algorithm version is the one every stored fingerprint was computed under`() {
         assertEquals(1, PerceptualHash.DHASH_ALGO_VERSION)
-        assertEquals(8, PerceptualHash.SIMILARITY_THRESHOLD)
+        assertEquals(12, PerceptualHash.SIMILARITY_THRESHOLD)
     }
 }

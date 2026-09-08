@@ -33,7 +33,6 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.flatMapLatest
-import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -44,9 +43,13 @@ import eu.akoos.photos.data.db.dao.FaceDao
 import eu.akoos.photos.data.db.dao.NotPersonDao
 import eu.akoos.photos.data.db.dao.PersonDao
 import eu.akoos.photos.data.db.dao.PersonManualPhotoDao
+import eu.akoos.photos.data.db.entity.PhotoLocationEntity
 import eu.akoos.photos.domain.model.PersonSummary
 import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
+import eu.akoos.photos.domain.usecase.HideSimilarFacesUseCase
 import eu.akoos.photos.domain.usecase.ObservePeopleUseCase
+import eu.akoos.photos.domain.usecase.isNameableCluster
+import eu.akoos.photos.domain.usecase.unpackEmbedding
 import eu.akoos.photos.presentation.gallery.FaceBox
 import eu.akoos.photos.presentation.gallery.PersonUi
 import javax.inject.Inject
@@ -67,6 +70,7 @@ class ReviewSuggestionsViewModel @Inject constructor(
     private val personDao: PersonDao,
     private val personManualPhotoDao: PersonManualPhotoDao,
     private val notPersonDao: NotPersonDao,
+    private val hideSimilarFaces: HideSimilarFacesUseCase,
 ) : ViewModel() {
 
     /** One-shot user feedback (a string res id) for a bulk action that otherwise finishes with no
@@ -79,18 +83,23 @@ class ReviewSuggestionsViewModel @Inject constructor(
      *  so the screen shows a skeleton rather than the empty state while it loads. */
     val clusters: StateFlow<List<PersonUi>?> = accountManager.getPrimaryUserId()
         .flatMapLatest { userId ->
-            if (userId == null) {
-                flowOf(emptyList())
-            } else {
-                observePeopleUseCase(userId, getGalleryItems.invoke(userId)).map { list ->
-                    list.mapNotNull { it.toPersonUi() }
-                        .filter { it.displayName.isNullOrBlank() }
-                        // The Unsorted bucket is pinned to the top, then the real unnamed clusters by size,
-                        // so the leftover pile is the first thing offered for curation but stays apart.
-                        .sortedWith(
-                            compareByDescending<PersonUi> { it.isOther }.thenByDescending { it.faceCount },
-                        )
-                }
+            observePeopleUseCase(
+                userId,
+                if (userId == null) getGalleryItems.invokeLocalOnly() else getGalleryItems.invoke(userId),
+            ).map { list ->
+                list.mapNotNull { it.toPersonUi() }
+                    // Match the People grid so the two surfaces never disagree: the same nameable clusters
+                    // shown there, plus the Unsorted pile, which stays regardless of size because it is the
+                    // leftover pile the user curates here.
+                    .filter { p ->
+                        isNameableCluster(p.displayName, p.isOther, p.faceCount) ||
+                            (p.displayName.isNullOrBlank() && p.isOther)
+                    }
+                    // The Unsorted bucket is pinned to the top, then the real unnamed clusters by size,
+                    // so the leftover pile is the first thing offered for curation but stays apart.
+                    .sortedWith(
+                        compareByDescending<PersonUi> { it.isOther }.thenByDescending { it.faceCount },
+                    )
             }
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), null)
@@ -99,14 +108,13 @@ class ReviewSuggestionsViewModel @Inject constructor(
      *  a new name. Feeds the shared person picker's list. */
     val namedPeople: StateFlow<List<PersonUi>> = accountManager.getPrimaryUserId()
         .flatMapLatest { userId ->
-            if (userId == null) {
-                flowOf(emptyList())
-            } else {
-                observePeopleUseCase(userId, getGalleryItems.invoke(userId)).map { list ->
-                    list.mapNotNull { it.toPersonUi() }
-                        .filter { !it.displayName.isNullOrBlank() }
-                        .sortedByDescending { it.faceCount }
-                }
+            observePeopleUseCase(
+                userId,
+                if (userId == null) getGalleryItems.invokeLocalOnly() else getGalleryItems.invoke(userId),
+            ).map { list ->
+                list.mapNotNull { it.toPersonUi() }
+                    .filter { !it.displayName.isNullOrBlank() }
+                    .sortedByDescending { it.faceCount }
             }
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), emptyList())
@@ -121,8 +129,7 @@ class ReviewSuggestionsViewModel @Inject constructor(
         val name = rawName.trim()
         if (clusterIds.isEmpty() || name.isEmpty()) return
         viewModelScope.launch(Dispatchers.IO) {
-            val userId = accountManager.getPrimaryUserId().first() ?: return@launch
-            val account = userId.id
+            val account = accountManager.getPrimaryUserId().first()?.id ?: PhotoLocationEntity.LOCAL_USER
             val existing = personDao.namedPeopleForUser(account).firstOrNull { it.displayName == name }
             val target = existing?.id
                 ?: clusterIds.maxByOrNull { faceDao.faceCountForPerson(account, it) }
@@ -150,12 +157,16 @@ class ReviewSuggestionsViewModel @Inject constructor(
     fun bulkNotPerson(clusterIds: Set<Long>) {
         if (clusterIds.isEmpty()) return
         viewModelScope.launch(Dispatchers.IO) {
-            val userId = accountManager.getPrimaryUserId().first() ?: return@launch
+            val account = accountManager.getPrimaryUserId().first()?.id ?: PhotoLocationEntity.LOCAL_USER
             for (id in clusterIds) {
-                faceDao.rejectAllForPerson(userId.id, id)
+                // Read the cluster's faces before rejecting them, so their mean can also sweep the same
+                // thing out of any other cluster it landed in (a statue across many photos).
+                val reference = faceDao.facesForPerson(account, id).map { unpackEmbedding(it.embedding) }
+                faceDao.rejectAllForPerson(account, id)
+                hideSimilarFaces(account, reference)
                 personDao.updateCoverAndCount(id, null, 0)
             }
-            personDao.deleteEmpty(userId.id)
+            personDao.deleteEmpty(account)
             _message.value = R.string.person_msg_dismissed
         }
     }

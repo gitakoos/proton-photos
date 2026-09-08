@@ -127,8 +127,13 @@ class FaceModelManager(context: Context) {
      * no network touched; failing that, and only when the asset is pinned and the user has agreed, the
      * bytes are fetched, verified and promoted. [onDownloadStart] fires once, just before the first
      * byte moves, so a caller can label the wait as the download it is rather than a stalled read.
+     * [onProgress] reports the running byte count for this asset as it arrives, so a caller can show a
+     * real bar instead of an open-ended spinner.
      */
-    suspend fun prepare(onDownloadStart: () -> Unit = {}): FaceModelPreparation =
+    suspend fun prepare(
+        onDownloadStart: () -> Unit = {},
+        onProgress: (Long) -> Unit = {},
+    ): FaceModelPreparation =
         withContext(Dispatchers.IO) {
             gate.withLock {
                 val asset = FaceModelAssets.MODEL
@@ -139,7 +144,7 @@ class FaceModelManager(context: Context) {
                 if (!downloadAccepted()) return@withLock FaceModelPreparation.NeedsConsent
 
                 onDownloadStart()
-                when (val outcome = download(asset)) {
+                when (val outcome = download(asset, onProgress)) {
                     is FaceModelOutcome.Ready -> FaceModelPreparation.Ready(outcome.file)
                     FaceModelOutcome.Corrupt -> FaceModelPreparation.Failed(REASON_CORRUPT)
                     is FaceModelOutcome.Unreachable ->
@@ -203,7 +208,7 @@ class FaceModelManager(context: Context) {
     private fun remember(file: File): File = file.also { verified = it }
 
     /** Streams [asset] to a temporary file, verifies it, and promotes it. Caller holds [gate]. */
-    private suspend fun download(asset: FaceModelAsset): FaceModelOutcome {
+    private suspend fun download(asset: FaceModelAsset, onProgress: (Long) -> Unit): FaceModelOutcome {
         modelsDir.mkdirs()
         val target = File(modelsDir, asset.fileName)
         // Same directory as the target so the promotion is a rename within one filesystem.
@@ -212,7 +217,7 @@ class FaceModelManager(context: Context) {
         val url = FaceModelAssets.downloadUrl(asset)
         return try {
             Log.i(TAG, "fetching ${asset.fileName} (${asset.sizeBytes} bytes)")
-            streamTo(url, partial, asset.sizeBytes)
+            streamTo(url, partial, asset.sizeBytes, onProgress)
             when (val check = verify(partial, asset)) {
                 FaceModelCheck.Ok -> {
                     target.delete()
@@ -238,9 +243,15 @@ class FaceModelManager(context: Context) {
     /**
      * Writes [url] into [into], stopping early on a response that claims more than [expectedBytes] so
      * a wrong or hostile URL cannot fill the disk. Cancellation is checked per chunk, which is what
-     * lets a caller drop the fetch the moment the user backs out.
+     * lets a caller drop the fetch the moment the user backs out. [onProgress] is handed the running
+     * byte total after each chunk lands, so a caller can drive a determinate bar.
      */
-    private suspend fun streamTo(url: String, into: File, expectedBytes: Long) {
+    private suspend fun streamTo(
+        url: String,
+        into: File,
+        expectedBytes: Long,
+        onProgress: (Long) -> Unit,
+    ) {
         val request = Request.Builder().url(url).build()
         val call = httpClient.newCall(request)
         call.execute().use { response ->
@@ -257,6 +268,7 @@ class FaceModelManager(context: Context) {
                         written += read
                         if (written > expectedBytes) throw IOException("response longer than expected")
                         output.write(buffer, 0, read)
+                        onProgress(written)
                     }
                     output.flush()
                 }

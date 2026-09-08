@@ -35,10 +35,11 @@ import android.graphics.Bitmap
  */
 object PerceptualHash {
 
-    /** Hamming distance at or below this counts as "visually similar" (tunable). 8/64 catches
-     *  re-encoded / mildly-edited copies and burst frames while avoiding false matches between
-     *  unrelated shots that merely share a flat (e.g. all-black) background. */
-    const val SIMILARITY_THRESHOLD = 8
+    /** Hamming distance at or below this counts as "visually similar" (tunable). 12/64 catches
+     *  re-encoded / mildly-edited copies and burst frames (whose fingerprints sit several bits apart)
+     *  while staying well below the distance unrelated shots fall at, so different photos are not
+     *  grouped. The band split below is sized to keep candidate generation exact at this distance. */
+    const val SIMILARITY_THRESHOLD = 12
 
     /** Version of the dHash algorithm. Bump to invalidate every stored hash when [dHash] changes
      *  shape (grid size, bit order, luminance weights) so old fingerprints recompute. */
@@ -65,10 +66,11 @@ object PerceptualHash {
     /** Number of differing bits between two hashes — the perceptual distance metric. */
     fun distance(a: Long, b: Long): Int = java.lang.Long.bitCount(a xor b)
 
-    /** Bit widths of the 9 disjoint bands the 64-bit hash is split into: 8 bands of 7 bits plus a
-     *  final band of 8 bits (7*8 + 8 = 64). With 9 bands, any two hashes at distance <= 8 differ in
-     *  at most 8 bands by the pigeonhole principle, so at least one band is identical. */
-    private val BAND_WIDTHS = intArrayOf(7, 7, 7, 7, 7, 7, 7, 7, 8)
+    /** Bit widths of the 13 disjoint bands the 64-bit hash is split into: 12 bands of 5 bits plus a
+     *  final band of 4 bits (5*12 + 4 = 64). With 13 bands, any two hashes at distance <= 12 differ
+     *  in at most 12 bands by the pigeonhole principle, so at least one band is identical, which keeps
+     *  the multi-index candidate generation exact at [SIMILARITY_THRESHOLD]. */
+    private val BAND_WIDTHS = intArrayOf(5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 4)
 
     /** Number of bands the hash is divided into for multi-index candidate generation. */
     val BAND_COUNT = BAND_WIDTHS.size
@@ -95,7 +97,7 @@ object PerceptualHash {
      *
      * EXACT for the multi-index (pigeonhole) scheme: hashes are bucketed by (band index, band value),
      * and only hashes sharing at least one band are distance-checked. Because any pair within
-     * [threshold] (<= the 8 the [BAND_COUNT] banding is sized for) must share a band, this returns
+     * [threshold] (<= the 12 the [BAND_COUNT] banding is sized for) must share a band, this returns
      * the identical set the brute-force O(n²) sweep would, just with far fewer comparisons.
      *
      * The returned pairs always have i < j and each pair appears once.

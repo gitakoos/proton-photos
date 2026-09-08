@@ -111,6 +111,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.res.stringResource
 import eu.akoos.photos.R
+import eu.akoos.photos.presentation.common.EditFieldSheet
 import eu.akoos.photos.presentation.common.anyMetadataEditable
 import eu.akoos.photos.presentation.gallery.MetadataStripPickerDialog
 import eu.akoos.photos.presentation.gallery.MoveToFolderHost
@@ -416,8 +417,13 @@ fun PhotoViewerScreen(
     // the faces. Reset on every page settle so tags never carry a previous photo's faces.
     val peopleInPhoto by viewModel.peopleInPhoto.collectAsStateWithLifecycle()
     var facesMode by remember { mutableStateOf(false) }
+    // The single Unsorted face the user tapped in the tags overlay to name, or null when no sheet is open.
+    var faceToName by remember { mutableStateOf<String?>(null) }
     // The settled photo's decoded pixel size, shared by the tags and the long-press face hit-test.
     var settledImageSize by remember { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
+    // The playing video's on-screen frame size, so face tags pin over a video the same way they do over
+    // a still. Set by the player's size callback, cleared on settle.
+    var videoFrameSize by remember { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
     val noFacesFoundMsg = stringResource(R.string.viewer_face_none_found)
     val isDownloading by viewModel.isDownloading.collectAsStateWithLifecycle()
     val downloadProgress by viewModel.downloadProgress.collectAsStateWithLifecycle()
@@ -534,6 +540,7 @@ fun PhotoViewerScreen(
     LaunchedEffect(pagerState.settledPage, pageGeneration) {
         facesMode = false
         settledImageSize = androidx.compose.ui.unit.IntSize.Zero
+        videoFrameSize = androidx.compose.ui.unit.IntSize.Zero
         items.getOrNull(pagerState.settledPage)?.let { viewModel.loadPeopleInPhoto(it) }
     }
 
@@ -1432,25 +1439,6 @@ fun PhotoViewerScreen(
                                                 .size(64.dp),
                                         )
                                     }
-                                    // Face name tags over the settled photo when the menu has them on,
-                                    // placed through the same fit and zoom the image rides so each tag
-                                    // stays on its face while panning and pinching. A tap opens the
-                                    // person.
-                                    if (facesMode && stateMatchesPage && peopleInPhoto.isNotEmpty() &&
-                                        settledImageSize.width > 0 && settledImageSize.height > 0
-                                    ) {
-                                        ViewerFaceTags(
-                                            imageSize = settledImageSize,
-                                            containerSize = containerSize,
-                                            scale = scale,
-                                            offset = offset,
-                                            people = peopleInPhoto,
-                                            onPersonClick = { personId ->
-                                                facesMode = false
-                                                onOpenPerson(personId)
-                                            },
-                                        )
-                                    }
                                 }
                             }
                         is PhotoViewerViewModel.ViewerState.ShowVideo -> {
@@ -1481,6 +1469,9 @@ fun PhotoViewerScreen(
                                     // fresh prepare() against the freshly-written bytes.
                                     reloadKey = editedAt,
                                     onPlayerReady = { currentPlayer = it },
+                                    // The frame size the face tags letterbox to; a still uses its decoded
+                                    // size, a video reports its own here.
+                                    onVideoSize = { videoFrameSize = it },
                                     // Keep the screen awake while the clip actually plays; the
                                     // polled flag drops to false on pause/stop/close so it clears.
                                     keepOn = isVideoPlaying,
@@ -1528,6 +1519,38 @@ fun PhotoViewerScreen(
                         )
                     }
                     (textState as? ViewerTextState.Working)?.let { ViewerTextProgress(it.stage) }
+
+                    // Face name tags over the settled photo or video when the menu has them on, placed
+                    // through the same fit and zoom the media rides so each tag stays on its face while
+                    // panning and pinching. A video uses its decoded frame size once the player reports
+                    // it, a still its decoded size; the still's size stands in until then. A tap opens
+                    // the person, or names a lone Unsorted face on the spot. Drawn under the hidden-blur
+                    // below so a hidden item never shows tags on top.
+                    val faceOverlaySize = if (
+                        state is PhotoViewerViewModel.ViewerState.ShowVideo &&
+                        videoFrameSize.width > 0 && videoFrameSize.height > 0
+                    ) videoFrameSize else settledImageSize
+                    if (facesMode && stateMatchesPage && peopleInPhoto.isNotEmpty() &&
+                        faceOverlaySize.width > 0 && faceOverlaySize.height > 0
+                    ) {
+                        ViewerFaceTags(
+                            imageSize = faceOverlaySize,
+                            containerSize = containerSize,
+                            scale = scale,
+                            offset = offset,
+                            people = peopleInPhoto,
+                            onFaceClick = { person ->
+                                facesMode = false
+                                // A leftover (Unsorted) face has no person to open, so name this one
+                                // face into a real person right here instead.
+                                if (person.isOther) {
+                                    faceToName = person.faceId
+                                } else {
+                                    onOpenPerson(person.personId)
+                                }
+                            },
+                        )
+                    }
 
                     // Video-only download badge. Shown from "download starts" all the way
                     // through "ExoPlayer prepares + first frame paints" — anything in between
@@ -1828,7 +1851,7 @@ fun PhotoViewerScreen(
                             // People in this photo: detect the faces on this photo (if not already) and
                             // pin their name tags, or take them down. The reliable path when a long
                             // press is awkward, and the only one on a photo not yet scanned.
-                            if (aiFeaturesEnabled && faceEnabled && isSignedIn) {
+                            if (aiFeaturesEnabled && faceEnabled) {
                                 androidx.compose.material3.DropdownMenuItem(
                                     text = { Text(stringResource(R.string.viewer_people_in_photo),
                                         color = FgPrimary) },
@@ -2595,6 +2618,26 @@ fun PhotoViewerScreen(
                 )
             }
         }
+    }
+
+    // ── Name a single Unsorted face tapped in the tags overlay ─────────────────
+    // A leftover face has no person page to open, so naming happens here: type a name and this one face
+    // becomes (or joins) that person, lifting it out of the Unsorted pile.
+    if (faceToName != null) {
+        val settledItem = items.getOrNull(pagerState.settledPage)
+        val fid = faceToName
+        EditFieldSheet(
+            title = stringResource(R.string.person_add_name),
+            hint = stringResource(R.string.person_rename_hint),
+            initialValue = "",
+            singleLine = true,
+            confirmLabel = stringResource(R.string.person_add_name),
+            onDismiss = { faceToName = null },
+            onSave = { name ->
+                if (fid != null && settledItem != null) viewModel.nameFace(settledItem, fid, name)
+            },
+            canConfirm = { it.isNotBlank() },
+        )
     }
 }
 

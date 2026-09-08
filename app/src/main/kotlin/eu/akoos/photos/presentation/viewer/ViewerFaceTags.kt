@@ -93,8 +93,8 @@ private fun screenRectOf(
 /**
  * Name tags pinned over the grouped faces on the photo now on screen. Each face's stored 0..1 box is
  * mapped to the screen through the same letterbox fit and pinch the image rides ([imagePointToScreen]),
- * so a tag stays on its face while the photo is panned and zoomed. Tapping a tag opens that person; an
- * unnamed face shows an add-name chip that opens its cluster.
+ * so a tag stays on its face while the photo is panned and zoomed. Tapping a named or clustered face opens
+ * that person; an Unsorted leftover face shows an add chip that names that one face on the spot.
  *
  * The name label is placed dynamically around each face (below, above, or to a side) and nudged off any
  * label already placed, so a group shot reads as a set of separate names rather than one overlapping
@@ -107,7 +107,7 @@ fun ViewerFaceTags(
     scale: Float,
     offset: Offset,
     people: List<PhotoViewerViewModel.ViewerPerson>,
-    onPersonClick: (Long) -> Unit,
+    onFaceClick: (PhotoViewerViewModel.ViewerPerson) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     if (imageSize.width <= 0 || imageSize.height <= 0) return
@@ -175,7 +175,7 @@ fun ViewerFaceTags(
                     .size(0.dp)
                     .wrapContentSize(align = Alignment.Center, unbounded = true),
             ) {
-                FaceTagPill(name = fr.person.name, onClick = { onPersonClick(fr.person.personId) })
+                FaceTagPill(name = fr.person.name, onClick = { onFaceClick(fr.person) })
             }
         }
     }

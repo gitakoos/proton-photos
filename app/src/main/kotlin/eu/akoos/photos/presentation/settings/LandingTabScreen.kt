@@ -83,13 +83,16 @@ fun LandingTabScreen(
                 .background(colors.cardBg, RoundedCornerShape(12.dp))
                 .border(0.5.dp, colors.cardBorder, RoundedCornerShape(12.dp)),
         ) {
-            LandingTab.entries.forEachIndexed { index, tab ->
+            // The Shared tab only exists with a signed-in account (the gallery drops it in guest
+            // mode), so offering it as a landing tab without one would silently fall back to Albums.
+            val tabs = LandingTab.entries.filter { it != LandingTab.Shared || state.isSignedIn }
+            tabs.forEachIndexed { index, tab ->
                 LandingTabRow(
                     label = stringResource(tab.labelRes),
                     selected = state.landingTab == tab,
                     onClick = { viewModel.setLandingTab(tab) },
                 )
-                if (index < LandingTab.entries.lastIndex) RowDivider()
+                if (index < tabs.lastIndex) RowDivider()
             }
         }
     }

@@ -103,7 +103,12 @@ class MirrorOverwriteJournal(private val dir: File) {
      * because reaching commit means the device file already holds the intended new bytes.
      */
     fun commit(entry: Entry) {
-        File(dir, entry.id + URI_SUFFIX).delete()
+        val uriFile = File(dir, entry.id + URI_SUFFIX)
+        // Delete the marker first (see above). If the delete fails, blank it so [pending] skips this
+        // pair: a stuck marker would otherwise let a later launch replay the already-committed
+        // overwrite, restoring the backup over the new bytes and silently reverting a mirror strip or
+        // compress (bringing back the very metadata a strip removed).
+        if (!uriFile.delete() && uriFile.exists()) runCatching { uriFile.writeText("") }
         File(dir, entry.id + BAK_SUFFIX).delete()
     }
 

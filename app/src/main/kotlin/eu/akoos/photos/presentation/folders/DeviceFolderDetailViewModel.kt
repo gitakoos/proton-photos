@@ -881,7 +881,9 @@ class DeviceFolderDetailViewModel @Inject constructor(
         val items = selectedGalleryItems()
         if (items.isEmpty()) return
         viewModelScope.launch {
-            val userId = primaryUserId ?: accountManager.getPrimaryUserId().first() ?: return@launch
+            // A local (device) delete needs no account; the use case only requires a signed-in user
+            // for a cloud trash, which local-only mode never produces. Pass the nullable userId through.
+            val userId = primaryUserId ?: accountManager.getPrimaryUserId().first()
             _isDeleting.value = true
             try {
                 when (val result = deletePhotoUseCase(userId, items, freeUpSpace, deleteFromCloud)) {
@@ -1054,10 +1056,10 @@ class DeviceFolderDetailViewModel @Inject constructor(
         // dialog on Android 11+). A stopped copy pass narrows this to its own prefix, which is what
         // leaves the photos it never reached where the user can still see them.
         val deleting = HiddenVaultDecisions.deletableOriginals(vaultable, collected)
-        val userId = accountManager.getPrimaryUserId().first() ?: run {
-            rollbackPendingHide()
-            return
-        }
+        // Hiding a device photo needs no account; the vault is app-private and the use case only
+        // requires a signed-in user for a cloud trash, which a hide never performs (deleteFromCloud =
+        // false). Pass the nullable userId through instead of aborting a guest hide here.
+        val userId = accountManager.getPrimaryUserId().first()
         when (val result = deletePhotoUseCase(userId, deleting, freeUpSpace = true, deleteFromCloud = false, hide = true)) {
             is DeletePhotoUseCase.Result.Success -> {
                 HiddenVaultDiagnostics.originalsRemoved(deleting.size, neededConsent = false)
@@ -1143,8 +1145,10 @@ class DeviceFolderDetailViewModel @Inject constructor(
         _pendingDeleteIntent.value = null
         viewModelScope.launch {
             if (pending != null) {
+                // A local (device) delete/hide finishes without an account; the use case guards its
+                // own cloud branch. run {} instead of an if-null so a guest's confirmed action commits.
                 val userId = accountManager.getPrimaryUserId().first()
-                if (userId != null) {
+                run {
                     // The refusal comes back as an answer rather than an exception, so it was
                     // being dropped: the device file had gone, the Drive copy had not, and the
                     // screen said nothing at all. The timeline surface already reports this.

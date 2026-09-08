@@ -104,7 +104,10 @@ fun sidewaysFromEncoded(encoded: String): Float? {
 }
 
 /** Detection-score, sharpness and turn floors a face must clear to be trusted for confident merging.
- *  Placeholders, adapted to our own embeddings once faces are re-indexed from the HD source. */
+ *  The score floor sits just above the detector's own keep threshold, so a clearly detected face is
+ *  trusted to anchor a person while only the borderline detections are held to the stricter distance;
+ *  set too high, clear recurring faces read as weak, fail to open a cluster, and pile up unclustered
+ *  instead of showing under People. */
 const val FACE_MIN_CONFIDENT_SCORE = 0.62f
 const val FACE_MIN_CONFIDENT_BLUR = 12.0
 const val FACE_MAX_CONFIDENT_SIDEWAYS = 0.18f

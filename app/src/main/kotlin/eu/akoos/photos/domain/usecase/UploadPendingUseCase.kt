@@ -746,7 +746,14 @@ class UploadPendingUseCase @Inject constructor(
         try {
             val rawLocalItem = localRepo.queryByUri(state.localUri)
             if (rawLocalItem == null) {
-                Log.w(UPLOAD_TAG, "Local item not found for URI: ${state.localUri}")
+                // The queued photo was deleted from the device before it uploaded. Drop its orphaned
+                // LOCAL_ONLY row (status-guarded, so a row another pass already claimed is left alone)
+                // so it stops showing as a phantom "Queued" tile and is not re-processed, and advance
+                // the finished tally (NOT the success tally, which drives allFailed) so the batch's
+                // "N of M" count reaches completion instead of sticking on the deleted photos.
+                Log.w(UPLOAD_TAG, "Queued photo gone before upload, dropping it: ${state.localUri}")
+                syncStateRepo.deleteLocalOnlyByUris(listOf(state.localUri))
+                finishedCount.incrementAndGet()
                 return
             }
             // Skip items whose folder is no longer in the backup selection. Read the selection LIVE

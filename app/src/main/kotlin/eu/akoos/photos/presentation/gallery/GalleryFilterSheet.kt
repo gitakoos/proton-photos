@@ -86,6 +86,9 @@ internal fun ContentFilterSheet(
     showCategorySection: Boolean = true,
     showMediaTypeSection: Boolean = true,
     showDateSection: Boolean = true,
+    // Signed out there is nothing but on-device media, so the backed-up / cloud chips can only ever
+    // return an empty grid; hide the whole sync-status section for a guest.
+    showSyncStatusSection: Boolean = true,
     onOpenTimelineSettings: (() -> Unit)? = null,
 ) {
     var mediaType by remember { mutableStateOf(currentFilter.mediaType) }
@@ -207,26 +210,28 @@ internal fun ContentFilterSheet(
         // ── Sync status ──────────────────────────────────────────────────────
         // No "All" chip: the chips toggle and span the sheet width, edge to edge with the calendar.
         // The active chip carries its own X, so tapping it (a second press) clears back to All.
-        FilterSectionLabel(stringResource(R.string.filter_sync_label))
-        val syncOptions = listOf(
-            SyncStatusFilter.LocalOnly to stringResource(R.string.filter_sync_local),
-            SyncStatusFilter.BackedUp to stringResource(R.string.filter_sync_backedup),
-            SyncStatusFilter.CloudOnly to stringResource(R.string.filter_sync_cloud),
-        )
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            syncOptions.forEach { (status, label) ->
-                FilterChip(
-                    label = label,
-                    selected = syncStatus == status,
-                    accentWhenSelected = true,
-                    trailingClear = true,
-                    modifier = Modifier.weight(1f),
-                    onClick = {
-                        val newStatus = if (syncStatus == status) SyncStatusFilter.All else status
-                        syncStatus = newStatus
-                        applyNow(ss = newStatus)
-                    },
-                )
+        if (showSyncStatusSection) {
+            FilterSectionLabel(stringResource(R.string.filter_sync_label))
+            val syncOptions = listOf(
+                SyncStatusFilter.LocalOnly to stringResource(R.string.filter_sync_local),
+                SyncStatusFilter.BackedUp to stringResource(R.string.filter_sync_backedup),
+                SyncStatusFilter.CloudOnly to stringResource(R.string.filter_sync_cloud),
+            )
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                syncOptions.forEach { (status, label) ->
+                    FilterChip(
+                        label = label,
+                        selected = syncStatus == status,
+                        accentWhenSelected = true,
+                        trailingClear = true,
+                        modifier = Modifier.weight(1f),
+                        onClick = {
+                            val newStatus = if (syncStatus == status) SyncStatusFilter.All else status
+                            syncStatus = newStatus
+                            applyNow(ss = newStatus)
+                        },
+                    )
+                }
             }
         }
 

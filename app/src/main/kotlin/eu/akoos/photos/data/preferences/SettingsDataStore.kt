@@ -541,6 +541,11 @@ object SettingsKeys {
 
     val MANAGE_MEDIA_PROMPTED = booleanPreferencesKey("manage_media_prompted")
 
+    /** Set once the post-notifications permission has been auto-requested, so the gallery asks at
+     *  most once per install instead of re-firing (and re-showing the "notifications off" snackbar)
+     *  on every return to the grid. */
+    val NOTIFICATION_PERMISSION_ASKED = booleanPreferencesKey("notification_permission_asked")
+
     /**
      * Set to true the moment the user finishes the post login onboarding wizard
      * (welcome → backup mode → privacy → notifications → photo access → manage
@@ -736,6 +741,15 @@ object SettingsKeys {
      * wipe lands, so an interrupted wipe retries on the next walk.
      */
     val FACE_MODEL_VERSION_KEY = intPreferencesKey("face_model_version")
+
+    /**
+     * Clustering-parameter generation the stored people were grouped under, compared against
+     * [eu.akoos.photos.domain.usecase.FACE_CLUSTER_PARAMS_VERSION] once the library is fully scanned.
+     * When it differs the people were grouped by older thresholds, so the indexer regroups the existing
+     * embeddings once (no re-detect, no re-embed) and records the new generation. Distinct from
+     * [FACE_MODEL_VERSION_KEY], which forces a full re-embed.
+     */
+    val FACE_CLUSTER_PARAMS_VERSION_KEY = intPreferencesKey("face_cluster_params_version")
 
     /**
      * DEBUG-only large-library simulator size. N synthetic photo_listing rows are generated

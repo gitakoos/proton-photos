@@ -111,8 +111,12 @@ class PerceptualHashScheduler @Inject constructor(
      * Compute the dHash for any of [items] whose stored row is missing or stale. Already-fresh
      * items are skipped via a single cache read. Returns immediately — hashing runs on the worker
      * pool and lands in the cache; the finder's Flow picks the hashes up as they arrive.
+     *
+     * [userId] is only needed to warm a cold cloud thumbnail (the decrypt below); a null userId is a
+     * guest, whose candidates are all local files that hash straight off disk, so the same scheduler
+     * runs for a guest with no account.
      */
-    fun request(items: List<GalleryItem>, userId: UserId) {
+    fun request(items: List<GalleryItem>, userId: UserId?) {
         scope.launch {
             val cache = runCatching { perceptualHashDao.getAll().associateBy { it.key } }
                 .getOrDefault(emptyMap())
@@ -128,7 +132,7 @@ class PerceptualHashScheduler @Inject constructor(
                 val (key, freshness, _) = keyFor(item) ?: return@forEach
                 if (!needsHash(cache[key], freshness)) return@forEach
                 if (item is GalleryItem.CloudOnly && !cloudThumbExists(item.cloud.linkId)) {
-                    if (decryptBudget > 0) {
+                    if (userId != null && decryptBudget > 0) {
                         decryptBudget--
                         runCatching { cloudRepo.requestThumbnailDecrypt(userId, item.cloud.linkId) }
                     }

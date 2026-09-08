@@ -98,6 +98,14 @@ data class SettingsUiState(
     /** True when the last face model download did not produce usable models, so the row can say so and
      *  the feature stays off. */
     val faceModelDownloadFailed: Boolean = false,
+    /** Running byte count of the face model download in flight, measured against
+     *  [eu.akoos.photos.data.face.FaceModelAssets.TOTAL_DOWNLOAD_BYTES], so the row shows a real bar
+     *  rather than an open-ended spinner. Reset to 0 whenever a download starts or ends. */
+    val faceModelDownloadedBytes: Long = 0L,
+    /** Whether Wi-Fi was connected when the face model download drawer was raised. Off means the
+     *  drawer states the download will use mobile data, so a large fetch is never pulled silently over
+     *  a metered link. */
+    val faceModelOnWifi: Boolean = true,
     /** Whether both face models (the detector and the embedder) are already on disk. It no longer gates
      *  the toggle, which stays usable so a missing model can be fetched or the feature switched off;
      *  it only lets the row read as available. Resolved at load and after a download, network-free. */

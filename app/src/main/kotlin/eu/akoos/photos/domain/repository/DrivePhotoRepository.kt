@@ -558,5 +558,5 @@ interface DrivePhotoRepository {
      * paused indexing, and unless the on-device face models are present. Resumable and idempotent: a
      * re-run only touches photos it has never produced a face for.
      */
-    suspend fun backfillFaces(userId: UserId)
+    suspend fun backfillFaces(userId: UserId?)
 }

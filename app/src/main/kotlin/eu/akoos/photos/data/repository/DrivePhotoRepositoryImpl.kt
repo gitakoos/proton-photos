@@ -588,7 +588,7 @@ class DrivePhotoRepositoryImpl @Inject constructor(
         localExifBackfillScheduler.backfillAll(userId)
     }
 
-    override suspend fun backfillFaces(userId: UserId) {
+    override suspend fun backfillFaces(userId: UserId?) {
         faceIndexingScheduler.indexAll(userId)
     }
 }

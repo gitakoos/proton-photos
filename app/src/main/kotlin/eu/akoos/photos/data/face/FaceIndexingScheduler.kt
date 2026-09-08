@@ -36,6 +36,7 @@ import androidx.datastore.preferences.core.edit
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -48,6 +49,7 @@ import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.flowOn
 import eu.akoos.photos.BuildConfig
 import eu.akoos.photos.domain.model.FaceBoxNorm
+import eu.akoos.photos.domain.usecase.FACE_CLUSTER_PARAMS_VERSION
 import eu.akoos.photos.domain.usecase.FACE_CLUSTER_THRESHOLD
 import eu.akoos.photos.domain.usecase.FACE_EMBEDDING_DIM
 import eu.akoos.photos.domain.usecase.FACE_MODEL_VERSION
@@ -61,6 +63,7 @@ import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
@@ -78,6 +81,7 @@ import eu.akoos.photos.data.db.entity.FaceEntity
 import eu.akoos.photos.data.db.entity.FaceScanEntity
 import eu.akoos.photos.data.db.entity.NotPersonEntity
 import eu.akoos.photos.data.db.entity.PersonManualPhotoEntity
+import eu.akoos.photos.data.db.entity.PhotoLocationEntity
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.data.repository.drive.PhotoDownloadService
@@ -120,7 +124,7 @@ data class FaceIndexingProgress(
 /** How large a not-yet-indexed backlog promotes the initial walk onto a foreground service with a
  *  progress notification. Below it the walk stays on the plain in-process coroutine, so a handful of
  *  incremental photos never posts a notification. */
-const val FACE_INDEX_FOREGROUND_THRESHOLD = 200
+const val FACE_INDEX_FOREGROUND_THRESHOLD = 50
 
 /**
  * Whether an about-to-run indexing pass of [pending] photos should host itself on the foreground
@@ -219,6 +223,10 @@ class FaceIndexingScheduler @Inject constructor(
     /** The last account a walk ran for, so an unpause can resume without being handed a userId. */
     @Volatile private var lastUserId: UserId? = null
 
+    /** When the last mid-walk clustering ran (elapsedRealtime), so groups can refresh during a long
+     *  drain without re-clustering on every pass. */
+    @Volatile private var lastIncrementalClusterMs = 0L
+
     private val _progress = MutableStateFlow(FaceIndexingProgress(FaceIndexingState.Idle, 0, 0))
     val progress: StateFlow<FaceIndexingProgress> = _progress.asStateFlow()
 
@@ -245,7 +253,7 @@ class FaceIndexingScheduler @Inject constructor(
      * model is not on the device yet (a later trigger retries once it is). Safe to call repeatedly;
      * overlapping calls collapse to one walk.
      */
-    suspend fun indexAll(userId: UserId) {
+    suspend fun indexAll(userId: UserId?) {
         lastUserId = userId
         val prefs = context.settingsDataStore.data.first()
         aiEnabled = prefs[SettingsKeys.AI_FEATURES_ENABLED] == true && prefs[SettingsKeys.FACE_ENABLED] == true
@@ -276,9 +284,11 @@ class FaceIndexingScheduler @Inject constructor(
             runCatching { migrateFaceModelVersionIfNeeded(userId) }
                 .onFailure { Log.w(TAG, "face model version wipe failed: ${it.message}") }
 
-            val items = runCatching { galleryItemsProvider.get().invoke(userId).first() }
-                .getOrDefault(emptyList())
-            val alreadyScanned = runCatching { faceScanDao.scannedKeysForUser(userId.id).toHashSet() }
+            val items = runCatching {
+                val provider = galleryItemsProvider.get()
+                (if (userId == null) provider.invokeLocalOnly() else provider.invoke(userId)).first()
+            }.getOrDefault(emptyList())
+            val alreadyScanned = runCatching { faceScanDao.scannedKeysForUser(userId?.id ?: PhotoLocationEntity.LOCAL_USER).toHashSet() }
                 .getOrDefault(HashSet())
             val pending = items.filter { it.stableId !in alreadyScanned }
             val total = pending.size
@@ -296,7 +306,27 @@ class FaceIndexingScheduler @Inject constructor(
                 // The library is fully re-detected, so any names a wipe or an import parked can now be
                 // put back on the faces before the groups form.
                 val reattached = reattachPendingLabels(userId)
-                if (BuildConfig.DEBUG || reattached || faceDao.unclusteredCount(userId.id) > 0) cluster(userId)
+                val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
+                // A clustering-parameter bump, a label reattach, or a debug build needs the global pass: it
+                // regroups the stored embeddings once with no re-embed, and the new params generation is
+                // recorded only after the pass actually completes (a failed one simply retries next walk).
+                val paramsOutdated =
+                    (prefs[SettingsKeys.FACE_CLUSTER_PARAMS_VERSION_KEY] ?: 0) != FACE_CLUSTER_PARAMS_VERSION
+                if (BuildConfig.DEBUG || reattached || paramsOutdated) {
+                    val grouped = cluster(userId)
+                    if (paramsOutdated && grouped) {
+                        context.settingsDataStore.edit {
+                            it[SettingsKeys.FACE_CLUSTER_PARAMS_VERSION_KEY] = FACE_CLUSTER_PARAMS_VERSION
+                        }
+                    }
+                } else {
+                    // Routine new photos: let the incremental pass attach them to existing people AND form
+                    // new clusters from the fresh faces, so the whole library is not regrouped just to place
+                    // a few. Only the weak faces it cannot confidently place are left over, and those fall to
+                    // a full regroup (which routes them to Unsorted) so none are orphaned.
+                    tryAssignNewFaces(userId)
+                    if (faceDao.unclusteredCount(account) > 0) cluster(userId)
+                }
                 _progress.value = FaceIndexingProgress(FaceIndexingState.Done, libraryTotal, libraryTotal)
                 return
             }
@@ -305,12 +335,14 @@ class FaceIndexingScheduler @Inject constructor(
             // Promote a substantial initial backlog onto a foreground service so the walk survives the
             // app being swiped from Recents; a few incremental photos stay on this coroutine with no
             // notification. Idempotent across passes, and swallowed if a background start is disallowed.
+            // A guest gets the same host: the service carries the local partition, so a large signed-out
+            // library is exactly as durable as a signed-in one.
             if (shouldRunForegroundIndex(total, prefs[SettingsKeys.FACE_INDEX_BACKGROUND] != false)) {
                 FaceIndexingService.start(context, userId)
             }
 
-            val detector = debugTimed("YuNet") { FaceDetector(detFile) }
-            val embedder = debugTimed("SFace") { FaceEmbedder(embFile) }
+            val detector = debugTimed("face detector") { FaceDetector(detFile) }
+            val embedder = debugTimed("embedder") { FaceEmbedder(embFile) }
             val cursor = AtomicInteger(0)
             val processed = AtomicInteger(0)
             val facesThisPass = AtomicInteger(0)
@@ -327,6 +359,12 @@ class FaceIndexingScheduler @Inject constructor(
             // workers and persisted as skip markers once the walk finishes; a deferred photo is never
             // added, so it stays pending for a later pass. Concurrent because the workers add in parallel.
             val scannedKeys = ConcurrentHashMap.newKeySet<String>()
+            // Markers are also flushed mid-pass in chunks (not only at pass end), so a long single-pass
+            // drain that is killed keeps the photos it already scanned. [persistedThisPass] counts the keys
+            // already flushed-and-removed, so progress stays the running scanned total even though
+            // [scannedKeys] then holds only the not-yet-flushed remainder. One flush runs at a time.
+            val persistedThisPass = AtomicInteger(0)
+            val scanFlushing = AtomicBoolean(false)
             try {
                 coroutineScope {
                     repeat(WORKER_COUNT) {
@@ -356,7 +394,7 @@ class FaceIndexingScheduler @Inject constructor(
                                 if (done % PROGRESS_STRIDE == 0 || done >= total) {
                                     _progress.value = FaceIndexingProgress(
                                         if (active()) FaceIndexingState.Running else FaceIndexingState.Paused,
-                                        scannedBefore + scannedKeys.size,
+                                        scannedBefore + persistedThisPass.get() + scannedKeys.size,
                                         libraryTotal,
                                     )
                                 }
@@ -365,10 +403,17 @@ class FaceIndexingScheduler @Inject constructor(
                                     val rate = if (elapsedS > 0.0) done / elapsedS else 0.0
                                     Log.i(
                                         TAG,
-                                        "indexed ${scannedBefore + scannedKeys.size}/$libraryTotal photos, " +
+                                        "indexed ${scannedBefore + persistedThisPass.get() + scannedKeys.size}/$libraryTotal photos, " +
                                             "faces found ${facesThisPass.get()}, " +
                                             "rate ${String.format(Locale.US, "%.1f", rate)}/s",
                                     )
+                                }
+                                // Persist scan markers mid-pass in chunks, so a long single-pass drain that
+                                // is killed keeps the photos it already scanned instead of restarting from
+                                // zero. One flush at a time; the other workers keep scanning meanwhile.
+                                if (scannedKeys.size >= SCAN_FLUSH_CHUNK && scanFlushing.compareAndSet(false, true)) {
+                                    try { flushScannedChunk(userId, scannedKeys, persistedThisPass) }
+                                    finally { scanFlushing.set(false) }
                                 }
                             }
                         }
@@ -387,13 +432,30 @@ class FaceIndexingScheduler @Inject constructor(
             // or not they held a face. A stopped or paused pass still records what it did scan; the
             // sign-out wipe clears the table separately.
             if (scannedKeys.isNotEmpty()) {
-                runCatching { faceScanDao.upsert(scannedKeys.map { FaceScanEntity(userId.id, it) }) }
+                runCatching { faceScanDao.upsert(scannedKeys.map { FaceScanEntity(userId?.id ?: PhotoLocationEntity.LOCAL_USER, it) }) }
                     .onFailure { Log.w(TAG, "scan marker flush failed: ${it.message}") }
             }
 
-            // No clustering mid-drain: a full walk is many passes, so grouping runs once from the
-            // drained branch above, not at the end of every pass.
-            val indexedNow = scannedBefore + scannedKeys.size
+            // Cluster DURING the walk, not only when the whole library drains. Two triggers, both
+            // bounded and cancellable (cluster() runs under a timeout): (1) the walk is about to pause
+            // rather than continue (off Wi-Fi, health-parked, nothing more to source this pass), so
+            // group what is indexed instead of leaving it until a drain that may never come, the
+            // reported "scan stalls, no groups" case; (2) a long continuous drain crossed the refresh
+            // interval, so people appear and grow as the scan runs. Rate-limited by the interval so a
+            // fast drain does not re-cluster every pass.
+            val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
+            val willContinue = restartRequested || (active() && sourcesLoaded.get() > 0)
+            val nowMs = SystemClock.elapsedRealtime()
+            if (active() && facesThisPass.get() > 0 &&
+                (!willContinue || nowMs - lastIncrementalClusterMs >= INCREMENTAL_CLUSTER_MIN_INTERVAL_MS) &&
+                runCatching { faceDao.unclusteredCount(account) }.getOrDefault(0) > 0
+            ) {
+                lastIncrementalClusterMs = nowMs
+                // Place just this pass's new faces against the cached people first; only fall back to the
+                // whole-library rebuild when the cache is not usable (first run, stale, or a big backlog).
+                if (!tryAssignNewFaces(userId)) cluster(userId)
+            }
+            val indexedNow = scannedBefore + persistedThisPass.get() + scannedKeys.size
             _progress.value = when {
                 !aiEnabled -> FaceIndexingProgress(FaceIndexingState.Idle, indexedNow, libraryTotal)
                 // Not Done here: a non-drained pass hands off to the next through the tail re-kick, and
@@ -413,6 +475,30 @@ class FaceIndexingScheduler @Inject constructor(
             if (resume || (active() && sourcesLoaded.get() > 0)) {
                 scope.launch { runCatching { indexAll(userId) } }
             }
+        }
+    }
+
+    /**
+     * Persist a chunk of accrued scan markers mid-pass and drop them from [scannedKeys], so a process or
+     * foreground-service kill during a long single-pass drain keeps the photos already scanned rather than
+     * restarting from zero. Snapshot then remove, so each marker is written once (idempotent upsert aside);
+     * concurrent adds during the write land in the set and the next flush (or the pass-end flush) carries
+     * them. On a write failure the keys are kept so the pass-end flush retries them. [persistedThisPass]
+     * tracks the removed count so progress stays the running scanned total after the set shrinks.
+     */
+    private suspend fun flushScannedChunk(
+        userId: UserId?,
+        scannedKeys: MutableSet<String>,
+        persistedThisPass: AtomicInteger,
+    ) {
+        val snapshot = scannedKeys.toList()
+        if (snapshot.isEmpty()) return
+        val ok = runCatching {
+            faceScanDao.upsert(snapshot.map { FaceScanEntity(userId?.id ?: PhotoLocationEntity.LOCAL_USER, it) })
+        }.onFailure { Log.w(TAG, "incremental scan flush failed: ${it.message}") }.isSuccess
+        if (ok) {
+            scannedKeys.removeAll(snapshot.toHashSet())
+            persistedThisPass.addAndGet(snapshot.size)
         }
     }
 
@@ -441,7 +527,7 @@ class FaceIndexingScheduler @Inject constructor(
      * scheduler's own scope so it outlives the screen, and the one-walk guard collapses a redundant
      * kick into the walk already going.
      */
-    fun requestIndex(userId: UserId) {
+    fun requestIndex(userId: UserId?) {
         scope.launch {
             runCatching { context.settingsDataStore.edit { it[SettingsKeys.FACE_INDEXING_PAUSED] = false } }
             paused = false
@@ -453,6 +539,10 @@ class FaceIndexingScheduler @Inject constructor(
         }
     }
 
+    /** Re-run clustering now (e.g. right after the user named or merged a person) so the name attracts
+     *  its other faces without waiting for the next scan pass. Forced, so it runs even while paused. */
+    fun requestRecluster(userId: UserId?) { scope.launch { runCatching { cluster(userId, force = true) } } }
+
     /**
      * Scan just the photo now on screen, so the viewer can offer a face to tag before the background
      * walk has reached it. A no-op when AI is off or the photo is already scanned, so a faceless photo
@@ -461,7 +551,7 @@ class FaceIndexingScheduler @Inject constructor(
      * on the photo the user is looking at, and serialises with any running walk through [mlLock] inside
      * the scan. Returns true when it scanned the photo (whether or not a face was found).
      */
-    suspend fun indexPhotoOnDemand(item: GalleryItem, userId: UserId, force: Boolean = false): Boolean {
+    suspend fun indexPhotoOnDemand(item: GalleryItem, userId: UserId?, force: Boolean = false): Boolean {
         val prefs = context.settingsDataStore.data.first()
         val enabled = prefs[SettingsKeys.AI_FEATURES_ENABLED] == true && prefs[SettingsKeys.FACE_ENABLED] == true
         if (!enabled) return false
@@ -469,7 +559,7 @@ class FaceIndexingScheduler @Inject constructor(
         // user asked, from the viewer) re-scans regardless, at a lower confidence so it can catch a face
         // the precision-first walk left behind. The few extra weak detections are on this one photo and
         // the user reviews them.
-        if (!force && faceScanDao.isScanned(userId.id, item.stableId)) return false
+        if (!force && faceScanDao.isScanned(userId?.id ?: PhotoLocationEntity.LOCAL_USER, item.stableId)) return false
         val detFile = (faceModelManager.prepare() as? FaceModelPreparation.Ready)?.file ?: return false
         val embFile = (faceEmbeddingModelManager.prepare() as? FaceModelPreparation.Ready)?.file ?: return false
         val detector = if (force) FaceDetector(detFile, scoreThreshold = 0.5f, inputSize = 640) else FaceDetector(detFile)
@@ -482,10 +572,14 @@ class FaceIndexingScheduler @Inject constructor(
             runCatching { embedder.close() }
         }
         if (scanned.isEmpty()) return false
-        runCatching { faceScanDao.upsert(scanned.map { FaceScanEntity(userId.id, it) }) }
-        // Give the fresh faces person ids so the viewer can show and tag them; a clustering failure is
-        // swallowed the same way the walk's own is.
-        cluster(userId)
+        runCatching { faceScanDao.upsert(scanned.map { FaceScanEntity(userId?.id ?: PhotoLocationEntity.LOCAL_USER, it) }) }
+        // Give the fresh faces person ids so the viewer can show and tag them. The incremental path places
+        // them against the cached people first (assign-to-existing, no rebuild); it runs regardless of the
+        // pause switch since it is plain DB work, matching the forced full rebuild it falls back to. That
+        // fallback stays forced, so it clusters even while background indexing is paused (the common state
+        // after the first scan); a plain call would no-op there and leave the freshly scanned faces with a
+        // null person id, so the viewer's grouped-faces read stays empty and the photo reads as "no faces".
+        if (!tryAssignNewFaces(userId)) cluster(userId, force = true)
         return true
     }
 
@@ -507,7 +601,7 @@ class FaceIndexingScheduler @Inject constructor(
      * thread, and serialises its native inference through [mlLock] like the walk.
      */
     fun sweepFacelessForPerson(
-        userId: UserId,
+        userId: UserId?,
         centroid: FloatArray,
         matchThreshold: Float,
     ): Flow<FaceSweepEvent> = channelFlow {
@@ -519,8 +613,10 @@ class FaceIndexingScheduler @Inject constructor(
             send(FaceSweepEvent.Progress(0, 0)); return@channelFlow
         }
         val items = runCatching {
-            val pending = faceScanDao.hiResPendingKeys(userId.id).toHashSet()
-            galleryItemsProvider.get().invoke(userId).first().filter { it.stableId in pending }
+            val pending = faceScanDao.hiResPendingKeys(userId?.id ?: PhotoLocationEntity.LOCAL_USER).toHashSet()
+            val provider = galleryItemsProvider.get()
+            (if (userId == null) provider.invokeLocalOnly() else provider.invoke(userId))
+                .first().filter { it.stableId in pending }
         }.getOrDefault(emptyList())
         send(FaceSweepEvent.Progress(0, items.size))
         if (items.isEmpty()) return@channelFlow
@@ -580,7 +676,7 @@ class FaceIndexingScheduler @Inject constructor(
                                             faceRows.add(
                                                 FaceEntity(
                                                     id = "$photoKey#$idx",
-                                                    userId = userId.id,
+                                                    userId = userId?.id ?: PhotoLocationEntity.LOCAL_USER,
                                                     photoKey = photoKey,
                                                     left = box.left,
                                                     top = box.top,
@@ -625,7 +721,7 @@ class FaceIndexingScheduler @Inject constructor(
                                 }
                                 // Mark hi-res swept whether or not a face was found, so a truly faceless
                                 // photo is recorded as looked-at and never re-swept.
-                                runCatching { faceScanDao.markHiResScanned(userId.id, listOf(photoKey)) }
+                                runCatching { faceScanDao.markHiResScanned(userId?.id ?: PhotoLocationEntity.LOCAL_USER, listOf(photoKey)) }
                                     .onFailure { Log.w(TAG, "sweep mark $photoKey failed: ${it.message}") }
                                 matches.forEach { send(it) }
                             }
@@ -640,8 +736,10 @@ class FaceIndexingScheduler @Inject constructor(
         }
         // The sweep added faces to photos the walk had left faceless, so group them once the sweep
         // drains: a newly persisted face then surfaces under the right person on its own, the same way
-        // the background walk clusters from its drained branch. Skipped when nothing was persisted.
-        if (newFaces.get() > 0) cluster(userId)
+        // the background walk clusters from its drained branch. Forced, since "Find more photos" is a
+        // user action that must group its results even while background indexing is paused. Skipped
+        // when nothing was persisted.
+        if (newFaces.get() > 0) cluster(userId, force = true)
     }.flowOn(Dispatchers.Default)
 
     /**
@@ -671,13 +769,13 @@ class FaceIndexingScheduler @Inject constructor(
      * empty snapshot over the pending one (which would lose every name). A no-op once the marker already
      * matches, so past the one-time migration a walk pays a single prefs read.
      */
-    private suspend fun migrateFaceModelVersionIfNeeded(userId: UserId) {
+    private suspend fun migrateFaceModelVersionIfNeeded(userId: UserId?) {
         val stored = context.settingsDataStore.data.first()[SettingsKeys.FACE_MODEL_VERSION_KEY]
         if (stored == FACE_MODEL_VERSION) {
             if (BuildConfig.DEBUG) Log.i(TAG, "face model version $FACE_MODEL_VERSION current, no wipe")
             return
         }
-        val account = userId.id
+        val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
         val faceTableEmpty = faceDao.facePhotoKeysForUser(account).isEmpty()
         val snapshotPresent = reattachFile.isFile
         when (reattachMigrationStep(faceTableEmpty, snapshotPresent)) {
@@ -704,8 +802,25 @@ class FaceIndexingScheduler @Inject constructor(
         // Marker last: only now is the wipe durably complete. The snapshot is left on disk for the
         // drained reattach to consume, so a crash after this still finds it waiting.
         context.settingsDataStore.edit { it[SettingsKeys.FACE_MODEL_VERSION_KEY] = FACE_MODEL_VERSION }
+        // A recognition-set swap leaves the previous set's model files behind, referenced by no current
+        // code. Prune the superseded filenames so a re-detected library does not also carry the dead
+        // models. Best-effort: a failure here never affects the migration completed above.
+        runCatching { pruneObsoleteModelFiles() }
+            .onFailure { Log.w(TAG, "obsolete model prune failed: ${it.message}") }
         if (BuildConfig.DEBUG) {
             Log.i(TAG, "face model version $stored -> $FACE_MODEL_VERSION, wiped $clearedFaces faces + $clearedScans scans")
+        }
+    }
+
+    /**
+     * Delete model files from a superseded recognition set. A detector or embedder swap leaves the
+     * previous set's files in the model directory referenced by no current code, and a model-version
+     * change is the one moment they are known to be obsolete. The names are the OpenCV YuNet + SFace set.
+     */
+    private fun pruneObsoleteModelFiles() {
+        val dir = File(context.filesDir, FaceModelAssets.DIRECTORY)
+        listOf("yunet.onnx", "sface.onnx").forEach { name ->
+            File(dir, name).takeIf { it.isFile }?.delete()
         }
     }
 
@@ -755,9 +870,9 @@ class FaceIndexingScheduler @Inject constructor(
      * exclusions are honoured when the groups form. The snapshot is cleared only after everything has been
      * applied, so a crash part way through resumes from the still-pending snapshot on the next drain.
      */
-    private suspend fun reattachPendingLabels(userId: UserId): Boolean {
+    private suspend fun reattachPendingLabels(userId: UserId?): Boolean {
         val data = FaceReattachSnapshot.read(reattachFile) ?: return false
-        val account = userId.id
+        val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
         val localFaces = faceDao.allFacesByScoreDesc(account).map {
             ReattachFace(it.id, it.photoKey, it.left, it.top, it.right, it.bottom)
         }
@@ -797,7 +912,7 @@ class FaceIndexingScheduler @Inject constructor(
      *  scanned, with faces or not, and a later run skips it. Bounded source in, recycled on the way out. */
     private suspend fun indexOne(
         item: GalleryItem,
-        userId: UserId,
+        userId: UserId?,
         detector: FaceDetector,
         embedder: FaceEmbedder,
         decryptBudget: AtomicInteger,
@@ -822,7 +937,7 @@ class FaceIndexingScheduler @Inject constructor(
      */
     private suspend fun scanOnePhoto(
         item: GalleryItem,
-        userId: UserId,
+        userId: UserId?,
         detector: FaceDetector,
         embedder: FaceEmbedder,
         decryptBudget: AtomicInteger,
@@ -849,6 +964,11 @@ class FaceIndexingScheduler @Inject constructor(
             return
         }
         sourcesLoaded.incrementAndGet()
+        // The source loaded and is about to be handed to detection, so mark the photo scanned now, before
+        // the ML block. If detect or embed then throws (an OOM on a crop, a bad frame), the photo is still
+        // recorded, so a poison photo is not re-decoded and retried on every later pass; a face-free photo
+        // is likewise marked once. A source that never loaded returned above and stays pending for a later pass.
+        scannedKeys.add(photoKey)
         try {
             mlLock.withLock {
                 val faces = detector.detect(source)
@@ -876,7 +996,7 @@ class FaceIndexingScheduler @Inject constructor(
                     val sh = source.height.toFloat()
                     val entity = FaceEntity(
                         id = "$photoKey#$index",
-                        userId = userId.id,
+                        userId = userId?.id ?: PhotoLocationEntity.LOCAL_USER,
                         photoKey = photoKey,
                         left = if (sw > 0f) (face.box.left / sw).coerceIn(0f, 1f) else 0f,
                         top = if (sh > 0f) (face.box.top / sh).coerceIn(0f, 1f) else 0f,
@@ -900,9 +1020,6 @@ class FaceIndexingScheduler @Inject constructor(
         } finally {
             if (!source.isRecycled) source.recycle()
         }
-        // Detection completed without throwing, so the photo has been scanned; record it whether or not
-        // a face was found. A source that never loaded returned above and stays pending for a later pass.
-        scannedKeys.add(photoKey)
     }
 
     /**
@@ -915,7 +1032,7 @@ class FaceIndexingScheduler @Inject constructor(
      */
     private suspend fun loadSource(
         item: GalleryItem,
-        userId: UserId,
+        userId: UserId?,
         decryptBudget: AtomicInteger,
         force: Boolean = false,
     ): Bitmap? = when (item) {
@@ -923,10 +1040,11 @@ class FaceIndexingScheduler @Inject constructor(
         // an image takes the first branch and never opens the retriever.
         is GalleryItem.LocalOnly -> decodeLocalBounded(item.local.uri)
             ?: decodeLocalVideoFrame(item.local.uri)
+        // The cloud fallback stays account-bound: a guest has only device items, so it is never reached.
         is GalleryItem.Synced -> decodeLocalBounded(item.local.uri)
             ?: decodeLocalVideoFrame(item.local.uri)
-            ?: decodeCloud(item.cloud, userId, decryptBudget, force)
-        is GalleryItem.CloudOnly -> decodeCloud(item.cloud, userId, decryptBudget, force)
+            ?: userId?.let { decodeCloud(item.cloud, it, decryptBudget, force) }
+        is GalleryItem.CloudOnly -> userId?.let { decodeCloud(item.cloud, it, decryptBudget, force) }
     }
 
     /**
@@ -937,7 +1055,17 @@ class FaceIndexingScheduler @Inject constructor(
      * Everything is wrapped: an unreadable or non-video file returns null, which the caller treats as a
      * photo that cannot be sourced.
      */
-    private fun decodeLocalVideoFrame(uri: String): Bitmap? = runCatching {
+    private suspend fun decodeLocalVideoFrame(uri: String): Bitmap? {
+        // MediaMetadataRetriever can hang indefinitely on a malformed file; the blocking helper's
+        // runCatching catches a throw but not a hang. Run the decode detached and bound the wait, so a
+        // wedged decode frees this worker rather than pinning it (three hung videos would otherwise stall
+        // all WORKER_COUNT workers) and the walk moves on. The abandoned decode is cancelled best-effort;
+        // its retriever is released in the helper's finally if the call ever returns.
+        val frame = scope.async(Dispatchers.IO) { decodeLocalVideoFrameBlocking(uri) }
+        return withTimeoutOrNull(VIDEO_FRAME_TIMEOUT_MS) { frame.await() } ?: run { frame.cancel(); null }
+    }
+
+    private fun decodeLocalVideoFrameBlocking(uri: String): Bitmap? = runCatching {
         val u = Uri.parse(uri)
         val retriever = MediaMetadataRetriever()
         try {
@@ -1154,7 +1282,7 @@ class FaceIndexingScheduler @Inject constructor(
     }
 
     /** Runs [block], and in a debug build logs how long it took under [label], so the ONNX session-open
-     *  cost (notably the ~37MB SFace load) is visible. A release build folds the timing away. */
+     *  cost (the model load) is visible. A release build folds the timing away. */
     private inline fun <T> debugTimed(label: String, block: () -> T): T {
         if (!BuildConfig.DEBUG) return block()
         val start = SystemClock.elapsedRealtime()
@@ -1162,19 +1290,55 @@ class FaceIndexingScheduler @Inject constructor(
     }
 
     /**
+     * Try the incremental fast path: place only the newly indexed faces against the cached people,
+     * without a whole-library rebuild. Returns true when it handled the pass (so the caller skips the
+     * full rebuild), false when a full rebuild is needed (first run, a stale cache, a large backlog) or
+     * when it failed. A failure is swallowed and reported as "needs a full rebuild" so the caller falls
+     * back cleanly, exactly as [cluster] swallows-and-continues; cancellation still propagates.
+     */
+    private suspend fun tryAssignNewFaces(userId: UserId?): Boolean =
+        try {
+            clusterFacesUseCase.assignNewFaces(userId)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            Log.w(TAG, "incremental assign failed, falling back to full cluster: ${e.message}")
+            false
+        }
+
+    /**
      * Group every stored face into people, once the library is fully scanned and is still permitted
      * to run. A clustering failure is logged and swallowed so it never fails the walk; cancellation
-     * still propagates.
+     * still propagates. Returns true only when a grouping actually completed (not skipped, timed out,
+     * or failed), so the caller can record that a parameter generation was applied.
      */
-    private suspend fun cluster(userId: UserId) {
-        if (!active()) return
-        try {
-            clusterFacesUseCase(userId)
-            if (BuildConfig.DEBUG) logClusterSweep(userId)
+    private suspend fun cluster(userId: UserId?, force: Boolean = false): Boolean {
+        if (!force && !active()) return false
+        return try {
+            // Hard ceiling on a single clustering round. The clusterer is bounded and cancellable
+            // (MAX_CLUSTERS + a polled cancellation check), so this only fires in a pathological case;
+            // when it does, the in-transaction rebuild rolls back and the walk carries on rather than
+            // hanging. withTimeoutOrNull absorbs its own timeout, so it never reads as a walk cancel.
+            val finished = withTimeoutOrNull(CLUSTER_TIMEOUT_MS) {
+                clusterFacesUseCase(userId)
+                true
+            }
+            if (finished == null) {
+                Log.w(TAG, "clustering timed out after ${CLUSTER_TIMEOUT_MS}ms, skipped this round")
+                false
+            } else {
+                if (BuildConfig.DEBUG) {
+                    // The debug threshold sweep reads per-account samples through the non-null diagnostic
+                    // path; a guest still clusters above, it just skips this measurement-only log.
+                    userId?.let { logClusterSweep(it) }
+                }
+                true
+            }
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (e: Throwable) {
             Log.w(TAG, "clustering failed: ${e.message}")
+            false
         }
     }
 
@@ -1192,8 +1356,44 @@ class FaceIndexingScheduler @Inject constructor(
                 return
             }
             logGrouping("REAL", FACE_CLUSTER_THRESHOLD, clusterFaces(samples))
-            for (t in floatArrayOf(0.34f, 0.38f, 0.42f, 0.46f, 0.50f)) {
+            // Bracket the production threshold so the cluster-count trend on BOTH sides of it shows:
+            // fewer clusters below it (fragments rejoin, but contamination risk rises), more above.
+            for (t in floatArrayOf(0.34f, 0.40f, 0.46f, 0.50f, 0.53f, 0.56f, 0.60f)) {
                 logGrouping("SWEEP", t, clusterFaces(samples, t, t))
+            }
+            // Each face's nearest OTHER face by cosine, bucketed, so the same-vs-different-person
+            // separation and where FACE_CLUSTER_THRESHOLD sits in it are visible in logcat. A same-person
+            // mass just below the threshold is the tell of over-strict fragmentation; overlap of the two
+            // humps warns that lowering the threshold would merge different people. Capped so the O(n^2)
+            // scan stays bounded on a large library.
+            val pool = samples.take(2500)
+            val n = pool.size
+            if (n >= 2) {
+                val buckets = IntArray(20)
+                var atOrAbove = 0
+                var justBelow = 0
+                for (i in 0 until n) {
+                    var best = -1f
+                    val ei = pool[i].embedding
+                    for (j in 0 until n) {
+                        if (j != i) {
+                            val s = cosineSimilarity(ei, pool[j].embedding)
+                            if (s > best) best = s
+                        }
+                    }
+                    if (best < 0f) continue
+                    buckets[(best * 20f).toInt().coerceIn(0, 19)]++
+                    if (best >= FACE_CLUSTER_THRESHOLD) atOrAbove++
+                    else if (best >= FACE_CLUSTER_THRESHOLD - 0.10f) justBelow++
+                }
+                val hist = buckets.mapIndexed { b, c ->
+                    if (c == 0) null else String.format(Locale.US, "%.2f:%d", b * 0.05, c)
+                }.filterNotNull().joinToString(" ")
+                Log.i(
+                    TAG,
+                    "SWEEP nearest (n=$n) t=${String.format(Locale.US, "%.2f", FACE_CLUSTER_THRESHOLD)} " +
+                        "atOrAbove=$atOrAbove justBelow0.10=$justBelow hist[$hist]",
+                )
             }
         }.onFailure { Log.w(TAG, "cluster sweep failed: ${it.message}") }
     }
@@ -1312,5 +1512,22 @@ class FaceIndexingScheduler @Inject constructor(
         /** While the device is not in a good state for heavy work, each worker re-checks at this
          *  cadence, so a resume or a pause / sign-out both take effect within a second. */
         const val HEALTH_PAUSE_POLL_MS = 1_000L
+
+        /** Hard ceiling on one clustering round (see [cluster]). The clusterer is bounded and
+         *  cancellable, so this only trips in a pathological case; when it does the walk carries on
+         *  rather than hanging. */
+        const val CLUSTER_TIMEOUT_MS = 180_000L
+
+        /** Least time between two mid-walk clusterings during a long continuous drain, so groups
+         *  refresh periodically without re-clustering on every pass. */
+        const val INCREMENTAL_CLUSTER_MIN_INTERVAL_MS = 60_000L
+
+        /** How many accrued scan markers trigger a mid-pass flush, so a long single-pass drain that is
+         *  killed keeps the photos it already scanned instead of restarting from zero. */
+        const val SCAN_FLUSH_CHUNK = 200
+
+        /** Hard ceiling on one device-video still-frame decode, so a malformed file that hangs
+         *  MediaMetadataRetriever frees the worker instead of pinning it (three would stall the pool). */
+        const val VIDEO_FRAME_TIMEOUT_MS = 10_000L
     }
 }

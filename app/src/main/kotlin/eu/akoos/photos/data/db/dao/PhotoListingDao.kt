@@ -206,6 +206,22 @@ interface PhotoListingDao {
     @Query("SELECT contentHash FROM photo_listing WHERE userId = :userId AND contentHash IN (:contentHashes)")
     suspend fun findExistingContentHashes(userId: String, contentHashes: List<String>): List<String>
 
+    /** The link of the one photo this user's library already holds for a content hash, or null when it
+     *  holds none. The dedup path resolves the pre-existing link so a skipped import records it against
+     *  the run, matching [findExistingContentHashes] on scope: same userId, same volume-scoped hash. */
+    @Query("SELECT linkId FROM photo_listing WHERE userId = :userId AND contentHash = :contentHash LIMIT 1")
+    suspend fun linkIdByContentHash(userId: String, contentHash: String): String?
+
+    /** Writes [contentHash] onto a just-uploaded link when the row is present and carries none yet, so a
+     *  later import recognises the same bytes and dedups them. The WHERE guard makes it a no-op once a
+     *  hash is present, so it never overwrites the value a full library refresh resolves; a row not yet
+     *  hydrated is left untouched for that refresh to fill. */
+    @Query(
+        "UPDATE photo_listing SET contentHash = :contentHash WHERE userId = :userId AND linkId = :linkId " +
+            "AND (contentHash IS NULL OR contentHash = '')",
+    )
+    suspend fun seedContentHash(userId: String, linkId: String, contentHash: String)
+
     /** Live observation for a specific set of linkIds — used by album detail screen. Callers chunk
      *  [linkIds] and restate this ORDER BY when merging the slices back together. */
     @Query("SELECT * FROM photo_listing WHERE linkId IN (:linkIds) ORDER BY captureTime DESC")

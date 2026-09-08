@@ -55,7 +55,6 @@ import kotlinx.coroutines.flow.sample
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
-import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
@@ -315,19 +314,17 @@ class GalleryViewModel @Inject constructor(
      *  [GalleryItem.CloudOnly] in the static item snapshot can become locally available after the
      *  user downloads it (the sync row updates, but the snapshot doesn't). This live set lets the
      *  grid upgrade such a cell's badge to "backed up + on device", matching the viewer. */
-    val downloadedCloudLinkIds: StateFlow<Set<String>> = flow {
-        val userId = accountManager.getPrimaryUserId().first()
-        if (userId == null) { emit(emptySet()); return@flow }
-        emitAll(
-            syncStateRepo.observeAll(userId).map { states ->
+    val downloadedCloudLinkIds: StateFlow<Set<String>> = accountManager.getPrimaryUserId()
+        .flatMapLatest { userId ->
+            if (userId == null) flowOf(emptySet())
+            else syncStateRepo.observeAll(userId).map { states ->
                 states.asSequence()
                     .filter { it.status == SyncStatus.SYNCED }
                     .filter { it.cloudFileId != null && it.localUri.isNotBlank() }
                     .map { it.cloudFileId!! }
                     .toSet()
-            },
-        )
-    }
+            }
+        }
         .retryOnDbTear("GalleryDownloadedIds")
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
 
@@ -537,9 +534,9 @@ class GalleryViewModel @Inject constructor(
 
     /**
      * People (face clusters) for the current account, surfaced as the round-thumbnail People rail on
-     * the Photos tab. Collected only while the master AI switch is on; an off switch, a signed-out
-     * account, or no indexed faces yet all resolve to an empty list, so the People chip stays hidden
-     * and the feature costs nothing on the common (AI-off) path. Recombined with the item set so each
+     * the Photos tab. Collected only while the master AI switch is on; an off switch or no indexed
+     * faces yet resolve to an empty list, so the People chip stays hidden and the feature costs
+     * nothing on the common (AI-off) path. Recombined with the item set so each
      * cover face box can be normalised against its cover photo's own dimensions for a face crop; the
      * item set changes only when photos are added or removed, not on a thumbnail decrypt, so this does
      * not rebuild while scrolling. If the list empties while a person filter is active (the switch was
@@ -553,7 +550,7 @@ class GalleryViewModel @Inject constructor(
             accountManager.getPrimaryUserId(),
         ) { aiOn, userId -> aiOn to userId }
             .flatMapLatest { (aiOn, userId) ->
-                if (!aiOn || userId == null) flowOf(emptyList<PersonSummary>())
+                if (!aiOn) flowOf(emptyList<PersonSummary>())
                 else observePeopleUseCase(userId, uiState.map { it.items }.distinctUntilChanged())
             }
         viewModelScope.launch {
@@ -599,9 +596,10 @@ class GalleryViewModel @Inject constructor(
                 recomputeFilteredForPerson()
                 return@launch
             }
-            val userId = accountManager.getPrimaryUserId().first() ?: return@launch
+            val account = accountManager.getPrimaryUserId().first()?.id
+                ?: eu.akoos.photos.data.db.entity.PhotoLocationEntity.LOCAL_USER
             val keys = try {
-                faceDao.photoKeysForPerson(userId.id, personId).first().toSet()
+                faceDao.photoKeysForPerson(account, personId).first().toSet()
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -1099,6 +1097,17 @@ class GalleryViewModel @Inject constructor(
         }
     }
 
+    /** Whether the one-time post-notifications auto-request has not yet fired. Read fresh from the
+     *  store so a stale UI-state value cannot re-ask (and re-show the snackbar) after a navigation. */
+    suspend fun shouldAskNotificationPermission(): Boolean =
+        !(context.settingsDataStore.data.first()[SettingsKeys.NOTIFICATION_PERMISSION_ASKED] ?: false)
+
+    fun markNotificationPermissionAsked() {
+        viewModelScope.launch {
+            context.settingsDataStore.edit { it[SettingsKeys.NOTIFICATION_PERMISSION_ASKED] = true }
+        }
+    }
+
     fun setContentFilter(filter: ContentFilter) {
         val state = _uiState.value
         val filtered = applyFilter(
@@ -1138,11 +1147,43 @@ class GalleryViewModel @Inject constructor(
         if (!networkObserver.isOnline.value) {
             // Offline: cached state from observeGallery() keeps the grid rendered. Pop the
             // spinner off immediately so pull-to-refresh doesn't hang.
+            // A local-only guest's on-device face rescan needs no network, so still honour the pull
+            // for it here rather than dropping the gesture at this cloud guard.
+            if (!_uiState.value.isSignedIn) {
+                localRepo.notifyMediaChanged()
+                viewModelScope.launch {
+                    val facePrefs = context.settingsDataStore.data.first()
+                    if (facePrefs[SettingsKeys.AI_FEATURES_ENABLED] == true &&
+                        facePrefs[SettingsKeys.FACE_ENABLED] == true
+                    ) {
+                        viewModelScope.launch(Dispatchers.IO) {
+                            runCatching { cloudRepo.backfillFaces(null) }
+                        }
+                    }
+                }
+            }
             _uiState.update { it.copy(isRefreshing = false, isSyncing = false) }
             return
         }
         viewModelScope.launch {
-            val userId = accountManager.getPrimaryUserId().first() ?: return@launch
+            val userId = accountManager.getPrimaryUserId().first()
+            if (userId == null) {
+                // No account: the timeline is device-only, so honour the pull with a local media
+                // rescan and settle the spinner rather than dropping the gesture at a cloud guard.
+                localRepo.notifyMediaChanged()
+                // Faces work without an account too: kick the same on-device face backfill the signed-in
+                // path runs, gated on the same switches, over the guest (local) partition.
+                val facePrefs = context.settingsDataStore.data.first()
+                if (facePrefs[SettingsKeys.AI_FEATURES_ENABLED] == true &&
+                    facePrefs[SettingsKeys.FACE_ENABLED] == true
+                ) {
+                    viewModelScope.launch(Dispatchers.IO) {
+                        runCatching { cloudRepo.backfillFaces(null) }
+                    }
+                }
+                _uiState.update { it.copy(isRefreshing = false, isSyncing = false) }
+                return@launch
+            }
             // isRefreshing drives the pull-to-refresh spinner; isSyncing (avatar ring) is left
             // to observeBackgroundUploadProgress so it only spins during real uploads, not the
             // long full cloud listing this refresh kicks off.
@@ -1354,10 +1395,10 @@ class GalleryViewModel @Inject constructor(
         if (items.isEmpty()) return
         viewModelScope.launch {
             _uiState.update { it.copy(multiDeleteState = MultiDeleteState.Working) }
-            val userId = accountManager.getPrimaryUserId().first() ?: run {
-                _uiState.update { it.copy(multiDeleteState = MultiDeleteState.Failed(context.getString(R.string.viewer_not_signed_in))) }
-                return@launch
-            }
+            // A local (device) delete needs no account; the use case only requires a signed-in user
+            // for a cloud trash, which local-only mode never produces. Pass the nullable userId
+            // through instead of blocking a guest delete here.
+            val userId = accountManager.getPrimaryUserId().first()
             val result = deletePhotoUseCase(
                 userId          = userId,
                 items           = items,
@@ -1407,18 +1448,16 @@ class GalleryViewModel @Inject constructor(
         viewModelScope.launch {
             // Run the deferred cloud delete first; surface failure as a multi-delete error.
             val cloudResult = if (pending != null) {
+                // No account is needed to finish a local delete; the use case guards its own cloud
+                // branch, returning CloudDeleteFailed only when there are cloud links and no session.
                 val userId = accountManager.getPrimaryUserId().first()
-                if (userId == null) {
-                    DeletePhotoUseCase.Result.CloudDeleteFailed
-                } else {
-                    deletePhotoUseCase.completeAfterPermissionGranted(
-                        userId          = userId,
-                        cloudLinkIds    = pending.cloudLinkIds,
-                        items           = pending.itemsBeingDeleted,
-                        freeUpSpace     = pending.freeUpSpace,
-                        hide            = pending.hide,
-                    )
-                }
+                deletePhotoUseCase.completeAfterPermissionGranted(
+                    userId          = userId,
+                    cloudLinkIds    = pending.cloudLinkIds,
+                    items           = pending.itemsBeingDeleted,
+                    freeUpSpace     = pending.freeUpSpace,
+                    hide            = pending.hide,
+                )
             } else DeletePhotoUseCase.Result.Success
             if (cloudResult is DeletePhotoUseCase.Result.CloudDeleteFailed) {
                 _uiState.update { it.copy(
@@ -1615,11 +1654,10 @@ class GalleryViewModel @Inject constructor(
         // dialog on Android 11+). Narrowing to the copied files is what leaves a photo whose copy
         // failed, and everything a stopped pass never reached, where the user can still see it.
         val deleting = HiddenVaultDecisions.deletableOriginals(vaultable, collected)
-        val userId = accountManager.getPrimaryUserId().first() ?: run {
-            rollbackPendingHide()
-            _uiState.update { it.copy(multiHideState = MultiDeleteState.Failed(context.getString(R.string.viewer_not_signed_in))) }
-            return
-        }
+        // Hiding a device photo needs no account; the vault is app-private and the use case only
+        // requires a signed-in user for a cloud trash, which a hide never performs (deleteFromCloud =
+        // false). Pass the nullable userId through instead of aborting a guest hide here.
+        val userId = accountManager.getPrimaryUserId().first()
         val result = deletePhotoUseCase(
             userId          = userId,
             items           = deleting,
@@ -1776,10 +1814,12 @@ class GalleryViewModel @Inject constructor(
      * routes them, exactly as it does for the same folder opened from its own screen.
      */
     private suspend fun folderHideSplit(bucketName: String): HiddenFolderRecords.HideSplit {
-        val userId = accountManager.getPrimaryUserId().first() ?: return HiddenFolderRecords.HideSplit.EMPTY
+        val userId = accountManager.getPrimaryUserId().first()
         val bucketItems = localRepo.queryByBucket(bucketName)
         if (bucketItems.isEmpty()) return HiddenFolderRecords.HideSplit.EMPTY
-        val pairedLinkIds = syncStateRepo.cloudPairedLinkIds(userId, bucketItems.map { it.uri })
+        // Without an account no device photo is paired to a Drive copy, so the split is all-local.
+        val pairedLinkIds: Map<String, String> =
+            if (userId != null) syncStateRepo.cloudPairedLinkIds(userId, bucketItems.map { it.uri }) else emptyMap()
         return HiddenFolderRecords.folderHideSplit(
             items = bucketItems.map { GalleryItem.LocalOnly(it) },
             bucketName = bucketName,

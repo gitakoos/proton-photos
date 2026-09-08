@@ -105,11 +105,9 @@ fun MemoriesScreen(
         val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
         val contentTopPad = statusBarTop + 72.dp
 
-        // Only people who appear in at least two photos reach the preview, so a single stray
-        // detection cannot open a section of its own; the empty state keys off that same set.
-        // Ente-style: the preview shows the people you have NAMED, so unnamed and junk clusters never
-        // clutter it. Before any are named, it falls back to the clusters worth naming, so the first
-        // person is still reachable; the header chevron opens the full People page either way.
+        // Only people in at least two photos reach the preview, so a stray detection cannot open its own
+        // section; the empty state keys off the same set. The preview shows the people you have NAMED,
+        // falling back to the clusters worth naming before any are named so the first is still reachable.
         val peopleNamed = state.people.filter { !it.displayName.isNullOrBlank() }
         val peopleToName = state.people.filter {
             it.displayName.isNullOrBlank() && it.faceCount >= MIN_FACES_TO_SHOW_PERSON

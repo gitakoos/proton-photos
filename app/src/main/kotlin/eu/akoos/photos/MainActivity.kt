@@ -382,20 +382,28 @@ class MainActivity : AppCompatActivity() {
 
                     when {
                         forceUpdate -> ForceUpdateDialog()
-                        isLocked -> AppLockScreen(onUnlocked = {
-                            lastUnlockMs = System.currentTimeMillis()
-                            isLocked = false
-                        })
                         else -> {
-                            NavGraph(
-                                onStartLogin = { authOrchestrator.startLoginWorkflow(null) },
-                                onCheckForUpdates = { runManualUpdateCheck() },
-                                widgetPhotoUri = widgetPhotoUri,
-                                onWidgetPhotoConsumed = { widgetPhotoUri = null },
-                                externalEditRequest = externalEditRequest,
-                                onExternalEditConsumed = { externalEditRequest = null },
-                            )
-                            UpdaterHost()
+                            // App lock is drawn as an OVERLAY over the nav graph, not as a branch that
+                            // replaces it. Gating NavGraph out of composition disposed its NavController
+                            // and back stack, so unlocking re-entered at the start destination and the
+                            // startup router popped to the gallery instead of returning where the user
+                            // was. AppLockScreen is opaque, FLAG_SECURE, and consumes all input, so it
+                            // fully covers the content (and the recents preview) with the route intact.
+                            Box(modifier = Modifier.fillMaxSize()) {
+                                NavGraph(
+                                    onStartLogin = { authOrchestrator.startLoginWorkflow(null) },
+                                    onCheckForUpdates = { runManualUpdateCheck() },
+                                    widgetPhotoUri = widgetPhotoUri,
+                                    onWidgetPhotoConsumed = { widgetPhotoUri = null },
+                                    externalEditRequest = externalEditRequest,
+                                    onExternalEditConsumed = { externalEditRequest = null },
+                                )
+                                UpdaterHost()
+                                if (isLocked) AppLockScreen(onUnlocked = {
+                                    lastUnlockMs = System.currentTimeMillis()
+                                    isLocked = false
+                                })
+                            }
                         }
                     }
                 }

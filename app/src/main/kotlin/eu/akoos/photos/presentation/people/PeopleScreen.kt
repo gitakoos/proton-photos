@@ -63,6 +63,7 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import eu.akoos.photos.R
+import eu.akoos.photos.domain.usecase.isNameableCluster
 import eu.akoos.photos.presentation.common.IconBubble
 import eu.akoos.photos.presentation.common.SecondaryButton
 import eu.akoos.photos.presentation.common.ShimmerBox
@@ -93,12 +94,15 @@ fun PeopleScreen(
     // A null value is the pre-first-emission load; once resolved it is a (possibly empty) list.
     val loading = people == null
     val resolved = people.orEmpty()
-    // This page shows only the people you have NAMED. Unnamed clusters are named, merged and dismissed
-    // on the review screen (the overflow menu), so junk never clutters your named people.
+    // The People grid shows only NAMED people, so it stays a clean list of who has been named. Every
+    // unnamed cluster is curated and named on the review screen instead (reached from the overflow menu
+    // or, when nothing is named yet, the empty state), which keeps naming in one place and off this grid.
     val named = resolved.filter { !it.displayName.isNullOrBlank() }
-    // Unnamed clusters still waiting for a name, surfaced as a count on the review entry. The Unsorted
-    // leftover bucket is not a suggestion to name, so it is left out of the tally.
-    val suggestionCount = resolved.count { it.displayName.isNullOrBlank() && !it.isOther }
+    val shown = named
+    // Unnamed clusters still waiting for a name, surfaced as a count on the review entry. Gated on the
+    // exact same rule as the grid cards above, so the badge matches the number of unnamed cards the user
+    // actually sees instead of counting held-back one-off detections or the Unsorted pile.
+    val suggestionCount = resolved.count { isNameableCluster(it.displayName, it.isOther, it.faceCount) }
     var menuOpen by remember { mutableStateOf(false) }
     var showSearch by remember { mutableStateOf(false) }
 
@@ -111,7 +115,7 @@ fun PeopleScreen(
         // empty state before the named people arrive.
         val phase = when {
             loading -> 0
-            named.isEmpty() -> 1
+            shown.isEmpty() -> 1
             else -> 2
         }
         Crossfade(targetState = phase, label = "peopleContent", modifier = Modifier.fillMaxSize()) { p ->
@@ -151,8 +155,14 @@ fun PeopleScreen(
                                 textAlign = TextAlign.Center,
                             )
                             Spacer(Modifier.height(14.dp))
+                            // Surface the count so a guest with unnamed clusters sees groups exist
+                            // and can tap through to name them, instead of a bare empty message.
                             SecondaryButton(
-                                label = stringResource(R.string.person_suggestions_review),
+                                label = if (suggestionCount > 0) {
+                                    stringResource(R.string.person_suggestions_review_count, suggestionCount)
+                                } else {
+                                    stringResource(R.string.person_suggestions_review)
+                                },
                                 onClick = onReviewSuggestions,
                             )
                         }
@@ -170,7 +180,7 @@ fun PeopleScreen(
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                         modifier = Modifier.fillMaxSize(),
                     ) {
-                        items(items = named, key = { it.personId }) { person ->
+                        items(items = shown, key = { it.personId }) { person ->
                             PersonCard(person = person, onClick = { onPersonClick(person.personId) })
                         }
                     }

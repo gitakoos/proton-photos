@@ -210,6 +210,7 @@ fun SearchScreen(
     val offlinePinIds by vm.offlinePinIds.collectAsStateWithLifecycle()
     val favoriteState by vm.favoriteState.collectAsStateWithLifecycle()
     val isSignedIn by vm.isSignedIn.collectAsStateWithLifecycle()
+    val faceEnabled by vm.faceEnabled.collectAsStateWithLifecycle()
 
     val isSelectionMode = selectedItems.isNotEmpty()
     // In selection mode the back button cancels the selection instead of leaving the screen.
@@ -416,8 +417,12 @@ fun SearchScreen(
                 item(key = "offline_preview_section") {
                     OfflinePreviewCard(onClick = onOpenOffline)
                 }
-                item(key = "people_preview_section") {
-                    PeoplePreviewCard(onClick = onOpenPeople)
+                // Entry point to the People page, shown whenever on-device face grouping is on and
+                // independent of sign-in, so a local-only guest can reach and name their clusters.
+                if (faceEnabled) {
+                    item(key = "people_preview_section") {
+                        PeoplePreviewCard(onClick = onOpenPeople)
+                    }
                 }
                 if (recent.isNotEmpty()) {
                     item(key = "recent_section") {
@@ -1002,6 +1007,8 @@ fun SearchScreen(
                 // sync-status + precise date pickers only.
                 showCategorySection = false,
                 showMediaTypeSection = false,
+                // Signed out there is only on-device media, so the backed-up / cloud chips are hidden.
+                showSyncStatusSection = isSignedIn,
             )
         }
     }

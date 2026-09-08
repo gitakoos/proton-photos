@@ -381,6 +381,24 @@ class ReconcileSyncStateUseCase @Inject constructor(
         // the normal folder scope by design, and clearing its queued flag would make the very next
         // upload pass skip it so the explicit upload would silently never run.
         val inScopeUris = newStates.map { it.localUri }.toSet()
+
+        // A queued photo the user deleted from the device before it uploaded leaves an orphaned
+        // LOCAL_ONLY row. The folder-scope cleanup below deliberately spares an explicit MANUAL /
+        // ALBUM_ADD / EDITOR intent, and the stranded-intent recovery further down would re-queue such
+        // a row every pass, so its now-missing file keeps the queue count from ever completing. Drop
+        // any QUEUED LOCAL_ONLY row whose file is gone from the WHOLE device (checked against
+        // allLocalItems, every file MediaStore sees, NOT the folder-filtered inScopeUris, so an
+        // out-of-folder photo that still exists is untouched), whatever queued it. deleteLocalOnlyByUris
+        // is status-guarded, so a row another pass just claimed to UPLOADING is left alone.
+        val allLocalUris = allLocalItems.mapTo(HashSet(allLocalItems.size)) { it.uri }
+        val goneQueued = syncStateRepo.observeAll(userId).first().filter {
+            it.status == SyncStatus.LOCAL_ONLY && it.queued && it.localUri !in allLocalUris
+        }
+        if (goneQueued.isNotEmpty()) {
+            syncStateRepo.deleteLocalOnlyByUris(goneQueued.map { it.localUri })
+            Log.d(TAG, "reconcile: dropped ${goneQueued.size} queued LOCAL_ONLY rows whose file is gone")
+        }
+
         val staleLocalOnly = syncStateRepo.observeAll(userId).first()
             .filter {
                 it.status == SyncStatus.LOCAL_ONLY &&
@@ -408,6 +426,10 @@ class ReconcileSyncStateUseCase @Inject constructor(
             .filter {
                 it.status == SyncStatus.LOCAL_ONLY &&
                     !it.queued &&
+                    // The file must still be on the device: a deleted intent has nothing to upload, and
+                    // re-queuing it would loop forever against a gone file (the gone-file drop above
+                    // clears the queued ones; this stops the un-queued survivors coming back).
+                    it.localUri in allLocalUris &&
                     // A stranded upload has no cloud copy by definition. Requiring cloudFileId == null
                     // stops a backed-up photo whose cloud copy was later removed (it demotes to
                     // LOCAL_ONLY) from being re-queued into an endless re-upload of a deletion.

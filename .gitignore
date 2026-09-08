@@ -22,6 +22,7 @@ keystore.properties
 # markdown docs (and the archived release notes) stay local and off GitHub.
 docs/*.md
 docs/release-notes/
+docs/releases/
 
 # Local reference clones of upstream repos (Ente, Immich, Drive), for cross-checking only.
 temp*/

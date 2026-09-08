@@ -71,6 +71,7 @@ import eu.akoos.photos.data.hidden.HiddenVaultJournal
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.currentShareStripConfig
 import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.data.repository.drive.AlbumSharingService
 import eu.akoos.photos.presentation.common.FavoriteActionState
 import eu.akoos.photos.presentation.common.FavoriteWriter
 import eu.akoos.photos.presentation.common.buildDeleteUndoAction
@@ -83,6 +84,7 @@ import eu.akoos.photos.presentation.util.formatBytes
 import eu.akoos.photos.presentation.viewer.PublicLinkState
 import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.GalleryItem
+import eu.akoos.photos.domain.entity.ShareExternalInvitation
 import eu.akoos.photos.domain.entity.ShareInvitation
 import eu.akoos.photos.domain.entity.ShareMember
 import eu.akoos.photos.domain.entity.SyncStatus
@@ -165,6 +167,8 @@ data class AlbumDetailUiState(
     /** Volume ID — may differ from the current user's volume for shared-with-me albums. */
     val volumeId: String? = null,
     val invitations: List<ShareInvitation> = emptyList(),
+    /** Pending external (non-Proton) invitations on this share, shown as extra "Who has access" rows (#54). */
+    val externalInvitations: List<ShareExternalInvitation> = emptyList(),
     val members: List<ShareMember> = emptyList(),
     val isLoadingInvitations: Boolean = false,
     val downloadState: AlbumDownloadState = AlbumDownloadState.Idle,
@@ -238,6 +242,7 @@ class AlbumDetailViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val accountManager: AccountManager,
     private val driveRepo: DrivePhotoRepository,
+    private val albumSharingService: AlbumSharingService,
     private val syncStateRepo: SyncStateRepository,
     private val getUser: GetUser,
     private val networkObserver: eu.akoos.photos.util.NetworkObserver,
@@ -656,7 +661,11 @@ class AlbumDetailViewModel @Inject constructor(
             // Surface failures via state.error so a network drop snackbars instead of showing an empty list.
             val invitationsResult = runCatching { driveRepo.loadShareInvitations(userId, shareId) }
             val membersResult = runCatching { driveRepo.loadShareMembers(userId, shareId) }
-            val firstError = invitationsResult.exceptionOrNull() ?: membersResult.exceptionOrNull()
+            // #54: pending external (non-Proton) invitations sit in the same list; a shareId is guaranteed here.
+            val externalResult = runCatching { albumSharingService.listExternalInvitations(userId, shareId) }
+            val firstError = invitationsResult.exceptionOrNull()
+                ?: membersResult.exceptionOrNull()
+                ?: externalResult.exceptionOrNull()
             val friendly = firstError?.let {
                 friendlyNetworkError(it, networkObserver.isOnline.value, context)
             }
@@ -665,6 +674,7 @@ class AlbumDetailViewModel @Inject constructor(
                     isLoadingInvitations = false,
                     invitations = invitationsResult.getOrDefault(emptyList()),
                     members = membersResult.getOrDefault(emptyList()),
+                    externalInvitations = externalResult.getOrDefault(emptyList()),
                     error = friendly ?: firstError?.let { e -> sanitizeErrorMessage(e.message) } ?: it.error,
                 )
             }
@@ -682,6 +692,30 @@ class AlbumDetailViewModel @Inject constructor(
                     onSuccess = { _uiState.update { it.copy(invitations = it.invitations.filter { inv -> inv.invitationId != invitationId }) } },
                     onFailure = { e ->
                         Log.e("AlbumDetailVM", "revokeInvitation failed", e)
+                        val friendly = friendlyNetworkError(e, networkObserver.isOnline.value, context)
+                        _uiState.update {
+                            it.copy(error = friendly ?: context.getString(R.string.share_revoke_failed))
+                        }
+                    },
+                )
+        }
+    }
+
+    /** Withdraws a pending external (non-Proton) invitation, then drops its row from the list (#54). */
+    fun revokeExternalInvitation(invitationId: String) {
+        val shareId = _uiState.value.shareId ?: return
+        if (invitationId.isBlank()) return
+        viewModelScope.launch {
+            val userId = accountManager.getPrimaryUserId().first() ?: return@launch
+            runCatching { albumSharingService.revokeExternalInvitation(userId, shareId, invitationId) }
+                .fold(
+                    onSuccess = {
+                        _uiState.update {
+                            it.copy(externalInvitations = it.externalInvitations.filter { inv -> inv.id != invitationId })
+                        }
+                    },
+                    onFailure = { e ->
+                        Log.e("AlbumDetailVM", "revokeExternalInvitation failed", e)
                         val friendly = friendlyNetworkError(e, networkObserver.isOnline.value, context)
                         _uiState.update {
                             it.copy(error = friendly ?: context.getString(R.string.share_revoke_failed))
@@ -1559,6 +1593,10 @@ class AlbumDetailViewModel @Inject constructor(
     fun inviteUsers(emails: List<String>, message: String, permissions: Int) {
         val albumLinkId = _uiState.value.albumLinkId.ifBlank { return }
         if (emails.isEmpty()) return
+        // #54: an invitation addressed to the signed-in user's own primary address never reaches the
+        // server; catch it locally with a clear message instead of a confusing round-trip rejection.
+        val ownAddress = _uiState.value.ownerEmail.trim().lowercase()
+        fun isOwnAddress(candidate: String) = ownAddress.isNotEmpty() && candidate.trim().lowercase() == ownAddress
         viewModelScope.launch {
             val userId = accountManager.getPrimaryUserId().first() ?: return@launch
             // Optimistic pending rows for new invitees (blank invitationId; replaced by server truth on refresh).
@@ -1568,6 +1606,7 @@ class AlbumDetailViewModel @Inject constructor(
                     .toSet()
                 val placeholders = emails
                     .filter { it.lowercase() !in known }
+                    .filterNot { isOwnAddress(it) }
                     .map { ShareInvitation(invitationId = "", email = it, permissions = permissions) }
                 state.copy(
                     isInvitingBatch = true,
@@ -1580,6 +1619,10 @@ class AlbumDetailViewModel @Inject constructor(
             // collecting it here is what lets this screen address the share it just made.
             val reportedShareIds = mutableListOf<String?>()
             for (email in emails) {
+                if (isOwnAddress(email)) {
+                    failures.add(email to context.getString(R.string.share_invite_self))
+                    continue
+                }
                 runCatching { driveRepo.inviteToAlbum(userId, albumLinkId, email, permissions) }
                     .fold(
                         onSuccess = { shareId ->

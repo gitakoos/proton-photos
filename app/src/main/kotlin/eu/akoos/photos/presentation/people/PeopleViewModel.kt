@@ -71,9 +71,11 @@ class PeopleViewModel @Inject constructor(
         accountManager.getPrimaryUserId(),
     ) { faceOn, userId -> faceOn to userId }
         .flatMapLatest { (faceOn, userId) ->
-            if (!faceOn || userId == null) flowOf(emptyList())
-            else observePeopleUseCase(userId, getGalleryItems.invoke(userId))
-                .map { list -> list.mapNotNull { it.toPersonUi() } }
+            if (!faceOn) flowOf(emptyList())
+            else observePeopleUseCase(
+                userId,
+                if (userId == null) getGalleryItems.invokeLocalOnly() else getGalleryItems.invoke(userId),
+            ).map { list -> list.mapNotNull { it.toPersonUi() } }
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), null)
 }

@@ -750,6 +750,95 @@
     <string name="metadata_edit_channel_desc">Prikazuje potek shranjevanja sprememb podrobnosti fotografij v Proton Drive.</string>
     <string name="metadata_edit_notification_title">Shranjevanje podrobnosti fotografij…</string>
     <string name="metadata_edit_notification_progress">%1$d od %2$d</string>
+    <!-- Google Takeout import notification. -->
+    <string name="import_channel_name">Uvoz fotografij</string>
+    <string name="import_channel_desc">Prikazuje potek uvoza datoteke Google Takeout v Proton Drive.</string>
+    <string name="import_notification_title">Uvažanje fotografij…</string>
+    <string name="import_notification_progress">%1$d od %2$d</string>
+    <string name="import_notification_done_title">Uvoz končan</string>
+    <string name="import_notification_done_text">%1$d uvoženih, %2$d preskočenih, %3$d ni uspelo</string>
+    <!-- Import staging notification. -->
+    <string name="import_stage_notification_title">Pripravljanje uvoza…</string>
+    <string name="import_stage_progress">%1$d od %2$d</string>
+    <!-- Google Takeout import screen. -->
+    <string name="import_title">Uvoz fotografij</string>
+    <string name="import_row_desc">Prenesite izvoz Google Photos ali Ente v Proton Drive</string>
+    <string name="import_explainer">Uvozite izvoz Google Takeout ali Ente kot .zip. Vaše fotografije se naložijo v Proton Drive z izvirnim datumom in lokacijo.</string>
+    <string name="import_choose_zip">Izberite .zip iz Takeout</string>
+    <string name="import_scanning">Branje izvoza…</string>
+    <string name="import_progress_count">%1$d / %2$d</string>
+    <string name="import_done_title">Uvoz končan</string>
+    <string name="import_done_summary">%1$d uvoženih, %2$d preskočenih, %3$d ni uspelo</string>
+    <string name="import_done_button">Končano</string>
+    <string name="import_failed_title">Uvoz ni uspel</string>
+    <string name="import_failed_msg">Med uvozom je prišlo do napake. Izberite datoteko in poskusite znova.</string>
+    <!-- Import review queue. -->
+    <string name="import_staging_title">Pripravljanje uvoza</string>
+    <string name="import_uploading_title">Nalaganje fotografij</string>
+    <string name="import_review_title">Pregled uvoza</string>
+    <string name="import_review_confirm">Uvozi %1$d fotografij</string>
+    <string name="import_review_discard">Zavrzi</string>
+    <string name="import_review_discard_title">Želite zavreči ta uvoz?</string>
+    <string name="import_review_discard_message">Pripravljene fotografije zapustijo pregled. Ničesar še ni bilo naloženo.</string>
+    <string name="import_review_remove">Odstrani %1$d</string>
+    <string name="import_review_restore">Obnovi</string>
+    <string name="import_review_selected_count">%1$d izbranih</string>
+    <string name="import_review_no_date">Ni datuma</string>
+    <string name="import_review_removed">Odstranjeno</string>
+    <string name="import_review_meta_section">Podrobnosti</string>
+    <string name="import_review_detail_date">Datum</string>
+    <string name="import_review_detail_location">Lokacija</string>
+    <string name="import_review_detail_description">Opis</string>
+    <string name="import_review_detail_filename">Ime datoteke</string>
+    <string name="import_review_detail_source">Vir</string>
+    <string name="import_review_source">Izvoz Google Photos ali Ente</string>
+    <!-- Recent imports history. -->
+    <string name="import_history_title">Nedavni uvozi</string>
+    <string name="import_history_row">%1$d uvoženih</string>
+    <string name="import_history_row_extra">%1$d preskočenih, %2$d ni uspelo</string>
+    <!-- Recent import detail + undo. -->
+    <string name="import_detail_title">Podrobnosti uvoza</string>
+    <string name="import_detail_empty">Teh fotografij ni več v Drive.</string>
+    <string name="import_undo">Razveljavi ta uvoz</string>
+    <string name="import_undo_confirm_title">Želite razveljaviti ta uvoz?</string>
+    <string name="import_undo_confirm_message">Fotografije, ki jih je dodal ta uvoz, se premaknejo v koš v Drive. Vse, kar ste od takrat spremenili, ostane ohranjeno.</string>
+    <string name="import_undo_running">Odstranjevanje uvoženih fotografij…</string>
+    <string name="import_undo_result">%1$d odstranjenih, %2$d spremenjenih ohranjenih, %3$d ni uspelo</string>
+    <string name="import_done_all_present">Te fotografije so že v vašem Drive, zato ni bilo nič uvoženo.</string>
+    <string name="import_detail_already_badge">Že v Drive</string>
+    <string name="import_review_already_badge">Že v Drive</string>
+    <string name="import_review_nothing_new">Nič novega za uvoz</string>
+    <string name="import_review_add_to_albums">Dodaj v albume</string>
+    <string name="import_album_mode_label">Albumi</string>
+    <string name="import_album_mode_none">Samo fotografije</string>
+    <string name="import_album_mode_shells">Ustvari prazne albume</string>
+    <string name="import_album_mode_photos">Fotografije v albumih</string>
+    <string name="import_albums_section">Albumi</string>
+    <string name="import_done_view_photos">Ogled uvoženih fotografij</string>
+    <string name="import_stat_date">Datum</string>
+    <string name="import_stat_to_import">Za uvoz</string>
+    <string name="import_stat_imported">Uvožene</string>
+    <string name="import_stat_already">Že v Drive</string>
+    <string name="import_stat_skipped">Preskočene</string>
+    <string name="import_stat_failed">Neuspele</string>
+    <string name="import_confirm_title">Uvoz v Drive?</string>
+    <string name="import_confirm_button">Uvozi</string>
+    <string name="import_confirm_albums_only">Izbrane fotografije bodo dodane v svoje albume.</string>
+    <string name="import_history_delete_title">Izbriši zapis uvoza</string>
+    <string name="import_history_delete_message">S tem se zapis odstrani iz Nedavnih uvozov skupaj z možnostjo razveljavitve. Uvožene fotografije in morebitni albumi ostanejo v vašem Drive.</string>
+    <string name="import_history_delete_confirm">Izbriši</string>
+    <plurals name="import_confirm_message">
+        <item quantity="one">%1$d fotografija se naloži v vaš Proton Drive.</item>
+        <item quantity="two">%1$d fotografiji se naložita v vaš Proton Drive.</item>
+        <item quantity="few">%1$d fotografije se naložijo v vaš Proton Drive.</item>
+        <item quantity="other">%1$d fotografij se naloži v vaš Proton Drive.</item>
+    </plurals>
+    <plurals name="import_album_photo_count">
+        <item quantity="one">%1$d fotografija</item>
+        <item quantity="two">%1$d fotografiji</item>
+        <item quantity="few">%1$d fotografije</item>
+        <item quantity="other">%1$d fotografij</item>
+    </plurals>
     <string name="album_download_notification_cancel">Prekliči</string>
     <string name="download_started_background">Prenašanje poteka v ozadju, napredek si oglejte v razdelku Dejavnost</string>
     <string name="albums_share_button">Deli album</string>
@@ -782,6 +871,7 @@
     <string name="share_role_can_view">si lahko ogleda</string>
     <string name="share_role_can_edit">lahko ureja</string>
     <string name="share_role_pending">v čakanju</string>
+    <string name="share_role_external">povabljen (zunanji)</string>
     <string name="share_stop_sharing">Ustavi deljenje</string>
     <string name="shared_stop_sharing_confirm_body">Javne povezave bodo prenehale delovati in fotografije ne bodo več v skupni rabi.</string>
     <string name="share_close">Zapri</string>
@@ -795,6 +885,7 @@
     <string name="share_invite_email_duplicate">Že dodano</string>
     <string name="share_invite_summary_partial">Poslano %1$d, %2$d ni bilo mogoče poslati</string>
     <string name="share_invite_summary_all_failed">Vabil ni bilo mogoče poslati</string>
+    <string name="share_invite_self">Ne morete povabiti lastnega računa</string>
     <!-- Album-sharing + album action error fallbacks (raw exception text stays in the log) -->
     <string name="share_revoke_failed">Vabila ni bilo mogoče preklicati</string>
     <string name="share_remove_member_failed">Člana ni bilo mogoče odstraniti</string>
@@ -1585,6 +1676,8 @@
     <string name="settings_ai_face_download_retry">Za ponovni poskus znova vklopite stikalo.</string>
     <string name="settings_ai_face_download_title">Prenesem model obrazov?</string>
     <string name="settings_ai_face_download_message">Prepoznavanje obrazov potrebuje prenos modela velikosti %1$s. Deluje prek katere koli povezave, priporočljiv pa je Wi-Fi.</string>
+    <string name="settings_ai_face_download_message_metered">Prepoznavanje obrazov potrebuje prenos modela velikosti %1$s. Wi-Fi ni povezan, zato bo ta prenos uporabil mobilne podatke.</string>
+    <string name="settings_ai_face_downloading_progress">%1$s / %2$s</string>
     <string name="settings_ai_face_download_confirm">Prenesi</string>
     <string name="settings_ai_face_model_missing">Modela obrazov ni v tej napravi.</string>
     <string name="settings_ai_face_remove_title">Odstranim podatke obrazov?</string>
@@ -1873,11 +1966,24 @@
     <string name="whats_new_albumcover_body">Izberite, kako velike so naslovnice albumov, od dveh do štirih v vrsti.</string>
     <string name="whats_new_denser_title">Gostejša časovnica</string>
     <string name="whats_new_denser_body">Časovnica zdaj doseže dve gostejši ravni, do osem fotografij v vrsti.</string>
+    <string name="whats_new_import_title">Uvoz iz Google Photos ali Ente</string>
+    <string name="whats_new_import_body">Prenesite izvoženo knjižnico v Proton Drive z ohranjenimi datumi, kraji in napisi, najprej jo preglejte in pustite, da teče v ozadju.</string>
+    <string name="whats_new_share_email_title">Delite album po e-pošti</string>
+    <string name="whats_new_share_email_body">Povabite kogar koli po e-pošti, tudi brez računa Proton, in kadar koli prekličite dostop.</string>
+    <string name="whats_new_video_faces_title">Obrazi na videih</string>
+    <string name="whats_new_video_faces_body">Oznake z imenom se zdaj prikažejo čez video, tako da vidite in odprete, kdo je na njem.</string>
+    <string name="whats_new_faces_rework_title">Natančnejše prepoznavanje obrazov</string>
+    <string name="whats_new_faces_rework_body">Precej manj napačnih skupin, preglednejši zaslon Osebe in popravek zašlega obraza z enim tapom.</string>
+    <string name="whats_new_guest_title">Brez računa deluje več</string>
+    <string name="whats_new_guest_body">Prepoznavanje obrazov, zemljevid, koledarske beležke in iskalnik dvojnikov zdaj delujejo tudi brez prijave.</string>
+    <string name="whats_new_dup_nobackup_title">Dvojniki brez varnostne kopije</string>
+    <string name="whats_new_dup_nobackup_body">Iskalnik dvojnikov zdaj pregleda fotografije v vaši napravi brez računa ali varnostne kopije.</string>
     <string name="whats_new_section_new">Novo</string>
     <string name="whats_new_section_improved">Izboljšave</string>
 
     <!-- Person detail -->
-    <string name="person_detail_unnamed">Oseba</string>
+    <string name="person_detail_unnamed">Brez imena</string>
+    <string name="person_add_name">Dodaj ime</string>
     <string name="person_unsorted">Nerazvrščeno</string>
     <string name="person_unsorted_hint">Obrazi, ki jih ni bilo mogoče zanesljivo povezati z osebo. Izberi fotografije, da izločiš pravo osebo, ali preostale označi kot »ni oseba«.</string>
     <string name="person_unsorted_caption">Preostali obrazi, ki jih ni bilo mogoče povezati. Odprite za razvrščanje.</string>

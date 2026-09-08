@@ -1059,6 +1059,51 @@ data class ShareInvitationDto(
     @SerialName("State") val state: Int? = null,
 )
 
+/**
+ * Body of an EXTERNAL (non-Proton) album-share invitation. The detached signature binds the
+ * invitee email to the share for a recipient who has no Proton address.
+ */
+@Serializable
+data class ExternalInvitationBodyDto(
+    @SerialName("InviterAddressID") val inviterAddressId: String,
+    @SerialName("InviteeEmail") val inviteeEmail: String,
+    @SerialName("Permissions") val permissions: Int,
+    /** Base64 detached signature over the invitee email, signed by the inviter address key. */
+    @SerialName("ExternalInvitationSignature") val externalInvitationSignature: String,
+)
+
+/** Wraps an external-invitation body plus optional notification-email details for the invitee. */
+@Serializable
+data class CreateExternalInvitationRequest(
+    @SerialName("ExternalInvitation") val externalInvitation: ExternalInvitationBodyDto,
+    @SerialName("EmailDetails") val emailDetails: InvitationEmailDetailsDto? = null,
+)
+
+/** Echoes the stored external invitation created by the POST. */
+@Serializable
+data class CreateExternalInvitationResponse(
+    @SerialName("Code") val code: Int,
+    @SerialName("ExternalInvitation") val externalInvitation: ExternalInvitationDto? = null,
+)
+
+/** One external (non-Proton) invitation as returned by a share's external-invitations listing. */
+@Serializable
+data class ExternalInvitationDto(
+    @SerialName("ExternalInvitationID") val externalInvitationId: String,
+    @SerialName("InviteeEmail") val inviteeEmail: String,
+    @SerialName("InviterEmail") val inviterEmail: String? = null,
+    @SerialName("Permissions") val permissions: Int = 4,
+    @SerialName("ExternalInvitationSignature") val externalInvitationSignature: String? = null,
+    @SerialName("State") val state: Int? = null,
+    @SerialName("CreateTime") val createTime: Long? = null,
+)
+
+@Serializable
+data class ExternalInvitationsResponse(
+    @SerialName("ExternalInvitations") val externalInvitations: List<ExternalInvitationDto> = emptyList(),
+    @SerialName("Code") val code: Int,
+)
+
 
 /**
  * Server-side photo copy for "Save to my library" on shared-with-me albums. The backend keeps the

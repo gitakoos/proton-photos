@@ -50,6 +50,8 @@ import eu.akoos.photos.data.api.dto.CreateShareUrlResponse
 import eu.akoos.photos.data.api.dto.ShareUrlsResponse
 import eu.akoos.photos.data.api.dto.FullLinkResponse
 import eu.akoos.photos.data.api.dto.ShareInvitationsResponse
+import eu.akoos.photos.data.api.dto.CreateExternalInvitationResponse
+import eu.akoos.photos.data.api.dto.ExternalInvitationsResponse
 import eu.akoos.photos.data.api.dto.SharedWithMeResponse
 import eu.akoos.photos.data.api.dto.GlobalInvitationsResponse
 import eu.akoos.photos.data.api.dto.InvitationDetailResponse
@@ -480,6 +482,25 @@ interface DriveApiService : BaseRetrofitApi {
 
     @DELETE("drive/v2/shares/{shareId}/invitations/{invitationId}")
     suspend fun revokeInvitation(
+        @Path("shareId") shareId: String,
+        @Path("invitationId") invitationId: String,
+    ): BaseResponse
+
+    // External (non-Proton) album-share invitations (#54): create, list, and revoke. The POST body
+    // carries a detached signature binding the invitee email to the share.
+    @POST("drive/v2/shares/{shareId}/external-invitations")
+    suspend fun inviteExternalToShare(
+        @Path("shareId") shareId: String,
+        @Body request: eu.akoos.photos.data.api.dto.CreateExternalInvitationRequest,
+    ): CreateExternalInvitationResponse
+
+    @GET("drive/v2/shares/{shareId}/external-invitations")
+    suspend fun listExternalInvitations(
+        @Path("shareId") shareId: String,
+    ): ExternalInvitationsResponse
+
+    @DELETE("drive/v2/shares/{shareId}/external-invitations/{invitationId}")
+    suspend fun revokeExternalInvitation(
         @Path("shareId") shareId: String,
         @Path("invitationId") invitationId: String,
     ): BaseResponse

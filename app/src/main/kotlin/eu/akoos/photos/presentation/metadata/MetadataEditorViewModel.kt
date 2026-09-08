@@ -33,6 +33,7 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.data.db.dao.PhotoLocationDao
+import eu.akoos.photos.data.db.entity.PhotoLocationEntity
 import eu.akoos.photos.data.hidden.HiddenStorageManager
 import eu.akoos.photos.data.hidden.HiddenVaultEditor
 import eu.akoos.photos.data.preferences.SettingsKeys
@@ -1094,7 +1095,8 @@ class MetadataEditorViewModel @Inject constructor(
     private suspend fun invalidateStoredLocations(uris: List<String>) {
         val ids = staleLocationIds(boundItems, uris.toSet())
         if (ids.isEmpty()) return
-        val userId = accountManager.getPrimaryUserId().first()?.id ?: return
+        // Signed out, drop the row from the local partition so the backfill re-reads the new place.
+        val userId = accountManager.getPrimaryUserId().first()?.id ?: PhotoLocationEntity.LOCAL_USER
         runCatching { ids.forEachSqlChunk { photoLocationDao.deleteByIds(userId, it) } }
     }
 

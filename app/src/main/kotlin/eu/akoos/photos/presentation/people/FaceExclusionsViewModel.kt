@@ -36,6 +36,7 @@ import kotlinx.coroutines.launch
 import me.proton.core.accountmanager.domain.AccountManager
 import eu.akoos.photos.data.db.dao.FaceDao
 import eu.akoos.photos.data.db.dao.NotPersonDao
+import eu.akoos.photos.data.db.entity.PhotoLocationEntity
 import eu.akoos.photos.data.face.FaceIndexingScheduler
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
@@ -71,7 +72,7 @@ data class FaceExclusionsUiState(
  * person's name; a "Not a person" dismissal set `rejected` on a cluster's faces. Both are listed here
  * with a face crop, and each undo reverses the underlying DB state so the face is re-evaluated on the
  * next clustering pass. Read once and re-read after an undo; gated like the People surfaces, so with the
- * AI or face switch off (or signed out) the screen reads no face data and shows nothing.
+ * AI or face switch off the screen reads no face data and shows nothing.
  */
 @HiltViewModel
 class FaceExclusionsViewModel @Inject constructor(
@@ -85,21 +86,18 @@ class FaceExclusionsViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(FaceExclusionsUiState())
     val uiState: StateFlow<FaceExclusionsUiState> = _uiState.asStateFlow()
 
-    /** Read both kinds of exclusion. A no-op (empty, not loading) when signed out or with face
-     *  recognition off, matching how the People screen gates on the same two switches. */
+    /** Read both kinds of exclusion. A no-op (empty, not loading) with face recognition off, matching
+     *  how the People screen gates on the same two switches. */
     fun load() {
         viewModelScope.launch {
-            val userId = accountManager.getPrimaryUserId().first() ?: run {
-                _uiState.value = FaceExclusionsUiState(isLoading = false)
-                return@launch
-            }
+            val account = accountManager.getPrimaryUserId().first()?.id ?: PhotoLocationEntity.LOCAL_USER
             val prefs = context.settingsDataStore.data.first()
             val faceOn = prefs[SettingsKeys.AI_FEATURES_ENABLED] == true && prefs[SettingsKeys.FACE_ENABLED] == true
             if (!faceOn) {
                 _uiState.value = FaceExclusionsUiState(isLoading = false)
                 return@launch
             }
-            val groups = notPersonDao.facesForUser(userId.id)
+            val groups = notPersonDao.facesForUser(account)
                 .groupBy { it.personName }
                 .map { (name, rows) ->
                     NotThisPersonGroup(
@@ -110,7 +108,7 @@ class FaceExclusionsViewModel @Inject constructor(
                     )
                 }
                 .sortedBy { it.name.lowercase() }
-            val ignored = faceDao.rejectedFacesForUser(userId.id)
+            val ignored = faceDao.rejectedFacesForUser(account)
                 .map { ExcludedFaceUi(it.id, it.photoKey, FaceBox(it.boxLeft, it.boxTop, it.boxRight, it.boxBottom)) }
             _uiState.value = FaceExclusionsUiState(isLoading = false, notThisPerson = groups, ignored = ignored)
         }
@@ -120,8 +118,8 @@ class FaceExclusionsViewModel @Inject constructor(
      *  reindex so the change is re-evaluated without waiting for the next automatic pass. */
     fun undoNotThisPerson(name: String, faceId: String) {
         viewModelScope.launch(Dispatchers.IO) {
-            val userId = accountManager.getPrimaryUserId().first() ?: return@launch
-            notPersonDao.deleteMark(userId.id, name, faceId)
+            val userId = accountManager.getPrimaryUserId().first()
+            notPersonDao.deleteMark(userId?.id ?: PhotoLocationEntity.LOCAL_USER, name, faceId)
             faceIndexingScheduler.requestIndex(userId)
             load()
         }
@@ -131,7 +129,7 @@ class FaceExclusionsViewModel @Inject constructor(
      *  re-clusters, then nudge a reindex. */
     fun undoIgnored(faceId: String) {
         viewModelScope.launch(Dispatchers.IO) {
-            val userId = accountManager.getPrimaryUserId().first() ?: return@launch
+            val userId = accountManager.getPrimaryUserId().first()
             faceDao.unrejectFace(faceId)
             faceIndexingScheduler.requestIndex(userId)
             load()

@@ -535,13 +535,12 @@ class CollageViewModel @Inject constructor(
         // cells cover it edge-to-edge, so it also just fills any hairline seam.
         canvas.drawColor(groutColor)
         val paint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG)
-        // A missing UserId only blocks cloud-only downloads; local decodes ignore it, so pass a
-        // harmless empty id rather than skipping the whole export.
-        val uid = userId ?: UserId("")
+        // A missing UserId only blocks cloud-only downloads; local decodes ignore it and a guest has
+        // only local cells, so the nullable id is passed straight through.
         // Blur background: a blurred cover of the first photo behind everything, so the gaps and any
         // zoomed-out cell sit on a frosted backdrop instead of the flat colour.
         if (background == CollageBackground.BLUR) {
-            val firstBmp = items.firstOrNull()?.let { bitmapSource.fullRes(it, uid, 1600) }
+            val firstBmp = items.firstOrNull()?.let { bitmapSource.fullRes(it, userId, 1600) }
             if (firstBmp != null) {
                 drawBlurredCover(canvas, paint, firstBmp, 0f, 0f, outW.toFloat(), outH.toFloat())
                 firstBmp.recycle()
@@ -553,7 +552,7 @@ class CollageViewModel @Inject constructor(
             ordered.forEachIndexed { drawIndex, item ->
                 val t = freeform[item.collageKey()] ?: FreeformTransform()
                 val need = (t.scale * outW).roundToInt().coerceIn(256, EXPORT_MAX_PX)
-                val bmp = bitmapSource.fullRes(item, uid, need) ?: return@forEachIndexed
+                val bmp = bitmapSource.fullRes(item, userId, need) ?: return@forEachIndexed
                 drawFreeformItem(canvas, paint, bmp, t, outW.toFloat(), outH.toFloat())
                 bmp.recycle()
                 _state.update { it.copy(exportProgress = (drawIndex + 1f) / items.size.coerceAtLeast(1)) }
@@ -569,7 +568,7 @@ class CollageViewModel @Inject constructor(
                 if (cellW < 1f || cellH < 1f) return@forEachIndexed
                 val transform = transforms[item.collageKey()] ?: CollageCellTransform()
                 val need = (maxOf(cellW, cellH) * transform.scale).roundToInt().coerceIn(256, EXPORT_MAX_PX)
-                val bmp = bitmapSource.fullRes(item, uid, need)
+                val bmp = bitmapSource.fullRes(item, userId, need)
                 if (bmp == null) {
                     Log.w(TAG, "export: cell $index fullRes returned null")
                     return@forEachIndexed

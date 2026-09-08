@@ -29,6 +29,7 @@ import androidx.datastore.preferences.core.edit
 import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.BuildConfig
 import eu.akoos.photos.data.db.dao.LocalTagDao
+import eu.akoos.photos.data.db.dao.PhotoLocationDao
 import eu.akoos.photos.data.db.dao.UploadAlbumTargetDao
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
@@ -73,6 +74,7 @@ class HiddenVaultRestorer @Inject constructor(
     private val accountManager: AccountManager,
     private val localTagDao: LocalTagDao,
     private val uploadAlbumTargetDao: UploadAlbumTargetDao,
+    private val photoLocationDao: PhotoLocationDao,
 ) {
 
     private val runs = HiddenRestoreRuns(appScope)
@@ -292,6 +294,13 @@ class HiddenVaultRestorer @Inject constructor(
             if (carried?.isWorthCarrying == true || heartedInVault) {
                 reapplyCarried(carried, uri, restoredTo)
                 tally.carriedReapplied++
+            }
+            // Carry the photo's stored map location from the uri it was hidden from onto the uri it
+            // came back as. The location row is keyed by uri and the restore mints a fresh one, so
+            // without this a revealed photo keeps its pin on a uri nothing shows and drops off the map.
+            // Ungated on isWorthCarrying: an ordinary photo carrying nothing else can still carry one.
+            sourceUri?.let { from ->
+                if (from != restoredTo) runCatching { photoLocationDao.rekey(from, restoredTo) }
             }
         }
         // Both halves on the one line, so a report of a photo that came back yet cannot be seen is

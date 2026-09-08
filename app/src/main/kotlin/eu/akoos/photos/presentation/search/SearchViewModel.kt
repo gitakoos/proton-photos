@@ -147,6 +147,15 @@ class SearchViewModel @Inject constructor(
         .map { it != null }
         .stateIn(viewModelScope, SharingStarted.Eagerly, true)
 
+    /** Whether on-device face grouping is switched on (the AI master + face toggles). Drives the
+     *  People entry card, an entry point that is independent of sign-in, so a local-only guest can
+     *  reach and name their clusters too. Defaults off so the card does not flash before the
+     *  switches resolve. */
+    val faceEnabled: StateFlow<Boolean> = context.settingsDataStore.data
+        .map { it[SettingsKeys.AI_FEATURES_ENABLED] == true && it[SettingsKeys.FACE_ENABLED] == true }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
     private val _query = MutableStateFlow("")
     val query: StateFlow<String> = _query.asStateFlow()
 
@@ -189,8 +198,8 @@ class SearchViewModel @Inject constructor(
      *  rows land. */
     val geotaggedLocations: StateFlow<List<PhotoLocationEntity>> = accountManager.getPrimaryUserId()
         .flatMapLatest { userId ->
-            if (userId == null) flowOf(emptyList())
-            else photoLocationDao.observeForUser(userId.id)
+            // Read the local partition when signed out, so a guest's Search map card populates too.
+            photoLocationDao.observeForUser(userId?.id ?: PhotoLocationEntity.LOCAL_USER)
         }
         .retryOnDbTear("SearchGeotagged")
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
@@ -317,8 +326,7 @@ class SearchViewModel @Inject constructor(
      */
     val peopleSuggestions: StateFlow<List<PersonUi>> = accountManager.getPrimaryUserId()
         .flatMapLatest { userId ->
-            if (userId == null) flowOf(emptyList())
-            else combine(observePeopleUseCase(userId, allItems), debouncedQuery) { people, q ->
+            combine(observePeopleUseCase(userId, allItems), debouncedQuery) { people, q ->
                 val needle = foldForMatch(q)
                 if (needle.isBlank()) emptyList()
                 else people
@@ -331,8 +339,8 @@ class SearchViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     /** All NAMED people for the People rail (the filter chip + face bar in the shared category rail),
-     *  independent of the query. Gated on the AI + face flags and a signed-in account, so a logged-out
-     *  or ML-off session shows no chip. Mirrors the timeline's people rail. */
+     *  independent of the query. Gated on the AI + face flags, so an ML-off session shows no chip; a
+     *  local-only session surfaces its own named people. Mirrors the timeline's people rail. */
     val people: StateFlow<List<PersonUi>> = combine(
         context.settingsDataStore.data
             .map { it[SettingsKeys.AI_FEATURES_ENABLED] == true && it[SettingsKeys.FACE_ENABLED] == true }
@@ -340,7 +348,7 @@ class SearchViewModel @Inject constructor(
         accountManager.getPrimaryUserId(),
     ) { aiOn, userId -> aiOn to userId }
         .flatMapLatest { (aiOn, userId) ->
-            if (!aiOn || userId == null) flowOf(emptyList())
+            if (!aiOn) flowOf(emptyList())
             else observePeopleUseCase(userId, allItems).map { summaries ->
                 summaries.filter { !it.displayName.isNullOrBlank() }.mapNotNull { it.toPersonUi() }
             }
@@ -368,9 +376,9 @@ class SearchViewModel @Inject constructor(
                 _personSelection.value = PersonSelection()
                 return@launch
             }
-            val userId = accountManager.getPrimaryUserId().first() ?: return@launch
+            val account = accountManager.getPrimaryUserId().first()?.id ?: PhotoLocationEntity.LOCAL_USER
             val keys = try {
-                faceDao.photoKeysForPerson(userId.id, personId).first().toSet()
+                faceDao.photoKeysForPerson(account, personId).first().toSet()
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {

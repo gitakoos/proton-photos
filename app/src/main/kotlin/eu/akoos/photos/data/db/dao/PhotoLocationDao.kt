@@ -59,4 +59,13 @@ interface PhotoLocationDao {
      */
     @Query("DELETE FROM photo_location WHERE userId = :userId AND id IN (:ids)")
     suspend fun deleteByIds(userId: String, ids: List<String>)
+
+    /**
+     * Move a photo's location row onto a new [newId], keeping its coordinates and its owner. A revealed
+     * photo comes back under a fresh MediaStore uri, and the row is keyed by uri, so without this it
+     * would go on naming the uri the hide removed and the photo would lose its map pin. `id` is the
+     * primary key and a uri is globally unique, so this touches at most one row whoever owns it.
+     */
+    @Query("UPDATE photo_location SET id = :newId WHERE id = :oldId")
+    suspend fun rekey(oldId: String, newId: String)
 }

@@ -73,6 +73,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import eu.akoos.photos.R
+import eu.akoos.photos.domain.entity.ShareExternalInvitation
 import eu.akoos.photos.domain.entity.ShareInvitation
 import eu.akoos.photos.domain.entity.ShareMember
 import eu.akoos.photos.presentation.common.ShimmerBox
@@ -99,6 +100,7 @@ internal fun ShareAlbumSheet(
     ownerEmail: String,
     hasShareRecord: Boolean,
     invitations: List<ShareInvitation>,
+    externalInvitations: List<ShareExternalInvitation>,
     members: List<ShareMember>,
     isLoadingInvitations: Boolean,
     inviteBatchResult: InviteBatchResult?,
@@ -107,6 +109,7 @@ internal fun ShareAlbumSheet(
     onInviteUsers: (emails: List<String>, message: String, permissions: Int) -> Unit,
     onStopSharing: () -> Unit,
     onRevokeInvitation: (String) -> Unit,
+    onRevokeExternalInvitation: (String) -> Unit,
     onRemoveMember: (String) -> Unit,
     onCreatePublicLink: () -> Unit,
     onDisablePublicLink: () -> Unit,
@@ -136,7 +139,7 @@ internal fun ShareAlbumSheet(
     val isShareActive = publicShareUrl != null
     // Cover the orphan-share case (members/URL empty but a share record lingers) so "Stop sharing" can clean it up.
     val hasActiveShares = hasShareRecord || isShareActive ||
-        members.isNotEmpty() || invitations.isNotEmpty()
+        members.isNotEmpty() || invitations.isNotEmpty() || externalInvitations.isNotEmpty()
     val hasPendingInvites = pendingEmails.isNotEmpty()
 
     ModalBottomSheet(
@@ -559,6 +562,13 @@ internal fun ShareAlbumSheet(
                 )
             }
 
+            externalInvitations.forEach { inv ->
+                ExternalInvitationRow(
+                    email = inv.email,
+                    onRevoke = { onRevokeExternalInvitation(inv.id) },
+                )
+            }
+
             // No public-link card: Drive rejects public URLs on album shares (code 2511); album sharing is invite-only.
 
             // Footer — "Stop sharing" revokes all member access.
@@ -660,7 +670,7 @@ internal fun PendingInvitationRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        // Darker amber in light mode — the dark-card amber washes out on white.
+        // Darker amber in light mode, since the dark-card amber washes out on white.
         val pendingAmber = if (AppColors.current.isLight) Color(0xFFB45309) else Color(0xFFFCD34D)
         AvatarCircle(letter = email.first().uppercase(), tint = pendingAmber)
         Text(email, color = FgPrimary, fontSize = 14.sp, modifier = Modifier.weight(1f))
@@ -676,6 +686,42 @@ internal fun PendingInvitationRow(
                 .padding(horizontal = 8.dp, vertical = 4.dp),
         ) {
             Text(stringResource(R.string.share_role_pending), color = pendingAmber, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+        }
+        Box(
+            modifier = Modifier
+                .size(28.dp)
+                .clip(CircleShape)
+                .clickable(onClick = onRevoke),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(Icons.Default.Close, stringResource(R.string.share_remove_member), tint = FgMute, modifier = Modifier.size(16.dp))
+        }
+    }
+}
+
+/** Pending external invitation row (#54): a recipient with no Proton account yet. Amber chip plus revoke. */
+@Composable
+internal fun ExternalInvitationRow(
+    email: String,
+    onRevoke: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        // Darker amber in light mode, since the dark-card amber washes out on white.
+        val pendingAmber = if (AppColors.current.isLight) Color(0xFFB45309) else Color(0xFFFCD34D)
+        AvatarCircle(letter = email.firstOrNull()?.uppercase() ?: "?", tint = pendingAmber)
+        Text(email, color = FgPrimary, fontSize = 14.sp, modifier = Modifier.weight(1f))
+        Box(
+            modifier = Modifier
+                .background(Color(0x33FCD34D), RoundedCornerShape(8.dp))
+                .padding(horizontal = 8.dp, vertical = 4.dp),
+        ) {
+            Text(stringResource(R.string.share_role_external), color = pendingAmber, fontSize = 11.sp, fontWeight = FontWeight.Medium)
         }
         Box(
             modifier = Modifier

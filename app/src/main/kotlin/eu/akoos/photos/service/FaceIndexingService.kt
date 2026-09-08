@@ -52,6 +52,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import eu.akoos.photos.data.db.entity.PhotoLocationEntity
 import me.proton.core.domain.entity.UserId
 import javax.inject.Inject
 
@@ -120,7 +121,15 @@ class FaceIndexingService : Service() {
             // Trigger through the scheduler's own entry; the single-flight guard makes a redundant kick a
             // no-op, so this only starts a walk when none is running (e.g. a sticky restart) and otherwise
             // just hosts the one already going.
-            lastUserId?.let { uid -> scope.launch { runCatching { scheduler.indexAll(UserId(uid)) } } }
+            // A guest walk carries the local sentinel, never a fabricated UserId (that would poison the
+            // per-UserId flow + crypto caches), so map it back to a null userId for indexAll.
+            lastUserId?.let { uid ->
+                scope.launch {
+                    runCatching {
+                        scheduler.indexAll(if (uid == PhotoLocationEntity.LOCAL_USER) null else UserId(uid))
+                    }
+                }
+            }
             observeProgress()
         }
         return START_STICKY
@@ -269,10 +278,10 @@ class FaceIndexingService : Service() {
         /** Idempotently start the host for [userId]. Repeated calls route through onStartCommand and stay
          *  running; a background-start refusal on Android 12+ is swallowed since the caller cannot know it
          *  is foreground. */
-        fun start(context: Context, userId: UserId) {
-            lastUserId = userId.id
+        fun start(context: Context, userId: UserId?) {
+            lastUserId = userId?.id ?: PhotoLocationEntity.LOCAL_USER
             val intent = Intent(context, FaceIndexingService::class.java)
-                .putExtra(EXTRA_USER_ID, userId.id)
+                .putExtra(EXTRA_USER_ID, userId?.id ?: PhotoLocationEntity.LOCAL_USER)
             runCatching {
                 ContextCompat.startForegroundService(context, intent)
             }.onFailure {

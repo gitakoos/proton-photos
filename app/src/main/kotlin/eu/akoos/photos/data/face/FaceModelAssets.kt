@@ -56,26 +56,26 @@ data class FaceModelAsset(
 object FaceModelAssets {
 
     /**
-     * The YuNet detector: one ONNX network that finds where the faces are, not who they are. It is
-     * pinned to the exact bytes of the published release asset, so the rail fetches it over the network
-     * and verifies both its length and its digest before use.
+     * The YOLOv5-face detector: one ONNX network that finds where the faces are, not who they are. It
+     * is pinned to the exact bytes of the published release asset, so the rail fetches it over the
+     * network and verifies both its length and its digest before use.
      */
     val MODEL = FaceModelAsset(
-        fileName = "yunet.onnx",
-        sizeBytes = 232589L,
-        sha256 = "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4",
+        fileName = "yolov5face.onnx",
+        sizeBytes = 32370314L,
+        sha256 = "8ece145c7a956ed276250778bdb89e40c8ac9521c8669b14d79718cc83ccab32",
     )
 
     /**
-     * The SFace recognition network: one ONNX model that turns an aligned 112x112 face crop into a
-     * face embedding, the vector later pieces compare to decide who is who. It rides the same release
-     * and the same side-load directory as [MODEL] and is pinned the same way, to the exact bytes of the
-     * published release asset.
+     * The GhostFaceNet recognition network: one ONNX model that turns an aligned 112x112 face crop
+     * into a 512-d face embedding, the vector later pieces compare to decide who is who. It rides the
+     * same release and the same side-load directory as [MODEL] and is pinned the same way, to the exact
+     * bytes of the published release asset.
      */
     val EMBED_MODEL = FaceModelAsset(
-        fileName = "sface.onnx",
-        sizeBytes = 38696353L,
-        sha256 = "0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79",
+        fileName = "ghostfacenet.onnx",
+        sizeBytes = 16190333L,
+        sha256 = "ffd8203a0c9e93d90a4957e24d173a883a5a04d64d23c771742c66273518a0db",
     )
 
     /** Whether both models are pinned to exact bytes. Until they are, the rail is side-load only. */
@@ -89,7 +89,7 @@ object FaceModelAssets {
      * rather than an app release: the models change on their own schedule and every app version that
      * expects these exact bytes points at the same immutable assets.
      */
-    const val RELEASE_TAG = "v1"
+    const val RELEASE_TAG = "v2"
 
     /** Where the models are fetched from; a file name appends directly to it. */
     const val BASE_URL = "https://github.com/gitakoos/face-models/releases/download/$RELEASE_TAG/"

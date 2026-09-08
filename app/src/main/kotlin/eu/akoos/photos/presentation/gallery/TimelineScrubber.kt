@@ -262,9 +262,9 @@ fun BoxScope.TimelineScrubber(
             .width(36.dp),
     ) {
         Box(modifier = Modifier.fillMaxHeight()) {
-            // Track — visual only; just measures its height. Deliberately NO tap/drag gesture: a tap
+            // Track, visual only; just measures its height. Deliberately NO tap/drag gesture: a tap
             // or a scroll-touch near the right edge must not jump the timeline. Only the grab handle
-            // below scrubs (matches Ente / Google Photos, where you grab the handle to move).
+            // below scrubs (you grab the handle to move, as most galleries do).
             Box(
                 modifier = Modifier
                     .fillMaxHeight()

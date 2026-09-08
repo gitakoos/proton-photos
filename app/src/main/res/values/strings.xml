@@ -728,6 +728,8 @@
     <string name="settings_ai_face_download_retry">Turn the switch on again to retry.</string>
     <string name="settings_ai_face_download_title">Download the face model?</string>
     <string name="settings_ai_face_download_message">Face recognition needs a %1$s model download. It works on any connection, though Wi-Fi is recommended.</string>
+    <string name="settings_ai_face_download_message_metered">Face recognition needs a %1$s model download. Wi-Fi is not connected, so this download will use mobile data.</string>
+    <string name="settings_ai_face_downloading_progress">%1$s / %2$s</string>
     <string name="settings_ai_face_download_confirm">Download</string>
     <string name="settings_ai_face_model_missing">The face model isn\'t on this device.</string>
     <string name="settings_ai_face_remove_title">Remove face data?</string>
@@ -1043,6 +1045,93 @@
     <string name="metadata_edit_channel_desc">Shows progress while saving photo detail changes to Proton Drive.</string>
     <string name="metadata_edit_notification_title">Saving photo details…</string>
     <string name="metadata_edit_notification_progress">%1$d of %2$d</string>
+    <!-- Google Takeout import notification. -->
+    <string name="import_channel_name">Photo import</string>
+    <string name="import_channel_desc">Shows progress while importing a Google Takeout export to Proton Drive.</string>
+    <string name="import_notification_title">Importing photos…</string>
+    <string name="import_notification_progress">%1$d of %2$d</string>
+    <string name="import_notification_done_title">Import complete</string>
+    <string name="import_notification_done_text">%1$d imported, %2$d skipped, %3$d failed</string>
+    <!-- Import staging (review-queue prep) notification. English only for now; other locales follow in a later pass. -->
+    <string name="import_stage_notification_title">Preparing import…</string>
+    <string name="import_stage_progress">%1$d of %2$d</string>
+    <!-- Google Takeout import screen (English only for now; other locales follow in a later pass). -->
+    <string name="import_title">Import photos</string>
+    <string name="import_row_desc">Bring a Google Photos or Ente export into Proton Drive</string>
+    <string name="import_explainer">Import a Google Takeout or Ente export as a .zip. Your photos upload to Proton Drive with their original date and location.</string>
+    <string name="import_choose_zip">Choose Takeout .zip</string>
+    <string name="import_scanning">Reading the export…</string>
+    <string name="import_progress_count">%1$d / %2$d</string>
+    <string name="import_done_title">Import complete</string>
+    <string name="import_done_summary">%1$d imported, %2$d skipped, %3$d failed</string>
+    <!-- Import done, already-in-Drive feedback. English only for now; other locales follow in a later pass. -->
+    <string name="import_done_all_present">These photos are already in your Drive, so nothing was imported.</string>
+    <string name="import_done_button">Done</string>
+    <string name="import_failed_title">Import failed</string>
+    <string name="import_failed_msg">Something went wrong during the import. Pick the file and try again.</string>
+    <!-- Import review queue (English only for now; other locales follow in a later pass). -->
+    <string name="import_staging_title">Preparing import</string>
+    <string name="import_uploading_title">Uploading photos</string>
+    <string name="import_review_title">Review import</string>
+    <string name="import_review_confirm">Import %1$d photos</string>
+    <string name="import_review_discard">Discard</string>
+    <string name="import_review_discard_title">Discard this import?</string>
+    <string name="import_review_discard_message">The prepared photos leave the review. Nothing has been uploaded yet.</string>
+    <string name="import_review_remove">Remove %1$d</string>
+    <string name="import_review_restore">Restore</string>
+    <string name="import_review_selected_count">%1$d selected</string>
+    <string name="import_review_no_date">No date</string>
+    <string name="import_review_removed">Removed</string>
+    <string name="import_review_meta_section">Details</string>
+    <string name="import_review_detail_date">Date</string>
+    <string name="import_review_detail_location">Location</string>
+    <string name="import_review_detail_description">Description</string>
+    <string name="import_review_detail_filename">File name</string>
+    <string name="import_review_detail_source">Source</string>
+    <string name="import_review_source">Google Photos or Ente export</string>
+    <!-- Recent imports history (English only for now; other locales follow in a later pass). -->
+    <string name="import_history_title">Recent imports</string>
+    <string name="import_history_row">%1$d imported</string>
+    <string name="import_history_row_extra">%1$d skipped, %2$d failed</string>
+    <!-- Recent import detail + undo (English only for now; other locales follow in a later pass). -->
+    <string name="import_detail_title">Import details</string>
+    <string name="import_detail_empty">These photos are no longer on Drive.</string>
+    <string name="import_detail_already_badge">Already in Drive</string>
+    <string name="import_undo">Undo this import</string>
+    <string name="import_undo_confirm_title">Undo this import?</string>
+    <string name="import_undo_confirm_message">The photos this import added move to the Drive trash. Anything you have changed since is kept.</string>
+    <string name="import_undo_running">Removing the imported photos…</string>
+    <string name="import_undo_result">Removed %1$d, kept %2$d changed, %3$d failed</string>
+    <!-- Import review album toggle + already-in-Drive badge (English only for now; other locales follow in a later pass). -->
+    <string name="import_review_already_badge">Already in Drive</string>
+    <string name="import_review_nothing_new">Nothing new to import</string>
+    <string name="import_review_add_to_albums">Add to albums</string>
+    <string name="import_album_mode_label">Albums</string>
+    <string name="import_album_mode_none">Photos only</string>
+    <string name="import_album_mode_shells">Create empty albums</string>
+    <string name="import_album_mode_photos">Photos in albums</string>
+    <string name="import_albums_section">Albums</string>
+    <string name="import_done_view_photos">See imported photos</string>
+    <string name="import_stat_date">Date</string>
+    <string name="import_stat_to_import">To import</string>
+    <string name="import_stat_imported">Imported</string>
+    <string name="import_stat_already">Already in Drive</string>
+    <string name="import_stat_skipped">Skipped</string>
+    <string name="import_stat_failed">Failed</string>
+    <string name="import_confirm_title">Import to Drive?</string>
+    <string name="import_confirm_button">Import</string>
+    <string name="import_confirm_albums_only">The selected photos will be added to their albums.</string>
+    <plurals name="import_confirm_message">
+        <item quantity="one">%1$d photo will be uploaded to your Proton Drive.</item>
+        <item quantity="other">%1$d photos will be uploaded to your Proton Drive.</item>
+    </plurals>
+    <string name="import_history_delete_title">Delete import record</string>
+    <string name="import_history_delete_message">This removes the record from Recent imports, along with its undo option. The imported photos and any albums stay in your Drive.</string>
+    <string name="import_history_delete_confirm">Delete</string>
+    <plurals name="import_album_photo_count">
+        <item quantity="one">%1$d photo</item>
+        <item quantity="other">%1$d photos</item>
+    </plurals>
     <string name="download_started_background">Downloading in the background, see Activity for progress</string>
     <string name="albums_share_button">Share album</string>
     <string name="album_link_copied">Link copied to clipboard</string>
@@ -1076,6 +1165,7 @@
     <string name="share_role_can_view">can view</string>
     <string name="share_role_can_edit">can edit</string>
     <string name="share_role_pending">pending</string>
+    <string name="share_role_external">invited (external)</string>
     <string name="share_stop_sharing">Stop sharing</string>
     <string name="shared_stop_sharing_confirm_body">The public links will stop working and the photos will no longer be shared.</string>
     <string name="share_close">Close</string>
@@ -1089,6 +1179,7 @@
     <string name="share_invite_email_duplicate">Already added</string>
     <string name="share_invite_summary_partial">Sent %1$d, %2$d couldn\'t be sent</string>
     <string name="share_invite_summary_all_failed">The invitations couldn\'t be sent</string>
+    <string name="share_invite_self">You can\'t invite your own account</string>
     <!-- Album-sharing + album action error fallbacks (raw exception text stays in the log) -->
     <string name="share_revoke_failed">Couldn\'t withdraw the invitation</string>
     <string name="share_remove_member_failed">Couldn\'t remove the member</string>
@@ -1172,11 +1263,12 @@
     <string name="location_saved_as_album_fmt">Album \"%1$s\" created</string>
 
     <!-- Person detail -->
-    <string name="person_detail_unnamed">Person</string>
+    <string name="person_detail_unnamed">Unnamed</string>
     <string name="person_unsorted">Unsorted</string>
     <string name="person_unsorted_hint">Faces that could not be confidently matched to a person. Select photos to move a real person out, or mark the rest as not a person.</string>
     <string name="person_unsorted_caption">Leftover faces that could not be matched. Open to sort them.</string>
     <string name="person_rename_title">Rename</string>
+    <string name="person_add_name">Add a name</string>
     <string name="person_rename_hint">Name</string>
     <string name="person_add_photos">Add photos</string>
     <string name="person_add_photos_title">Add to this person</string>
@@ -1813,6 +1905,18 @@
     <string name="whats_new_albumcover_body">Choose how large album covers appear, from two up to four across.</string>
     <string name="whats_new_denser_title">A denser timeline</string>
     <string name="whats_new_denser_body">The timeline zooms to two denser levels now, fitting up to eight photos per row.</string>
+    <string name="whats_new_import_title">Import from Google Photos or Ente</string>
+    <string name="whats_new_import_body">Bring an exported library into Proton Drive with its dates, places and captions intact, review it first, and let it run in the background.</string>
+    <string name="whats_new_share_email_title">Share an album by email</string>
+    <string name="whats_new_share_email_body">Invite anyone by email, even without a Proton account, and revoke access at any time.</string>
+    <string name="whats_new_video_faces_title">Faces on videos</string>
+    <string name="whats_new_video_faces_body">Name tags now show over a video, so you can see and open who is in it.</string>
+    <string name="whats_new_faces_rework_title">Sharper face recognition</string>
+    <string name="whats_new_faces_rework_body">Far fewer false groups, a clearer People screen, and a one-tap way to fix a stray face.</string>
+    <string name="whats_new_guest_title">More works without an account</string>
+    <string name="whats_new_guest_body">Face recognition, the map, the calendar notes and the duplicate finder now all run signed out.</string>
+    <string name="whats_new_dup_nobackup_title">Duplicates without a backup</string>
+    <string name="whats_new_dup_nobackup_body">The duplicate finder now scans the photos on your device with no account or backup needed.</string>
     <string name="whats_new_section_new">New</string>
     <string name="whats_new_section_improved">Improved</string>
     <string name="whats_new_more_240">Plus copied links stay hidden in the clipboard preview, file sizes match everywhere they appear, automatic free-up checks with Drive before removing a copy from your phone, and large albums and selections hold together better.</string>

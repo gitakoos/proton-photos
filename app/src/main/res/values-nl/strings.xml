@@ -589,6 +589,91 @@
     <string name="metadata_edit_channel_desc">Toont de voortgang tijdens het opslaan van wijzigingen in fotodetails naar Proton Drive.</string>
     <string name="metadata_edit_notification_title">Fotodetails worden opgeslagen…</string>
     <string name="metadata_edit_notification_progress">%1$d van %2$d</string>
+    <!-- Google Takeout import notification. -->
+    <string name="import_channel_name">Foto-import</string>
+    <string name="import_channel_desc">Toont de voortgang tijdens het importeren van een Google Takeout-export naar Proton Drive.</string>
+    <string name="import_notification_title">Foto\'s worden geïmporteerd…</string>
+    <string name="import_notification_progress">%1$d van %2$d</string>
+    <string name="import_notification_done_title">Import voltooid</string>
+    <string name="import_notification_done_text">%1$d geïmporteerd, %2$d overgeslagen, %3$d mislukt</string>
+    <!-- Import staging notification. -->
+    <string name="import_stage_notification_title">Import wordt voorbereid…</string>
+    <string name="import_stage_progress">%1$d van %2$d</string>
+    <!-- Google Takeout import screen. -->
+    <string name="import_title">Foto\'s importeren</string>
+    <string name="import_row_desc">Breng een Google Photos- of Ente-export naar Proton Drive</string>
+    <string name="import_explainer">Importeer een Google Takeout- of Ente-export als .zip. Je foto\'s worden met hun oorspronkelijke datum en locatie geüpload naar Proton Drive.</string>
+    <string name="import_choose_zip">Takeout-.zip kiezen</string>
+    <string name="import_scanning">De export wordt gelezen…</string>
+    <string name="import_progress_count">%1$d / %2$d</string>
+    <string name="import_done_title">Import voltooid</string>
+    <string name="import_done_summary">%1$d geïmporteerd, %2$d overgeslagen, %3$d mislukt</string>
+    <string name="import_done_button">Klaar</string>
+    <string name="import_failed_title">Import mislukt</string>
+    <string name="import_failed_msg">Er is iets misgegaan tijdens het importeren. Kies het bestand en probeer het opnieuw.</string>
+    <!-- Import review queue. -->
+    <string name="import_staging_title">Import wordt voorbereid</string>
+    <string name="import_uploading_title">Foto\'s uploaden</string>
+    <string name="import_review_title">Import controleren</string>
+    <string name="import_review_confirm">%1$d foto\'s importeren</string>
+    <string name="import_review_discard">Weggooien</string>
+    <string name="import_review_discard_title">Deze import weggooien?</string>
+    <string name="import_review_discard_message">De voorbereide foto\'s verlaten de controle. Er is nog niets geüpload.</string>
+    <string name="import_review_remove">%1$d verwijderen</string>
+    <string name="import_review_restore">Herstellen</string>
+    <string name="import_review_selected_count">%1$d geselecteerd</string>
+    <string name="import_review_no_date">Geen datum</string>
+    <string name="import_review_removed">Verwijderd</string>
+    <string name="import_review_meta_section">Details</string>
+    <string name="import_review_detail_date">Datum</string>
+    <string name="import_review_detail_location">Locatie</string>
+    <string name="import_review_detail_description">Beschrijving</string>
+    <string name="import_review_detail_filename">Bestandsnaam</string>
+    <string name="import_review_detail_source">Bron</string>
+    <string name="import_review_source">Google Photos- of Ente-export</string>
+    <!-- Recent imports history. -->
+    <string name="import_history_title">Recente imports</string>
+    <string name="import_history_row">%1$d geïmporteerd</string>
+    <string name="import_history_row_extra">%1$d overgeslagen, %2$d mislukt</string>
+    <!-- Recent import detail + undo. -->
+    <string name="import_detail_title">Importdetails</string>
+    <string name="import_detail_empty">Deze foto\'s staan niet meer op Drive.</string>
+    <string name="import_undo">Deze import ongedaan maken</string>
+    <string name="import_undo_confirm_title">Deze import ongedaan maken?</string>
+    <string name="import_undo_confirm_message">De foto\'s die deze import heeft toegevoegd, gaan naar de prullenbak van Drive. Alles wat je sindsdien hebt gewijzigd, blijft behouden.</string>
+    <string name="import_undo_running">Geïmporteerde foto\'s worden verwijderd…</string>
+    <string name="import_undo_result">%1$d verwijderd, %2$d gewijzigde behouden, %3$d mislukt</string>
+    <string name="import_done_all_present">Deze foto\'s staan al in je Drive, dus er is niets geïmporteerd.</string>
+    <string name="import_detail_already_badge">Al in Drive</string>
+    <string name="import_review_already_badge">Al in Drive</string>
+    <string name="import_review_nothing_new">Niets nieuws om te importeren</string>
+    <string name="import_review_add_to_albums">Aan albums toevoegen</string>
+    <string name="import_album_mode_label">Albums</string>
+    <string name="import_album_mode_none">Alleen foto\'s</string>
+    <string name="import_album_mode_shells">Lege albums maken</string>
+    <string name="import_album_mode_photos">Foto\'s in albums</string>
+    <string name="import_albums_section">Albums</string>
+    <string name="import_done_view_photos">Geïmporteerde foto\'s bekijken</string>
+    <string name="import_stat_date">Datum</string>
+    <string name="import_stat_to_import">Te importeren</string>
+    <string name="import_stat_imported">Geïmporteerd</string>
+    <string name="import_stat_already">Al in Drive</string>
+    <string name="import_stat_skipped">Overgeslagen</string>
+    <string name="import_stat_failed">Mislukt</string>
+    <string name="import_confirm_title">Naar Drive importeren?</string>
+    <string name="import_confirm_button">Importeren</string>
+    <string name="import_confirm_albums_only">De geselecteerde foto\'s worden aan hun albums toegevoegd.</string>
+    <string name="import_history_delete_title">Importrecord verwijderen</string>
+    <string name="import_history_delete_message">Hiermee wordt het record uit Recente imports verwijderd, samen met de optie om het ongedaan te maken. De geïmporteerde foto\'s en eventuele albums blijven in je Drive.</string>
+    <string name="import_history_delete_confirm">Verwijderen</string>
+    <plurals name="import_confirm_message">
+        <item quantity="one">%1$d foto wordt naar jouw Proton Drive geüpload.</item>
+        <item quantity="other">%1$d foto\'s worden naar jouw Proton Drive geüpload.</item>
+    </plurals>
+    <plurals name="import_album_photo_count">
+        <item quantity="one">%1$d foto</item>
+        <item quantity="other">%1$d foto\'s</item>
+    </plurals>
     <string name="album_download_notification_cancel">Annuleren</string>
     <string name="download_started_background">Wordt op de achtergrond gedownload, bekijk de voortgang bij Activiteit</string>
     <string name="albums_share_button">Album delen</string>
@@ -611,6 +696,7 @@
     <string name="share_role_can_view">kan bekijken</string>
     <string name="share_role_can_edit">kan bewerken</string>
     <string name="share_role_pending">in afwachting</string>
+    <string name="share_role_external">uitgenodigd (extern)</string>
     <string name="share_stop_sharing">Stoppen met delen</string>
     <string name="shared_stop_sharing_confirm_body">De openbare links werken niet meer en de foto\'s worden niet langer gedeeld.</string>
     <string name="share_close">Sluiten</string>
@@ -624,6 +710,7 @@
     <string name="share_invite_email_duplicate">Al toegevoegd</string>
     <string name="share_invite_summary_partial">%1$d verzonden, %2$d konden niet worden verzonden</string>
     <string name="share_invite_summary_all_failed">De uitnodigingen konden niet worden verzonden</string>
+    <string name="share_invite_self">Je kunt je eigen account niet uitnodigen</string>
     <!-- Album-sharing + album action error fallbacks (raw exception text stays in the log) -->
     <string name="share_revoke_failed">Kon de uitnodiging niet intrekken</string>
     <string name="share_remove_member_failed">Kon het lid niet verwijderen</string>
@@ -1529,6 +1616,8 @@
     <string name="settings_ai_face_download_retry">Zet de schakelaar opnieuw aan om het nog eens te proberen.</string>
     <string name="settings_ai_face_download_title">Het gezichtsmodel downloaden?</string>
     <string name="settings_ai_face_download_message">Gezichtsherkenning vereist een modeldownload van %1$s. Het werkt via elke verbinding, maar wifi wordt aanbevolen.</string>
+    <string name="settings_ai_face_download_message_metered">Gezichtsherkenning vereist een modeldownload van %1$s. Er is geen wifi verbonden, dus deze download gebruikt mobiele data.</string>
+    <string name="settings_ai_face_downloading_progress">%1$s / %2$s</string>
     <string name="settings_ai_face_download_confirm">Downloaden</string>
     <string name="settings_ai_face_model_missing">Het gezichtsmodel staat niet op dit apparaat.</string>
     <string name="settings_ai_face_remove_title">Gezichtsgegevens verwijderen?</string>
@@ -1810,11 +1899,24 @@
     <string name="whats_new_albumcover_body">Kies hoe groot albumomslagen verschijnen, van twee tot vier per rij.</string>
     <string name="whats_new_denser_title">Een dichtere tijdlijn</string>
     <string name="whats_new_denser_body">De tijdlijn zoomt nu naar twee dichtere niveaus, tot acht foto\'s per rij.</string>
+    <string name="whats_new_import_title">Importeer uit Google Photos of Ente</string>
+    <string name="whats_new_import_body">Breng een geëxporteerde bibliotheek naar Proton Drive met behoud van datums, plaatsen en bijschriften, bekijk hem eerst en laat het op de achtergrond lopen.</string>
+    <string name="whats_new_share_email_title">Deel een album via e-mail</string>
+    <string name="whats_new_share_email_body">Nodig iedereen uit via e-mail, ook zonder Proton-account, en trek de toegang op elk moment in.</string>
+    <string name="whats_new_video_faces_title">Gezichten op video\'s</string>
+    <string name="whats_new_video_faces_body">Naamlabels verschijnen nu over een video, zodat je kunt zien en openen wie erop staat.</string>
+    <string name="whats_new_faces_rework_title">Scherpere gezichtsherkenning</string>
+    <string name="whats_new_faces_rework_body">Veel minder verkeerde groepen, een overzichtelijker Personen-scherm en een verdwaald gezicht dat je met één tik corrigeert.</string>
+    <string name="whats_new_guest_title">Meer werkt zonder account</string>
+    <string name="whats_new_guest_body">Gezichtsherkenning, de kaart, de kalendernotities en de duplicaatzoeker werken nu allemaal zonder aanmelding.</string>
+    <string name="whats_new_dup_nobackup_title">Duplicaten zonder back-up</string>
+    <string name="whats_new_dup_nobackup_body">De duplicaatzoeker scant nu de foto\'s op je apparaat, zonder account of back-up.</string>
     <string name="whats_new_section_new">Nieuw</string>
     <string name="whats_new_section_improved">Verbeteringen</string>
 
     <!-- Person detail -->
-    <string name="person_detail_unnamed">Persoon</string>
+    <string name="person_detail_unnamed">Naamloos</string>
+    <string name="person_add_name">Een naam toevoegen</string>
     <string name="person_unsorted">Niet gesorteerd</string>
     <string name="person_unsorted_hint">Gezichten zonder zekere overeenkomst met een persoon. Selecteer afbeeldingen om een echte persoon eruit te halen, of markeer de rest als geen persoon.</string>
     <string name="person_unsorted_caption">Overgebleven gezichten die niet konden worden gekoppeld. Open om ze te sorteren.</string>

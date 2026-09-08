@@ -108,7 +108,7 @@ class LocalExifBackfillScheduler @Inject constructor(
      * persist both results. Suspends until the whole remaining set has been processed. A no-op once
      * both skip sets are complete (the reads leave nothing to do). Safe to call repeatedly.
      */
-    suspend fun backfillAll(userId: UserId) {
+    suspend fun backfillAll(userId: UserId?, respectHealthGate: Boolean = true) {
         val canReadLocation = hasMediaLocationGrant(context)
         if (!canReadLocation) {
             Log.i(TAG, "ACCESS_MEDIA_LOCATION not granted; GPS leg skipped, date leg still runs")
@@ -124,7 +124,7 @@ class LocalExifBackfillScheduler @Inject constructor(
         val adopted = HashMap<String, CaptureDateOverride.Entry>()
         val pending = walkLock.withLock {
             val located: Set<String> = if (!canReadLocation) emptySet() else
-                runCatching { photoLocationDao.idsForUser(userId.id).toHashSet() }
+                runCatching { photoLocationDao.idsForUser(userId?.id ?: PhotoLocationEntity.LOCAL_USER).toHashSet() }
                     .getOrDefault(hashSetOf())
             val dated: Map<String, CaptureDateOverride.Entry> = runCatching {
                 CaptureDateOverride.parse(
@@ -177,8 +177,10 @@ class LocalExifBackfillScheduler @Inject constructor(
             // Defer this background walk while the phone is hot, low on battery, or in the power saver;
             // it resumes on its own once conditions clear. Not gated on interaction: it runs quietly in
             // the background and does not compete with the UI. Inside the try so a cancellation during
-            // the wait still reaches the finally that clears the inFlight reservations.
-            while (!deviceHealth.backgroundWorkAllowed()) delay(HEALTH_PAUSE_POLL_MS)
+            // the wait still reaches the finally that clears the inFlight reservations. A user-initiated
+            // call (the map, opened by the user) skips this: they asked to see their places now, so the
+            // walk runs even on a low battery rather than leaving the map empty until the phone charges.
+            if (respectHealthGate) while (!deviceHealth.backgroundWorkAllowed()) delay(HEALTH_PAUSE_POLL_MS)
             coroutineScope {
                 pending.forEach { entry ->
                     launch {
@@ -203,7 +205,7 @@ class LocalExifBackfillScheduler @Inject constructor(
      *  store what each produced. */
     private suspend fun readAndStore(
         entry: Pending,
-        userId: UserId,
+        userId: UserId?,
         corrections: MutableMap<String, CaptureDateOverride.Entry>,
     ) {
         val item = entry.item
@@ -260,10 +262,10 @@ class LocalExifBackfillScheduler @Inject constructor(
     }
 
     /** Upsert one located photo's coordinates; a write failure costs that fix alone, not the walk. */
-    private suspend fun storeLocation(uri: String, userId: UserId, coords: Pair<Double, Double>) {
+    private suspend fun storeLocation(uri: String, userId: UserId?, coords: Pair<Double, Double>) {
         val entity = PhotoLocationEntity(
             id = uri,
-            userId = userId.id,
+            userId = userId?.id ?: PhotoLocationEntity.LOCAL_USER,
             latitude = coords.first,
             longitude = coords.second,
         )

@@ -42,6 +42,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
@@ -67,8 +68,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.res.pluralStringResource
@@ -78,6 +81,7 @@ import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.presentation.common.ConfirmDialog
 import eu.akoos.photos.presentation.common.EditFieldSheet
 import eu.akoos.photos.presentation.common.IconBubble
+import eu.akoos.photos.presentation.common.SelectionAction
 import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
 import eu.akoos.photos.presentation.gallery.PersonTile
 import eu.akoos.photos.presentation.gallery.PersonUi
@@ -106,6 +110,8 @@ fun PersonDetailScreen(
     onAddPhotos: () -> Unit,
     onRemovePhotos: (Set<String>) -> Unit,
     onMoveSelectionToPerson: (Set<String>, String) -> Unit = { _, _ -> },
+    /** Drops the selected Unsorted faces from People for good (the "This is not a person" action). */
+    onMarkSelectionNotPerson: (Set<String>) -> Unit = {},
     onSetCover: (String) -> Unit = {},
     mergeCandidates: List<PersonUi> = emptyList(),
     onLoadMergeCandidates: () -> Unit = {},
@@ -120,9 +126,11 @@ fun PersonDetailScreen(
     onFindMore: () -> Unit = {},
 ) {
     val appColors = AppColors.current
+    val gridState = rememberLazyGridState()
     var showRename by remember { mutableStateOf(false) }
     var showRemoveConfirm by remember { mutableStateOf(false) }
     var showIgnoreConfirm by remember { mutableStateOf(false) }
+    var showNotPersonConfirm by remember { mutableStateOf(false) }
     var menuOpen by remember { mutableStateOf(false) }
     var showMergePicker by remember { mutableStateOf(false) }
     var showMoveSelectionPicker by remember { mutableStateOf(false) }
@@ -152,6 +160,57 @@ fun PersonDetailScreen(
 
     BackHandler(enabled = selecting) { selection = emptySet() }
 
+    // Bulk actions for the current photo selection. They ride in the top header while selecting (the same
+    // place the review list puts its whole-cluster actions), instead of a separate bottom bar.
+    val personSelectionActions = buildList {
+        // Choosing a cover needs exactly one photo picked AND a named person (the cover is stored against
+        // the name); an unnamed cluster has nowhere to keep it.
+        if (selection.size == 1 && state.personName != null) {
+            add(
+                SelectionAction(
+                    icon = Icons.Default.AccountCircle,
+                    label = stringResource(R.string.person_set_cover),
+                    onClick = { pendingCover = selection.first() },
+                ),
+            )
+        }
+        // Merge the picked photos into another person (an existing one, or a new name to split them off):
+        // the photo-level twin of the whole-cluster merge, so it shares that icon and wording rather than
+        // reading as a separate "move".
+        add(
+            SelectionAction(
+                icon = Icons.Default.CallMerge,
+                label = stringResource(R.string.person_merge_action),
+                onClick = {
+                    onLoadMergeCandidates()
+                    showMoveSelectionPicker = true
+                },
+            ),
+        )
+        // Removing photos only makes sense for a named person; an unnamed cluster has no person to keep
+        // the photos off of.
+        if (state.personName != null) {
+            add(
+                SelectionAction(
+                    icon = Icons.Default.PersonRemove,
+                    label = stringResource(R.string.person_remove_from),
+                    onClick = { showRemoveConfirm = true },
+                ),
+            )
+        }
+        // Dropping the picked faces from People for good is offered on the Unsorted pile and any unnamed
+        // cluster, so junk faces can be rejected in place; a named person keeps "Remove from person".
+        if (state.isOther || state.personName == null) {
+            add(
+                SelectionAction(
+                    icon = Icons.Default.PersonOff,
+                    label = stringResource(R.string.person_not_a_person),
+                    onClick = { showNotPersonConfirm = true },
+                ),
+            )
+        }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -173,6 +232,7 @@ fun PersonDetailScreen(
                 val seamless = eu.akoos.photos.presentation.gallery.rememberSeamlessGrid()
                 LazyVerticalGrid(
                     columns = GridCells.Fixed(cols),
+                    state = gridState,
                     // Match the timeline grid: same default columns, 20.dp side inset and 6.dp gap,
                     // so person photos render at the same size as the Photos page. Edge-to-edge drops
                     // the side inset and rounding and tightens the gap. The top clears the floating
@@ -211,6 +271,7 @@ fun PersonDetailScreen(
                                 onMerge = { onAcceptSuggestion(mergeSuggestion.personId) },
                                 onDismiss = { onDismissSuggestion(mergeSuggestion.personId) },
                                 onLeave = onLeaveSuggestion,
+                                modifier = Modifier.animateItem(),
                             )
                         }
                     }
@@ -240,57 +301,25 @@ fun PersonDetailScreen(
             }
         }
 
-        // Floating pill header: browse mode carries add + edit; selection mode carries a count and a
-        // remove action, and its back arrow clears the selection.
+        // Selection puts its bulk actions in the top header (like the review list); browse mode shows the
+        // person's own add + edit + overflow there instead. The two never show at once.
         if (selecting) {
             FloatingHeader(
                 title = stringResource(R.string.album_picker_selected, selection.size),
                 onBack = { selection = emptySet() },
                 trailing = {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        // Choosing a cover needs exactly one photo picked AND a named person (the cover
-                        // is stored against the name); an unnamed cluster has nowhere to keep it, so the
-                        // button would silently do nothing there.
-                        if (selection.size == 1 && state.personName != null) {
-                            IconBubble(
-                                icon = Icons.Default.AccountCircle,
-                                contentDescription = stringResource(R.string.person_set_cover),
-                                onClick = { pendingCover = selection.first() },
-                                diameter = 40.dp,
-                                iconSize = 18.dp,
-                                background = appColors.pillBg,
-                                borderColor = appColors.pillBorder,
-                                tint = appColors.fgPrimary,
-                            )
-                        }
-                        // Reassign the picked photos to another person, or split them into a new one.
+                    personSelectionActions.forEachIndexed { index, action ->
                         IconBubble(
-                            icon = Icons.Default.PersonAdd,
-                            contentDescription = stringResource(R.string.person_move_to_title),
-                            onClick = {
-                                onLoadMergeCandidates()
-                                showMoveSelectionPicker = true
-                            },
+                            icon = action.icon,
+                            contentDescription = action.label,
+                            onClick = action.onClick,
                             diameter = 40.dp,
-                            iconSize = 16.dp,
+                            iconSize = 18.dp,
                             background = appColors.pillBg,
                             borderColor = appColors.pillBorder,
                             tint = appColors.fgPrimary,
+                            modifier = if (index == 0) Modifier else Modifier.padding(start = 8.dp),
                         )
-                        // Removing photos from a person only makes sense for a named one; an unnamed
-                        // cluster has no person to keep the photos off of.
-                        if (state.personName != null) {
-                            IconBubble(
-                                icon = Icons.Default.PersonRemove,
-                                contentDescription = stringResource(R.string.person_remove_from),
-                                onClick = { showRemoveConfirm = true },
-                                diameter = 40.dp,
-                                iconSize = 16.dp,
-                                background = appColors.pillBg,
-                                borderColor = appColors.pillBorder,
-                                tint = appColors.fgPrimary,
-                            )
-                        }
                     }
                 },
             )
@@ -313,35 +342,9 @@ fun PersonDetailScreen(
                 onBack = onBack,
                 trailing = {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        // Add is only meaningful once the person is named, since a manual add is stored
-                        // against the name so it survives a rescan.
-                        if (state.personName != null) {
-                            IconBubble(
-                                icon = Icons.Default.Add,
-                                contentDescription = stringResource(R.string.person_add_photos),
-                                onClick = onAddPhotos,
-                                diameter = 40.dp,
-                                iconSize = 16.dp,
-                                background = appColors.pillBg,
-                                borderColor = appColors.pillBorder,
-                                tint = appColors.fgPrimary,
-                            )
-                        }
-                        // The Unsorted bucket is never renamed (that would turn the junk pile into a
-                        // person) and never whole-merged: it is curated by selecting faces to move out or
-                        // reject, so neither the rename button nor the overflow is offered for it.
-                        if (!state.isOther) {
-                            IconBubble(
-                                icon = Icons.Default.Edit,
-                                contentDescription = stringResource(R.string.person_rename_title),
-                                onClick = { showRename = true },
-                                diameter = 40.dp,
-                                iconSize = 16.dp,
-                                background = appColors.pillBg,
-                                borderColor = appColors.pillBorder,
-                                tint = appColors.fgPrimary,
-                            )
-                        }
+                        // Add photos, name / rename, and the rest all live inside the overflow menu below,
+                        // so a long name up top never collides with a row of buttons. The Unsorted bucket
+                        // is never renamed or whole-merged and has no manual add, so it shows no overflow.
                         if (!state.isOther) Box {
                             IconBubble(
                                 icon = Icons.Default.MoreVert,
@@ -360,6 +363,53 @@ fun PersonDetailScreen(
                                 containerColor = appColors.cardBg,
                                 border = BorderStroke(0.5.dp, appColors.pillBorder),
                             ) {
+                                // Name an unnamed cluster, or rename a named person, through one item.
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            if (state.personName == null) {
+                                                stringResource(R.string.person_add_name)
+                                            } else {
+                                                stringResource(R.string.person_rename_title)
+                                            },
+                                            color = appColors.fgPrimary,
+                                        )
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            Icons.Default.Edit,
+                                            contentDescription = null,
+                                            tint = appColors.fgDim,
+                                        )
+                                    },
+                                    onClick = {
+                                        menuOpen = false
+                                        showRename = true
+                                    },
+                                )
+                                // Add photos: named only, since a manual add is stored against the name so
+                                // it survives a rescan.
+                                if (state.personName != null) {
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(
+                                                stringResource(R.string.person_add_photos),
+                                                color = appColors.fgPrimary,
+                                            )
+                                        },
+                                        leadingIcon = {
+                                            Icon(
+                                                Icons.Default.Add,
+                                                contentDescription = null,
+                                                tint = appColors.fgDim,
+                                            )
+                                        },
+                                        onClick = {
+                                            menuOpen = false
+                                            onAddPhotos()
+                                        },
+                                    )
+                                }
                                 // Only for a named person: the sweep matches against this person's mean
                                 // face, which needs a name to keep what it adds across a rebuild.
                                 if (state.personName != null) {
@@ -433,6 +483,7 @@ fun PersonDetailScreen(
                 },
             )
         }
+
     }
 
     // Rename as a bottom drawer (the app's shared single-field editor), so it reads like every other
@@ -549,6 +600,24 @@ fun PersonDetailScreen(
             onDismiss = { showIgnoreConfirm = false },
         )
     }
+
+    // The selection-mode "This is not a person" for the Unsorted bucket or an unnamed cluster: drops just
+    // the picked faces, sharing the same confirm copy as the whole-cluster dismissal above.
+    if (showNotPersonConfirm) {
+        ConfirmDialog(
+            title = stringResource(R.string.person_not_a_person_confirm_title),
+            message = stringResource(R.string.person_not_a_person_confirm_body),
+            confirmLabel = stringResource(R.string.person_not_a_person_confirm),
+            dismissLabel = stringResource(R.string.cancel),
+            destructive = true,
+            onConfirm = {
+                onMarkSelectionNotPerson(selection)
+                selection = emptySet()
+                showNotPersonConfirm = false
+            },
+            onDismiss = { showNotPersonConfirm = false },
+        )
+    }
 }
 
 /**
@@ -562,58 +631,95 @@ private fun MergeSuggestionBanner(
     onMerge: () -> Unit,
     onDismiss: () -> Unit,
     onLeave: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val colors = AppColors.current
     Column(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
-            .padding(bottom = 10.dp)
-            .clip(RoundedCornerShape(18.dp))
-            .background(colors.surfaceWeak)
-            .border(0.5.dp, colors.pillBorder, RoundedCornerShape(18.dp))
-            .padding(14.dp),
+            .padding(bottom = 12.dp)
+            // A soft lift so the prompt reads as a card resting on the grid, not a flat inset panel.
+            .shadow(6.dp, RoundedCornerShape(22.dp), clip = false)
+            .clip(RoundedCornerShape(22.dp))
+            .background(colors.cardBg)
+            .border(0.5.dp, colors.cardBorder, RoundedCornerShape(22.dp))
+            .padding(16.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             PersonTile(person = candidate, selected = false, onClick = onMerge)
-            Spacer(Modifier.width(12.dp))
+            Spacer(Modifier.width(14.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     stringResource(R.string.person_merge_suggest_title),
                     color = colors.fgPrimary,
-                    fontSize = 14.sp,
+                    fontSize = 15.sp,
                     fontWeight = FontWeight.SemiBold,
+                    lineHeight = 19.sp,
                 )
                 candidate.displayName?.takeIf { it.isNotBlank() }?.let {
-                    Spacer(Modifier.height(2.dp))
+                    Spacer(Modifier.height(3.dp))
                     Text(it, color = colors.fgMute, fontSize = 12.5.sp)
                 }
             }
         }
-        Spacer(Modifier.height(12.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            BannerAction(stringResource(R.string.person_merge_suggest_merge), accent = true, onClick = onMerge)
-            BannerAction(stringResource(R.string.person_merge_suggest_dismiss), accent = false, onClick = onDismiss)
-            BannerAction(stringResource(R.string.person_merge_suggest_later), accent = false, onClick = onLeave)
+        Spacer(Modifier.height(14.dp))
+        // The two real decisions share the width evenly; "Different person" needs the room, so it is never
+        // squeezed into a third next to "Merge".
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            BannerAction(
+                stringResource(R.string.person_merge_suggest_merge),
+                accent = true,
+                onClick = onMerge,
+                modifier = Modifier.weight(1f),
+            )
+            BannerAction(
+                stringResource(R.string.person_merge_suggest_dismiss),
+                accent = false,
+                onClick = onDismiss,
+                modifier = Modifier.weight(1f),
+            )
         }
+        Spacer(Modifier.height(8.dp))
+        // "Not now" is the low-stakes escape, so it sits below as a quiet full-width action rather than
+        // competing with the two decisions above.
+        Text(
+            stringResource(R.string.person_merge_suggest_later),
+            color = colors.fgMute,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Medium,
+            textAlign = TextAlign.Center,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(999.dp))
+                .clickable(onClick = onLeave)
+                .padding(vertical = 8.dp),
+        )
     }
 }
 
 @Composable
-private fun BannerAction(label: String, accent: Boolean, onClick: () -> Unit) {
+private fun BannerAction(
+    label: String,
+    accent: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val colors = AppColors.current
     Text(
         label,
         color = if (accent) Color.White else colors.fgPrimary,
         fontSize = 13.sp,
         fontWeight = FontWeight.SemiBold,
-        modifier = Modifier
+        textAlign = TextAlign.Center,
+        maxLines = 1,
+        modifier = modifier
             .clip(RoundedCornerShape(999.dp))
-            .background(if (accent) colors.accent else colors.surfaceWeak)
+            .background(if (accent) colors.accent else colors.pillBg)
             .then(
                 if (accent) Modifier
                 else Modifier.border(0.5.dp, colors.pillBorder, RoundedCornerShape(999.dp)),
             )
             .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+            .padding(horizontal = 12.dp, vertical = 10.dp),
     )
 }

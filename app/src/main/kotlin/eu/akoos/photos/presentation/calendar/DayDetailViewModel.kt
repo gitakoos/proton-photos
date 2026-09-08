@@ -42,6 +42,7 @@ import kotlinx.coroutines.launch
 import me.proton.core.accountmanager.domain.AccountManager
 import eu.akoos.photos.data.db.dao.DayMetaDao
 import eu.akoos.photos.data.db.entity.DayMetaEntity
+import eu.akoos.photos.data.db.entity.PhotoLocationEntity
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.entity.GalleryItem
@@ -87,12 +88,14 @@ class DayDetailViewModel @Inject constructor(
                         flowOf(DayLoadData(emptyList(), null, null, emptySet()))
                     } else {
                         userIdFlow.flatMapLatest { userId ->
-                            // Signed out the day is filled from the device's own media; the day-meta
-                            // row (description, cover) is account scoped, so it is absent then.
+                            // Signed out the day is filled from the device's own media and its
+                            // metadata row (description, cover) lives under the local partition, so a
+                            // guest can annotate a day the same as a signed-in user.
                             val libraryFlow = if (userId == null) getGalleryItems.invokeLocalOnly()
                                 else getGalleryItems.invoke(userId)
-                            val metaFlow = if (userId == null) flowOf<DayMetaEntity?>(null)
-                                else dayMetaDao.observeByDate(userId.id, date)
+                            val metaFlow = dayMetaDao.observeByDate(
+                                userId?.id ?: PhotoLocationEntity.LOCAL_USER, date,
+                            )
                             combine(
                                 libraryFlow,
                                 metaFlow,
@@ -162,9 +165,11 @@ class DayDetailViewModel @Inject constructor(
     private fun upsertWith(block: (DayMetaEntity?) -> DayMetaEntity) {
         val date = _selectedDate.value ?: return
         viewModelScope.launch {
-            val userId = accountManager.getPrimaryUserId().first() ?: return@launch
-            val current = dayMetaDao.getByDate(userId.id, date)
-            val next = block(current).copy(date = date, userId = userId.id)
+            // A guest writes under the local partition, a signed-in user under their own id, so the
+            // edit persists either way (was dropped for a guest before).
+            val account = accountManager.getPrimaryUserId().first()?.id ?: PhotoLocationEntity.LOCAL_USER
+            val current = dayMetaDao.getByDate(account, date)
+            val next = block(current).copy(date = date, userId = account)
             dayMetaDao.upsert(next)
         }
     }

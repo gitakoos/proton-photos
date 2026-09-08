@@ -39,6 +39,7 @@ import androidx.compose.material.icons.filled.SaveAlt
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Face
 import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Public
@@ -46,6 +47,7 @@ import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.GroupAdd
 import androidx.compose.material.icons.filled.HdrOn
 import androidx.compose.material.icons.filled.Movie
+import androidx.compose.material.icons.filled.NoAccounts
 import androidx.compose.material.icons.filled.PhotoAlbum
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Shield
@@ -120,12 +122,12 @@ internal val WhatsNewReleases: List<WhatsNewRelease> = listOf(
         version = "2.5.0",
         hero = null,
         features = listOf(
-            WhatsNewFeature(Icons.Default.Face, R.string.whats_new_faces_title, R.string.whats_new_faces_body, WhatsNewCategory.New),
-            WhatsNewFeature(Icons.Default.PhoneAndroid, R.string.whats_new_localonly_title, R.string.whats_new_localonly_body, WhatsNewCategory.New),
-            WhatsNewFeature(Icons.Default.Public, R.string.whats_new_map_title, R.string.whats_new_map_body, WhatsNewCategory.Improved),
-            WhatsNewFeature(Icons.Default.Difference, R.string.whats_new_dupfinder_title, R.string.whats_new_dupfinder_body, WhatsNewCategory.Improved),
-            WhatsNewFeature(Icons.Default.GridView, R.string.whats_new_albumcover_title, R.string.whats_new_albumcover_body, WhatsNewCategory.Improved),
-            WhatsNewFeature(Icons.Default.DensitySmall, R.string.whats_new_denser_title, R.string.whats_new_denser_body, WhatsNewCategory.Improved),
+            WhatsNewFeature(Icons.Default.SwapVert, R.string.whats_new_import_title, R.string.whats_new_import_body, WhatsNewCategory.New),
+            WhatsNewFeature(Icons.Default.Email, R.string.whats_new_share_email_title, R.string.whats_new_share_email_body, WhatsNewCategory.New),
+            WhatsNewFeature(Icons.Default.Movie, R.string.whats_new_video_faces_title, R.string.whats_new_video_faces_body, WhatsNewCategory.New),
+            WhatsNewFeature(Icons.Default.Face, R.string.whats_new_faces_rework_title, R.string.whats_new_faces_rework_body, WhatsNewCategory.Improved),
+            WhatsNewFeature(Icons.Default.NoAccounts, R.string.whats_new_guest_title, R.string.whats_new_guest_body, WhatsNewCategory.Improved),
+            WhatsNewFeature(Icons.Default.Difference, R.string.whats_new_dup_nobackup_title, R.string.whats_new_dup_nobackup_body, WhatsNewCategory.Improved),
         ),
     ),
     WhatsNewRelease(
@@ -173,13 +175,19 @@ internal val WhatsNewReleases: List<WhatsNewRelease> = listOf(
 internal val LatestWhatsNewRelease: WhatsNewRelease get() = WhatsNewReleases.first()
 
 /**
- * The cards that shipped across the earlier 2.5.0 preview builds (test1 / test2). They are held out of
- * the 2.5.0 card above so each PREVIEW announces only what THAT preview added; prepend them to the
+ * The cards that shipped across the earlier 2.5.0 preview builds (test1 / test2 / test3). They are held
+ * out of the 2.5.0 card above so each PREVIEW announces only what THAT preview added; prepend them to the
  * 2.5.0 card's features for the STABLE release, where someone updating from 2.4.0 meets all of 2.5.0
  * at once. Referencing the strings here also keeps them from reading as unused until then.
  */
 @Suppress("unused")
 internal val WhatsNew250EarlierPreviews: List<WhatsNewFeature> = listOf(
+    WhatsNewFeature(Icons.Default.Face, R.string.whats_new_faces_title, R.string.whats_new_faces_body, WhatsNewCategory.New),
+    WhatsNewFeature(Icons.Default.PhoneAndroid, R.string.whats_new_localonly_title, R.string.whats_new_localonly_body, WhatsNewCategory.New),
+    WhatsNewFeature(Icons.Default.Public, R.string.whats_new_map_title, R.string.whats_new_map_body, WhatsNewCategory.Improved),
+    WhatsNewFeature(Icons.Default.Difference, R.string.whats_new_dupfinder_title, R.string.whats_new_dupfinder_body, WhatsNewCategory.Improved),
+    WhatsNewFeature(Icons.Default.GridView, R.string.whats_new_albumcover_title, R.string.whats_new_albumcover_body, WhatsNewCategory.Improved),
+    WhatsNewFeature(Icons.Default.DensitySmall, R.string.whats_new_denser_title, R.string.whats_new_denser_body, WhatsNewCategory.Improved),
     WhatsNewFeature(Icons.Default.Brush, R.string.whats_new_editor_title, R.string.whats_new_editor_body),
     WhatsNewFeature(Icons.Default.GridView, R.string.whats_new_collage_title, R.string.whats_new_collage_body),
     WhatsNewFeature(Icons.Default.SaveAlt, R.string.whats_new_export_title, R.string.whats_new_export_body),

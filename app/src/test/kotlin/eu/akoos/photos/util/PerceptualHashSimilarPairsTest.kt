@@ -76,13 +76,13 @@ class PerceptualHashSimilarPairsTest {
     }
 
     @Test
-    fun `band split covers all 64 bits with the expected 9-band shape`() {
-        // 8 bands of 7 bits + 1 band of 8 bits = 64, so every hash bit lands in exactly one band.
-        assertEquals(9, PerceptualHash.BAND_COUNT)
+    fun `band split covers all 64 bits with the expected 13-band shape`() {
+        // 12 bands of 5 bits + 1 band of 4 bits = 64, so every hash bit lands in exactly one band.
+        assertEquals(13, PerceptualHash.BAND_COUNT)
         // A hash with every bit set must have every band value non-zero and, reassembled, equal -1L.
         val all = -1L
         val values = PerceptualHash.bandValues(all)
-        assertEquals(9, values.size)
+        assertEquals(13, values.size)
         assertTrue(values.all { it != 0L })
     }
 
@@ -102,20 +102,21 @@ class PerceptualHashSimilarPairsTest {
     fun `deliberately near pairs (including chains) are found and match brute force`() {
         val rnd = Random(0x1234)
         val base = MutableList(120) { rnd.nextLong() }
+        val t = PerceptualHash.SIMILARITY_THRESHOLD
         // Seed clusters and chains: exact dupes, in-threshold neighbours, an over-threshold link
         // that single-link clustering should still bridge transitively, and a just-past outlier.
         val seeded = ArrayList<Long>(base)
         val anchor = base[0]
         seeded.add(anchor)                                   // distance 0 (exact duplicate)
-        seeded.add(perturb(anchor, 4, rnd))                  // within threshold
-        seeded.add(perturb(anchor, 8, rnd))                  // exactly at threshold
-        val chainB = perturb(anchor, 8, rnd)
-        seeded.add(chainB)                                   // A~B at 8
-        seeded.add(perturb(chainB, 8, rnd))                  // B~C at 8 (A~C may exceed 8: chain link)
-        seeded.add(perturb(anchor, 9, rnd))                  // just past threshold — must NOT pair with anchor
+        seeded.add(perturb(anchor, t / 2, rnd))              // within threshold
+        seeded.add(perturb(anchor, t, rnd))                  // exactly at threshold
+        val chainB = perturb(anchor, t, rnd)
+        seeded.add(chainB)                                   // A~B at t
+        seeded.add(perturb(chainB, t, rnd))                  // B~C at t (A~C may exceed t: chain link)
+        seeded.add(perturb(anchor, t + 1, rnd))              // just past threshold, must NOT pair with anchor
 
         val hashes = seeded.toLongArray()
-        val threshold = PerceptualHash.SIMILARITY_THRESHOLD
+        val threshold = t
 
         val expected = bruteForcePairs(hashes, threshold)
         val actual = PerceptualHash.similarPairs(hashes, threshold).toSet()
@@ -129,7 +130,7 @@ class PerceptualHashSimilarPairsTest {
     @Test
     fun `equivalence holds across many seeds and multiple thresholds`() {
         // Sweep several seeds and sizes; check the multi-index result matches brute force for the
-        // production threshold and neighbouring values, since the banding is sized for <= 8.
+        // production threshold and smaller values, which the banding is sized to keep exact.
         for (seed in 0 until 25) {
             val rnd = Random(seed.toLong())
             val size = 50 + rnd.nextInt(250)
@@ -137,7 +138,7 @@ class PerceptualHashSimilarPairsTest {
             val pool = ArrayList<Long>(size)
             repeat(size) {
                 val h = if (pool.isNotEmpty() && rnd.nextInt(4) == 0) {
-                    perturb(pool[rnd.nextInt(pool.size)], rnd.nextInt(10), rnd)
+                    perturb(pool[rnd.nextInt(pool.size)], rnd.nextInt(14), rnd)
                 } else {
                     rnd.nextLong()
                 }

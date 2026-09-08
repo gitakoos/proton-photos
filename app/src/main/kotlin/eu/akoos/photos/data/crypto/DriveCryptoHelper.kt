@@ -52,6 +52,7 @@ import javax.inject.Singleton
 internal object DriveSignatureContexts {
     val INVITER = SignatureContext(value = "drive.share-member.inviter", isCritical = true)
     val MEMBER  = SignatureContext(value = "drive.share-member.member", isCritical = true)
+    val EXTERNAL = SignatureContext(value = "drive.share-member.external-invitation", isCritical = true)
 }
 
 private const val TAG = "DriveCrypto"
@@ -921,6 +922,35 @@ class DriveCryptoHelper @Inject constructor(
         )
         val unarmoredSig = cryptoContext.pgpCrypto.getUnarmored(armoredSig)
         keyPacketBase64 to Base64.encodeToString(unarmoredSig, Base64.NO_WRAP)
+    }
+
+    /**
+     * Produces the Base64 `ExternalInvitationSignature` a non-Proton album invitation carries (#54).
+     *
+     * A non-Proton invitee has no published key to encrypt to, so the invite is authenticated rather
+     * than sealed: the inviter signs, but does not encrypt, the tuple binding the recipient's address
+     * to the share's session key. The signed input is the UTF-8 bytes of
+     * `"$inviteeEmail|$sessionKeyBase64"`, where `sessionKeyBase64` is the raw album share session-key
+     * bytes ([SessionKey.key]) Base64-encoded with NO_WRAP. The detached signature carries the
+     * [DriveSignatureContexts.EXTERNAL] critical context (the server rejects it otherwise), and its
+     * unarmored bytes are Base64-encoded (NO_WRAP) for the POST body.
+     */
+    fun signExternalInvitation(
+        inviteeEmail: String,
+        sessionKey: SessionKey,
+        signerKeyBytes: ByteArray,
+    ): String = cryptoLock.withLock {
+        // signData (armoring) + getUnarmored enter libgojni; serialize. The base64 + concat are pure
+        // CPU but kept inside to mirror encryptAndSignSessionKeyForInvitee.
+        val sessionKeyBase64 = Base64.encodeToString(sessionKey.key, Base64.NO_WRAP)
+        val signedInput = "$inviteeEmail|$sessionKeyBase64".toByteArray(Charsets.UTF_8)
+        val armoredSig = cryptoContext.pgpCrypto.signData(
+            signedInput,
+            signerKeyBytes,
+            DriveSignatureContexts.EXTERNAL,
+        )
+        val unarmoredSig = cryptoContext.pgpCrypto.getUnarmored(armoredSig)
+        Base64.encodeToString(unarmoredSig, Base64.NO_WRAP)
     }
 
     /**

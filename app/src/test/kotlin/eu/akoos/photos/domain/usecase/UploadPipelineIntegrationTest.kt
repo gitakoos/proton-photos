@@ -430,6 +430,53 @@ class UploadPipelineIntegrationTest {
         }
     }
 
+    // ── Scenario 5: a queued photo deleted before it uploads ────────────────────────
+
+    @Test
+    fun `a queued photo deleted before upload is dropped and the rest still upload`() = runTest {
+        val keep = "content://media/keep"
+        val gone = "content://media/gone"
+        local.add(localItem(keep))
+        local.add(localItem(gone))
+        // Queue both as explicit MANUAL uploads (bypasses the bulk gates).
+        forceUploadUseCase.forceUpload(userId, listOf(keep, gone))
+        // The user deletes one from the device before the batch runs.
+        local.remove(gone)
+
+        val result = uploadUseCase(userId)
+
+        // The surviving photo backed up; the deleted one did not.
+        assertEquals(1, cloud.photos.value.size)
+        assertEquals(SyncStatus.SYNCED, row(keep)!!.status)
+        // The deleted photo's orphaned LOCAL_ONLY row was dropped, so it is neither re-processed nor
+        // left behind as a phantom "Queued" tile.
+        assertNull("a deleted queued photo's row must be dropped", row(gone))
+        // The whole batch was attempted (so the "N of M" count can still complete), but only the
+        // surviving photo counts as a success, and the deleted one must not read as a failure either.
+        assertEquals(2, result.attempted)
+        assertEquals(1, result.successCount)
+    }
+
+    @Test
+    fun `reconcile drops a queued MANUAL row whose file was deleted and never re-queues it`() = runTest {
+        seedBulkUploadGates(folder = "Camera")
+        val gone = "content://media/gone-manual"
+        local.add(localItem(gone, bucket = "Camera"))
+        syncRepo.upsert(localOnlyRow(gone), userId)
+        syncRepo.markQueued(gone, QueueSource.MANUAL, System.currentTimeMillis())
+        // The user deletes the file from the device.
+        local.remove(gone)
+
+        reconcileUseCase(userId).collectToEnd()
+
+        // The orphaned row is dropped, not left queued and not re-queued under its MANUAL source.
+        assertNull("a deleted MANUAL-queued photo's row must be dropped", row(gone))
+
+        // A second reconcile must not resurrect or re-queue it.
+        reconcileUseCase(userId).collectToEnd()
+        assertNull("reconcile must not re-create a deleted photo's row", row(gone))
+    }
+
     private fun localOnlyRow(uri: String) = SyncState(
         localUri = uri,
         cloudFileId = null,
@@ -460,6 +507,12 @@ private class FakeLocalMediaRepository : LocalMediaRepository {
 
     fun add(item: LocalMediaItem) {
         items.value = items.value + item
+    }
+
+    /** Simulate the user deleting the file from the device: it leaves the library and its
+     *  content-URI stops resolving, exactly as a MediaStore delete does. */
+    fun remove(uri: String) {
+        items.value = items.value.filterNot { it.uri == uri }
     }
 
     override fun observeLocalMedia(): Flow<List<LocalMediaItem>> = items.asStateFlow()

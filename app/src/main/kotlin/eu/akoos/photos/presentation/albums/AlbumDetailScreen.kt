@@ -1197,6 +1197,7 @@ fun AlbumDetailScreen(
                 ownerEmail = state.ownerEmail,
                 hasShareRecord = state.shareId != null,
                 invitations = state.invitations,
+                externalInvitations = state.externalInvitations,
                 members = state.members,
                 isLoadingInvitations = state.isLoadingInvitations,
                 inviteBatchResult = state.inviteBatchResult,
@@ -1208,6 +1209,7 @@ fun AlbumDetailScreen(
                     scope.launch { shareSheetState.hide() }.invokeOnCompletion { showShareSheet = false }
                 },
                 onRevokeInvitation = { invitationId -> viewModel.revokeInvitation(invitationId) },
+                onRevokeExternalInvitation = { invitationId -> viewModel.revokeExternalInvitation(invitationId) },
                 onRemoveMember = { memberId -> viewModel.removeMember(memberId) },
                 onCreatePublicLink = { viewModel.createPublicLink() },
                 onDisablePublicLink = { viewModel.disablePublicLink() },

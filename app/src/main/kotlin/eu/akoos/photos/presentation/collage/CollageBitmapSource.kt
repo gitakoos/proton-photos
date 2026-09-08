@@ -77,11 +77,14 @@ class CollageBitmapSource @Inject constructor(
     /** A full-resolution bitmap bounded to [maxPx] on the long side, for the export. A cloud-only
      *  photo is downloaded and decrypted first; a device photo decodes its own file. Null on failure.
      *  Run these one at a time so only one original is in memory at once. */
-    suspend fun fullRes(item: GalleryItem, userId: UserId, maxPx: Int): Bitmap? = withContext(Dispatchers.IO) {
+    suspend fun fullRes(item: GalleryItem, userId: UserId?, maxPx: Int): Bitmap? = withContext(Dispatchers.IO) {
         when (item) {
             is GalleryItem.LocalOnly -> decodeUri(Uri.parse(item.local.uri), maxPx)
             is GalleryItem.Synced -> decodeUri(Uri.parse(item.local.uri), maxPx)
             is GalleryItem.CloudOnly -> {
+                // A cloud original needs an account to download and decrypt; a guest has none (and no
+                // cloud items), so skip rather than fabricate a UserId.
+                if (userId == null) return@withContext null
                 val file = try {
                     cloudRepo.downloadFullResPhoto(userId, item.cloud)
                 } catch (e: CancellationException) {

@@ -36,13 +36,13 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
-import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import me.proton.core.accountmanager.domain.AccountManager
 import eu.akoos.photos.data.db.dao.DayMetaDao
 import eu.akoos.photos.data.db.entity.DayMetaEntity
+import eu.akoos.photos.data.db.entity.PhotoLocationEntity
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.data.repository.drive.ThumbnailUrlStore
@@ -103,15 +103,14 @@ class CalendarViewModel @Inject constructor(
             try {
                 accountManager.getPrimaryUserId()
                     .flatMapLatest { userId ->
-                        primaryUserId = userId?.id
+                        primaryUserId = userId?.id ?: PhotoLocationEntity.LOCAL_USER
                         // Build the month grid from the data sources only, so a thumbnail-decrypt
                         // (store change) does not re-run the heavier buildMonths walk. Signed out the
-                        // grid is built from the device's own media; the day-meta overlay is account
-                        // scoped, so it is empty then.
+                        // grid is built from the device's own media and the day-meta overlay reads the
+                        // local partition, so a guest's day annotations show on the calendar too.
                         val libraryFlow = if (userId == null) getGalleryItems.invokeLocalOnly()
                             else getGalleryItems.invoke(userId)
-                        val metasFlow = if (userId == null) flowOf(emptyList<DayMetaEntity>())
-                            else dayMetaDao.observeAll(userId.id)
+                        val metasFlow = dayMetaDao.observeAll(userId?.id ?: PhotoLocationEntity.LOCAL_USER)
                         combine(
                             libraryFlow,
                             metasFlow,

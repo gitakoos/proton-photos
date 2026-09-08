@@ -109,6 +109,9 @@ fun rememberGallerySelectionActions(
     addToAlbumState: AddToAlbumState,
     allSelected: Boolean,
     isSignedIn: Boolean = true,
+    // Add-to-person runs on-device, so it is offered whenever there are people to add to, guest
+    // included; the account-only actions (add-to-album, back-up) stay behind isSignedIn.
+    showAddToPerson: Boolean = isSignedIn,
     onSelectAll: () -> Unit,
     onShare: () -> Unit,
     onHide: () -> Unit,
@@ -169,7 +172,7 @@ fun rememberGallerySelectionActions(
                 )
             )
         }
-        if (isSignedIn) {
+        if (showAddToPerson) {
             add(
                 SelectionAction(
                     icon = Icons.Default.Person,

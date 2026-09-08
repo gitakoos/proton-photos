@@ -23,35 +23,24 @@
 package eu.akoos.photos.presentation.offline
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.OfflinePin
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -63,10 +52,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -74,8 +60,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.delay
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.GalleryItem
-import eu.akoos.photos.presentation.common.IconBubble
 import eu.akoos.photos.presentation.common.ReturnToViewerPhoto
+import eu.akoos.photos.presentation.common.SelectionAction
+import eu.akoos.photos.presentation.common.SelectionDrawer
 import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
 import eu.akoos.photos.presentation.gallery.PhotoCell
 import eu.akoos.photos.presentation.gallery.photoCellInputsFor
@@ -83,18 +70,13 @@ import eu.akoos.photos.presentation.gallery.rememberDefaultGridColumns
 import eu.akoos.photos.presentation.gallery.rememberSeamlessGrid
 import eu.akoos.photos.presentation.gallery.rememberDragMultiSelectModifier
 import eu.akoos.photos.presentation.common.FloatingHeader
-import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.Bg0
 import eu.akoos.photos.presentation.theme.FgDim
 import eu.akoos.photos.presentation.theme.FgMute
-import eu.akoos.photos.presentation.theme.FgPrimary
-import eu.akoos.photos.presentation.theme.PillBg
-import eu.akoos.photos.presentation.theme.PillBgOpaque
-import eu.akoos.photos.presentation.theme.PillBorder
 
 /**
  * Dedicated grid of every cloud photo the user has made available offline. Reuses the timeline's
- * [PhotoCell], the shared drag-to-select gesture, and the same bottom action dock as the gallery, so
+ * [PhotoCell], the shared drag-to-select gesture, and the same selection drawer as the gallery, so
  * selection behaves identically. The only bulk action here is removing the chosen photos from
  * offline. The floating pill header sits over the scrolling grid.
  */
@@ -125,6 +107,7 @@ fun OfflinePhotosScreen(
     ) {
         val cols = rememberDefaultGridColumns()
         val seamless = rememberSeamlessGrid()
+        val gridState = rememberLazyGridState()
         if (items.isEmpty()) {
             Box(
                 Modifier.fillMaxSize().padding(top = contentTopPad),
@@ -141,7 +124,6 @@ fun OfflinePhotosScreen(
                 }
             }
         } else {
-            val gridState = rememberLazyGridState()
             // Shared drag-to-select: long-press a cell to select it, then sweep a contiguous range.
             // Keyed by linkId — the same key the grid cells use — so the swept keys map to selection.
             val keyToIndex = remember(selectableKeys) {
@@ -226,72 +208,36 @@ fun OfflinePhotosScreen(
             }
         }
 
-        // Top header: a cancel + count bar while selecting, else the floating pill title.
-        if (inSelectionMode) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .statusBarsPadding()
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                IconBubble(
-                    icon = Icons.Default.Close,
-                    contentDescription = stringResource(R.string.gallery_cancel_selection),
-                    onClick = { viewModel.clearSelection() },
-                    diameter = 40.dp,
-                    iconSize = 20.dp,
-                    background = PillBg,
-                    borderColor = PillBorder,
-                    tint = FgPrimary,
-                )
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(999.dp))
-                        .background(PillBg)
-                        .border(0.5.dp, PillBorder, RoundedCornerShape(999.dp))
-                        .padding(horizontal = 14.dp, vertical = 8.dp),
-                ) {
-                    Text(
-                        pluralStringResource(R.plurals.count_photos_plural, selectedIds.size, selectedIds.size),
-                        color = FgPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
-                    )
-                }
-            }
-        } else {
+        // Floating pill header over the scrolling grid, hidden while selecting so its back arrow
+        // cannot pop the screen and drop the selection; the drawer then carries cancel and count.
+        if (!inSelectionMode) {
             FloatingHeader(
                 title = stringResource(R.string.offline_screen_title),
                 onBack = onBack,
             )
         }
 
-        // Bottom action dock — same framing as the gallery selection bar; the one action is remove.
-        AnimatedVisibility(
-            visible = inSelectionMode && selectedIds.isNotEmpty(),
-            enter = fadeIn(),
-            exit = fadeOut(),
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .navigationBarsPadding()
-                .padding(bottom = 24.dp),
-        ) {
-            Row(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(999.dp))
-                    .background(PillBgOpaque)
-                    .border(0.5.dp, PillBorder, RoundedCornerShape(999.dp))
-                    .clickable { viewModel.removeSelectedFromOffline() }
-                    .padding(horizontal = 18.dp, vertical = 12.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(Icons.Default.OfflinePin, null, tint = Accent, modifier = Modifier.size(20.dp))
-                Text(
-                    stringResource(R.string.offline_remove),
-                    color = Accent, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
-                )
-            }
+        // Selection drawer: the shared surface every multi-select uses. Offline's one bulk action is
+        // removing the chosen photos from offline.
+        val selectedItems = remember(items, selectedIds) {
+            items.filter { (it as? GalleryItem.CloudOnly)?.cloud?.linkId in selectedIds }
         }
+        val actions = buildList {
+            add(
+                SelectionAction(
+                    icon = Icons.Default.OfflinePin,
+                    label = stringResource(R.string.offline_remove),
+                    onClick = { viewModel.removeSelectedFromOffline() },
+                )
+            )
+        }
+        SelectionDrawer(
+            visible = inSelectionMode,
+            items = selectedItems,
+            actions = actions,
+            onDismiss = { viewModel.clearSelection() },
+            contentScrolling = gridState.isScrollInProgress,
+            modifier = Modifier.align(Alignment.BottomCenter),
+        )
     }
 }

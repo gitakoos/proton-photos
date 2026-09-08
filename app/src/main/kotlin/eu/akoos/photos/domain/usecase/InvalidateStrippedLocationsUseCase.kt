@@ -24,6 +24,7 @@ package eu.akoos.photos.domain.usecase
 
 import android.util.Log
 import eu.akoos.photos.data.db.dao.PhotoLocationDao
+import eu.akoos.photos.data.db.entity.PhotoLocationEntity
 import eu.akoos.photos.util.MetadataStripConfig
 import eu.akoos.photos.util.forEachSqlChunk
 import kotlinx.coroutines.CancellationException
@@ -67,9 +68,11 @@ class InvalidateStrippedLocationsUseCase @Inject constructor(
     suspend operator fun invoke(config: MetadataStripConfig, strippedUris: Collection<String>) {
         val ids = strippedLocationIds(config, strippedUris)
         if (ids.isEmpty()) return
-        val userId = accountManager.getPrimaryUserId().first()?.id ?: return
+        // A guest strips GPS the same as a signed-in user; drop the stored fix under the local
+        // partition so the map, Search places and location screen stop plotting the old point.
+        val account = accountManager.getPrimaryUserId().first()?.id ?: PhotoLocationEntity.LOCAL_USER
         try {
-            ids.forEachSqlChunk { photoLocationDao.deleteByIds(userId, it) }
+            ids.forEachSqlChunk { photoLocationDao.deleteByIds(account, it) }
         } catch (e: Exception) {
             if (e is CancellationException) throw e
             Log.w(TAG, "stored location drop for ${ids.size} stripped files failed: ${e.message}")

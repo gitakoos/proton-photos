@@ -27,3 +27,11 @@ data class ShareInvitation(
     val email: String,
     val permissions: Int,
 )
+
+/** A pending EXTERNAL (non-Proton) album-share invitation surfaced in "Who has access" (#54). */
+data class ShareExternalInvitation(
+    val id: String,
+    val email: String,
+    val permissions: Int,
+    val state: Int? = null,
+)

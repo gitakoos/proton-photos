@@ -95,10 +95,21 @@ class MemoriesViewModel @Inject constructor(
     val uiState: StateFlow<MemoriesUiState> = accountManager.getPrimaryUserId()
         .flatMapLatest { userId ->
             if (userId == null) {
-                // Signed out the Collection is derived from the device's own media. People clustering
-                // is account scoped (and behind the AI opt-in), so it stays empty here.
-                getGalleryItems.invokeLocalOnly()
+                // Signed out the Collection is derived from the device's own media, and on-device face
+                // grouping runs under the local partition, so People appear here too when AI is on, the
+                // same opt-in the signed-in branch below honours. Local covers load directly, so the
+                // cloud cover-pinning tail is not needed here.
+                val memories = getGalleryItems.invokeLocalOnly()
                     .map { all -> MemoriesUiState(isLoading = false, onThisDay = computeOnThisDay(all), seasons = buckets(all)) }
+                val people = context.settingsDataStore.data
+                    .map { it[SettingsKeys.AI_FEATURES_ENABLED] == true && it[SettingsKeys.FACE_ENABLED] == true }
+                    .distinctUntilChanged()
+                    .flatMapLatest { enabled ->
+                        if (!enabled) flowOf(emptyList<PersonUi>())
+                        else observePeopleUseCase(null, getGalleryItems.invokeLocalOnly())
+                            .map { list -> list.mapNotNull { it.toPersonUi() } }
+                    }
+                combine(memories, people) { state, ppl -> state.copy(people = ppl) }
             } else {
                 val memories = getGalleryItems.invoke(userId)
                     .map { all -> MemoriesUiState(isLoading = false, onThisDay = computeOnThisDay(all), seasons = buckets(all)) }
@@ -132,8 +143,8 @@ class MemoriesViewModel @Inject constructor(
                     .combine(thumbnailUrlStore.urls) { state, urls -> state.withThumbnails(urls) }
             }
         }
-        // The busiest cities ride alongside the day/season/people groupings. The use case does its own
-        // account gating, so a signed-out session simply yields no cities here.
+        // The busiest cities ride alongside the day/season/people groupings. ObservePlacesUseCase reads
+        // the local partition when signed out, so a guest's cities populate here too.
         .combine(observePlacesUseCase().map { it.cities.take(12) }) { state, cities ->
             state.copy(places = cities)
         }

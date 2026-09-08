@@ -792,6 +792,510 @@ class AppDatabaseMigrationTest {
     }
 
     @Test
+    fun migrate_v33_to_v34_createsClusterSummaryTable_personIdIsPrimaryKey_updatedAtDefaultsZero() {
+        Migrations.MIGRATION_33_34.migrate(db)
+
+        // The table exists and accepts a row shaped exactly like ClusterSummaryEntity.
+        db.execSQL(
+            "INSERT INTO cluster_summary (personId, userId, centroid, memberCount, modelVersion, updatedAt) " +
+                "VALUES (1, 'u1', X'01020304', 12, 4, 100)"
+        )
+        db.query(
+            "SELECT personId, userId, memberCount, modelVersion, updatedAt FROM cluster_summary WHERE personId = 1"
+        ).use { cur ->
+            assertTrue("expected the inserted centroid row to be readable", cur.moveToFirst())
+            assertEquals(1L, cur.getLong(0))
+            assertEquals("u1", cur.getString(1))
+            assertEquals(12, cur.getInt(2))
+            assertEquals(4, cur.getInt(3))
+            assertEquals(100L, cur.getLong(4))
+        }
+
+        // updatedAt carries a DEFAULT 0, so a row inserted without it reads back as 0.
+        db.execSQL(
+            "INSERT INTO cluster_summary (personId, userId, centroid, memberCount, modelVersion) " +
+                "VALUES (2, 'u1', X'05', 1, 4)"
+        )
+        db.query("SELECT updatedAt FROM cluster_summary WHERE personId = 2").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals("updatedAt defaults to 0 when omitted", 0L, cur.getLong(0))
+        }
+
+        // A second write for the same person REPLACES the first (personId is the primary key), mirroring
+        // @Upsert, so a re-summarised cluster never piles up two rows.
+        db.execSQL(
+            "INSERT OR REPLACE INTO cluster_summary (personId, userId, centroid, memberCount, modelVersion, updatedAt) " +
+                "VALUES (1, 'u1', X'0607', 20, 4, 200)"
+        )
+        db.query("SELECT COUNT(*), MAX(memberCount) FROM cluster_summary WHERE personId = 1").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals("the personId is a primary key, so only one summary survives", 1, cur.getInt(0))
+            assertEquals("the replacement member count won", 20, cur.getInt(1))
+        }
+
+        // The clear-for-user delete is scoped to one account, leaving another's summaries alone.
+        db.execSQL(
+            "INSERT INTO cluster_summary (personId, userId, centroid, memberCount, modelVersion, updatedAt) " +
+                "VALUES (5, 'u2', X'08', 3, 4, 300)"
+        )
+        db.execSQL("DELETE FROM cluster_summary WHERE userId = 'u1'")
+        db.query("SELECT COUNT(*) FROM cluster_summary WHERE userId = 'u1'").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals("one account's summaries cleared", 0, cur.getInt(0))
+        }
+        db.query("SELECT personId FROM cluster_summary WHERE userId = 'u2'").use { cur ->
+            assertTrue("the other account's summary remains", cur.moveToFirst())
+            assertEquals(5L, cur.getLong(0))
+        }
+    }
+
+    @Test
+    fun migrate_v34_to_v35_createsPendingImportTable_compositeKeyReplacesPerEntry_scopesByZip() {
+        Migrations.MIGRATION_34_35.migrate(db)
+
+        // The table exists and accepts a row shaped exactly like PendingImportEntity.
+        db.execSQL(
+            "INSERT INTO pending_import (zipId, entryName, linkId, importedAt) " +
+                "VALUES ('zip-a', 'Takeout/Photos/a.jpg', 'link-1', 100)"
+        )
+        db.query(
+            "SELECT zipId, entryName, linkId, importedAt FROM pending_import WHERE zipId = 'zip-a'"
+        ).use { cur ->
+            assertTrue("expected the inserted import marker to be readable", cur.moveToFirst())
+            assertEquals("zip-a", cur.getString(0))
+            assertEquals("Takeout/Photos/a.jpg", cur.getString(1))
+            assertEquals("link-1", cur.getString(2))
+            assertEquals(100L, cur.getLong(3))
+        }
+
+        // A second write for the same (zipId, entryName) REPLACES the first (the composite primary key),
+        // mirroring @Insert(REPLACE), so a resume that re-marks an entry never piles up two rows.
+        db.execSQL(
+            "INSERT OR REPLACE INTO pending_import (zipId, entryName, linkId, importedAt) " +
+                "VALUES ('zip-a', 'Takeout/Photos/a.jpg', 'link-2', 200)"
+        )
+        db.query(
+            "SELECT COUNT(*), MAX(linkId), MAX(importedAt) FROM pending_import " +
+                "WHERE zipId = 'zip-a' AND entryName = 'Takeout/Photos/a.jpg'"
+        ).use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals("the (zipId, entryName) pair is the primary key, so only one marker survives", 1, cur.getInt(0))
+            assertEquals("the replacement link won", "link-2", cur.getString(1))
+            assertEquals(200L, cur.getLong(2))
+        }
+
+        // A different entry of the same zip, and the same entry name under a different zip, are each their
+        // own marker, so the per-zip dedupe never bleeds across zips.
+        db.execSQL(
+            "INSERT INTO pending_import (zipId, entryName, linkId, importedAt) " +
+                "VALUES ('zip-a', 'Takeout/Photos/b.jpg', 'link-3', 300)"
+        )
+        db.execSQL(
+            "INSERT INTO pending_import (zipId, entryName, linkId, importedAt) " +
+                "VALUES ('zip-b', 'Takeout/Photos/a.jpg', 'link-4', 400)"
+        )
+
+        // The EXISTS-style resume probe the DAO runs: a sent entry is seen, an unsent one is not.
+        db.query(
+            "SELECT EXISTS(SELECT 1 FROM pending_import WHERE zipId = 'zip-a' AND entryName = 'Takeout/Photos/b.jpg')"
+        ).use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals("an already-imported entry is reported present", 1, cur.getInt(0))
+        }
+        db.query(
+            "SELECT EXISTS(SELECT 1 FROM pending_import WHERE zipId = 'zip-a' AND entryName = 'Takeout/Photos/z.jpg')"
+        ).use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals("an entry not yet imported is reported absent", 0, cur.getInt(0))
+        }
+
+        // The per-zip count is scoped, so a resumed run's starting progress reflects only its own zip.
+        db.query("SELECT COUNT(*) FROM pending_import WHERE zipId = 'zip-a'").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals("two distinct entries of zip-a", 2, cur.getInt(0))
+        }
+
+        // clearForZip deletes one zip's markers and leaves another zip's alone.
+        db.execSQL("DELETE FROM pending_import WHERE zipId = 'zip-a'")
+        db.query("SELECT COUNT(*) FROM pending_import WHERE zipId = 'zip-a'").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals("zip-a markers cleared", 0, cur.getInt(0))
+        }
+        db.query("SELECT entryName FROM pending_import WHERE zipId = 'zip-b'").use { cur ->
+            assertTrue("the other zip's markers remain", cur.moveToFirst())
+            assertEquals("Takeout/Photos/a.jpg", cur.getString(0))
+        }
+    }
+
+    @Test
+    fun migrate_v35_to_v36_createsImportStagedTable_compositeKeyReplacesPerEntry_filtersReviewChoices() {
+        Migrations.MIGRATION_35_36.migrate(db)
+
+        // The table exists and accepts a row shaped exactly like ImportStagedEntity, nullable
+        // metadata columns left NULL where the archive resolved nothing.
+        db.execSQL(
+            "INSERT INTO import_staged " +
+                "(zipId, entryName, title, dateMs, lat, lng, description, sizeBytes, thumbPath, excluded, uploaded, stagedAt) " +
+                "VALUES ('zip-a', 'Takeout/Photos/a.jpg', 'a.jpg', 1000, 47.5, 19.05, NULL, 2048, '/cache/a.jpg', 0, 0, 10)"
+        )
+        db.query(
+            "SELECT zipId, entryName, title, dateMs, lat, lng, description, sizeBytes, thumbPath, excluded, uploaded, stagedAt " +
+                "FROM import_staged WHERE zipId = 'zip-a' AND entryName = 'Takeout/Photos/a.jpg'"
+        ).use { cur ->
+            assertTrue("expected the inserted staged row to be readable", cur.moveToFirst())
+            assertEquals("zip-a", cur.getString(0))
+            assertEquals("Takeout/Photos/a.jpg", cur.getString(1))
+            assertEquals("a.jpg", cur.getString(2))
+            assertEquals(1000L, cur.getLong(3))
+            assertEquals(47.5, cur.getDouble(4), 0.0)
+            assertEquals(19.05, cur.getDouble(5), 0.0)
+            assertTrue("description left NULL where none resolved", cur.isNull(6))
+            assertEquals(2048L, cur.getLong(7))
+            assertEquals("/cache/a.jpg", cur.getString(8))
+            assertEquals(0, cur.getInt(9))
+            assertEquals(0, cur.getInt(10))
+            assertEquals(10L, cur.getLong(11))
+        }
+
+        // A second write for the same (zipId, entryName) REPLACES the first (the composite primary key),
+        // mirroring @Insert(REPLACE), so re-staging an entry never piles up two rows.
+        db.execSQL(
+            "INSERT OR REPLACE INTO import_staged " +
+                "(zipId, entryName, title, dateMs, lat, lng, description, sizeBytes, thumbPath, excluded, uploaded, stagedAt) " +
+                "VALUES ('zip-a', 'Takeout/Photos/a.jpg', 'renamed.jpg', 2000, NULL, NULL, 'desc', 4096, '/cache/a2.jpg', 0, 0, 20)"
+        )
+        db.query(
+            "SELECT COUNT(*), MAX(title), MAX(stagedAt) FROM import_staged " +
+                "WHERE zipId = 'zip-a' AND entryName = 'Takeout/Photos/a.jpg'"
+        ).use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals("the (zipId, entryName) pair is the primary key, so only one staged row survives", 1, cur.getInt(0))
+            assertEquals("the replacement metadata won", "renamed.jpg", cur.getString(1))
+            assertEquals(20L, cur.getLong(2))
+        }
+
+        // Three entries covering the upload filter: one clean, one the user excluded, one already sent.
+        db.execSQL(
+            "INSERT INTO import_staged " +
+                "(zipId, entryName, sizeBytes, excluded, uploaded, stagedAt) " +
+                "VALUES ('zip-a', 'Takeout/Photos/b.jpg', 100, 1, 0, 30)"
+        )
+        db.execSQL(
+            "INSERT INTO import_staged " +
+                "(zipId, entryName, sizeBytes, excluded, uploaded, stagedAt) " +
+                "VALUES ('zip-a', 'Takeout/Photos/c.jpg', 100, 0, 1, 40)"
+        )
+
+        // The pendingUpload / observeIncludedCount filter: only the neither-excluded-nor-uploaded row.
+        db.query(
+            "SELECT COUNT(*) FROM import_staged WHERE zipId = 'zip-a' AND excluded = 0 AND uploaded = 0"
+        ).use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals("only the clean entry is queued to upload", 1, cur.getInt(0))
+        }
+
+        // markUploaded flips one entry, and it drops out of the pending set.
+        db.execSQL(
+            "UPDATE import_staged SET uploaded = 1 WHERE zipId = 'zip-a' AND entryName = 'Takeout/Photos/a.jpg'"
+        )
+        db.query(
+            "SELECT COUNT(*) FROM import_staged WHERE zipId = 'zip-a' AND excluded = 0 AND uploaded = 0"
+        ).use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals("the marked entry left the pending set", 0, cur.getInt(0))
+        }
+
+        // setExcluded over a selection toggles the flag back, bringing an entry into the pending set.
+        db.execSQL(
+            "UPDATE import_staged SET excluded = 0 WHERE zipId = 'zip-a' AND entryName IN ('Takeout/Photos/b.jpg')"
+        )
+        db.query(
+            "SELECT COUNT(*) FROM import_staged WHERE zipId = 'zip-a' AND excluded = 0 AND uploaded = 0"
+        ).use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals("the un-excluded entry is queued again", 1, cur.getInt(0))
+        }
+
+        // A different archive keeps its own staged set, so per-zip scoping never bleeds across archives.
+        db.execSQL(
+            "INSERT INTO import_staged (zipId, entryName, sizeBytes, excluded, uploaded, stagedAt) " +
+                "VALUES ('zip-b', 'Takeout/Photos/a.jpg', 100, 0, 0, 50)"
+        )
+        db.query("SELECT COUNT(*) FROM import_staged WHERE zipId = 'zip-a'").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals("three distinct entries of zip-a", 3, cur.getInt(0))
+        }
+
+        // clearForZip drops one archive's staged rows and leaves another's alone.
+        db.execSQL("DELETE FROM import_staged WHERE zipId = 'zip-a'")
+        db.query("SELECT COUNT(*) FROM import_staged WHERE zipId = 'zip-a'").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals("zip-a staged rows cleared", 0, cur.getInt(0))
+        }
+        db.query("SELECT entryName FROM import_staged WHERE zipId = 'zip-b'").use { cur ->
+            assertTrue("the other archive's staged rows remain", cur.moveToFirst())
+            assertEquals("Takeout/Photos/a.jpg", cur.getString(0))
+        }
+    }
+
+    @Test
+    fun migrate_v35_to_v36_createsImportHistoryTable_autoIdAssigned_ordersNewestFirst() {
+        Migrations.MIGRATION_35_36.migrate(db)
+
+        // The table exists and accepts a row shaped exactly like ImportHistoryEntity, id omitted so the
+        // autoincrement key assigns one.
+        db.execSQL(
+            "INSERT INTO import_history (zipId, fileName, importedAt, total, uploaded, skipped, failed) " +
+                "VALUES ('zip-a', 'takeout-1.zip', 100, 10, 8, 1, 1)"
+        )
+        db.execSQL(
+            "INSERT INTO import_history (zipId, fileName, importedAt, total, uploaded, skipped, failed) " +
+                "VALUES ('zip-b', 'takeout-2.zip', 200, 5, 5, 0, 0)"
+        )
+
+        // Two runs get two distinct auto-generated ids.
+        db.query("SELECT COUNT(*), COUNT(DISTINCT id) FROM import_history").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals(2, cur.getInt(0))
+            assertEquals("each run got its own auto-generated id", 2, cur.getInt(1))
+        }
+
+        // observeAll / recent order newest first by importedAt.
+        db.query("SELECT fileName, total, uploaded, skipped, failed FROM import_history ORDER BY importedAt DESC")
+            .use { cur ->
+                assertTrue(cur.moveToFirst())
+                assertEquals("the newer run sorts first", "takeout-2.zip", cur.getString(0))
+                assertEquals(5, cur.getInt(1))
+                assertEquals(5, cur.getInt(2))
+                assertEquals(0, cur.getInt(3))
+                assertEquals(0, cur.getInt(4))
+
+                assertTrue(cur.moveToNext())
+                assertEquals("takeout-1.zip", cur.getString(0))
+                assertEquals("its skipped and failed counts are preserved", 1, cur.getInt(3))
+                assertEquals(1, cur.getInt(4))
+            }
+    }
+
+    @Test
+    fun migrate_v36_to_v37_addsRunIdToHistory_andCreatesImportUploadedLedger() {
+        // Build the v36 import tables from the real prior migration so the fixture cannot drift from the
+        // schema MIGRATION_36_37 has to alter.
+        Migrations.MIGRATION_35_36.migrate(db)
+        db.execSQL(
+            "INSERT INTO import_history (zipId, fileName, importedAt, total, uploaded, skipped, failed) " +
+                "VALUES ('zip-a', 'takeout-1.zip', 100, 10, 8, 1, 1)"
+        )
+
+        Migrations.MIGRATION_36_37.migrate(db)
+
+        // The existing summary survives and defaults to a null runId, so a run recorded without a ledger
+        // is simply not undoable rather than lost.
+        db.query("SELECT fileName, uploaded, runId FROM import_history WHERE zipId = 'zip-a'").use { cur ->
+            assertTrue("expected the seeded run to survive the migration", cur.moveToFirst())
+            assertEquals("takeout-1.zip", cur.getString(0))
+            assertEquals(8, cur.getInt(1))
+            assertTrue("runId defaults to NULL on existing runs", cur.isNull(2))
+        }
+        // The new column is writable: a run stamps its id so its ledger can be found again.
+        db.execSQL("UPDATE import_history SET runId = 'run-1' WHERE zipId = 'zip-a'")
+        db.query("SELECT runId FROM import_history WHERE zipId = 'zip-a'").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals("run-1", cur.getString(0))
+        }
+
+        // The ledger table exists and accepts a row shaped exactly like ImportUploadedEntity, id omitted
+        // so the autoincrement key assigns one and the nullable name/date left NULL.
+        db.execSQL(
+            "INSERT INTO import_uploaded (runId, linkId, sha1, name, dateMs, undone) " +
+                "VALUES ('run-1', 'link-1', 'sha-1', 'a.jpg', 1000, 0)"
+        )
+        db.execSQL(
+            "INSERT INTO import_uploaded (runId, linkId, sha1, undone) " +
+                "VALUES ('run-1', 'link-2', 'sha-2', 0)"
+        )
+        db.query(
+            "SELECT id, runId, linkId, sha1, name, dateMs, undone FROM import_uploaded WHERE linkId = 'link-1'"
+        ).use { cur ->
+            assertTrue("expected the inserted ledger row to be readable", cur.moveToFirst())
+            assertTrue("the autoincrement key assigned an id", cur.getLong(0) > 0)
+            assertEquals("run-1", cur.getString(1))
+            assertEquals("link-1", cur.getString(2))
+            assertEquals("sha-1", cur.getString(3))
+            assertEquals("a.jpg", cur.getString(4))
+            assertEquals(1000L, cur.getLong(5))
+            assertEquals("a fresh upload is not undone", 0, cur.getInt(6))
+        }
+        // The second row left its nullable name/date NULL, distinct from an empty string.
+        db.query("SELECT name, dateMs FROM import_uploaded WHERE linkId = 'link-2'").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertTrue("name left NULL where none was carried", cur.isNull(0))
+            assertTrue("dateMs left NULL where none was carried", cur.isNull(1))
+        }
+
+        // pendingByRun / pendingCount read the rows not yet undone; markUndone flips a selection by linkId.
+        db.query("SELECT COUNT(*) FROM import_uploaded WHERE runId = 'run-1' AND undone = 0").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals("both fresh uploads are pending", 2, cur.getInt(0))
+        }
+        db.execSQL("UPDATE import_uploaded SET undone = 1 WHERE runId = 'run-1' AND linkId IN ('link-1')")
+        db.query("SELECT COUNT(*) FROM import_uploaded WHERE runId = 'run-1' AND undone = 0").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals("the undone upload dropped out of the pending set", 1, cur.getInt(0))
+        }
+
+        // The runId index scopes the ledger: another run's rows are their own set, so an undo of one run
+        // never reaches into another.
+        db.execSQL(
+            "INSERT INTO import_uploaded (runId, linkId, sha1, undone) VALUES ('run-2', 'link-9', 'sha-9', 0)"
+        )
+        db.query("SELECT COUNT(*) FROM import_uploaded WHERE runId = 'run-1'").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals("run-1 keeps its own two rows", 2, cur.getInt(0))
+        }
+        db.query("SELECT linkId FROM import_uploaded WHERE runId = 'run-2'").use { cur ->
+            assertTrue("the other run's ledger is untouched", cur.moveToFirst())
+            assertEquals("link-9", cur.getString(0))
+        }
+    }
+
+    @Test
+    fun migrate_v37_to_v38_addsAlreadyInDriveToLedger_andDropsPendingImport() {
+        // Build the full v37 import state from the real prior migrations so the fixture cannot drift:
+        // MIGRATION_34_35 creates pending_import, MIGRATION_35_36 the staged/history tables, and
+        // MIGRATION_36_37 the import_uploaded ledger MIGRATION_37_38 has to alter.
+        Migrations.MIGRATION_34_35.migrate(db)
+        Migrations.MIGRATION_35_36.migrate(db)
+        Migrations.MIGRATION_36_37.migrate(db)
+        // A v37 ledger row, written before the new column exists, to check its default after the ALTER.
+        db.execSQL(
+            "INSERT INTO import_uploaded (runId, linkId, sha1, name, dateMs, undone) " +
+                "VALUES ('run-1', 'link-1', 'sha-1', 'a.jpg', 1000, 0)"
+        )
+        // The dead table still carries a marker, so the drop is observed to remove a real table with data.
+        db.execSQL(
+            "INSERT INTO pending_import (zipId, entryName, linkId, importedAt) " +
+                "VALUES ('zip-a', 'Takeout/Photos/a.jpg', 'link-1', 100)"
+        )
+
+        Migrations.MIGRATION_37_38.migrate(db)
+
+        // The existing ledger row survives and its new alreadyInDrive flag defaults to 0, so an upload
+        // recorded before the column existed stays a real upload an undo will trash.
+        db.query(
+            "SELECT linkId, undone, alreadyInDrive FROM import_uploaded WHERE linkId = 'link-1'"
+        ).use { cur ->
+            assertTrue("expected the seeded ledger row to survive the migration", cur.moveToFirst())
+            assertEquals("link-1", cur.getString(0))
+            assertEquals("a fresh upload is not undone", 0, cur.getInt(1))
+            assertEquals("alreadyInDrive defaults to 0 on existing rows", 0, cur.getInt(2))
+        }
+        // The new column is writable: a deduped photo records the pre-existing link with the flag set, the
+        // signal that lets an undo skip it.
+        db.execSQL(
+            "INSERT INTO import_uploaded (runId, linkId, sha1, undone, alreadyInDrive) " +
+                "VALUES ('run-1', 'link-2', 'sha-2', 0, 1)"
+        )
+        db.query(
+            "SELECT alreadyInDrive FROM import_uploaded WHERE runId = 'run-1' AND alreadyInDrive = 1"
+        ).use { cur ->
+            assertTrue("the deduped row is readable by its flag", cur.moveToFirst())
+            assertEquals("a deduped row carries alreadyInDrive = 1", 1, cur.getInt(0))
+        }
+
+        // The dead pending_import table is gone, superseded by import_staged / import_uploaded, so a
+        // lookup in sqlite_master finds no table of that name.
+        db.query(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'pending_import'"
+        ).use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals("pending_import no longer exists after the migration", 0, cur.getInt(0))
+        }
+    }
+
+    @Test
+    fun migrate_v38_to_v39_addsAlbumColumnsToStaged_andCreatesAlbumMemberTable() {
+        // Build the v38 import_staged shape from the real prior migration so the fixture cannot drift from
+        // the schema MIGRATION_38_39 has to alter. MIGRATION_35_36 creates import_staged in the shape v38
+        // still carries, since 36 through 38 never touch that table.
+        Migrations.MIGRATION_35_36.migrate(db)
+        // A v38 staged row, written before the new columns exist, to check their defaults after the ALTERs.
+        db.execSQL(
+            "INSERT INTO import_staged " +
+                "(zipId, entryName, title, dateMs, lat, lng, description, sizeBytes, thumbPath, excluded, uploaded, stagedAt) " +
+                "VALUES ('zip-a', 'Takeout/Photos/a.jpg', 'a.jpg', 1000, NULL, NULL, NULL, 2048, '/cache/a.jpg', 0, 0, 10)"
+        )
+
+        Migrations.MIGRATION_38_39.migrate(db)
+
+        // The existing staged row survives; albumName defaults NULL (a timeline entry no album claims) and
+        // alreadyInDrive defaults 0, so a row staged before the columns existed reads back as not yet badged.
+        db.query(
+            "SELECT entryName, albumName, alreadyInDrive FROM import_staged WHERE zipId = 'zip-a'"
+        ).use { cur ->
+            assertTrue("expected the seeded staged row to survive the migration", cur.moveToFirst())
+            assertEquals("Takeout/Photos/a.jpg", cur.getString(0))
+            assertTrue("albumName defaults to NULL on existing rows", cur.isNull(1))
+            assertEquals("alreadyInDrive defaults to 0 on existing rows", 0, cur.getInt(2))
+        }
+        // Both new columns are writable: the stage pass records the source album and the already-in-Drive badge.
+        db.execSQL(
+            "UPDATE import_staged SET albumName = 'Wedding', alreadyInDrive = 1 " +
+                "WHERE zipId = 'zip-a' AND entryName = 'Takeout/Photos/a.jpg'"
+        )
+        db.query("SELECT albumName, alreadyInDrive FROM import_staged WHERE zipId = 'zip-a'").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals("Wedding", cur.getString(0))
+            assertEquals(1, cur.getInt(1))
+        }
+
+        // The membership table exists and accepts a row shaped exactly like ImportAlbumMemberEntity, id
+        // omitted so the autoincrement key assigns one. A photo in two albums is one edge per album.
+        db.execSQL("INSERT INTO import_album_member (runId, albumName, linkId) VALUES ('run-1', 'Wedding', 'link-1')")
+        db.execSQL("INSERT INTO import_album_member (runId, albumName, linkId) VALUES ('run-1', 'Holiday', 'link-1')")
+        db.execSQL("INSERT INTO import_album_member (runId, albumName, linkId) VALUES ('run-1', 'Wedding', 'link-2')")
+        db.query("SELECT COUNT(*), COUNT(DISTINCT id) FROM import_album_member WHERE runId = 'run-1'").use { cur ->
+            assertTrue("expected the inserted membership edges to be readable", cur.moveToFirst())
+            assertEquals(3, cur.getInt(0))
+            assertEquals("each edge got its own auto-generated id", 3, cur.getInt(1))
+        }
+
+        // albumsForRun reads the run's distinct albums; linkIdsForAlbum reads one album's member links.
+        db.query("SELECT COUNT(DISTINCT albumName) FROM import_album_member WHERE runId = 'run-1'").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals("the run carried two distinct albums", 2, cur.getInt(0))
+        }
+        db.query(
+            "SELECT DISTINCT linkId FROM import_album_member WHERE runId = 'run-1' AND albumName = 'Wedding' ORDER BY linkId"
+        ).use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals("link-1", cur.getString(0))
+            assertTrue(cur.moveToNext())
+            assertEquals("Wedding holds both of its member links", "link-2", cur.getString(0))
+        }
+
+        // The runId index exists, the scope every album read filters on.
+        db.query(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'index_import_album_member_runId'"
+        ).use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals("the runId index was created", 1, cur.getInt(0))
+        }
+
+        // clearForRun drops one run's edges and leaves another run's alone.
+        db.execSQL("INSERT INTO import_album_member (runId, albumName, linkId) VALUES ('run-2', 'Trip', 'link-9')")
+        db.execSQL("DELETE FROM import_album_member WHERE runId = 'run-1'")
+        db.query("SELECT COUNT(*) FROM import_album_member WHERE runId = 'run-1'").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals("run-1 edges cleared", 0, cur.getInt(0))
+        }
+        db.query("SELECT albumName FROM import_album_member WHERE runId = 'run-2'").use { cur ->
+            assertTrue("the other run's edges remain", cur.moveToFirst())
+            assertEquals("Trip", cur.getString(0))
+        }
+    }
+
+    @Test
     fun migrate_v2_through_v4_chain_appliesBothMigrations() {
         // Seed a pure v2 row.
         db.execSQL(

@@ -31,7 +31,6 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
@@ -77,6 +76,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.PointerEventPass
@@ -110,7 +110,6 @@ import eu.akoos.photos.presentation.theme.Bg2
 import eu.akoos.photos.presentation.theme.SheetBg
 import eu.akoos.photos.presentation.theme.FgDim
 import eu.akoos.photos.presentation.theme.Line2
-import eu.akoos.photos.presentation.theme.PillBorder
 import kotlinx.coroutines.launch
 
 /**
@@ -390,9 +389,11 @@ private fun SelectionDrawerBody(
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            // A shadow lifts the sheet off the grid instead of a hairline border, matching the borderless
+            // elevated sheets the rest of the app uses (the modal bottom sheets and the import bars).
+            .shadow(6.dp, shape)
             .clip(shape)
             .background(SheetBg)
-            .border(0.5.dp, PillBorder, shape)
             .navigationBarsPadding()
             .then(detentDrag),
     ) {

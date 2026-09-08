@@ -93,6 +93,7 @@ import eu.akoos.photos.presentation.folders.DeviceFolderDetailScreen
 import eu.akoos.photos.presentation.folders.DeviceFolderOpenAction
 import eu.akoos.photos.presentation.gallery.GalleryScreen
 import eu.akoos.photos.presentation.hidden.HiddenAlbumScreen
+import eu.akoos.photos.presentation.importer.ImportScreen
 import eu.akoos.photos.presentation.offline.OfflinePhotosScreen
 import eu.akoos.photos.presentation.people.PeopleScreen
 import eu.akoos.photos.presentation.people.ReviewSuggestionsScreen
@@ -171,6 +172,7 @@ sealed class Screen(val route: String) {
     data object DeviceFolderDetail : Screen("device_folder_detail")
     data object ExcludedFolders : Screen("excluded_folders")
     data object Trash : Screen("trash")
+    data object Import : Screen("import")
     data object DuplicateFinder : Screen("duplicate_finder")
     data object HiddenAlbum : Screen("hidden_album")
     data object Offline : Screen("offline_photos")
@@ -874,6 +876,7 @@ fun NavGraph(
                 onAddPhotos = { navController.navigate(Screen.PersonPhotoPicker.create(personId)) },
                 onRemovePhotos = { keys -> personVm.removePhotos(personId, keys) },
                 onMoveSelectionToPerson = { keys, name -> personVm.moveSelectedToPerson(personId, keys, name) },
+                onMarkSelectionNotPerson = { keys -> personVm.markSelectedNotPerson(personId, keys) },
                 onSetCover = { key -> personVm.setCover(personId, key) },
                 mergeSuggestion = mergeSuggestion,
                 onAcceptSuggestion = { candidateId -> personVm.acceptMergeSuggestion(personId, candidateId) },
@@ -1287,6 +1290,7 @@ fun NavGraph(
                 onNotificationsClick      = { navController.navigate(Screen.NotificationSettings.route) },
                 onRecentlyDeletedClick    = { navController.navigate(Screen.Trash.route) },
                 onFindDuplicatesClick     = { navController.navigate(Screen.DuplicateFinder.route) },
+                onImportClick             = { navController.navigate(Screen.Import.route) },
                 onAppearanceClick         = { navController.navigate(Screen.AppearanceSettings.route) },
                 onLanguageClick           = { navController.navigate(Screen.LanguageSettings.route) },
                 onAboutClick              = { navController.navigate(Screen.About.route) },
@@ -1593,6 +1597,10 @@ fun NavGraph(
             )
         }
 
+        composable(Screen.Import.route) {
+            ImportScreen(onBack = { navController.popBackStack() })
+        }
+
         composable(
             Screen.Search.route,
             // Container-transform feel on open: the search page grows up from the top bar (where the
@@ -1705,6 +1713,12 @@ fun NavGraph(
                     selectedViewerHiddenLinkIds = emptySet()
                     viewerFromAlbum = false
                     navController.navigate(Screen.Viewer.route)
+                },
+                onEditMetadata = { selection ->
+                    // A place runs over the user's own library, never an album someone shared with
+                    // them, so the editor's own per-item rules decide what is writable.
+                    metadataEditorRequest = MetadataEditorRequest(selection, isReadOnlyAlbum = false)
+                    navController.navigate(Screen.MetadataEditor.route)
                 },
             )
         }

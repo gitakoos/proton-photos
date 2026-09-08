@@ -492,5 +492,135 @@ object Migrations {
         }
     }
 
-    val ALL: Array<Migration> = arrayOf(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22, MIGRATION_22_23, MIGRATION_23_24, MIGRATION_24_25, MIGRATION_25_26, MIGRATION_26_27, MIGRATION_27_28, MIGRATION_28_29, MIGRATION_29_30, MIGRATION_30_31, MIGRATION_31_32, MIGRATION_32_33)
+    /** v33 to v34: new `cluster_summary` table, one cached per-person centroid so an incremental
+     *  clustering pass can place a newly indexed face against the people already grouped without
+     *  re-reading every stored embedding. Additive and rebuildable: the cache derives entirely from the
+     *  `face` and `person` tables, so the empty table is the correct state to arrive at and a full
+     *  recluster refills it. Existing tables are untouched. */
+    val MIGRATION_33_34 = object : Migration(33, 34) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `cluster_summary` (`personId` INTEGER NOT NULL, " +
+                    "`userId` TEXT NOT NULL, `centroid` BLOB NOT NULL, `memberCount` INTEGER NOT NULL, " +
+                    "`modelVersion` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL DEFAULT 0, " +
+                    "PRIMARY KEY(`personId`))"
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_cluster_summary_userId` " +
+                    "ON `cluster_summary` (`userId`)"
+            )
+        }
+    }
+
+    /** v34 to v35: new `pending_import` table, one row per Google Takeout media entry successfully
+     *  uploaded to Drive, so the resumable import worker survives a process kill and skips the entries
+     *  it already sent. Additive, and the empty table is the correct state to arrive at: a marker exists
+     *  only once an import uploads an entry, and nothing this migration can see stands in for an import a
+     *  person has not yet started. Existing tables are untouched. */
+    val MIGRATION_34_35 = object : Migration(34, 35) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `pending_import` (" +
+                    "`zipId` TEXT NOT NULL, `entryName` TEXT NOT NULL, `linkId` TEXT NOT NULL, " +
+                    "`importedAt` INTEGER NOT NULL, PRIMARY KEY(`zipId`, `entryName`))"
+            )
+        }
+    }
+
+    /** v35 to v36: two new tables for the import review queue. `import_staged` holds one row per media
+     *  entry awaiting the user's review before upload, carrying its resolved metadata and a cached
+     *  thumbnail path; `import_history` records one row per completed run. Additive, and both empty
+     *  tables are the correct state to arrive at: a staged row exists only once a run is picked and
+     *  reviewed, and a history row only once a run finishes, so nothing this migration can see stands in
+     *  for either. Existing tables, `pending_import` included, are untouched. */
+    val MIGRATION_35_36 = object : Migration(35, 36) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `import_staged` (" +
+                    "`zipId` TEXT NOT NULL, `entryName` TEXT NOT NULL, `title` TEXT, " +
+                    "`dateMs` INTEGER, `lat` REAL, `lng` REAL, `description` TEXT, " +
+                    "`sizeBytes` INTEGER NOT NULL, `thumbPath` TEXT, `excluded` INTEGER NOT NULL, " +
+                    "`uploaded` INTEGER NOT NULL, `stagedAt` INTEGER NOT NULL, " +
+                    "PRIMARY KEY(`zipId`, `entryName`))"
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_import_staged_zipId` " +
+                    "ON `import_staged` (`zipId`)"
+            )
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `import_history` (" +
+                    "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `zipId` TEXT NOT NULL, " +
+                    "`fileName` TEXT NOT NULL, `importedAt` INTEGER NOT NULL, `total` INTEGER NOT NULL, " +
+                    "`uploaded` INTEGER NOT NULL, `skipped` INTEGER NOT NULL, `failed` INTEGER NOT NULL)"
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_import_history_importedAt` " +
+                    "ON `import_history` (`importedAt`)"
+            )
+        }
+    }
+
+    /** v36 to v37: the import ledger that backs undoing a run. `import_history` gains a `runId` tying
+     *  each summary to the per-photo rows, and a new `import_uploaded` table records one row per photo a
+     *  run sent to Drive, carrying its linkId and content sha1 so an undo moves exactly the photos still
+     *  matching what was uploaded. Additive: the ALTER leaves every existing history row intact with a
+     *  null runId, and the empty ledger is the correct state to arrive at, since a row exists only once a
+     *  run uploads a photo and nothing this migration can see stands in for a run a person has not yet
+     *  made. Existing tables are untouched. */
+    val MIGRATION_36_37 = object : Migration(36, 37) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE import_history ADD COLUMN runId TEXT")
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `import_uploaded` (" +
+                    "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `runId` TEXT NOT NULL, " +
+                    "`linkId` TEXT NOT NULL, `sha1` TEXT NOT NULL, `name` TEXT, `dateMs` INTEGER, " +
+                    "`undone` INTEGER NOT NULL)"
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_import_uploaded_runId` " +
+                    "ON `import_uploaded` (`runId`)"
+            )
+        }
+    }
+
+    /** v37 to v38: the import ledger gains an `alreadyInDrive` flag so a deduped photo, one the run found
+     *  already in Drive and did not upload, is recorded against the run under the pre-existing link with
+     *  the flag set; the history can then badge it and an undo skips it rather than trashing a photo the
+     *  run never created. The ADD carries a `DEFAULT 0`, required for a NOT NULL column on a populated
+     *  table, so every existing ledger row reads back as a real upload. The dead `pending_import` table
+     *  is dropped, superseded by `import_staged` and `import_uploaded`; nothing reads it, so the drop is
+     *  safe. Every other table is untouched. */
+    val MIGRATION_37_38 = object : Migration(37, 38) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE import_uploaded ADD COLUMN alreadyInDrive INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("DROP TABLE IF EXISTS pending_import")
+        }
+    }
+
+    /** v38 to v39: the import review gains album recreation and an upfront already-in-Drive badge.
+     *  `import_staged` gets a nullable `albumName` (the export album folder an entry came from, null for a
+     *  timeline entry) and an `alreadyInDrive` flag set at stage time, its ADD carrying a `DEFAULT 0`
+     *  required for a NOT NULL column on a populated table so every existing staged row reads back as not
+     *  yet in Drive. A new `import_album_member` table records one row per (uploaded photo, album) pair so
+     *  a later pass can recreate each export album from the links a run created. Additive, and the empty
+     *  membership table is the correct state to arrive at: a row exists only once a run uploads a photo that
+     *  belonged to an album, and nothing this migration can see stands in for one. Existing tables are
+     *  otherwise untouched. */
+    val MIGRATION_38_39 = object : Migration(38, 39) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE import_staged ADD COLUMN albumName TEXT")
+            db.execSQL("ALTER TABLE import_staged ADD COLUMN alreadyInDrive INTEGER NOT NULL DEFAULT 0")
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `import_album_member` (" +
+                    "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `runId` TEXT NOT NULL, " +
+                    "`albumName` TEXT NOT NULL, `linkId` TEXT NOT NULL)"
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_import_album_member_runId` " +
+                    "ON `import_album_member` (`runId`)"
+            )
+        }
+    }
+
+    val ALL: Array<Migration> = arrayOf(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22, MIGRATION_22_23, MIGRATION_23_24, MIGRATION_24_25, MIGRATION_25_26, MIGRATION_26_27, MIGRATION_27_28, MIGRATION_28_29, MIGRATION_29_30, MIGRATION_30_31, MIGRATION_31_32, MIGRATION_32_33, MIGRATION_33_34, MIGRATION_34_35, MIGRATION_35_36, MIGRATION_36_37, MIGRATION_37_38, MIGRATION_38_39)
 }

@@ -40,6 +40,7 @@ import eu.akoos.photos.data.db.dao.FaceDao
 import eu.akoos.photos.data.db.dao.PersonDao
 import eu.akoos.photos.data.db.dao.PersonManualPhotoDao
 import eu.akoos.photos.data.db.entity.FaceEntity
+import eu.akoos.photos.data.db.entity.PhotoLocationEntity
 import eu.akoos.photos.data.face.FaceIndexingScheduler
 import eu.akoos.photos.data.face.FaceSweepEvent
 import eu.akoos.photos.data.preferences.SettingsKeys
@@ -92,15 +93,12 @@ class FindMorePhotosViewModel @Inject constructor(
         if (started) return
         started = true
         sweepJob = viewModelScope.launch {
-            val userId = accountManager.getPrimaryUserId().first() ?: run {
-                _uiState.value = _uiState.value.copy(running = false)
-                return@launch
-            }
+            val userId = accountManager.getPrimaryUserId().first()
             // Faces off: nothing to sweep, so end the run without touching the index.
             val prefs = context.settingsDataStore.data.first()
             val faceOn = prefs[SettingsKeys.AI_FEATURES_ENABLED] == true && prefs[SettingsKeys.FACE_ENABLED] == true
             if (!faceOn) { _uiState.value = _uiState.value.copy(running = false); return@launch }
-            val account = userId.id
+            val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
             val name = personDao.personById(personId)?.displayName
             _uiState.value = _uiState.value.copy(personName = name)
 
@@ -111,7 +109,9 @@ class FindMorePhotosViewModel @Inject constructor(
             if (centroid == null) { _uiState.value = _uiState.value.copy(running = false); return@launch }
 
             // A snapshot of the library, to resolve a matched photo key to the item the grid draws.
-            val library = runCatching { getGalleryItems.invoke(userId).first() }.getOrDefault(emptyList())
+            val library = runCatching {
+                (if (userId == null) getGalleryItems.invokeLocalOnly() else getGalleryItems.invoke(userId)).first()
+            }.getOrDefault(emptyList())
             val byKey = library.associateBy { it.stableId }
 
             // Photos already on this person (their faces, plus any manually attached), so a photo the
@@ -151,8 +151,7 @@ class FindMorePhotosViewModel @Inject constructor(
         val picks = _uiState.value.found.filter { it.faceId in selectedFaceIds }
         if (picks.isEmpty()) return
         viewModelScope.launch(Dispatchers.IO) {
-            val userId = accountManager.getPrimaryUserId().first() ?: return@launch
-            val account = userId.id
+            val account = accountManager.getPrimaryUserId().first()?.id ?: PhotoLocationEntity.LOCAL_USER
             val name = personDao.personById(personId)?.displayName
             val rows = picks.map { p ->
                 FaceEntity(

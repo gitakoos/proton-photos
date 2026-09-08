@@ -20,6 +20,8 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
+@file:OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+
 package eu.akoos.photos.presentation.viewer
 
 import android.content.Context
@@ -41,9 +43,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -70,6 +72,7 @@ import eu.akoos.photos.domain.usecase.DeletePhotoUseCase
 import eu.akoos.photos.data.db.dao.LocalTagDao
 import eu.akoos.photos.data.db.dao.PhotoListingDao
 import eu.akoos.photos.data.db.dao.PhotoLocationDao
+import eu.akoos.photos.data.db.entity.PhotoLocationEntity
 import eu.akoos.photos.data.hidden.HiddenStorageManager
 import eu.akoos.photos.data.hidden.HiddenVaultDiagnostics
 import eu.akoos.photos.data.hidden.HiddenVaultJournal
@@ -489,26 +492,25 @@ class PhotoViewerViewModel @Inject constructor(
      *  its passed-in static `items` snapshot against this by identity so a photo finishing upload
      *  (LocalOnly → Synced) or any metadata refresh reflects in the open viewer instead of staying
      *  frozen at click time. Empty until the merge first emits. */
-    val liveItems: StateFlow<List<GalleryItem>> = flow {
-        val userId = accountManager.getPrimaryUserId().first()
-        if (userId == null) { emitAll(getGalleryItems.invokeLocalOnly()); return@flow }
-        emitAll(getGalleryItems.invoke(userId))
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val liveItems: StateFlow<List<GalleryItem>> = accountManager.getPrimaryUserId()
+        .flatMapLatest { userId ->
+            if (userId == null) getGalleryItems.invokeLocalOnly()
+            else getGalleryItems.invoke(userId)
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     /** Cloud linkId → local URI for photos also on device. Lets the screen upgrade a CloudOnly
      *  badge to "Synced" after a download, since the static `items` snapshot can't reflect it. */
-    val localUriByLinkId: StateFlow<Map<String, String>> = flow {
-        val userId = accountManager.getPrimaryUserId().first()
-        if (userId == null) { emit(emptyMap()); return@flow }
-        emitAll(
-            syncStateRepo.observeAll(userId).map { states ->
+    val localUriByLinkId: StateFlow<Map<String, String>> = accountManager.getPrimaryUserId()
+        .flatMapLatest { userId ->
+            if (userId == null) flowOf(emptyMap())
+            else syncStateRepo.observeAll(userId).map { states ->
                 states.asSequence()
                     .filter { it.status == eu.akoos.photos.domain.entity.SyncStatus.SYNCED }
                     .filter { it.cloudFileId != null && it.localUri.isNotBlank() }
                     .associate { it.cloudFileId!! to it.localUri }
             }
-        )
-    }
+        }
         .retryOnDbTear("ViewerLocalUris")
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
 
@@ -519,11 +521,10 @@ class PhotoViewerViewModel @Inject constructor(
     fun deleteItem(item: GalleryItem, freeUpSpace: Boolean, deleteFromCloud: Boolean) {
         viewModelScope.launch {
             _deleteState.value = DeleteState.Working
+            // A local (device) delete needs no account; the use case only requires a signed-in user
+            // for a cloud trash, which local-only mode never produces. Pass the nullable userId
+            // through instead of blocking a guest delete here.
             val userId = accountManager.getPrimaryUserId().first()
-            if (userId == null) {
-                _deleteState.value = DeleteState.Failed(context.getString(R.string.viewer_not_signed_in))
-                return@launch
-            }
             val result = deletePhotoUseCase(
                 userId          = userId,
                 items           = listOf(item),
@@ -612,6 +613,11 @@ class PhotoViewerViewModel @Inject constructor(
         val personId: Long,
         val name: String?,
         val faceBox: eu.akoos.photos.presentation.gallery.FaceBox,
+        /** The specific face this chip stands for, so a single leftover face can be named on its own. */
+        val faceId: String,
+        /** True when the face sits in the Unsorted leftover bucket, which cannot be named as a whole; the
+         *  viewer names this one face into a new or existing person instead of opening the bucket. */
+        val isOther: Boolean,
     )
 
     private val _peopleInPhoto = MutableStateFlow<List<ViewerPerson>>(emptyList())
@@ -629,7 +635,7 @@ class PhotoViewerViewModel @Inject constructor(
             val prefs = context.settingsDataStore.data.first()
             val aiOn = prefs[SettingsKeys.AI_FEATURES_ENABLED] == true && prefs[SettingsKeys.FACE_ENABLED] == true
             _peopleInPhoto.value =
-                if (!aiOn || userId == null) emptyList() else resolvePeople(item, userId, detectIfEmpty = false)
+                if (!aiOn) emptyList() else resolvePeople(item, userId, detectIfEmpty = false)
         }
     }
 
@@ -640,7 +646,7 @@ class PhotoViewerViewModel @Inject constructor(
      * off. The detection itself runs off the main thread.
      */
     suspend fun detectFacesNow(item: GalleryItem): List<ViewerPerson> {
-        val userId = accountManager.getPrimaryUserId().first() ?: return emptyList()
+        val userId = accountManager.getPrimaryUserId().first()
         val prefs = context.settingsDataStore.data.first()
         val aiOn = prefs[SettingsKeys.AI_FEATURES_ENABLED] == true && prefs[SettingsKeys.FACE_ENABLED] == true
         if (!aiOn) return emptyList()
@@ -653,10 +659,10 @@ class PhotoViewerViewModel @Inject constructor(
      *  photo on demand first (a no-op on one already scanned) so a face can still be found. */
     private suspend fun resolvePeople(
         item: GalleryItem,
-        userId: me.proton.core.domain.entity.UserId,
+        userId: me.proton.core.domain.entity.UserId?,
         detectIfEmpty: Boolean,
     ): List<ViewerPerson> {
-        val account = userId.id
+        val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
         val photoKey = item.stableId
         var faces = runCatching { faceDao.groupedFacesForPhoto(account, photoKey) }.getOrDefault(emptyList())
         if (faces.isEmpty() && detectIfEmpty) {
@@ -665,17 +671,49 @@ class PhotoViewerViewModel @Inject constructor(
             }.getOrDefault(false)
             if (scanned) faces = runCatching { faceDao.groupedFacesForPhoto(account, photoKey) }.getOrDefault(emptyList())
         }
-        val byPerson = LinkedHashMap<Long, ViewerPerson>()
+        val otherId = personDao.otherPersonId(account)
+        val result = ArrayList<ViewerPerson>()
+        val seenPerson = HashSet<Long>()
         for (f in faces) {
             val pid = f.personId ?: continue
-            if (byPerson.containsKey(pid)) continue
-            val name = personDao.personById(pid)?.displayName?.takeIf { it.isNotBlank() }
-            byPerson[pid] = ViewerPerson(
-                pid, name,
-                eu.akoos.photos.presentation.gallery.FaceBox(f.left, f.top, f.right, f.bottom),
+            val isOther = pid == otherId
+            // One chip per named or unnamed-cluster person, but one chip PER FACE for the Unsorted bucket,
+            // so every leftover face on the photo can be named on its own instead of all collapsing into the
+            // single grab-bag bucket (which is what left them unnameable from here).
+            if (!isOther && !seenPerson.add(pid)) continue
+            val name = if (isOther) null else personDao.personById(pid)?.displayName?.takeIf { it.isNotBlank() }
+            result.add(
+                ViewerPerson(
+                    pid, name,
+                    eu.akoos.photos.presentation.gallery.FaceBox(f.left, f.top, f.right, f.bottom),
+                    f.id, isOther,
+                ),
             )
         }
-        return byPerson.values.sortedByDescending { it.name != null }
+        return result.sortedByDescending { it.name != null }
+    }
+
+    /**
+     * Name one face on the photo now on screen: assign it to an existing person called [rawName], or a
+     * fresh one, and label it so the name survives a rebuild. For a face stuck in the Unsorted leftover
+     * bucket (which cannot be named as a whole), this is how a single face is lifted out into a real
+     * person. A recluster is requested so the new name pulls in that person's other faces. Guest-safe via
+     * the local sentinel; the chips on this photo are refreshed so the named face shows its name at once.
+     */
+    fun nameFace(item: GalleryItem, faceId: String, rawName: String) {
+        val name = rawName.trim()
+        if (faceId.isEmpty() || name.isEmpty()) return
+        viewModelScope.launch(Dispatchers.IO) {
+            val userId = accountManager.getPrimaryUserId().first()
+            val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
+            val target = personDao.namedPeopleForUser(account)
+                .firstOrNull { it.displayName == name }?.id
+                ?: personDao.insert(eu.akoos.photos.data.db.entity.PersonEntity(userId = account, displayName = name))
+            faceDao.reassignFacesToPerson(listOf(faceId), target)
+            faceDao.labelFacesByIds(listOf(faceId), name)
+            faceIndexingScheduler.requestRecluster(userId)
+            loadPeopleInPhoto(item)
+        }
     }
 
     /**
@@ -723,18 +761,16 @@ class PhotoViewerViewModel @Inject constructor(
             // First commit the deferred cloud delete, if any. Doing this in a coroutine so a
             // network hiccup surfaces as Failed rather than crashing the UI.
             val cloudResult = if (pending != null) {
+                // No account is needed to finish a local delete; the use case guards its own cloud
+                // branch, returning CloudDeleteFailed only when there are cloud links and no session.
                 val userId = accountManager.getPrimaryUserId().first()
-                if (userId == null) {
-                    DeletePhotoUseCase.Result.CloudDeleteFailed
-                } else {
-                    deletePhotoUseCase.completeAfterPermissionGranted(
-                        userId          = userId,
-                        cloudLinkIds    = pending.cloudLinkIds,
-                        items           = pending.itemsBeingDeleted,
-                        freeUpSpace     = pending.freeUpSpace,
-                        hide            = pending.hide,
-                    )
-                }
+                deletePhotoUseCase.completeAfterPermissionGranted(
+                    userId          = userId,
+                    cloudLinkIds    = pending.cloudLinkIds,
+                    items           = pending.itemsBeingDeleted,
+                    freeUpSpace     = pending.freeUpSpace,
+                    hide            = pending.hide,
+                )
             } else DeletePhotoUseCase.Result.Success
 
             if (cloudResult is DeletePhotoUseCase.Result.CloudDeleteFailed) {
@@ -1136,10 +1172,10 @@ class PhotoViewerViewModel @Inject constructor(
             }
             pendingHidePrivateUri = privateUri
 
-            val userId = accountManager.getPrimaryUserId().first() ?: run {
-                cancelPendingHide()
-                return@launch
-            }
+            // Hiding a device photo needs no account; the vault is app-private and the use case only
+            // requires a signed-in user for a cloud trash, which a hide never performs (deleteFromCloud
+            // = false). Pass the nullable userId through instead of aborting a guest hide here.
+            val userId = accountManager.getPrimaryUserId().first()
             val result = deletePhotoUseCase(
                 userId          = userId,
                 items           = listOf(item),

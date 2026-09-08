@@ -60,6 +60,17 @@ object NotificationIds {
     /** The initial face-indexing foreground service's progress notification. */
     const val FACE_INDEXING = 4249
 
+    /** The Google Takeout import worker's foreground progress notification. */
+    const val IMPORT = 4250
+
+    /** The Takeout import's terminal summary. Its own id so WorkManager's teardown of the ongoing
+     *  foreground post ([IMPORT]) does not take the summary down with it. */
+    const val IMPORT_DONE = 4251
+
+    /** The import staging worker's foreground progress notification (the review-queue prep pass, ahead
+     *  of any upload). Its own id so it never collides with the direct-import posts above. */
+    const val IMPORT_STAGE = 4252
+
     /**
      * Reserved for album downloads, which take one id per run so two concurrent downloads keep
      * separate entries in the shade instead of overwriting each other. No fixed id may fall in here.

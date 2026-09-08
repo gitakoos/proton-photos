@@ -27,6 +27,7 @@ package eu.akoos.photos.domain.usecase
 import android.content.Context
 import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.data.db.dao.PhotoLocationDao
+import eu.akoos.photos.data.db.entity.PhotoLocationEntity
 import eu.akoos.photos.data.repository.drive.ThumbnailUrlStore
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.util.OfflineGeocoder
@@ -34,7 +35,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
-import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
 import me.proton.core.accountmanager.domain.AccountManager
 import java.util.concurrent.ConcurrentHashMap
@@ -61,8 +61,8 @@ class ObservePlacesUseCase @Inject constructor(
 
     operator fun invoke(): Flow<PlacesData> = accountManager.getPrimaryUserId()
         .flatMapLatest { userId ->
-            val locationFlow = if (userId == null) flowOf(emptyList())
-            else photoLocationDao.observeForUser(userId.id)
+            // Read the local partition when signed out, so a guest's places populate too.
+            val locationFlow = photoLocationDao.observeForUser(userId?.id ?: PhotoLocationEntity.LOCAL_USER)
             val libraryFlow = if (userId == null) getGalleryItems.invokeLocalOnly()
             else getGalleryItems.invoke(userId)
             combine(locationFlow, libraryFlow, thumbnailUrlStore.urls) { locations, library, urls ->

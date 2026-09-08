@@ -202,6 +202,7 @@ fun SettingsScreen(
     onNotificationsClick: () -> Unit = {},
     onRecentlyDeletedClick: () -> Unit = {},
     onFindDuplicatesClick: () -> Unit = {},
+    onImportClick: () -> Unit = {},
     onAppearanceClick: () -> Unit = {},
     onLanguageClick: () -> Unit = {},
     onAboutClick: () -> Unit = {},
@@ -286,11 +287,11 @@ fun SettingsScreen(
                 append("Android ").append(Build.VERSION.RELEASE)
                 append(" (sdk ").append(Build.VERSION.SDK_INT).append(')')
             }
-            // Crash records (privacy-safe: types + code frames only) live in a small file
-            // so they survive the crash; fold them into the same bundle as the sync log.
+            // Crash records (privacy-safe: types + code frames only) live in a small file so they survive
+            // the crash; fold them into the same bundle as the sync log. Only this build's own crashes go
+            // in, so an update does not carry a prior version's history into a fresh report.
             val crashLog = runCatching {
-                java.io.File(java.io.File(context.filesDir, "diagnostics"), "last_crash.txt")
-                    .takeIf { it.exists() }?.readText().orEmpty()
+                eu.akoos.photos.util.CrashLogStore.currentVersionText(context.filesDir, BuildConfig.VERSION_CODE)
             }.getOrDefault("")
             val sync = if (eu.akoos.photos.util.SyncDiagnostics.isEmpty()) ""
                 else eu.akoos.photos.util.SyncDiagnostics.dump()
@@ -317,6 +318,10 @@ fun SettingsScreen(
                 run {
                     if (isNotEmpty()) append("\n\n")
                     append("Faces:\n").append(eu.akoos.photos.util.FaceDiagnostics.snapshot())
+                }
+                if (eu.akoos.photos.util.ImportDiagnostics.hasData()) {
+                    if (isNotEmpty()) append("\n\n")
+                    append("Import:\n").append(eu.akoos.photos.util.ImportDiagnostics.snapshot())
                 }
                 if (crashLog.isNotBlank()) {
                     if (isNotEmpty()) append("\n\n")
@@ -655,8 +660,8 @@ fun SettingsScreen(
                 )
                 RowDivider()
                 }
-                // Storage controls (device + Drive usage, recently deleted, duplicate
-                // finder) stay available without an account, so the local-only session keeps them.
+                // Storage controls (device + Drive usage, duplicate finder, recently
+                // deleted) stay available without an account, so the local-only session keeps them.
                 NavRow(
                     label = stringResource(R.string.settings_storage_section),
                     description = stringResource(R.string.settings_storage_nav_desc),
@@ -664,16 +669,26 @@ fun SettingsScreen(
                 )
                 RowDivider()
                 NavRow(
-                    label = stringResource(R.string.settings_recently_deleted),
-                    description = recentlyDeletedSubtitle(state.trashedCount, state.cloudTrashCount),
-                    onClick = onRecentlyDeletedClick,
-                )
-                RowDivider()
-                NavRow(
                     label = stringResource(R.string.settings_find_duplicates),
                     description = stringResource(R.string.settings_find_duplicates_desc),
                     onClick = onFindDuplicatesClick,
                 )
+                RowDivider()
+                NavRow(
+                    label = stringResource(R.string.settings_recently_deleted),
+                    description = recentlyDeletedSubtitle(state.trashedCount, state.cloudTrashCount),
+                    onClick = onRecentlyDeletedClick,
+                )
+                // Google Takeout import lands photos in Drive, so it needs an account; it sits
+                // last with the cleanup tools and is hidden without a sign-in.
+                if (state.isSignedIn) {
+                    RowDivider()
+                    NavRow(
+                        label = stringResource(R.string.import_title),
+                        description = stringResource(R.string.import_row_desc),
+                        onClick = onImportClick,
+                    )
+                }
             }
             }
 
@@ -1026,6 +1041,8 @@ fun AiSettingsScreen(
                     onCheckedChange = viewModel::setOcrEnabled,
                     enabled = !state.ocrModelDownloading,
                 )
+                // Face recognition runs fully on-device, so it works without an account too; a guest's
+                // face and person rows go under a local partition, the same way the map stores its fixes.
                 RowDivider()
                 ToggleRow(
                     label = stringResource(R.string.settings_ai_face_toggle),
@@ -1045,19 +1062,36 @@ fun AiSettingsScreen(
                     onCheckedChange = viewModel::setFaceEnabled,
                     enabled = !state.faceModelDownloading,
                 )
-                // A spinner under the toggle makes the model fetch visibly in progress; a failed fetch
-                // adds a line saying the switch itself is the retry, so a stuck-looking row is explained.
+                // A determinate bar under the toggle shows the model fetch really moving, with the byte
+                // count so far against the total, so a slow link reads as progress rather than a stall; a
+                // failed fetch adds a line saying the switch itself is the retry.
                 if (state.faceModelDownloading) {
-                    Row(
+                    val faceTotalBytes = FaceModelAssets.TOTAL_DOWNLOAD_BYTES
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(start = 16.dp, end = 16.dp, bottom = 14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(16.dp),
-                            strokeWidth = 2.dp,
+                        LinearProgressIndicator(
+                            progress = {
+                                if (faceTotalBytes > 0L) {
+                                    (state.faceModelDownloadedBytes.toFloat() / faceTotalBytes)
+                                        .coerceIn(0f, 1f)
+                                } else 0f
+                            },
+                            modifier = Modifier.fillMaxWidth(),
                             color = colors.accent,
+                            trackColor = colors.trackBg,
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            text = stringResource(
+                                R.string.settings_ai_face_downloading_progress,
+                                formatBytes(state.faceModelDownloadedBytes),
+                                formatBytes(faceTotalBytes),
+                            ),
+                            color = colors.fgMute,
+                            fontSize = 12.sp,
                         )
                     }
                 } else if (state.faceModelDownloadFailed) {
@@ -1131,8 +1165,14 @@ fun AiSettingsScreen(
             when (state.faceModelPrompt) {
                 FaceModelPrompt.Download -> ConfirmSheet(
                     title = stringResource(R.string.settings_ai_face_download_title),
+                    // Off Wi-Fi the message states the fetch will use mobile data, so the large download
+                    // is confirmed rather than pulled silently over a metered link.
                     message = stringResource(
-                        R.string.settings_ai_face_download_message,
+                        if (state.faceModelOnWifi) {
+                            R.string.settings_ai_face_download_message
+                        } else {
+                            R.string.settings_ai_face_download_message_metered
+                        },
                         formatBytes(FaceModelAssets.TOTAL_DOWNLOAD_BYTES),
                     ),
                     confirmLabel = stringResource(R.string.settings_ai_face_download_confirm),
@@ -1200,6 +1240,7 @@ fun FaceRecognitionScreen(
     val faceUi by viewModel.faceIndexingUi.collectAsStateWithLifecycle()
     val peopleCount by viewModel.peopleCount.collectAsStateWithLifecycle()
     val people by viewModel.people.collectAsStateWithLifecycle()
+    val settingsState by viewModel.uiState.collectAsStateWithLifecycle()
 
     SettingsSubPageScaffold(title = stringResource(R.string.settings_face_section), onBack = onBack) {
         FaceStatusCard(
@@ -1214,12 +1255,17 @@ fun FaceRecognitionScreen(
             onRescan = viewModel::rescanFaces,
             onClear = viewModel::clearFaceIndex,
         )
-        Spacer(Modifier.height(20.dp))
-        FaceTransferCard(
-            inProgress = transferInProgress,
-            onExport = viewModel::exportFaceIndex,
-            onImport = viewModel::importFaceIndex,
-        )
+        // The encrypted export and import seal the face index to the account's own key, so they need
+        // an account; a guest has no key to seal to. Hidden without one, while the rest of the screen
+        // (the on-device scan, people and maintenance) runs for a guest just as it does signed in.
+        if (settingsState.isSignedIn) {
+            Spacer(Modifier.height(20.dp))
+            FaceTransferCard(
+                inProgress = transferInProgress,
+                onExport = viewModel::exportFaceIndex,
+                onImport = viewModel::importFaceIndex,
+            )
+        }
         Spacer(Modifier.height(20.dp))
     }
 }
@@ -1903,31 +1949,34 @@ fun PrivacySecuritySettingsScreen(
                 label = stringResource(R.string.settings_strip_share),
                 onClick = onShareMetadataClick,
             )
-            RowDivider()
+            // Offline photos and the telemetry mirror are both Proton-account concepts, so the whole
+            // group is hidden without a signed-in account, and its leading divider with it so guest
+            // mode does not end this section on a dangling separator.
             if (state.isSignedIn) {
+                RowDivider()
                 NavRow(
                     label = stringResource(R.string.settings_offline_photos),
                     description = stringResource(R.string.offline_screen_empty),
                     onClick = onOfflinePhotosClick,
                 )
                 RowDivider()
+                // Telemetry events fired by the embedded ProtonCore stack are gated by
+                // IsTelemetryEnabledImpl, which reads the server side `Telemetry`
+                // preference. This is surfaced as a read-only mirror so the control's
+                // location is discoverable; the actual switch lives in the Proton
+                // account settings.
+                InfoRow(
+                    label = stringResource(R.string.settings_telemetry),
+                    description = stringResource(R.string.settings_telemetry_desc),
+                    value = when (state.telemetryEnabled) {
+                        true -> stringResource(R.string.settings_telemetry_on)
+                        false -> stringResource(R.string.settings_telemetry_off)
+                        // Unresolved stays neutral: the gate defaults to enabled when the
+                        // account setting is unreadable, so "Off" would be a false assurance.
+                        null -> stringResource(R.string.settings_telemetry_checking)
+                    },
+                )
             }
-            // Telemetry events fired by the embedded ProtonCore stack are gated by
-            // IsTelemetryEnabledImpl, which reads the server side `Telemetry`
-            // preference. This is surfaced as a read-only mirror so the control's
-            // location is discoverable; the actual switch lives in the Proton
-            // account settings.
-            InfoRow(
-                label = stringResource(R.string.settings_telemetry),
-                description = stringResource(R.string.settings_telemetry_desc),
-                value = when (state.telemetryEnabled) {
-                    true -> stringResource(R.string.settings_telemetry_on)
-                    false -> stringResource(R.string.settings_telemetry_off)
-                    // Unresolved stays neutral: the gate defaults to enabled when the
-                    // account setting is unreadable, so "Off" would be a false assurance.
-                    null -> stringResource(R.string.settings_telemetry_checking)
-                },
-            )
         }
         // Footnote: the map draws its background from a public tile endpoint, which is the
         // one place the app reaches a server outside Proton.

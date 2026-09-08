@@ -28,6 +28,7 @@ import eu.akoos.photos.data.db.dao.FaceDao
 import eu.akoos.photos.data.db.dao.PersonDao
 import eu.akoos.photos.data.db.dao.PersonManualPhotoDao
 import eu.akoos.photos.data.db.entity.PersonManualPhotoEntity
+import eu.akoos.photos.data.db.entity.PhotoLocationEntity
 import javax.inject.Inject
 
 /**
@@ -44,11 +45,13 @@ class AddPhotosToPersonUseCase @Inject constructor(
 ) {
     suspend operator fun invoke(personId: Long, photoKeys: Collection<String>) {
         if (photoKeys.isEmpty()) return
-        val userId = accountManager.getPrimaryUserId().first() ?: return
+        // Runs on-device, so a guest attaches under the local partition, the same key its faces and
+        // person rows already use; a non-null account collapses this back to userId.id.
+        val account = accountManager.getPrimaryUserId().first()?.id ?: PhotoLocationEntity.LOCAL_USER
         val person = personDao.personById(personId) ?: return
         val name = person.displayName
         if (name.isNullOrBlank()) return
-        personManualPhotoDao.add(photoKeys.map { PersonManualPhotoEntity(userId.id, name, it) })
+        personManualPhotoDao.add(photoKeys.map { PersonManualPhotoEntity(account, name, it) })
         // Display-only, by design: a manual add is stored against the name so the photo shows and
         // survives a rebuild, but its detected face is deliberately NOT auto-labelled. When the
         // person's own face is too small or distant to detect, the only face the detector found in the
@@ -56,8 +59,8 @@ class AddPhotosToPersonUseCase @Inject constructor(
         // the person's centroid. Confirmed teaching comes from the suggestion review, where the user
         // actually sees and approves the face.
         // Keep the shown count honest: distinct photos across the person's faces and manual adds.
-        val union = (faceDao.distinctPhotoKeysForPerson(userId.id, personId) +
-            personManualPhotoDao.photoKeysForNameList(userId.id, name)).toHashSet().size
+        val union = (faceDao.distinctPhotoKeysForPerson(account, personId) +
+            personManualPhotoDao.photoKeysForNameList(account, name)).toHashSet().size
         personDao.updateCoverAndCount(personId, person.coverFaceId, union)
     }
 }

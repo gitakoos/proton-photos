@@ -749,6 +749,95 @@
     <string name="metadata_edit_channel_desc">Zobrazuje průběh ukládání změn detailů fotek na Proton Drive.</string>
     <string name="metadata_edit_notification_title">Ukládání detailů fotek…</string>
     <string name="metadata_edit_notification_progress">%1$d z %2$d</string>
+    <!-- Google Takeout import notification. -->
+    <string name="import_channel_name">Import fotek</string>
+    <string name="import_channel_desc">Zobrazuje průběh importu souboru Google Takeout na Proton Drive.</string>
+    <string name="import_notification_title">Importování fotek…</string>
+    <string name="import_notification_progress">%1$d z %2$d</string>
+    <string name="import_notification_done_title">Import dokončen</string>
+    <string name="import_notification_done_text">%1$d importováno, %2$d přeskočeno, %3$d se nezdařilo</string>
+    <!-- Import staging notification. -->
+    <string name="import_stage_notification_title">Příprava importu…</string>
+    <string name="import_stage_progress">%1$d z %2$d</string>
+    <!-- Google Takeout import screen. -->
+    <string name="import_title">Import fotek</string>
+    <string name="import_row_desc">Přeneste export Google Photos nebo Ente na Proton Drive</string>
+    <string name="import_explainer">Importujte export Google Takeout nebo Ente jako .zip. Vaše fotky se nahrají na Proton Drive s původním datem a místem.</string>
+    <string name="import_choose_zip">Vybrat .zip z Takeout</string>
+    <string name="import_scanning">Čtení exportu…</string>
+    <string name="import_progress_count">%1$d / %2$d</string>
+    <string name="import_done_title">Import dokončen</string>
+    <string name="import_done_summary">%1$d importováno, %2$d přeskočeno, %3$d se nezdařilo</string>
+    <string name="import_done_button">Hotovo</string>
+    <string name="import_failed_title">Import se nezdařil</string>
+    <string name="import_failed_msg">Během importu došlo k chybě. Vyberte soubor a zkuste to znovu.</string>
+    <!-- Import review queue. -->
+    <string name="import_staging_title">Příprava importu</string>
+    <string name="import_uploading_title">Nahrávání fotek</string>
+    <string name="import_review_title">Kontrola importu</string>
+    <string name="import_review_confirm">Importovat %1$d fotek</string>
+    <string name="import_review_discard">Zahodit</string>
+    <string name="import_review_discard_title">Zahodit tento import?</string>
+    <string name="import_review_discard_message">Připravené fotky opustí kontrolu. Zatím nebylo nic nahráno.</string>
+    <string name="import_review_remove">Odebrat %1$d</string>
+    <string name="import_review_restore">Obnovit</string>
+    <string name="import_review_selected_count">%1$d vybráno</string>
+    <string name="import_review_no_date">Bez data</string>
+    <string name="import_review_removed">Odebráno</string>
+    <string name="import_review_meta_section">Podrobnosti</string>
+    <string name="import_review_detail_date">Datum</string>
+    <string name="import_review_detail_location">Místo</string>
+    <string name="import_review_detail_description">Popis</string>
+    <string name="import_review_detail_filename">Název souboru</string>
+    <string name="import_review_detail_source">Zdroj</string>
+    <string name="import_review_source">Export Google Photos nebo Ente</string>
+    <!-- Recent imports history. -->
+    <string name="import_history_title">Nedávné importy</string>
+    <string name="import_history_row">%1$d importováno</string>
+    <string name="import_history_row_extra">%1$d přeskočeno, %2$d se nezdařilo</string>
+    <!-- Recent import detail + undo. -->
+    <string name="import_detail_title">Podrobnosti importu</string>
+    <string name="import_detail_empty">Tyto fotky už na Drive nejsou.</string>
+    <string name="import_undo">Vrátit tento import zpět</string>
+    <string name="import_undo_confirm_title">Vrátit tento import zpět?</string>
+    <string name="import_undo_confirm_message">Fotky přidané tímto importem se přesunou do koše na Drive. Vše, co jste od té doby změnili, zůstane zachováno.</string>
+    <string name="import_undo_running">Odebírání importovaných fotek…</string>
+    <string name="import_undo_result">Odebráno %1$d, zachováno %2$d změněných, %3$d se nezdařilo</string>
+    <string name="import_done_all_present">Tyto fotky už jsou na vašem Drive, takže se nic neimportovalo.</string>
+    <string name="import_detail_already_badge">Už na Drive</string>
+    <string name="import_review_already_badge">Už na Drive</string>
+    <string name="import_review_nothing_new">Nic nového k importu</string>
+    <string name="import_review_add_to_albums">Přidat do alb</string>
+    <string name="import_album_mode_label">Alba</string>
+    <string name="import_album_mode_none">Pouze fotky</string>
+    <string name="import_album_mode_shells">Vytvořit prázdná alba</string>
+    <string name="import_album_mode_photos">Fotky v albech</string>
+    <string name="import_albums_section">Alba</string>
+    <string name="import_done_view_photos">Zobrazit importované fotky</string>
+    <string name="import_stat_date">Datum</string>
+    <string name="import_stat_to_import">K importu</string>
+    <string name="import_stat_imported">Importováno</string>
+    <string name="import_stat_already">Už na Drive</string>
+    <string name="import_stat_skipped">Přeskočeno</string>
+    <string name="import_stat_failed">Nezdařilo se</string>
+    <string name="import_confirm_title">Importovat na Drive?</string>
+    <string name="import_confirm_button">Importovat</string>
+    <string name="import_confirm_albums_only">Vybrané fotky budou přidány do svých alb.</string>
+    <string name="import_history_delete_title">Smazat záznam importu</string>
+    <string name="import_history_delete_message">Tím se záznam odstraní z Nedávných importů spolu s možností jeho vrácení. Importované fotky a případná alba zůstanou na vašem Drive.</string>
+    <string name="import_history_delete_confirm">Smazat</string>
+    <plurals name="import_confirm_message">
+        <item quantity="one">%1$d fotka se nahraje na váš Proton Drive.</item>
+        <item quantity="few">%1$d fotky se nahrají na váš Proton Drive.</item>
+        <item quantity="many">%1$d fotky se nahraje na váš Proton Drive.</item>
+        <item quantity="other">%1$d fotek se nahraje na váš Proton Drive.</item>
+    </plurals>
+    <plurals name="import_album_photo_count">
+        <item quantity="one">%1$d fotka</item>
+        <item quantity="few">%1$d fotky</item>
+        <item quantity="many">%1$d fotky</item>
+        <item quantity="other">%1$d fotek</item>
+    </plurals>
     <string name="album_download_notification_cancel">Zrušit</string>
     <string name="download_started_background">Stahuje se na pozadí, průběh najdete v Aktivitě</string>
     <string name="albums_share_button">Sdílet album</string>
@@ -781,6 +870,7 @@
     <string name="share_role_can_view">může zobrazit</string>
     <string name="share_role_can_edit">může upravovat</string>
     <string name="share_role_pending">čeká se</string>
+    <string name="share_role_external">pozván (externí)</string>
     <string name="share_stop_sharing">Ukončit sdílení</string>
     <string name="shared_stop_sharing_confirm_body">Veřejné odkazy přestanou fungovat a fotky již nebudou sdílené.</string>
     <string name="share_close">Zavřít</string>
@@ -794,6 +884,7 @@
     <string name="share_invite_email_duplicate">Již přidáno</string>
     <string name="share_invite_summary_partial">Odesláno %1$d, %2$d nešlo odeslat</string>
     <string name="share_invite_summary_all_failed">Pozvánky se nepodařilo odeslat</string>
+    <string name="share_invite_self">Nemůžete pozvat vlastní účet</string>
     <!-- Album-sharing + album action error fallbacks (raw exception text stays in the log) -->
     <string name="share_revoke_failed">Pozvánku se nepodařilo zrušit</string>
     <string name="share_remove_member_failed">Člena se nepodařilo odebrat</string>
@@ -1586,6 +1677,8 @@
     <string name="settings_ai_face_download_retry">Opětovným zapnutím přepínače to zkuste znovu.</string>
     <string name="settings_ai_face_download_title">Stáhnout model obličejů?</string>
     <string name="settings_ai_face_download_message">Rozpoznávání obličejů potřebuje stáhnout model o velikosti %1$s. Funguje na jakémkoli připojení, ale doporučuje se Wi-Fi.</string>
+    <string name="settings_ai_face_download_message_metered">Rozpoznávání obličejů potřebuje stáhnout model o velikosti %1$s. Wi-Fi není připojena, takže toto stahování využije mobilní data.</string>
+    <string name="settings_ai_face_downloading_progress">%1$s / %2$s</string>
     <string name="settings_ai_face_download_confirm">Stáhnout</string>
     <string name="settings_ai_face_model_missing">Model obličejů není v tomto zařízení.</string>
     <string name="settings_ai_face_remove_title">Odebrat data obličejů?</string>
@@ -1879,11 +1972,24 @@
     <string name="whats_new_albumcover_body">Zvolte, jak velké jsou obálky alb, od dvou do čtyř ve řadě.</string>
     <string name="whats_new_denser_title">Hustší časová osa</string>
     <string name="whats_new_denser_body">Časová osa teď přiblíží na dvě hustší úrovně, až osm fotek na řádek.</string>
+    <string name="whats_new_import_title">Import z Google Photos nebo Ente</string>
+    <string name="whats_new_import_body">Přeneste exportovanou knihovnu do Proton Drive se zachovanými daty, místy a popisky, nejdřív si ji projděte a nechte ji běžet na pozadí.</string>
+    <string name="whats_new_share_email_title">Sdílejte album e-mailem</string>
+    <string name="whats_new_share_email_body">Pozvěte kohokoli e-mailem, i bez účtu Proton, a přístup kdykoli zrušte.</string>
+    <string name="whats_new_video_faces_title">Obličeje ve videích</string>
+    <string name="whats_new_video_faces_body">Jmenovky se teď zobrazují přes video, takže vidíte, kdo je na něm, a můžete ho otevřít.</string>
+    <string name="whats_new_faces_rework_title">Přesnější rozpoznávání obličejů</string>
+    <string name="whats_new_faces_rework_body">Mnohem méně chybných skupin, přehlednější obrazovka Lidé a oprava zatoulaného obličeje jedním klepnutím.</string>
+    <string name="whats_new_guest_title">Bez účtu funguje víc</string>
+    <string name="whats_new_guest_body">Rozpoznávání obličejů, mapa, poznámky v kalendáři i vyhledávač duplicit teď fungují i bez přihlášení.</string>
+    <string name="whats_new_dup_nobackup_title">Duplicity bez zálohy</string>
+    <string name="whats_new_dup_nobackup_body">Vyhledávač duplicit teď prohledá fotky ve vašem zařízení bez účtu i bez zálohy.</string>
     <string name="whats_new_section_new">Novinky</string>
     <string name="whats_new_section_improved">Vylepšení</string>
 
     <!-- Person detail -->
-    <string name="person_detail_unnamed">Osoba</string>
+    <string name="person_detail_unnamed">Bez jména</string>
+    <string name="person_add_name">Přidat jméno</string>
     <string name="person_unsorted">Neseřazené</string>
     <string name="person_unsorted_hint">Tváře, které nebylo možné s jistotou přiřadit k osobě. Vyber fotky a přesuň skutečnou osobu ven, nebo zbytek označ jako „není osoba“.</string>
     <string name="person_unsorted_caption">Zbývající obličeje, které nešlo přiřadit. Otevřete je a roztřiďte.</string>

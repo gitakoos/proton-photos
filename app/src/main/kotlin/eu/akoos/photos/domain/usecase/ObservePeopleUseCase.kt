@@ -33,6 +33,7 @@ import eu.akoos.photos.data.db.dao.FaceDao
 import eu.akoos.photos.data.db.dao.PersonDao
 import eu.akoos.photos.data.db.entity.FaceEntity
 import eu.akoos.photos.data.db.entity.PersonEntity
+import eu.akoos.photos.data.db.entity.PhotoLocationEntity
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.model.FaceBoxNorm
 import eu.akoos.photos.domain.model.PersonSummary
@@ -66,10 +67,10 @@ class ObservePeopleUseCase @Inject constructor(
 
     @OptIn(ExperimentalCoroutinesApi::class)
     operator fun invoke(
-        userId: UserId,
+        userId: UserId?,
         items: Flow<List<GalleryItem>>,
     ): Flow<List<PersonSummary>> =
-        combine(personDao.observePeopleForUser(userId.id), items) { people, feed -> people to feed }
+        combine(personDao.observePeopleForUser(userId?.id ?: PhotoLocationEntity.LOCAL_USER), items) { people, feed -> people to feed }
             .mapLatest { (people, feed) -> buildSummaries(people, feed) }
 
     /** Resolve each person's cover face to a [PersonSummary], normalising the cover face box against

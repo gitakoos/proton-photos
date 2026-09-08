@@ -23,6 +23,7 @@
 package eu.akoos.photos.worker
 
 import android.content.Context
+import android.util.Log
 import androidx.hilt.work.HiltWorker
 import androidx.work.Constraints
 import androidx.work.CoroutineWorker
@@ -33,7 +34,9 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
+import eu.akoos.photos.data.db.dao.ImportStagedDao
 import eu.akoos.photos.util.DeviceHealthPolicy
+import java.io.File
 import java.util.concurrent.TimeUnit
 
 /**
@@ -56,6 +59,7 @@ class CachePruneWorker @AssistedInject constructor(
     @Assisted private val context: Context,
     @Assisted params: WorkerParameters,
     private val deviceHealth: DeviceHealthPolicy,
+    private val importStagedDao: ImportStagedDao,
 ) : CoroutineWorker(context, params) {
 
     override suspend fun doWork(): Result {
@@ -79,12 +83,31 @@ class CachePruneWorker @AssistedInject constructor(
         eu.akoos.photos.data.repository.drive.UploadResumeManifest.pruneStaleTempDirs(
             context.cacheDir,
         )
+        // Sweep abandoned import stages. Picking a zip stages import_staged rows plus cached
+        // thumbnails; a finished run clears its own rows and a re-stage clears the prior ones, but a
+        // stage the user walked away from without confirming or discarding is freed only here. The
+        // STALE_MS horizon is far longer than any real staging session, so an in-progress or a
+        // just-finished import stays recent and untouched. Guarded so a prune failure never fails
+        // the worker; each thumbnail delete is best-effort.
+        runCatching {
+            val cutoff = System.currentTimeMillis() - STALE_MS
+            val stale = importStagedDao.thumbPathsOlderThan(cutoff)
+            stale.forEach { path -> path?.let { runCatching { File(it).delete() } } }
+            importStagedDao.deleteOlderThan(cutoff)
+            if (stale.isNotEmpty()) Log.d(TAG, "pruned ${stale.size} abandoned import stage(s)")
+        }
         return Result.success()
     }
 
     companion object {
         const val UNIQUE_NAME = "cache_prune_periodic"
+        private const val TAG = "cache_prune_worker"
         private const val INTERVAL_MINUTES = 30L
+
+        /** Age past which a picked-but-never-confirmed import stage is swept: its import_staged
+         *  rows and cached thumbnails. Far longer than any real staging session, so only a
+         *  genuinely abandoned stage is ever caught. */
+        private val STALE_MS: Long = TimeUnit.DAYS.toMillis(7)
 
         fun schedule(workManager: WorkManager) {
             val constraints = Constraints.Builder()

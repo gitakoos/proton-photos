@@ -92,6 +92,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -105,10 +106,24 @@ import eu.akoos.photos.presentation.theme.FgPrimary
 import eu.akoos.photos.presentation.theme.PillBg
 import eu.akoos.photos.presentation.theme.PillBorder
 import eu.akoos.photos.presentation.util.formatVideoTime
+import kotlin.math.roundToInt
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 
 // ── Video player ───────────────────────────────────────────────────────────────
+
+/** The on-screen size of a decoded frame: Media3 reports coded width/height plus a pixel aspect and a
+ *  rotation the surface applies, so a 90/270 clip is shown with its sides swapped. Mirrors PlayerView's
+ *  own TextureView handling, so face tags letterbox to exactly the frame the player draws. The rotation
+ *  field is 0 on modern decoders (the codec rotates the output) and non-zero on older ones, so reading
+ *  it stays correct across both. */
+@Suppress("DEPRECATION")
+private fun displaySizeOf(v: androidx.media3.common.VideoSize): IntSize {
+    if (v.width <= 0 || v.height <= 0) return IntSize.Zero
+    val w = (v.width * v.pixelWidthHeightRatio).roundToInt().coerceAtLeast(1)
+    val rotated = v.unappliedRotationDegrees == 90 || v.unappliedRotationDegrees == 270
+    return if (rotated) IntSize(v.height, w) else IntSize(w, v.height)
+}
 
 /**
  * Plays a video file or content URI using ExoPlayer (Media3).
@@ -130,6 +145,9 @@ internal fun VideoPlayer(
     onEnded: (() -> Unit)? = null,
     /** Holds the screen awake only while a video is actually playing; clears on pause/stop/close. */
     keepOn: Boolean = false,
+    /** The decoded frame's on-screen size (pixel aspect and rotation applied), for pinning face tags
+     *  over the playing surface. Reports [IntSize.Zero] until the decoder knows the size. */
+    onVideoSize: (IntSize) -> Unit = {},
 ) {
     val context = LocalContext.current
     val loop = onEnded == null
@@ -163,8 +181,15 @@ internal fun VideoPlayer(
                     android.widget.Toast.LENGTH_LONG,
                 ).show()
             }
+            // Face tags letterbox to the frame, so report its size the moment the decoder knows it
+            // (and again if a track change resizes it).
+            override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) {
+                onVideoSize(displaySizeOf(videoSize))
+            }
         }
         exoPlayer.addListener(listener)
+        // A reused player may already know its size, so no fresh callback fires; emit it once now.
+        exoPlayer.videoSize.let { if (it.width > 0 && it.height > 0) onVideoSize(displaySizeOf(it)) }
         onDispose {
             exoPlayer.removeListener(listener)
             exoPlayer.release()

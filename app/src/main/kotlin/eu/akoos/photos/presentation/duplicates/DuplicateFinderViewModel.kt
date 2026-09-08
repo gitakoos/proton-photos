@@ -35,7 +35,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
-import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.sample
@@ -44,10 +43,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import me.proton.core.accountmanager.domain.AccountManager
 import me.proton.core.domain.entity.UserId
-import eu.akoos.photos.data.db.dao.LocalHashRow
 import eu.akoos.photos.data.db.dao.PerceptualHashDao
 import eu.akoos.photos.data.db.dao.PerceptualHashLite
-import eu.akoos.photos.data.db.dao.SyncStateDao
+import eu.akoos.photos.data.repository.LocalContentHashFiller
 import eu.akoos.photos.data.repository.drive.PerceptualHashScheduler
 import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.GalleryItem
@@ -70,7 +68,7 @@ private data class LeanHash(val hash: Long, val freshness: String)
  *  uri -> hash lookup maps are built once per sampled tick, not on every background hash write. */
 private data class Sources(
     val items: List<GalleryItem>,
-    val localHashRows: List<LocalHashRow>,
+    val localHashes: Map<String, String>,
     val hashRows: List<PerceptualHashLite>,
     val deleted: Set<String>,
 )
@@ -83,7 +81,7 @@ private data class Prepared(
     val freshHashes: Map<String, LeanHash>,
     val srcItems: List<GalleryItem>,
     val srcDeleted: Set<String>,
-    val srcLocalHashRows: List<LocalHashRow>,
+    val srcLocalHashes: Map<String, String>,
 )
 
 /**
@@ -108,13 +106,13 @@ internal fun shouldRecluster(current: Map<String, Long>, last: Map<String, Long>
 @HiltViewModel
 class DuplicateFinderViewModel @Inject constructor(
     private val getGalleryItems: GetGalleryItemsUseCase,
-    private val syncStateDao: SyncStateDao,
     private val findDuplicates: FindDuplicatesUseCase,
     private val deletePhotoUseCase: DeletePhotoUseCase,
     private val accountManager: AccountManager,
     private val cloudRepo: DrivePhotoRepository,
     private val perceptualHashDao: PerceptualHashDao,
     private val perceptualHashScheduler: PerceptualHashScheduler,
+    private val localContentHashFiller: LocalContentHashFiller,
 ) : ViewModel() {
 
     data class UiState(
@@ -157,13 +155,20 @@ class DuplicateFinderViewModel @Inject constructor(
     // very large library). Only a new or changed fingerprint reclusters. See [shouldRecluster].
     private var lastClusteredFingerprint: Map<String, Long>? = null
 
+    // The exact-duplicate ids the last similar pass excluded. An exact copy is shown under "Identical",
+    // so it is kept out of "Similar"; when this set changes (a photo's content hash lands and moves it
+    // into an exact group) the similar groups must recluster even if their own fingerprint did not
+    // change, so the moved photo leaves "Similar". A pure delete of a similar-only photo leaves this
+    // unchanged and still skips the O(n²) recluster.
+    private var lastSimilarExactIds: Set<String>? = null
+
     // Inputs + result of the last exact-duplicate pass. findDuplicates depends ONLY on the items, the
     // session-deleted set, and the local content hashes, never the perceptual hashes whose background
     // fill drives most re-emits, so when all three source references are unchanged the identical groups
     // are reused instead of rebuilt, which stops the fingerprint fill from re-running it every tick.
     private var lastDupItems: List<GalleryItem>? = null
     private var lastDupDeleted: Set<String>? = null
-    private var lastDupLocalHashRows: List<LocalHashRow>? = null
+    private var lastDupLocalHashes: Map<String, String>? = null
     private var lastDupResult: FindDuplicatesUseCase.Result? = null
 
     /** photoLinkId -> the cloud album name (alphabetically first when a photo is in several) the copy
@@ -198,48 +203,43 @@ class DuplicateFinderViewModel @Inject constructor(
         viewModelScope.launch {
             accountManager.getPrimaryUserId().flatMapLatest { userId ->
                 primaryUserId = userId
-                // The combine wakes on EVERY background hash write (the scheduler fills the table
-                // one row at a time on a large library), so its transform stays allocation-free and
-                // only bundles the current source references. The lean projections keep a 50k
-                // library from materialising the full SyncState / fingerprint entities here. Signed
-                // out the device's own media feeds the grouping; the local-content-hash rows are
-                // account scoped, so that source is empty then, while the perceptual-hash cache is
-                // algorithm-keyed and read the same either way.
+                // The combine wakes on EVERY background hash write (both fillers land one entry at a
+                // time on a large library), so its transform stays allocation-free and only bundles the
+                // current source references. The device exact-duplicate hashes come from
+                // LocalContentHashFiller, which size-pre-filters and streams a SHA-1 on device with no
+                // account, so a signed-out or never-backed-up photo is grouped the same as a backed-up
+                // one; the perceptual-hash cache is algorithm-keyed and read the same either way.
                 val libraryFlow = if (userId == null) getGalleryItems.invokeLocalOnly()
                     else getGalleryItems.invoke(userId)
-                val localHashesFlow = if (userId == null) flowOf(emptyList<LocalHashRow>())
-                    else syncStateDao.observeLocalHashes(userId.id)
                 combine(
                     libraryFlow,
-                    localHashesFlow,
+                    localContentHashFiller.hashes,
                     perceptualHashDao.observeLite(PerceptualHash.DHASH_ALGO_VERSION),
                     recentlyDeleted,
-                ) { items, localHashRows, hashRows, deleted ->
-                    Sources(items, localHashRows, hashRows, deleted)
+                ) { items, localHashes, hashRows, deleted ->
+                    Sources(items, localHashes, hashRows, deleted)
                 }
             }
                 // The combined flow re-emits on every single background hash write; sample so a
                 // burst of writes collapses to a periodic regroup instead of one full pairwise pass
                 // per hashed row.
                 .sample(400L)
-                // Build the per-tick lookup maps AFTER the sample, off the main thread, so the two
-                // 50k maps are rebuilt a couple of times a second at most, not once per hash write
-                // (rebuilding them in the combine transform is what pinned the heap during the fill).
+                // Build the fingerprint lookup map AFTER the sample, off the main thread, so a 50k
+                // library rebuilds it a couple of times a second at most, not once per hash write
+                // (rebuilding it in the combine transform is what pinned the heap during the fill).
                 .map { s ->
                     // Drop items deleted this session BEFORE grouping so a stale source re-emit
                     // can't bring a just-deleted duplicate back into a group with a dead preview.
                     val live = if (s.deleted.isEmpty()) s.items
                         else s.items.filterNot { it.stableId in s.deleted }
-                    val localHashes = HashMap<String, String>(s.localHashRows.size)
-                    for (r in s.localHashRows) localHashes[r.localUri] = r.localHash
                     val freshHashes = HashMap<String, LeanHash>(s.hashRows.size)
                     for (r in s.hashRows) freshHashes[r.key] = LeanHash(r.hash, r.freshness)
-                    Prepared(live, localHashes, freshHashes, s.items, s.deleted, s.localHashRows)
+                    Prepared(live, s.localHashes, freshHashes, s.items, s.deleted, s.localHashes)
                 }
                 .flowOn(Dispatchers.Default)
-                // A delete writes to sync_state / perceptual_hash while these observers read the
-                // same tables, which can fault a cursor window mid-read on a large library. Re-run
-                // the stream instead of letting that torn read force-close the screen.
+                // A delete evicts perceptual_hash rows while observeLite reads that table, which can
+                // fault a cursor window mid-read on a large library. Re-run the stream instead of
+                // letting that torn read force-close the screen.
                 .retryOnDbTear(TAG) { _uiState.update { it.copy(isLoading = false) } }
                 .collect { p ->
                 val items = p.liveItems
@@ -250,18 +250,23 @@ class DuplicateFinderViewModel @Inject constructor(
                     lastDupResult != null &&
                     p.srcItems === lastDupItems &&
                     p.srcDeleted === lastDupDeleted &&
-                    p.srcLocalHashRows === lastDupLocalHashRows
+                    p.srcLocalHashes === lastDupLocalHashes
                 ) {
                     lastDupResult!!
                 } else {
                     findDuplicates(items, p.localHashes).also {
                         lastDupItems = p.srcItems
                         lastDupDeleted = p.srcDeleted
-                        lastDupLocalHashRows = p.srcLocalHashRows
+                        lastDupLocalHashes = p.srcLocalHashes
                         lastDupResult = it
                     }
                 }
-                groupSimilarFromStored(items, p.freshHashes)
+                // A photo already grouped as an exact ("Identical") duplicate is kept out of the
+                // "Similar" groups, so the same photo is never listed and separately ticked in both
+                // sections (which double-counted the delete tally the tester saw).
+                val exactIds = (result.deviceGroups + result.cloudGroups)
+                    .flatMapTo(HashSet<String>()) { g -> g.items.map { it.stableId } }
+                groupSimilarFromStored(items, p.freshHashes, exactIds)
                 _uiState.update {
                     it.copy(
                         isLoading = false,
@@ -271,7 +276,12 @@ class DuplicateFinderViewModel @Inject constructor(
                 }
                 if (items !== lastScheduledItems) {
                     lastScheduledItems = items
-                    primaryUserId?.let { perceptualHashScheduler.request(items, it) }
+                    // A guest (null userId) hashes its local files the same way; the scheduler only
+                    // needs an account to warm a cold cloud thumbnail, which a guest never has.
+                    perceptualHashScheduler.request(items, primaryUserId)
+                    // Fill the exact-duplicate device hashes on device, with or without an account, so
+                    // the "Identical" groups cover local files the backup pipeline never hashed.
+                    localContentHashFiller.request(items)
                 }
             }
         }
@@ -284,8 +294,16 @@ class DuplicateFinderViewModel @Inject constructor(
      * and clustered by [group]. Anything not yet hashed is simply absent here and gets filled in by
      * [perceptualHashScheduler] in the background, this re-runs as the cache Flow re-emits. While
      * any candidate still lacks a fresh stored hash the scan is reported as in progress.
+     *
+     * A photo already in an exact group ([exactIds]) is skipped, so an exact duplicate is shown only
+     * under "Identical" and never also under "Similar" (the double-listing that let one photo be ticked
+     * in two sections and counted twice).
      */
-    private suspend fun groupSimilarFromStored(items: List<GalleryItem>, freshHashes: Map<String, LeanHash>) {
+    private suspend fun groupSimilarFromStored(
+        items: List<GalleryItem>,
+        freshHashes: Map<String, LeanHash>,
+        exactIds: Set<String>,
+    ) {
         // Resolve each candidate to its fresh hash off the main thread, and fingerprint the input
         // (candidate key -> hash) so a pass that only removed candidates can skip the O(n²) cluster.
         data class Prepared(
@@ -300,6 +318,8 @@ class DuplicateFinderViewModel @Inject constructor(
             val fingerprint = HashMap<String, Long>(items.size)
             var anyMissing = false
             for (item in items) {
+                // Shown under "Identical" already; never list it under "Similar" too.
+                if (item.stableId in exactIds) continue
                 when (item) {
                     is GalleryItem.LocalOnly -> {
                         val hash = freshHashFor(item.local.uri, "${item.local.dateModified}_${item.local.sizeBytes}", freshHashes)
@@ -325,7 +345,11 @@ class DuplicateFinderViewModel @Inject constructor(
         // place, so skip the expensive re-cluster and just drop any vanished member. Only a new or
         // changed fingerprint reclusters. This is what stops a burst of deletes on a very large
         // library from re-allocating the cluster buckets on every re-emit until the heap is gone.
-        if (!shouldRecluster(prepared.fingerprint, lastClusteredFingerprint)) {
+        // Also recluster when the exact-id set changed (a photo moved into or out of "Identical"), so
+        // it leaves or rejoins "Similar" even though its own similar fingerprint did not move. A pure
+        // delete of a similar-only photo leaves exactIds unchanged and still skips the O(n²) recluster.
+        val exactChanged = exactIds != lastSimilarExactIds
+        if (!exactChanged && !shouldRecluster(prepared.fingerprint, lastClusteredFingerprint)) {
             val liveIds = items.mapTo(HashSet(items.size)) { it.stableId }
             _uiState.update {
                 it.copy(
@@ -344,6 +368,7 @@ class DuplicateFinderViewModel @Inject constructor(
             )
         }
         lastClusteredFingerprint = prepared.fingerprint
+        lastSimilarExactIds = exactIds
         _uiState.update {
             it.copy(
                 similarDeviceGroups = clustered.first,
@@ -467,8 +492,9 @@ class DuplicateFinderViewModel @Inject constructor(
         if (toDelete.isEmpty()) return
 
         viewModelScope.launch {
+            // A local (device) delete needs no account; the use case only requires a signed-in user
+            // for a cloud trash, which local-only mode never produces. Pass the nullable userId through.
             val userId = primaryUserId ?: runCatching { accountManager.getPrimaryUserId().first() }.getOrNull()
-            if (userId == null) return@launch
             _uiState.update { it.copy(isDeleting = true, errorMessage = null) }
             try {
                 Log.d(TAG, "deleteExtras: group=${group.items.size}, keep=${keepIds.size}, toDelete=${toDelete.size}")
@@ -531,8 +557,9 @@ class DuplicateFinderViewModel @Inject constructor(
         if (toDelete.isEmpty()) return
 
         viewModelScope.launch {
+            // A local (device) delete needs no account; the use case only requires a signed-in user
+            // for a cloud trash, which local-only mode never produces. Pass the nullable userId through.
             val userId = primaryUserId ?: runCatching { accountManager.getPrimaryUserId().first() }.getOrNull()
-            if (userId == null) return@launch
             _uiState.update { it.copy(isDeleting = true, errorMessage = null) }
             try {
                 Log.d(TAG, "deleteExtrasBatch: groups=${perGroup.size}, toDelete=${toDelete.size}")
@@ -573,7 +600,8 @@ class DuplicateFinderViewModel @Inject constructor(
         _uiState.update { it.copy(pendingDeleteIntent = null) }
         if (pending == null) return
         viewModelScope.launch {
-            val userId = primaryUserId ?: runCatching { accountManager.getPrimaryUserId().first() }.getOrNull() ?: return@launch
+            // A local (device) delete needs no account; the use case guards its own cloud branch.
+            val userId = primaryUserId ?: runCatching { accountManager.getPrimaryUserId().first() }.getOrNull()
             try {
                 // This reports a refused Drive delete by RETURNING it, the same way the first attempt
                 // does, so ignoring the answer recorded the copies as gone while the Drive half was
