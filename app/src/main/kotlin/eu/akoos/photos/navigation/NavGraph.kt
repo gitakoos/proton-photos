@@ -92,6 +92,8 @@ import eu.akoos.photos.presentation.editor.VideoEditorScreen
 import eu.akoos.photos.presentation.folders.DeviceFolderDetailScreen
 import eu.akoos.photos.presentation.folders.DeviceFolderOpenAction
 import eu.akoos.photos.presentation.gallery.GalleryScreen
+import eu.akoos.photos.presentation.gallery.localVideoUri
+import eu.akoos.photos.presentation.gallery.videoCloudPhoto
 import eu.akoos.photos.presentation.hidden.HiddenAlbumScreen
 import eu.akoos.photos.presentation.importer.ImportScreen
 import eu.akoos.photos.presentation.offline.OfflinePhotosScreen
@@ -106,6 +108,7 @@ import eu.akoos.photos.presentation.memories.MemoriesScreen
 import eu.akoos.photos.presentation.memories.MemoryCategory
 import eu.akoos.photos.presentation.memories.MemoryCategoryScreen
 import eu.akoos.photos.presentation.collage.CollageScreen
+import eu.akoos.photos.presentation.gifmaker.GifMakerScreen
 import eu.akoos.photos.presentation.metadata.MetadataEditorScreen
 import eu.akoos.photos.presentation.onboarding.OnboardingScreen
 import eu.akoos.photos.presentation.settings.AboutScreen
@@ -113,6 +116,7 @@ import eu.akoos.photos.presentation.settings.AccountScreen
 import eu.akoos.photos.presentation.settings.FaqScreen
 import eu.akoos.photos.presentation.settings.AiSettingsScreen
 import eu.akoos.photos.presentation.settings.FaceRecognitionScreen
+import eu.akoos.photos.presentation.settings.SemanticSearchScreen
 import eu.akoos.photos.presentation.settings.AppearanceSettingsScreen
 import eu.akoos.photos.presentation.settings.LandingTabScreen
 import eu.akoos.photos.presentation.settings.LanguageSettingsScreen
@@ -160,6 +164,7 @@ sealed class Screen(val route: String) {
     data object StorageSettings : Screen("storage_settings")
     data object AiSettings : Screen("ai_settings")
     data object FaceRecognition : Screen("face_recognition")
+    data object SemanticSearch : Screen("semantic_search")
     data object FaceExclusions : Screen("face_exclusions")
     data object FreeUpSpace : Screen("free_up_space")
     data object PrivacySecuritySettings : Screen("privacy_security_settings")
@@ -180,6 +185,7 @@ sealed class Screen(val route: String) {
     data object MetadataEditor : Screen("metadata_editor")
     data object Collage : Screen("collage")
     data object CollagePhotoPicker : Screen("collage_photo_picker")
+    data object GifMaker : Screen("gif_maker")
     data object LocalFolderPhotoPicker : Screen("local_folder_photo_picker")
     data object Loading : Screen("loading")
     data object Login : Screen("login")
@@ -305,6 +311,20 @@ class ThumbnailUrlsViewModel @Inject constructor(
     val urls: StateFlow<Map<String, String>> = store.urls
 }
 
+/** Encodes a single trash viewer action as the "action|kind|key" string the Trash screen parses and
+ *  runs. A Synced item never appears in trash, so it maps to an empty no-op. */
+private fun trashActionString(action: String, item: GalleryItem): String = when (item) {
+    is GalleryItem.LocalOnly -> "$action|device|${item.local.uri}"
+    is GalleryItem.CloudOnly -> "$action|cloud|${item.cloud.linkId}"
+    else -> ""
+}
+
+/** What the GIF maker was opened with: a device video's URI, or a cloud-only video to download first. */
+private sealed interface GifMakerSource {
+    data class LocalUri(val uri: String) : GifMakerSource
+    data class Cloud(val photo: CloudPhoto) : GifMakerSource
+}
+
 @Composable
 fun NavGraph(
     onStartLogin: () -> Unit = {},
@@ -376,6 +396,10 @@ fun NavGraph(
     // True when the viewer was opened from an album detail (not from the main gallery).
     // Suppresses the per-photo "Save to device" button — the album has its own "Download all".
     var viewerFromAlbum by remember { mutableStateOf(false) }
+    // True only while the viewer was opened from the Trash screen, so it renders read-only
+    // (no delete / favourite / rename / add-to-album / edit). Set at every viewer-open site
+    // like viewerFromAlbum, so a later non-trash open can never inherit a stale true.
+    var viewerTrashMode by remember { mutableStateOf(false) }
     // True when the entry point asked for a slideshow rather than a single photo, so the viewer
     // opens already playing. Cleared on the way out, like viewerSecure, so an ordinary photo tap
     // afterwards opens still.
@@ -394,6 +418,26 @@ fun NavGraph(
     var collageItems by remember { mutableStateOf<List<GalleryItem>>(emptyList()) }
     // Photos the in-app picker returned to add to the open collage.
     var collagePicked by remember { mutableStateOf<List<GalleryItem>?>(null) }
+    // The source handed to the GIF maker, in nav scope because it reaches the screen the same way the
+    // collage items do. A device video carries its URI; a cloud-only video carries the CloudPhoto so the
+    // maker downloads it first, exactly the way the video editor's cloud path does.
+    var gifMakerSource by remember { mutableStateOf<GifMakerSource?>(null) }
+    val navigateToGifMaker: (String) -> Unit = { uri ->
+        gifMakerSource = GifMakerSource.LocalUri(uri)
+        navController.navigate(Screen.GifMaker.route)
+    }
+    val navigateToGifMakerCloud: (CloudPhoto) -> Unit = { photo ->
+        gifMakerSource = GifMakerSource.Cloud(photo)
+        navController.navigate(Screen.GifMaker.route)
+    }
+    // Routes a gallery item to the GIF maker: a device video plays from its local file, a cloud-only
+    // video downloads first. A cloud-only item only exists when signed in, so guests stay on the local
+    // path with no extra gate.
+    val navigateToGifMakerForItem: (GalleryItem) -> Unit = { item ->
+        val local = item.localVideoUri()
+        if (local != null) navigateToGifMaker(local)
+        else item.videoCloudPhoto()?.let { navigateToGifMakerCloud(it) }
+    }
     // The name typed for a new device folder, and the device photos the picker returned to fill it
     // (logged-out New folder flow). Nav scope so the value survives the picker round-trip.
     var pendingLocalFolderName by remember { mutableStateOf<String?>(null) }
@@ -533,6 +577,7 @@ fun NavGraph(
             selectedViewerIndex = 0
             selectedViewerHiddenLinkIds = emptySet()
             viewerFromAlbum = false
+            viewerTrashMode = false
             navController.navigate(Screen.Viewer.route) {
                 popUpTo(navController.graph.id) { inclusive = true }
             }
@@ -668,6 +713,7 @@ fun NavGraph(
                     selectedViewerIndex = index
                     selectedViewerHiddenLinkIds = hiddenCloudLinkIds
                     viewerFromAlbum = false
+                    viewerTrashMode = false
                     navController.navigate(Screen.Viewer.route)
                 },
                 onAlbumClick = { album ->
@@ -718,6 +764,7 @@ fun NavGraph(
                     collageItems = selection
                     navController.navigate(Screen.Collage.route)
                 },
+                onCreateGif = navigateToGifMakerForItem,
                 onStartNewFolderPick = { name ->
                     pendingLocalFolderName = name
                     navController.navigate(Screen.LocalFolderPhotoPicker.route)
@@ -757,6 +804,7 @@ fun NavGraph(
                     selectedViewerIndex = index
                     selectedViewerHiddenLinkIds = emptySet()
                     viewerFromAlbum = false
+                    viewerTrashMode = false
                     navController.navigate(Screen.Viewer.route)
                 },
                 onSeeAll = { cat ->
@@ -806,6 +854,7 @@ fun NavGraph(
                     selectedViewerIndex = index
                     selectedViewerHiddenLinkIds = emptySet()
                     viewerFromAlbum = false
+                    viewerTrashMode = false
                     navController.navigate(Screen.Viewer.route)
                 },
                 onSwitchCategory = { cat ->
@@ -830,6 +879,7 @@ fun NavGraph(
                         selectedViewerIndex = idx
                         selectedViewerHiddenLinkIds = emptySet()
                         viewerFromAlbum = false
+                        viewerTrashMode = false
                         navController.navigate(Screen.Viewer.route)
                     },
                 )
@@ -870,6 +920,7 @@ fun NavGraph(
                     selectedViewerIndex = items.indexOfFirst { it.stableId == item.stableId }.coerceAtLeast(0)
                     selectedViewerHiddenLinkIds = emptySet()
                     viewerFromAlbum = false
+                    viewerTrashMode = false
                     navController.navigate(Screen.Viewer.route)
                 },
                 onRename = { name -> personVm.rename(personId, name) { navController.popBackStack() } },
@@ -944,6 +995,7 @@ fun NavGraph(
                 onBack = { settledKey ->
                     viewerSecure = false
                     viewerAutoplay = false
+                    viewerTrashMode = false
                     viewerReturnKey.value = settledKey
                     leaveOverlayScreen()
                 },
@@ -951,7 +1003,7 @@ fun NavGraph(
                 // Every mutating affordance in the viewer (delete / set-as-cover / favorite /
                 // rename / add-to-album / edit) collapses into a no-op + hides itself behind
                 // this flag.
-                isReadOnlyAlbum = readOnlyAlbum,
+                isReadOnlyAlbum = readOnlyAlbum || viewerTrashMode,
                 // Taking a photo out of an album is an edit, so it follows the same right as
                 // adding rather than plain ownership. That makes it a separate question from
                 // isReadOnlyAlbum: an editor on a shared album may remove, and is exactly the
@@ -965,11 +1017,30 @@ fun NavGraph(
                     editorItem = item
                     navController.navigate(Screen.PhotoEditor.route)
                 },
+                onCreateGif = navigateToGifMakerForItem,
                 onEditMetadata = { item ->
                     metadataEditorRequest = MetadataEditorRequest(listOf(item), readOnlyAlbum)
                     navController.navigate(Screen.MetadataEditor.route)
                 },
                 onOpenPerson = { personId -> navController.navigate(Screen.PersonDetail.create(personId)) },
+                trashMode = viewerTrashMode,
+                // The Trash screen owns both actions (device via its MediaStore launchers, cloud via
+                // its ViewModel), so the viewer records the action on the Trash back-stack entry and
+                // closes the same way onBack does.
+                onTrashRestore = { item ->
+                    navController.previousBackStackEntry?.savedStateHandle?.set(
+                        "trashViewerAction", trashActionString("restore", item),
+                    )
+                    viewerTrashMode = false
+                    leaveOverlayScreen()
+                },
+                onTrashDeleteForever = { item ->
+                    navController.previousBackStackEntry?.savedStateHandle?.set(
+                        "trashViewerAction", trashActionString("delete", item),
+                    )
+                    viewerTrashMode = false
+                    leaveOverlayScreen()
+                },
             )
         }
 
@@ -1181,6 +1252,20 @@ fun NavGraph(
             }
         }
 
+        composable(Screen.GifMaker.route) {
+            when (val src = gifMakerSource) {
+                is GifMakerSource.LocalUri -> GifMakerScreen(
+                    videoUri = src.uri,
+                    onBack = { navController.popBackStack() },
+                )
+                is GifMakerSource.Cloud -> GifMakerScreen(
+                    cloudPhoto = src.photo,
+                    onBack = { navController.popBackStack() },
+                )
+                null -> LaunchedEffect(Unit) { navController.popBackStack() }
+            }
+        }
+
         composable(Screen.CollagePhotoPicker.route) {
             // The album picker in "return" mode: it hands the selected photos back to the collage
             // instead of adding them to an album.
@@ -1217,6 +1302,7 @@ fun NavGraph(
                     sharedByEmail = album.sharedByEmail,
                     volumeId = album.volumeId,
                     coverThumbnailUrl = album.coverThumbnailUrl,
+                    coverLinkId = album.coverLinkId,
                     openShareSheet = albumOpenedToShare,
                     onShareSheetRequestConsumed = { albumOpenedToShare = false },
                     openAction = albumOpenAction,
@@ -1231,6 +1317,7 @@ fun NavGraph(
                         // was populated.
                         selectedViewerHiddenLinkIds = emptySet()
                         viewerFromAlbum = true
+                        viewerTrashMode = false
                         navController.navigate(Screen.Viewer.route)
                     },
                     onSlideshowClick = { items ->
@@ -1240,6 +1327,7 @@ fun NavGraph(
                         selectedViewerIndex = 0
                         selectedViewerHiddenLinkIds = emptySet()
                         viewerFromAlbum = true
+                        viewerTrashMode = false
                         viewerAutoplay = true
                         navController.navigate(Screen.Viewer.route)
                     },
@@ -1387,14 +1475,21 @@ fun NavGraph(
             AiSettingsScreen(
                 onBack = { navController.popBackStack() },
                 onFaceRecognitionClick = { navController.navigate(Screen.FaceRecognition.route) },
-                onExcludedFacesClick = { navController.navigate(Screen.FaceExclusions.route) },
+                onSemanticSearchClick = { navController.navigate(Screen.SemanticSearch.route) },
             )
         }
 
         composable(Screen.FaceRecognition.route) {
             FaceRecognitionScreen(
                 onBack = { navController.popBackStack() },
-                onSeeAllPeople = { navController.navigate(Screen.People.route) },
+                onOpenPerson = { personId -> navController.navigate(Screen.PersonDetail.create(personId)) },
+                onOpenExcluded = { navController.navigate(Screen.FaceExclusions.route) },
+            )
+        }
+
+        composable(Screen.SemanticSearch.route) {
+            SemanticSearchScreen(
+                onBack = { navController.popBackStack() },
             )
         }
 
@@ -1459,6 +1554,7 @@ fun NavGraph(
                     selectedViewerIndex = index
                     selectedViewerHiddenLinkIds = emptySet()
                     viewerFromAlbum = false
+                    viewerTrashMode = false
                     viewerSecure = true
                     navController.navigate(Screen.Viewer.route)
                 },
@@ -1470,6 +1566,7 @@ fun NavGraph(
                     selectedViewerIndex = index
                     selectedViewerHiddenLinkIds = emptySet()
                     viewerFromAlbum = false
+                    viewerTrashMode = false
                     viewerSecure = true
                     navController.navigate(Screen.Viewer.route)
                 },
@@ -1486,6 +1583,7 @@ fun NavGraph(
                     selectedViewerIndex = index
                     selectedViewerHiddenLinkIds = emptySet()
                     viewerFromAlbum = false
+                    viewerTrashMode = false
                     viewerSecure = false
                     navController.navigate(Screen.Viewer.route)
                 },
@@ -1511,6 +1609,7 @@ fun NavGraph(
                         selectedViewerIndex = index
                         selectedViewerHiddenLinkIds = emptySet()
                         viewerFromAlbum = false
+                        viewerTrashMode = false
                         // A folder reached from the Hidden area lists vaulted photos, so its viewer
                         // gets the same FLAG_SECURE window the vault grid's own viewer gets. The flag
                         // has to be set on both branches: it survives across navigations, so leaving
@@ -1532,6 +1631,7 @@ fun NavGraph(
                         selectedViewerIndex = 0
                         selectedViewerHiddenLinkIds = emptySet()
                         viewerFromAlbum = false
+                        viewerTrashMode = false
                         viewerAutoplay = true
                         viewerSecure = deviceFolderFromVault
                         navController.navigate(Screen.Viewer.route)
@@ -1582,12 +1682,27 @@ fun NavGraph(
             arguments = listOf(navArgument("tab") { type = NavType.StringType; defaultValue = "device" }),
         ) { backStackEntry ->
             val tab = backStackEntry.arguments?.getString("tab")
+            // Restore / Delete-forever chosen inside the read-only viewer lands here as an
+            // "action|kind|key" string on this entry's savedStateHandle; TrashScreen runs it.
+            val viewerAction by backStackEntry.savedStateHandle
+                .getStateFlow<String?>("trashViewerAction", null)
+                .collectAsStateWithLifecycle()
             TrashScreen(
                 onBack = { navController.popBackStack() },
                 initialTab = if (tab == "cloud")
                     eu.akoos.photos.presentation.settings.TrashTab.Cloud
                 else
                     eu.akoos.photos.presentation.settings.TrashTab.Device,
+                onOpenItem = { items, index ->
+                    selectedViewerItems = items
+                    selectedViewerIndex = index
+                    selectedViewerHiddenLinkIds = emptySet()
+                    viewerFromAlbum = false
+                    viewerTrashMode = true
+                    navController.navigate(Screen.Viewer.route)
+                },
+                pendingViewerAction = viewerAction,
+                onViewerActionHandled = { backStackEntry.savedStateHandle["trashViewerAction"] = null },
             )
         }
 
@@ -1624,6 +1739,7 @@ fun NavGraph(
                     selectedViewerIndex = index
                     selectedViewerHiddenLinkIds = emptySet()
                     viewerFromAlbum = false
+                    viewerTrashMode = false
                     navController.navigate(Screen.Viewer.route)
                 },
                 onOpenMap = {
@@ -1712,6 +1828,7 @@ fun NavGraph(
                     selectedViewerIndex = index
                     selectedViewerHiddenLinkIds = emptySet()
                     viewerFromAlbum = false
+                    viewerTrashMode = false
                     navController.navigate(Screen.Viewer.route)
                 },
                 onEditMetadata = { selection ->

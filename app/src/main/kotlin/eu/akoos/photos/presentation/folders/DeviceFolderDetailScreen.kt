@@ -585,6 +585,7 @@ fun DeviceFolderDetailScreen(
                             isOffline = inputs.isOffline,
                             typeBadgeRes = inputs.typeBadgeRes,
                             typeBadgeCdRes = inputs.typeBadgeCdRes,
+                            isLocalGif = inputs.isLocalGif,
                             columns = cols,
                             cornerRadius = if (seamless) 0.dp else 10.dp,
                             onClick = {

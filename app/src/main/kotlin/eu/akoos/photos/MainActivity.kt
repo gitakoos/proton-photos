@@ -38,6 +38,7 @@ import androidx.appcompat.app.AppCompatDelegate
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
@@ -97,6 +98,7 @@ import eu.akoos.photos.presentation.lock.AppLockManager
 import eu.akoos.photos.presentation.lock.AppLockScreen
 import eu.akoos.photos.presentation.settings.ThemeMode
 import eu.akoos.photos.presentation.settings.ThemePalette
+import eu.akoos.photos.presentation.theme.LocalStaticImageLoader
 import eu.akoos.photos.presentation.theme.ProtonPhotosTheme
 import eu.akoos.photos.presentation.util.LocaleOverride
 import eu.akoos.photos.data.repository.drive.PhotoStreamService
@@ -351,6 +353,25 @@ class MainActivity : AppCompatActivity() {
             }
             val amoledBlack by amoledFlow.collectAsState(initial = false)
 
+            // Tint the green "backed up" cloud badges with the palette accent — DataStore-backed, live.
+            val tintCloudFlow = remember {
+                settingsDataStore.data.map { it[SettingsKeys.TINT_CLOUD_WITH_ACCENT] == true }
+            }
+            val tintCloudWithAccent by tintCloudFlow.collectAsState(initial = false)
+
+            // GIF autoplay in grids / on album covers, DataStore-backed, re-collected so they apply live.
+            val gifAutoplayGridFlow = remember {
+                settingsDataStore.data.map { it[SettingsKeys.GIF_AUTOPLAY_GRID] == true }
+            }
+            val gifAutoplayGrid by gifAutoplayGridFlow.collectAsState(initial = false)
+            val gifAutoplayCoversFlow = remember {
+                settingsDataStore.data.map { it[SettingsKeys.GIF_AUTOPLAY_COVERS] == true }
+            }
+            val gifAutoplayCovers by gifAutoplayCoversFlow.collectAsState(initial = false)
+
+            // The animated-decoder-free Coil loader, exposed to grids/covers that render a GIF as a still.
+            val staticImageLoader = remember { (application as App).staticImageLoader }
+
             // Active locale — DataStore-driven so a change reflows string resolution without an
             // Activity recreate. Initial value from the boot-mirror to avoid a first-composition flash.
             val languageFlow = remember {
@@ -374,7 +395,15 @@ class MainActivity : AppCompatActivity() {
             }
 
             LocaleOverride(language) {
-                ProtonPhotosTheme(darkTheme = useDark, palette = palette, amoledBlack = amoledBlack) {
+                ProtonPhotosTheme(
+                    darkTheme = useDark,
+                    palette = palette,
+                    amoledBlack = amoledBlack,
+                    tintCloudWithAccent = tintCloudWithAccent,
+                    gifAutoplayGrid = gifAutoplayGrid,
+                    gifAutoplayCovers = gifAutoplayCovers,
+                ) {
+                  CompositionLocalProvider(LocalStaticImageLoader provides staticImageLoader) {
                     val forceUpdateFlow = remember {
                         settingsDataStore.data.map { it[FORCE_UPDATE_REQUIRED] == true }
                     }
@@ -406,6 +435,7 @@ class MainActivity : AppCompatActivity() {
                             }
                         }
                     }
+                  }
                 }
             }
         }

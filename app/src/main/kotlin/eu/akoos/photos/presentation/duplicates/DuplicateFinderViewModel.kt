@@ -53,7 +53,7 @@ import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.usecase.DeletePhotoUseCase
 import eu.akoos.photos.domain.usecase.FindDuplicatesUseCase
 import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
-import eu.akoos.photos.util.PerceptualHash
+import eu.akoos.photos.util.PdqHash
 import eu.akoos.photos.util.retryOnDbTear
 import javax.inject.Inject
 
@@ -61,7 +61,7 @@ private const val TAG = "DuplicateFinder"
 
 /** A lean projection of a stored perceptual-hash row: just the fingerprint and the freshness token,
  *  so the clustering pass never holds the full entity for every photo in the library. */
-private data class LeanHash(val hash: Long, val freshness: String)
+private data class LeanHash(val fingerprint: PdqHash.Fingerprint, val freshness: String)
 
 /** A cheap reference bundle the duplicate finder's combine emits so its per-emission transform
  *  allocates nothing on a large library: it just carries the current source lists. The expensive
@@ -214,7 +214,7 @@ class DuplicateFinderViewModel @Inject constructor(
                 combine(
                     libraryFlow,
                     localContentHashFiller.hashes,
-                    perceptualHashDao.observeLite(PerceptualHash.DHASH_ALGO_VERSION),
+                    perceptualHashDao.observeLite(PdqHash.ALGO_VERSION),
                     recentlyDeleted,
                 ) { items, localHashes, hashRows, deleted ->
                     Sources(items, localHashes, hashRows, deleted)
@@ -233,7 +233,8 @@ class DuplicateFinderViewModel @Inject constructor(
                     val live = if (s.deleted.isEmpty()) s.items
                         else s.items.filterNot { it.stableId in s.deleted }
                     val freshHashes = HashMap<String, LeanHash>(s.hashRows.size)
-                    for (r in s.hashRows) freshHashes[r.key] = LeanHash(r.hash, r.freshness)
+                    for (r in s.hashRows) freshHashes[r.key] =
+                        LeanHash(PdqHash.Fingerprint(longArrayOf(r.h0, r.h1, r.h2, r.h3), r.quality, r.color), r.freshness)
                     Prepared(live, s.localHashes, freshHashes, s.items, s.deleted, s.localHashes)
                 }
                 .flowOn(Dispatchers.Default)
@@ -307,35 +308,41 @@ class DuplicateFinderViewModel @Inject constructor(
         // Resolve each candidate to its fresh hash off the main thread, and fingerprint the input
         // (candidate key -> hash) so a pass that only removed candidates can skip the O(n²) cluster.
         data class Prepared(
-            val deviceHashed: List<Pair<GalleryItem, Long>>,
-            val cloudHashed: List<Pair<GalleryItem, Long>>,
+            val deviceHashed: List<Pair<GalleryItem, PdqHash.Fingerprint>>,
+            val cloudHashed: List<Pair<GalleryItem, PdqHash.Fingerprint>>,
             val fingerprint: Map<String, Long>,
             val anyMissing: Boolean,
         )
         val prepared = withContext(Dispatchers.Default) {
-            val deviceHashed = ArrayList<Pair<GalleryItem, Long>>()
-            val cloudHashed = ArrayList<Pair<GalleryItem, Long>>()
+            val deviceHashed = ArrayList<Pair<GalleryItem, PdqHash.Fingerprint>>()
+            val cloudHashed = ArrayList<Pair<GalleryItem, PdqHash.Fingerprint>>()
             val fingerprint = HashMap<String, Long>(items.size)
             var anyMissing = false
+            // Add a resolved fingerprint to its bucket, unless it is a near-flat frame ([PdqHash.isUsable]
+            // is false) which is intentionally left out of the finder rather than matched against every
+            // other flat frame. A still-missing fingerprint keeps the "scanning" note up; a dropped
+            // near-flat one does not, since it is a finished, deliberate outcome.
+            fun consider(item: GalleryItem, fp: PdqHash.Fingerprint?, bucket: ArrayList<Pair<GalleryItem, PdqHash.Fingerprint>>, tag: String) {
+                when {
+                    fp == null -> anyMissing = true
+                    PdqHash.isUsable(fp) -> {
+                        bucket.add(item to fp)
+                        fingerprint["$tag:${item.stableId}"] = changeKey(fp)
+                    }
+                }
+            }
             for (item in items) {
                 // Shown under "Identical" already; never list it under "Similar" too.
                 if (item.stableId in exactIds) continue
                 when (item) {
-                    is GalleryItem.LocalOnly -> {
-                        val hash = freshHashFor(item.local.uri, "${item.local.dateModified}_${item.local.sizeBytes}", freshHashes)
-                        if (hash != null) { deviceHashed.add(item to hash); fingerprint["d:${item.stableId}"] = hash } else anyMissing = true
-                    }
-                    is GalleryItem.CloudOnly -> {
-                        val linkId = item.cloud.linkId
-                        val hash = freshHashFor(linkId, linkId, freshHashes)
-                        if (hash != null) { cloudHashed.add(item to hash); fingerprint["c:${item.stableId}"] = hash } else anyMissing = true
-                    }
-                    is GalleryItem.Synced -> {
-                        // Fingerprinted from the local file (see PerceptualHashScheduler); grouped with
-                        // the cloud-backed candidates since a Synced photo lives on Drive too.
-                        val hash = freshHashFor(item.local.uri, "${item.local.dateModified}_${item.local.sizeBytes}", freshHashes)
-                        if (hash != null) { cloudHashed.add(item to hash); fingerprint["c:${item.stableId}"] = hash } else anyMissing = true
-                    }
+                    is GalleryItem.LocalOnly ->
+                        consider(item, freshHashFor(item.local.uri, "${item.local.dateModified}_${item.local.sizeBytes}", freshHashes), deviceHashed, "d")
+                    is GalleryItem.CloudOnly ->
+                        consider(item, freshHashFor(item.cloud.linkId, item.cloud.linkId, freshHashes), cloudHashed, "c")
+                    // Fingerprinted from the local file (see PerceptualHashScheduler); grouped with the
+                    // cloud-backed candidates since a Synced photo lives on Drive too.
+                    is GalleryItem.Synced ->
+                        consider(item, freshHashFor(item.local.uri, "${item.local.dateModified}_${item.local.sizeBytes}", freshHashes), cloudHashed, "c")
                 }
             }
             Prepared(deviceHashed, cloudHashed, fingerprint, anyMissing)
@@ -378,13 +385,19 @@ class DuplicateFinderViewModel @Inject constructor(
         }
     }
 
-    /** The stored hash for [key] when it exists and matches the expected [freshness]; null when
+    /** The stored fingerprint for [key] when it exists and matches the expected [freshness]; null when
      *  missing or stale. The map is already filtered to the current algorithm version in the combine. */
     private fun freshHashFor(
         key: String,
         freshness: String,
         freshHashes: Map<String, LeanHash>,
-    ): Long? = freshHashes[key]?.takeIf { it.freshness == freshness }?.hash
+    ): PdqHash.Fingerprint? = freshHashes[key]?.takeIf { it.freshness == freshness }?.fingerprint
+
+    /** A single-long digest of a fingerprint, used only to notice when a candidate's fingerprint changed
+     *  so the O(n^2) re-cluster is skipped when nothing moved. Folds the structure and the quality, so a
+     *  frame crossing the usability line also reads as changed. */
+    private fun changeKey(fp: PdqHash.Fingerprint): Long =
+        fp.bits[0] xor fp.bits[1] xor fp.bits[2] xor fp.bits[3] xor fp.quality.toLong()
 
     /** Drop any group member whose id is no longer live (deleted since the last cluster), collapsing a
      *  group to nothing when one copy remains. A group with every member still present is returned as
@@ -401,22 +414,22 @@ class DuplicateFinderViewModel @Inject constructor(
     }
 
     /**
-     * True single-link clustering. Any two items within [PerceptualHash.SIMILARITY_THRESHOLD] join the
-     * same cluster, TRANSITIVELY: a near-duplicate run A~B~C groups fully even when A and C are just past
-     * the threshold from each other, so a burst of similar shots lands in one group instead of being
-     * split by the first item it was compared against. Same threshold, so it never widens what counts as
-     * similar; it only stops under-grouping a chain. The clustering itself is delegated to the
-     * memory-bounded [PerceptualHash.clusterSimilar], which produces the identical clusters a full
-     * pairwise sweep would without accumulating a candidate-pair set that a very large library can OOM on.
+     * True single-link clustering. Any two items that [PdqHash.matches] (structure within
+     * [PdqHash.MATCH_THRESHOLD] AND colour within [PdqHash.MAX_COLOR_DISTANCE]) join the same cluster,
+     * TRANSITIVELY: a near-duplicate run A~B~C groups fully even when A and C are just past the threshold
+     * from each other, so a burst of similar shots lands in one group instead of being split by the first
+     * item it was compared against. The clustering is delegated to the band-indexed
+     * [PdqHash.clusterSimilar], which produces the identical clusters a full pairwise sweep would without
+     * accumulating a candidate-pair set that a very large library can OOM on. Callers have already dropped
+     * near-flat frames, so every fingerprint here is usable.
      */
     private fun group(
-        hashed: List<Pair<GalleryItem, Long>>,
+        hashed: List<Pair<GalleryItem, PdqHash.Fingerprint>>,
         type: FindDuplicatesUseCase.GroupType,
     ): List<FindDuplicatesUseCase.DuplicateGroup> {
         val n = hashed.size
         if (n < 2) return emptyList()
-        val hashes = LongArray(n) { hashed[it].second }
-        val root = PerceptualHash.clusterSimilar(hashes, PerceptualHash.SIMILARITY_THRESHOLD)
+        val root = PdqHash.clusterSimilar(hashed.map { it.second })
         val byRoot = HashMap<Int, MutableList<GalleryItem>>()
         for (i in 0 until n) byRoot.getOrPut(root[i]) { mutableListOf() }.add(hashed[i].first)
         return byRoot.values

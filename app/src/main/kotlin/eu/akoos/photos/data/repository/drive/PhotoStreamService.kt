@@ -483,6 +483,9 @@ class PhotoStreamService @Inject constructor(
     /** Mark [linkIds] as just-trashed so the next refresh keeps them out (see [isRecentlyTrashed]). */
     fun markRecentlyTrashed(linkIds: Collection<String>) {
         val now = System.currentTimeMillis()
+        // Sweep entries past the protection window while marking, so a large trash with no later
+        // isRecentlyTrashed lookups does not keep them in the map until the next reset().
+        recentlyTrashed.entries.removeAll { now - it.value > TRASH_PROTECTION_WINDOW_MS }
         linkIds.forEach { recentlyTrashed[it] = now }
     }
 

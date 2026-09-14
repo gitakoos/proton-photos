@@ -49,6 +49,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -77,6 +78,17 @@ import eu.akoos.photos.data.face.FaceModelPreparation
 import eu.akoos.photos.data.ocr.OcrModelComponent
 import eu.akoos.photos.data.ocr.OcrModelManager
 import eu.akoos.photos.data.ocr.OcrModelOutcome
+import eu.akoos.photos.data.semantic.SemanticIndexingProgress
+import eu.akoos.photos.data.semantic.SemanticIndexingScheduler
+import eu.akoos.photos.data.semantic.SemanticModelAssets
+import eu.akoos.photos.data.semantic.SemanticModelManager
+import eu.akoos.photos.data.semantic.SemanticModelPreparation
+import eu.akoos.photos.service.ModelDownloadService
+import eu.akoos.photos.util.MlRail
+import eu.akoos.photos.util.MlWalkGate
+import eu.akoos.photos.util.ModelDownloadKind
+import eu.akoos.photos.util.ModelDownloadPhase
+import eu.akoos.photos.util.ModelDownloadState
 import eu.akoos.photos.data.hidden.HiddenVaultJournal
 import eu.akoos.photos.data.hidden.HiddenVaultLeftovers
 import eu.akoos.photos.data.hidden.HiddenVaultRecords
@@ -102,6 +114,7 @@ import eu.akoos.photos.domain.usecase.ImportFaceIndexUseCase
 import eu.akoos.photos.domain.usecase.FreeUpSpaceUseCase
 import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
 import eu.akoos.photos.domain.usecase.ObservePeopleUseCase
+import eu.akoos.photos.domain.usecase.isNameableCluster
 import eu.akoos.photos.domain.usecase.ReconcileSyncStateUseCase
 import eu.akoos.photos.domain.usecase.UploadPendingUseCase
 import eu.akoos.photos.domain.usecase.UploadStatus
@@ -164,6 +177,9 @@ class SettingsViewModel @Inject constructor(
     private val getGalleryItems: GetGalleryItemsUseCase,
     private val newsRepository: NewsRepository,
     private val networkObserver: NetworkObserver,
+    private val semanticIndexingScheduler: SemanticIndexingScheduler,
+    private val modelDownloadState: ModelDownloadState,
+    private val mlWalkGate: MlWalkGate,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SettingsUiState())
@@ -181,10 +197,71 @@ class SettingsViewModel @Inject constructor(
     private val ocrModelManager by lazy { OcrModelManager(context) }
     private val faceModelManager by lazy { FaceModelManager(context) }
     private val faceEmbeddingModelManager by lazy { FaceEmbeddingModelManager(context) }
+    private val semanticModelManager by lazy { SemanticModelManager(context) }
+
+    init {
+        // The per-feature enable toggles mirror their durable prefs, so a download that finished on
+        // ModelDownloadService (which sets the pref) flips the row on live on whichever settings page is
+        // open, and because the pref is the source of truth a stale finished-state can never re-enable a
+        // feature the user has since turned off. OCR keeps its "on when the models are already present"
+        // default when its pref was never written (matching the load path and the viewer's own gate), so
+        // the disk check runs off the main thread.
+        viewModelScope.launch {
+            context.settingsDataStore.data
+                .map {
+                    Triple(
+                        it[SettingsKeys.FACE_ENABLED] == true,
+                        it[SettingsKeys.OCR_ENABLED] ?: ocrModelManager.filesPresentQuick(),
+                        it[SettingsKeys.SEMANTIC_ENABLED] == true,
+                    )
+                }
+                .distinctUntilChanged()
+                .flowOn(Dispatchers.IO)
+                .collect { (face, ocr, semantic) ->
+                    _uiState.update { it.copy(faceEnabled = face, ocrEnabled = ocr, semanticEnabled = semantic) }
+                }
+        }
+        // Reflect the shared model-download progress into the per-feature rows, derived fresh from the
+        // whole snapshot on each emit rather than accumulated: a cleared or absent entry reads as
+        // not-downloading (so a stopped or torn-down download can never leave a row wedged at a frozen
+        // bar), and a terminal state lingering in the process-lived map is harmless. The enable itself
+        // rides the prefs above; only the transient spinner, byte count and failure flag come from here.
+        viewModelScope.launch {
+            modelDownloadState.status.collect { s ->
+                val face = s[ModelDownloadKind.FACE]
+                val ocr = s[ModelDownloadKind.OCR]
+                val semantic = s[ModelDownloadKind.SEMANTIC]
+                _uiState.update {
+                    it.copy(
+                        faceModelDownloading = face?.phase == ModelDownloadPhase.DOWNLOADING,
+                        faceModelDownloadFailed = face?.phase == ModelDownloadPhase.FAILED,
+                        faceModelDownloadedBytes = if (face?.phase == ModelDownloadPhase.DOWNLOADING) (face?.downloadedBytes ?: 0L) else 0L,
+                        faceRecognitionAvailable = if (face?.phase == ModelDownloadPhase.DONE) true else it.faceRecognitionAvailable,
+                        ocrModelDownloading = ocr?.phase == ModelDownloadPhase.DOWNLOADING,
+                        ocrModelDownloadFailed = ocr?.phase == ModelDownloadPhase.FAILED,
+                        semanticModelDownloading = semantic?.phase == ModelDownloadPhase.DOWNLOADING,
+                        semanticModelDownloadFailed = semantic?.phase == ModelDownloadPhase.FAILED,
+                        semanticModelDownloadProgress = if (semantic?.phase == ModelDownloadPhase.DOWNLOADING) (semantic?.downloadedBytes ?: 0L) else 0L,
+                    )
+                }
+            }
+        }
+    }
 
     /** Where the background face indexer stands, surfaced verbatim from the scheduler so the AI
      *  settings panel can label its state and offer pause / resume. */
     val faceIndexingProgress: StateFlow<FaceIndexingProgress> = faceIndexingScheduler.progress
+
+    /** Where the background semantic indexer stands, surfaced verbatim from the scheduler so the
+     *  semantic-search sub-page can label its state and offer pause / resume. Mirrors
+     *  [faceIndexingProgress]. */
+    val semanticIndexingProgress: StateFlow<SemanticIndexingProgress> = semanticIndexingScheduler.progress
+
+    /** Which background ML walk holds the shared model gate right now (or null when free). The face and
+     *  semantic walks share one gate so their ONNX sessions are never both resident, so whichever asked
+     *  second waits; its card reads this to say it is standing by for the other task rather than looking
+     *  frozen. */
+    val mlActiveRail: StateFlow<MlRail?> = mlWalkGate.activeRail
 
     /** The face card's view, folding the scheduler's progress together with the live device health so
      *  the card can name a health pause the walk itself never reports (it keeps emitting
@@ -230,6 +307,36 @@ class SettingsViewModel @Inject constructor(
                 .map { list -> list.mapNotNull { it.toPersonUi() }.filter { !it.displayName.isNullOrBlank() } }
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), emptyList())
+
+    /** Every real face group for the account, named and not-yet-named alike (excluding the Unsorted
+     *  bucket and clusters too small to name), resolved to tiles. The scan status shows these so a group
+     *  appears as soon as it forms, not only once it is named; a guest's local partition groups here too.
+     *  Live, so the row grows as a walk runs. */
+    val faceGroups: StateFlow<List<PersonUi>> = accountManager.getPrimaryUserId()
+        .flatMapLatest { userId ->
+            observePeopleUseCase(userId, if (userId == null) getGalleryItems.invokeLocalOnly() else getGalleryItems.invoke(userId))
+                .map { list ->
+                    list.filter { (!it.displayName.isNullOrBlank() && !it.isOther) || isNameableCluster(it.displayName, it.isOther, it.faceCount) }
+                        .mapNotNull { it.toPersonUi() }
+                }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), emptyList())
+
+    /** How many real groups the clustering has formed for the account (named + not-yet-named), counted
+     *  straight from the person rows so the AI-menu row subtitle needs no cover resolution. */
+    val faceGroupCount: StateFlow<Int> = accountManager.getPrimaryUserId()
+        .flatMapLatest { userId ->
+            personDao.observePeopleForUser(userId?.id ?: PhotoLocationEntity.LOCAL_USER)
+                .map { people ->
+                    people.count { (!it.displayName.isNullOrBlank() && !it.isOther) || isNameableCluster(it.displayName, it.isOther, it.faceCount) }
+                }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), 0)
+
+    /** Total faces the scan has detected for the account, a live figure for the status headline. */
+    val faceCount: StateFlow<Int> = accountManager.getPrimaryUserId()
+        .flatMapLatest { userId -> faceDao.observeFaceCountForUser(userId?.id ?: PhotoLocationEntity.LOCAL_USER) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), 0)
 
     /** Adapt a domain [PersonSummary] to the gallery's [PersonUi]; a person with no resolvable cover is
      *  dropped, matching how the People rail maps them. */
@@ -407,7 +514,11 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
                 val cache = context.cacheDir
-                listOf("thumbnails", "fullres", "fullres-session").forEach { name ->
+                // editor + motion hold transient editor / motion-photo scratch that only exists
+                // while their screen is open, so they are safe to clear on demand here; video_editor
+                // is deliberately left to the periodic age sweep so this button cannot delete a
+                // background export still being written.
+                listOf("thumbnails", "fullres", "fullres-session", "editor", "motion").forEach { name ->
                     val sub = File(cache, name)
                     if (sub.exists()) sub.deleteRecursively()
                 }
@@ -822,11 +933,16 @@ class SettingsViewModel @Inject constructor(
                     themeMode = ThemeMode.fromKey(migratedPrefs[SettingsKeys.THEME_MODE]),
                     palette = ThemePalette.fromKey(migratedPrefs[SettingsKeys.THEME_PALETTE]),
                     amoledBlack = migratedPrefs[SettingsKeys.AMOLED_BLACK] ?: false,
+                    tintCloudWithAccent = migratedPrefs[SettingsKeys.TINT_CLOUD_WITH_ACCENT] ?: false,
+                    gifAutoplayGrid = migratedPrefs[SettingsKeys.GIF_AUTOPLAY_GRID] ?: false,
+                    gifAutoplayCovers = migratedPrefs[SettingsKeys.GIF_AUTOPLAY_COVERS] ?: false,
                     aiFeaturesEnabled = migratedPrefs[SettingsKeys.AI_FEATURES_ENABLED] ?: false,
                     // Absent OCR opt-in defaults to whether the reader's models are already on disk, so
                     // a device that has fetched them opens with Copy text on rather than off.
                     ocrEnabled = migratedPrefs[SettingsKeys.OCR_ENABLED] ?: ocrModelManager.filesPresentQuick(),
                     faceEnabled = migratedPrefs[SettingsKeys.FACE_ENABLED] ?: false,
+                    faceAutoMerge = migratedPrefs[SettingsKeys.FACE_AUTO_MERGE] ?: false,
+                    semanticEnabled = migratedPrefs[SettingsKeys.SEMANTIC_ENABLED] ?: false,
                     landingTab = LandingTab.fromIndex(migratedPrefs[SettingsKeys.LANDING_TAB]),
                     lastSyncMs = migratedPrefs[SettingsKeys.LAST_SYNC_MS],
                     language = migratedPrefs[SettingsKeys.LANGUAGE] ?: "system",
@@ -835,6 +951,9 @@ class SettingsViewModel @Inject constructor(
                     compressVideosOnUpload = migratedPrefs[SettingsKeys.COMPRESS_VIDEO_ON_UPLOAD] ?: false,
                     compressTier = UploadCompressionTier.fromOrdinalOrDefault(
                         migratedPrefs[SettingsKeys.COMPRESS_UPLOAD_TIER] ?: UploadCompressionTier.BALANCED.ordinal
+                    ),
+                    compressTierVideo = UploadCompressionTier.fromOrdinalOrDefault(
+                        migratedPrefs[SettingsKeys.COMPRESS_UPLOAD_TIER_VIDEO] ?: UploadCompressionTier.BALANCED.ordinal
                     ),
                     mirrorStripToLocal = migratedPrefs[SettingsKeys.MIRROR_STRIP_TO_LOCAL] ?: false,
                     mirrorCompressToLocal = migratedPrefs[SettingsKeys.MIRROR_COMPRESS_TO_LOCAL] ?: false,
@@ -926,6 +1045,15 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             context.settingsDataStore.edit { it[SettingsKeys.FULLRES_WIFI_ONLY] = wifiOnly }
             _uiState.update { it.copy(fullresWifiOnly = wifiOnly) }
+        }
+    }
+
+    /** Persist the opt-in "automatically merge likely-same people" switch. When on, a drained face pass
+     *  folds each named person's closest look-alike cluster in without a per-suggestion confirmation. */
+    fun setFaceAutoMerge(enabled: Boolean) {
+        viewModelScope.launch {
+            context.settingsDataStore.edit { it[SettingsKeys.FACE_AUTO_MERGE] = enabled }
+            _uiState.update { it.copy(faceAutoMerge = enabled) }
         }
     }
 
@@ -1072,6 +1200,33 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    /** Persist the "tint the backed-up cloud badges with the palette accent" preference. Applies live via
+     *  the theme, which provides it to the badges through a composition local. */
+    fun setTintCloudWithAccent(enabled: Boolean) {
+        viewModelScope.launch {
+            context.settingsDataStore.edit { it[SettingsKeys.TINT_CLOUD_WITH_ACCENT] = enabled }
+            _uiState.update { it.copy(tintCloudWithAccent = enabled) }
+        }
+    }
+
+    /** Persist the "animate GIFs in grids" preference. Grid cells read it through a composition local
+     *  and pick the animated or static image loader accordingly. */
+    fun setGifAutoplayGrid(enabled: Boolean) {
+        viewModelScope.launch {
+            context.settingsDataStore.edit { it[SettingsKeys.GIF_AUTOPLAY_GRID] = enabled }
+            _uiState.update { it.copy(gifAutoplayGrid = enabled) }
+        }
+    }
+
+    /** Persist the "animate GIF album covers" preference. Cover composables read it through a composition
+     *  local and pick the animated or static image loader accordingly. */
+    fun setGifAutoplayCovers(enabled: Boolean) {
+        viewModelScope.launch {
+            context.settingsDataStore.edit { it[SettingsKeys.GIF_AUTOPLAY_COVERS] = enabled }
+            _uiState.update { it.copy(gifAutoplayCovers = enabled) }
+        }
+    }
+
 
     /**
      * Persist the master AI-features opt-in. Off keeps every on-device model unfetched and hides the
@@ -1147,24 +1302,13 @@ class SettingsViewModel @Inject constructor(
         _uiState.update {
             it.copy(
                 ocrModelPrompt = OcrModelPrompt.None,
-                ocrModelDownloading = true,
                 ocrModelDownloadFailed = false,
             )
         }
-        viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.OCR_MODEL_DOWNLOAD_ALLOWED] = true }
-            // The reader needs both the detection and the recognition halves, so both are fetched before
-            // the switch flips on; the detection half comes first, so the larger one is not fetched when
-            // the smaller one cannot be.
-            val ready = listOf(OcrModelComponent.Detection, OcrModelComponent.Recognition)
-                .all { ocrModelManager.ensure(it) is OcrModelOutcome.Ready }
-            if (ready) {
-                context.settingsDataStore.edit { it[SettingsKeys.OCR_ENABLED] = true }
-                _uiState.update { it.copy(ocrEnabled = true, ocrModelDownloading = false) }
-            } else {
-                _uiState.update { it.copy(ocrModelDownloading = false, ocrModelDownloadFailed = true) }
-            }
-        }
+        // Fetched on ModelDownloadService so it survives leaving this screen and shows a notification;
+        // the row's state comes back through modelDownloadState (observed in init). On a verified
+        // download the service turns Copy text on.
+        ModelDownloadService.start(context, ModelDownloadKind.OCR)
     }
 
     /**
@@ -1267,53 +1411,14 @@ class SettingsViewModel @Inject constructor(
         _uiState.update {
             it.copy(
                 faceModelPrompt = FaceModelPrompt.None,
-                faceModelDownloading = true,
                 faceModelDownloadFailed = false,
                 faceModelDownloadedBytes = 0L,
             )
         }
-        viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.FACE_MODEL_DOWNLOAD_ALLOWED] = true }
-            // The detector lands first, so the embedder's byte count carries on from the detector's
-            // size to keep the bar climbing across both halves toward the quoted total.
-            val embedderBase = FaceModelAssets.MODEL.sizeBytes
-            val step = 256L * 1024
-            var lastShown = -1L
-            val report: (Long) -> Unit = { cumulative ->
-                // Coalesce the per-chunk callbacks so the panel is not recomposed on every 64 KB; the
-                // bar still climbs smoothly across the download.
-                if (cumulative - lastShown >= step || cumulative >= FaceModelAssets.TOTAL_DOWNLOAD_BYTES) {
-                    lastShown = cumulative
-                    _uiState.update { it.copy(faceModelDownloadedBytes = cumulative) }
-                }
-            }
-            val ready = withContext(Dispatchers.IO) {
-                faceModelManager.prepare(onProgress = { report(it) }) is FaceModelPreparation.Ready &&
-                    faceEmbeddingModelManager.prepare(
-                        onProgress = { report(embedderBase + it) },
-                    ) is FaceModelPreparation.Ready
-            }
-            if (ready) {
-                context.settingsDataStore.edit { it[SettingsKeys.FACE_ENABLED] = true }
-                _uiState.update {
-                    it.copy(
-                        faceEnabled = true,
-                        faceRecognitionAvailable = true,
-                        faceModelDownloading = false,
-                        faceModelDownloadedBytes = 0L,
-                    )
-                }
-                faceIndexingScheduler.requestIndex(accountManager.getPrimaryUserId().first())
-            } else {
-                _uiState.update {
-                    it.copy(
-                        faceModelDownloading = false,
-                        faceModelDownloadFailed = true,
-                        faceModelDownloadedBytes = 0L,
-                    )
-                }
-            }
-        }
+        // Fetched on ModelDownloadService so it survives leaving this screen and shows a progress
+        // notification; the row's progress and the eventual enable come back through modelDownloadState
+        // (observed in init). On a verified download the service turns the feature on and kicks the walk.
+        ModelDownloadService.start(context, ModelDownloadKind.FACE)
     }
 
     /** The drawer's Keep action: switch face recognition off but leave the model and the face data. */
@@ -1369,12 +1474,149 @@ class SettingsViewModel @Inject constructor(
     }
 
     /**
+     * The semantic-search per-feature opt-in, managing the models rather than just flipping a flag.
+     * Turning it on with the models on disk enables at once and starts indexing; without them it raises
+     * the download-consent drawer instead of switching on against models that are not there. Turning it
+     * off with the models on disk opens the Keep-or-Remove drawer; with no models on disk there is
+     * nothing to remove, so it just switches off. Independent of the master switch, so it gates the
+     * semantic index on its own. Guest-safe: a null userId indexes the local partition.
+     */
+    fun setSemanticEnabled(on: Boolean) {
+        if (on) enableSemantic() else disableSemantic()
+    }
+
+    /** Models on disk already: flip semantic search on and start indexing. Otherwise hold it off and ask
+     *  to fetch the models first, so the switch never turns on against models that are not there. */
+    private fun enableSemantic() {
+        viewModelScope.launch {
+            val present = withContext(Dispatchers.IO) { semanticModelManager.areModelsPresent() }
+            if (present) {
+                context.settingsDataStore.edit { it[SettingsKeys.SEMANTIC_ENABLED] = true }
+                _uiState.update {
+                    it.copy(
+                        semanticEnabled = true,
+                        semanticModelPrompt = SemanticModelPrompt.None,
+                        semanticModelDownloadFailed = false,
+                    )
+                }
+                cloudRepo.backfillSemantic(accountManager.getPrimaryUserId().first())
+            } else {
+                // Note the connection now so the drawer can say the fetch will use mobile data when
+                // Wi-Fi is not there, the same gate sync applies before it moves large data.
+                val onWifi = networkObserver.currentlyOnWifi()
+                _uiState.update {
+                    it.copy(
+                        semanticModelPrompt = SemanticModelPrompt.Download,
+                        semanticModelDownloadFailed = false,
+                        semanticModelOnWifi = onWifi,
+                    )
+                }
+            }
+        }
+    }
+
+    /** Flipping semantic search off with the models on disk opens the Keep-or-Remove drawer while the
+     *  feature stays on, so a tap outside leaves everything as it was. With no models on disk there is
+     *  nothing to remove, so it switches off at once; persisting the flag stands any running walk down on
+     *  its own next per-photo check, leaving the embeddings in place. */
+    private fun disableSemantic() {
+        viewModelScope.launch {
+            val present = withContext(Dispatchers.IO) { semanticModelManager.areModelsPresent() }
+            if (present) {
+                _uiState.update { it.copy(semanticModelPrompt = SemanticModelPrompt.Remove) }
+            } else {
+                context.settingsDataStore.edit { it[SettingsKeys.SEMANTIC_ENABLED] = false }
+                _uiState.update {
+                    it.copy(semanticEnabled = false, semanticModelPrompt = SemanticModelPrompt.None)
+                }
+            }
+        }
+    }
+
+    /**
+     * Accept the semantic-search model download. Records the consent the indexer itself also checks,
+     * fetches the image and text encoders off the main thread while the row shows progress, and turns the
+     * feature on only once both verify. A failed fetch leaves it off and surfaces the failure on the row.
+     * Mirrors [confirmFaceModelDownload] in shape.
+     */
+    fun confirmSemanticModelDownload() {
+        _uiState.update {
+            it.copy(
+                semanticModelPrompt = SemanticModelPrompt.None,
+                semanticModelDownloadFailed = false,
+                semanticModelDownloadProgress = 0L,
+            )
+        }
+        // The fetch runs on ModelDownloadService (a foreground service) so it survives leaving this
+        // screen and shows a progress notification; the row's progress and the eventual enable come back
+        // through modelDownloadState (observed in init). On a verified download the service turns the
+        // feature on and kicks the indexer itself.
+        ModelDownloadService.start(context, ModelDownloadKind.SEMANTIC)
+    }
+
+    /** The drawer's Keep action: switch semantic search off but leave the models and the embeddings in
+     *  place. Persisting the flag stands any running walk down on its own next per-photo check. */
+    fun disableSemanticKeepingModel() {
+        _uiState.update { it.copy(semanticModelPrompt = SemanticModelPrompt.None) }
+        viewModelScope.launch {
+            context.settingsDataStore.edit { it[SettingsKeys.SEMANTIC_ENABLED] = false }
+            _uiState.update { it.copy(semanticEnabled = false) }
+        }
+    }
+
+    /**
+     * The drawer's Remove action: switch semantic search off AND delete the models and the account's
+     * image embeddings from this device. [SemanticIndexingScheduler.reset] stands the running walk down
+     * and clears the embeddings, [SemanticModelManager.deleteAll] removes the model files, and the
+     * download consent is reset so a later re-enable asks again.
+     */
+    fun confirmSemanticModelRemoval() {
+        _uiState.update { it.copy(semanticModelPrompt = SemanticModelPrompt.None) }
+        viewModelScope.launch {
+            context.settingsDataStore.edit { it[SettingsKeys.SEMANTIC_ENABLED] = false }
+            semanticIndexingScheduler.reset(accountManager.getPrimaryUserId().first())
+            semanticModelManager.deleteAll()
+            context.settingsDataStore.edit { it[SettingsKeys.SEMANTIC_MODEL_DOWNLOAD_ALLOWED] = false }
+            _uiState.update { it.copy(semanticEnabled = false, semanticModelDownloadFailed = false) }
+        }
+    }
+
+    /** Close the semantic drawer with no change: a tap outside leaves the switch and the models exactly
+     *  as they were, so an accidental toggle undoes itself rather than switching the feature off unasked. */
+    fun dismissSemanticModelPrompt() {
+        _uiState.update { it.copy(semanticModelPrompt = SemanticModelPrompt.None) }
+    }
+
+    /**
      * Persist the face-indexing pause switch. Pausing lets the running walk stop itself on its next
      * per-photo check; resuming kicks a fresh pass for the last account. It never auto-restarts while
      * paused, so only an explicit resume here re-arms it.
      */
     fun setFaceIndexingPaused(paused: Boolean) {
         viewModelScope.launch { faceIndexingScheduler.setPaused(paused) }
+    }
+
+    /**
+     * Resume the face scan when the recognition screen opens, so a walk the OS killed (app swiped from
+     * Recents) continues without waiting for a pull-to-refresh. Routes through the paused-respecting
+     * [DrivePhotoRepository.backfillFaces] -> indexAll, which bails while the user's pause is set, so it
+     * never re-arms an explicit pause; idempotent, since a walk already running collapses this to a
+     * no-op. Guest-safe: a null userId scans the local partition, exactly like the gallery's guest kick.
+     */
+    fun resumeFaceIndexingIfNeeded() {
+        viewModelScope.launch {
+            try {
+                val prefs = context.settingsDataStore.data.first()
+                if (prefs[SettingsKeys.AI_FEATURES_ENABLED] != true ||
+                    prefs[SettingsKeys.FACE_ENABLED] != true
+                ) return@launch
+                cloudRepo.backfillFaces(accountManager.getPrimaryUserId().first())
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                android.util.Log.w("SettingsViewModel", "resume face indexing failed", e)
+            }
+        }
     }
 
     /**
@@ -1400,21 +1642,72 @@ class SettingsViewModel @Inject constructor(
     }
 
     /**
-     * Re-detect every photo from scratch at the current detector resolution, KEEPING the user's manual
-     * attachments and "not this person" feedback (both name-keyed), so a detector-quality change is
-     * picked up without discarding curation. Cluster names reset (they are tied to the old face ids);
-     * re-naming a cluster re-attaches its manual adds by name.
+     * Re-detect every photo from scratch at the current detector resolution, KEEPING the user's named
+     * people, manual attachments and "not this person" feedback. The scan snapshots the names and
+     * exclusions by face-box geometry before it wipes the faces and reattaches them once the library has
+     * re-detected (the same path a recognition-model change takes), so a re-detect refreshes the groups
+     * without discarding the naming work. Guest-safe: a null userId scans the local partition.
      */
     fun rescanFaces() {
         viewModelScope.launch {
+            faceIndexingScheduler.rescan(accountManager.getPrimaryUserId().first())
+        }
+    }
+
+    /**
+     * Persist the semantic-indexing pause switch. Pausing lets the running walk stop itself on its next
+     * per-photo check; resuming kicks a fresh pass for the last account. The pause is held in memory,
+     * matching the scheduler, so it never re-arms on its own; only an explicit resume here restarts it.
+     */
+    fun setSemanticIndexingPaused(paused: Boolean) {
+        viewModelScope.launch { semanticIndexingScheduler.setPaused(paused) }
+    }
+
+    /**
+     * Resume the semantic scan when the search sub-page opens, so a walk the OS killed continues without
+     * waiting for a fresh trigger. Routes through the paused-respecting
+     * [DrivePhotoRepository.backfillSemantic] -> indexAll, which bails while the user's pause is set, so it
+     * never re-arms an explicit pause; idempotent, since a walk already running collapses this to a no-op.
+     * Guest-safe: a null userId indexes the local partition.
+     */
+    fun resumeSemanticIndexingIfNeeded() {
+        viewModelScope.launch {
+            try {
+                val prefs = context.settingsDataStore.data.first()
+                if (prefs[SettingsKeys.AI_FEATURES_ENABLED] != true ||
+                    prefs[SettingsKeys.SEMANTIC_ENABLED] != true
+                ) return@launch
+                cloudRepo.backfillSemantic(accountManager.getPrimaryUserId().first())
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                android.util.Log.w("SettingsViewModel", "resume semantic indexing failed", e)
+            }
+        }
+    }
+
+    /**
+     * Re-embed the whole library from scratch at the user's request. An embedding row is the scan marker,
+     * so a plain re-kick would only fill gaps; this drops every stored vector first, then kicks a fresh
+     * pass, so every photo is indexed again. Mirrors the face rescan's clear-then-reindex order.
+     * Guest-safe: a null userId indexes the local partition.
+     */
+    fun rescanSemantic() {
+        viewModelScope.launch {
             val userId = accountManager.getPrimaryUserId().first()
-            val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
-            faceIndexingScheduler.reset()
-            faceDao.clearForUser(account)
-            personDao.clearForUser(account)
-            faceScanDao.clearForUser(account)
-            // person_manual_photo and not_person are intentionally kept (name-keyed curation).
-            faceIndexingScheduler.requestIndex(userId)
+            semanticIndexingScheduler.reset(userId)
+            semanticIndexingScheduler.requestIndex(userId)
+        }
+    }
+
+    /**
+     * Wipe every image embedding for the account. Stands the running walk down first, mirroring the
+     * sign-out order, then drops the stored vectors; the photos themselves are untouched. A later Rescan
+     * rebuilds the index from scratch.
+     */
+    fun clearSemantic() {
+        viewModelScope.launch {
+            semanticIndexingScheduler.reset(accountManager.getPrimaryUserId().first())
         }
     }
 
@@ -1422,6 +1715,14 @@ class SettingsViewModel @Inject constructor(
     val faceTransferMsg: StateFlow<String?> = _faceTransferMsg.asStateFlow()
 
     fun clearFaceTransferMsg() { _faceTransferMsg.value = null }
+
+    /** The document a successful export was just written to, surfaced so the screen can offer to send it
+     *  on through the system share sheet (another app or a nearby device) right after the save. Null
+     *  until an export succeeds; cleared once the share prompt is answered. */
+    private val _faceExportedUri = MutableStateFlow<Uri?>(null)
+    val faceExportedUri: StateFlow<Uri?> = _faceExportedUri.asStateFlow()
+
+    fun clearFaceExportedUri() { _faceExportedUri.value = null }
 
     /** True while an export or import runs, so the transfer rows read as busy and cannot be tapped
      *  again mid-run. */
@@ -1442,6 +1743,9 @@ class SettingsViewModel @Inject constructor(
                     count == 0 -> context.getString(R.string.settings_ai_export_empty)
                     else -> context.getString(R.string.settings_ai_transfer_failed)
                 }
+                // A real file landed: offer to send it on (another app / nearby device) via the system
+                // share sheet, so the user does not have to hunt for it to Quick Share it.
+                if (count > 0) _faceExportedUri.value = uri
             } finally {
                 _faceTransferInProgress.value = false
             }
@@ -1454,7 +1758,10 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             _faceTransferInProgress.value = true
             try {
-                val userId = accountManager.getPrimaryUserId().firstOrNull() ?: return@launch
+                val userId = accountManager.getPrimaryUserId().firstOrNull() ?: run {
+                    _faceTransferMsg.value = context.getString(R.string.settings_ai_transfer_failed)
+                    return@launch
+                }
                 // Stand any in-flight walk down first, so it cannot re-detect and overwrite the faces we are
                 // about to import (which would wipe their name labels), mirroring rescan's order.
                 faceIndexingScheduler.reset()
@@ -1569,6 +1876,13 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             context.settingsDataStore.edit { it[SettingsKeys.COMPRESS_UPLOAD_TIER] = tier.ordinal }
             _uiState.update { it.copy(compressTier = tier) }
+        }
+    }
+
+    fun setCompressTierVideo(tier: UploadCompressionTier) {
+        viewModelScope.launch {
+            context.settingsDataStore.edit { it[SettingsKeys.COMPRESS_UPLOAD_TIER_VIDEO] = tier.ordinal }
+            _uiState.update { it.copy(compressTierVideo = tier) }
         }
     }
 

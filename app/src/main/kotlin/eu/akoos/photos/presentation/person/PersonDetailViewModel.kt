@@ -93,6 +93,7 @@ class PersonDetailViewModel @Inject constructor(
     private val personManualPhotoDao: PersonManualPhotoDao,
     private val notPersonDao: NotPersonDao,
     private val personCoverDao: PersonCoverDao,
+    private val clusterSummaryDao: eu.akoos.photos.data.db.dao.ClusterSummaryDao,
     private val getGalleryItems: GetGalleryItemsUseCase,
     private val observePeopleUseCase: ObservePeopleUseCase,
     private val assignPersonName: eu.akoos.photos.domain.usecase.AssignPersonNameUseCase,
@@ -288,6 +289,19 @@ class PersonDetailViewModel @Inject constructor(
                 chosen
             }
             if (bestId < 0L) { _mergeSuggestion.value = null; return@launch }
+            // Auto-merge on: accept the same card the user would tap, rather than surfacing it. Fold the
+            // look-alike in, re-cluster, then look for the next one, so a named person absorbs its whole
+            // chain of look-alikes with no taps. Only an UNNAMED candidate is auto-accepted; a rare
+            // named-vs-named suggestion still surfaces as a card so the user decides, never silently
+            // merging two people they named apart.
+            val autoMerge = context.settingsDataStore.data.first()[SettingsKeys.FACE_AUTO_MERGE] == true
+            val candidateNamed = !personDao.personById(bestId)?.displayName.isNullOrBlank()
+            if (autoMerge && !candidateNamed) {
+                foldPersonInto(account, bestId, name)
+                faceIndexingScheduler.requestRecluster(userId)
+                loadMergeSuggestion(personId)
+                return@launch
+            }
             _mergeSuggestion.value = observePeopleUseCase(
                 userId,
                 if (userId == null) getGalleryItems.invokeLocalOnly() else getGalleryItems.invoke(userId),
@@ -424,6 +438,10 @@ class PersonDetailViewModel @Inject constructor(
             val count = personPhotoCount(faceDao.distinctPhotoKeysForPerson(account, personId), manual)
             val cover = resolveCover(account, personId, name)
             personDao.updateCoverAndCount(personId, cover, count)
+            // The unassigned faces changed the cluster, so its stored summary is stale; drop it and
+            // recluster so the freed faces regroup and the count stays honest.
+            clusterSummaryDao.deleteByPerson(personId)
+            faceIndexingScheduler.requestRecluster(accountManager.getPrimaryUserId().first())
             _message.value = R.string.person_msg_removed
         }
     }
@@ -442,6 +460,10 @@ class PersonDetailViewModel @Inject constructor(
             val name = personDao.personById(personId)?.displayName
             faceDao.rejectFacesForPersonInPhotos(account, personId, photoKeys)
             refreshPersonCoverAndCount(account, personId, name)
+            // Rejected faces changed the cluster; drop the stale summary and recluster so the count and
+            // any regrouping stay honest.
+            clusterSummaryDao.deleteByPerson(personId)
+            faceIndexingScheduler.requestRecluster(accountManager.getPrimaryUserId().first())
             _message.value = R.string.person_msg_dismissed
         }
     }
@@ -465,6 +487,11 @@ class PersonDetailViewModel @Inject constructor(
             refreshPersonCoverAndCount(account, fromPersonId, personDao.personById(fromPersonId)?.displayName)
             refreshPersonCoverAndCount(account, target, name)
             personDao.deleteEmpty(account)
+            // The target absorbed faces and the emptied source is gone; drop the target's now-stale
+            // summary and any orphan so a rebuild recomputes and no dead centroid pulls in new faces.
+            clusterSummaryDao.deleteByPerson(target)
+            clusterSummaryDao.deleteOrphansForUser(account)
+            faceIndexingScheduler.requestRecluster(accountManager.getPrimaryUserId().first())
             _message.value = R.string.person_msg_moved
         }
     }
@@ -497,6 +524,9 @@ class PersonDetailViewModel @Inject constructor(
             }
             personDao.updateCoverAndCount(personId, null, 0)
             personDao.deleteEmpty(account)
+            clusterSummaryDao.deleteByPerson(personId)
+            clusterSummaryDao.deleteOrphansForUser(account)
+            faceIndexingScheduler.requestRecluster(accountManager.getPrimaryUserId().first())
             withContext(Dispatchers.Main) { onDone() }
         }
     }

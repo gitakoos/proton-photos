@@ -50,6 +50,7 @@ import eu.akoos.photos.domain.repository.SyncStateRepository
 import eu.akoos.photos.domain.usecase.ForceUploadLocalUrisUseCase
 import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
 import eu.akoos.photos.util.retryOnDbTear
+import eu.akoos.photos.util.sanitizeErrorMessage
 import javax.inject.Inject
 
 /** One-shot result of an "add to album" run, consumed once by the screen. */
@@ -181,7 +182,7 @@ class AlbumPhotoPickerViewModel @Inject constructor(
                     if (e is kotlinx.coroutines.CancellationException) throw e
                     Log.e("AlbumPickerVM", "addPhotosToAlbum failed", e)
                     _addState.update {
-                        PickerAddState.Failed(e.message ?: context.getString(R.string.gallery_add_to_album_failed))
+                        PickerAddState.Failed(e.message?.let(::sanitizeErrorMessage) ?: context.getString(R.string.gallery_add_to_album_failed))
                     }
                     return@launch
                 }
@@ -194,7 +195,7 @@ class AlbumPhotoPickerViewModel @Inject constructor(
                     if (e is kotlinx.coroutines.CancellationException) throw e
                     Log.e("AlbumPickerVM", "queueForAlbum failed", e)
                     _addState.update {
-                        PickerAddState.Failed(e.message ?: context.getString(R.string.gallery_add_to_album_failed))
+                        PickerAddState.Failed(e.message?.let(::sanitizeErrorMessage) ?: context.getString(R.string.gallery_add_to_album_failed))
                     }
                     return@launch
                 }

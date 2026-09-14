@@ -289,6 +289,8 @@
     <string name="gallery_filter_raw">RAW</string>
     <string name="gallery_category_people">Osebe</string>
     <string name="gallery_filter_photos">Fotografije</string>
+    <string name="gallery_category_show">Pokaži %1$s</string>
+    <string name="gallery_category_hide">Skrij %1$s</string>
     <!-- Gallery snackbar / error fallbacks (raw exception text stays in the log) -->
     <string name="gallery_error_title">Napaka</string>
     <string name="gallery_undo">Razveljavi</string>
@@ -373,6 +375,20 @@
     <string name="face_index_service_progress">%1$d od %2$d</string>
     <string name="face_index_service_waiting">Čakanje na nadaljevanje</string>
     <string name="face_index_service_stop">Ustavi</string>
+    <string name="semantic_index_service_channel_name">Indeksiranje za iskanje</string>
+    <string name="semantic_index_service_channel_desc">Prikazuje potek med pripravo fotografij za iskanje.</string>
+    <string name="semantic_index_service_title">Priprava fotografij za iskanje</string>
+    <string name="semantic_index_service_progress">%1$d od %2$d</string>
+    <string name="semantic_index_service_waiting">Čakanje na nadaljevanje</string>
+    <string name="semantic_index_service_stop">Ustavi</string>
+    <string name="model_download_channel_name">Prenosi modelov</string>
+    <string name="model_download_channel_desc">Prikazuje potek med prenašanjem modela v napravi.</string>
+    <string name="model_download_title_face">Prenašanje modela za razvrščanje obrazov</string>
+    <string name="model_download_title_ocr">Prenašanje modela za prepoznavanje besedila</string>
+    <string name="model_download_title_semantic">Prenašanje modela za iskanje fotografij</string>
+    <string name="model_download_progress">%1$s od %2$s</string>
+    <string name="model_download_preparing">Pripravljanje…</string>
+    <string name="model_download_stop">Ustavi</string>
 
     <!-- Delete bottom sheet -->
     <string name="delete_album_container_warning">S tem izbrišete album, vaše fotografije pa ostanejo v Proton Drive.</string>
@@ -693,6 +709,12 @@
     <string name="map_style_modern_summary">Sodoben globus, ki ga lahko zavrtite do svojih krajev.</string>
     <string name="settings_amoled_black">Čisto črna (AMOLED)</string>
     <string name="settings_amoled_black_summary">V temnem načinu uporabi pravo črno ozadje za varčevanje z energijo na zaslonih OLED.</string>
+    <string name="settings_tint_cloud">Oznake oblaka v poudarni barvi</string>
+    <string name="settings_tint_cloud_summary">Za oznake varnostno kopiranih fotografij uporabi poudarno barvo namesto zelene.</string>
+    <string name="settings_gif_autoplay_grid">Predvajaj GIF-e v mrežah</string>
+    <string name="settings_gif_autoplay_grid_summary">Animiraj GIF-e na časovnici, v albumih in mapah naprave. Ko je izklopljeno, se prikaže mirujoča sličica.</string>
+    <string name="settings_gif_autoplay_covers">Predvajaj GIF ovitke albumov</string>
+    <string name="settings_gif_autoplay_covers_summary">Animiraj ovitek albuma, kadar je GIF, tudi pri albumih v oblaku (ovitek se prenese enkrat).</string>
 
     <!-- Language -->
     <string name="language_en">English</string>
@@ -1686,6 +1708,31 @@
     <string name="settings_ai_face_remove_keep">Obdrži</string>
     <string name="settings_ai_face_remove_confirm_title">Ali ste prepričani?</string>
     <string name="settings_ai_face_remove_confirm_message">S tem trajno odstranite model obrazov ter vse prepoznane obraze in imena. Tega ni mogoče razveljaviti.</string>
+    <string name="settings_ai_semantic">Pomensko iskanje</string>
+    <string name="settings_ai_semantic_desc">Poiščite fotografije z opisom tega, kaj je na njih</string>
+    <string name="settings_ai_semantic_downloading">Prenašanje…</string>
+    <string name="settings_ai_semantic_download_failed">Modelov za iskanje ni bilo mogoče prenesti.</string>
+    <string name="settings_ai_semantic_download_retry">Za ponovni poskus znova vklopite stikalo.</string>
+    <string name="settings_ai_semantic_download_title">Prenesem modele za iskanje?</string>
+    <string name="settings_ai_semantic_download_message">Pomensko iskanje potrebuje prenos modela velikosti %1$s. Deluje prek katere koli povezave, priporočljiv pa je Wi-Fi.</string>
+    <string name="settings_ai_semantic_download_message_metered">Pomensko iskanje potrebuje prenos modela velikosti %1$s. Wi-Fi ni povezan, zato bo ta prenos uporabil mobilne podatke.</string>
+    <string name="settings_ai_semantic_downloading_progress">%1$s / %2$s</string>
+    <string name="settings_ai_semantic_download_confirm">Prenesi</string>
+    <string name="settings_ai_semantic_remove_title">Odstranim prenesene modele?</string>
+    <string name="settings_ai_semantic_remove_message">S tem se sprosti približno %1$s. Pozneje jih lahko znova prenesete.</string>
+    <string name="settings_ai_semantic_remove_confirm">Odstrani</string>
+    <string name="settings_ai_semantic_remove_keep">Obdrži</string>
+    <string name="settings_ai_semantic_indexing_waiting">Čakanje na iskalne modele</string>
+    <string name="settings_ai_semantic_ready">Vaše fotografije je mogoče iskati</string>
+    <string name="settings_ai_semantic_rescan">Znova preglej vse fotografije</string>
+    <string name="settings_ai_semantic_rescan_desc">Počisti iskalni indeks in ga znova zgradi za vsako fotografijo.</string>
+    <string name="settings_ai_semantic_rescan_confirm_title">Znova pregledati vse fotografije?</string>
+    <string name="settings_ai_semantic_rescan_confirm_msg">Iskalni indeks se počisti in nato znova zgradi za vsako fotografijo, kar lahko traja nekaj časa.</string>
+    <string name="settings_ai_semantic_not_indexed">Vaše fotografije še niso indeksirane</string>
+    <string name="settings_ai_semantic_clear">Počisti podatke iskanja</string>
+    <string name="settings_ai_semantic_clear_desc">Odstrani iskalni indeks za vse fotografije iz tega telefona.</string>
+    <string name="settings_ai_semantic_clear_confirm_title">Počisti podatke iskanja?</string>
+    <string name="settings_ai_semantic_clear_confirm_msg">To odstrani iskalni indeks za vse fotografije. Vaše fotografije ostanejo nespremenjene.</string>
     <string name="settings_face_section">Prepoznani obrazi</string>
     <string name="settings_face_maintenance">Vzdrževanje</string>
     <string name="settings_face_transfer">Prenos</string>
@@ -1697,6 +1744,7 @@
     <string name="settings_ai_import_confirm_msg">Doda obraze in osebe iz datoteke v ta telefon in jih znova združi. Vaši trenutni obrazi ostanejo ohranjeni.</string>
     <string name="settings_ai_indexing_running">Pregledovanje fotografij</string>
     <string name="settings_ai_indexing_waiting">Čakanje na model obrazov</string>
+    <string name="settings_ai_indexing_waiting_other">Čakanje na dokončanje drugega opravila v napravi</string>
     <string name="settings_ai_indexing_paused">Zaustavljeno</string>
     <string name="settings_ai_indexing_paused_battery">Zaustavljeno, nizka baterija</string>
     <string name="settings_ai_indexing_paused_warm">Zaustavljeno, telefon je topel</string>
@@ -1782,10 +1830,12 @@
     <string name="settings_ai_export_empty">Zaenkrat ni obrazov za izvoz.</string>
     <string name="settings_ai_export_warn_msg">Ta datoteka vsebuje prstne odtise obrazov, izračunane iz vaših fotografij. Kdor koli, ki jo pridobi, bi lahko znova sestavil model obrazov oseb v vaši knjižnici, zato jo hranite zasebno in jo delite le z ljudmi, ki jim zaupate.</string>
     <string name="settings_ai_export_warn_title">Izvoziti indeks obrazov?</string>
+    <string name="settings_ai_export_share_title">Deliti indeks obrazov?</string>
+    <string name="settings_ai_export_share_msg">Pošljite izvoženo datoteko v drugo aplikacijo ali napravo v bližini.</string>
     <string name="settings_ai_import">Uvozi indeks obrazov</string>
     <string name="settings_ai_import_done">Uvoženih %1$d obrazov, %2$d oseb.</string>
     <string name="settings_ai_rescan">Znova preglej fotografije</string>
-    <string name="settings_ai_rescan_confirm_msg">Vsaka fotografija se znova pregleda za obraze z več podrobnostmi, kar najde manjše in bolj oddaljene obraze. Vaše ročno dodane fotografije se ohranijo, osebe pa se znova združijo, zato boste morda morali nekatere znova poimenovati.</string>
+    <string name="settings_ai_rescan_confirm_msg">Vsaka fotografija se znova pregleda za obraze z več podrobnostmi, kar najde manjše in bolj oddaljene obraze. Vaša imena in popravki se ohranijo in znova dodelijo, ko so obrazi znova zaznani.</string>
     <string name="settings_ai_rescan_confirm_title">Znova pregledati vse fotografije?</string>
     <string name="settings_ai_transfer_failed">Prenos indeksa obrazov ni uspel.</string>
     <string name="settings_ai_transfer_working">Poteka…</string>
@@ -1885,6 +1935,19 @@
     <string name="collage_tab_layout">Postavitev</string>
     <string name="collage_tab_ratio">Razmerje</string>
     <string name="collage_trim_for_grid">Odstrani %1$d za preklop na mrežno postavitev</string>
+    <!-- GIF maker -->
+    <string name="action_make_gif">Ustvari GIF</string>
+    <string name="gif_maker_title">Ustvarjalnik GIF-ov</string>
+    <string name="gif_maker_aspect_original">Izvirnik</string>
+    <string name="gif_maker_aspect_square">1:1</string>
+    <string name="gif_maker_save">Shrani GIF</string>
+    <string name="gif_maker_progress">Ustvarjanje GIF-a…</string>
+    <string name="gif_maker_hint">GIF nima zvoka in je lahko dolg do 10 sekund.</string>
+    <string name="gif_maker_saved">GIF shranjen med vaše fotografije</string>
+    <string name="gif_export_channel_name">Ustvarjanje GIF-a</string>
+    <string name="gif_export_channel_desc">Prikazuje napredek med ustvarjanjem GIF-a.</string>
+    <string name="gif_quality_title">Kakovost GIF-a</string>
+    <string name="gif_maker_duration">%1$s s</string>
     <string name="editor_adj_fade">Obleditev</string>
     <string name="editor_adj_grain">Zrnatost</string>
     <string name="editor_adj_sharpen">Izostri</string>
@@ -1978,6 +2041,8 @@
     <string name="whats_new_guest_body">Prepoznavanje obrazov, zemljevid, koledarske beležke in iskalnik dvojnikov zdaj delujejo tudi brez prijave.</string>
     <string name="whats_new_dup_nobackup_title">Dvojniki brez varnostne kopije</string>
     <string name="whats_new_dup_nobackup_body">Iskalnik dvojnikov zdaj pregleda fotografije v vaši napravi brez računa ali varnostne kopije.</string>
+    <string name="whats_new_compress_split_title">Ločena kakovost za fotografije in videoposnetke</string>
+    <string name="whats_new_compress_split_body">Stiskanje fotografij in videoposnetkov ima zdaj svoje ravni kakovosti. Preverite jih v Nastavitvah, pod Kakovost in velikost.</string>
     <string name="whats_new_section_new">Novo</string>
     <string name="whats_new_section_improved">Izboljšave</string>
 
@@ -2010,4 +2075,14 @@
     <string name="face_excluded_undo">Undo</string>
     <string name="albums_search_hint">Iskanje albumov</string>
     <string name="albums_search_no_results">Noben album se ne ujema z iskanjem.</string>
+    <string name="settings_ai_groups_found">%1$d skupin</string>
+    <string name="settings_ai_faces_found">%1$d obrazov</string>
+    <string name="sign_out_dialog_face_warning">Poimenovane osebe in skupine obrazov v tej napravi bodo prav tako odstranjene in se ob ponovni prijavi ne obnovijo.</string>
+    <string name="person_rename_merge_confirm_title">Združiti z obstoječo osebo?</string>
+    <string name="person_rename_merge_confirm_body">Oseba z imenom %1$s že obstaja. Uporaba tega imena združi obe v eno, česar ni mogoče razveljaviti. Združiti?</string>
+    <string name="person_move_confirm_title">Premakniti k tej osebi?</string>
+    <string name="person_move_confirm_body">Premakniti izbrane fotografije k %1$s?</string>
+    <string name="person_move_confirm">Premakni</string>
+    <string name="settings_face_auto_merge">Samodejno združi verjetna ujemanja</string>
+    <string name="settings_face_auto_merge_desc">Ko pregled najde skupino, ki je zelo verjetno nekdo, ki ste ga že poimenovali, jo doda brez vprašanja. Združitev ni mogoče razveljaviti, zato pustite to izklopljeno, če želite vsako potrditi sami.</string>
 </resources>

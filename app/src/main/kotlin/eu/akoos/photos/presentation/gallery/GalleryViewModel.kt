@@ -353,6 +353,8 @@ class GalleryViewModel @Inject constructor(
         observeHideInAlbums()
         observeHiddenAlbumIds()
         observePeople()
+        resumeFaceIndexingOnLaunch()
+        resumeSemanticIndexingOnLaunch()
     }
 
     /**
@@ -1024,6 +1026,59 @@ class GalleryViewModel @Inject constructor(
     }
 
     /**
+     * Resume the on-device face scan on cold start, so a walk the OS killed (app swiped from Recents)
+     * continues without a pull-to-refresh. The launch sync above never touches faces, so this is the
+     * only cold-start kick. Mirrors the refresh path's face gates: the same AI switches, the battery
+     * gate for the signed-in whole-library walk, and none for a guest's local partition. Paused-
+     * respecting (routes through backfillFaces -> indexAll, which bails while paused) and idempotent
+     * (a running walk collapses it to a no-op).
+     */
+    private fun resumeFaceIndexingOnLaunch() {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val facePrefs = context.settingsDataStore.data.first()
+                if (facePrefs[SettingsKeys.AI_FEATURES_ENABLED] != true ||
+                    facePrefs[SettingsKeys.FACE_ENABLED] != true
+                ) return@launch
+                val userId = accountManager.getPrimaryUserId().first()
+                // Guest (no account) rescans the local partition with no battery gate; the signed-in
+                // walk reuses the refresh path's gate so a low battery defers it.
+                if (userId != null && context.isBatteryLow()) return@launch
+                cloudRepo.backfillFaces(userId)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                android.util.Log.w("GalleryVM", "resume face indexing failed: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * Resume the on-device semantic index on cold start, so a walk the OS killed continues without a
+     * pull-to-refresh. The sibling of [resumeFaceIndexingOnLaunch], gated on the master AI switch and the
+     * semantic switch (independent of the face switch), with the same battery gate for the signed-in
+     * whole-library walk and none for a guest's local partition. Paused-respecting and idempotent (routes
+     * through backfillSemantic -> indexAll, which bails while off or paused and collapses a running walk).
+     */
+    private fun resumeSemanticIndexingOnLaunch() {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val prefs = context.settingsDataStore.data.first()
+                if (prefs[SettingsKeys.AI_FEATURES_ENABLED] != true ||
+                    prefs[SettingsKeys.SEMANTIC_ENABLED] != true
+                ) return@launch
+                val userId = accountManager.getPrimaryUserId().first()
+                if (userId != null && context.isBatteryLow()) return@launch
+                cloudRepo.backfillSemantic(userId)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                android.util.Log.w("GalleryVM", "resume semantic indexing failed: ${e.message}")
+            }
+        }
+    }
+
+    /**
      * Observe folder-selection changes. When the user configures backup folders and comes back,
      * immediately trigger a reconcile+upload without requiring an app restart.
      */
@@ -1160,6 +1215,13 @@ class GalleryViewModel @Inject constructor(
                             runCatching { cloudRepo.backfillFaces(null) }
                         }
                     }
+                    if (facePrefs[SettingsKeys.AI_FEATURES_ENABLED] == true &&
+                        facePrefs[SettingsKeys.SEMANTIC_ENABLED] == true
+                    ) {
+                        viewModelScope.launch(Dispatchers.IO) {
+                            runCatching { cloudRepo.backfillSemantic(null) }
+                        }
+                    }
                 }
             }
             _uiState.update { it.copy(isRefreshing = false, isSyncing = false) }
@@ -1179,6 +1241,13 @@ class GalleryViewModel @Inject constructor(
                 ) {
                     viewModelScope.launch(Dispatchers.IO) {
                         runCatching { cloudRepo.backfillFaces(null) }
+                    }
+                }
+                if (facePrefs[SettingsKeys.AI_FEATURES_ENABLED] == true &&
+                    facePrefs[SettingsKeys.SEMANTIC_ENABLED] == true
+                ) {
+                    viewModelScope.launch(Dispatchers.IO) {
+                        runCatching { cloudRepo.backfillSemantic(null) }
                     }
                 }
                 _uiState.update { it.copy(isRefreshing = false, isSyncing = false) }
@@ -1222,6 +1291,16 @@ class GalleryViewModel @Inject constructor(
                     ) {
                         viewModelScope.launch(Dispatchers.IO) {
                             runCatching { cloudRepo.backfillFaces(userId) }
+                        }
+                    }
+                    // Index photos for semantic search, gated on the master and semantic switches. The
+                    // scheduler no-ops when off or the model is absent; gate here so the common path never
+                    // launches a coroutine that returns at once.
+                    if (facePrefs[SettingsKeys.AI_FEATURES_ENABLED] == true &&
+                        facePrefs[SettingsKeys.SEMANTIC_ENABLED] == true
+                    ) {
+                        viewModelScope.launch(Dispatchers.IO) {
+                            runCatching { cloudRepo.backfillSemantic(userId) }
                         }
                     }
                 }

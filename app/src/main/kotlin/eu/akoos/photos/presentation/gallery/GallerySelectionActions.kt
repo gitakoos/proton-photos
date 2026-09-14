@@ -36,6 +36,7 @@ import androidx.compose.material.icons.automirrored.filled.DriveFileMove
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.FileDownload
+import androidx.compose.material.icons.filled.Gif
 import androidx.compose.material.icons.filled.GridView
 import eu.akoos.photos.presentation.collage.COLLAGE_MAX_PHOTOS
 import eu.akoos.photos.presentation.collage.COLLAGE_MIN_PHOTOS
@@ -64,6 +65,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import eu.akoos.photos.R
+import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.presentation.common.FavoriteActionState
 import eu.akoos.photos.presentation.common.SelectionAction
@@ -80,6 +82,31 @@ import eu.akoos.photos.presentation.common.offlineTurnsOn
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.ErrorColor
 import eu.akoos.photos.util.MetadataStripConfig
+
+/**
+ * The device-file URI for a single video, or null when the item is not a video or has no local file
+ * (a cloud-only video). The GIF maker reads frames with MediaMetadataRetriever, which needs a local
+ * or content URI, so a cloud-only video cannot feed it and the Make GIF entry point stays hidden.
+ */
+internal fun GalleryItem.localVideoUri(): String? = when (this) {
+    is GalleryItem.LocalOnly ->
+        if (local.mimeType.startsWith("video/", ignoreCase = true)) local.uri else null
+    is GalleryItem.Synced ->
+        if (local.mimeType.startsWith("video/", ignoreCase = true)) local.uri else null
+    is GalleryItem.CloudOnly -> null
+}
+
+/**
+ * The [CloudPhoto] for a single cloud-only video, or null when the item is not a cloud-only video. A
+ * cloud-only video has no device file, so the GIF maker downloads it first (an account-gated path,
+ * mirroring the video editor) before the frames feed MediaMetadataRetriever. A device-backed video is
+ * covered by [localVideoUri] instead, so this returns null for LocalOnly and Synced.
+ */
+internal fun GalleryItem.videoCloudPhoto(): CloudPhoto? = when (this) {
+    is GalleryItem.CloudOnly ->
+        if (cloud.mimeType.startsWith("video/", ignoreCase = true)) cloud else null
+    is GalleryItem.LocalOnly, is GalleryItem.Synced -> null
+}
 
 /**
  * Every bulk action the timeline offers over a multi-select, in the order the shared selection
@@ -125,6 +152,7 @@ fun rememberGallerySelectionActions(
     onStripMetadata: (MetadataStripConfig) -> Unit,
     onEditMetadata: () -> Unit,
     onCreateCollage: () -> Unit,
+    onCreateGif: () -> Unit,
     onRequestMoveToFolder: () -> Unit = {},
 ): List<SelectionAction> {
     val sharing = multiShareState as? MultiShareState.Working
@@ -198,6 +226,20 @@ fun rememberGallerySelectionActions(
                     icon = Icons.Default.GridView,
                     label = stringResource(R.string.collage_create),
                     onClick = onCreateCollage,
+                )
+            )
+        }
+        // Make GIF turns a single short video into an animated GIF. A device video feeds
+        // MediaMetadataRetriever directly; a cloud-only video downloads first the way the video
+        // editor's cloud path does. Either way it needs a one-item selection that is a video. A
+        // cloud-only item only exists when signed in, so guests stay on the local path.
+        val gifVideo = selectedItems.singleOrNull()
+        if (gifVideo?.localVideoUri() != null || gifVideo?.videoCloudPhoto() != null) {
+            add(
+                SelectionAction(
+                    icon = Icons.Default.Gif,
+                    label = stringResource(R.string.action_make_gif),
+                    onClick = onCreateGif,
                 )
             )
         }

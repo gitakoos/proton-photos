@@ -73,6 +73,8 @@ import androidx.compose.material.icons.filled.NewReleases
 import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.SwapHoriz
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -828,7 +830,20 @@ internal fun CategoryRail(
     val savedCsv by remember {
         context.settingsDataStore.data.map { it[SettingsKeys.CATEGORY_RAIL_ORDER] }
     }.collectAsState(initial = null)
-    val order = remember(savedCsv) { resolveCategoryOrder(savedCsv) }
+    val hidden by remember {
+        context.settingsDataStore.data.map { it[SettingsKeys.CATEGORY_RAIL_HIDDEN] ?: emptySet() }
+    }.collectAsState(initial = emptySet())
+    val order = remember(savedCsv, hidden) {
+        resolveCategoryOrder(savedCsv).filterNot { it.name in hidden }
+    }
+
+    // A category hidden while it was the active filter would leave the timeline filtered with no
+    // chip left to clear it, so fall back to All.
+    LaunchedEffect(selectedFilter, hidden) {
+        if (selectedFilter != GalleryFilter.All && selectedFilter.name in hidden) {
+            onFilterSelected(GalleryFilter.All)
+        }
+    }
 
     Column(modifier = modifier) {
         LazyRow(
@@ -977,16 +992,20 @@ internal fun PersonTile(
             )
         }
         val name = person.displayName?.takeIf { it.isNotBlank() }
-        if (name != null) {
-            Spacer(Modifier.height(4.dp))
-            Text(
-                name,
-                color = if (selected) Accent else FgDim,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Medium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+        // Reserve the caption line whether or not the person is named, so a row that mixes named and
+        // not-yet-named tiles keeps one height instead of shrinking as it scrolls onto the unnamed ones.
+        Spacer(Modifier.height(4.dp))
+        Box(modifier = Modifier.height(16.dp), contentAlignment = Alignment.Center) {
+            if (name != null) {
+                Text(
+                    name,
+                    color = if (selected) Accent else FgDim,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
     }
 }
@@ -1143,6 +1162,9 @@ internal fun CategoryReorderList(modifier: Modifier = Modifier) {
     val savedCsv by remember {
         context.settingsDataStore.data.map { it[SettingsKeys.CATEGORY_RAIL_ORDER] }
     }.collectAsState(initial = null)
+    val hidden by remember {
+        context.settingsDataStore.data.map { it[SettingsKeys.CATEGORY_RAIL_HIDDEN] ?: emptySet() }
+    }.collectAsState(initial = emptySet())
     var order by remember { mutableStateOf<List<GalleryFilter>>(emptyList()) }
     LaunchedEffect(savedCsv) { order = resolveCategoryOrder(savedCsv) }
 
@@ -1157,6 +1179,18 @@ internal fun CategoryReorderList(modifier: Modifier = Modifier) {
         }
     }
 
+    fun toggleHidden(cat: GalleryFilter) {
+        scope.launch {
+            runCatching {
+                context.settingsDataStore.edit {
+                    val current = it[SettingsKeys.CATEGORY_RAIL_HIDDEN] ?: emptySet()
+                    it[SettingsKeys.CATEGORY_RAIL_HIDDEN] =
+                        if (cat.name in current) current - cat.name else current + cat.name
+                }
+            }
+        }
+    }
+
     var draggedCat by remember { mutableStateOf<GalleryFilter?>(null) }
     var dragOffsetY by remember { mutableStateOf(0f) }
 
@@ -1164,6 +1198,7 @@ internal fun CategoryReorderList(modifier: Modifier = Modifier) {
         order.forEachIndexed { index, cat ->
             key(cat) {
                 val isDragged = cat == draggedCat
+                val isHidden = cat.name in hidden
                 Row(
                     modifier = Modifier
                         .zIndex(if (isDragged) 1f else 0f)
@@ -1177,14 +1212,34 @@ internal fun CategoryReorderList(modifier: Modifier = Modifier) {
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    GalleryCategoryIcon(cat, tint = FgDim)
+                    GalleryCategoryIcon(cat, tint = if (isHidden) FgDim.copy(alpha = 0.45f) else FgDim)
                     Text(
                         categoryLabel(cat),
-                        color = FgPrimary,
+                        color = if (isHidden) FgPrimary.copy(alpha = 0.45f) else FgPrimary,
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Medium,
                         modifier = Modifier.weight(1f),
                     )
+                    // Show / hide this category on the timeline + search rail. A hidden row dims but
+                    // stays in place so its position in the order is kept for when it is shown again.
+                    Box(
+                        modifier = Modifier
+                            .size(48.dp)
+                            .clip(CircleShape)
+                            .clickable { toggleHidden(cat) },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            if (isHidden) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                            contentDescription = stringResource(
+                                if (isHidden) R.string.gallery_category_show
+                                else R.string.gallery_category_hide,
+                                categoryLabel(cat),
+                            ),
+                            tint = if (isHidden) FgDim else Accent,
+                            modifier = Modifier.size(22.dp),
+                        )
+                    }
                     // Drag handle — grab and drag; the row lifts and follows the finger while the
                     // list reorders live as it passes neighbours. Keyed on the item so the gesture
                     // survives the reorder recompositions mid-drag.

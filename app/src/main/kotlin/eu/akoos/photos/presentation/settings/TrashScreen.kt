@@ -69,6 +69,7 @@ import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -90,6 +91,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.CloudTrashItem
+import eu.akoos.photos.domain.entity.GalleryItem
+import eu.akoos.photos.domain.entity.toCloudPhoto
 import eu.akoos.photos.presentation.common.ConfirmDialog
 import eu.akoos.photos.presentation.common.EmptyState
 import eu.akoos.photos.presentation.common.SelectionCheckPop
@@ -115,6 +118,11 @@ enum class TrashTab { Device, Cloud }
 fun TrashScreen(
     onBack: () -> Unit,
     initialTab: TrashTab = TrashTab.Device,
+    onOpenItem: (List<GalleryItem>, Int) -> Unit = { _, _ -> },
+    /** Action chosen inside the read-only trash viewer, as "action|kind|key". Executed once here
+     *  because the device MediaStore launchers live on this screen. */
+    pendingViewerAction: String? = null,
+    onViewerActionHandled: () -> Unit = {},
     viewModel: TrashViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -159,6 +167,32 @@ fun TrashScreen(
     fun launchDeviceDeleteForever() {
         val pi = viewModel.buildDeleteDeviceForeverIntent() ?: return
         deviceDeleteLauncher.launch(IntentSenderRequest.Builder(pi.intentSender).build())
+    }
+
+    // A Restore / Delete-forever tap inside the read-only trash viewer hands its action back here
+    // as "action|kind|key" (device actions need this screen's MediaStore launchers). Run it once,
+    // then clear the value via onViewerActionHandled so a re-emit can't replay it.
+    LaunchedEffect(pendingViewerAction) {
+        val raw = pendingViewerAction ?: return@LaunchedEffect
+        val parts = raw.split("|", limit = 3)
+        if (parts.size == 3 && parts.none { it.isBlank() }) {
+            val (action, kind, key) = parts
+            when (kind) {
+                "device" -> when (action) {
+                    "restore" -> viewModel.buildRestoreDeviceIntent(setOf(key))?.let {
+                        deviceRestoreLauncher.launch(IntentSenderRequest.Builder(it.intentSender).build())
+                    }
+                    "delete" -> viewModel.buildDeleteDeviceForeverIntent(setOf(key))?.let {
+                        deviceDeleteLauncher.launch(IntentSenderRequest.Builder(it.intentSender).build())
+                    }
+                }
+                "cloud" -> when (action) {
+                    "restore" -> viewModel.restoreCloud(listOf(key))
+                    "delete" -> viewModel.deleteCloudForever(listOf(key))
+                }
+            }
+        }
+        onViewerActionHandled()
     }
 
     Box(
@@ -318,7 +352,14 @@ fun TrashScreen(
                                     selected        = selected,
                                     inSelectionMode = state.device.isSelectionMode,
                                     purgeDays       = purgeDays,
-                                    onClick         = { if (state.device.isSelectionMode) viewModel.toggleDeviceSelection(item.uri) },
+                                    onClick         = {
+                                        if (state.device.isSelectionMode) {
+                                            viewModel.toggleDeviceSelection(item.uri)
+                                        } else {
+                                            val items = state.device.items.map { GalleryItem.LocalOnly(it) }
+                                            onOpenItem(items, state.device.items.indexOfFirst { it.uri == item.uri }.coerceAtLeast(0))
+                                        }
+                                    },
                                     onLongClick     = { viewModel.toggleDeviceSelection(item.uri) },
                                 ) {
                                     AsyncImage(
@@ -388,13 +429,23 @@ fun TrashScreen(
                                     colors          = colors,
                                     selected        = selected,
                                     inSelectionMode = state.cloud.isSelectionMode,
-                                    onClick         = { if (state.cloud.isSelectionMode) viewModel.toggleCloudSelection(item.linkId) },
+                                    onClick         = {
+                                        if (state.cloud.isSelectionMode) {
+                                            viewModel.toggleCloudSelection(item.linkId)
+                                        } else {
+                                            val items = state.cloud.items.map {
+                                                GalleryItem.CloudOnly(it.toCloudPhoto(state.cloud.decryptedThumbnails[it.linkId]))
+                                            }
+                                            onOpenItem(items, state.cloud.items.indexOfFirst { it.linkId == item.linkId }.coerceAtLeast(0))
+                                        }
+                                    },
                                     onLongClick     = { viewModel.toggleCloudSelection(item.linkId) },
                                 ) {
                                     CloudTrashThumbnail(
                                         item = item,
                                         decryptedUri = decryptedUri,
                                         onRequestDecrypt = { viewModel.requestCloudThumbnail(item) },
+                                        onCancelDecrypt = { viewModel.cancelCloudThumbnail(item.linkId) },
                                     )
                                 }
                             }
@@ -489,6 +540,7 @@ private fun CloudTrashThumbnail(
     item: CloudTrashItem,
     decryptedUri: String?,
     onRequestDecrypt: () -> Unit,
+    onCancelDecrypt: () -> Unit,
 ) {
     val colors = AppColors.current
     if (decryptedUri != null) {
@@ -505,6 +557,11 @@ private fun CloudTrashThumbnail(
     LaunchedEffect(item.linkId) {
         kotlinx.coroutines.delay(120)
         onRequestDecrypt()
+    }
+    // Cancel the in-flight decrypt when the cell scrolls off, freeing a pool permit for
+    // the tiles still on screen.
+    DisposableEffect(item.linkId) {
+        onDispose { onCancelDecrypt() }
     }
     Box(
         modifier = Modifier

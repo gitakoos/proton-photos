@@ -47,6 +47,10 @@ interface FaceScanDao {
     @Query("SELECT EXISTS(SELECT 1 FROM face_scan WHERE userId = :userId AND photoKey = :photoKey)")
     suspend fun isScanned(userId: String, photoKey: String): Boolean
 
+    /** Whether this owner has scanned anything yet: the cheap guard for the guest-adopt migration. */
+    @Query("SELECT EXISTS(SELECT 1 FROM face_scan WHERE userId = :userId)")
+    suspend fun hasAnyForUser(userId: String): Boolean
+
     /** Photos the walk scanned but found no face on, the set a sensitive "find more" sweep re-checks:
      *  these are exactly the shots the precision-first walk (1024) left without a face. */
     @Query(
@@ -89,6 +93,16 @@ interface FaceScanDao {
     /** Removes every scan marker for the account, for the sign-out wipe. */
     @Query("DELETE FROM face_scan WHERE userId = :userId")
     suspend fun clearForUser(userId: String)
+
+    /** Re-keys every scan marker from one owner to another, so a guest's scanned photos are not
+     *  re-scanned (and their faces overwritten) after sign-in. */
+    @Query("UPDATE face_scan SET userId = :to WHERE userId = :from")
+    suspend fun updateUserId(from: String, to: String)
+
+    /** Moves a photo's scan marker to a new key when a device photo is backed up, so the Synced copy
+     *  is not re-scanned into a duplicate face set. */
+    @Query("UPDATE face_scan SET photoKey = :newKey WHERE userId = :userId AND photoKey = :oldKey")
+    suspend fun rekeyPhoto(userId: String, oldKey: String, newKey: String)
 
     /** Removes every scan marker for every account, so a recognition-model re-index wipe forces the
      *  whole library to be re-scanned and re-embedded with the current model. Returns the row count

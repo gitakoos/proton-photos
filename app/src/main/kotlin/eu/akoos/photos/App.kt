@@ -145,9 +145,14 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
         // Periodic sweeper for the "process killed for days, cache still on disk" gap the cold-start
         // prune above can't reach.
         CachePruneWorker.schedule(WorkManager.getInstance(this))
+        // Daily maintenance that reaps face rows whose photo has left the library for good, so the
+        // biometric tables cannot grow without bound; trust-gated and trash-aware so restorable
+        // photos keep their faces.
+        eu.akoos.photos.worker.FaceReapWorker.schedule(WorkManager.getInstance(this))
         scheduleUpdateCheck()
         seedAlbumOptInFromBucketMap()
         migrateOcrConsentToAiFeatures()
+        migrateCompressTierSplit()
         importPendingAlbumAdds()
         recoverMirrorOverwrites()
         registerCacheCleanupOnBackground()
@@ -165,6 +170,7 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
         val shedFrom = android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW
         if (level >= shedFrom) {
             imageLoader.memoryCache?.clear()
+            staticImageLoader.memoryCache?.clear()
         }
     }
 
@@ -284,6 +290,28 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
                 if (prefs[SettingsKeys.AI_FEATURES_ENABLED] != null) return@runCatching
                 if (prefs[SettingsKeys.OCR_MODEL_DOWNLOAD_ALLOWED] == true) {
                     settingsDataStore.edit { it[SettingsKeys.AI_FEATURES_ENABLED] = true }
+                }
+            }
+        }
+    }
+
+    /**
+     * One-shot seed for the photo/video compression tier split (#108): copies the old shared
+     * [SettingsKeys.COMPRESS_UPLOAD_TIER] into the new video-only [SettingsKeys.COMPRESS_UPLOAD_TIER_VIDEO]
+     * so an upgrading install keeps the exact level it had on both paths. Gated on
+     * [SettingsKeys.COMPRESS_TIER_SPLIT_MIGRATED], which flips true once so the seed never re-runs. An
+     * absent shared value is left absent (both paths already default to Balanced). Never touches the
+     * on/off toggles.
+     */
+    private fun migrateCompressTierSplit() {
+        appScope.launch {
+            runCatching {
+                val prefs = settingsDataStore.data.first()
+                if (prefs[SettingsKeys.COMPRESS_TIER_SPLIT_MIGRATED] == true) return@runCatching
+                val sharedTier = prefs[SettingsKeys.COMPRESS_UPLOAD_TIER]
+                settingsDataStore.edit { p ->
+                    if (sharedTier != null) p[SettingsKeys.COMPRESS_UPLOAD_TIER_VIDEO] = sharedTier
+                    p[SettingsKeys.COMPRESS_TIER_SPLIT_MIGRATED] = true
                 }
             }
         }
@@ -506,6 +534,7 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
                             val ratio = eu.akoos.photos.util.PerfDiagnostics.heapUsedRatio()
                             if (ratio >= HEAP_RELIEF_HIGH_RATIO && !relievedWhileHigh) {
                                 imageLoader.memoryCache?.clear()
+                                staticImageLoader.memoryCache?.clear()
                                 eu.akoos.photos.util.PerfDiagnostics.recordHeapRelief()
                                 relievedWhileHigh = true
                             } else if (ratio < HEAP_RELIEF_LOW_RATIO) {
@@ -527,7 +556,15 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
     // Coil ImageLoader. VideoFrameDecoder for video posters; the animated decoder plays GIFs and
     // widens HEIF/AVIF coverage (ImageDecoderDecoder on API 28+, GifDecoder below). Memory cache is
     // capped well under the largeHeap 25% default, which balloons past 400 MB and made scrolling laggy.
-    override fun newImageLoader(): ImageLoader = ImageLoader.Builder(this)
+    override fun newImageLoader(): ImageLoader = buildImageLoader(animated = true)
+
+    // Sibling loader with the animated decoders left out, so a GIF resolves to its still first frame
+    // with no playback. Reached from Compose via LocalStaticImageLoader by grids and covers that opt
+    // out of GIF autoplay; identical to the main loader in every other respect, and its own memory
+    // cache keeps still frames from colliding with the animated loader's entries under the same key.
+    val staticImageLoader: ImageLoader by lazy { buildImageLoader(animated = false) }
+
+    private fun buildImageLoader(animated: Boolean): ImageLoader = ImageLoader.Builder(this)
         .components {
             // First in line from the API that can attach a gain map at all, and even there it claims
             // a load only when that load opted in and the bytes actually carry one. Every other load
@@ -536,10 +573,12 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
                 add(UltraHdrDecoder.Factory())
             }
             add(VideoFrameDecoder.Factory())
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                add(coil.decode.ImageDecoderDecoder.Factory())
-            } else {
-                add(coil.decode.GifDecoder.Factory())
+            if (animated) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    add(coil.decode.ImageDecoderDecoder.Factory())
+                } else {
+                    add(coil.decode.GifDecoder.Factory())
+                }
             }
         }
         .crossfade(true)

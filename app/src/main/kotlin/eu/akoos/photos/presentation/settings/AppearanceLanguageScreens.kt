@@ -155,6 +155,18 @@ fun ThemeSettingsScreen(
             }
         }
 
+        // Tint the green "backed up" cloud badges with the chosen palette accent instead of the fixed
+        // green. Independent of light/dark, so it is always shown.
+        Spacer(Modifier.height(20.dp))
+        SettingsCard {
+            ToggleRow(
+                label = stringResource(R.string.settings_tint_cloud),
+                description = stringResource(R.string.settings_tint_cloud_summary),
+                checked = state.tintCloudWithAccent,
+                onCheckedChange = { viewModel.setTintCloudWithAccent(it) },
+            )
+        }
+
         // ── AMOLED pure-black toggle — only takes effect in dark mode, so it shows only when the
         // effective theme is dark: an explicit Dark choice, or System while the system is dark. ──
         val darkEffective = state.themeMode == ThemeMode.Dark ||

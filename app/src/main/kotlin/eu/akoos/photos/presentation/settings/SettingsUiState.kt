@@ -68,6 +68,12 @@ data class SettingsUiState(
     /** When true, dark mode forces base surfaces to true black for OLED panels. Off by default;
      *  has no effect in light mode. */
     val amoledBlack: Boolean = false,
+    /** Tint the green "backed up" cloud badges with the palette accent instead of green. Off by default. */
+    val tintCloudWithAccent: Boolean = false,
+    /** Animate GIFs in the timeline, album, and device-folder grids. Off shows a still first frame. */
+    val gifAutoplayGrid: Boolean = false,
+    /** Animate a GIF album cover, including cloud albums. Off shows a still first frame. */
+    val gifAutoplayCovers: Boolean = false,
     /** Master opt-in for on-device AI/ML features (Copy text, Hide faces, and the People grouping to
      *  come). Off by default: when off no model is downloaded and the AI entry points stay hidden. */
     val aiFeaturesEnabled: Boolean = false,
@@ -88,6 +94,8 @@ data class SettingsUiState(
     /** Per-feature opt-in for the face features (Hide faces and People), nested under
      *  [aiFeaturesEnabled]. Off by default. */
     val faceEnabled: Boolean = false,
+    /** Opt-in "automatically merge likely-same people" switch on the face sub-page. Off by default. */
+    val faceAutoMerge: Boolean = false,
     /** Which face model drawer the AI panel is showing: [FaceModelPrompt.Download] when the feature was
      *  switched on with no model on disk, [FaceModelPrompt.Remove] when it was switched off, offering to
      *  delete the model and data it leaves behind, or [FaceModelPrompt.None] for no drawer. */
@@ -110,6 +118,28 @@ data class SettingsUiState(
      *  the toggle, which stays usable so a missing model can be fetched or the feature switched off;
      *  it only lets the row read as available. Resolved at load and after a download, network-free. */
     val faceRecognitionAvailable: Boolean = false,
+    /** Per-feature opt-in for semantic search (find photos by a typed phrase), nested under
+     *  [aiFeaturesEnabled]. Off by default. */
+    val semanticEnabled: Boolean = false,
+    /** Which semantic-search model drawer the AI panel is showing: [SemanticModelPrompt.Download] when the
+     *  feature was switched on with no models on disk, [SemanticModelPrompt.Remove] when it was switched
+     *  off, offering to delete the models and the embeddings they produced, or [SemanticModelPrompt.None]
+     *  for no drawer. */
+    val semanticModelPrompt: SemanticModelPrompt = SemanticModelPrompt.None,
+    /** True while an accepted semantic-search model download runs, so the toggle row reads as busy and
+     *  holds its switch until both the image and text encoders land. */
+    val semanticModelDownloading: Boolean = false,
+    /** True when the last semantic-search model download did not produce usable models, so the row can
+     *  say so and the feature stays off. */
+    val semanticModelDownloadFailed: Boolean = false,
+    /** Running byte count of the semantic-search model download in flight, measured against
+     *  [eu.akoos.photos.data.semantic.SemanticModelAssets.TOTAL_DOWNLOAD_BYTES], so the row shows a real
+     *  bar rather than an open-ended spinner. Reset to 0 whenever a download starts or ends. */
+    val semanticModelDownloadProgress: Long = 0L,
+    /** Whether Wi-Fi was connected when the semantic-search model download drawer was raised. Off means
+     *  the drawer states the download will use mobile data, so a large fetch is never pulled silently over
+     *  a metered link. */
+    val semanticModelOnWifi: Boolean = true,
     /** Which top-level tab the gallery opens on at app start. Default Photos. */
     val landingTab: LandingTab = LandingTab.Photos,
     /** Grid-layout settings (Appearance → Grid layout). [gridRememberLast] on = the timeline
@@ -158,13 +188,15 @@ data class SettingsUiState(
     /** When true, photos are re-encoded to a lighter JPEG per [compressTier] before reaching Drive.
      *  The on-device original is never modified. Off by default. */
     val compressOnUpload: Boolean = false,
-    /** When true, videos are transcoded to a smaller copy per [compressTier] before reaching Drive.
-     *  Separate opt-in from [compressOnUpload]; both share [compressTier]. The on-device original is
-     *  never modified. Off by default. */
+    /** When true, videos are transcoded to a smaller copy per [compressTierVideo] before reaching
+     *  Drive. Separate opt-in from [compressOnUpload]. The on-device original is never modified. Off
+     *  by default. */
     val compressVideosOnUpload: Boolean = false,
-    /** Which quality tier the upload compression uses when [compressOnUpload] or
-     *  [compressVideosOnUpload] is on. Governs both the photo and the video path. */
+    /** Which quality tier the PHOTO upload compression uses when [compressOnUpload] is on. */
     val compressTier: UploadCompressionTier = UploadCompressionTier.BALANCED,
+    /** Which quality tier the VIDEO upload compression uses when [compressVideosOnUpload] is on, the
+     *  video-only counterpart of [compressTier]. Reuses the same [labelRes] / [descRes] mapping. */
+    val compressTierVideo: UploadCompressionTier = UploadCompressionTier.BALANCED,
     val mirrorStripToLocal: Boolean = false,
     /** When true, the lighter re-encode also overwrites the on-device original (all-files access
      *  required), so the local file matches the compressed upload. Persisted only for now. */
@@ -274,6 +306,13 @@ enum class OcrModelPrompt { None, Download, Remove }
  * anything is wiped; [None] shows no drawer.
  */
 enum class FaceModelPrompt { None, Download, Remove, ConfirmRemove }
+
+/**
+ * Which semantic-search model drawer the AI settings panel is showing, if any. [Download] asks to fetch
+ * the image and text encoders when the feature is switched on without them on disk; [Remove] asks whether
+ * to delete them, and the embeddings they produced, when the feature is switched off.
+ */
+enum class SemanticModelPrompt { None, Download, Remove }
 
 enum class ThemeMode(val storageKey: String, val labelRes: Int) {
     System("system", eu.akoos.photos.R.string.theme_mode_system),

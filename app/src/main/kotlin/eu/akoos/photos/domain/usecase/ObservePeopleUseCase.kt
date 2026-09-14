@@ -71,34 +71,46 @@ class ObservePeopleUseCase @Inject constructor(
         items: Flow<List<GalleryItem>>,
     ): Flow<List<PersonSummary>> =
         combine(personDao.observePeopleForUser(userId?.id ?: PhotoLocationEntity.LOCAL_USER), items) { people, feed -> people to feed }
-            .mapLatest { (people, feed) -> buildSummaries(people, feed) }
+            .mapLatest { (people, feed) -> buildSummaries(userId?.id ?: PhotoLocationEntity.LOCAL_USER, people, feed) }
 
     /** Resolve each person's cover face to a [PersonSummary], normalising the cover face box against
      *  the cover photo's dimensions when they are known (a device or backed-up-on-device photo); a
      *  cloud-only cover with no local dimensions keeps a null box and its tile shows the whole cover. */
     private suspend fun buildSummaries(
+        account: String,
         people: List<PersonEntity>,
         items: List<GalleryItem>,
     ): List<PersonSummary> {
-        val covers = people.mapNotNull { person ->
-            val coverFaceId = person.coverFaceId ?: return@mapNotNull null
-            val face = runCatching { faceDao.faceById(coverFaceId) }.getOrNull() ?: return@mapNotNull null
-            person to face
+        if (people.isEmpty()) return emptyList()
+        val feedEmpty = items.isEmpty()
+        // A set of the feed's own stableId strings (references, not copies) for liveness checks. Off the
+        // main thread since the feed can hold tens of thousands of items.
+        val feedKeys: Set<String> = if (feedEmpty) emptySet()
+        else withContext(Dispatchers.Default) { HashSet<String>(items.size).apply { for (i in items) add(i.stableId) } }
+        // Resolve each person to a cover face whose photo is still in the library: the stored cover when
+        // it is live, else the person's next available face. Losing the cover photo (hidden, vaulted,
+        // deleted, reaped) then reshuffles the cover instead of hiding the whole person; only a person
+        // with no live face left is dropped. While the feed is still loading, keep the stored cover and
+        // drop nobody.
+        val covers = withContext(Dispatchers.Default) {
+            people.mapNotNull { person ->
+                val stored = person.coverFaceId?.let { runCatching { faceDao.faceById(it) }.getOrNull() }
+                val fallback: suspend () -> FaceEntity? = {
+                    runCatching { faceDao.facesForPerson(account, person.id) }.getOrNull()
+                        ?.firstOrNull { it.photoKey in feedKeys }
+                }
+                val cover = chooseLiveCoverFace(stored, feedKeys, feedEmpty, fallback) ?: return@mapNotNull null
+                person to cover
+            }
         }
         if (covers.isEmpty()) return emptyList()
-        // One pass over the feed, collecting dimensions for the handful of cover photos and noting
-        // which of those photos the library still holds, so the lookup stays memory-light on a large
-        // library (no full stableId to dimensions map). Off the main thread since the feed can hold
-        // tens of thousands of items.
+        // One light pass for the chosen covers' dimensions (early-continue on every other item).
         val neededKeys = covers.mapTo(HashSet()) { it.second.photoKey }
-        val (coverDims, present) = withContext(Dispatchers.Default) {
+        val coverDims = withContext(Dispatchers.Default) {
             val dims = HashMap<String, Pair<Int, Int>>()
-            val seen = HashSet<String>()
             for (item in items) {
                 val key = item.stableId
-                if (key !in neededKeys) continue
-                seen.add(key)
-                if (key in dims) continue
+                if (key !in neededKeys || key in dims) continue
                 val d = when (item) {
                     is GalleryItem.LocalOnly -> item.local.width to item.local.height
                     is GalleryItem.Synced -> item.local.width to item.local.height
@@ -106,13 +118,9 @@ class ObservePeopleUseCase @Inject constructor(
                 }
                 if (d != null && d.first > 0 && d.second > 0) dims[key] = d
             }
-            dims to seen
+            dims
         }
-        // Drop a person whose cover photo has left the library (its source photo was deleted), so a
-        // stale face embedding cannot surface a ghost person with an unloadable cover. Skipped while
-        // the feed is still empty, so people are not hidden mid-load.
-        val live = if (items.isEmpty()) covers else covers.filter { it.second.photoKey in present }
-        return live.map { (person, face) ->
+        return covers.map { (person, face) ->
             PersonSummary(
                 personId = person.id,
                 displayName = person.displayName,
@@ -158,4 +166,21 @@ class ObservePeopleUseCase @Inject constructor(
         while (longEdge / (sample * 2) >= FACE_SOURCE_MAX_EDGE) sample *= 2
         return sample
     }
+}
+
+/**
+ * The cover face to show for a person: the stored cover when its photo is still in the library, else
+ * the [fallback] (the person's next live face), else null so the caller drops a person with no live
+ * face. While the feed is still loading ([feedEmpty]) the stored cover is kept as-is so people are not
+ * reshuffled or hidden mid-load.
+ */
+internal suspend fun chooseLiveCoverFace(
+    stored: FaceEntity?,
+    feedKeys: Set<String>,
+    feedEmpty: Boolean,
+    fallback: suspend () -> FaceEntity?,
+): FaceEntity? {
+    if (feedEmpty) return stored
+    if (stored != null && stored.photoKey in feedKeys) return stored
+    return fallback()
 }

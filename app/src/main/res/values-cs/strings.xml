@@ -288,6 +288,8 @@
     <string name="gallery_filter_raw">RAW</string>
     <string name="gallery_category_people">Lidé</string>
     <string name="gallery_filter_photos">Fotky</string>
+    <string name="gallery_category_show">Zobrazit %1$s</string>
+    <string name="gallery_category_hide">Skrýt %1$s</string>
     <!-- Gallery snackbar / error fallbacks (raw exception text stays in the log) -->
     <string name="gallery_error_title">Chyba</string>
     <string name="gallery_undo">Zpět</string>
@@ -372,6 +374,20 @@
     <string name="face_index_service_progress">%1$d z %2$d</string>
     <string name="face_index_service_waiting">Čekání na pokračování</string>
     <string name="face_index_service_stop">Ukončit</string>
+    <string name="semantic_index_service_channel_name">Indexování pro vyhledávání</string>
+    <string name="semantic_index_service_channel_desc">Zobrazuje průběh při přípravě fotek pro vyhledávání.</string>
+    <string name="semantic_index_service_title">Příprava fotek pro vyhledávání</string>
+    <string name="semantic_index_service_progress">%1$d z %2$d</string>
+    <string name="semantic_index_service_waiting">Čekání na pokračování</string>
+    <string name="semantic_index_service_stop">Ukončit</string>
+    <string name="model_download_channel_name">Stahování modelů</string>
+    <string name="model_download_channel_desc">Zobrazuje průběh při stahování modelu přímo v zařízení.</string>
+    <string name="model_download_title_face">Stahování modelu pro seskupování obličejů</string>
+    <string name="model_download_title_ocr">Stahování modelu pro rozpoznávání textu</string>
+    <string name="model_download_title_semantic">Stahování modelu pro vyhledávání fotek</string>
+    <string name="model_download_progress">%1$s z %2$s</string>
+    <string name="model_download_preparing">Příprava…</string>
+    <string name="model_download_stop">Ukončit</string>
 
     <!-- Delete bottom sheet -->
     <string name="delete_album_container_warning">Tímto se smaže album, ale vaše fotky zůstanou na Proton Drive.</string>
@@ -692,6 +708,12 @@
     <string name="map_style_modern_summary">Moderní glóbus, kterým můžete otáčet ke svým místům.</string>
     <string name="settings_amoled_black">Čistá černá (AMOLED)</string>
     <string name="settings_amoled_black_summary">V tmavém režimu používat skutečně černé pozadí pro úsporu energie na OLED displejích.</string>
+    <string name="settings_tint_cloud">Odznaky cloudu v barvě akcentu</string>
+    <string name="settings_tint_cloud_summary">Použít pro odznaky zálohovaných fotek barvu akcentu místo zelené.</string>
+    <string name="settings_gif_autoplay_grid">Přehrávat GIFy v mřížkách</string>
+    <string name="settings_gif_autoplay_grid_summary">Animovat GIFy na časové ose, v albech a ve složkách zařízení. Když je vypnuto, zobrazí se statický snímek.</string>
+    <string name="settings_gif_autoplay_covers">Přehrávat GIF obaly alb</string>
+    <string name="settings_gif_autoplay_covers_summary">Animovat obal alba, pokud je to GIF, i u cloudových alb (obal se stáhne jednou).</string>
 
     <!-- Language -->
     <string name="language_en">English, Angličtina</string>
@@ -1687,6 +1709,31 @@
     <string name="settings_ai_face_remove_keep">Ponechat</string>
     <string name="settings_ai_face_remove_confirm_title">Opravdu?</string>
     <string name="settings_ai_face_remove_confirm_message">Tímto se trvale odebere model obličejů a všechny rozpoznané obličeje i jména. Akci nelze vrátit zpět.</string>
+    <string name="settings_ai_semantic">Sémantické vyhledávání</string>
+    <string name="settings_ai_semantic_desc">Najděte fotografie popisem toho, co je na nich</string>
+    <string name="settings_ai_semantic_downloading">Stahování…</string>
+    <string name="settings_ai_semantic_download_failed">Vyhledávací modely se nepodařilo stáhnout.</string>
+    <string name="settings_ai_semantic_download_retry">Opětovným zapnutím přepínače to zkuste znovu.</string>
+    <string name="settings_ai_semantic_download_title">Stáhnout vyhledávací modely?</string>
+    <string name="settings_ai_semantic_download_message">Sémantické vyhledávání potřebuje stáhnout model o velikosti %1$s. Funguje na jakémkoli připojení, ale doporučuje se Wi-Fi.</string>
+    <string name="settings_ai_semantic_download_message_metered">Sémantické vyhledávání potřebuje stáhnout model o velikosti %1$s. Wi-Fi není připojena, takže toto stahování využije mobilní data.</string>
+    <string name="settings_ai_semantic_downloading_progress">%1$s / %2$s</string>
+    <string name="settings_ai_semantic_download_confirm">Stáhnout</string>
+    <string name="settings_ai_semantic_remove_title">Odebrat stažené modely?</string>
+    <string name="settings_ai_semantic_remove_message">Tím se uvolní přibližně %1$s. Modely můžete později znovu stáhnout.</string>
+    <string name="settings_ai_semantic_remove_confirm">Odebrat</string>
+    <string name="settings_ai_semantic_remove_keep">Ponechat</string>
+    <string name="settings_ai_semantic_indexing_waiting">Čekání na vyhledávací modely</string>
+    <string name="settings_ai_semantic_ready">Vaše fotky lze prohledávat</string>
+    <string name="settings_ai_semantic_rescan">Znovu prohledat všechny fotky</string>
+    <string name="settings_ai_semantic_rescan_desc">Vymaže vyhledávací index a znovu jej sestaví pro každou fotku.</string>
+    <string name="settings_ai_semantic_rescan_confirm_title">Znovu prohledat všechny fotky?</string>
+    <string name="settings_ai_semantic_rescan_confirm_msg">Vyhledávací index se vymaže a poté se znovu sestaví pro každou fotku, což může chvíli trvat.</string>
+    <string name="settings_ai_semantic_not_indexed">Vaše fotky ještě nejsou zaindexované</string>
+    <string name="settings_ai_semantic_clear">Vymazat data vyhledávání</string>
+    <string name="settings_ai_semantic_clear_desc">Odstraní vyhledávací index všech fotek z tohoto telefonu.</string>
+    <string name="settings_ai_semantic_clear_confirm_title">Vymazat data vyhledávání?</string>
+    <string name="settings_ai_semantic_clear_confirm_msg">Tímto se odstraní vyhledávací index všech fotek. Vašich fotek se to nedotkne.</string>
     <string name="settings_face_section">Rozpoznané obličeje</string>
     <string name="settings_face_maintenance">Údržba</string>
     <string name="settings_face_transfer">Přenos</string>
@@ -1698,6 +1745,7 @@
     <string name="settings_ai_import_confirm_msg">Přidá obličeje a osoby ze souboru do tohoto telefonu a znovu je seskupí. Vaše stávající obličeje zůstanou zachovány.</string>
     <string name="settings_ai_indexing_running">Prohledávání fotek</string>
     <string name="settings_ai_indexing_waiting">Čekání na model obličejů</string>
+    <string name="settings_ai_indexing_waiting_other">Čekání na dokončení jiné úlohy v zařízení</string>
     <string name="settings_ai_indexing_paused">Pozastaveno</string>
     <string name="settings_ai_indexing_paused_battery">Pozastaveno, nízká baterie</string>
     <string name="settings_ai_indexing_paused_warm">Pozastaveno, telefon je zahřátý</string>
@@ -1783,10 +1831,12 @@
     <string name="settings_ai_export_empty">Zatím žádné obličeje k exportu.</string>
     <string name="settings_ai_export_warn_msg">Tento soubor obsahuje otisky obličejů vypočítané z vašich fotek. Kdokoli, kdo jej získá, by mohl znovu sestavit model obličejů osob ve vaší knihovně, proto jej udržujte v soukromí a sdílejte pouze s lidmi, kterým důvěřujete.</string>
     <string name="settings_ai_export_warn_title">Exportovat index obličejů?</string>
+    <string name="settings_ai_export_share_title">Sdílet index obličejů?</string>
+    <string name="settings_ai_export_share_msg">Odešlete exportovaný soubor do jiné aplikace nebo blízkého zařízení.</string>
     <string name="settings_ai_import">Importovat index obličejů</string>
     <string name="settings_ai_import_done">Importováno %1$d obličejů, %2$d osob.</string>
     <string name="settings_ai_rescan">Znovu prohledat fotky</string>
-    <string name="settings_ai_rescan_confirm_msg">Každá fotka bude znovu prohledána na obličeje ve vyšším detailu, což najde menší a vzdálenější obličeje. Vaše ručně přidané fotky zůstanou zachovány, ale osoby budou přeskupeny, takže některé možná budete muset pojmenovat znovu.</string>
+    <string name="settings_ai_rescan_confirm_msg">Každá fotka bude znovu prohledána na obličeje ve vyšším detailu, což najde menší a vzdálenější obličeje. Vaše jména a opravy zůstanou zachovány a budou znovu přiřazeny po opětovném rozpoznání obličejů.</string>
     <string name="settings_ai_rescan_confirm_title">Znovu prohledat všechny fotky?</string>
     <string name="settings_ai_transfer_failed">Přenos indexu obličejů selhal.</string>
     <string name="settings_ai_transfer_working">Pracuji…</string>
@@ -1888,6 +1938,19 @@
     <string name="collage_tab_layout">Rozvržení</string>
     <string name="collage_tab_ratio">Poměr</string>
     <string name="collage_trim_for_grid">Odeberte %1$d pro přepnutí na mřížku</string>
+    <!-- GIF maker -->
+    <string name="action_make_gif">Vytvořit GIF</string>
+    <string name="gif_maker_title">Tvorba GIFu</string>
+    <string name="gif_maker_aspect_original">Originál</string>
+    <string name="gif_maker_aspect_square">1:1</string>
+    <string name="gif_maker_save">Uložit GIF</string>
+    <string name="gif_maker_progress">Vytváření GIFu…</string>
+    <string name="gif_maker_hint">GIF nemá zvuk a může být dlouhý až 10 sekund.</string>
+    <string name="gif_maker_saved">GIF uložen do vašich fotek</string>
+    <string name="gif_export_channel_name">Vytváření GIFu</string>
+    <string name="gif_export_channel_desc">Zobrazuje průběh při vytváření GIFu.</string>
+    <string name="gif_quality_title">Kvalita GIFu</string>
+    <string name="gif_maker_duration">%1$s s</string>
 
     <!-- Photo/video editor adjustments, filters and tools -->
     <string name="editor_adj_fade">Vyblednutí</string>
@@ -1984,6 +2047,8 @@
     <string name="whats_new_guest_body">Rozpoznávání obličejů, mapa, poznámky v kalendáři i vyhledávač duplicit teď fungují i bez přihlášení.</string>
     <string name="whats_new_dup_nobackup_title">Duplicity bez zálohy</string>
     <string name="whats_new_dup_nobackup_body">Vyhledávač duplicit teď prohledá fotky ve vašem zařízení bez účtu i bez zálohy.</string>
+    <string name="whats_new_compress_split_title">Samostatná kvalita fotek a videí</string>
+    <string name="whats_new_compress_split_body">Komprese fotek a videí má teď vlastní úrovně kvality. Zkontrolujte je v Nastavení, v části Kvalita a velikost.</string>
     <string name="whats_new_section_new">Novinky</string>
     <string name="whats_new_section_improved">Vylepšení</string>
 
@@ -2016,4 +2081,14 @@
     <string name="face_excluded_undo">Undo</string>
     <string name="albums_search_hint">Hledat v albech</string>
     <string name="albums_search_no_results">Žádná alba neodpovídají hledání.</string>
+    <string name="settings_ai_groups_found">%1$d skupin</string>
+    <string name="settings_ai_faces_found">%1$d obličejů</string>
+    <string name="sign_out_dialog_face_warning">Pojmenované osoby a skupiny obličejů v tomto zařízení budou také odstraněny a po opětovném přihlášení se neobnoví.</string>
+    <string name="person_rename_merge_confirm_title">Sloučit s existující osobou?</string>
+    <string name="person_rename_merge_confirm_body">Osoba se jménem %1$s již existuje. Použití tohoto jména sloučí obě v jednu, což nelze vrátit zpět. Sloučit?</string>
+    <string name="person_move_confirm_title">Přesunout k této osobě?</string>
+    <string name="person_move_confirm_body">Přesunout vybrané fotky k %1$s?</string>
+    <string name="person_move_confirm">Přesunout</string>
+    <string name="settings_face_auto_merge">Automaticky slučovat pravděpodobné shody</string>
+    <string name="settings_face_auto_merge_desc">Když skenování najde skupinu, která je velmi pravděpodobně někdo, koho jste už pojmenovali, přidá ji bez ptaní. Sloučení nelze vrátit zpět, proto to nechte vypnuté, chcete-li každé potvrdit sami.</string>
 </resources>

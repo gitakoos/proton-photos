@@ -320,8 +320,21 @@ class GalleryItemSelectionController @AssistedInject constructor(
         }
         val localUris = items.mapNotNull { (it as? GalleryItem.LocalOnly)?.local?.uri }
         val joined = if (cloudLinkIds.isNotEmpty()) {
-            runCatching { driveRepo.addPhotosToAlbum(userId, albumLinkId, cloudLinkIds) }
-                .getOrNull()?.succeededLinkIds?.size ?: 0
+            val outcome = try {
+                val result = driveRepo.addPhotosToAlbum(userId, albumLinkId, cloudLinkIds)
+                addToAlbumOutcome(cloudLinkIds.size, result.succeededLinkIds.size, result.failedLinkIds.size, threw = false)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "addToAlbum failed: ${e.message}")
+                addToAlbumOutcome(cloudLinkIds.size, 0, 0, threw = true)
+            }
+            if (outcome.isPartialOrFullFailure) {
+                _actionFailure.tryEmit(
+                    context.resources.getQuantityString(R.plurals.viewer_add_photos_failed, outcome.failed, outcome.failed),
+                )
+            }
+            outcome.added
         } else 0
         val queued = if (localUris.isNotEmpty()) {
             forceUploadLocalUris.queueForAlbum(userId, albumLinkId, localUris)

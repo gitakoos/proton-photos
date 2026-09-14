@@ -288,6 +288,8 @@
     <string name="gallery_filter_raw">RAW</string>
     <string name="gallery_category_people">Ľudia</string>
     <string name="gallery_filter_photos">Fotky</string>
+    <string name="gallery_category_show">Zobraziť %1$s</string>
+    <string name="gallery_category_hide">Skryť %1$s</string>
     <!-- Gallery snackbar / error fallbacks (raw exception text stays in the log) -->
     <string name="gallery_error_title">Chyba</string>
     <string name="gallery_undo">Späť</string>
@@ -372,6 +374,20 @@
     <string name="face_index_service_progress">%1$d z %2$d</string>
     <string name="face_index_service_waiting">Čakanie na pokračovanie</string>
     <string name="face_index_service_stop">Zastaviť</string>
+    <string name="semantic_index_service_channel_name">Indexovanie pre vyhľadávanie</string>
+    <string name="semantic_index_service_channel_desc">Zobrazuje priebeh počas prípravy fotiek na vyhľadávanie.</string>
+    <string name="semantic_index_service_title">Príprava fotiek na vyhľadávanie</string>
+    <string name="semantic_index_service_progress">%1$d z %2$d</string>
+    <string name="semantic_index_service_waiting">Čakanie na pokračovanie</string>
+    <string name="semantic_index_service_stop">Zastaviť</string>
+    <string name="model_download_channel_name">Sťahovanie modelov</string>
+    <string name="model_download_channel_desc">Zobrazuje priebeh počas sťahovania modelu priamo v zariadení.</string>
+    <string name="model_download_title_face">Sťahovanie modelu na zoskupovanie tvárí</string>
+    <string name="model_download_title_ocr">Sťahovanie modelu na rozpoznávanie textu</string>
+    <string name="model_download_title_semantic">Sťahovanie modelu na vyhľadávanie fotiek</string>
+    <string name="model_download_progress">%1$s z %2$s</string>
+    <string name="model_download_preparing">Príprava…</string>
+    <string name="model_download_stop">Zastaviť</string>
 
     <!-- Delete bottom sheet -->
     <string name="delete_album_container_warning">Týmto sa odstráni album, ale vaše fotky zostanú na Proton Drive.</string>
@@ -692,6 +708,12 @@
     <string name="map_style_modern_summary">Moderný glóbus, ktorým môžete otáčať k svojim miestam.</string>
     <string name="settings_amoled_black">Čistá čierna (AMOLED)</string>
     <string name="settings_amoled_black_summary">V tmavom režime používať skutočne čierne pozadie pre úsporu energie na OLED displejoch.</string>
+    <string name="settings_tint_cloud">Odznaky cloudu vo farbe akcentu</string>
+    <string name="settings_tint_cloud_summary">Použiť pre odznaky zálohovaných fotiek farbu akcentu namiesto zelenej.</string>
+    <string name="settings_gif_autoplay_grid">Prehrávať GIFy v mriežkach</string>
+    <string name="settings_gif_autoplay_grid_summary">Animovať GIFy na časovej osi, v albumoch a v priečinkoch zariadenia. Keď je vypnuté, zobrazí sa statická snímka.</string>
+    <string name="settings_gif_autoplay_covers">Prehrávať GIF obaly albumov</string>
+    <string name="settings_gif_autoplay_covers_summary">Animovať obal albumu, ak je to GIF, aj pri cloudových albumoch (obal sa stiahne raz).</string>
 
     <!-- Language -->
     <string name="language_en">English</string>
@@ -1689,6 +1711,31 @@
     <string name="settings_ai_face_remove_keep">Ponechať</string>
     <string name="settings_ai_face_remove_confirm_title">Naozaj?</string>
     <string name="settings_ai_face_remove_confirm_message">Týmto sa natrvalo odstráni model tvárí a všetky rozpoznané tváre a mená. Túto akciu nemožno vrátiť späť.</string>
+    <string name="settings_ai_semantic">Sémantické vyhľadávanie</string>
+    <string name="settings_ai_semantic_desc">Nájdite fotografie opísaním toho, čo je na nich</string>
+    <string name="settings_ai_semantic_downloading">Sťahovanie…</string>
+    <string name="settings_ai_semantic_download_failed">Vyhľadávacie modely sa nepodarilo stiahnuť.</string>
+    <string name="settings_ai_semantic_download_retry">Opätovným zapnutím prepínača to skúste znova.</string>
+    <string name="settings_ai_semantic_download_title">Stiahnuť vyhľadávacie modely?</string>
+    <string name="settings_ai_semantic_download_message">Sémantické vyhľadávanie potrebuje stiahnuť model s veľkosťou %1$s. Funguje na akomkoľvek pripojení, ale odporúča sa Wi-Fi.</string>
+    <string name="settings_ai_semantic_download_message_metered">Sémantické vyhľadávanie potrebuje stiahnuť model s veľkosťou %1$s. Wi-Fi nie je pripojená, takže toto sťahovanie použije mobilné dáta.</string>
+    <string name="settings_ai_semantic_downloading_progress">%1$s / %2$s</string>
+    <string name="settings_ai_semantic_download_confirm">Stiahnuť</string>
+    <string name="settings_ai_semantic_remove_title">Odstrániť stiahnuté modely?</string>
+    <string name="settings_ai_semantic_remove_message">Tým sa uvoľní približne %1$s. Modely môžete neskôr znova stiahnuť.</string>
+    <string name="settings_ai_semantic_remove_confirm">Odstrániť</string>
+    <string name="settings_ai_semantic_remove_keep">Ponechať</string>
+    <string name="settings_ai_semantic_indexing_waiting">Čaká sa na vyhľadávacie modely</string>
+    <string name="settings_ai_semantic_ready">Vaše fotky sa dajú prehľadávať</string>
+    <string name="settings_ai_semantic_rescan">Znova prehľadať všetky fotky</string>
+    <string name="settings_ai_semantic_rescan_desc">Vymaže vyhľadávací index a znova ho zostaví pre každú fotku.</string>
+    <string name="settings_ai_semantic_rescan_confirm_title">Znova prehľadať všetky fotky?</string>
+    <string name="settings_ai_semantic_rescan_confirm_msg">Vyhľadávací index sa vymaže a potom sa znova zostaví pre každú fotku, čo môže chvíľu trvať.</string>
+    <string name="settings_ai_semantic_not_indexed">Vaše fotky ešte nie sú zaindexované</string>
+    <string name="settings_ai_semantic_clear">Vymazať údaje vyhľadávania</string>
+    <string name="settings_ai_semantic_clear_desc">Odstráni vyhľadávací index všetkých fotiek z tohto telefónu.</string>
+    <string name="settings_ai_semantic_clear_confirm_title">Vymazať údaje vyhľadávania?</string>
+    <string name="settings_ai_semantic_clear_confirm_msg">Týmto sa odstráni vyhľadávací index všetkých fotiek. Vašich fotiek sa to nedotkne.</string>
     <string name="settings_face_section">Rozpoznané tváre</string>
     <string name="settings_face_maintenance">Údržba</string>
     <string name="settings_face_transfer">Prenos</string>
@@ -1700,6 +1747,7 @@
     <string name="settings_ai_import_confirm_msg">Pridá tváre a osoby zo súboru do tohto telefónu a znova ich zoskupí. Vaše aktuálne tváre zostanú zachované.</string>
     <string name="settings_ai_indexing_running">Prehľadávanie fotiek</string>
     <string name="settings_ai_indexing_waiting">Čakanie na model tvárí</string>
+    <string name="settings_ai_indexing_waiting_other">Čakanie na dokončenie inej úlohy v zariadení</string>
     <string name="settings_ai_indexing_paused">Pozastavené</string>
     <string name="settings_ai_indexing_paused_battery">Pozastavené, nízka batéria</string>
     <string name="settings_ai_indexing_paused_warm">Pozastavené, telefón je teplý</string>
@@ -1785,10 +1833,12 @@
     <string name="settings_ai_export_empty">Zatiaľ žiadne tváre na export.</string>
     <string name="settings_ai_export_warn_msg">Tento súbor obsahuje odtlačky tvárí vypočítané z vašich fotiek. Ktokoľvek, kto ho získa, by mohol znova zostaviť model tvárí osôb vo vašej knižnici, preto ho uchovávajte v súkromí a zdieľajte iba s ľuďmi, ktorým dôverujete.</string>
     <string name="settings_ai_export_warn_title">Exportovať index tvárí?</string>
+    <string name="settings_ai_export_share_title">Zdieľať index tvárí?</string>
+    <string name="settings_ai_export_share_msg">Odošlite exportovaný súbor do inej aplikácie alebo do zariadenia v okolí.</string>
     <string name="settings_ai_import">Importovať index tvárí</string>
     <string name="settings_ai_import_done">Importovaných %1$d tvárí, %2$d osôb.</string>
     <string name="settings_ai_rescan">Znova prehľadať fotky</string>
-    <string name="settings_ai_rescan_confirm_msg">Každá fotka sa znova prehľadá na tváre s vyšším detailom, čo nájde menšie a vzdialenejšie tváre. Vaše ručne pridané fotky zostanú zachované, ale osoby sa preskupia, takže niektoré možno budete musieť pomenovať znova.</string>
+    <string name="settings_ai_rescan_confirm_msg">Každá fotka sa znova prehĺdá na tváre s vyšším detailom, čo nájde menšie a vzdialenejšie tváre. Vaše mená a opravy zostanú zachované a znova sa priradia po opätovnom rozpoznání tvárí.</string>
     <string name="settings_ai_rescan_confirm_title">Znova prehľadať všetky fotky?</string>
     <string name="settings_ai_transfer_failed">Prenos indexu tvárí zlyhal.</string>
     <string name="settings_ai_transfer_working">Pracujem…</string>
@@ -1890,6 +1940,19 @@
     <string name="collage_tab_layout">Rozloženie</string>
     <string name="collage_tab_ratio">Pomer</string>
     <string name="collage_trim_for_grid">Odstráňte %1$d na prepnutie na mriežku</string>
+    <!-- GIF maker -->
+    <string name="action_make_gif">Vytvoriť GIF</string>
+    <string name="gif_maker_title">Tvorba GIFu</string>
+    <string name="gif_maker_aspect_original">Originál</string>
+    <string name="gif_maker_aspect_square">1:1</string>
+    <string name="gif_maker_save">Uložiť GIF</string>
+    <string name="gif_maker_progress">Vytváranie GIFu…</string>
+    <string name="gif_maker_hint">GIF nemá zvuk a môže byť dlhý až 10 sekúnd.</string>
+    <string name="gif_maker_saved">GIF uložený do vašich fotiek</string>
+    <string name="gif_export_channel_name">Vytváranie GIFu</string>
+    <string name="gif_export_channel_desc">Zobrazuje priebeh počas vytvárania GIFu.</string>
+    <string name="gif_quality_title">Kvalita GIFu</string>
+    <string name="gif_maker_duration">%1$s s</string>
 
     <!-- Photo and video editor additions -->
     <string name="editor_adj_fade">Vyblednutie</string>
@@ -1985,6 +2048,8 @@
     <string name="whats_new_guest_body">Rozpoznávanie tvárí, mapa, poznámky v kalendári a vyhľadávač duplikátov teraz fungujú aj bez prihlásenia.</string>
     <string name="whats_new_dup_nobackup_title">Duplikáty bez zálohy</string>
     <string name="whats_new_dup_nobackup_body">Vyhľadávač duplikátov teraz prehľadá fotky vo vašom zariadení bez účtu aj bez zálohy.</string>
+    <string name="whats_new_compress_split_title">Samostatná kvalita fotiek a videí</string>
+    <string name="whats_new_compress_split_body">Kompresia fotiek a videí má teraz vlastné úrovne kvality. Skontrolujte ich v Nastaveniach, v časti Kvalita a veľkosť.</string>
     <string name="whats_new_section_new">Novinky</string>
     <string name="whats_new_section_improved">Vylepšenia</string>
 
@@ -2017,4 +2082,14 @@
     <string name="face_excluded_undo">Undo</string>
     <string name="albums_search_hint">Hľadať v albumoch</string>
     <string name="albums_search_no_results">Žiadne albumy nezodpovedajú hľadaniu.</string>
+    <string name="settings_ai_groups_found">%1$d skupín</string>
+    <string name="settings_ai_faces_found">%1$d tvárí</string>
+    <string name="sign_out_dialog_face_warning">Pomenované osoby a skupiny tvárí v tomto zariadení sa tiež odstránia a po opätovnom prihlásení sa neobnovia.</string>
+    <string name="person_rename_merge_confirm_title">Zlúčiť s existujúcou osobou?</string>
+    <string name="person_rename_merge_confirm_body">Osoba s menom %1$s už existuje. Použitie tohto mena zlúči obe do jednej, čo nemožno vrátiť späť. Zlúčiť?</string>
+    <string name="person_move_confirm_title">Presunúť k tejto osobe?</string>
+    <string name="person_move_confirm_body">Presunúť vybrané fotky k %1$s?</string>
+    <string name="person_move_confirm">Presunúť</string>
+    <string name="settings_face_auto_merge">Automaticky zlučovať pravdepodobné zhody</string>
+    <string name="settings_face_auto_merge_desc">Keď skenovanie nájde skupinu, ktorá je veľmi pravdepodobne niekto, koho ste už pomenovali, pridá ju bez opýtania. Zlúčenia nemožno vrátiť späť, preto to nechajte vypnuté, ak chcete každé potvrdiť sami.</string>
 </resources>

@@ -203,6 +203,8 @@
     <string name="gallery_filter_raw">RAW</string>
     <string name="gallery_category_people">Personen</string>
     <string name="gallery_filter_photos">Foto\'s</string>
+    <string name="gallery_category_show">%1$s tonen</string>
+    <string name="gallery_category_hide">%1$s verbergen</string>
 
     <!-- Permission -->
     <string name="permission_grant_button">Toegang verlenen</string>
@@ -246,6 +248,20 @@
     <string name="face_index_service_progress">%1$d van %2$d</string>
     <string name="face_index_service_waiting">Wachten om door te gaan</string>
     <string name="face_index_service_stop">Stoppen</string>
+    <string name="semantic_index_service_channel_name">Indexeren voor zoeken</string>
+    <string name="semantic_index_service_channel_desc">Toont de voortgang terwijl foto\'s worden voorbereid voor zoeken.</string>
+    <string name="semantic_index_service_title">Foto\'s worden voorbereid voor zoeken</string>
+    <string name="semantic_index_service_progress">%1$d van %2$d</string>
+    <string name="semantic_index_service_waiting">Wachten om door te gaan</string>
+    <string name="semantic_index_service_stop">Stoppen</string>
+    <string name="model_download_channel_name">Modeldownloads</string>
+    <string name="model_download_channel_desc">Toont de voortgang terwijl een model op het apparaat wordt gedownload.</string>
+    <string name="model_download_title_face">Model voor gezichtsgroepering wordt gedownload</string>
+    <string name="model_download_title_ocr">Model voor tekstherkenning wordt gedownload</string>
+    <string name="model_download_title_semantic">Model voor zoeken in foto\'s wordt gedownload</string>
+    <string name="model_download_progress">%1$s van %2$s</string>
+    <string name="model_download_preparing">Voorbereiden…</string>
+    <string name="model_download_stop">Stoppen</string>
 
     <!-- Delete bottom sheet -->
     <string name="delete_album_container_warning">Hiermee verwijder je het album, maar je foto\'s blijven in Proton Drive.</string>
@@ -532,6 +548,12 @@
     <string name="map_style_modern_summary">Een moderne globe die je naar je plekken kunt draaien.</string>
     <string name="settings_amoled_black">Puur zwart (AMOLED)</string>
     <string name="settings_amoled_black_summary">Gebruik echt zwarte achtergronden in de donkere modus om stroom te besparen op OLED-schermen.</string>
+    <string name="settings_tint_cloud">Cloudbadges in accentkleur</string>
+    <string name="settings_tint_cloud_summary">Gebruik de accentkleur voor de cloudbadges in plaats van groen.</string>
+    <string name="settings_gif_autoplay_grid">Gifs afspelen in rasters</string>
+    <string name="settings_gif_autoplay_grid_summary">Animeer gifs in de tijdlijn, albums en apparaatmappen. Wanneer uit, wordt een stilstaand beeld getoond.</string>
+    <string name="settings_gif_autoplay_covers">Gif-albumhoezen afspelen</string>
+    <string name="settings_gif_autoplay_covers_summary">Animeer een albumhoes als het een gif is, ook bij cloudalbums (de hoes wordt één keer gedownload).</string>
 
     <!-- Language -->
     <string name="language_en">English, English</string>
@@ -1626,6 +1648,31 @@
     <string name="settings_ai_face_remove_keep">Behouden</string>
     <string name="settings_ai_face_remove_confirm_title">Weet je het zeker?</string>
     <string name="settings_ai_face_remove_confirm_message">Hiermee worden het gezichtsmodel en alle herkende gezichten en namen definitief verwijderd. Dit kan niet ongedaan worden gemaakt.</string>
+    <string name="settings_ai_semantic">Semantisch zoeken</string>
+    <string name="settings_ai_semantic_desc">Vind foto\'s door te beschrijven wat erop staat</string>
+    <string name="settings_ai_semantic_downloading">Downloaden…</string>
+    <string name="settings_ai_semantic_download_failed">De zoekmodellen konden niet worden gedownload.</string>
+    <string name="settings_ai_semantic_download_retry">Zet de schakelaar opnieuw aan om het nog eens te proberen.</string>
+    <string name="settings_ai_semantic_download_title">De zoekmodellen downloaden?</string>
+    <string name="settings_ai_semantic_download_message">Semantisch zoeken vereist een modeldownload van %1$s. Het werkt via elke verbinding, maar wifi wordt aanbevolen.</string>
+    <string name="settings_ai_semantic_download_message_metered">Semantisch zoeken vereist een modeldownload van %1$s. Er is geen wifi verbonden, dus deze download gebruikt mobiele data.</string>
+    <string name="settings_ai_semantic_downloading_progress">%1$s / %2$s</string>
+    <string name="settings_ai_semantic_download_confirm">Downloaden</string>
+    <string name="settings_ai_semantic_remove_title">De gedownloade modellen verwijderen?</string>
+    <string name="settings_ai_semantic_remove_message">Dit maakt ongeveer %1$s vrij. Je kunt ze later opnieuw downloaden.</string>
+    <string name="settings_ai_semantic_remove_confirm">Verwijderen</string>
+    <string name="settings_ai_semantic_remove_keep">Behouden</string>
+    <string name="settings_ai_semantic_indexing_waiting">Wachten op de zoekmodellen</string>
+    <string name="settings_ai_semantic_ready">Je foto\'s zijn doorzoekbaar</string>
+    <string name="settings_ai_semantic_rescan">Alle foto\'s opnieuw scannen</string>
+    <string name="settings_ai_semantic_rescan_desc">Wist de zoekindex en bouwt deze opnieuw op voor elke foto.</string>
+    <string name="settings_ai_semantic_rescan_confirm_title">Alle foto\'s opnieuw scannen?</string>
+    <string name="settings_ai_semantic_rescan_confirm_msg">De zoekindex wordt gewist en daarna opnieuw opgebouwd voor elke foto, wat even kan duren.</string>
+    <string name="settings_ai_semantic_not_indexed">Je foto\'s zijn nog niet geïndexeerd</string>
+    <string name="settings_ai_semantic_clear">Zoekgegevens wissen</string>
+    <string name="settings_ai_semantic_clear_desc">Verwijdert de zoekindex voor elke foto van deze telefoon.</string>
+    <string name="settings_ai_semantic_clear_confirm_title">Zoekgegevens wissen?</string>
+    <string name="settings_ai_semantic_clear_confirm_msg">Dit verwijdert de zoekindex voor elke foto. Je foto\'s worden niet aangetast.</string>
     <string name="settings_face_section">Herkende gezichten</string>
     <string name="settings_face_maintenance">Onderhoud</string>
     <string name="settings_face_transfer">Overdracht</string>
@@ -1637,6 +1684,7 @@
     <string name="settings_ai_import_confirm_msg">Dit voegt de gezichten en personen uit het bestand toe aan deze telefoon en groepeert ze opnieuw. Je huidige gezichten blijven behouden.</string>
     <string name="settings_ai_indexing_running">Je foto\'s worden doorzocht</string>
     <string name="settings_ai_indexing_waiting">Wachten op het gezichtsmodel</string>
+    <string name="settings_ai_indexing_waiting_other">Wachten tot een andere taak op het apparaat klaar is</string>
     <string name="settings_ai_indexing_paused">Gepauzeerd</string>
     <string name="settings_ai_indexing_paused_battery">Gepauzeerd, batterij bijna leeg</string>
     <string name="settings_ai_indexing_paused_warm">Gepauzeerd, telefoon is warm</string>
@@ -1720,10 +1768,12 @@
     <string name="settings_ai_export_empty">Nog geen gezichten om te exporteren.</string>
     <string name="settings_ai_export_warn_msg">Dit bestand bevat de gezichtsvingerafdrukken die uit je foto\'s zijn berekend. Iedereen die het krijgt, zou een gezichtsmodel van de personen in je bibliotheek kunnen reconstrueren, dus houd het privé en deel het alleen met mensen die je vertrouwt.</string>
     <string name="settings_ai_export_warn_title">Gezichtsindex exporteren?</string>
+    <string name="settings_ai_export_share_title">Gezichtsindex delen?</string>
+    <string name="settings_ai_export_share_msg">Stuur het geëxporteerde bestand naar een andere app of een apparaat in de buurt.</string>
     <string name="settings_ai_import">Gezichtsindex importeren</string>
     <string name="settings_ai_import_done">%1$d gezichten, %2$d personen geïmporteerd.</string>
     <string name="settings_ai_rescan">Foto\'s opnieuw scannen</string>
-    <string name="settings_ai_rescan_confirm_msg">Elke foto wordt opnieuw op gezichten gescand met meer detail, waardoor kleinere en verder weg gelegen gezichten worden gevonden. Je handmatig toegevoegde foto\'s blijven behouden, maar personen worden opnieuw gegroepeerd, dus je moet er misschien een paar opnieuw een naam geven.</string>
+    <string name="settings_ai_rescan_confirm_msg">Elke foto wordt opnieuw op gezichten gescand met meer detail, waardoor kleinere en verder weg gelegen gezichten worden gevonden. Je namen en correcties blijven behouden en worden opnieuw toegepast zodra de gezichten opnieuw zijn gedetecteerd.</string>
     <string name="settings_ai_rescan_confirm_title">Alle foto\'s opnieuw scannen?</string>
     <string name="settings_ai_transfer_failed">Overdracht van gezichtsindex mislukt.</string>
     <string name="settings_ai_transfer_working">Bezig…</string>
@@ -1815,6 +1865,19 @@
     <string name="collage_tab_layout">Indeling</string>
     <string name="collage_tab_ratio">Verhouding</string>
     <string name="collage_trim_for_grid">Verwijder %1$d om naar een rasterindeling over te schakelen</string>
+    <!-- GIF maker -->
+    <string name="action_make_gif">GIF maken</string>
+    <string name="gif_maker_title">GIF-maker</string>
+    <string name="gif_maker_aspect_original">Origineel</string>
+    <string name="gif_maker_aspect_square">1:1</string>
+    <string name="gif_maker_save">GIF opslaan</string>
+    <string name="gif_maker_progress">GIF wordt gemaakt…</string>
+    <string name="gif_maker_hint">Een GIF heeft geen geluid en kan maximaal 10 seconden lang zijn.</string>
+    <string name="gif_maker_saved">GIF opgeslagen in je foto\'s</string>
+    <string name="gif_export_channel_name">Gif maken</string>
+    <string name="gif_export_channel_desc">Toont de voortgang terwijl een gif wordt gemaakt.</string>
+    <string name="gif_quality_title">Gif-kwaliteit</string>
+    <string name="gif_maker_duration">%1$s s</string>
 
     <!-- Photo editor: adjustments, color, filters, geometry, draw/text tools, export -->
     <string name="editor_adj_fade">Vervagen</string>
@@ -1911,6 +1974,8 @@
     <string name="whats_new_guest_body">Gezichtsherkenning, de kaart, de kalendernotities en de duplicaatzoeker werken nu allemaal zonder aanmelding.</string>
     <string name="whats_new_dup_nobackup_title">Duplicaten zonder back-up</string>
     <string name="whats_new_dup_nobackup_body">De duplicaatzoeker scant nu de foto\'s op je apparaat, zonder account of back-up.</string>
+    <string name="whats_new_compress_split_title">Aparte kwaliteit voor foto\'s en video\'s</string>
+    <string name="whats_new_compress_split_body">Foto- en videocompressie hebben nu elk een eigen kwaliteitsniveau. Controleer ze in Instellingen, onder Kwaliteit en grootte.</string>
     <string name="whats_new_section_new">Nieuw</string>
     <string name="whats_new_section_improved">Verbeteringen</string>
 
@@ -1943,4 +2008,14 @@
     <string name="face_excluded_undo">Undo</string>
     <string name="albums_search_hint">Albums zoeken</string>
     <string name="albums_search_no_results">Geen album komt overeen met de zoekopdracht.</string>
+    <string name="settings_ai_groups_found">%1$d groepen</string>
+    <string name="settings_ai_faces_found">%1$d gezichten</string>
+    <string name="sign_out_dialog_face_warning">De personen met een naam en gezichtsgroepen op dit apparaat worden ook verwijderd en worden niet hersteld wanneer je opnieuw inlogt.</string>
+    <string name="person_rename_merge_confirm_title">Samenvoegen met bestaande persoon?</string>
+    <string name="person_rename_merge_confirm_body">Er bestaat al een persoon met de naam %1$s. Die naam voegt de twee samen tot één, wat niet ongedaan kan worden gemaakt. Samenvoegen?</string>
+    <string name="person_move_confirm_title">Naar deze persoon verplaatsen?</string>
+    <string name="person_move_confirm_body">De selectie naar %1$s verplaatsen?</string>
+    <string name="person_move_confirm">Verplaatsen</string>
+    <string name="settings_face_auto_merge">Waarschijnlijke overeenkomsten automatisch samenvoegen</string>
+    <string name="settings_face_auto_merge_desc">Wanneer een scan een groep vindt die zeer waarschijnlijk iemand is die je al een naam gaf, wordt die zonder vragen toegevoegd. Samenvoegen kan niet ongedaan worden gemaakt, laat dit dus uit om ze zelf te bevestigen.</string>
 </resources>

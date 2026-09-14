@@ -136,6 +136,10 @@ fun PersonDetailScreen(
     var showMoveSelectionPicker by remember { mutableStateOf(false) }
     var pendingCover by remember { mutableStateOf<String?>(null) }
     var pendingMerge by remember { mutableStateOf<PersonUi?>(null) }
+    // A rename whose name matches another person, and a move of a selection onto an existing person, both
+    // reassign faces in a way that is not cleanly undone, so each confirms first (like the merge picker).
+    var pendingRenameMerge by remember { mutableStateOf<String?>(null) }
+    var pendingMove by remember { mutableStateOf<PersonUi?>(null) }
     var selection by remember { mutableStateOf(emptySet<String>()) }
     val selecting = selection.isNotEmpty()
 
@@ -149,6 +153,9 @@ fun PersonDetailScreen(
     // empty. A person still loading or opened already empty never pops.
     var hadPhotos by remember { mutableStateOf(false) }
     var leftOnEmpty by remember { mutableStateOf(false) }
+    // Load the other named people up front (not only when a picker opens), so renaming this person onto
+    // an existing name can be recognised as a merge and confirmed rather than folding the two silently.
+    LaunchedEffect(Unit) { onLoadMergeCandidates() }
     LaunchedEffect(state.isLoading, state.items.isEmpty()) {
         if (state.items.isNotEmpty()) {
             hadPhotos = true
@@ -496,7 +503,16 @@ fun PersonDetailScreen(
             singleLine = true,
             confirmLabel = stringResource(R.string.action_save),
             onDismiss = { showRename = false },
-            onSave = { onRename(it) },
+            onSave = { entered ->
+                // Renaming onto a name another person holds is a merge (same name = same person), so it
+                // confirms first instead of silently folding two people together. A new name just renames.
+                val trimmed = entered.trim()
+                if (trimmed.isNotEmpty() && mergeCandidates.any { it.displayName == trimmed }) {
+                    pendingRenameMerge = trimmed
+                } else {
+                    onRename(entered)
+                }
+            },
         )
     }
 
@@ -560,8 +576,7 @@ fun PersonDetailScreen(
             people = mergeCandidates,
             onPick = { picked ->
                 showMoveSelectionPicker = false
-                onMoveSelectionToPerson(toMove, picked.displayName ?: "")
-                selection = emptySet()
+                pendingMove = picked
             },
             onCreateNew = { name ->
                 showMoveSelectionPicker = false
@@ -583,6 +598,35 @@ fun PersonDetailScreen(
                 pendingMerge = null
             },
             onDismiss = { pendingMerge = null },
+        )
+    }
+
+    pendingRenameMerge?.let { name ->
+        ConfirmDialog(
+            title = stringResource(R.string.person_rename_merge_confirm_title),
+            message = stringResource(R.string.person_rename_merge_confirm_body, name),
+            confirmLabel = stringResource(R.string.person_merge_confirm),
+            dismissLabel = stringResource(R.string.cancel),
+            onConfirm = {
+                onRename(name)
+                pendingRenameMerge = null
+            },
+            onDismiss = { pendingRenameMerge = null },
+        )
+    }
+
+    pendingMove?.let { target ->
+        ConfirmDialog(
+            title = stringResource(R.string.person_move_confirm_title),
+            message = stringResource(R.string.person_move_confirm_body, target.displayName ?: ""),
+            confirmLabel = stringResource(R.string.person_move_confirm),
+            dismissLabel = stringResource(R.string.cancel),
+            onConfirm = {
+                onMoveSelectionToPerson(selection, target.displayName ?: "")
+                selection = emptySet()
+                pendingMove = null
+            },
+            onDismiss = { pendingMove = null },
         )
     }
 

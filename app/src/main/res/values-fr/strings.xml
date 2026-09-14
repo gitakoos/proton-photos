@@ -158,6 +158,8 @@
     <string name="gallery_filter_raw">RAW</string>
     <string name="gallery_category_people">Personnes</string>
     <string name="gallery_filter_photos">Photos</string>
+    <string name="gallery_category_show">Afficher %1$s</string>
+    <string name="gallery_category_hide">Masquer %1$s</string>
 
     <!-- Permission -->
     <string name="permission_grant_button">Autoriser l\'accès</string>
@@ -501,6 +503,12 @@
     <string name="map_style_modern_summary">Un globe moderne que vous pouvez faire pivoter vers vos lieux.</string>
     <string name="settings_amoled_black">Noir pur (AMOLED)</string>
     <string name="settings_amoled_black_summary">Utiliser des arrière-plans noir pur en mode sombre pour économiser la batterie sur les écrans OLED.</string>
+    <string name="settings_tint_cloud">Badges cloud dans la couleur d\'accent</string>
+    <string name="settings_tint_cloud_summary">Utiliser la couleur d\'accent pour les badges des photos sauvegardées au lieu du vert.</string>
+    <string name="settings_gif_autoplay_grid">Lire les GIF dans les grilles</string>
+    <string name="settings_gif_autoplay_grid_summary">Animer les GIF dans le fil chronologique, les albums et les dossiers de l\'appareil. Si désactivé, une image fixe est affichée.</string>
+    <string name="settings_gif_autoplay_covers">Lire les couvertures d\'album GIF</string>
+    <string name="settings_gif_autoplay_covers_summary">Animer la couverture d\'un album quand c\'est un GIF, y compris pour les albums cloud (la couverture est téléchargée une fois).</string>
 
     <!-- Language -->
     <string name="language_en">Anglais, English</string>
@@ -917,6 +925,20 @@
     <string name="face_index_service_progress">%1$d sur %2$d</string>
     <string name="face_index_service_waiting">En attente pour continuer</string>
     <string name="face_index_service_stop">Arrêter</string>
+    <string name="semantic_index_service_channel_name">Indexation pour la recherche</string>
+    <string name="semantic_index_service_channel_desc">Affiche la progression pendant la préparation des photos pour la recherche.</string>
+    <string name="semantic_index_service_title">Préparation des photos pour la recherche</string>
+    <string name="semantic_index_service_progress">%1$d sur %2$d</string>
+    <string name="semantic_index_service_waiting">En attente pour continuer</string>
+    <string name="semantic_index_service_stop">Arrêter</string>
+    <string name="model_download_channel_name">Téléchargements de modèle</string>
+    <string name="model_download_channel_desc">Affiche la progression pendant le téléchargement d\'un modèle sur l\'appareil.</string>
+    <string name="model_download_title_face">Téléchargement du modèle de regroupement des visages</string>
+    <string name="model_download_title_ocr">Téléchargement du modèle de reconnaissance de texte</string>
+    <string name="model_download_title_semantic">Téléchargement du modèle de recherche de photos</string>
+    <string name="model_download_progress">%1$s sur %2$s</string>
+    <string name="model_download_preparing">Préparation…</string>
+    <string name="model_download_stop">Arrêter</string>
     <string name="search_section_on_this_day">Ce jour-là</string>
     <string name="search_section_on_this_day_years">Il y a %1$d an</string>
     <string name="search_section_on_this_day_years_plural">Il y a %1$d ans</string>
@@ -1600,6 +1622,31 @@
     <string name="settings_ai_face_remove_keep">Conserver</string>
     <string name="settings_ai_face_remove_confirm_title">Êtes-vous sûr ?</string>
     <string name="settings_ai_face_remove_confirm_message">Cette action supprime définitivement le modèle de visages et tous les visages et noms reconnus. Elle est irréversible.</string>
+    <string name="settings_ai_semantic">Recherche sémantique</string>
+    <string name="settings_ai_semantic_desc">Trouvez des photos en décrivant ce qu\'elles contiennent</string>
+    <string name="settings_ai_semantic_downloading">Téléchargement…</string>
+    <string name="settings_ai_semantic_download_failed">Les modèles de recherche n\'ont pas pu être téléchargés.</string>
+    <string name="settings_ai_semantic_download_retry">Réactivez le commutateur pour réessayer.</string>
+    <string name="settings_ai_semantic_download_title">Télécharger les modèles de recherche ?</string>
+    <string name="settings_ai_semantic_download_message">La recherche sémantique nécessite le téléchargement d\'un modèle de %1$s. Cela fonctionne sur toute connexion, mais le Wi-Fi est recommandé.</string>
+    <string name="settings_ai_semantic_download_message_metered">La recherche sémantique nécessite le téléchargement d\'un modèle de %1$s. Le Wi-Fi n\'est pas connecté, ce téléchargement utilisera donc les données mobiles.</string>
+    <string name="settings_ai_semantic_downloading_progress">%1$s / %2$s</string>
+    <string name="settings_ai_semantic_download_confirm">Télécharger</string>
+    <string name="settings_ai_semantic_remove_title">Supprimer les modèles téléchargés ?</string>
+    <string name="settings_ai_semantic_remove_message">Cela libère environ %1$s. Vous pourrez les télécharger à nouveau plus tard.</string>
+    <string name="settings_ai_semantic_remove_confirm">Supprimer</string>
+    <string name="settings_ai_semantic_remove_keep">Conserver</string>
+    <string name="settings_ai_semantic_indexing_waiting">En attente des modèles de recherche</string>
+    <string name="settings_ai_semantic_ready">Vos photos peuvent être recherchées</string>
+    <string name="settings_ai_semantic_rescan">Réanalyser toutes les photos</string>
+    <string name="settings_ai_semantic_rescan_desc">Efface l\'index de recherche et le reconstruit pour chaque photo.</string>
+    <string name="settings_ai_semantic_rescan_confirm_title">Réanalyser toutes les photos ?</string>
+    <string name="settings_ai_semantic_rescan_confirm_msg">L\'index de recherche est effacé puis reconstruit pour chaque photo, ce qui peut prendre un moment.</string>
+    <string name="settings_ai_semantic_not_indexed">Vos photos ne sont pas encore indexées</string>
+    <string name="settings_ai_semantic_clear">Effacer les données de recherche</string>
+    <string name="settings_ai_semantic_clear_desc">Supprime l\'index de recherche de toutes les photos de ce téléphone.</string>
+    <string name="settings_ai_semantic_clear_confirm_title">Effacer les données de recherche ?</string>
+    <string name="settings_ai_semantic_clear_confirm_msg">Cela supprime l\'index de recherche de toutes les photos. Vos photos ne sont pas affectées.</string>
     <string name="settings_face_section">Visages reconnus</string>
     <string name="settings_face_maintenance">Maintenance</string>
     <string name="settings_face_transfer">Transfert</string>
@@ -1611,6 +1658,7 @@
     <string name="settings_ai_import_confirm_msg">Ceci ajoute les visages et les personnes du fichier à ce téléphone et les regroupe. Vos visages actuels sont conservés.</string>
     <string name="settings_ai_indexing_running">Analyse de vos photos</string>
     <string name="settings_ai_indexing_waiting">En attente du modèle de visages</string>
+    <string name="settings_ai_indexing_waiting_other">En attente de la fin d\'une autre tâche sur l\'appareil</string>
     <string name="settings_ai_indexing_paused">En pause</string>
     <string name="settings_ai_indexing_paused_battery">En pause, batterie faible</string>
     <string name="settings_ai_indexing_paused_warm">En pause, le téléphone est chaud</string>
@@ -1694,10 +1742,12 @@
     <string name="settings_ai_export_empty">Aucun visage à exporter pour le moment.</string>
     <string name="settings_ai_export_warn_msg">Ce fichier contient les empreintes de visages calculées à partir de vos photos. Quiconque l\'obtient pourrait reconstituer un modèle facial des personnes de votre bibliothèque, gardez-le donc privé et ne le partagez qu\'avec des personnes de confiance.</string>
     <string name="settings_ai_export_warn_title">Exporter l\'index des visages ?</string>
+    <string name="settings_ai_export_share_title">Partager l\'index des visages ?</string>
+    <string name="settings_ai_export_share_msg">Envoyez le fichier exporté vers une autre application ou un appareil à proximité.</string>
     <string name="settings_ai_import">Importer l\'index des visages</string>
     <string name="settings_ai_import_done">%1$d visages, %2$d personnes importés.</string>
     <string name="settings_ai_rescan">Réanalyser les photos</string>
-    <string name="settings_ai_rescan_confirm_msg">Chaque photo est de nouveau analysée pour les visages avec plus de détail, ce qui détecte des visages plus petits et plus éloignés. Vos photos ajoutées manuellement sont conservées, mais les personnes sont regroupées, vous devrez donc peut-être en renommer quelques-unes.</string>
+    <string name="settings_ai_rescan_confirm_msg">Chaque photo est de nouveau analysée pour les visages avec plus de détail, ce qui détecte des visages plus petits et plus éloignés. Vos noms et corrections sont conservés et réappliqués une fois les visages redétectés.</string>
     <string name="settings_ai_rescan_confirm_title">Réanalyser toutes les photos ?</string>
     <string name="settings_ai_transfer_failed">Échec du transfert de l\'index des visages.</string>
     <string name="settings_ai_transfer_working">En cours…</string>
@@ -1791,6 +1841,19 @@
     <string name="collage_tab_layout">Disposition</string>
     <string name="collage_tab_ratio">Proportions</string>
     <string name="collage_trim_for_grid">Retirez %1$d pour passer en disposition grille</string>
+    <!-- GIF maker -->
+    <string name="action_make_gif">Créer un GIF</string>
+    <string name="gif_maker_title">Créateur de GIF</string>
+    <string name="gif_maker_aspect_original">Original</string>
+    <string name="gif_maker_aspect_square">1:1</string>
+    <string name="gif_maker_save">Enregistrer le GIF</string>
+    <string name="gif_maker_progress">Création du GIF…</string>
+    <string name="gif_maker_hint">Un GIF n\'a pas de son et peut durer jusqu\'à 10 secondes.</string>
+    <string name="gif_maker_saved">GIF enregistré dans vos photos</string>
+    <string name="gif_export_channel_name">Création de GIF</string>
+    <string name="gif_export_channel_desc">Affiche la progression pendant la création d\'un GIF.</string>
+    <string name="gif_quality_title">Qualité du GIF</string>
+    <string name="gif_maker_duration">%1$s s</string>
     <string name="editor_adj_fade">Fondu</string>
     <string name="editor_adj_grain">Grain</string>
     <string name="editor_adj_sharpen">Netteté</string>
@@ -1882,6 +1945,8 @@
     <string name="whats_new_guest_body">La reconnaissance faciale, la carte, les notes du calendrier et le détecteur de doublons fonctionnent désormais sans être connecté.</string>
     <string name="whats_new_dup_nobackup_title">Des doublons sans sauvegarde</string>
     <string name="whats_new_dup_nobackup_body">Le détecteur de doublons analyse désormais les photos de votre appareil, sans compte ni sauvegarde.</string>
+    <string name="whats_new_compress_split_title">Qualité distincte pour les photos et les vidéos</string>
+    <string name="whats_new_compress_split_body">La compression des photos et des vidéos a désormais ses propres niveaux de qualité. Vérifiez-les dans les Paramètres, sous Qualité et taille.</string>
     <string name="whats_new_section_new">Nouveautés</string>
     <string name="whats_new_section_improved">Améliorations</string>
 
@@ -1914,4 +1979,14 @@
     <string name="face_excluded_undo">Undo</string>
     <string name="albums_search_hint">Rechercher des albums</string>
     <string name="albums_search_no_results">Aucun album ne correspond à la recherche.</string>
+    <string name="settings_ai_groups_found">%1$d groupes</string>
+    <string name="settings_ai_faces_found">%1$d visages</string>
+    <string name="sign_out_dialog_face_warning">Les personnes nommées et les groupes de visages sur cet appareil sont également supprimés et ne sont pas restaurés lors de la reconnexion.</string>
+    <string name="person_rename_merge_confirm_title">Fusionner avec la personne existante ?</string>
+    <string name="person_rename_merge_confirm_body">Une personne nommée %1$s existe déjà. Utiliser ce nom fusionne les deux en une seule, ce qui est irréversible. Fusionner ?</string>
+    <string name="person_move_confirm_title">Déplacer vers cette personne ?</string>
+    <string name="person_move_confirm_body">Déplacer les photos sélectionnées vers %1$s ?</string>
+    <string name="person_move_confirm">Déplacer</string>
+    <string name="settings_face_auto_merge">Fusionner automatiquement les correspondances probables</string>
+    <string name="settings_face_auto_merge_desc">Quand une analyse trouve un groupe très probablement identique à une personne déjà nommée, il lui est ajouté sans demander. Les fusions sont irréversibles, laissez donc ceci désactivé pour confirmer chacune vous-même.</string>
 </resources>

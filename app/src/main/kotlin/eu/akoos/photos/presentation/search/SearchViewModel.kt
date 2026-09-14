@@ -33,6 +33,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -46,6 +47,8 @@ import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
@@ -72,6 +75,7 @@ import eu.akoos.photos.domain.usecase.ForceUploadLocalUrisUseCase
 import eu.akoos.photos.domain.model.PersonSummary
 import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
 import eu.akoos.photos.domain.usecase.ObservePeopleUseCase
+import eu.akoos.photos.domain.usecase.SemanticSearchUseCase
 import eu.akoos.photos.presentation.common.GalleryItemSelectionController
 import eu.akoos.photos.presentation.common.MoveToFolderController
 import eu.akoos.photos.presentation.gallery.ContentFilter
@@ -93,6 +97,7 @@ class SearchViewModel @Inject constructor(
     private val selectionFactory: GalleryItemSelectionController.Factory,
     private val thumbnailUrlStore: ThumbnailUrlStore,
     private val observePeopleUseCase: ObservePeopleUseCase,
+    private val semanticSearchUseCase: SemanticSearchUseCase,
     private val faceDao: FaceDao,
     private val moveController: MoveToFolderController,
     @ApplicationContext private val context: Context,
@@ -286,7 +291,10 @@ class SearchViewModel @Inject constructor(
         val personKeys: Set<String>?,
     )
 
-    val results: StateFlow<List<GalleryItem>> = accountManager.getPrimaryUserId()
+    /** The keyword + metadata matches, the search path that has always been here: the merged library
+     *  narrowed by the typed query, the content filter, the category chip and the People rail. Folded
+     *  into [results] first and unchanged, so a semantic-off session sees exactly this. */
+    private val keywordResults: Flow<List<GalleryItem>> = accountManager.getPrimaryUserId()
         .flatMapLatest { userId ->
             val libraryFlow = if (userId == null) getGalleryItems.invokeLocalOnly()
                 else getGalleryItems.invoke(userId)
@@ -316,6 +324,88 @@ class SearchViewModel @Inject constructor(
         }
         // Fold/normalize + per-item category checks over the whole library are heavy; run them off
         // the main thread so typing stays smooth on large libraries.
+        .flowOn(Dispatchers.Default)
+
+    /** The AI master switch and semantic search both on. The whole semantic feed hangs off this, the
+     *  same gate shape the [people] rail uses, so a semantic-off session adds nothing to [results]. */
+    private val semanticEnabled = context.settingsDataStore.data
+        .map { it[SettingsKeys.AI_FEATURES_ENABLED] == true && it[SettingsKeys.SEMANTIC_ENABLED] == true }
+        .distinctUntilChanged()
+
+    /** The content-search feed: whether a search is still running for the current query, and the
+     *  resolved matches so far. Held as one value so the loading flag and the matches never disagree. */
+    private data class SemanticFeed(val loading: Boolean, val items: List<GalleryItem>)
+
+    /**
+     * The image-content search as (still-running, ranked photo keys). Gated on the AI + semantic flags
+     * (never runs, empty when off) and guest-safe (a null account keys the local partition).
+     *
+     * A fresh non-blank query emits loading true at once, so the screen's placeholder shows through the
+     * settle delay AND the model run rather than only after; then it waits [SEMANTIC_DEBOUNCE_MS] for
+     * typing to settle (flatMapLatest cancels a superseded query mid-wait, exactly as a debounce would),
+     * embeds and ranks off the main thread, and emits the ranked keys with loading false. Keys, not
+     * items, cross this stage so [semanticFeed] can re-resolve them against the library on a sync change
+     * without re-running the model. The CLIP embed is far dearer than the keyword filter, so it settles a
+     * touch longer than the keyword feed.
+     */
+    private val rankedKeys: Flow<Pair<Boolean, List<String>>> = combine(
+        semanticEnabled,
+        accountManager.getPrimaryUserId(),
+    ) { on, userId -> on to userId }
+        .flatMapLatest { (on, userId) ->
+            if (!on) flowOf(false to emptyList<String>())
+            else _query.flatMapLatest { q ->
+                if (q.isBlank()) flowOf(false to emptyList<String>())
+                else flow {
+                    emit(true to emptyList<String>())
+                    delay(SEMANTIC_DEBOUNCE_MS)
+                    emit(false to semanticSearchUseCase.searchKeys(q, userId, SEMANTIC_LIMIT))
+                }
+            }
+        }
+        .flowOn(Dispatchers.Default)
+
+    /**
+     * The resolved content matches plus the live loading flag. Each ranked key is resolved to the
+     * [GalleryItem] it names in the merged library, in rank order, dropping any key no longer in the
+     * feed. Held so both [results] and [semanticSearching] read one consistent value.
+     */
+    private val semanticFeed: StateFlow<SemanticFeed> =
+        combine(rankedKeys, allItems) { (loading, keys), library ->
+            if (keys.isEmpty()) {
+                SemanticFeed(loading, emptyList())
+            } else {
+                val byKey = library.associateBy { it.stableId }
+                SemanticFeed(loading, keys.mapNotNull { byKey[it] })
+            }
+        }
+            .flowOn(Dispatchers.Default)
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SemanticFeed(false, emptyList()))
+
+    /** True while a content search for the current query is still running, so the grid can show a
+     *  placeholder instead of an empty "no results" flash the matches then pop into. */
+    val semanticSearching: StateFlow<Boolean> = semanticFeed
+        .map { it.loading }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    /**
+     * The grid's photos: the keyword + metadata matches first, in their existing order, then any
+     * semantic-only match after them in rank order, deduped by [GalleryItem.stableId]. Semantic off (or
+     * no hits) leaves this exactly equal to [keywordResults], so the non-semantic path never changes;
+     * with it on the same grid gains the content-matched photos.
+     */
+    val results: StateFlow<List<GalleryItem>> = combine(keywordResults, semanticFeed) { keyword, feed ->
+        val semantic = feed.items
+        if (semantic.isEmpty()) {
+            keyword
+        } else {
+            val seen = HashSet<String>(keyword.size + semantic.size)
+            for (item in keyword) seen.add(item.stableId)
+            val tail = semantic.filter { seen.add(it.stableId) }
+            if (tail.isEmpty()) keyword else keyword + tail
+        }
+    }
         .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
@@ -543,5 +633,16 @@ class SearchViewModel @Inject constructor(
             8 to R.string.gallery_filter_panoramas,
             9 to R.string.gallery_filter_raw,
         ).mapValues { SearchFilter.fold(context.getString(it.value)) }
+    }
+
+    private companion object {
+        /** The semantic top-K a search folds in, matching the use case's own cap: more than the grid
+         *  shows at once, cheap to rank and merge. */
+        const val SEMANTIC_LIMIT = 200
+
+        /** Settle delay before a content search embeds the query, the debounce the keyword feed uses plus
+         *  a touch, since the CLIP embed is far dearer than the per-item filter. A superseded query cancels
+         *  the wait through flatMapLatest, so only the query typing settles on is ever embedded. */
+        const val SEMANTIC_DEBOUNCE_MS = 300L
     }
 }

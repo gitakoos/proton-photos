@@ -48,7 +48,17 @@ interface ClusterSummaryDao {
     @Query("DELETE FROM cluster_summary WHERE userId = :userId")
     suspend fun clearForUser(userId: String)
 
+    /** Re-keys every cluster summary from one owner to another, to adopt a guest's centroids on sign-in. */
+    @Query("UPDATE cluster_summary SET userId = :to WHERE userId = :from")
+    suspend fun updateUserId(from: String, to: String)
+
     /** Drops one person's cached centroid, so a merged or deleted cluster leaves no stale summary. */
+    /** Drops summaries whose person no longer exists (merged, moved-away, or dismissed): a stale
+     *  centroid left here would pull new faces onto a deleted person, and its member count would keep
+     *  the self-check from noticing the drift. Run after any pass that removes empty people. */
+    @Query("DELETE FROM cluster_summary WHERE userId = :userId AND personId NOT IN (SELECT id FROM person WHERE userId = :userId)")
+    suspend fun deleteOrphansForUser(userId: String)
+
     @Query("DELETE FROM cluster_summary WHERE personId = :personId")
     suspend fun deleteByPerson(personId: Long)
 

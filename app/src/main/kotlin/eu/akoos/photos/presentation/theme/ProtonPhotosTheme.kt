@@ -328,6 +328,21 @@ fun paletteAccent(palette: ThemePalette, isLight: Boolean): Color =
 /** Composition-local with the active app color tokens. */
 val LocalAppColors = staticCompositionLocalOf { darkAppColors(ThemePalette.Default) }
 
+/** When true, the green "synced" cloud badges are tinted with the palette accent instead of the fixed
+ *  green, per the user's appearance setting. Defaults off so the badges stay green unless opted in. */
+val LocalTintCloudWithAccent = staticCompositionLocalOf { false }
+
+/** When true, GIFs animate in the timeline, album, and device-folder grids; off renders a still first
+ *  frame. Defaults off so grids stay calm unless the user opts in. */
+val LocalGifAutoplayGrid = staticCompositionLocalOf { false }
+
+/** When true, a GIF album cover animates; off renders a still first frame. Defaults off. */
+val LocalGifAutoplayCovers = staticCompositionLocalOf { false }
+
+/** The animated-decoder-free Coil loader, used to render a GIF as its still first frame with no
+ *  playback. Null until MainActivity provides the application's instance. */
+val LocalStaticImageLoader = staticCompositionLocalOf<coil.ImageLoader?> { null }
+
 /** Accessor — call AppColors.current to read tokens in a Composable. */
 object AppColors {
     val current: AppColorsTokens
@@ -485,6 +500,9 @@ fun ProtonPhotosTheme(
     darkTheme: Boolean = true,
     palette: ThemePalette = ThemePalette.Default,
     amoledBlack: Boolean = false,
+    tintCloudWithAccent: Boolean = false,
+    gifAutoplayGrid: Boolean = false,
+    gifAutoplayCovers: Boolean = false,
     content: @Composable () -> Unit,
 ) {
     val amoled  = darkTheme && amoledBlack
@@ -494,6 +512,9 @@ fun ProtonPhotosTheme(
         CompositionLocalProvider(
             LocalIndication provides NoIndication,
             LocalAppColors  provides colors,
+            LocalTintCloudWithAccent provides tintCloudWithAccent,
+            LocalGifAutoplayGrid provides gifAutoplayGrid,
+            LocalGifAutoplayCovers provides gifAutoplayCovers,
             LocalTextStyle  provides LocalTextStyle.current.merge(TextStyle(fontFamily = InterFamily)),
         ) {
             content()

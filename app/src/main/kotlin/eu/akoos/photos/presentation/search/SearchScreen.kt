@@ -116,6 +116,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -139,6 +140,7 @@ import eu.akoos.photos.presentation.common.allLocalOnly
 import eu.akoos.photos.presentation.common.MultiStripState
 import eu.akoos.photos.presentation.common.ReturnToViewerPhoto
 import eu.akoos.photos.presentation.common.ScrollScrubber
+import eu.akoos.photos.presentation.common.ShimmerSquare
 import androidx.compose.material.icons.filled.PrivacyTip
 import eu.akoos.photos.presentation.gallery.CategoryRail
 import eu.akoos.photos.presentation.gallery.LocalPeopleRail
@@ -191,6 +193,7 @@ fun SearchScreen(
     val query by vm.query.collectAsStateWithLifecycle()
     val peopleSuggestions by vm.peopleSuggestions.collectAsStateWithLifecycle()
     val results by vm.results.collectAsStateWithLifecycle()
+    val semanticSearching by vm.semanticSearching.collectAsStateWithLifecycle()
     val filter by vm.contentFilter.collectAsStateWithLifecycle()
     val selectedCategory by vm.selectedCategory.collectAsStateWithLifecycle()
     val people by vm.people.collectAsStateWithLifecycle()
@@ -497,6 +500,11 @@ fun SearchScreen(
                 minItemsToShow = 8,
             )
             }
+        } else if (results.isEmpty() && semanticSearching) {
+            // A content search is running and nothing keyword-matched yet (say "sunset", which no
+            // filename matches): show shimmering placeholder tiles rather than a blank "no results"
+            // that the matches then pop into once the model returns.
+            SemanticSearchSkeletonGrid(topPadding = headerPad)
         } else if (results.isEmpty()) {
             Box(
                 modifier = Modifier.fillMaxSize().padding(top = headerPad),
@@ -1018,6 +1026,35 @@ private fun keyOf(item: GalleryItem): String = when (item) {
     is GalleryItem.LocalOnly -> "L:" + item.local.uri
     is GalleryItem.Synced    -> "S:" + item.local.uri
     is GalleryItem.CloudOnly -> "C:" + item.cloud.linkId
+}
+
+/**
+ * Placeholder grid shown while a content (semantic) search runs and nothing has keyword-matched yet, so
+ * a query like "sunset" that no filename matches shimmers rather than flashing "no results" and then
+ * popping the photos in. A fixed three-column block of shimmer squares, matching the results grid's
+ * columns, side padding and spacing so the switch to the real grid is seamless. Non-scrolling: it lives
+ * for only the length of one search.
+ */
+@Composable
+private fun SemanticSearchSkeletonGrid(topPadding: Dp) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .navigationBarsPadding()
+            .padding(start = 6.dp, end = 6.dp, top = topPadding + 4.dp),
+    ) {
+        repeat(4) { row ->
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                repeat(3) {
+                    ShimmerSquare(modifier = Modifier.weight(1f), cornerRadius = 10.dp)
+                }
+            }
+            if (row < 3) Spacer(Modifier.height(4.dp))
+        }
+    }
 }
 
 /**

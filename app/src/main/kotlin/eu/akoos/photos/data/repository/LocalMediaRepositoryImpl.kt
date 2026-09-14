@@ -31,6 +31,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.provider.MediaStore
+import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
@@ -66,6 +67,8 @@ import eu.akoos.photos.util.mimeFromPath
 import eu.akoos.photos.worker.SyncWorker
 import javax.inject.Inject
 import javax.inject.Singleton
+
+private const val TAG = "LocalMediaRepository"
 
 @Singleton
 class LocalMediaRepositoryImpl @Inject constructor(
@@ -490,7 +493,10 @@ class LocalMediaRepositoryImpl @Inject constructor(
                         result += cursor.toLocalMediaItem(baseUri = baseUri)
                     }
                 }
-            } catch (_: Exception) {}
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                Log.w(TAG, "trashed media query failed: ${e.message}")
+            }
         }
         result.sortedByDescending { it.dateTaken }
     }

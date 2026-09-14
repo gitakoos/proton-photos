@@ -139,6 +139,17 @@ object SettingsKeys {
      */
     val AMOLED_BLACK = booleanPreferencesKey("amoled_black")
 
+    /** When true, the green "backed up" cloud badges are tinted with the palette accent colour instead of
+     *  the fixed green. Off by default, so the badges stay green unless the user turns it on. */
+    val TINT_CLOUD_WITH_ACCENT = booleanPreferencesKey("tint_cloud_with_accent")
+
+    /** When true, GIFs animate in the timeline, album, and device-folder grids; off shows a still first
+     *  frame instead. Off by default so grids stay calm unless the user opts in. */
+    val GIF_AUTOPLAY_GRID = booleanPreferencesKey("gif_autoplay_grid")
+
+    /** When true, an album cover that is a GIF animates; off shows a still first frame. Off by default. */
+    val GIF_AUTOPLAY_COVERS = booleanPreferencesKey("gif_autoplay_covers")
+
     /** true = the classic OpenStreetMap tile map; false (default) = the modern world map. */
     val MAP_STYLE_OSM = booleanPreferencesKey("map_style_osm")
 
@@ -181,6 +192,10 @@ object SettingsKeys {
     /** User's custom order for the timeline category rail, a CSV of GalleryFilter enum names.
      *  Absent = the default Drive-web order. Reordered by long-pressing a chip and dragging. */
     val CATEGORY_RAIL_ORDER = stringPreferencesKey("category_rail_order")
+
+    /** GalleryFilter enum names the user has hidden from the timeline category rail, toggled with
+     *  the eye button on the Timeline filter screen. Absent / empty = every category shows. */
+    val CATEGORY_RAIL_HIDDEN = stringSetPreferencesKey("category_rail_hidden")
 
     val LANGUAGE = stringPreferencesKey("language")
 
@@ -471,13 +486,22 @@ object SettingsKeys {
     val COMPRESS_ON_UPLOAD = booleanPreferencesKey("compress_on_upload")
     /** When true, the upload pipeline transcodes each video to a smaller copy before sending it to
      *  Drive, trading some quality for a smaller cloud footprint. Separate opt-in from
-     *  [COMPRESS_ON_UPLOAD]; both share [COMPRESS_UPLOAD_TIER]. The on-device original is never
-     *  touched. Off by default. */
+     *  [COMPRESS_ON_UPLOAD]; its quality tier is [COMPRESS_UPLOAD_TIER_VIDEO]. The on-device original
+     *  is never touched. Off by default. */
     val COMPRESS_VIDEO_ON_UPLOAD = booleanPreferencesKey("compress_video_on_upload")
-    /** Ordinal of the selected compression tier, mapping to an [eu.akoos.photos.domain.entity.UploadCompressionTier]
-     *  value. Absent = the Balanced default. Consulted by both the photo ([COMPRESS_ON_UPLOAD]) and
-     *  the video ([COMPRESS_VIDEO_ON_UPLOAD]) path. */
+    /** Ordinal of the PHOTO compression tier, mapping to an [eu.akoos.photos.domain.entity.UploadCompressionTier]
+     *  value. Absent = the Balanced default. Consulted by the photo ([COMPRESS_ON_UPLOAD]) path; the
+     *  video path reads its own [COMPRESS_UPLOAD_TIER_VIDEO]. */
     val COMPRESS_UPLOAD_TIER = intPreferencesKey("compress_upload_tier")
+    /** Ordinal of the VIDEO compression tier, the video-only counterpart of [COMPRESS_UPLOAD_TIER]
+     *  (#108). Absent = the Balanced default. Consulted only by the video ([COMPRESS_VIDEO_ON_UPLOAD])
+     *  path. */
+    val COMPRESS_UPLOAD_TIER_VIDEO = intPreferencesKey("compress_upload_tier_video")
+    /** One-shot migration flag for the photo/video tier split (#108). While unset, the migration in
+     *  `App.kt` seeds [COMPRESS_UPLOAD_TIER_VIDEO] from the old shared [COMPRESS_UPLOAD_TIER] so an
+     *  upgrading install keeps its level on both paths, then flips this true so the seed never
+     *  re-runs. */
+    val COMPRESS_TIER_SPLIT_MIGRATED = booleanPreferencesKey("compress_tier_split_migrated")
     /** When true, "strip on upload" also wipes the on-device original (with MANAGE_MEDIA), so the
      *  backed-up copy and the local file stay byte-identical and pair by content hash. */
     val MIRROR_STRIP_TO_LOCAL = booleanPreferencesKey("mirror_strip_to_local")
@@ -718,12 +742,38 @@ object SettingsKeys {
     val FACE_MODEL_DOWNLOAD_ALLOWED = booleanPreferencesKey("face_model_download_allowed")
 
     /**
+     * True once the user has agreed to fetch the on-device semantic search models, the CLIP image
+     * and text encoders that let a typed phrase find matching photos. Several hundred megabytes together,
+     * so they are fetched only on agreement. Absent means the agreement has not been given yet.
+     *
+     * Mirrors [FACE_MODEL_DOWNLOAD_ALLOWED]: only an acceptance is stored, never a refusal, because the
+     * prompt never appears on its own. It only ever follows the user reaching for the feature, so asking
+     * again on the next such request is the answer to that request rather than a repeat of the same one.
+     */
+    val SEMANTIC_MODEL_DOWNLOAD_ALLOWED = booleanPreferencesKey("semantic_model_download_allowed")
+
+    /**
+     * Per-feature opt-in for semantic search (find photos by a typed phrase), nested under
+     * [AI_FEATURES_ENABLED]. Absent reads as OFF, so the semantic index stays idle until the user turns
+     * it on. Off keeps the master AI switch on while standing the semantic indexing walk down. The
+     * background indexer reads [AI_FEATURES_ENABLED] && [SEMANTIC_ENABLED]; if either is off it no-ops.
+     */
+    val SEMANTIC_ENABLED = booleanPreferencesKey("semantic_enabled")
+
+    /**
      * User pause switch for the background face-indexing walk. Absent (the default) reads as NOT
      * paused, so indexing runs whenever the AI features are on. When true the walk stops itself
      * between photos and never auto-restarts, so a user who would rather the phone not spend cycles
      * on it can turn it off from Settings and have it stay off until they turn it back on.
      */
     val FACE_INDEXING_PAUSED = booleanPreferencesKey("face_indexing_paused")
+
+    /**
+     * When true, the face scan automatically merges each named person's closest look-alike cluster (the
+     * same matches the manual "this may be the same person" card would offer), instead of surfacing them
+     * for confirmation. Off by default, since a merge cannot be cleanly undone.
+     */
+    val FACE_AUTO_MERGE = booleanPreferencesKey("face_auto_merge")
 
     /**
      * When true (the default), a substantial initial face-indexing backlog runs under a foreground

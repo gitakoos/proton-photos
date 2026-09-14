@@ -116,6 +116,7 @@ import eu.akoos.photos.data.db.dao.ClusterSummaryDao
 import eu.akoos.photos.data.db.dao.DayMetaDao
 import eu.akoos.photos.data.db.dao.FaceDao
 import eu.akoos.photos.data.db.dao.FaceScanDao
+import eu.akoos.photos.data.db.dao.ImageEmbeddingDao
 import eu.akoos.photos.data.db.dao.ImportAlbumMemberDao
 import eu.akoos.photos.data.db.dao.ImportHistoryDao
 import eu.akoos.photos.data.db.dao.ImportStagedDao
@@ -138,6 +139,7 @@ import eu.akoos.photos.data.db.entity.ClusterSummaryEntity
 import eu.akoos.photos.data.db.entity.DayMetaEntity
 import eu.akoos.photos.data.db.entity.FaceEntity
 import eu.akoos.photos.data.db.entity.FaceScanEntity
+import eu.akoos.photos.data.db.entity.ImageEmbeddingEntity
 import eu.akoos.photos.data.db.entity.ImportAlbumMemberEntity
 import eu.akoos.photos.data.db.entity.ImportHistoryEntity
 import eu.akoos.photos.data.db.entity.ImportStagedEntity
@@ -191,6 +193,7 @@ import eu.akoos.photos.data.db.entity.UploadAlbumTargetEntity
         NotPersonEntity::class,
         PersonCoverEntity::class,
         ClusterSummaryEntity::class,
+        ImageEmbeddingEntity::class,
         // Account
         AccountEntity::class,
         AccountMetadataEntity::class,
@@ -230,7 +233,7 @@ import eu.akoos.photos.data.db.entity.UploadAlbumTargetEntity
         // Telemetry
         TelemetryEventEntity::class,
     ],
-    version = 39,
+    version = 41,
     exportSchema = true,
 )
 abstract class AppDatabase : BaseDatabase(),
@@ -272,6 +275,7 @@ abstract class AppDatabase : BaseDatabase(),
     abstract fun notPersonDao(): NotPersonDao
     abstract fun personCoverDao(): PersonCoverDao
     abstract fun clusterSummaryDao(): ClusterSummaryDao
+    abstract fun imageEmbeddingDao(): ImageEmbeddingDao
 
     abstract override fun accountDao(): AccountDao
     abstract override fun sessionDao(): SessionDao

@@ -40,6 +40,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.PointF
 import android.graphics.RectF
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -56,6 +57,13 @@ import kotlin.math.roundToInt
  * [close]; opening it costs far more than a run, so a caller holds the instance for as long as it
  * needs detections and closes it after. [detect] is a one-shot call meant for a user action, not a
  * per-frame loop. The instance is not safe for concurrent runs and its owner serialises them.
+ *
+ * A native [detect] run cannot be cancelled once it is in flight. An owner that bounds a run with a
+ * watchdog must therefore ABANDON (never [close]) an instance whose run timed out and open a fresh one
+ * for the next run: closing the session while the wedged native call still uses it is a use-after-free,
+ * and running the next detection on a fresh session is what keeps two runs off the one session. The run
+ * executes on [dispatcher] (a dedicated background pool when the owner passes one), so a wedged native
+ * call pins a thread there rather than a shared UI / CPU pool.
  *
  * Coordinates come back in the original bitmap's own pixel space. The input is letterboxed into a
  * fixed square with the picture centred and grey padding filling the margins, so mapping a result back
@@ -74,12 +82,20 @@ class FaceDetector(
      *  fixed [INPUT] square, so a run always uses [INPUT]; the parameter stays only so a caller can name
      *  the size it feeds. */
     private val inputSize: Int = INPUT,
+    /** Where the native run executes. Defaults to [Dispatchers.Default] for a one-shot caller; the
+     *  background indexer passes its own dedicated pool so a run its watchdog abandons pins a thread there
+     *  rather than the shared CPU pool. */
+    private val dispatcher: CoroutineDispatcher = Dispatchers.Default,
 ) : AutoCloseable {
 
     private val environment: OrtEnvironment = OrtEnvironment.getEnvironment()
 
     private val sessionOptions = OrtSession.SessionOptions().apply {
-        setOptimizationLevel(OrtSession.SessionOptions.OptLevel.BASIC_OPT)
+        // Full graph optimizations (fusions, constant folding) over the default BASIC level; still on the
+        // CPU at full fp32, so the calibrated thresholds are unaffected. The XNNPACK provider is not built
+        // into this Runtime package (requesting it aborts at session creation), so the default CPU kernels
+        // run; a real NPU speedup would need the NNAPI provider, which must be validated for accuracy first.
+        setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
     }
 
     private val session: OrtSession = environment.createSession(modelFile.absolutePath, sessionOptions)
@@ -94,7 +110,7 @@ class FaceDetector(
     val droppedTooSmall = AtomicInteger(0)
 
     /** The faces in [bitmap], in its own pixel coordinates. Empty when there is nothing to find. */
-    suspend fun detect(bitmap: Bitmap): List<DetectedFace> = withContext(Dispatchers.Default) {
+    suspend fun detect(bitmap: Bitmap): List<DetectedFace> = withContext(dispatcher) {
         if (bitmap.isRecycled) return@withContext emptyList()
         val sourceWidth = bitmap.width
         val sourceHeight = bitmap.height

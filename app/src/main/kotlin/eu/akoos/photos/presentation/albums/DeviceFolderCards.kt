@@ -59,10 +59,17 @@ object DeviceFolderCards {
         .map { (name, groupItems) ->
             val sorted = groupItems.sortedByDescending { it.dateTaken }
             val pinned = pinnedCovers[name]?.takeIf { uri -> sorted.any { it.uri == uri } }
+            // Resolve the cover to its item so the card knows whether it is a GIF; the uri alone is a
+            // MediaStore content:// id that never carries the extension.
+            val coverItem = pinned?.let { p -> sorted.firstOrNull { it.uri == p } } ?: sorted.firstOrNull()
             DeviceFolder(
                 name = name,
-                coverUri = pinned ?: sorted.firstOrNull()?.uri,
+                coverUri = coverItem?.uri,
                 itemCount = sorted.size,
+                coverIsGif = coverItem?.let {
+                    it.mimeType.equals("image/gif", ignoreCase = true) ||
+                        it.displayName.endsWith(".gif", ignoreCase = true)
+                } ?: false,
             )
         }
         .sortedByDescending { it.itemCount }

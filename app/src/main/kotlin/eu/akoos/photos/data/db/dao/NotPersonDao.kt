@@ -82,4 +82,17 @@ interface NotPersonDao {
 
     @Query("DELETE FROM not_person WHERE userId = :userId")
     suspend fun clearForUser(userId: String)
+
+    /** Re-keys every not-a-person mark from one owner to another, to carry a guest's exclusions on sign-in. */
+    @Query("UPDATE not_person SET userId = :to WHERE userId = :from")
+    suspend fun updateUserId(from: String, to: String)
+
+    /** Follows a not-a-person face (faceId is `photoKey#index`) to its new key when a device photo is
+     *  backed up. The substr prefix match avoids LIKE wildcards a content uri could contain. */
+    @Query(
+        "UPDATE not_person SET faceId = :newKey || substr(faceId, length(:oldKey) + 1) " +
+            "WHERE userId = :userId AND substr(faceId, 1, length(:oldKey)) = :oldKey " +
+            "AND substr(faceId, length(:oldKey) + 1, 1) = '#'"
+    )
+    suspend fun rekeyPhoto(userId: String, oldKey: String, newKey: String)
 }

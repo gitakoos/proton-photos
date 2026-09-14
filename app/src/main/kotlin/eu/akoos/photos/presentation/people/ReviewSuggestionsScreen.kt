@@ -245,11 +245,20 @@ fun ReviewSuggestionsScreen(
                 showMerge = false
             },
             onCreateNew = { name ->
-                viewModel.bulkMerge(sel, name)
-                selection = emptySet()
                 showMerge = false
+                // Typing a name another person already holds is a merge, not a new person, so route it
+                // through the same confirm the list-pick uses; a genuinely new name commits at once.
+                val trimmed = name.trim()
+                if (trimmed.isNotEmpty() && namedPeople.any { it.displayName == trimmed }) {
+                    pendingBulkMerge = sel to trimmed
+                } else {
+                    viewModel.bulkMerge(sel, name)
+                    selection = emptySet()
+                }
             },
-            onDismiss = { showMerge = false },
+            // Cancelling clears the selection too, so a backed-out merge does not leave selection mode on
+            // and turn the next tap on a cluster into a select-toggle instead of opening it.
+            onDismiss = { showMerge = false; selection = emptySet() },
         )
     }
 
@@ -264,7 +273,7 @@ fun ReviewSuggestionsScreen(
                 selection = emptySet()
                 pendingBulkMerge = null
             },
-            onDismiss = { pendingBulkMerge = null },
+            onDismiss = { pendingBulkMerge = null; selection = emptySet() },
         )
     }
 
@@ -279,7 +288,7 @@ fun ReviewSuggestionsScreen(
                 selection = emptySet()
                 showNotPerson = false
             },
-            onDismiss = { showNotPerson = false },
+            onDismiss = { showNotPerson = false; selection = emptySet() },
             destructive = true,
         )
     }

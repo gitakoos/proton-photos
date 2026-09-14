@@ -114,6 +114,8 @@ import eu.akoos.photos.presentation.albums.DeviceFolder
 import eu.akoos.photos.presentation.albums.UnifiedAlbumCard
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.Bg0
+import eu.akoos.photos.presentation.theme.LocalTintCloudWithAccent
+import eu.akoos.photos.presentation.theme.StatusSynced
 import eu.akoos.photos.presentation.theme.Bg2
 import eu.akoos.photos.presentation.theme.ErrorColor
 import eu.akoos.photos.presentation.theme.FgDim
@@ -760,12 +762,11 @@ private fun HiddenPhotoCell(
                 Icon(
                     androidx.compose.material.icons.Icons.Default.Cloud,
                     contentDescription = stringResource(R.string.cd_status_backed_up),
-                    // Same green as the gallery's SyncedCloudBadge so the visual language
-                    // for "this photo is on Drive" stays consistent between Hidden and the
-                    // regular timeline. Using the brand Accent (purple) here instead would
-                    // read as a third badge colour and imply the hidden item lives on a
-                    // different kind of cloud than the regular Synced ones.
-                    tint = Color(0xFF30D158),
+                    // Same source as the gallery's SyncedCloudBadge so the "this photo is on
+                    // Drive" colour stays consistent between Hidden and the regular timeline:
+                    // the fixed green by default, or the palette accent everywhere when the
+                    // appearance setting opts in.
+                    tint = if (LocalTintCloudWithAccent.current) Accent else StatusSynced,
                     modifier = Modifier.size(12.dp),
                 )
             }

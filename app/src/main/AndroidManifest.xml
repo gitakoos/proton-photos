@@ -280,6 +280,30 @@
             android:exported="false"
             android:foregroundServiceType="dataSync" />
 
+        <!-- Initial semantic-search indexing foreground host. Keeps the process alive so the one-time
+             CLIP embedding walk runs to completion after the user swipes the app from Recents. LOW
+             channel importance; the walk still parks on the shared device-health policy and model gate. -->
+        <service
+            android:name=".service.SemanticIndexingService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <!-- Common on-device model-download host. Keeps the opt-in model downloads (face grouping, text
+             recognition, photo search) running after the user leaves settings, with a progress
+             notification; one download at a time. LOW channel importance. -->
+        <service
+            android:name=".service.ModelDownloadService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <!-- GIF export foreground host. Runs the maker's encode and optional cloud upload to completion after
+             the screen pops and the app is backgrounded or swiped from Recents; dataSync covers the encode and
+             the upload. LOW channel importance, torn down when the export finishes. -->
+        <service
+            android:name=".service.GifExportService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
         <!-- Opt-in screenshot quick-actions overlay, enabled from Settings. The specialUse foreground
              type needs a declared subtype on Android 14+; the property is harmless on older releases. -->
         <service

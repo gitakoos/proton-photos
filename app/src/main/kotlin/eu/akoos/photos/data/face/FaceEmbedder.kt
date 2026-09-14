@@ -35,6 +35,7 @@ import ai.onnxruntime.OnnxValue
 import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
 import android.graphics.Bitmap
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -50,16 +51,32 @@ import kotlin.math.sqrt
  * needs embeddings and closes it after. [embed] is not safe for concurrent runs and its owner
  * serialises them.
  *
+ * A native [embed] run cannot be cancelled once it is in flight. An owner that bounds a run with a
+ * watchdog must therefore ABANDON (never [close]) an instance whose run timed out and open a fresh one
+ * for the next run: closing the session while the wedged native call still uses it is a use-after-free,
+ * and running the next embedding on a fresh session is what keeps two runs off the one session. The run
+ * executes on [dispatcher] (a dedicated background pool when the owner passes one), so a wedged native
+ * call pins a thread there rather than a shared UI / CPU pool.
+ *
  * The input is a 112x112 landmark-aligned crop (see [FaceAlignment]), fed RGB and normalised by
  * (value - 127.5) / 128 as GhostFaceNet expects; the output vector is L2-normalised so two
  * embeddings compare by a plain cosine (dot product).
  */
-class FaceEmbedder(modelFile: File) : AutoCloseable {
+class FaceEmbedder(
+    modelFile: File,
+    /** Where the native run executes. Defaults to [Dispatchers.Default] for a one-shot caller; the
+     *  background indexer passes its own dedicated pool so a run its watchdog abandons pins a thread there
+     *  rather than the shared CPU pool. */
+    private val dispatcher: CoroutineDispatcher = Dispatchers.Default,
+) : AutoCloseable {
 
     private val environment: OrtEnvironment = OrtEnvironment.getEnvironment()
 
     private val sessionOptions = OrtSession.SessionOptions().apply {
-        setOptimizationLevel(OrtSession.SessionOptions.OptLevel.BASIC_OPT)
+        // Full graph optimizations over the default BASIC level; still CPU + fp32, so the calibrated
+        // thresholds are unaffected. XNNPACK is not built into this Runtime package (requesting it aborts
+        // at session creation), so the default CPU kernels run.
+        setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
     }
 
     private val session: OrtSession = environment.createSession(modelFile.absolutePath, sessionOptions)
@@ -72,7 +89,7 @@ class FaceEmbedder(modelFile: File) : AutoCloseable {
      * The L2-normalised [DIM]-d embedding of [aligned], a 112x112 face crop. A recycled bitmap yields
      * a zero vector rather than throwing, so a caller iterating detected faces can skip a dead crop.
      */
-    suspend fun embed(aligned: Bitmap): FloatArray = withContext(Dispatchers.Default) {
+    suspend fun embed(aligned: Bitmap): FloatArray = withContext(dispatcher) {
         if (aligned.isRecycled) return@withContext FloatArray(DIM)
         val tensor = toInputTensor(aligned)
         val embedding = try {

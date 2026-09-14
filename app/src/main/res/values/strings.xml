@@ -440,6 +440,8 @@
     <string name="gallery_filter_panoramas">Panoramas</string>
     <string name="gallery_filter_raw">RAW</string>
     <string name="gallery_category_people">People</string>
+    <string name="gallery_category_show">Show %1$s</string>
+    <string name="gallery_category_hide">Hide %1$s</string>
     <string name="gallery_filter_photos">Photos</string>
     <!-- Gallery snackbar / error fallbacks (raw exception text stays in the log) -->
     <string name="gallery_error_title">Error</string>
@@ -551,6 +553,20 @@
     <string name="face_index_service_progress">%1$d of %2$d</string>
     <string name="face_index_service_waiting">Waiting to continue</string>
     <string name="face_index_service_stop">Stop</string>
+    <string name="semantic_index_service_channel_name">Photo search indexing</string>
+    <string name="semantic_index_service_channel_desc">Shows progress while photos are prepared for search.</string>
+    <string name="semantic_index_service_title">Preparing photos for search</string>
+    <string name="semantic_index_service_progress">%1$d of %2$d</string>
+    <string name="semantic_index_service_waiting">Waiting to continue</string>
+    <string name="semantic_index_service_stop">Stop</string>
+    <string name="model_download_channel_name">Model downloads</string>
+    <string name="model_download_channel_desc">Shows progress while an on-device model downloads.</string>
+    <string name="model_download_title_face">Downloading face grouping model</string>
+    <string name="model_download_title_ocr">Downloading text recognition model</string>
+    <string name="model_download_title_semantic">Downloading photo search model</string>
+    <string name="model_download_progress">%1$s of %2$s</string>
+    <string name="model_download_preparing">Preparing…</string>
+    <string name="model_download_stop">Stop</string>
 
     <!-- Delete bottom sheet -->
     <string name="delete_album_container_warning">This deletes the album but keeps your photos in Proton Drive.</string>
@@ -738,6 +754,31 @@
     <string name="settings_ai_face_remove_keep">Keep</string>
     <string name="settings_ai_face_remove_confirm_title">Are you sure?</string>
     <string name="settings_ai_face_remove_confirm_message">This permanently removes the face model and every recognized face and name. It cannot be undone.</string>
+    <string name="settings_ai_semantic">Semantic search</string>
+    <string name="settings_ai_semantic_desc">Find photos by describing what is in them</string>
+    <string name="settings_ai_semantic_downloading">Downloading…</string>
+    <string name="settings_ai_semantic_download_failed">The search models could not be downloaded.</string>
+    <string name="settings_ai_semantic_download_retry">Turn the switch on again to retry.</string>
+    <string name="settings_ai_semantic_download_title">Download the search models?</string>
+    <string name="settings_ai_semantic_download_message">Semantic search needs a %1$s model download. It works on any connection, though Wi-Fi is recommended.</string>
+    <string name="settings_ai_semantic_download_message_metered">Semantic search needs a %1$s model download. Wi-Fi is not connected, so this download will use mobile data.</string>
+    <string name="settings_ai_semantic_downloading_progress">%1$s / %2$s</string>
+    <string name="settings_ai_semantic_download_confirm">Download</string>
+    <string name="settings_ai_semantic_remove_title">Remove the downloaded models?</string>
+    <string name="settings_ai_semantic_remove_message">This frees about %1$s. You can download them again later.</string>
+    <string name="settings_ai_semantic_remove_confirm">Remove</string>
+    <string name="settings_ai_semantic_remove_keep">Keep</string>
+    <string name="settings_ai_semantic_indexing_waiting">Waiting for the search models</string>
+    <string name="settings_ai_semantic_ready">Your photos are searchable</string>
+    <string name="settings_ai_semantic_rescan">Rescan all photos</string>
+    <string name="settings_ai_semantic_rescan_desc">Clear the search index and build it again for every photo.</string>
+    <string name="settings_ai_semantic_rescan_confirm_title">Rescan all photos?</string>
+    <string name="settings_ai_semantic_rescan_confirm_msg">The search index is cleared and then built again for every photo, which can take a while.</string>
+    <string name="settings_ai_semantic_not_indexed">Your photos are not indexed yet</string>
+    <string name="settings_ai_semantic_clear">Clear search data</string>
+    <string name="settings_ai_semantic_clear_desc">Remove the search index for every photo from this phone.</string>
+    <string name="settings_ai_semantic_clear_confirm_title">Clear search data?</string>
+    <string name="settings_ai_semantic_clear_confirm_msg">This removes the search index for every photo. Your photos are not affected.</string>
     <string name="settings_face_section">Recognized faces</string>
     <string name="settings_face_maintenance">Maintenance</string>
     <string name="settings_face_transfer">Transfer</string>
@@ -755,6 +796,7 @@
     <string name="settings_ai_import_confirm_msg">This adds the faces and people from the file to this phone and regroups them. Your current faces are kept.</string>
     <string name="settings_ai_indexing_running">Scanning your photos</string>
     <string name="settings_ai_indexing_waiting">Waiting for the face model</string>
+    <string name="settings_ai_indexing_waiting_other">Waiting for another on-device task to finish</string>
     <string name="settings_ai_indexing_paused">Paused</string>
     <string name="settings_ai_indexing_paused_battery">Paused, battery low</string>
     <string name="settings_ai_indexing_paused_warm">Paused, phone is warm</string>
@@ -773,13 +815,15 @@
     <string name="settings_ai_export_warn_msg">This file holds the face fingerprints computed from your photos. Anyone who gets it could rebuild a face model of the people in your library, so keep it private and share it only with people you trust.</string>
     <string name="settings_ai_export_done">Face index exported (%1$d faces).</string>
     <string name="settings_ai_export_empty">No faces to export yet.</string>
+    <string name="settings_ai_export_share_title">Share the face index?</string>
+    <string name="settings_ai_export_share_msg">Send the exported file to another app or a nearby device.</string>
     <string name="settings_ai_import_done">Imported %1$d faces, %2$d people.</string>
     <string name="settings_ai_transfer_failed">Face index transfer failed.</string>
     <string name="settings_ai_transfer_working">Working…</string>
     <string name="settings_ai_import_wrong_account">This face index belongs to a different account and cannot be opened here.</string>
     <string name="settings_ai_import_reattach">This index used a different model. Its %1$d names will return to your photos as they are scanned.</string>
     <string name="settings_ai_rescan_confirm_title">Rescan all photos?</string>
-    <string name="settings_ai_rescan_confirm_msg">Every photo is scanned for faces again at higher detail, which finds smaller and more distant faces. Your manually added photos are kept, but people are regrouped, so you may need to name a few again.</string>
+    <string name="settings_ai_rescan_confirm_msg">Every photo is scanned for faces again at higher detail, which finds smaller and more distant faces. Your names and corrections are kept and put back once the faces are re-detected.</string>
     <string name="settings_ai_clear">Clear face data</string>
     <string name="settings_ai_clear_confirm_title">Clear face data?</string>
     <string name="settings_ai_clear_confirm_msg">This removes every found person and all face data. Your photos are not affected. Faces are detected again the next time indexing runs.</string>
@@ -872,6 +916,10 @@
     <string name="settings_mosaic_grid_desc">Lay the timeline out as a staggered mosaic where each photo keeps its own shape, so portrait photos stand taller.</string>
     <string name="settings_seamless_grid">Edge to edge</string>
     <string name="settings_seamless_grid_desc">Denser grid with square corners and thumbnails that reach the screen edge.</string>
+    <string name="settings_gif_autoplay_grid">Play GIFs in grids</string>
+    <string name="settings_gif_autoplay_grid_summary">Animate GIFs in the timeline, albums, and device folders. When off, they show a still frame.</string>
+    <string name="settings_gif_autoplay_covers">Play GIF album covers</string>
+    <string name="settings_gif_autoplay_covers_summary">Animate an album cover when it is a GIF, including cloud albums (the cover downloads once).</string>
     <string name="timeline_filter_subtitle">Choose what to hide from your main Photos timeline. Hidden photos stay on your device and keep backing up.</string>
     <string name="timeline_filter_categories_header">Category bar</string>
     <string name="timeline_filter_layout_desc">Applies to all photo grids</string>
@@ -970,6 +1018,8 @@
     <string name="map_style_modern_summary">A modern globe you can spin to your places.</string>
     <string name="settings_amoled_black">Pure black (AMOLED)</string>
     <string name="settings_amoled_black_summary">Use true black backgrounds in dark mode to save power on OLED screens.</string>
+    <string name="settings_tint_cloud">Accent-tinted cloud badges</string>
+    <string name="settings_tint_cloud_summary">Use your accent color for the backed-up cloud badges instead of green.</string>
 
     <!-- Language -->
     <string name="language_en">English</string>
@@ -1917,6 +1967,8 @@
     <string name="whats_new_guest_body">Face recognition, the map, the calendar notes and the duplicate finder now all run signed out.</string>
     <string name="whats_new_dup_nobackup_title">Duplicates without a backup</string>
     <string name="whats_new_dup_nobackup_body">The duplicate finder now scans the photos on your device with no account or backup needed.</string>
+    <string name="whats_new_compress_split_title">Separate photo and video quality</string>
+    <string name="whats_new_compress_split_body">Photo and video compression now have their own quality levels. Check yours in Settings, under Quality and size.</string>
     <string name="whats_new_section_new">New</string>
     <string name="whats_new_section_improved">Improved</string>
     <string name="whats_new_more_240">Plus copied links stay hidden in the clipboard preview, file sizes match everywhere they appear, automatic free-up checks with Drive before removing a copy from your phone, and large albums and selections hold together better.</string>
@@ -1944,9 +1996,32 @@
     <string name="collage_bg_blur">Blur</string>
     <string name="collage_drop_remove">Release to remove from the collage</string>
     <string name="collage_trim_for_grid">Remove %1$d to switch to a grid layout</string>
+    <!-- GIF maker -->
+    <string name="action_make_gif">Make GIF</string>
+    <string name="gif_maker_title">GIF maker</string>
+    <string name="gif_maker_aspect_original">Original</string>
+    <string name="gif_maker_aspect_square">1:1</string>
+    <string name="gif_maker_save">Save GIF</string>
+    <string name="gif_maker_progress">Creating GIF…</string>
+    <string name="gif_maker_hint">A GIF has no sound and can be up to 10 seconds long.</string>
+    <string name="gif_maker_saved">GIF saved to your photos</string>
+    <string name="gif_export_channel_name">GIF creation</string>
+    <string name="gif_export_channel_desc">Shows progress while a GIF is being created.</string>
+    <string name="gif_quality_title">GIF quality</string>
+    <string name="gif_maker_duration">%1$s s</string>
     <string name="permissions_default_gallery_title">Set as default gallery</string>
     <string name="permissions_default_gallery_why">Open the system settings to make this app the default for opening photos and videos.</string>
     <string name="permissions_action_open">Open</string>
     <string name="albums_search_hint">Search albums</string>
     <string name="albums_search_no_results">No albums match your search.</string>
+    <string name="settings_ai_groups_found">%1$d groups</string>
+    <string name="settings_ai_faces_found">%1$d faces</string>
+    <string name="sign_out_dialog_face_warning">Your named people and face groups on this device are also removed, and are not restored when you sign back in.</string>
+    <string name="person_rename_merge_confirm_title">Merge with existing person?</string>
+    <string name="person_rename_merge_confirm_body">A person named %1$s already exists. Using that name merges the two into one, which cannot be undone. Merge them?</string>
+    <string name="person_move_confirm_title">Move to this person?</string>
+    <string name="person_move_confirm_body">Move the selected photos to %1$s?</string>
+    <string name="person_move_confirm">Move</string>
+    <string name="settings_face_auto_merge">Merge likely matches automatically</string>
+    <string name="settings_face_auto_merge_desc">When a scan finds a group very likely to be someone you already named, add it to them without asking. Merges cannot be undone, so leave this off to confirm each one yourself.</string>
 </resources>

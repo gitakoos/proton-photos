@@ -352,6 +352,9 @@ fun GalleryScreen(
      *  selection (matching the Strip action), so every handed item is editable. */
     onEditMetadata: (items: List<GalleryItem>) -> Unit = {},
     onCreateCollage: (items: List<GalleryItem>) -> Unit = {},
+    /** Hands the single selected video to the GIF maker. The action is offered only for a one-item
+     *  selection that is a video with a local file, so the item always carries a readable URI. */
+    onCreateGif: (video: GalleryItem) -> Unit = {},
     /** Opens the device photo picker for the logged-out "New folder" flow, carrying the folder name
      *  the user just typed. The picked device photos come back via [newFolderPickedItems]. */
     onStartNewFolderPick: (String) -> Unit = {},
@@ -1332,6 +1335,7 @@ fun GalleryScreen(
             onStripMetadata = viewModel::stripMetadataSelected,
             onEditMetadata = { onEditMetadata(state.selectedItems.toList()) },
             onCreateCollage = { onCreateCollage(state.selectedItems.toList()) },
+            onCreateGif = { state.selectedItems.singleOrNull()?.let(onCreateGif) },
             onRequestMoveToFolder = { showMoveToFolderSheet = true },
         )
         SelectionDrawer(

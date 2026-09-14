@@ -50,16 +50,20 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import coil.imageLoader
 import eu.akoos.photos.R
 import eu.akoos.photos.presentation.theme.Bg2
 import eu.akoos.photos.presentation.theme.FgMute
 import eu.akoos.photos.presentation.theme.FgPrimary
+import eu.akoos.photos.presentation.theme.LocalGifAutoplayCovers
+import eu.akoos.photos.presentation.theme.LocalStaticImageLoader
 
 /** The optional sharing state shown via the top-start pill. */
 enum class AlbumShareBadge {
@@ -81,6 +85,10 @@ enum class AlbumCloudBadge {
 @Composable
 fun UnifiedAlbumCard(
     coverModel: Any?,
+    /** True when [coverModel] is a local GIF whose uri hides its extension (a MediaStore content://
+     *  id). Lets the card pick the still-frame loader when cover autoplay is off. A cloud GIF cover
+     *  needs no flag: it arrives resolved as a file path ending in .gif. */
+    coverIsGif: Boolean = false,
     title: String,
     metaText: String,
     shareBadge: AlbumShareBadge = AlbumShareBadge.None,
@@ -114,8 +122,21 @@ fun UnifiedAlbumCard(
                 .background(Bg2),
         ) {
             if (coverModel != null) {
+                // A GIF cover animates only when the user opted into cover autoplay; otherwise the
+                // decoder-free loader renders its still first frame. A local cover's content:// uri
+                // hides the extension, so [coverIsGif] carries the answer there; a resolved cloud GIF
+                // arrives as a file path ending in .gif. Every other cover keeps the default loader
+                // and is a still image regardless.
+                val autoplay = LocalGifAutoplayCovers.current
+                val staticLoader = LocalStaticImageLoader.current
+                val context = LocalContext.current
+                val modelIsGif = coverIsGif || coverModel.toString().endsWith(".gif", ignoreCase = true)
+                val coverLoader =
+                    if (modelIsGif && !autoplay) staticLoader ?: context.imageLoader
+                    else context.imageLoader
                 AsyncImage(
                     model              = coverModel,
+                    imageLoader        = coverLoader,
                     contentDescription = null,
                     contentScale       = ContentScale.Crop,
                     modifier           = Modifier.fillMaxSize(),

@@ -615,6 +615,7 @@ fun AlbumsScreen(
                                 // part of the arrangement, so they keep their own taps.
                                 CloudAlbumCard(
                                     album       = album,
+                                    resolveCoverGif = viewModel::resolveCoverGif,
                                     interactionsEnabled = !reorderMode,
                                     onClick     = { onAlbumClick(album) },
                                     onLongClick = { cloudAlbumSheetFor = album },
@@ -705,6 +706,7 @@ fun AlbumsScreen(
                             ) { folder ->
                                 UnifiedAlbumCard(
                                     coverModel = folder.coverUri?.let(Uri::parse),
+                                    coverIsGif = folder.coverIsGif,
                                     title = folder.name,
                                     metaText = pluralStringResource(
                                         R.plurals.count_photos_plural, folder.itemCount, folder.itemCount,
@@ -1212,13 +1214,17 @@ private fun CloudAlbumCard(
     modifier: Modifier = Modifier,
     onLongClick: () -> Unit = {},
     interactionsEnabled: Boolean = true,
+    resolveCoverGif: suspend (String) -> String? = { null },
 ) {
     // Cloud Album entity has no per-mime-type breakdown, so we only have a total to show.
     // Using the media-neutral count_items_plural keeps "1 item" / "N items" pluralisation
     // correct without promising a photos-vs-videos split we can't compute without per-album
     // child fetches.
+    // With cover autoplay on, swap the still thumbnail for the resolved full-res GIF so the default
+    // loader animates it; every other case keeps the static thumbnail unchanged.
+    val coverModel = rememberCoverGifModel(album.coverLinkId, album.coverThumbnailUrl, resolveCoverGif)
     UnifiedAlbumCard(
-        coverModel  = album.coverThumbnailUrl,
+        coverModel  = coverModel,
         title       = album.name,
         metaText    = androidx.compose.ui.res.pluralStringResource(
             R.plurals.count_items_plural, album.photoCount, album.photoCount,

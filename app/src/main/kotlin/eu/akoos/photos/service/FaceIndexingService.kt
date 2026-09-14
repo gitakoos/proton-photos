@@ -45,6 +45,7 @@ import eu.akoos.photos.data.face.FaceIndexingScheduler
 import eu.akoos.photos.data.face.FaceIndexingState
 import eu.akoos.photos.data.notification.NotificationIds
 import eu.akoos.photos.data.notification.ensureNotificationChannel
+import eu.akoos.photos.util.FaceDiagnostics
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -115,6 +116,9 @@ class FaceIndexingService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
+        // Note the foreground start once per session (a re-kick does not reset it), so the copied
+        // diagnostics can show how long this dataSync service has run against the platform's daily budget.
+        FaceDiagnostics.recordFgsStart()
 
         if (!started) {
             started = true
@@ -142,6 +146,9 @@ class FaceIndexingService : Service() {
      */
     @RequiresApi(Build.VERSION_CODES.VANILLA_ICE_CREAM)
     override fun onTimeout(startId: Int, fgsType: Int) {
+        // Record the platform hitting the dataSync daily budget, so the copied diagnostics can confirm or
+        // rule out the 6h cap as the reason a large scan stopped short.
+        FaceDiagnostics.recordFgsTimeout()
         Log.w(TAG, "dataSync foreground budget exhausted; stopping")
         stopIndexingService()
     }
@@ -149,6 +156,8 @@ class FaceIndexingService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         scope.cancel()
+        // The foreground session ended, so the diagnostics runtime reads "off" until the next start.
+        FaceDiagnostics.recordFgsStop()
     }
 
     /**

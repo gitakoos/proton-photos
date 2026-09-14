@@ -258,6 +258,7 @@ class AlbumDetailViewModel @Inject constructor(
     private val favoriteWriter: FavoriteWriter,
     private val observePeopleUseCase: eu.akoos.photos.domain.usecase.ObservePeopleUseCase,
     private val addPhotosToPersonUseCase: eu.akoos.photos.domain.usecase.AddPhotosToPersonUseCase,
+    private val resolveCoverGifUseCase: eu.akoos.photos.domain.usecase.ResolveCoverGifUseCase,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(AlbumDetailUiState())
@@ -319,6 +320,16 @@ class AlbumDetailViewModel @Inject constructor(
     /** Cancel any in-flight decrypt for [linkId] when the cell scrolls off-screen. */
     fun cancelThumbnailDecrypt(linkId: String) {
         driveRepo.cancelThumbnailDecrypt(linkId)
+    }
+
+    /**
+     * A playable local GIF path (`file://…`) for the hero cover [coverLinkId], or null when it is not
+     * an animatable GIF, is unavailable under the Wi-Fi-only policy, or no account is signed in (the
+     * cover then stays its static thumbnail). Delegates to the shared [ResolveCoverGifUseCase].
+     */
+    suspend fun resolveCoverGif(coverLinkId: String): String? {
+        val userId = accountManager.getPrimaryUserId().first() ?: return null
+        return resolveCoverGifUseCase.resolve(userId, coverLinkId)
     }
 
     init {

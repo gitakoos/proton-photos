@@ -1979,7 +1979,9 @@ class ScreenshotOverlayService : Service() {
         private const val AUTO_DISMISS_MS = 6_000L
 
         // Most recent draw actions kept for Undo; older snapshots are evicted so memory stays bounded.
-        private const val UNDO_CAP = 8
+        // Each undo entry is a full-screen ARGB_8888 layer copy (~10 MB on a high-res panel), so the
+        // depth is kept shallow to bound the resident memory of a foreground drawing service.
+        private const val UNDO_CAP = 5
 
         fun start(context: Context) {
             if (!Settings.canDrawOverlays(context)) {

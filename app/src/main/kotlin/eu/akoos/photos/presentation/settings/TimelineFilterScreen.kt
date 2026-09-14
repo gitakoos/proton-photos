@@ -218,6 +218,20 @@ fun TimelineLayoutScreen(
                     scope.launch { ctx.settingsDataStore.edit { it[SettingsKeys.SHOW_ON_THIS_DAY] = on } }
                 },
             )
+            RowDivider()
+            ToggleRow(
+                label = stringResource(R.string.settings_gif_autoplay_grid),
+                description = stringResource(R.string.settings_gif_autoplay_grid_summary),
+                checked = settings.gifAutoplayGrid,
+                onCheckedChange = settingsViewModel::setGifAutoplayGrid,
+            )
+            RowDivider()
+            ToggleRow(
+                label = stringResource(R.string.settings_gif_autoplay_covers),
+                description = stringResource(R.string.settings_gif_autoplay_covers_summary),
+                checked = settings.gifAutoplayCovers,
+                onCheckedChange = settingsViewModel::setGifAutoplayCovers,
+            )
         }
         Spacer(Modifier.height(24.dp))
     }

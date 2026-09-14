@@ -128,6 +128,7 @@ internal val WhatsNewReleases: List<WhatsNewRelease> = listOf(
             WhatsNewFeature(Icons.Default.Face, R.string.whats_new_faces_rework_title, R.string.whats_new_faces_rework_body, WhatsNewCategory.Improved),
             WhatsNewFeature(Icons.Default.NoAccounts, R.string.whats_new_guest_title, R.string.whats_new_guest_body, WhatsNewCategory.Improved),
             WhatsNewFeature(Icons.Default.Difference, R.string.whats_new_dup_nobackup_title, R.string.whats_new_dup_nobackup_body, WhatsNewCategory.Improved),
+            WhatsNewFeature(Icons.Default.Compress, R.string.whats_new_compress_split_title, R.string.whats_new_compress_split_body, WhatsNewCategory.Improved),
         ),
     ),
     WhatsNewRelease(

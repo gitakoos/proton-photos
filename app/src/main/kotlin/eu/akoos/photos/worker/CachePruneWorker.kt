@@ -74,6 +74,9 @@ class CachePruneWorker @AssistedInject constructor(
         eu.akoos.photos.data.repository.drive.PhotoDownloadService.pruneStaleFullResCache(
             context,
             networkAvailable = true,
+            // Off-main periodic pass, so also reclaim download-resume scratch (dec_*/.tmp)
+            // abandoned past RESUME_TTL_MS; the startup + viewer-close callers keep the light sweep.
+            deepClean = true,
         )
         // Sweep abandoned upload-resume tempDirs whose last-touch is older than the
         // STALE_TTL. The resume manifest itself preserves blocks indefinitely after a
@@ -96,7 +99,29 @@ class CachePruneWorker @AssistedInject constructor(
             importStagedDao.deleteOlderThan(cutoff)
             if (stale.isNotEmpty()) Log.d(TAG, "pruned ${stale.size} abandoned import stage(s)")
         }
+        // Sweep abandoned scratch a process kill can leave with no owner to reclaim it: video-editor
+        // exports (hundreds of MB), motion-photo probes, and a staged-but-never-installed update APK.
+        // Each cutoff is far longer than the real activity, so an in-progress one (a fresh file) is
+        // never touched.
+        sweepStaleFiles("video_editor", VIDEO_EDITOR_STALE_MS, "video-editor")
+        sweepStaleFiles("motion", MOTION_STALE_MS, "motion-photo")
+        sweepStaleFiles("updates", UPDATES_STALE_MS, "staged-update")
         return Result.success()
+    }
+
+    /** Deletes top-level files under `cacheDir/[dirName]` last touched before [ttlMs] ago. Best-effort
+     *  and directory-scoped, so it never touches a fresh (in-progress) file. */
+    private fun sweepStaleFiles(dirName: String, ttlMs: Long, label: String) {
+        runCatching {
+            val dir = File(context.cacheDir, dirName)
+            if (!dir.isDirectory) return
+            val cutoff = System.currentTimeMillis() - ttlMs
+            var swept = 0
+            dir.listFiles()?.forEach { f ->
+                if (f.isFile && f.lastModified() in 1..cutoff && f.delete()) swept++
+            }
+            if (swept > 0) Log.d(TAG, "swept $swept abandoned $label temp(s)")
+        }
     }
 
     companion object {
@@ -108,6 +133,16 @@ class CachePruneWorker @AssistedInject constructor(
          *  rows and cached thumbnails. Far longer than any real staging session, so only a
          *  genuinely abandoned stage is ever caught. */
         private val STALE_MS: Long = TimeUnit.DAYS.toMillis(7)
+
+        /** Age past which a leftover `video_editor/vmux_*` export temp is swept. Far longer than any
+         *  real export, so a background export still being written is never touched. */
+        private val VIDEO_EDITOR_STALE_MS: Long = TimeUnit.HOURS.toMillis(6)
+
+        /** Motion-photo probe temps are momentary, so a leftover is old within hours. */
+        private val MOTION_STALE_MS: Long = TimeUnit.HOURS.toMillis(6)
+
+        /** A staged update APK the user has not installed is kept a week before it is reclaimed. */
+        private val UPDATES_STALE_MS: Long = TimeUnit.DAYS.toMillis(7)
 
         fun schedule(workManager: WorkManager) {
             val constraints = Constraints.Builder()

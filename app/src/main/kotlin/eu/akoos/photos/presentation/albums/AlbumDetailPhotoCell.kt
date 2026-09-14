@@ -68,6 +68,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import coil.imageLoader
 import coil.request.ImageRequest
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.CloudPhoto
@@ -81,6 +82,8 @@ import eu.akoos.photos.presentation.theme.Bg0
 import eu.akoos.photos.presentation.theme.Bg2
 import eu.akoos.photos.presentation.theme.ErrorColor
 import eu.akoos.photos.presentation.theme.FgDim
+import eu.akoos.photos.presentation.theme.LocalGifAutoplayGrid
+import eu.akoos.photos.presentation.theme.LocalStaticImageLoader
 import eu.akoos.photos.presentation.theme.StatusSynced
 import eu.akoos.photos.presentation.util.formatVideoTime
 
@@ -135,6 +138,12 @@ internal fun PhotoCell(
     onRequestThumbnail: (linkId: String) -> Unit = {},
     onCancelThumbnail: (linkId: String) -> Unit = {},
 ) {
+    // A local GIF animates only when the user opted into grid autoplay; otherwise the decoder-free
+    // loader renders its still first frame. A cloud thumbnail is static already, so it is unaffected.
+    val gridAutoplay = LocalGifAutoplayGrid.current
+    val staticLoader = LocalStaticImageLoader.current
+    val isLocalGif = localUri != null && photo.mimeType == "image/gif"
+
     val imageModel: Any? = when {
         localUri != null -> android.net.Uri.parse(localUri)
         photo.thumbnailUrl != null -> photo.thumbnailUrl
@@ -205,8 +214,12 @@ internal fun PhotoCell(
                         .crossfade(false)
                         .build()
                 }
+                val cellLoader =
+                    if (isLocalGif && !gridAutoplay) staticLoader ?: context.imageLoader
+                    else context.imageLoader
                 AsyncImage(
                     model = request,
+                    imageLoader = cellLoader,
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize(),

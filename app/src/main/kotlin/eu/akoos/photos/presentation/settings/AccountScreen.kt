@@ -233,7 +233,10 @@ fun AccountScreen(
                 } else ""
                 "\n\n" + total + recoverable
             } else ""
-            val signOutMessage = stringResource(R.string.sign_out_dialog_message) + vaultWarning
+            // Signing out also wipes the on-device face index, so when face recognition is on the message
+            // says the names and groups go too, rather than letting the loss come as a surprise.
+            val faceWarning = if (state.faceEnabled) "\n\n" + stringResource(R.string.sign_out_dialog_face_warning) else ""
+            val signOutMessage = stringResource(R.string.sign_out_dialog_message) + vaultWarning + faceWarning
             ConfirmDialog(
                 title = stringResource(R.string.sign_out_dialog_title),
                 message = signOutMessage,

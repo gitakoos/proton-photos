@@ -36,6 +36,8 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Panorama
@@ -52,8 +54,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
-import androidx.compose.foundation.gestures.rememberTransformableState
-import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -84,6 +84,7 @@ import androidx.compose.material.icons.filled.BrokenImage
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.EditNote
+import androidx.compose.material.icons.filled.Gif
 import androidx.compose.material.icons.filled.PrivacyTip
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MoreVert
@@ -109,8 +110,10 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import eu.akoos.photos.R
+import eu.akoos.photos.presentation.common.ConfirmDialog
 import eu.akoos.photos.presentation.common.EditFieldSheet
 import eu.akoos.photos.presentation.common.anyMetadataEditable
 import eu.akoos.photos.presentation.gallery.MetadataStripPickerDialog
@@ -147,7 +150,9 @@ import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.RemoveCircleOutline
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.outlined.DeleteForever
 import androidx.compose.material.icons.outlined.OfflinePin
+import androidx.compose.material.icons.outlined.RestoreFromTrash
 import eu.akoos.photos.data.hidden.VaultMove
 import eu.akoos.photos.data.image.ULTRA_HDR_TAG
 import eu.akoos.photos.data.image.decodeUltraHdr
@@ -158,6 +163,8 @@ import eu.akoos.photos.domain.usecase.DeletePhotoUseCase
 import eu.akoos.photos.presentation.gallery.LocalThumbnailUrls
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.Bg0
+import eu.akoos.photos.presentation.theme.LocalTintCloudWithAccent
+import eu.akoos.photos.presentation.theme.StatusSynced
 import eu.akoos.photos.presentation.theme.SheetBg
 import eu.akoos.photos.presentation.theme.ErrorColor
 import eu.akoos.photos.presentation.theme.FgDim
@@ -319,11 +326,21 @@ fun PhotoViewerScreen(
      *  Only seeds the initial value — the play/pause pill owns it from there. */
     startSlideshow: Boolean = false,
     onEditItem: (GalleryItem) -> Unit = {},
+    /** Hands the current video's local URI to the GIF maker. Offered only for a video with a device
+     *  file: the encoder reads frames with MediaMetadataRetriever, which a cloud-only video lacks. */
+    onCreateGif: (item: GalleryItem) -> Unit = {},
     /** Opens the date + place metadata editor for the current item. Suppressed for a shared-with-me
      *  album (the sheet hides the affordance), mirroring the rename gate. */
     onEditMetadata: (GalleryItem) -> Unit = {},
     /** Opens the page of the person the face index grouped, from the "people in this photo" bar. */
     onOpenPerson: (Long) -> Unit = {},
+    /** True when the viewer was opened from the Trash screen: adds a Restore / Delete-forever bar to
+     *  the bottom chrome. The mutating chrome is already suppressed through [isReadOnlyAlbum]. */
+    trashMode: Boolean = false,
+    /** Hands the settled trashed item back to the Trash screen to restore, then closes the viewer. */
+    onTrashRestore: (GalleryItem) -> Unit = {},
+    /** Hands the settled trashed item back to the Trash screen to delete forever, then closes. */
+    onTrashDeleteForever: (GalleryItem) -> Unit = {},
     viewModel: PhotoViewerViewModel = hiltViewModel(),
 ) {
     if (items.isEmpty()) { onBack(null); return }
@@ -421,6 +438,14 @@ fun PhotoViewerScreen(
     var faceToName by remember { mutableStateOf<String?>(null) }
     // The settled photo's decoded pixel size, shared by the tags and the long-press face hit-test.
     var settledImageSize by remember { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
+    // Once any settled photo decodes to HDR, hold the window in HDR colour mode for the rest of the
+    // viewer session instead of toggling it per photo. A per-page effect flipped the window colour mode
+    // DEFAULT->HDR on every swipe (the old effect reset to DEFAULT when a page left and the next page set
+    // HDR again), and each colour-mode change reconfigures the display with a visible white flash. This
+    // one session-scoped effect switches at most once and resets to DEFAULT only when the viewer closes;
+    // an SDR photo renders fine in an HDR-capable window.
+    var viewerEverHdr by remember { mutableStateOf(false) }
+    HdrWindowColorMode(enabled = viewerEverHdr)
     // The playing video's on-screen frame size, so face tags pin over a video the same way they do over
     // a still. Set by the player's size callback, cleared on settle.
     var videoFrameSize by remember { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
@@ -592,15 +617,13 @@ fun PhotoViewerScreen(
     var scale  by remember { mutableFloatStateOf(1f) }
     var offset by remember { mutableStateOf(Offset.Zero) }
     var containerSize by remember { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
-    // Pan distance accumulated past the image edge while zoomed; crossing the threshold pages.
-    var edgeOverpan by remember { mutableFloatStateOf(0f) }
     // The zoom and pan the page was sitting at when text mode took it over. Text mode moves the
     // photo for its own reasons, so leaving it hands back what the user had rather than the
     // fit the mode chose. Null whenever there is nothing owed back.
     var textZoomBefore by remember { mutableStateOf<ViewerZoom?>(null) }
-    LaunchedEffect(pagerState.settledPage, pageGeneration) { scale = 1f; offset = Offset.Zero; edgeOverpan = 0f }
+    LaunchedEffect(pagerState.settledPage, pageGeneration) { scale = 1f; offset = Offset.Zero }
 
-    val transformState = rememberTransformableState { zoomChange, panChange, _ ->
+    val onZoomPan by rememberUpdatedState<(Float, Offset) -> Unit>({ zoomChange, panChange ->
         // The user's own fingers on the photo outrank anything text mode set up: from here the page
         // is theirs and there is no earlier zoom left to restore.
         textZoomBefore = null
@@ -614,29 +637,14 @@ fun PhotoViewerScreen(
                 unclamped.x.coerceIn(-maxX, maxX),
                 unclamped.y.coerceIn(-maxY, maxY),
             )
-            // Edge-paging: a pure pan (no active pinch) pushing past the horizontal
-            // bound accumulates; crossing the threshold advances the pager the same
-            // direction the finger travels. Any in-bounds pan resets the accumulator
-            // so casual panning never triggers it.
-            if (kotlin.math.abs(zoomChange - 1f) < 0.001f) {
-                when {
-                    unclamped.x < -maxX -> edgeOverpan += (-maxX - unclamped.x)
-                    unclamped.x >  maxX -> edgeOverpan -= (unclamped.x - maxX)
-                    else                -> edgeOverpan = 0f
-                }
-                val threshold = 140f
-                if (edgeOverpan > threshold && pagerState.currentPage < items.lastIndex) {
-                    edgeOverpan = 0f
-                    scope.launch { pagerState.animateScrollToPage(pagerState.currentPage + 1) }
-                } else if (edgeOverpan < -threshold && pagerState.currentPage > 0) {
-                    edgeOverpan = 0f
-                    scope.launch { pagerState.animateScrollToPage(pagerState.currentPage - 1) }
-                }
-            }
+            // A zoomed photo never pages to its neighbour: panning past the edge just stops at the
+            // bound. An accidental sideways drag at the edge cannot swap the photo, and no page
+            // animation runs while still zoomed, so the neighbour never flashes underneath.
+            // To change photo, zoom back out first, exactly as a phone gallery does.
         } else {
             offset = Offset.Zero
         }
-    }
+    })
 
     // Per-page full-res image cache: keeps the last loaded image so non-settled pages
     // don't visually drop quality to thumbnail while the exit animation is still playing.
@@ -676,8 +684,12 @@ fun PhotoViewerScreen(
         onBack(anchorKey.takeIf { it != openedKey })
     }
     // Route the system/gesture back through the same teardown so a hardware back doesn't leave the
-    // playing surface to linger through the pop fade either.
-    androidx.activity.compose.BackHandler(enabled = !exiting) { startExit() }
+    // playing surface to linger through the pop fade either. A zoomed photo takes back to zoom OUT
+    // first, like a phone gallery, so an accidental zoom is undone by back instead of closing the
+    // viewer; only an un-zoomed photo's back tears it down.
+    androidx.activity.compose.BackHandler(enabled = !exiting) {
+        if (scale > 1f) { scale = 1f; offset = Offset.Zero } else startExit()
+    }
 
     // ── Read the text on the photo ────────────────────────────────────────────
     var textState by remember { mutableStateOf<ViewerTextState>(ViewerTextState.Idle) }
@@ -971,6 +983,9 @@ fun PhotoViewerScreen(
     }
 
     var showMetadata by remember { mutableStateOf(false) }
+    // Every trash action confirms in-app, since a device delete under MANAGE_MEDIA runs with no OS
+    // dialog. Null hides the confirm; "restore" or "delete" name the pending action.
+    var trashConfirmAction by remember { mutableStateOf<String?>(null) }
     var showStripPicker by remember { mutableStateOf(false) }
     var showRenameDialog by remember { mutableStateOf(false) }
     val renameState by viewModel.renameState.collectAsStateWithLifecycle()
@@ -1215,12 +1230,49 @@ fun PhotoViewerScreen(
                         showOverlays = true
                     }
                 }
+            }
+            .pointerInput("viewer-pinch") {
+                // Pinch to zoom, and one-finger pan while zoomed, detected on the stable root box so the
+                // first gesture on a freshly settled page is not swallowed by the per-page node that
+                // rebuilds at settle (#113). Engages only on two fingers, or one finger once already
+                // zoomed and moved past slop, so a single-finger swipe at rest is left to the pager and a
+                // tap to the tap detector (including double tap to zoom back out while zoomed).
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = false)
+                    val touchSlop = viewConfiguration.touchSlop
+                    var engaged = false
+                    var accumPan = Offset.Zero
+                    do {
+                        val event = awaitPointerEvent()
+                        val pressedCount = event.changes.count { it.pressed }
+                        if (pressedCount == 0) break
+                        if (!engaged) {
+                            if (pressedCount >= 2) {
+                                engaged = true
+                            } else if (pressedCount == 1 && rootScale > 1f) {
+                                accumPan += event.calculatePan()
+                                if (accumPan.getDistance() > touchSlop) engaged = true
+                            }
+                        }
+                        if (engaged) {
+                            val zoomChange = event.calculateZoom()
+                            val panChange = event.calculatePan()
+                            if (zoomChange != 1f || panChange != Offset.Zero) {
+                                onZoomPan(zoomChange, panChange)
+                            }
+                            event.changes.forEach { if (it.pressed) it.consume() }
+                        }
+                    } while (event.changes.any { it.pressed })
+                }
             },
         contentAlignment = Alignment.Center,
     ) {
         // ── Pager ──────────────────────────────────────────────────────────────
         HorizontalPager(
             state = pagerState,
+            // Compose and load one page either side, so swiping onto a neighbour finds its thumbnail
+            // already decoded instead of a blank Bg0 frame while it loads.
+            beyondViewportPageCount = 1,
             modifier = Modifier.fillMaxSize(),
             // Key each page slot to its item's stable identity so a live reconcile rebinds per-page
             // state (video flags, painted-thumb gate) to the photo rather than the position. When a
@@ -1300,25 +1352,37 @@ fun PhotoViewerScreen(
                     null -> null
                 }
                 val stateMatchesPage = state.itemKey == null || state.itemKey == currentItemKey
-                // True once the settled full-res image has actually painted for this page.
-                // Re-armed per item so each new photo holds its thumb underneath until the
-                // full-res frame is up. Keeps the thumb drawn through the full-res decode +
-                // crossfade so the Bg0 background never shows through on a cold open.
-                var fullResPainted by remember(currentItemKey) { mutableStateOf(false) }
-                // Hide the thumb once the full-res image has painted for this settled page so
-                // it stops peeking through at the edges when the user pinch-zooms and pans —
-                // the full-res layer is graphicsLayer-translated, the thumb is not, and at
-                // any non-centered scale>1f the thumb would otherwise show through behind.
-                val suppressThumbForLoadedImage = isSettled &&
-                    state is PhotoViewerViewModel.ViewerState.ShowImage &&
-                    stateMatchesPage &&
-                    fullResPainted
-                if (thumbModel != null && !suppressThumbForVideo && !suppressThumbForLoadedImage) {
+                // Keep the blurry thumb drawn UNDER the full-res the whole time this photo is shown,
+                // carrying the exact same pinch-zoom transform (below) so it sits precisely beneath the
+                // full-res at any scale and never peeks at the edges. Being always underneath, it covers
+                // the Bg0 background through the full-res decode AND its crossfade-in, at scale 1 or zoomed
+                // alike, so the background can never flash through while the sharp image morphs in. Hidden
+                // only for a video once its first frame has painted (the player takes over there).
+                if (thumbModel != null && !suppressThumbForVideo) {
+                    val thumbCtx = LocalContext.current
                     AsyncImage(
-                        model = thumbModel,
+                        // No crossfade on the thumb itself: it is the instant base the full-res morphs over.
+                        model = remember(thumbModel) {
+                            ImageRequest.Builder(thumbCtx).data(thumbModel).crossfade(false).build()
+                        },
                         contentDescription = null,
                         contentScale = ContentScale.Fit,
-                        modifier = Modifier.fillMaxSize(),
+                        modifier = Modifier
+                            .fillMaxSize()
+                            // Only the CURRENT page carries the pinch-zoom transform. scale/offset are
+                            // shared viewer state, so applying them to every page's thumb blows the
+                            // neighbour's thumb up by the current zoom and bleeds it into this page; a
+                            // neighbour must stay at identity until it becomes the settled page.
+                            .then(
+                                if (isSettled) {
+                                    Modifier.graphicsLayer(
+                                        scaleX = scale, scaleY = scale,
+                                        translationX = offset.x, translationY = offset.y,
+                                    )
+                                } else {
+                                    Modifier
+                                },
+                            ),
                     )
                 }
                 // Non-settled pages: show cached full-res so they don't visually
@@ -1326,8 +1390,12 @@ fun PhotoViewerScreen(
                 if (!isSettled) {
                     val cached = pageImageCache[page]
                     if (cached != null) {
+                        val cachedCtx = LocalContext.current
                         AsyncImage(
-                            model = cached,
+                            // Same reason as the thumb: no fade over the Bg0 background.
+                            model = remember(cached) {
+                                ImageRequest.Builder(cachedCtx).data(cached).crossfade(false).build()
+                            },
                             contentDescription = null,
                             contentScale = ContentScale.Fit,
                             modifier = Modifier.fillMaxSize(),
@@ -1365,15 +1433,18 @@ fun PhotoViewerScreen(
                                         modifier = Modifier.fillMaxSize(),
                                     )
                                 } else {
-                                    // Fade the full-res in over the thumb (which stays drawn
-                                    // until onState reports Success) so a cold open never shows
-                                    // the background through a one-frame gap. The transform stays
-                                    // on this element so pinch-zoom is unaffected.
+                                    // Fade the full-res in over the thumb for a subtle blurry->sharp morph.
+                                    // Safe now that the thumb stays drawn underneath at scale 1 (see the
+                                    // suppress rule above): the fade reveals the sharp full-res over the
+                                    // still-visible blurry thumb, not over the Bg0 background, so it
+                                    // dissolves smoothly with no white flash. Coil skips the fade on a
+                                    // memory-cache hit, so a photo paged back to snaps in at once. The
+                                    // transform stays on this element so pinch-zoom is unaffected.
                                     val imageContext = LocalContext.current
                                     val fullResRequest = remember(s.model) {
                                         ImageRequest.Builder(imageContext)
                                             .data(s.model)
-                                            .crossfade(true)
+                                            .crossfade(220)
                                             // The one request in the app that asks for the gain map
                                             // to survive the decode. An HDR bitmap costs the base
                                             // image plus a gain map plane, so it stays scoped to the
@@ -1388,10 +1459,6 @@ fun PhotoViewerScreen(
                                     // broken-image glyph instead. Re-armed per item so each photo
                                     // starts clean.
                                     var fullResFailed by remember(currentItemKey) { mutableStateOf(false) }
-                                    // Whether the bitmap Coil just handed back carries a gain map,
-                                    // read off the decoded drawable rather than by re-opening the
-                                    // file. Re-armed per item so each photo decides for itself.
-                                    var fullResIsHdr by remember(currentItemKey) { mutableStateOf(false) }
                                     AsyncImage(
                                         model = fullResRequest,
                                         contentDescription = null,
@@ -1399,9 +1466,11 @@ fun PhotoViewerScreen(
                                         onState = { st ->
                                             when (st) {
                                                 is AsyncImagePainter.State.Success -> {
-                                                    fullResPainted = true
                                                     fullResFailed = false
-                                                    fullResIsHdr = st.result.drawable.hasGainMap()
+                                                    // Latch the session into HDR colour mode the first
+                                                    // time a settled photo carries a gain map, and never
+                                                    // back, so the window mode is not toggled per page.
+                                                    if (st.result.drawable.hasGainMap()) viewerEverHdr = true
                                                     // Only the settled page feeds the shared size the
                                                     // face tags + long-press hit-test read.
                                                     if (isSettled) settledImageSize =
@@ -1416,17 +1485,11 @@ fun PhotoViewerScreen(
                                         },
                                         modifier = Modifier
                                             .fillMaxSize()
-                                            .transformable(state = transformState, canPan = { scale > 1f })
                                             .graphicsLayer(
                                                 scaleX = scale, scaleY = scale,
                                                 translationX = offset.x, translationY = offset.y,
                                             ),
                                     )
-                                    // A gain map only means anything once the window itself asks
-                                    // for HDR. This effect lives inside the settled page's branch,
-                                    // so it follows the settled photo: paging away disposes it,
-                                    // and so does a back gesture or leaving the viewer at all.
-                                    HdrWindowColorMode(enabled = fullResIsHdr)
                                     if (fullResFailed) {
                                         // Centered over the viewer background, a touch larger than
                                         // the grid tile's placeholder but the same muted treatment.
@@ -1481,7 +1544,6 @@ fun PhotoViewerScreen(
                                     // with graphicsLayer.
                                     modifier = Modifier
                                         .fillMaxSize()
-                                        .transformable(state = transformState, canPan = { scale > 1f })
                                         .graphicsLayer(
                                             scaleX = scale, scaleY = scale,
                                             translationX = offset.x, translationY = offset.y,
@@ -1501,9 +1563,8 @@ fun PhotoViewerScreen(
                     // so a hidden photo can never end up with readable words drawn on top of it.
                     // The dim and the lit words first, then the invisible layer the platform's own
                     // selection is taken from, which has to be nearest the finger to get the long
-                    // press before anything under it does. Carrying the pinch as well, because the
-                    // layer covers the picture and a gesture that stops at it would never reach the
-                    // image's own transform.
+                    // press before anything under it does. Pinch to zoom still works over it because the
+                    // root box detector reads the gesture whether or not this layer consumes it.
                     if (showingText != null && stateMatchesPage) {
                         val textTransform = viewerTransform(containerSize, scale, offset)
                         ViewerTextOverlay(
@@ -1514,8 +1575,6 @@ fun PhotoViewerScreen(
                             showing = showingText,
                             transform = textTransform,
                             selection = textSelection,
-                            modifier = Modifier
-                                .transformable(state = transformState, canPan = { scale > 1f }),
                         )
                     }
                     (textState as? ViewerTextState.Working)?.let { ViewerTextProgress(it.stage) }
@@ -1530,7 +1589,7 @@ fun PhotoViewerScreen(
                         state is PhotoViewerViewModel.ViewerState.ShowVideo &&
                         videoFrameSize.width > 0 && videoFrameSize.height > 0
                     ) videoFrameSize else settledImageSize
-                    if (facesMode && stateMatchesPage && peopleInPhoto.isNotEmpty() &&
+                    if (facesMode && stateMatchesPage && peopleInPhoto.isNotEmpty() && !trashMode &&
                         faceOverlaySize.width > 0 && faceOverlaySize.height > 0
                     ) {
                         ViewerFaceTags(
@@ -1540,12 +1599,14 @@ fun PhotoViewerScreen(
                             offset = offset,
                             people = peopleInPhoto,
                             onFaceClick = { person ->
-                                facesMode = false
                                 // A leftover (Unsorted) face has no person to open, so name this one
-                                // face into a real person right here instead.
+                                // face into a real person right here, and KEEP the overlay up so the next
+                                // face in a group photo can be tagged without reopening it. Opening a real
+                                // person navigates away, so there the overlay is dropped.
                                 if (person.isOther) {
                                     faceToName = person.faceId
                                 } else {
+                                    facesMode = false
                                     onOpenPerson(person.personId)
                                 }
                             },
@@ -1799,6 +1860,9 @@ fun PhotoViewerScreen(
                         }
                     }
 
+                    // A trashed item has no overflow actions (people, save to device, hide, delete),
+                    // so the More menu and its trigger are left out entirely in trash mode.
+                    if (!trashMode) {
                     Box {
                         val appColors = eu.akoos.photos.presentation.theme.AppColors.current
                         var menuExpanded by remember { mutableStateOf(false) }
@@ -1917,6 +1981,34 @@ fun PhotoViewerScreen(
                                     onClick = {
                                         menuExpanded = false
                                         showStripPicker = true
+                                    },
+                                )
+                            }
+                            // Make GIF turns a short video into an animated GIF. A device video feeds
+                            // the encoder from its local file; a cloud-only video downloads first the
+                            // way the video editor's cloud path does (NavGraph routes on the item).
+                            // Every photo is left out.
+                            val gifVideo: GalleryItem? = when (val s = settledItem) {
+                                is GalleryItem.LocalOnly ->
+                                    if (s.local.mimeType.startsWith("video/")) s else null
+                                is GalleryItem.Synced ->
+                                    if (s.local.mimeType.startsWith("video/")) s else null
+                                is GalleryItem.CloudOnly ->
+                                    // Mirror the Edit-video gate: a cloud video downloads first, so it
+                                    // is offered only when the album is not read-only (a shared-with-me
+                                    // video is view-only).
+                                    if (!isReadOnlyAlbum && s.cloud.mimeType.startsWith("video/")) s else null
+                                null -> null
+                            }
+                            if (gifVideo != null) {
+                                androidx.compose.material3.DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.action_make_gif),
+                                        color = FgPrimary) },
+                                    leadingIcon = { Icon(Icons.Default.Gif, null,
+                                        tint = Accent, modifier = Modifier.size(20.dp)) },
+                                    onClick = {
+                                        menuExpanded = false
+                                        onCreateGif(gifVideo)
                                     },
                                 )
                             }
@@ -2061,6 +2153,7 @@ fun PhotoViewerScreen(
                                 )
                             }
                         }
+                    }
                     }
                 }
             }
@@ -2262,7 +2355,7 @@ fun PhotoViewerScreen(
                         Icon(
                             Icons.Default.Cloud,
                             contentDescription = stringResource(R.string.cd_status_backed_up_device),
-                            tint = Color(0xFF30D158),
+                            tint = if (LocalTintCloudWithAccent.current) Accent else StatusSynced,
                             modifier = Modifier.size(13.dp),
                         )
                         Text("·", color = FgMute, fontSize = 13.sp)
@@ -2289,6 +2382,57 @@ fun PhotoViewerScreen(
                     Text(formatItemDate(currentItem), color = FgDim, fontSize = 13.sp)
                 }
                 Text("›", color = FgMute, fontSize = 15.sp)
+            }
+
+            // Trash action bar with Restore + Delete forever for the settled item, shown only when the
+            // viewer was opened from Trash. Fades with the chrome; the Trash screen behind us runs the
+            // action once we hand the item back and close.
+            if (trashMode) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .background(PillBg, infoPillShape)
+                            .border(0.5.dp, PillBorder, infoPillShape)
+                            .clickable { if (settledItem != null) trashConfirmAction = "restore" }
+                            .padding(horizontal = 16.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Icon(
+                            Icons.Outlined.RestoreFromTrash,
+                            contentDescription = null,
+                            tint = FgPrimary,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Text(
+                            stringResource(R.string.trash_restore),
+                            color = FgPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium,
+                        )
+                    }
+                    Row(
+                        modifier = Modifier
+                            .background(PillBg, infoPillShape)
+                            .border(0.5.dp, PillBorder, infoPillShape)
+                            .clickable { if (settledItem != null) trashConfirmAction = "delete" }
+                            .padding(horizontal = 16.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Icon(
+                            Icons.Outlined.DeleteForever,
+                            contentDescription = null,
+                            tint = ErrorColor,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Text(
+                            stringResource(R.string.trash_delete_forever_confirm),
+                            color = ErrorColor, fontSize = 13.sp, fontWeight = FontWeight.Medium,
+                        )
+                    }
+                }
             }
         }
         } // AnimatedVisibility
@@ -2325,6 +2469,40 @@ fun PhotoViewerScreen(
                 .navigationBarsPadding()
                 .padding(bottom = 96.dp),
         )
+    }
+
+    // Restore and Delete forever both confirm in-app for both item kinds. A device delete under
+    // MANAGE_MEDIA runs silently with no OS dialog, so the viewer confirms it itself, matching the
+    // Trash screen. Strings pick device vs cloud wording off the settled item's type.
+    if (trashConfirmAction != null) {
+        val item = items.getOrNull(pagerState.settledPage)
+        if (item == null) {
+            trashConfirmAction = null
+        } else {
+            val isDevice = item is GalleryItem.LocalOnly
+            val isRestore = trashConfirmAction == "restore"
+            ConfirmDialog(
+                title = if (isRestore) pluralStringResource(R.plurals.trash_restore_title, 1, 1)
+                    else pluralStringResource(R.plurals.trash_delete_forever_title, 1, 1),
+                message = if (isRestore) {
+                    if (isDevice) stringResource(R.string.trash_restore_device_message)
+                    else stringResource(R.string.trash_restore_cloud_message)
+                } else {
+                    if (isDevice) stringResource(R.string.trash_delete_forever_message)
+                    else pluralStringResource(R.plurals.trash_cloud_empty_confirm_message, 1, 1)
+                },
+                confirmLabel = if (isRestore) stringResource(R.string.trash_restore)
+                    else stringResource(R.string.trash_delete_forever_confirm),
+                dismissLabel = stringResource(R.string.cancel),
+                onConfirm = {
+                    val a = trashConfirmAction
+                    trashConfirmAction = null
+                    if (a == "restore") onTrashRestore(item) else onTrashDeleteForever(item)
+                },
+                onDismiss = { trashConfirmAction = null },
+                destructive = !isRestore,
+            )
+        }
     }
 
     // ── Metadata sheet ─────────────────────────────────────────────────────────

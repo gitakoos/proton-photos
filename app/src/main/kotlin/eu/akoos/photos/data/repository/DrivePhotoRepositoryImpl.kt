@@ -93,9 +93,14 @@ class DrivePhotoRepositoryImpl @Inject constructor(
     private val videoDurationBackfillScheduler: VideoDurationBackfillScheduler,
     private val localExifBackfillScheduler: LocalExifBackfillScheduler,
     private val faceIndexingScheduler: eu.akoos.photos.data.face.FaceIndexingScheduler,
+    private val semanticIndexingScheduler: eu.akoos.photos.data.semantic.SemanticIndexingScheduler,
     private val faceDao: eu.akoos.photos.data.db.dao.FaceDao,
     private val personDao: eu.akoos.photos.data.db.dao.PersonDao,
     private val faceScanDao: eu.akoos.photos.data.db.dao.FaceScanDao,
+    private val notPersonDao: eu.akoos.photos.data.db.dao.NotPersonDao,
+    private val personCoverDao: eu.akoos.photos.data.db.dao.PersonCoverDao,
+    private val personManualPhotoDao: eu.akoos.photos.data.db.dao.PersonManualPhotoDao,
+    private val clusterSummaryDao: eu.akoos.photos.data.db.dao.ClusterSummaryDao,
     private val photoListingDao: PhotoListingDao,
     private val listingSweepSnapshotDao: ListingSweepSnapshotDao,
     private val syncStateDao: SyncStateDao,
@@ -480,9 +485,19 @@ class DrivePhotoRepositoryImpl @Inject constructor(
         // are wiped, so it is already standing down when the wipe lands and writes no face for the
         // account that is leaving. Face embeddings are biometric data, so the rows go with the session.
         runCatching { faceIndexingScheduler.reset() }
+        // Same treatment for the semantic index: stop the walk and drop this account's image embeddings,
+        // which are private derived data that leave with the session rather than lingering for the next.
+        runCatching { semanticIndexingScheduler.reset(userId) }
         runCatching { faceDao.clearForUser(userId.id) }
         runCatching { personDao.clearForUser(userId.id) }
         runCatching { faceScanDao.clearForUser(userId.id) }
+        // The person NAME lives in these three plus the cluster centroids in the fourth, all keyed by
+        // account; clearing only the first three above left names, boxes and covers on disk for a
+        // departed account. Biometric data leaves with the session, so wipe all six face tables.
+        runCatching { notPersonDao.clearForUser(userId.id) }
+        runCatching { personCoverDao.clearForUser(userId.id) }
+        runCatching { personManualPhotoDao.clearForUser(userId.id) }
+        runCatching { clusterSummaryDao.clearForUser(userId.id) }
         // Wipe all plaintext key material before the user's tokens disappear, so even if the
         // process keeps running afterwards a heap inspection can't pull keys from this Singleton.
         shareService.wipeKeyCache()
@@ -590,5 +605,9 @@ class DrivePhotoRepositoryImpl @Inject constructor(
 
     override suspend fun backfillFaces(userId: UserId?) {
         faceIndexingScheduler.indexAll(userId)
+    }
+
+    override suspend fun backfillSemantic(userId: UserId?) {
+        semanticIndexingScheduler.indexAll(userId)
     }
 }

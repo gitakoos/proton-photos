@@ -638,6 +638,7 @@ internal fun PhotoGrid(
                     isOffline         = inputs.isOffline,
                     typeBadgeRes      = inputs.typeBadgeRes,
                     typeBadgeCdRes    = inputs.typeBadgeCdRes,
+                    isLocalGif        = inputs.isLocalGif,
                     columns           = columnCount,
                     cornerRadius      = if (seamless) 0.dp else 10.dp,
                     onClick           = {
@@ -721,10 +722,13 @@ private suspend fun visibleRangeDecrypt(
     }
 }
 
-/** Clamp band for a mosaic tile's aspect ratio so a panorama or a sliver-thin source can't produce
- *  an absurdly short or tall cell that breaks the staggered flow. */
-private const val MOSAIC_ASPECT_MIN = 0.5f
-private const val MOSAIC_ASPECT_MAX = 2.0f
+/** Clamp band for a mosaic tile's aspect ratio, kept to a moderate portrait-to-landscape range (2:3 to
+ *  3:2). The staggered grid packs into whichever lane is shortest and a date header re-levels the lanes,
+ *  so an extreme panorama or sliver tile leaves the neighbouring lanes far behind and opens a large gap
+ *  above the next header; holding the band near-square keeps the masonry look while cutting that ragged
+ *  whitespace. */
+private const val MOSAIC_ASPECT_MIN = 0.6667f
+private const val MOSAIC_ASPECT_MAX = 1.5f
 
 /**
  * Width / height aspect ratio for a mosaic tile from STORED dimensions, or null when none are
@@ -838,6 +842,11 @@ private fun MosaicPhotoGrid(
             for ((index, group) in grouped.withIndex()) {
                 val (month, monthItems) = group
                 val (monthPhotos, monthVideos) = monthCounts[index]
+                // A section with fewer photos than a full row cannot fill the lanes, so a masonry mix of
+                // tall and short tiles there just leaves a ragged gap under the empty lanes before the next
+                // header. Lay such a sparse section out as uniform squares so it reads as a tidy short
+                // block rather than whitespace.
+                val sparseSection = monthItems.size < columnCount
                 if (effectiveGrouping != TimelineGrouping.None) {
                     val selectedInGroup = monthItems.count { it in selectedItems }
                     item(span = StaggeredGridItemSpan.FullLine, contentType = "header") {
@@ -884,10 +893,11 @@ private fun MosaicPhotoGrid(
                         isOffline         = inputs.isOffline,
                         typeBadgeRes      = inputs.typeBadgeRes,
                         typeBadgeCdRes    = inputs.typeBadgeCdRes,
+                        isLocalGif        = inputs.isLocalGif,
                         columns           = columnCount,
                         cornerRadius      = if (seamless) 0.dp else 10.dp,
-                        aspectRatioOverride = storedAspect ?: thumbAspect,
-                        onIntrinsicAspect = if (storedAspect == null) {
+                        aspectRatioOverride = if (sparseSection) 1f else (storedAspect ?: thumbAspect),
+                        onIntrinsicAspect = if (!sparseSection && storedAspect == null) {
                             { aspect -> thumbAspect = aspect.coerceIn(MOSAIC_ASPECT_MIN, MOSAIC_ASPECT_MAX) }
                         } else null,
                         onClick           = {

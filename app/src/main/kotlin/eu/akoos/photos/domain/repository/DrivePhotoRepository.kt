@@ -559,4 +559,12 @@ interface DrivePhotoRepository {
      * re-run only touches photos it has never produced a face for.
      */
     suspend fun backfillFaces(userId: UserId?)
+
+    /**
+     * Walk the library's photos that have not been semantically indexed yet, compute one CLIP image
+     * embedding per photo, and store it for typed-phrase search. A no-op unless the AI features and
+     * semantic search are both on, and unless the on-device image model is present. Resumable and
+     * idempotent: a re-run only touches photos it has never embedded.
+     */
+    suspend fun backfillSemantic(userId: UserId?)
 }

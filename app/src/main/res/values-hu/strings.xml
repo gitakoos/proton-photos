@@ -178,6 +178,8 @@
     <string name="gallery_filter_raw">RAW</string>
     <string name="gallery_category_people">Emberek</string>
     <string name="gallery_filter_photos">Fotók</string>
+    <string name="gallery_category_show">%1$s megjelenítése</string>
+    <string name="gallery_category_hide">%1$s elrejtése</string>
 
     <!-- Permission -->
     <string name="permission_grant_button">Hozzáférés engedélyezése</string>
@@ -524,6 +526,12 @@
     <string name="map_style_modern_summary">Modern földgömb, amelyet a helyeidhez pörgethetsz.</string>
     <string name="settings_amoled_black">Tiszta fekete (AMOLED)</string>
     <string name="settings_amoled_black_summary">Valódi fekete háttér használata sötét módban, hogy az OLED kijelzők kevesebb energiát fogyasszanak.</string>
+    <string name="settings_tint_cloud">Felhő jelvények a paletta színével</string>
+    <string name="settings_tint_cloud_summary">A mentett fotók felhő jelvénye a paletta színét használja a zöld helyett.</string>
+    <string name="settings_gif_autoplay_grid">GIF-ek lejátszása a rácsokban</string>
+    <string name="settings_gif_autoplay_grid_summary">A GIF-ek animálnak az idővonalon, az albumokban és az eszközmappákban. Kikapcsolva állókockát mutatnak.</string>
+    <string name="settings_gif_autoplay_covers">GIF album borítók lejátszása</string>
+    <string name="settings_gif_autoplay_covers_summary">Az album borítója animál, ha GIF, a felhő albumoknál is (a borító egyszer töltődik le).</string>
 
     <!-- Language -->
     <string name="language_en">Angol, English</string>
@@ -940,6 +948,20 @@
     <string name="face_index_service_progress">%1$d / %2$d</string>
     <string name="face_index_service_waiting">Várakozás a folytatásra</string>
     <string name="face_index_service_stop">Leállítás</string>
+    <string name="semantic_index_service_channel_name">Keresési indexelés</string>
+    <string name="semantic_index_service_channel_desc">Mutatja a haladást, amíg a fotókat előkészíti a kereséshez.</string>
+    <string name="semantic_index_service_title">Fotók előkészítése a kereséshez</string>
+    <string name="semantic_index_service_progress">%1$d / %2$d</string>
+    <string name="semantic_index_service_waiting">Várakozás a folytatásra</string>
+    <string name="semantic_index_service_stop">Leállítás</string>
+    <string name="model_download_channel_name">Modell letöltések</string>
+    <string name="model_download_channel_desc">Mutatja a haladást, amíg egy eszközön futó modell letöltődik.</string>
+    <string name="model_download_title_face">Arccsoportosító modell letöltése</string>
+    <string name="model_download_title_ocr">Szövegfelismerő modell letöltése</string>
+    <string name="model_download_title_semantic">Fotókereső modell letöltése</string>
+    <string name="model_download_progress">%1$s / %2$s</string>
+    <string name="model_download_preparing">Előkészítés…</string>
+    <string name="model_download_stop">Leállítás</string>
     <string name="search_section_on_this_day">Ezen a napon</string>
     <string name="search_section_on_this_day_years">%1$d éve</string>
     <string name="search_section_on_this_day_years_plural">%1$d éve</string>
@@ -1598,6 +1620,31 @@
     <string name="settings_ai_face_remove_keep">Megtartás</string>
     <string name="settings_ai_face_remove_confirm_title">Biztos benne?</string>
     <string name="settings_ai_face_remove_confirm_message">Ezzel véglegesen eltávolítja az arcmodellt és az összes felismert arcot és nevet. A művelet nem vonható vissza.</string>
+    <string name="settings_ai_semantic">Szemantikus keresés</string>
+    <string name="settings_ai_semantic_desc">Fényképek keresése annak leírásával, hogy mi látható rajtuk</string>
+    <string name="settings_ai_semantic_downloading">Letöltés…</string>
+    <string name="settings_ai_semantic_download_failed">A keresési modelleket nem sikerült letölteni.</string>
+    <string name="settings_ai_semantic_download_retry">A kapcsoló ismételt bekapcsolásával újrapróbálható.</string>
+    <string name="settings_ai_semantic_download_title">Letölti a keresési modelleket?</string>
+    <string name="settings_ai_semantic_download_message">A szemantikus kereséshez le kell tölteni egy %1$s méretű modellt. Bármilyen kapcsolaton működik, de a Wi-Fi ajánlott.</string>
+    <string name="settings_ai_semantic_download_message_metered">A szemantikus kereséshez le kell tölteni egy %1$s méretű modellt. A Wi-Fi nincs csatlakoztatva, ezért ez a letöltés mobiladatot használ.</string>
+    <string name="settings_ai_semantic_downloading_progress">%1$s / %2$s</string>
+    <string name="settings_ai_semantic_download_confirm">Letöltés</string>
+    <string name="settings_ai_semantic_remove_title">Eltávolítja a letöltött modelleket?</string>
+    <string name="settings_ai_semantic_remove_message">Ezzel körülbelül %1$s szabadul fel. Később újra letöltheti őket.</string>
+    <string name="settings_ai_semantic_remove_confirm">Eltávolítás</string>
+    <string name="settings_ai_semantic_remove_keep">Megtartás</string>
+    <string name="settings_ai_semantic_indexing_waiting">Várakozás a keresési modellekre</string>
+    <string name="settings_ai_semantic_ready">A fényképeid kereshetők</string>
+    <string name="settings_ai_semantic_rescan">Az összes fotó újravizsgálata</string>
+    <string name="settings_ai_semantic_rescan_desc">Törli a keresési indexet, majd minden fotóhoz újraépíti.</string>
+    <string name="settings_ai_semantic_rescan_confirm_title">Újravizsgálod az összes fotót?</string>
+    <string name="settings_ai_semantic_rescan_confirm_msg">A keresési index törlődik, majd minden fotóhoz újraépül, ami eltarthat egy ideig.</string>
+    <string name="settings_ai_semantic_not_indexed">A fényképeid még nincsenek indexelve</string>
+    <string name="settings_ai_semantic_clear">Keresési adatok törlése</string>
+    <string name="settings_ai_semantic_clear_desc">Eltávolítja az összes fénykép keresési indexét erről a telefonról.</string>
+    <string name="settings_ai_semantic_clear_confirm_title">Törlöd a keresési adatokat?</string>
+    <string name="settings_ai_semantic_clear_confirm_msg">Ez eltávolítja minden fénykép keresési indexét. A fényképeidet ez nem érinti.</string>
     <string name="settings_face_section">Felismert arcok</string>
     <string name="settings_face_maintenance">Karbantartás</string>
     <string name="settings_face_transfer">Átvitel</string>
@@ -1609,6 +1656,7 @@
     <string name="settings_ai_import_confirm_msg">Hozzáadja a fájlban lévő arcokat és embereket ehhez a telefonhoz, majd újracsoportosítja őket. A jelenlegi arcaid megmaradnak.</string>
     <string name="settings_ai_indexing_running">Fotók átvizsgálása</string>
     <string name="settings_ai_indexing_waiting">Várakozás az arc-modellre</string>
+    <string name="settings_ai_indexing_waiting_other">Várakozás egy másik, eszközön futó feladat befejezésére</string>
     <string name="settings_ai_indexing_paused">Szüneteltetve</string>
     <string name="settings_ai_indexing_paused_battery">Szüneteltetve, alacsony töltöttség</string>
     <string name="settings_ai_indexing_paused_warm">Szüneteltetve, a telefon meleg</string>
@@ -1692,10 +1740,12 @@
     <string name="settings_ai_export_empty">Még nincs exportálható arc.</string>
     <string name="settings_ai_export_warn_msg">Ez a fájl a fotóidból számított arclenyomatokat tartalmazza. Aki hozzájut, újraépíthetné a könyvtáradban lévő emberek arcmodelljét, ezért tartsd titokban, és csak olyanokkal oszd meg, akikben megbízol.</string>
     <string name="settings_ai_export_warn_title">Arc-index exportálása?</string>
+    <string name="settings_ai_export_share_title">Arc-index megosztása?</string>
+    <string name="settings_ai_export_share_msg">Küldd el az exportált fájlt egy másik alkalmazásnak vagy egy közeli eszköznek.</string>
     <string name="settings_ai_import">Arc-index importálása</string>
     <string name="settings_ai_import_done">%1$d arc, %2$d ember importálva.</string>
     <string name="settings_ai_rescan">Fotók újravizsgálata</string>
-    <string name="settings_ai_rescan_confirm_msg">Minden fotót újra átvizsgál arcok után nagyobb részletességgel, ami kisebb és távolabbi arcokat is megtalál. A kézzel hozzáadott fotóid megmaradnak, de az emberek újracsoportosításra kerülnek, így néhányat lehet, hogy újra el kell nevezned.</string>
+    <string name="settings_ai_rescan_confirm_msg">Minden fotót újra átvizsgál arcok után nagyobb részletességgel, ami kisebb és távolabbi arcokat is megtalál. A neveid és javításaid megmaradnak, és visszakerülnek az újra felismert arcokra.</string>
     <string name="settings_ai_rescan_confirm_title">Újravizsgálod az összes fotót?</string>
     <string name="settings_ai_transfer_failed">Az arc-index átvitele sikertelen.</string>
     <string name="settings_ai_transfer_working">Folyamatban…</string>
@@ -1787,6 +1837,19 @@
     <string name="collage_tab_layout">Elrendezés</string>
     <string name="collage_tab_ratio">Arány</string>
     <string name="collage_trim_for_grid">Távolíts el %1$d elemet a rács elrendezéshez</string>
+    <!-- GIF maker -->
+    <string name="action_make_gif">GIF készítése</string>
+    <string name="gif_maker_title">GIF-készítő</string>
+    <string name="gif_maker_aspect_original">Eredeti</string>
+    <string name="gif_maker_aspect_square">1:1</string>
+    <string name="gif_maker_save">GIF mentése</string>
+    <string name="gif_maker_progress">GIF készítése…</string>
+    <string name="gif_maker_hint">A GIF-nek nincs hangja, és legfeljebb 10 másodperc hosszú lehet.</string>
+    <string name="gif_maker_saved">GIF elmentve a fotók közé</string>
+    <string name="gif_export_channel_name">GIF készítés</string>
+    <string name="gif_export_channel_desc">A GIF készítésének állapotát mutatja.</string>
+    <string name="gif_quality_title">GIF minőség</string>
+    <string name="gif_maker_duration">%1$s mp</string>
 
     <!-- Editor: new adjustment, color, export, geometry, draw and text controls -->
     <string name="editor_adj_fade">Fakítás</string>
@@ -1883,6 +1946,8 @@
     <string name="whats_new_guest_body">Az arcfelismerés, a térkép, a naptárjegyzetek és a duplikátumkereső mostantól mind bejelentkezés nélkül is működik.</string>
     <string name="whats_new_dup_nobackup_title">Duplikátumok biztonsági mentés nélkül</string>
     <string name="whats_new_dup_nobackup_body">A duplikátumkereső mostantól a készülékeden lévő fotókat vizsgálja, fiók és biztonsági mentés nélkül.</string>
+    <string name="whats_new_compress_split_title">Külön fotó- és videóminőség</string>
+    <string name="whats_new_compress_split_body">A fotók és a videók tömörítésének mostantól külön minőségi szintje van. Ellenőrizd a Beállítások Minőség és méret részében.</string>
     <string name="whats_new_section_new">Új</string>
     <string name="whats_new_section_improved">Fejlesztések</string>
 
@@ -1915,4 +1980,14 @@
     <string name="face_excluded_undo">Visszavonás</string>
     <string name="albums_search_hint">Albumok keresése</string>
     <string name="albums_search_no_results">Nincs a keresésnek megfelelő album.</string>
+    <string name="settings_ai_groups_found">%1$d csoport</string>
+    <string name="settings_ai_faces_found">%1$d arc</string>
+    <string name="sign_out_dialog_face_warning">Az ezen az eszközön elnevezett emberek és arc-csoportok is törlődnek, és nem állnak vissza, amikor újra bejelentkezel.</string>
+    <string name="person_rename_merge_confirm_title">Összevonás a meglévő személlyel?</string>
+    <string name="person_rename_merge_confirm_body">Már létezik egy %1$s nevű személy. Ezt a nevet használva a kettő eggyé olvad, ami nem vonható vissza. Összevonod?</string>
+    <string name="person_move_confirm_title">Áthelyezed ehhez a személyhez?</string>
+    <string name="person_move_confirm_body">Áthelyezed a kijelölt fotókat ide: %1$s?</string>
+    <string name="person_move_confirm">Áthelyezés</string>
+    <string name="settings_face_auto_merge">Valószínű egyezések automatikus összevonása</string>
+    <string name="settings_face_auto_merge_desc">Ha a vizsgálat talál egy csoportot, ami nagyon valószínűleg egy már elnevezett személy, kérdés nélkül hozzáadja. Az összevonás nem vonható vissza, ezért hagyd kikapcsolva, ha egyesével akarod megerősíteni.</string>
 </resources>

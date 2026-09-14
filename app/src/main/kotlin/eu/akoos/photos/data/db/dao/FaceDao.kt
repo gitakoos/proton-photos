@@ -315,6 +315,11 @@ interface FaceDao {
     @Query("SELECT COUNT(*) FROM face WHERE userId = :userId AND personId IS NOT NULL AND rejected = 0")
     suspend fun assignedFaceCount(userId: String): Int
 
+    /** Total detected faces for the account (kept, not removed), as a live count for the scan status.
+     *  Emits again as the walk writes new faces, so the status figure climbs while a scan runs. */
+    @Query("SELECT COUNT(*) FROM face WHERE userId = :userId AND rejected = 0")
+    fun observeFaceCountForUser(userId: String): Flow<Int>
+
     /** The not-yet-grouped faces for the account, projected to the fields the incremental pass needs.
      *  Only the unclustered remainder is read (not the whole face table), so placing a fresh import
      *  against the cached centroids never loads every stored embedding at once. */
@@ -343,6 +348,19 @@ interface FaceDao {
     /** Removes every face for the account, for the sign-out wipe. */
     @Query("DELETE FROM face WHERE userId = :userId")
     suspend fun clearForUser(userId: String)
+
+    /** Re-keys every face row from one owner to another, to adopt a guest's faces on sign-in. */
+    @Query("UPDATE face SET userId = :to WHERE userId = :from")
+    suspend fun updateUserId(from: String, to: String)
+
+    /** How many face rows an owner holds, so a sign-in migration can report what it carried or dropped. */
+    @Query("SELECT COUNT(*) FROM face WHERE userId = :userId")
+    suspend fun countForUser(userId: String): Int
+
+    /** Moves a photo's faces from one photo key to another when a device photo is backed up to Drive,
+     *  so its faces (id is `photoKey#index`) reuse the cloud identity instead of a duplicate re-scan. */
+    @Query("UPDATE face SET id = :newKey || substr(id, length(:oldKey) + 1), photoKey = :newKey WHERE userId = :userId AND photoKey = :oldKey")
+    suspend fun rekeyPhoto(userId: String, oldKey: String, newKey: String)
 
     /** Removes every face for every account, the recognition-model re-index wipe: a model change
      *  invalidates all stored embeddings regardless of which account produced them. Returns the row

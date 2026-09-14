@@ -24,6 +24,7 @@ package eu.akoos.photos.domain.usecase
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import eu.akoos.photos.data.db.dao.ClusterSummaryDao
 import eu.akoos.photos.data.db.dao.FaceDao
 import eu.akoos.photos.data.db.dao.NotPersonDao
 import eu.akoos.photos.data.db.dao.PersonDao
@@ -46,6 +47,7 @@ class AssignPersonNameUseCase @Inject constructor(
     private val personManualPhotoDao: PersonManualPhotoDao,
     private val notPersonDao: NotPersonDao,
     private val personCoverDao: PersonCoverDao,
+    private val clusterSummaryDao: ClusterSummaryDao,
 ) {
     suspend operator fun invoke(account: String, fromPersonId: Long, rawName: String): Long =
         withContext(Dispatchers.IO) {
@@ -71,6 +73,11 @@ class AssignPersonNameUseCase @Inject constructor(
             if (target != fromPersonId) {
                 personDao.updateCoverAndCount(fromPersonId, null, 0)
                 personDao.deleteEmpty(account)
+                // The target absorbed the source's faces, so its stored centroid + count are stale, and
+                // the removed source leaves an orphan summary. Drop both: the next clustering pass then
+                // recomputes the target, and no stale centroid can pull a new face onto a dead person.
+                clusterSummaryDao.deleteByPerson(target)
+                clusterSummaryDao.deleteOrphansForUser(account)
             }
             target
         }

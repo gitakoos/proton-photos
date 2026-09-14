@@ -139,6 +139,10 @@ class CloudTrashService @Inject constructor(
     private val photoStreamService: PhotoStreamService,
     private val cryptoHelper: eu.akoos.photos.data.crypto.DriveCryptoHelper,
     private val cryptoContext: me.proton.core.crypto.common.context.CryptoContext,
+    private val faceDao: eu.akoos.photos.data.db.dao.FaceDao,
+    private val faceScanDao: eu.akoos.photos.data.db.dao.FaceScanDao,
+    private val perceptualHashDao: eu.akoos.photos.data.db.dao.PerceptualHashDao,
+    private val photoLocationDao: eu.akoos.photos.data.db.dao.PhotoLocationDao,
 ) {
     suspend fun deleteFiles(userId: UserId, linkIds: List<String>): CloudTrashOutcome = withContext(Dispatchers.IO) {
         if (linkIds.isEmpty()) return@withContext CloudTrashOutcome(emptySet(), emptySet())
@@ -318,6 +322,9 @@ class CloudTrashService @Inject constructor(
             // endpoint is photos-share-only — trashed items may live in any share on
             // the volume, so we walk per group and use the matching shareId for each.
             val linksById = mutableMapOf<String, LinkCoreDto>()
+            // The link DTO doesn't say which share a trashed link came from, but the viewer needs it
+            // to re-resolve the full-res download, so it's recorded here from the owning trash group.
+            val shareIdByLinkId = mutableMapOf<String, String>()
             for (group in groups) {
                 for (chunk in group.linkIds.chunked(150)) {
                     val resp = runCatching {
@@ -328,7 +335,12 @@ class CloudTrashService @Inject constructor(
                         }
                     }
                     resp.fold(
-                        onSuccess = { r -> r.links.forEach { linksById[it.linkId] = it } },
+                        onSuccess = { r ->
+                            r.links.forEach {
+                                linksById[it.linkId] = it
+                                shareIdByLinkId[it.linkId] = group.shareId
+                            }
+                        },
                         onFailure = { e -> Log.w(TAG, "getCloudTrash: fetch_metadata chunk failed for share ${group.shareId}: ${e.message}") },
                     )
                 }
@@ -367,6 +379,10 @@ class CloudTrashService @Inject constructor(
                 }.onFailure { e -> Log.w(TAG, "getCloudTrash: thumbnail batch failed — ${e.message}") }
             }
 
+            // Photos are flat under the photos root, so its link key decrypts their names; fetch it
+            // once and decrypt each trashed name so the viewer's details sheet shows a real name.
+            val rootLinkKeyBytes = runCatching { shareService.getRootLinkKeyBytes(userId) }.getOrNull()
+
             photoLinks.map { link ->
                 val thumbId = link.fileProperties?.activeRevision?.thumbnails?.firstOrNull()?.thumbnailId
                     ?: link.activeRevision?.thumbnails?.firstOrNull()?.thumbnailId
@@ -385,6 +401,13 @@ class CloudTrashService @Inject constructor(
                     contentKeyPacket  = ckp,
                     parentLinkId      = link.parentLinkId,
                     volumeId          = volumeId,
+                    shareId           = shareIdByLinkId[link.linkId],
+                    revisionId        = link.fileProperties?.activeRevision?.id ?: link.activeRevision?.id,
+                    mimeType          = link.mimeType,
+                    sizeBytes         = link.size,
+                    name              = rootLinkKeyBytes?.let { rk ->
+                        link.name?.let { enc -> runCatching { cryptoHelper.decryptLinkName(enc, rk) }.getOrNull() }
+                    },
                 )
             }
         } catch (e: Exception) {
@@ -488,6 +511,19 @@ class CloudTrashService @Inject constructor(
                 }
                 val deleted = linkIds.toSet() - failed
                 Log.d(TAG, "deleteFromCloudForever: permanently deleted ${deleted.size}/${linkIds.size} items (${failed.size} failed)")
+                // A permanently deleted photo can never come back, so drop its on-device per-photo
+                // side rows now (all keyed by the linkId): face rows + scan markers, its perceptual
+                // hash, and its cached location. The periodic reaper is the net for photos removed
+                // elsewhere. Best-effort, so a failure here never fails the server-applied delete.
+                if (deleted.isNotEmpty()) {
+                    val deletedList = deleted.toList()
+                    runCatching {
+                        faceDao.deleteByPhotoKeys(userId.id, deleted)
+                        faceScanDao.deleteByPhotoKeys(userId.id, deleted)
+                        perceptualHashDao.deleteByKeys(deletedList)
+                        photoLocationDao.deleteByIds(userId.id, deletedList)
+                    }.onFailure { Log.w(TAG, "deleteFromCloudForever: per-photo data prune failed: ${it.message}") }
+                }
                 CloudDeleteOutcome(deleted, failed)
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e

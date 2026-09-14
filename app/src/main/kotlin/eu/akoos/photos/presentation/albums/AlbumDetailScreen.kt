@@ -165,6 +165,9 @@ fun AlbumDetailScreen(
     sharedByEmail: String? = null,
     volumeId: String? = null,
     coverThumbnailUrl: String? = null,
+    /** linkId of the album's cover photo, from the grid. Lets the hero animate a GIF cover when cover
+     *  autoplay is on; null keeps the cover its static thumbnail. */
+    coverLinkId: String? = null,
     /** True when the entry point asked to share this album rather than browse it, so the share drawer
      *  opens with the screen. [onShareSheetRequestConsumed] retires the request as soon as it is
      *  acted on, so coming back from the viewer does not raise the drawer again. */
@@ -460,6 +463,13 @@ fun AlbumDetailScreen(
     // Prefer a cover chosen in this session (set by runSetCover) so the header flips immediately,
     // then the nav-arg cover, then the first photo as a fallback for a brand-new album.
     val coverUrl = state.coverThumbnailUrl ?: coverThumbnailUrl ?: state.photos.firstOrNull()?.thumbnailUrl
+    // The linkId of whichever photo the shown cover belongs to, so a GIF cover animates the right
+    // photo: match the shown still to its loaded member (covers a cover set this session too), else
+    // fall back to the cover linkId the grid handed in.
+    val heroCoverLinkId = remember(coverUrl, coverLinkId, state.photos) {
+        state.photos.firstOrNull { it.thumbnailUrl != null && it.thumbnailUrl == coverUrl }?.linkId
+            ?: coverLinkId
+    }
     val appColors = AppColors.current
     val pullRefreshState = androidx.compose.material3.pulltorefresh.rememberPullToRefreshState()
     val gridState = rememberLazyGridState()
@@ -565,6 +575,8 @@ fun AlbumDetailScreen(
                 Box(modifier = Modifier.padding(horizontal = if (seamless) 20.dp else 0.dp)) {
                 eu.akoos.photos.presentation.albums.components.AlbumHeroHeader(
                     coverModel = coverUrl,
+                    coverLinkId = heroCoverLinkId,
+                    resolveCoverGif = viewModel::resolveCoverGif,
                     title = state.albumName.ifBlank { albumName },
                     photoCountText = countLabel,
                     coverParallax = {

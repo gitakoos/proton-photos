@@ -59,4 +59,12 @@ interface PersonCoverDao {
 
     @Query("DELETE FROM person_cover WHERE userId = :userId")
     suspend fun clearForUser(userId: String)
+
+    /** Re-keys every chosen cover from one owner to another, to carry a guest's covers on sign-in. */
+    @Query("UPDATE person_cover SET userId = :to WHERE userId = :from")
+    suspend fun updateUserId(from: String, to: String)
+
+    /** Follows a cover photo to its new key when a device photo is backed up to Drive. */
+    @Query("UPDATE person_cover SET photoKey = :newKey WHERE userId = :userId AND photoKey = :oldKey")
+    suspend fun rekeyPhoto(userId: String, oldKey: String, newKey: String)
 }

@@ -41,7 +41,6 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -107,10 +106,8 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size as GSize
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -132,6 +129,7 @@ import eu.akoos.photos.presentation.common.ConfirmDialog
 import eu.akoos.photos.presentation.common.ErrorPopup
 import eu.akoos.photos.presentation.common.rememberVideoFilmstripFrames
 import eu.akoos.photos.presentation.editor.components.SaveOptionRow
+import eu.akoos.photos.presentation.editor.components.VideoFilmstripTrimmer
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.Bg0
 import eu.akoos.photos.presentation.theme.Bg2
@@ -1351,175 +1349,6 @@ private fun formatSpeed(s: Float): String = when (s) {
     2f -> "2×"
     else -> "${s}×"
 }
-
-// ─── Video filmstrip + playhead trim slider ──────────────────────────────────
-
-/**
- * Trim widget that looks and feels like a tiny video editor — a strip of evenly-spaced
- * frame thumbnails as the track, two heavy bar-shaped handles at the edges of the
- * selected range, a darker mask over the trimmed-off ends, and a thin white playhead
- * line that follows the live ExoPlayer position. Dragging the playhead seeks the
- * preview; dragging an edge handle moves the trim in/out point.
- *
- * The [thumbnails] are extracted by the shared filmstrip hook at the screen scope and
- * passed in; the strip deliberately does not reshuffle as the trim range moves, since that
- * would re-key the frames and tank the UX.
- */
-@Composable
-private fun VideoFilmstripTrimmer(
-    durationMs: Long,
-    trimStartMs: Long,
-    trimEndMs: Long,
-    playheadMs: Long,
-    /** Hoisted at the screen scope; this composable just renders. Hoisting prevents the
-     *  strip from resetting on a tab-switch round trip since the extraction state no longer
-     *  dies with this composable. */
-    thumbnails: List<android.graphics.Bitmap?>,
-    onTrimChange: (start: Long, end: Long) -> Unit,
-    onScrubMs: (Long) -> Unit,
-    /** Fired when a PLAYHEAD scrub begins / ends (not the trim handles), so the host can turn the
-     *  player's scrubbing mode on for the drag and off on release. */
-    onScrubStart: () -> Unit = {},
-    onScrubEnd: () -> Unit = {},
-) {
-    val density = LocalDensity.current
-    val handleWidthPx = with(density) { 14.dp.toPx() }
-    // Generous hit-slop around each trim bar — 48dp is the platform minimum touch target
-    // and it gives the user a comfortable margin to grab the start/end edges. The
-    // playhead is only picked up when the touch is well inside the trimmed window so
-    // the bars always win when the gesture starts near an edge.
-    val touchSlopPx = with(density) { 48.dp.toPx() }
-    val stripHeight = 64.dp
-
-    // Thumbnails are passed in from the screen scope so they survive activeTool tab
-    // swaps; the shared hook caches the finished strip, so a swap back reads a warm strip
-    // instead of re-running the extraction.
-
-    var grabbed by remember { mutableStateOf<Grabbed?>(null) }
-    var canvasWidthPx by remember { mutableFloatStateOf(1f) }
-    // Capture composable colors out of the Canvas draw scope (Canvas's body is *not*
-    // composable, so we can't read Accent there).
-    val accentColor = Accent
-
-    // pointerInput's lambda captures its closure ONCE per key change — recompositions
-    // don't refresh the captured props. Without these State proxies the gesture handlers
-    // see stale `trimStartMs`/`trimEndMs` after the first drag: the user trims start to
-    // 5 s, releases, then taps the bar to drag it back — but the picker still thinks
-    // start is at x=0 (stale) and routes the touch to Playhead instead of Start. Using
-    // a State<Long> reference whose `value` is always the latest snapshot fixes that
-    // without re-keying the gesture loop (which would restart drags mid-motion).
-    val latestTrimStart by androidx.compose.runtime.rememberUpdatedState(trimStartMs)
-    val latestTrimEnd by androidx.compose.runtime.rememberUpdatedState(trimEndMs)
-
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(stripHeight)
-            .clip(RoundedCornerShape(10.dp))
-            .background(TrackBg)
-            // Same reason as the range slider: the two edge bars reach the display's gesture
-            // strips, and a 64dp strip is cheap to exclude whole.
-            .systemGestureExclusion()
-            .onSizeChanged { canvasWidthPx = it.width.toFloat().coerceAtLeast(1f) }
-            // Key on `durationMs` only — including the trim values here would restart
-            // the gesture pipeline on every drag step (the user types a tiny drag →
-            // onTrimChange fires → trim* updates → pointerInput resets → user has to
-            // release-and-regrab to keep dragging). The handlers read latestTrimStart /
-            // latestTrimEnd via rememberUpdatedState so they always see fresh values
-            // without restarting the gesture loop.
-            .pointerInput(durationMs) {
-                detectDragGestures(
-                    onDragStart = { offset ->
-                        val w = size.width.toFloat().coerceAtLeast(1f)
-                        val startX = latestTrimStart.toFloat() / durationMs * w
-                        val endX = latestTrimEnd.toFloat() / durationMs * w
-                        val dStart = kotlin.math.abs(offset.x - startX)
-                        val dEnd = kotlin.math.abs(offset.x - endX)
-                        // Edge bars win inside their hit-slop even from within the active
-                        // range. Whichever bar is closer takes the gesture.
-                        grabbed = when {
-                            dStart < touchSlopPx && dStart <= dEnd -> Grabbed.Start
-                            dEnd < touchSlopPx && dEnd < dStart -> Grabbed.End
-                            // Tap inside the active range, well clear of either bar → scrub.
-                            offset.x > startX + touchSlopPx && offset.x < endX - touchSlopPx
-                                -> Grabbed.Playhead
-                            else -> null
-                        }
-                        if (grabbed != null) onScrubStart()
-                        if (grabbed == Grabbed.Playhead) {
-                            val pct = (offset.x / w).coerceIn(0f, 1f)
-                            onScrubMs((pct * durationMs).toLong().coerceIn(latestTrimStart, latestTrimEnd))
-                        }
-                    },
-                    onDrag = { change, _ ->
-                        val w = size.width.toFloat().coerceAtLeast(1f)
-                        val pct = (change.position.x / w).coerceIn(0f, 1f)
-                        val ms = (pct * durationMs).toLong()
-                        when (grabbed) {
-                            // Seek the preview to the edge being dragged so the boundary frame is
-                            // visible as the handle moves.
-                            Grabbed.Start -> { onTrimChange(ms, latestTrimEnd); onScrubMs(ms) }
-                            Grabbed.End -> { onTrimChange(latestTrimStart, ms); onScrubMs(ms) }
-                            Grabbed.Playhead -> onScrubMs(ms.coerceIn(latestTrimStart, latestTrimEnd))
-                            null -> Unit
-                        }
-                        change.consume()
-                    },
-                    onDragEnd = { grabbed = null; onScrubEnd() },
-                    onDragCancel = { grabbed = null; onScrubEnd() },
-                )
-            },
-    ) {
-        // Filmstrip — always render all 12 slots; arriving thumbnails fill their slot, the
-        // rest stay as track-coloured placeholders. A fixed 12-slot row keeps the layout
-        // from jumping (laying out only as frames arrive would resize slots from full-width
-        // to halves to thirds as each lands); only the bitmap inside each slot pops in.
-        val slotCount = 12
-        Row(modifier = Modifier.fillMaxSize()) {
-            for (i in 0 until slotCount) {
-                val bmp = thumbnails.getOrNull(i)
-                if (bmp != null) {
-                    androidx.compose.foundation.Image(
-                        bitmap = bmp.asImageBitmap(),
-                        contentDescription = null,
-                        modifier = Modifier.weight(1f).fillMaxSize(),
-                        contentScale = ContentScale.Crop,
-                    )
-                } else {
-                    Box(modifier = Modifier.weight(1f).fillMaxSize().background(TrackBg))
-                }
-            }
-        }
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            val w = size.width
-            val h = size.height
-            val startX = (trimStartMs.toFloat() / durationMs * w).coerceIn(0f, w)
-            val endX = (trimEndMs.toFloat() / durationMs * w).coerceIn(0f, w)
-            // Dim the trimmed-off portions so the active range pops visually.
-            val mask = Color.Black.copy(alpha = 0.55f)
-            drawRect(mask, topLeft = Offset(0f, 0f), size = GSize(startX, h))
-            drawRect(mask, topLeft = Offset(endX, 0f), size = GSize(w - endX, h))
-            // Accent-coloured outline around the selected range — top/bottom bars and
-            // the two edge handles. The bar handles are wider than the slider thumbs so
-            // a fingertip naturally lands on them without precision dragging.
-            val barW = handleWidthPx
-            drawRect(accentColor, topLeft = Offset(startX, 0f), size = GSize(barW, h))
-            drawRect(accentColor, topLeft = Offset(endX - barW, 0f), size = GSize(barW, h))
-            drawRect(accentColor, topLeft = Offset(startX, 0f), size = GSize(endX - startX, 3f))
-            drawRect(accentColor, topLeft = Offset(startX, h - 3f), size = GSize(endX - startX, 3f))
-            // Playhead line — thin, bright, with a small triangle on top so it's spotted
-            // immediately when the strip is busy.
-            val playX = (playheadMs.toFloat() / durationMs * w).coerceIn(0f, w)
-            drawRect(
-                color = Color.White,
-                topLeft = Offset(playX - 1.5f, 0f),
-                size = GSize(3f, h),
-            )
-        }
-    }
-}
-
-private enum class Grabbed { Start, End, Playhead }
 
 // ─── Save sheet ──────────────────────────────────────────────────────────────
 

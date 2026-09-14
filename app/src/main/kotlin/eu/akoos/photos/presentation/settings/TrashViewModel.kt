@@ -31,6 +31,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -108,6 +109,11 @@ class TrashViewModel @Inject constructor(
 
     private val cacheTtlMs = 5L * 60L * 1000L
 
+    /** linkId → the coroutine currently decrypting that thumbnail, so a recomposed or
+     *  re-scrolled cell reuses the in-flight decrypt instead of launching a duplicate, and
+     *  a scrolled-off cell can cancel it. Only touched on Main via viewModelScope. */
+    private val inFlightThumbnailJobs = mutableMapOf<String, Job>()
+
     init {
         loadDeviceTrash()
         loadCloudTrash()
@@ -148,23 +154,27 @@ class TrashViewModel @Inject constructor(
     }
 
     fun buildRestoreDeviceIntent(): PendingIntent? {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return null
         val device = _uiState.value.device
-        val uris = device.selectedUris
-            .ifEmpty { device.items.map { it.uri }.toSet() }
-            .map { Uri.parse(it) }
-        if (uris.isEmpty()) return null
-        return MediaStore.createTrashRequest(context.contentResolver, uris, false)
+        return buildRestoreDeviceIntent(device.selectedUris.ifEmpty { device.items.map { it.uri }.toSet() })
+    }
+
+    fun buildRestoreDeviceIntent(uris: Set<String>): PendingIntent? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return null
+        val parsed = uris.map { Uri.parse(it) }
+        if (parsed.isEmpty()) return null
+        return MediaStore.createTrashRequest(context.contentResolver, parsed, false)
     }
 
     fun buildDeleteDeviceForeverIntent(): PendingIntent? {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return null
         val device = _uiState.value.device
-        val uris = device.selectedUris
-            .ifEmpty { device.items.map { it.uri }.toSet() }
-            .map { Uri.parse(it) }
-        if (uris.isEmpty()) return null
-        return MediaStore.createDeleteRequest(context.contentResolver, uris)
+        return buildDeleteDeviceForeverIntent(device.selectedUris.ifEmpty { device.items.map { it.uri }.toSet() })
+    }
+
+    fun buildDeleteDeviceForeverIntent(uris: Set<String>): PendingIntent? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return null
+        val parsed = uris.map { Uri.parse(it) }
+        if (parsed.isEmpty()) return null
+        return MediaStore.createDeleteRequest(context.contentResolver, parsed)
     }
 
     fun onDeviceActionCompleted() {
@@ -237,14 +247,19 @@ class TrashViewModel @Inject constructor(
     }
 
     fun restoreSelectedCloud() {
+        val state = _uiState.value
+        // Mirror emptyCloudSelected: with no explicit selection, "Restore" acts on every
+        // trashed item. Without this fallback the action silently no-ops when nothing is
+        // ticked, since selectedLinkIds is empty.
+        restoreCloud(
+            state.cloud.selectedLinkIds.takeIf { it.isNotEmpty() }?.toList()
+                ?: state.cloud.items.map { it.linkId },
+        )
+    }
+
+    fun restoreCloud(linkIds: List<String>) {
+        if (linkIds.isEmpty()) return
         viewModelScope.launch {
-            val state = _uiState.value
-            // Mirror emptyCloudSelected: with no explicit selection, "Restore" acts on every
-            // trashed item. Without this fallback the action silently no-ops when nothing is
-            // ticked, since selectedLinkIds is empty.
-            val linkIds = state.cloud.selectedLinkIds.takeIf { it.isNotEmpty() }?.toList()
-                ?: state.cloud.items.map { it.linkId }
-            if (linkIds.isEmpty()) return@launch
             val userId = accountManager.getPrimaryUserId().first() ?: return@launch
             val result = runCatching { cloudTrashService.restoreFromCloudTrash(userId, linkIds) }
             result.fold(
@@ -286,11 +301,16 @@ class TrashViewModel @Inject constructor(
     }
 
     fun emptyCloudSelected() {
+        val state = _uiState.value
+        deleteCloudForever(
+            state.cloud.selectedLinkIds.takeIf { it.isNotEmpty() }?.toList()
+                ?: state.cloud.items.map { it.linkId },
+        )
+    }
+
+    fun deleteCloudForever(linkIds: List<String>) {
+        if (linkIds.isEmpty()) return
         viewModelScope.launch {
-            val state = _uiState.value
-            val linkIds = state.cloud.selectedLinkIds.takeIf { it.isNotEmpty() }?.toList()
-                ?: state.cloud.items.map { it.linkId }
-            if (linkIds.isEmpty()) return@launch
             val userId = accountManager.getPrimaryUserId().first() ?: return@launch
             val result = runCatching { cloudTrashService.deleteFromCloudForever(userId, linkIds) }
             result.fold(
@@ -332,40 +352,52 @@ class TrashViewModel @Inject constructor(
 
     /**
      * Lazy thumbnail decrypt for a single cloud-trash entry. Called by the cell when it
-     * enters composition and the URL isn't already cached. The scheduler handles
-     * concurrency (3-permit semaphore shared with the gallery) and disk caching, so a
-     * second call for the same linkId is cheap. Failures are swallowed — the cell falls
-     * back to the placeholder.
+     * enters composition and the URL isn't already cached. An in-flight decrypt for the
+     * same linkId is tracked so a recomposed or re-scrolled cell doesn't relaunch a
+     * duplicate onto the shared 3-permit decrypt pool. Failures are swallowed and the cell
+     * falls back to the placeholder.
      */
     fun requestCloudThumbnail(item: CloudTrashItem) {
         val state = _uiState.value.cloud
         if (state.decryptedThumbnails.containsKey(item.linkId)) return
+        if (inFlightThumbnailJobs.containsKey(item.linkId)) return
         val serverUrl = item.thumbnailUrl ?: return
         val ckp = item.contentKeyPacket ?: return
         val encNodeKey = item.encNodeKey ?: return
         val encNodePass = item.encNodePassphrase ?: return
         val parentLinkId = item.parentLinkId ?: return
         val volumeId = item.volumeId ?: return
-        viewModelScope.launch {
-            val userId = accountManager.getPrimaryUserId().first() ?: return@launch
-            val fileUrl = runCatching {
-                thumbnailScheduler.decryptThumbnailToFileBounded(
-                    userId = userId,
-                    linkId = item.linkId,
-                    volumeId = volumeId,
-                    serverUrl = serverUrl,
-                    serverToken = item.thumbnailToken,
-                    contentKeyPacketBase64 = ckp,
-                    encNodeKey = encNodeKey,
-                    encNodePass = encNodePass,
-                    parentLinkId = parentLinkId,
-                )
-            }.getOrNull() ?: return@launch
-            _uiState.update { st ->
-                st.copy(cloud = st.cloud.copy(
-                    decryptedThumbnails = st.cloud.decryptedThumbnails + (item.linkId to fileUrl),
-                ))
+        val job = viewModelScope.launch {
+            try {
+                val userId = accountManager.getPrimaryUserId().first() ?: return@launch
+                val fileUrl = runCatching {
+                    thumbnailScheduler.decryptThumbnailToFileBounded(
+                        userId = userId,
+                        linkId = item.linkId,
+                        volumeId = volumeId,
+                        serverUrl = serverUrl,
+                        serverToken = item.thumbnailToken,
+                        contentKeyPacketBase64 = ckp,
+                        encNodeKey = encNodeKey,
+                        encNodePass = encNodePass,
+                        parentLinkId = parentLinkId,
+                    )
+                }.getOrNull() ?: return@launch
+                _uiState.update { st ->
+                    st.copy(cloud = st.cloud.copy(
+                        decryptedThumbnails = st.cloud.decryptedThumbnails + (item.linkId to fileUrl),
+                    ))
+                }
+            } finally {
+                inFlightThumbnailJobs.remove(item.linkId)
             }
         }
+        inFlightThumbnailJobs[item.linkId] = job
+    }
+
+    /** Cancel an in-flight cloud-trash thumbnail decrypt when its cell leaves the grid, so a fast
+     *  scroll cannot flood the shared decrypt pool and stall the visible tiles. */
+    fun cancelCloudThumbnail(linkId: String) {
+        inFlightThumbnailJobs.remove(linkId)?.cancel()
     }
 }

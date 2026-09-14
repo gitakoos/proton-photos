@@ -66,6 +66,7 @@ import eu.akoos.photos.util.StripResult
 import eu.akoos.photos.util.stripForShareOrOriginal
 import eu.akoos.photos.presentation.albums.AlbumPhotoSortMode
 import eu.akoos.photos.presentation.common.FavoriteActionState
+import eu.akoos.photos.presentation.common.addToAlbumOutcome
 import eu.akoos.photos.presentation.common.MoveToFolderController
 import eu.akoos.photos.presentation.common.MultiStripState
 import eu.akoos.photos.presentation.common.PhotoSortOrder
@@ -669,8 +670,20 @@ class DeviceFolderDetailViewModel @Inject constructor(
         val localUris = items.mapNotNull { (it as? GalleryItem.LocalOnly)?.local?.uri }
 
         val joined = if (cloudLinkIds.isNotEmpty()) {
-            runCatching { driveRepo.addPhotosToAlbum(userId, albumLinkId, cloudLinkIds) }
-                .getOrNull()?.succeededLinkIds?.size ?: 0
+            val outcome = try {
+                val result = driveRepo.addPhotosToAlbum(userId, albumLinkId, cloudLinkIds)
+                addToAlbumOutcome(cloudLinkIds.size, result.succeededLinkIds.size, result.failedLinkIds.size, threw = false)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                addToAlbumOutcome(cloudLinkIds.size, 0, 0, threw = true)
+            }
+            if (outcome.isPartialOrFullFailure) {
+                _favoriteFailure.tryEmit(
+                    context.resources.getQuantityString(R.plurals.viewer_add_photos_failed, outcome.failed, outcome.failed),
+                )
+            }
+            outcome.added
         } else 0
         val queued = if (localUris.isNotEmpty()) {
             forceUploadLocalUris.queueForAlbum(userId, albumLinkId, localUris)

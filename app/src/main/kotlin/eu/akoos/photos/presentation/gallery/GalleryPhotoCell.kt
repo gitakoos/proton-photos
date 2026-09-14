@@ -74,6 +74,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.compose.AsyncImagePainter
+import coil.imageLoader
 import coil.request.ImageRequest
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.GalleryItem
@@ -84,6 +85,10 @@ import eu.akoos.photos.presentation.common.rememberLocalVideoThumbnail
 import eu.akoos.photos.presentation.common.selectPressScale
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.Bg2
+import eu.akoos.photos.presentation.theme.LocalGifAutoplayGrid
+import eu.akoos.photos.presentation.theme.LocalStaticImageLoader
+import eu.akoos.photos.presentation.theme.LocalTintCloudWithAccent
+import eu.akoos.photos.presentation.theme.StatusSynced
 import eu.akoos.photos.presentation.theme.FgDim
 import eu.akoos.photos.presentation.util.formatVideoTime
 
@@ -113,6 +118,9 @@ internal data class PhotoCellInputs(
     // renders the OS thumbnail instead of decoding a fresh video frame per bind. Cloud-only videos
     // stay false (their poster is an already-decrypted image).
     val isLocalVideo: Boolean,
+    // True for an on-device GIF (LocalOnly or a Synced local twin, mime image/gif): the cell can then
+    // render its still first frame when grid GIF autoplay is off. A cloud thumbnail is static already.
+    val isLocalGif: Boolean,
     // Video length in ms for the always-on bottom-start duration pill. Null for images and when
     // unknown; resolved local-first (the on-device file's duration) then cloud (durationMs).
     val durationMs: Long?,
@@ -211,11 +219,13 @@ internal fun photoCellInputsFor(
     // An on-device video (LocalOnly, or a Synced twin) can show the OS poster instead of a decoded
     // frame. CloudOnly videos have no local file here, so they keep the decrypted-image path.
     val hasLocalUri = item is GalleryItem.LocalOnly || item is GalleryItem.Synced
+    val isLocalGif = hasLocalUri && mime == "image/gif"
     return PhotoCellInputs(
         imageData      = imageData,
         stableKey      = cloudId ?: favoriteKey,
         isVideo        = isVideo,
         isLocalVideo   = isVideo && hasLocalUri,
+        isLocalGif     = isLocalGif,
         durationMs     = durationMs,
         isPlaceholder  = imageData == null && item is GalleryItem.CloudOnly,
         showCloudBadge  = item is GalleryItem.CloudOnly && !isDownloaded,
@@ -266,6 +276,8 @@ internal fun PhotoCell(
     // On-device video: render the system thumbnail instead of decoding a video frame through Coil,
     // so the poster is instant on open rather than popping in. Defaults false (unchanged path).
     isLocalVideo: Boolean = false,
+    // On-device GIF: render its still first frame instead of animating when grid autoplay is off.
+    isLocalGif: Boolean = false,
     // Video length in ms; drives the always-on bottom-start duration pill (null = no pill).
     durationMs: Long? = null,
     isPlaceholder: Boolean = false,
@@ -301,6 +313,11 @@ internal fun PhotoCell(
     // (its uri) simply misses the map. The lookup is O(1); the resolved value drives both the
     // placeholder decision and the image request below.
     val resolvedImageData = imageData ?: LocalThumbnailUrls.current.value[stableKey]
+
+    // A local GIF animates only when the user opted into grid autoplay; otherwise the decoder-free
+    // loader renders its still first frame. Every other cell keeps the default (animating) loader.
+    val gridAutoplay = LocalGifAutoplayGrid.current
+    val staticLoader = LocalStaticImageLoader.current
 
     // Badge-density tiers by the grid's live column count. As tiles shrink the corner badges crowd,
     // so denser grids drop the lower-priority ones. The cloud/status badge is always kept (it is the
@@ -446,8 +463,12 @@ internal fun PhotoCell(
                         .crossfade(false)
                         .build()
                 }
+                val cellLoader =
+                    if (isLocalGif && !gridAutoplay) staticLoader ?: context.imageLoader
+                    else context.imageLoader
                 AsyncImage(
                     model              = request,
+                    imageLoader        = cellLoader,
                     contentDescription = null,
                     contentScale       = ContentScale.Crop,
                     onState            = onImageState,
@@ -649,7 +670,7 @@ internal fun BoxScope.SyncedCloudBadge() {
         Icon(
             Icons.Default.Cloud,
             contentDescription = stringResource(R.string.cd_status_backed_up_device),
-            tint = Color(0xFF30D158),
+            tint = if (LocalTintCloudWithAccent.current) Accent else StatusSynced,
             modifier = Modifier.size(12.dp),
         )
     }

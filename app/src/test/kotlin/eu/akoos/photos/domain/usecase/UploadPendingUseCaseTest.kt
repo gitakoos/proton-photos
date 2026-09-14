@@ -40,7 +40,9 @@ import me.proton.core.domain.entity.UserId
 import eu.akoos.photos.data.db.dao.UploadAlbumTargetDao
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.data.upload.UploadImageCompressor
 import eu.akoos.photos.domain.entity.LocalMediaItem
+import eu.akoos.photos.domain.entity.UploadCompressionTier
 import eu.akoos.photos.domain.entity.QueueSource
 import eu.akoos.photos.domain.entity.StorageFullException
 import eu.akoos.photos.domain.entity.SyncState
@@ -136,6 +138,7 @@ class UploadPendingUseCaseTest {
         every { mockPrefs[SettingsKeys.COMPRESS_ON_UPLOAD] } returns false
         every { mockPrefs[SettingsKeys.COMPRESS_VIDEO_ON_UPLOAD] } returns false
         every { mockPrefs[SettingsKeys.COMPRESS_UPLOAD_TIER] } returns null
+        every { mockPrefs[SettingsKeys.COMPRESS_UPLOAD_TIER_VIDEO] } returns null
         every { mockPrefs[SettingsKeys.MIRROR_COMPRESS_TO_LOCAL] } returns false
         every { mockPrefs[SettingsKeys.PENDING_ALBUM_ADDS] } returns emptySet()
         every { mockPrefs[SettingsKeys.PENDING_DELETE_URIS] } returns emptySet()
@@ -482,6 +485,49 @@ class UploadPendingUseCaseTest {
         withStrippingNeutralised { useCase(userId) }
 
         assertEquals(originalMs, itemSlot.captured.dateTaken)
+    }
+
+    // ─── compression tiers (#108) ─────────────────────────────────────────────
+
+    @Test
+    fun `photo compression reads the photo tier not the video tier`() = runTest {
+        // The two tiers are independent keys. The photo path must hand the image compressor the PHOTO
+        // tier even when the (distinct) video tier is set to something else.
+        every { mockPrefsRef[SettingsKeys.COMPRESS_ON_UPLOAD] } returns true
+        every { mockPrefsRef[SettingsKeys.COMPRESS_UPLOAD_TIER] } returns UploadCompressionTier.LIGHT.ordinal
+        every { mockPrefsRef[SettingsKeys.COMPRESS_UPLOAD_TIER_VIDEO] } returns UploadCompressionTier.SPACE_SAVER.ordinal
+        every { syncStateRepo.observeAll(userId) } returns
+            flowOf(listOf(syncState("uri://img", SyncStatus.LOCAL_ONLY)))
+        coEvery { localRepo.queryByUri("uri://img") } returns localItem("uri://img")
+        coEvery { cloudRepo.uploadFile(userId, any(), any(), any(), any(), any()) } returns "cloud-id"
+
+        val photoTierSlot = slot<UploadCompressionTier>()
+        // The compressor returns null so the upload proceeds with the original bytes; the test only
+        // cares which tier the branch hands it. mockkObject unmocks on block exit.
+        mockkObject(UploadImageCompressor) {
+            every { UploadImageCompressor.skipsCompressionForGainMap(any(), any(), any()) } returns false
+            every {
+                UploadImageCompressor.compressToTemp(any(), any(), capture(photoTierSlot), any())
+            } returns null
+            useCase(userId)
+        }
+
+        assertEquals(UploadCompressionTier.LIGHT, photoTierSlot.captured)
+    }
+
+    @Test
+    fun `video compression params come from the video tier, distinct from the photo tier`() {
+        // The video path derives its transcode knobs from the VIDEO tier through
+        // videoCompressionParamsFor (the function the upload path's video branch calls with
+        // videoCompressTier). SPACE_SAVER yields SPACE_SAVER's short-edge cap and bitrate, and a
+        // different tier yields different knobs, so photo and video no longer share one level.
+        val videoParams = videoCompressionParamsFor(UploadCompressionTier.SPACE_SAVER)
+        assertEquals(UploadCompressionTier.SPACE_SAVER.videoMaxShortEdgePx, videoParams.maxShortEdgePx)
+        assertEquals(UploadCompressionTier.SPACE_SAVER.videoBitrateBps, videoParams.targetBitrateBps)
+        assertNotEquals(
+            videoCompressionParamsFor(UploadCompressionTier.LIGHT),
+            videoCompressionParamsFor(UploadCompressionTier.SPACE_SAVER),
+        )
     }
 
     /**

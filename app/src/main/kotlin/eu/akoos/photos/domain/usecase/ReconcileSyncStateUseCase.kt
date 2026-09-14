@@ -399,7 +399,13 @@ class ReconcileSyncStateUseCase @Inject constructor(
             Log.d(TAG, "reconcile: dropped ${goneQueued.size} queued LOCAL_ONLY rows whose file is gone")
         }
 
-        val staleLocalOnly = syncStateRepo.observeAll(userId).first()
+        // One post-delete snapshot serves both this out-of-scope de-queue and the stranded-intent
+        // recovery below. Their row sets are disjoint (this pass is queued rows with a null/AUTO_FOLDER
+        // source, the next is un-queued rows with a MANUAL/ALBUM_ADD/EDITOR source), so the clearQueued
+        // writes here never fall into that filter and a single read is enough.
+        val afterDropSnapshot = syncStateRepo.observeAll(userId).first()
+
+        val staleLocalOnly = afterDropSnapshot
             .filter {
                 it.status == SyncStatus.LOCAL_ONLY &&
                     it.queued &&
@@ -422,7 +428,7 @@ class ReconcileSyncStateUseCase @Inject constructor(
         // row that flips to UPLOADING between this snapshot and markQueued is harmless (claimForUpload
         // guards on status, and a queued flag on an UPLOADING row is cleared when it reaches SYNCED).
         val recoverNow = System.currentTimeMillis()
-        val strandedIntent = syncStateRepo.observeAll(userId).first()
+        val strandedIntent = afterDropSnapshot
             .filter {
                 it.status == SyncStatus.LOCAL_ONLY &&
                     !it.queued &&

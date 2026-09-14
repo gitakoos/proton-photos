@@ -806,6 +806,10 @@ class PhotoDownloadService @Inject constructor(
          * re-downloaded on demand.
          */
         const val FULLRES_TTL_MS: Long = 30L * 60L * 1000L
+        // Download resume scratch (dec_*.bin / .tmp) is kept far longer than a finalized blob so a
+        // paused or resumable download survives, but not forever: a deep clean reclaims scratch
+        // abandoned beyond this age so a swiped-away large download cannot strand cache indefinitely.
+        const val RESUME_TTL_MS: Long = 7L * 24L * 60L * 60L * 1000L
 
         /**
          * Returns the canonical on-disk path for the full-res blob of [photo], or null when
@@ -834,9 +838,11 @@ class PhotoDownloadService @Inject constructor(
 
         /**
          * Sweeps `cacheDir/fullres/` for FINAL output files older than [FULLRES_TTL_MS]
-         * and deletes them. Skips the per-block scratch files (`dec_*.bin`, `enc_*.bin`)
-         * and any `.tmp` partials — those belong to an in-flight or resumable download
-         * and the existing resume logic handles their lifecycle. A `.hashes` sidecar
+         * and deletes them. Per-block scratch (`dec_*.bin`, `.tmp`) belongs to an in-flight or
+         * resumable download, so a normal sweep leaves it; a [deepClean] pass additionally
+         * reclaims resume scratch older than [RESUME_TTL_MS] (a swiped-away large download can
+         * otherwise strand GBs of `dec_*.bin`). Only the periodic worker passes [deepClean] so the
+         * synchronous startup and viewer-close callers stay cheap. A `.hashes` sidecar
          * adjacent to a swept blob is also removed; an orphan sidecar would never be
          * consulted again (the blob it described is gone) and just wastes inodes.
          *
@@ -844,7 +850,11 @@ class PhotoDownloadService @Inject constructor(
          * viewable while the device is offline. TTL eviction resumes the next time this
          * runs with a live network.
          */
-        fun pruneStaleFullResCache(context: android.content.Context, networkAvailable: Boolean) {
+        fun pruneStaleFullResCache(
+            context: android.content.Context,
+            networkAvailable: Boolean,
+            deepClean: Boolean = false,
+        ) {
             if (!networkAvailable) {
                 Log.d(TAG, "pruneStaleFullResCache: skipping — offline grace")
                 return
@@ -853,14 +863,21 @@ class PhotoDownloadService @Inject constructor(
             if (!cacheDir.isDirectory) return
             val now = System.currentTimeMillis()
             val cutoff = now - FULLRES_TTL_MS
+            val resumeCutoff = now - RESUME_TTL_MS
             var deleted = 0
             cacheDir.listFiles()?.forEach { f ->
                 if (!f.isFile) return@forEach
                 val name = f.name
-                // Keep dec_* (resume state) and .tmp (in-flight publish); enc_* is transient
-                // per-block scratch deleted inline after decrypt, so an old enc_* is an orphan
-                // from a crash mid-block — let the TTL cutoff sweep it like a finalized blob.
-                if (name.startsWith("dec_") || name.endsWith(".tmp")) return@forEach
+                // dec_* (resume state) and .tmp (in-flight publish) belong to an in-flight or
+                // resumable download; enc_* is transient per-block scratch deleted inline after
+                // decrypt, so an old enc_* is an orphan from a crash mid-block that the TTL cutoff
+                // sweeps like a finalized blob. A deep clean reclaims resume scratch abandoned past
+                // RESUME_TTL_MS; deleting a stale one is safe because the resume scan only trusts a
+                // dec_* that still exists with length > 0 and re-fetches a missing block.
+                if (name.startsWith("dec_") || name.endsWith(".tmp")) {
+                    if (deepClean && f.lastModified() in 1..resumeCutoff && f.delete()) deleted++
+                    return@forEach
+                }
                 if (f.lastModified() in 1..cutoff) {
                     if (f.delete()) deleted++
                     // Wipe the linkId.hashes sidecar alongside any swept blob so we don't

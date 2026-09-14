@@ -34,9 +34,11 @@ import android.os.SystemClock
 import android.util.Log
 import androidx.datastore.preferences.core.edit
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -64,6 +66,8 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlin.coroutines.EmptyCoroutineContext
+import kotlin.coroutines.coroutineContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
@@ -93,12 +97,14 @@ import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
 import eu.akoos.photos.service.FaceIndexingService
 import eu.akoos.photos.util.DeviceHealthPolicy
 import eu.akoos.photos.util.FaceDiagnostics
+import eu.akoos.photos.util.MlRail
 import eu.akoos.photos.util.NetworkObserver
 import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import javax.inject.Inject
@@ -133,6 +139,17 @@ const val FACE_INDEX_FOREGROUND_THRESHOLD = 50
  */
 fun shouldRunForegroundIndex(pending: Int, backgroundEnabled: Boolean): Boolean =
     backgroundEnabled && pending >= FACE_INDEX_FOREGROUND_THRESHOLD
+
+/**
+ * Whether a photo whose source failed to load should be recorded scanned (so a later pass skips it)
+ * rather than left pending. A device item that yields no bitmap is a corrupt or unsupported local file
+ * with no cloud original to retry, so it is marked. A cloud item is marked only when its load wedged past
+ * a decode or decrypt watchdog (a deterministic hang that would re-wedge next pass); a plain defer (off
+ * Wi-Fi, out of budget) or a transient download timeout leaves it pending for a later retry. Pure so it
+ * is unit-tested without Android.
+ */
+internal fun shouldMarkScannedOnNullSource(isLocalOnly: Boolean, loadTimedOut: Boolean): Boolean =
+    isLocalOnly || loadTimedOut
 
 /**
  * Walks the whole library once and records the faces in each photo, in the background, only while
@@ -186,7 +203,11 @@ class FaceIndexingScheduler @Inject constructor(
     // use-case's construction to the first walk, by which point the repository graph is built.
     private val galleryItemsProvider: Provider<GetGalleryItemsUseCase>,
     private val clusterFacesUseCase: ClusterFacesUseCase,
+    private val autoMergePeople: eu.akoos.photos.domain.usecase.AutoMergePeopleUseCase,
+    private val migrateGuestFaceData: eu.akoos.photos.domain.usecase.MigrateGuestFaceDataUseCase,
+    private val rekeyPhotoFaces: eu.akoos.photos.domain.usecase.RekeyPhotoFacesUseCase,
     private val deviceHealth: DeviceHealthPolicy,
+    private val mlWalkGate: eu.akoos.photos.util.MlWalkGate,
 ) {
     /** Own scope so an unpause kick and the settings watcher outlive the caller that triggered them. */
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -194,9 +215,20 @@ class FaceIndexingScheduler @Inject constructor(
     private val faceModelManager by lazy { FaceModelManager(context) }
     private val faceEmbeddingModelManager by lazy { FaceEmbeddingModelManager(context) }
 
-    /** Serialises the two ONNX sessions: neither is safe for concurrent runs, and holding one run at
-     *  a time also caps the transient tensor memory a detection or embedding allocates. */
+    /** Serialises the two ONNX sessions: neither is safe for concurrent runs on ONE session, and holding
+     *  one run at a time also caps the transient tensor memory a detection or embedding allocates. A run
+     *  the watchdog abandons keeps its own (immediately replaced) session, so it never shares one with the
+     *  next run. */
     private val mlLock = Mutex()
+
+    /** A dedicated elastic pool for the native ONNX runs, owned here. A run the per-item watchdog abandons
+     *  stays wedged in an uncancellable native call and keeps its thread; keeping those off
+     *  [Dispatchers.Default] (shared with Compose) and [Dispatchers.IO] (the load path) means a systematic
+     *  wedge starves neither the UI nor the loads. Elastic, so a fresh run always gets a thread while an
+     *  abandoned one lingers; idle threads are reclaimed. */
+    private val mlDispatcher = Executors.newCachedThreadPool { r ->
+        Thread(r, "face-ml").apply { isDaemon = true }
+    }.asCoroutineDispatcher()
 
     /** Caps how many cloud full-res downloads run at once. A few in parallel is the same shape the
      *  photo download path already uses, and overlapping them is what makes a cloud scan keep pace
@@ -212,6 +244,14 @@ class FaceIndexingScheduler @Inject constructor(
      *  volatile read rather than a DataStore round trip per item. */
     @Volatile private var aiEnabled = false
     @Volatile private var paused = false
+
+    /** The user's "download full-res on Wi-Fi only" choice (default on). When off, the background scan may
+     *  fetch cloud full-res over mobile data too, so a scan is not stuck at the device photos off Wi-Fi. */
+    @Volatile private var fullresWifiOnly = true
+
+    /** The user's opt-in "automatically merge likely-same people" choice (default off). When on, a drained
+     *  pass folds each named person's closest look-alike cluster in without asking. */
+    @Volatile private var autoMerge = false
 
     /** Set by [reset] to stop a running walk promptly on sign-out; cleared at the start of each walk. */
     @Volatile private var stopRequested = false
@@ -232,6 +272,7 @@ class FaceIndexingScheduler @Inject constructor(
 
     init {
         watchSettings()
+        watchNetworkResume()
         // Mirror every progress emit into the copied diagnostics, so a scan standing still short of the
         // end is legible there rather than a blind spot.
         scope.launch { progress.collect { FaceDiagnostics.record(it.state.name, it.indexed, it.total) } }
@@ -243,6 +284,24 @@ class FaceIndexingScheduler @Inject constructor(
             context.settingsDataStore.data.collect { prefs ->
                 aiEnabled = prefs[SettingsKeys.AI_FEATURES_ENABLED] == true && prefs[SettingsKeys.FACE_ENABLED] == true
                 paused = prefs[SettingsKeys.FACE_INDEXING_PAUSED] == true
+                fullresWifiOnly = prefs[SettingsKeys.FULLRES_WIFI_ONLY] ?: true
+                autoMerge = prefs[SettingsKeys.FACE_AUTO_MERGE] == true
+            }
+        }
+    }
+
+    /** Resume a scan that stalled while off Wi-Fi once the connection becomes unmetered again. An
+     *  off-Wi-Fi cloud backlog otherwise sits in Running with a frozen count until a manual trigger,
+     *  because a pass that loads no source does not re-kick itself. Only a signed-in account has cloud
+     *  items to defer, so a guest (lastUserId null) never kicks; indexAll collapses an overlapping call. */
+    private fun watchNetworkResume() {
+        scope.launch {
+            var wasUnmetered = networkObserver.isUnmetered.value
+            networkObserver.isUnmetered.collect { nowUnmetered ->
+                if (shouldResumeFaceScanOnUnmetered(wasUnmetered, nowUnmetered)) {
+                    lastUserId?.let { uid -> runCatching { indexAll(uid) } }
+                }
+                wasUnmetered = nowUnmetered
             }
         }
     }
@@ -258,6 +317,8 @@ class FaceIndexingScheduler @Inject constructor(
         val prefs = context.settingsDataStore.data.first()
         aiEnabled = prefs[SettingsKeys.AI_FEATURES_ENABLED] == true && prefs[SettingsKeys.FACE_ENABLED] == true
         paused = prefs[SettingsKeys.FACE_INDEXING_PAUSED] == true
+        fullresWifiOnly = prefs[SettingsKeys.FULLRES_WIFI_ONLY] ?: true
+        autoMerge = prefs[SettingsKeys.FACE_AUTO_MERGE] == true
         // Dark when off: no model prep, no enumeration, no walk.
         if (!aiEnabled) { setIdle(); return }
         if (paused) { _progress.value = FaceIndexingProgress(FaceIndexingState.Paused, 0, 0); return }
@@ -284,12 +345,33 @@ class FaceIndexingScheduler @Inject constructor(
             runCatching { migrateFaceModelVersionIfNeeded(userId) }
                 .onFailure { Log.w(TAG, "face model version wipe failed: ${it.message}") }
 
+            // Before this account reads any scan markers or enumerates, adopt a guest's face data if
+            // this is the sign-in after a local-only session: re-key local -> account so the device
+            // photos are not re-scanned and their names overwritten. Idempotent, skipped for a guest.
+            userId?.let { acct ->
+                runCatching {
+                    val result = migrateGuestFaceData.invoke(acct.id)
+                    FaceDiagnostics.recordMigration(result.action.name, result.people, result.faces)
+                }.onFailure { Log.w(TAG, "guest face adopt failed: ${it.message}") }
+            }
+
             val items = runCatching {
                 val provider = galleryItemsProvider.get()
                 (if (userId == null) provider.invokeLocalOnly() else provider.invoke(userId)).first()
             }.getOrDefault(emptyList())
             val alreadyScanned = runCatching { faceScanDao.scannedKeysForUser(userId?.id ?: PhotoLocationEntity.LOCAL_USER).toHashSet() }
                 .getOrDefault(HashSet())
+            // A device photo backed up to Drive re-appears under its cloud linkId. If its device copy
+            // was already scanned, move its faces to the cloud key instead of re-scanning a duplicate
+            // set, and treat the cloud key as scanned so the walk skips it. Account only (a guest has
+            // no cloud copy).
+            userId?.let { acct ->
+                val syncedPairs = items.filterIsInstance<GalleryItem.Synced>().map { it.local.uri to it.cloud.linkId }
+                eu.akoos.photos.domain.usecase.backupRekeyPairs(syncedPairs, alreadyScanned).forEach { (oldKey, newKey) ->
+                    runCatching { if (rekeyPhotoFaces.invoke(acct.id, oldKey, newKey)) alreadyScanned.add(newKey) }
+                        .onFailure { Log.w(TAG, "face rekey on backup failed: ${it.message}") }
+                }
+            }
             val pending = items.filter { it.stableId !in alreadyScanned }
             val total = pending.size
             // Progress is cumulative across the auto-continue passes, not per pass: the total is the
@@ -327,6 +409,13 @@ class FaceIndexingScheduler @Inject constructor(
                     tryAssignNewFaces(userId)
                     if (faceDao.unclusteredCount(account) > 0) cluster(userId)
                 }
+                // Opt-in auto-merge: once the groups have settled, fold each named person's closest
+                // look-alike cluster in (the same matches the manual suggestion card would offer), so the
+                // user does not confirm them one by one. Best-effort; a failure never fails the walk.
+                if (autoMerge) {
+                    runCatching { autoMergePeople(account) }
+                        .onFailure { Log.w(TAG, "auto-merge failed: ${it.message}") }
+                }
                 _progress.value = FaceIndexingProgress(FaceIndexingState.Done, libraryTotal, libraryTotal)
                 return
             }
@@ -341,8 +430,12 @@ class FaceIndexingScheduler @Inject constructor(
                 FaceIndexingService.start(context, userId)
             }
 
-            val detector = debugTimed("face detector") { FaceDetector(detFile) }
-            val embedder = debugTimed("embedder") { FaceEmbedder(embFile) }
+            // Reassignable pair: a per-item ML timeout abandons the wedged instances (leaks their sessions
+            // rather than closing them under a live native call) and opens a fresh pair for the next item.
+            val ml = FaceMl(
+                { debugTimed("face detector") { FaceDetector(detFile, dispatcher = mlDispatcher) } },
+                { debugTimed("embedder") { FaceEmbedder(embFile, dispatcher = mlDispatcher) } },
+            )
             val cursor = AtomicInteger(0)
             val processed = AtomicInteger(0)
             val facesThisPass = AtomicInteger(0)
@@ -365,26 +458,36 @@ class FaceIndexingScheduler @Inject constructor(
             // [scannedKeys] then holds only the not-yet-flushed remainder. One flush runs at a time.
             val persistedThisPass = AtomicInteger(0)
             val scanFlushing = AtomicBoolean(false)
+            // Hold the shared model gate for the session-resident window, so this face pair and a
+            // semantic walk's CLIP session are never both loaded at once (the large-heap OOM risk).
+            // Released the moment the sessions are closed; the short user-facing scans stay ungated.
+            mlWalkGate.acquire(MlRail.FACE)
             try {
                 coroutineScope {
-                    repeat(WORKER_COUNT) {
+                    repeat(WORKER_COUNT) { workerIndex ->
                         launch {
                             while (active()) {
-                                // Heavy face indexing stands down while the device is not in a good
-                                // state: the user is interacting, or the phone is hot / low on battery /
-                                // in the power saver. Poll so a pause or sign-out still stops the walk
-                                // promptly, and so the models stay loaded across a short pause rather
-                                // than reloading them on every scroll.
-                                while (active() && !deviceHealth.heavyMlAllowed()) {
-                                    FaceDiagnostics.recordPark(deviceHealth.verdict().reason)
+                                // The face scan runs serialized on background threads, so it no longer
+                                // stands down for touch input: gate the walk on the physical/power tier
+                                // only, so watching the face screen never freezes the scan. It still
+                                // stands down for low battery / heat / power-save. Poll so a pause or
+                                // sign-out still stops the walk promptly and the models stay loaded across
+                                // a short park rather than reloading. One verdict snapshot per check keeps
+                                // the recorded reason honest: a snapshot that denies background work always
+                                // names a physical/power reason (the interaction branch is reached only
+                                // once those gates pass), so the walk never records an interaction park.
+                                var verdict = deviceHealth.verdict()
+                                while (active() && !verdict.backgroundWorkAllowed) {
+                                    FaceDiagnostics.recordPark(verdict.reason)
                                     delay(HEALTH_PAUSE_POLL_MS)
+                                    verdict = deviceHealth.verdict()
                                 }
                                 if (!active()) break
                                 val i = cursor.getAndIncrement()
                                 if (i >= total) break
                                 val item = pending[i]
                                 try {
-                                    indexOne(item, userId, detector, embedder, decryptBudget, sourcesLoaded, scannedKeys, facesThisPass, acceptedScores, droppedTooBlurry, acceptedBlur)
+                                    indexOne(item, userId, ml, decryptBudget, sourcesLoaded, scannedKeys, "w$workerIndex", facesThisPass, acceptedScores, droppedTooBlurry, acceptedBlur)
                                 } catch (e: kotlinx.coroutines.CancellationException) {
                                     throw e
                                 } catch (e: Throwable) {
@@ -420,12 +523,14 @@ class FaceIndexingScheduler @Inject constructor(
                     }
                 }
                 if (BuildConfig.DEBUG && acceptedScores != null) {
-                    logDetectionStats(acceptedScores, detector.droppedTooSmall.get())
+                    logDetectionStats(acceptedScores, ml.droppedTooSmall())
                     logBlurStats(acceptedBlur.orEmpty(), droppedTooBlurry.get())
                 }
             } finally {
-                runCatching { detector.close() }
-                runCatching { embedder.close() }
+                // Closes only the live pair; an abandoned (timed-out) instance was already dropped and is
+                // never closed here, so no session is freed while a wedged native call still uses it.
+                ml.close()
+                mlWalkGate.release(MlRail.FACE)
             }
 
             // Persist this pass's scan markers in one batch, so the next run skips these photos whether
@@ -555,6 +660,16 @@ class FaceIndexingScheduler @Inject constructor(
         val prefs = context.settingsDataStore.data.first()
         val enabled = prefs[SettingsKeys.AI_FEATURES_ENABLED] == true && prefs[SettingsKeys.FACE_ENABLED] == true
         if (!enabled) return false
+        // Adopt a guest's face data before this path writes the first account-owned row: the viewer can
+        // reach here right after sign-in, ahead of the walk, and a fresh account marker would otherwise
+        // flip the walk's later migration to DISCARD. Idempotent + transaction-guarded, so racing the
+        // walk's own call is safe.
+        userId?.let { acct ->
+            runCatching {
+                val result = migrateGuestFaceData.invoke(acct.id)
+                FaceDiagnostics.recordMigration(result.action.name, result.people, result.faces)
+            }.onFailure { Log.w(TAG, "guest face adopt failed: ${it.message}") }
+        }
         // The walk marks every photo scanned, so a plain call would skip them all. A forced call (the
         // user asked, from the viewer) re-scans regardless, at a lower confidence so it can catch a face
         // the precision-first walk left behind. The few extra weak detections are on this one photo and
@@ -562,14 +677,20 @@ class FaceIndexingScheduler @Inject constructor(
         if (!force && faceScanDao.isScanned(userId?.id ?: PhotoLocationEntity.LOCAL_USER, item.stableId)) return false
         val detFile = (faceModelManager.prepare() as? FaceModelPreparation.Ready)?.file ?: return false
         val embFile = (faceEmbeddingModelManager.prepare() as? FaceModelPreparation.Ready)?.file ?: return false
-        val detector = if (force) FaceDetector(detFile, scoreThreshold = 0.5f, inputSize = 640) else FaceDetector(detFile)
-        val embedder = FaceEmbedder(embFile)
+        // Same abandon-on-timeout holder as the walk: a single on-demand inference that exceeds the ML
+        // watchdog on a slow device abandons its (wedged) pair rather than closing a session mid-run.
+        val ml = FaceMl(
+            {
+                if (force) FaceDetector(detFile, scoreThreshold = 0.5f, inputSize = 640, dispatcher = mlDispatcher)
+                else FaceDetector(detFile, dispatcher = mlDispatcher)
+            },
+            { FaceEmbedder(embFile, dispatcher = mlDispatcher) },
+        )
         val scanned = ConcurrentHashMap.newKeySet<String>()
         try {
-            scanOnePhoto(item, userId, detector, embedder, AtomicInteger(2), AtomicInteger(0), scanned, force = force)
+            scanOnePhoto(item, userId, ml, AtomicInteger(2), AtomicInteger(0), scanned, worker = "ondemand", force = force)
         } finally {
-            runCatching { detector.close() }
-            runCatching { embedder.close() }
+            ml.close()
         }
         if (scanned.isEmpty()) return false
         runCatching { faceScanDao.upsert(scanned.map { FaceScanEntity(userId?.id ?: PhotoLocationEntity.LOCAL_USER, it) }) }
@@ -622,8 +743,12 @@ class FaceIndexingScheduler @Inject constructor(
         if (items.isEmpty()) return@channelFlow
         // The detector + embedder are shared; the mlLock below serialises their (native) inference, so
         // the workers overlap on decode and take turns on inference, matching how the walk parallelises.
-        val detector = FaceDetector(detFile, scoreThreshold = 0.6f, inputSize = 640)
-        val embedder = FaceEmbedder(embFile)
+        // A reassignable pair like the walk's: a per-item ML timeout abandons the wedged instances and
+        // opens a fresh pair rather than closing a session under a live native call.
+        val ml = FaceMl(
+            { FaceDetector(detFile, scoreThreshold = 0.6f, inputSize = 640, dispatcher = mlDispatcher) },
+            { FaceEmbedder(embFile, dispatcher = mlDispatcher) },
+        )
         val cursor = AtomicInteger(0)
         val done = AtomicInteger(0)
         // Faces the sweep persisted this run, so it clusters once at the end only when it actually
@@ -643,72 +768,89 @@ class FaceIndexingScheduler @Inject constructor(
                                 // Under the lock: detect + embed, build the rows to persist and the
                                 // matches to stream. The DB writes happen after the lock is released, so
                                 // the mlLock only ever holds native inference, exactly as the walk does.
-                                val (rows, matches) = try {
-                                    mlLock.withLock {
-                                        val sw = source.width.toFloat()
-                                        val sh = source.height.toFloat()
-                                        val faceRows = ArrayList<FaceEntity>()
-                                        val out = ArrayList<FaceSweepEvent.Match>()
-                                        detector.detect(source).forEachIndexed { idx, face ->
-                                            val aligned = FaceAlignment.alignFace(source, face.landmarks)
-                                            val blur = runCatching { alignedBlur(aligned) }.getOrNull()
-                                            // Same hard blur gate as the index path: an extremely blurred
-                                            // crop is neither stored nor offered as a match.
-                                            if (blur != null && blur < MIN_SHARPNESS) {
+                                val (rows, matches) = mlLock.withLock {
+                                    // Snapshot the current pair inside the lock: a timeout below abandons
+                                    // exactly these, and the next lock holder opens the fresh pair.
+                                    val detector = ml.detector()
+                                    val embedder = ml.embedder()
+                                    val completed = boundedRun(ML_TIMEOUT_MS, mlDispatcher) {
+                                        try {
+                                            val sw = source.width.toFloat()
+                                            val sh = source.height.toFloat()
+                                            val faceRows = ArrayList<FaceEntity>()
+                                            val out = ArrayList<FaceSweepEvent.Match>()
+                                            detector.detect(source).forEachIndexed { idx, face ->
+                                                val aligned = FaceAlignment.alignFace(source, face.landmarks)
+                                                val blur = runCatching { alignedBlur(aligned) }.getOrNull()
+                                                // Same hard blur gate as the index path: an extremely blurred
+                                                // crop is neither stored nor offered as a match.
+                                                if (blur != null && blur < MIN_SHARPNESS) {
+                                                    if (!aligned.isRecycled) aligned.recycle()
+                                                    return@forEachIndexed
+                                                }
+                                                val emb = embedder.embed(aligned)
                                                 if (!aligned.isRecycled) aligned.recycle()
-                                                return@forEachIndexed
-                                            }
-                                            val emb = embedder.embed(aligned)
-                                            if (!aligned.isRecycled) aligned.recycle()
-                                            val box = FaceBoxNorm(
-                                                left = if (sw > 0f) (face.box.left / sw).coerceIn(0f, 1f) else 0f,
-                                                top = if (sh > 0f) (face.box.top / sh).coerceIn(0f, 1f) else 0f,
-                                                right = if (sw > 0f) (face.box.right / sw).coerceIn(0f, 1f) else 1f,
-                                                bottom = if (sh > 0f) (face.box.bottom / sh).coerceIn(0f, 1f) else 1f,
-                                            )
-                                            val landmarks = encodeLandmarks(face.landmarks)
-                                            val embedding = packEmbedding(emb)
-                                            // A normal index row, built exactly as scanOnePhoto does
-                                            // (same id derivation, box, landmarks, score, blur, null
-                                            // personId/manualName), so the persisted face is
-                                            // indistinguishable from an index-time one and clusters
-                                            // the same. Adding it later just upserts personId onto it.
-                                            faceRows.add(
-                                                FaceEntity(
-                                                    id = "$photoKey#$idx",
-                                                    userId = userId?.id ?: PhotoLocationEntity.LOCAL_USER,
-                                                    photoKey = photoKey,
-                                                    left = box.left,
-                                                    top = box.top,
-                                                    right = box.right,
-                                                    bottom = box.bottom,
-                                                    landmarks = landmarks,
-                                                    embedding = embedding,
-                                                    personId = null,
-                                                    score = face.score,
-                                                    blur = blur,
-                                                ),
-                                            )
-                                            if (emb.size == FACE_EMBEDDING_DIM &&
-                                                cosineSimilarity(emb, centroid) >= matchThreshold
-                                            ) {
-                                                out.add(
-                                                    FaceSweepEvent.Match(
+                                                val box = FaceBoxNorm(
+                                                    left = if (sw > 0f) (face.box.left / sw).coerceIn(0f, 1f) else 0f,
+                                                    top = if (sh > 0f) (face.box.top / sh).coerceIn(0f, 1f) else 0f,
+                                                    right = if (sw > 0f) (face.box.right / sw).coerceIn(0f, 1f) else 1f,
+                                                    bottom = if (sh > 0f) (face.box.bottom / sh).coerceIn(0f, 1f) else 1f,
+                                                )
+                                                val landmarks = encodeLandmarks(face.landmarks)
+                                                val embedding = packEmbedding(emb)
+                                                // A normal index row, built exactly as scanOnePhoto does
+                                                // (same id derivation, box, landmarks, score, blur, null
+                                                // personId/manualName), so the persisted face is
+                                                // indistinguishable from an index-time one and clusters
+                                                // the same. Adding it later just upserts personId onto it.
+                                                faceRows.add(
+                                                    FaceEntity(
+                                                        id = "$photoKey#$idx",
+                                                        userId = userId?.id ?: PhotoLocationEntity.LOCAL_USER,
                                                         photoKey = photoKey,
-                                                        index = idx,
-                                                        box = box,
+                                                        left = box.left,
+                                                        top = box.top,
+                                                        right = box.right,
+                                                        bottom = box.bottom,
                                                         landmarks = landmarks,
                                                         embedding = embedding,
+                                                        personId = null,
                                                         score = face.score,
                                                         blur = blur,
                                                     ),
                                                 )
+                                                if (emb.size == FACE_EMBEDDING_DIM &&
+                                                    cosineSimilarity(emb, centroid) >= matchThreshold
+                                                ) {
+                                                    out.add(
+                                                        FaceSweepEvent.Match(
+                                                            photoKey = photoKey,
+                                                            index = idx,
+                                                            box = box,
+                                                            landmarks = landmarks,
+                                                            embedding = embedding,
+                                                            score = face.score,
+                                                            blur = blur,
+                                                        ),
+                                                    )
+                                                }
                                             }
+                                            faceRows to out
+                                        } finally {
+                                            // The detached run owns [source] and recycles it here on a
+                                            // normal, thrown, or timed-out finish, so a leaked in-flight run
+                                            // keeps a valid bitmap rather than reading a recycled one.
+                                            if (!source.isRecycled) source.recycle()
                                         }
-                                        faceRows to out
                                     }
-                                } finally {
-                                    if (!source.isRecycled) source.recycle()
+                                    if (completed == null) {
+                                        FaceDiagnostics.recordWatchdogTimeout()
+                                        // The run is still inside an uncancellable native call on this pair;
+                                        // abandon it (never close a session with a run still using it) so the
+                                        // next item opens a fresh pair.
+                                        ml.abandon()
+                                    }
+                                    completed ?: (emptyList<FaceEntity>() to emptyList<FaceSweepEvent.Match>())
                                 }
                                 // Persist every detected face as a normal index row and drop this photo
                                 // from the faceless set, so it surfaces for the right person on its own
@@ -731,8 +873,7 @@ class FaceIndexingScheduler @Inject constructor(
                 }
             }
         } finally {
-            runCatching { detector.close() }
-            runCatching { embedder.close() }
+            runCatching { ml.close() }
         }
         // The sweep added faces to photos the walk had left faceless, so group them once the sweep
         // drains: a newly persisted face then surfaces under the right person on its own, the same way
@@ -753,6 +894,27 @@ class FaceIndexingScheduler @Inject constructor(
         _progress.value = FaceIndexingProgress(FaceIndexingState.Idle, 0, 0)
         FaceDiagnostics.clear()
         runCatching { context.settingsDataStore.edit { it.remove(SettingsKeys.FACE_INDEXING_PAUSED) } }
+    }
+
+    /**
+     * Re-detect the whole library at the current detector while KEEPING the user's names and exclusions.
+     * The names, "not this person" marks and removed faces are snapshotted by face-box geometry BEFORE the
+     * wipe, exactly as a model-version migration does, so the re-detected library carries them back once
+     * [reattachPendingLabels] runs on the drained pass. Faces, scan markers and the account's exclusions are
+     * cleared (the exclusions return from the snapshot); the person rows and the name-keyed manual
+     * attachments are left in place. A fresh walk then re-detects, reattaches the names by geometry and
+     * regroups. Guest-safe: a null userId rescans the local partition.
+     */
+    suspend fun rescan(userId: UserId?) {
+        val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
+        reset()
+        runCatching { captureReattachSnapshot(account) }
+            .onFailure { Log.w(TAG, "rescan snapshot failed: ${it.message}") }
+        faceDao.clearForUser(account)
+        faceScanDao.clearForUser(account)
+        runCatching { notPersonDao.clearForUser(account) }
+            .onFailure { Log.w(TAG, "rescan not-person clear failed: ${it.message}") }
+        requestIndex(userId)
     }
 
     /**
@@ -913,11 +1075,11 @@ class FaceIndexingScheduler @Inject constructor(
     private suspend fun indexOne(
         item: GalleryItem,
         userId: UserId?,
-        detector: FaceDetector,
-        embedder: FaceEmbedder,
+        ml: FaceMl,
         decryptBudget: AtomicInteger,
         sourcesLoaded: AtomicInteger,
         scannedKeys: MutableSet<String>,
+        worker: String,
         facesFound: AtomicInteger,
         acceptedScores: MutableList<Float>?,
         droppedTooBlurry: AtomicInteger,
@@ -927,7 +1089,7 @@ class FaceIndexingScheduler @Inject constructor(
         // Background face indexing yields the process-global crypto gate to interactive decrypts; the
         // on-demand and faceless-sweep paths run scanOnePhoto/loadSource directly and stay foreground.
         withContext(DecryptPriorityContext(DecryptPriority.BACKGROUND)) {
-            scanOnePhoto(item, userId, detector, embedder, decryptBudget, sourcesLoaded, scannedKeys, facesFound = facesFound, acceptedScores = acceptedScores, droppedTooBlurry = droppedTooBlurry, acceptedBlur = acceptedBlur)
+            scanOnePhoto(item, userId, ml, decryptBudget, sourcesLoaded, scannedKeys, worker = worker, facesFound = facesFound, acceptedScores = acceptedScores, droppedTooBlurry = droppedTooBlurry, acceptedBlur = acceptedBlur)
         }
     }
 
@@ -938,11 +1100,11 @@ class FaceIndexingScheduler @Inject constructor(
     private suspend fun scanOnePhoto(
         item: GalleryItem,
         userId: UserId?,
-        detector: FaceDetector,
-        embedder: FaceEmbedder,
+        ml: FaceMl,
         decryptBudget: AtomicInteger,
         sourcesLoaded: AtomicInteger,
         scannedKeys: MutableSet<String>,
+        worker: String,
         force: Boolean = false,
         facesFound: AtomicInteger? = null,
         acceptedScores: MutableList<Float>? = null,
@@ -950,75 +1112,136 @@ class FaceIndexingScheduler @Inject constructor(
         acceptedBlur: MutableList<Float>? = null,
     ) {
         val photoKey = item.stableId
-        val source = loadSource(item, userId, decryptBudget, force) ?: run {
-            // A device-only item that still yields no source is neither a decodable image nor a
-            // decodable video (a corrupt or unsupported local file), and has no cloud original to try on
-            // a later pass. Record it scanned rather than leave it pending forever: once only such items
-            // remained, a pass would load nothing, the walk would not re-kick, and the count would stand
-            // still at "Running" for good. A cloud item returning null is a transient defer (off Wi-Fi or
-            // out of budget) and stays pending on purpose.
-            if (item is GalleryItem.LocalOnly) {
-                scannedKeys.add(photoKey)
-                FaceDiagnostics.recordUnloadableLocal()
-            }
-            return
-        }
-        sourcesLoaded.incrementAndGet()
-        // The source loaded and is about to be handed to detection, so mark the photo scanned now, before
-        // the ML block. If detect or embed then throws (an OOM on a crop, a bad frame), the photo is still
-        // recorded, so a poison photo is not re-decoded and retried on every later pass; a face-free photo
-        // is likewise marked once. A source that never loaded returned above and stays pending for a later pass.
-        scannedKeys.add(photoKey)
+        // Name the item this worker is on right now, so a scan that freezes is legible in the copied
+        // diagnostics instead of a blind spot. Cleared on the way out, whichever branch returns.
+        val label = inFlightLabel(item)
+        FaceDiagnostics.recordInFlight(worker, label)
         try {
+            // The load path (decode, cloud download, thumbnail decrypt) can wedge on a pathological item;
+            // loadSource bounds each blocking call and flips this when one runs past its watchdog, so the
+            // caller can tell a true wedge from a plain defer (off Wi-Fi or out of budget). Time the load
+            // and gather the cloud fetch metrics so the diagnostics ring shows per-item load / dl cost.
+            val loadTimedOut = AtomicBoolean(false)
+            val loadMetrics = LoadMetrics()
+            val loadStart = SystemClock.elapsedRealtime()
+            val loaded = loadSource(item, userId, decryptBudget, force, loadTimedOut, loadMetrics)
+            val loadMs = SystemClock.elapsedRealtime() - loadStart
+            val source = loaded ?: run {
+                // A device-only item that still yields no source is neither a decodable image nor a
+                // decodable video (a corrupt or unsupported local file), and has no cloud original to try on
+                // a later pass. Record it scanned rather than leave it pending forever: once only such items
+                // remained, a pass would load nothing, the walk would not re-kick, and the count would stand
+                // still at "Running" for good. A cloud item returning null is a transient defer (off Wi-Fi or
+                // out of budget) and stays pending on purpose, UNLESS a decode or decrypt wedged past its
+                // watchdog (loadTimedOut), which is recorded scanned so a deterministically hanging source is
+                // skipped next pass rather than re-hung; a transient download timeout is left pending to retry.
+                if (item is GalleryItem.LocalOnly) FaceDiagnostics.recordUnloadableLocal()
+                if (shouldMarkScannedOnNullSource(item is GalleryItem.LocalOnly, loadTimedOut.get())) {
+                    scannedKeys.add(photoKey)
+                }
+                return
+            }
+            sourcesLoaded.incrementAndGet()
+            // The source loaded and is about to be handed to detection, so mark the photo scanned now, before
+            // the ML block. If detect or embed then throws (an OOM on a crop, a bad frame), the photo is still
+            // recorded, so a poison photo is not re-decoded and retried on every later pass; a face-free photo
+            // is likewise marked once. A source that never loaded returned above and stays pending for a later pass.
+            scannedKeys.add(photoKey)
+            // Bound the native inference like the video-frame decode is bounded: one wedged ONNX run must not
+            // pin the shared lock and freeze every worker forever. On a timeout control returns here, mlLock
+            // releases, and the item (already marked scanned) is left as if it held no face so the walk moves
+            // on. The run cannot be cancelled once native, so on a timeout the wedged pair is ABANDONED (never
+            // closed) and the next item opens a fresh pair (see [FaceMl]); the snapshot below binds THIS run
+            // to the current pair so the abandon frees exactly it, and no later run shares a session with the
+            // leaked one. The detached block owns [source] and recycles it in its own finally, so a leaked
+            // in-flight run keeps a valid bitmap rather than reading a recycled one.
+            var inferMs = 0L
             mlLock.withLock {
-                val faces = detector.detect(source)
-                for ((index, face) in faces.withIndex()) {
-                    val aligned = FaceAlignment.alignFace(source, face.landmarks)
-                    val blur = runCatching { alignedBlur(aligned) }.getOrNull()
-                    // Hard quality gate: drop an extremely blurred crop before it costs an embed or a
-                    // stored row, mirroring the detector's min-size gate. The floor stays conservative so
-                    // only unusable faces are lost while the accepted-blur log calibrates where to raise it.
-                    if (blur != null && blur < MIN_SHARPNESS) {
-                        if (!aligned.isRecycled) aligned.recycle()
-                        if (BuildConfig.DEBUG) droppedTooBlurry?.incrementAndGet()
-                        continue
-                    }
-                    val embedding = try {
-                        embedder.embed(aligned)
+                val inferStart = SystemClock.elapsedRealtime()
+                // Snapshot the current pair inside the lock: a timeout below abandons exactly these, and the
+                // next lock holder opens and reads the fresh pair.
+                val detector = ml.detector()
+                val embedder = ml.embedder()
+                val completed = boundedRun(ML_TIMEOUT_MS, mlDispatcher) {
+                    try {
+                        val faces = detector.detect(source)
+                        // Count every face the detector returned, before the blur / size gates drop any, so
+                        // a "0 people found" report separates no-faces-in-library from faces-but-no-cluster.
+                        FaceDiagnostics.recordFacesDetected(faces.size)
+                        for ((index, face) in faces.withIndex()) {
+                            val aligned = FaceAlignment.alignFace(source, face.landmarks)
+                            val blur = runCatching { alignedBlur(aligned) }.getOrNull()
+                            // Hard quality gate: drop an extremely blurred crop before it costs an embed or a
+                            // stored row, mirroring the detector's min-size gate. The floor stays conservative so
+                            // only unusable faces are lost while the accepted-blur log calibrates where to raise it.
+                            if (blur != null && blur < MIN_SHARPNESS) {
+                                if (!aligned.isRecycled) aligned.recycle()
+                                if (BuildConfig.DEBUG) droppedTooBlurry?.incrementAndGet()
+                                continue
+                            }
+                            val embedding = try {
+                                embedder.embed(aligned)
+                            } finally {
+                                if (!aligned.isRecycled) aligned.recycle()
+                            }
+                            // Store the box as a 0..1 fraction of the (EXIF-oriented) source, so a cover crops
+                            // correctly with no need for the photo's pixel dimensions later. A cloud-only cover
+                            // has no stored dimensions, so a pixel box could not be normalised and the whole
+                            // group photo showed instead of the one face.
+                            val sw = source.width.toFloat()
+                            val sh = source.height.toFloat()
+                            val entity = FaceEntity(
+                                id = "$photoKey#$index",
+                                userId = userId?.id ?: PhotoLocationEntity.LOCAL_USER,
+                                photoKey = photoKey,
+                                left = if (sw > 0f) (face.box.left / sw).coerceIn(0f, 1f) else 0f,
+                                top = if (sh > 0f) (face.box.top / sh).coerceIn(0f, 1f) else 0f,
+                                right = if (sw > 0f) (face.box.right / sw).coerceIn(0f, 1f) else 1f,
+                                bottom = if (sh > 0f) (face.box.bottom / sh).coerceIn(0f, 1f) else 1f,
+                                landmarks = encodeLandmarks(face.landmarks),
+                                embedding = packEmbedding(embedding),
+                                personId = null,
+                                score = face.score,
+                                blur = blur,
+                            )
+                            runCatching { faceDao.upsert(entity) }
+                                .onFailure { Log.w(TAG, "face upsert $photoKey#$index failed: ${it.message}") }
+                            if (BuildConfig.DEBUG) {
+                                facesFound?.incrementAndGet()
+                                acceptedScores?.add(face.score)
+                                blur?.let { acceptedBlur?.add(it) }
+                            }
+                        }
+                        true
                     } finally {
-                        if (!aligned.isRecycled) aligned.recycle()
-                    }
-                    // Store the box as a 0..1 fraction of the (EXIF-oriented) source, so a cover crops
-                    // correctly with no need for the photo's pixel dimensions later. A cloud-only cover
-                    // has no stored dimensions, so a pixel box could not be normalised and the whole
-                    // group photo showed instead of the one face.
-                    val sw = source.width.toFloat()
-                    val sh = source.height.toFloat()
-                    val entity = FaceEntity(
-                        id = "$photoKey#$index",
-                        userId = userId?.id ?: PhotoLocationEntity.LOCAL_USER,
-                        photoKey = photoKey,
-                        left = if (sw > 0f) (face.box.left / sw).coerceIn(0f, 1f) else 0f,
-                        top = if (sh > 0f) (face.box.top / sh).coerceIn(0f, 1f) else 0f,
-                        right = if (sw > 0f) (face.box.right / sw).coerceIn(0f, 1f) else 1f,
-                        bottom = if (sh > 0f) (face.box.bottom / sh).coerceIn(0f, 1f) else 1f,
-                        landmarks = encodeLandmarks(face.landmarks),
-                        embedding = packEmbedding(embedding),
-                        personId = null,
-                        score = face.score,
-                        blur = blur,
-                    )
-                    runCatching { faceDao.upsert(entity) }
-                        .onFailure { Log.w(TAG, "face upsert $photoKey#$index failed: ${it.message}") }
-                    if (BuildConfig.DEBUG) {
-                        facesFound?.incrementAndGet()
-                        acceptedScores?.add(face.score)
-                        blur?.let { acceptedBlur?.add(it) }
+                        // The detached run is the sole owner of [source]: it recycles here on a normal or thrown
+                        // finish, and on a timeout it keeps [source] until its wedged native call returns, so the
+                        // bitmap is never recycled out from under a live read. The worker does not recycle it.
+                        if (!source.isRecycled) source.recycle()
                     }
                 }
+                if (completed == null) {
+                    FaceDiagnostics.recordWatchdogTimeout()
+                    // The detached run is still inside an uncancellable native call on this pair; abandon it
+                    // (never close a session with a run still using it) so the next item opens a fresh pair.
+                    ml.abandon()
+                }
+                inferMs = SystemClock.elapsedRealtime() - inferStart
             }
+            // Append this processed item to the diagnostics ring (newest-first) and fold it into the run
+            // aggregates, so the next tester copy shows per-item load / infer / dl timings and the slowest
+            // item rather than only a standing count.
+            FaceDiagnostics.recordProcessed(
+                label = label,
+                isVideo = itemIsVideo(item),
+                sizeBytes = itemSizeBytes(item),
+                loadMs = loadMs,
+                inferMs = inferMs,
+                downloadMs = loadMetrics.downloadMs,
+                downloadedBytes = loadMetrics.downloadedBytes,
+            )
         } finally {
-            if (!source.isRecycled) source.recycle()
+            FaceDiagnostics.clearInFlight(worker)
         }
     }
 
@@ -1035,16 +1258,18 @@ class FaceIndexingScheduler @Inject constructor(
         userId: UserId?,
         decryptBudget: AtomicInteger,
         force: Boolean = false,
+        timedOut: AtomicBoolean = AtomicBoolean(false),
+        metrics: LoadMetrics = LoadMetrics(),
     ): Bitmap? = when (item) {
         // A device video decodes to no bitmap through BitmapFactory, so fall through to a still frame;
         // an image takes the first branch and never opens the retriever.
-        is GalleryItem.LocalOnly -> decodeLocalBounded(item.local.uri)
+        is GalleryItem.LocalOnly -> decodeLocalBounded(item.local.uri, timedOut)
             ?: decodeLocalVideoFrame(item.local.uri)
         // The cloud fallback stays account-bound: a guest has only device items, so it is never reached.
-        is GalleryItem.Synced -> decodeLocalBounded(item.local.uri)
+        is GalleryItem.Synced -> decodeLocalBounded(item.local.uri, timedOut)
             ?: decodeLocalVideoFrame(item.local.uri)
-            ?: userId?.let { decodeCloud(item.cloud, it, decryptBudget, force) }
-        is GalleryItem.CloudOnly -> userId?.let { decodeCloud(item.cloud, it, decryptBudget, force) }
+            ?: userId?.let { decodeCloud(item.cloud, it, decryptBudget, force, timedOut, metrics) }
+        is GalleryItem.CloudOnly -> userId?.let { decodeCloud(item.cloud, it, decryptBudget, force, timedOut, metrics) }
     }
 
     /**
@@ -1096,9 +1321,11 @@ class FaceIndexingScheduler @Inject constructor(
         userId: UserId,
         decryptBudget: AtomicInteger,
         force: Boolean = false,
+        timedOut: AtomicBoolean = AtomicBoolean(false),
+        metrics: LoadMetrics = LoadMetrics(),
     ): Bitmap? =
-        if (photo.mimeType.startsWith("video/")) decodeCloudBounded(photo.linkId, userId, decryptBudget)
-        else decodeCloudFullRes(photo, userId, decryptBudget, force)
+        if (photo.mimeType.startsWith("video/")) decodeCloudBounded(photo.linkId, userId, decryptBudget, timedOut)
+        else decodeCloudFullRes(photo, userId, decryptBudget, force, timedOut, metrics)
 
     /**
      * Detect a cloud image from its full-resolution bytes. On Wi-Fi and while the per-pass budget
@@ -1114,24 +1341,55 @@ class FaceIndexingScheduler @Inject constructor(
         userId: UserId,
         decryptBudget: AtomicInteger,
         force: Boolean = false,
+        timedOut: AtomicBoolean = AtomicBoolean(false),
+        metrics: LoadMetrics = LoadMetrics(),
     ): Bitmap? {
         // A forced pass (the user asked, from the viewer) downloads this one photo regardless of the
         // Wi-Fi-only rule and the walk's own stop/pause state; both exist to keep the BACKGROUND walk
-        // from flooding data or crypto, which a single deliberate request is not.
-        if (!force && !networkObserver.currentlyOnWifi()) return null
+        // from flooding data or crypto, which a single deliberate request is not. The Wi-Fi-only rule is
+        // the user's "full-res on Wi-Fi only" setting, so once that is off the walk fetches over mobile
+        // data too instead of stalling at the on-device photos.
+        if (!force && fullresWifiOnly && !networkObserver.currentlyOnWifi()) return null
         if (!takeBudget(decryptBudget)) return null
+        // A download timeout is transient (a slow or stalled link), unlike a deterministic decode or
+        // decrypt wedge: it gets its OWN flag, kept OFF [timedOut], so the item is left PENDING for a later
+        // pass to retry when the network is better rather than marked permanently scanned. Only the decode
+        // below feeds [timedOut] (a file that will not decode this pass will not decode next pass either).
+        val downloadTimedOut = AtomicBoolean(false)
         val file = downloadLock.withPermit {
             if (!force && !active()) return null
-            runCatching { photoDownloadService.downloadFullResPhoto(userId, photo) }.getOrNull()
+            // Bound the full-res download so a stalled link frees the worker rather than pinning it.
+            // Generous, since a large original on a slow link can be legitimately slow. Time just the
+            // download and note the bytes it fetched for the diagnostics ring; only a produced file counts.
+            val dlStart = SystemClock.elapsedRealtime()
+            boundedRun(DOWNLOAD_TIMEOUT_MS, Dispatchers.IO, downloadTimedOut) {
+                val produced = runCatching { photoDownloadService.downloadFullResPhoto(userId, photo) }.getOrNull()
+                // A download that lands after the watchdog gave up has no consumer, so this detached block
+                // deletes it here rather than leave an orphan in the fullres cache.
+                if (produced != null && downloadTimedOut.get()) {
+                    runCatching { produced.delete() }
+                    null
+                } else {
+                    produced
+                }
+            }?.also {
+                metrics.downloadMs = SystemClock.elapsedRealtime() - dlStart
+                metrics.downloadedBytes = runCatching { it.length() }.getOrDefault(0L)
+            }
         } ?: return null
         return try {
-            decodeFileBounded(file)
+            decodeFileBounded(file, timedOut)
         } finally {
             runCatching { file.delete() }
         }
     }
 
-    private fun decodeLocalBounded(uri: String): Bitmap? = runCatching {
+    /** A bounded decode of a device file, run detached under a watchdog so a decode that wedges frees the
+     *  worker and flips [timedOut] rather than pinning it. */
+    private suspend fun decodeLocalBounded(uri: String, timedOut: AtomicBoolean): Bitmap? =
+        boundedRun(DECODE_TIMEOUT_MS, Dispatchers.IO, timedOut) { decodeLocalBlocking(uri) }
+
+    private fun decodeLocalBlocking(uri: String): Bitmap? = runCatching {
         val u = Uri.parse(uri)
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         context.contentResolver.openInputStream(u)?.use { BitmapFactory.decodeStream(it, null, bounds) }
@@ -1149,7 +1407,12 @@ class FaceIndexingScheduler @Inject constructor(
         orientedBitmap(bmp, orientation)
     }.getOrNull()
 
-    private fun decodeFileBounded(file: File): Bitmap? = runCatching {
+    /** A bounded decode of a cache file, run detached under a watchdog so a decode that wedges frees the
+     *  worker and flips [timedOut] rather than pinning it. */
+    private suspend fun decodeFileBounded(file: File, timedOut: AtomicBoolean): Bitmap? =
+        boundedRun(DECODE_TIMEOUT_MS, Dispatchers.IO, timedOut) { decodeFileBlocking(file) }
+
+    private fun decodeFileBlocking(file: File): Bitmap? = runCatching {
         if (!file.exists() || file.length() <= 0L) return@runCatching null
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeFile(file.absolutePath, bounds)
@@ -1205,16 +1468,17 @@ class FaceIndexingScheduler @Inject constructor(
         linkId: String,
         userId: UserId,
         decryptBudget: AtomicInteger,
+        timedOut: AtomicBoolean = AtomicBoolean(false),
     ): Bitmap? {
         // Warm HD wins: best detail, no crypto, no budget.
         val hdCached = cloudHdThumbFile(linkId)
-        if (hdCached.exists() && hdCached.length() > 0L) return decodeFileBounded(hdCached)
+        if (hdCached.exists() && hdCached.length() > 0L) return decodeFileBounded(hdCached, timedOut)
 
         // Cold path is budgeted. Once the per-pass budget is spent, still index off a warm Type 1
         // thumbnail the gallery already made (free), else leave the photo for a later pass.
         if (!takeBudget(decryptBudget)) {
             val warmT1 = cloudThumbFile(linkId)
-            return if (warmT1.exists() && warmT1.length() > 0L) decodeFileBounded(warmT1) else null
+            return if (warmT1.exists() && warmT1.length() > 0L) decodeFileBounded(warmT1, timedOut) else null
         }
 
         val entity = runCatching { photoListingDao.getByLinkId(linkId) }.getOrNull() ?: return null
@@ -1224,39 +1488,45 @@ class FaceIndexingScheduler @Inject constructor(
         val parentLinkId = entity.parentLinkId ?: return null
 
         // Spend the budget unit on the HD decrypt (fresh Type 2 url + the shared node/session decrypt).
-        val hdProduced = runCatching {
-            thumbnailScheduler.decryptHdThumbnailToFileBounded(
-                userId = userId,
-                linkId = linkId,
-                volumeId = entity.volumeId,
-                contentKeyPacketBase64 = contentKeyPacket,
-                encNodeKey = encNodeKey,
-                encNodePass = encNodePass,
-                parentLinkId = parentLinkId,
-            )
-        }.getOrNull()
-        if (!hdProduced.isNullOrBlank()) return decodeFileBounded(cloudHdThumbFile(linkId))
+        // Bounded like the rest of the load path: a decrypt that wedges frees the worker and flips
+        // [timedOut] rather than pinning it.
+        val hdProduced = boundedRun(DECRYPT_TIMEOUT_MS, Dispatchers.IO, timedOut) {
+            runCatching {
+                thumbnailScheduler.decryptHdThumbnailToFileBounded(
+                    userId = userId,
+                    linkId = linkId,
+                    volumeId = entity.volumeId,
+                    contentKeyPacketBase64 = contentKeyPacket,
+                    encNodeKey = encNodeKey,
+                    encNodePass = encNodePass,
+                    parentLinkId = parentLinkId,
+                )
+            }.getOrNull()
+        }
+        if (!hdProduced.isNullOrBlank()) return decodeFileBounded(cloudHdThumbFile(linkId), timedOut)
 
         // No Type 2 thumbnail (older upload) or a transient HD failure: fall back to the Type 1 path so
         // the photo still indexes. A warm Type 1 file decodes straight off disk; a cold one rides the
         // gallery's bounded Type 1 decrypt.
         val warmT1 = cloudThumbFile(linkId)
-        if (warmT1.exists() && warmT1.length() > 0L) return decodeFileBounded(warmT1)
+        if (warmT1.exists() && warmT1.length() > 0L) return decodeFileBounded(warmT1, timedOut)
         val serverUrl = entity.serverThumbnailUrl ?: return null
-        val produced = runCatching {
-            thumbnailScheduler.decryptThumbnailToFileBounded(
-                userId = userId,
-                linkId = linkId,
-                volumeId = entity.volumeId,
-                serverUrl = serverUrl,
-                serverToken = entity.serverThumbnailToken,
-                contentKeyPacketBase64 = contentKeyPacket,
-                encNodeKey = encNodeKey,
-                encNodePass = encNodePass,
-                parentLinkId = parentLinkId,
-            )
-        }.getOrNull() ?: return null
-        return if (produced.isNotBlank()) decodeFileBounded(cloudThumbFile(linkId)) else null
+        val produced = boundedRun(DECRYPT_TIMEOUT_MS, Dispatchers.IO, timedOut) {
+            runCatching {
+                thumbnailScheduler.decryptThumbnailToFileBounded(
+                    userId = userId,
+                    linkId = linkId,
+                    volumeId = entity.volumeId,
+                    serverUrl = serverUrl,
+                    serverToken = entity.serverThumbnailToken,
+                    contentKeyPacketBase64 = contentKeyPacket,
+                    encNodeKey = encNodeKey,
+                    encNodePass = encNodePass,
+                    parentLinkId = parentLinkId,
+                )
+            }.getOrNull()
+        } ?: return null
+        return if (produced.isNotBlank()) decodeFileBounded(cloudThumbFile(linkId), timedOut) else null
     }
 
     private fun cloudThumbFile(linkId: String): File =
@@ -1279,6 +1549,59 @@ class FaceIndexingScheduler @Inject constructor(
 
     private fun setIdle() {
         _progress.value = FaceIndexingProgress(FaceIndexingState.Idle, 0, 0)
+    }
+
+    /**
+     * Run [block] detached and wait at most [timeoutMs] for it, so a blocking or wedged call (a native
+     * ONNX inference, a bitmap decode, a cloud download, a decrypt) frees this worker instead of pinning
+     * it forever: one pathological item then releases the shared lock and the walk moves to the next.
+     * Returns the block's result, or null when the block itself returned null. On a true timeout (the
+     * work is still running when the wait elapses) it flips [timedOut], cancels the wait, and returns
+     * null; the abandoned work keeps running on its own detached coroutine (a wedged native call cannot
+     * be cancelled) and finishes or dies on its own. An abandoned ONNX run keeps using its session, so the
+     * ML caller ABANDONS that detector / embedder and opens a fresh pair for the next item (see [FaceMl]);
+     * that reallocation, not buffer isolation, is what keeps two runs off the one session. The caller's
+     * decrypt priority rides into the detached context so a background load stays background at the
+     * crypto gate. This is [decodeLocalVideoFrame]'s bounded-decode pattern, generalised.
+     */
+    private suspend fun <T> boundedRun(
+        timeoutMs: Long,
+        dispatcher: CoroutineDispatcher,
+        timedOut: AtomicBoolean? = null,
+        block: suspend CoroutineScope.() -> T,
+    ): T? {
+        val work = scope.async(
+            dispatcher + (coroutineContext[DecryptPriorityContext] ?: EmptyCoroutineContext),
+            block = block,
+        )
+        val result = withTimeoutOrNull(timeoutMs) { work.await() }
+        if (result == null && work.isActive) {
+            timedOut?.set(true)
+            work.cancel()
+        }
+        return result
+    }
+
+    /** A short, truncated, non-identifying pointer to [item] for the copied diagnostics, so a frozen
+     *  scan shows where it wedged without carrying a full key, path, or token. */
+    private fun inFlightLabel(item: GalleryItem): String = when (item) {
+        is GalleryItem.CloudOnly -> "cloud:" + item.cloud.linkId.take(8)
+        is GalleryItem.Synced -> "synced:" + item.cloud.linkId.take(8)
+        is GalleryItem.LocalOnly -> "local:" + item.local.uri.substringAfterLast('/').take(16)
+    }
+
+    /** Whether [item] is a video, for the diagnostics ring's img / vid tag. */
+    private fun itemIsVideo(item: GalleryItem): Boolean = when (item) {
+        is GalleryItem.CloudOnly -> item.cloud.mimeType.startsWith("video/")
+        is GalleryItem.Synced -> item.cloud.mimeType.startsWith("video/")
+        is GalleryItem.LocalOnly -> item.local.mimeType.startsWith("video/")
+    }
+
+    /** [item]'s byte size, for the diagnostics ring's per-item size. */
+    private fun itemSizeBytes(item: GalleryItem): Long = when (item) {
+        is GalleryItem.CloudOnly -> item.cloud.sizeBytes
+        is GalleryItem.Synced -> item.cloud.sizeBytes
+        is GalleryItem.LocalOnly -> item.local.sizeBytes
     }
 
     /** Runs [block], and in a debug build logs how long it took under [label], so the ONNX session-open
@@ -1484,6 +1807,53 @@ class FaceIndexingScheduler @Inject constructor(
         return buffer.array()
     }
 
+    /**
+     * Holds a walk's or an on-demand call's detector + embedder as reassignable references, so a per-item
+     * ML timeout can abandon the wedged pair and open a fresh one. A timed-out native run cannot be
+     * cancelled and keeps using its ONNX session after the watchdog gives up, so that instance must never
+     * be [close]d (closing frees the session mid-run: a native use-after-free). [abandon] drops the wedged
+     * references WITHOUT closing them (the leaked thread finishes against a still-valid session, an already
+     * accepted tradeoff) and the next [detector] / [embedder] opens a fresh pair, so no later run shares a
+     * session with the leaked one. [close] frees only the live pair. Opened lazily and every access is
+     * serialised under [mlLock], so the plain nullable fields are safe.
+     */
+    private class FaceMl(
+        private val openDetector: () -> FaceDetector,
+        private val openEmbedder: () -> FaceEmbedder,
+    ) : AutoCloseable {
+        private var detector: FaceDetector? = null
+        private var embedder: FaceEmbedder? = null
+
+        fun detector(): FaceDetector = detector ?: openDetector().also { detector = it }
+
+        fun embedder(): FaceEmbedder = embedder ?: openEmbedder().also { embedder = it }
+
+        /** The current detector's min-size drop count for the debug pass-end log; 0 before it opens. */
+        fun droppedTooSmall(): Int = detector?.droppedTooSmall?.get() ?: 0
+
+        /** A run on the current pair timed out: drop the references WITHOUT closing, so the wedged native
+         *  call keeps a valid session and the next [detector] / [embedder] opens a fresh one. */
+        fun abandon() {
+            detector = null
+            embedder = null
+        }
+
+        override fun close() {
+            detector?.let { d -> runCatching { d.close() } }
+            embedder?.let { e -> runCatching { e.close() } }
+            detector = null
+            embedder = null
+        }
+    }
+
+    /** Per-item cloud fetch metrics the load path fills in for the diagnostics ring: the download
+     *  duration and the bytes fetched. Confined to one item's scan on one worker, so plain fields are
+     *  safe; left at the sentinel for a device item or a deferred cloud item that fetched nothing. */
+    private class LoadMetrics {
+        var downloadMs: Long = -1L
+        var downloadedBytes: Long = 0L
+    }
+
     private companion object {
         /** Worker pool size. Three keeps a few photos moving through the download / decode / ONNX
          *  pipeline at once while the ONNX sessions themselves stay serialised by [mlLock]. */
@@ -1529,5 +1899,28 @@ class FaceIndexingScheduler @Inject constructor(
         /** Hard ceiling on one device-video still-frame decode, so a malformed file that hangs
          *  MediaMetadataRetriever frees the worker instead of pinning it (three would stall the pool). */
         const val VIDEO_FRAME_TIMEOUT_MS = 10_000L
+
+        /** Hard ceiling on one photo's native face inference (detect + embed). Generous, so a slow but
+         *  valid run on a large crop is never falsely skipped; only a true multi-second wedge trips it,
+         *  freeing the shared ML lock and the worker rather than freezing every worker on one item. */
+        const val ML_TIMEOUT_MS = 30_000L
+
+        /** Hard ceiling on one bitmap decode (a device file or a cloud cache file), so a decode that
+         *  wedges frees the worker instead of pinning it. */
+        const val DECODE_TIMEOUT_MS = 20_000L
+
+        /** Hard ceiling on one cloud full-res download. Generous, since a large original over a slow link
+         *  can legitimately take a while; only a stalled link trips it, and a trip leaves the item pending
+         *  for a later pass (a download timeout is transient) rather than marking it scanned. */
+        const val DOWNLOAD_TIMEOUT_MS = 120_000L
+
+        /** Hard ceiling on one cloud thumbnail decrypt, so a wedged decrypt frees the worker instead of
+         *  pinning it. */
+        const val DECRYPT_TIMEOUT_MS = 20_000L
     }
 }
+
+/** True only on the edge where the network becomes unmetered, so a scan deferred while off Wi-Fi
+ *  resumes on reconnect rather than staying idle, without kicking on the initial replayed state. */
+internal fun shouldResumeFaceScanOnUnmetered(wasUnmetered: Boolean, nowUnmetered: Boolean): Boolean =
+    !wasUnmetered && nowUnmetered

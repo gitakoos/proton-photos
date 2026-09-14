@@ -130,7 +130,8 @@ fun ViewerFaceTags(
     // Greedy placement: bigger faces first (they anchor the layout), each label taking the first of
     // below / above / right / left that stays on screen and clears the labels already placed.
     val placed = ArrayList<FloatArray>() // l, t, r, b of each chosen pill
-    val anchors = HashMap<Long, Offset>() // pill centre per person id
+    val anchors = HashMap<String, Offset>() // pill centre per FACE (Unsorted faces share one personId, so a
+    // person-id key would collide and stack every "+" on one face; the face id is unique per rect)
     fun overlaps(a: FloatArray, b: FloatArray) =
         a[0] < b[2] && a[2] > b[0] && a[1] < b[3] && a[3] > b[1]
     for (fr in rects.sortedByDescending { (it.right - it.left) * (it.bottom - it.top) }) {
@@ -152,7 +153,7 @@ fun ViewerFaceTags(
         val fx = chosen.x.coerceIn(w / 2f, containerW - w / 2f)
         val fy = chosen.y.coerceIn(pillH / 2f, containerH - pillH / 2f)
         placed.add(floatArrayOf(fx - w / 2f, fy - pillH / 2f, fx + w / 2f, fy + pillH / 2f))
-        anchors[fr.person.personId] = Offset(fx, fy)
+        anchors[fr.person.faceId] = Offset(fx, fy)
     }
 
     Box(modifier = modifier.fillMaxSize()) {
@@ -168,7 +169,7 @@ fun ViewerFaceTags(
         }
         // Then the name pills, each centred on its computed anchor and free to overflow it.
         rects.forEach { fr ->
-            val anchor = anchors[fr.person.personId] ?: return@forEach
+            val anchor = anchors[fr.person.faceId] ?: return@forEach
             Box(
                 modifier = Modifier
                     .offset { IntOffset(anchor.x.roundToInt(), anchor.y.roundToInt()) }

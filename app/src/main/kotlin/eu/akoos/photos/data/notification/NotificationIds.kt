@@ -71,6 +71,21 @@ object NotificationIds {
      *  of any upload). Its own id so it never collides with the direct-import posts above. */
     const val IMPORT_STAGE = 4252
 
+    /** The GIF export foreground service's ongoing "creating GIF" progress notification, torn down with the
+     *  service once the encode/upload finishes. */
+    const val GIF_EXPORT = 4253
+
+    /** The GIF export's terminal failure notice. Its own id so the service's stopForeground teardown of the
+     *  ongoing progress post ([GIF_EXPORT]) does not take the failure notice down with it. */
+    const val GIF_EXPORT_DONE = 4254
+
+    /** The initial semantic-search indexing foreground service's progress notification. */
+    const val SEMANTIC_INDEXING = 4255
+
+    /** The common on-device model-download foreground service's progress notification (face, text
+     *  recognition and photo search share it, one download at a time). */
+    const val MODEL_DOWNLOAD = 4256
+
     /**
      * Reserved for album downloads, which take one id per run so two concurrent downloads keep
      * separate entries in the shade instead of overwriting each other. No fixed id may fall in here.

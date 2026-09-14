@@ -311,4 +311,5 @@ internal class FakeDrivePhotoRepository : DrivePhotoRepository {
     override suspend fun backfillVideoDurations(userId: UserId) {}
     override suspend fun backfillLocalExif(userId: UserId) {}
     override suspend fun backfillFaces(userId: UserId?) {}
+    override suspend fun backfillSemantic(userId: UserId?) {}
 }

@@ -115,7 +115,6 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
-import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -128,11 +127,15 @@ import eu.akoos.photos.R
 import eu.akoos.photos.data.face.FaceIndexingState
 import eu.akoos.photos.data.face.FaceModelAssets
 import eu.akoos.photos.data.ocr.OcrModelAssets
+import eu.akoos.photos.data.semantic.SemanticIndexingProgress
+import eu.akoos.photos.data.semantic.SemanticIndexingState
+import eu.akoos.photos.data.semantic.SemanticModelAssets
 import eu.akoos.photos.domain.entity.UploadCompressionTier
 import eu.akoos.photos.presentation.gallery.PersonTile
 import eu.akoos.photos.presentation.search.SearchFilter
 import eu.akoos.photos.presentation.common.ConfirmDialog
 import eu.akoos.photos.presentation.common.ConfirmSheet
+import eu.akoos.photos.util.ShareIntentBuilder
 import eu.akoos.photos.presentation.common.PrimaryButton
 import eu.akoos.photos.presentation.common.ErrorPopup
 import eu.akoos.photos.presentation.common.FloatingHeaderScrim
@@ -318,6 +321,10 @@ fun SettingsScreen(
                 run {
                     if (isNotEmpty()) append("\n\n")
                     append("Faces:\n").append(eu.akoos.photos.util.FaceDiagnostics.snapshot())
+                }
+                run {
+                    if (isNotEmpty()) append("\n\n")
+                    append("Semantic:\n").append(eu.akoos.photos.util.SemanticDiagnostics.snapshot())
                 }
                 if (eu.akoos.photos.util.ImportDiagnostics.hasData()) {
                     if (isNotEmpty()) append("\n\n")
@@ -1001,19 +1008,19 @@ fun SettingsScreen(
 
 // ── Machine learning sub-page (hub) ───────────────────────────────────────────
 // Master opt-in for the on-device ML features. When off, nothing downloads and the per-feature
-// controls stay hidden. With it on, two sub-toggles pick which features run: Copy text and Face
-// recognition. Face recognition stays disabled until its model is available, and adds a management
-// row whose subtitle mirrors the live scan state so progress shows without drilling in.
+// controls stay hidden. With it on, the panel lists Copy text (a toggle) and two rows, Face
+// recognition and Photo search, each opening a dedicated sub-page that holds its own enable toggle,
+// model download and controls; the rows' subtitles mirror the live scan state so progress shows
+// without drilling in.
 
 @Composable
 fun AiSettingsScreen(
     onBack: () -> Unit,
     onFaceRecognitionClick: () -> Unit,
-    onExcludedFacesClick: () -> Unit,
+    onSemanticSearchClick: () -> Unit,
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
-    val colors = AppColors.current
     SettingsSubPageScaffold(title = stringResource(R.string.settings_ai_section), onBack = onBack) {
         SettingsCard {
             ToggleRow(
@@ -1042,87 +1049,32 @@ fun AiSettingsScreen(
                     enabled = !state.ocrModelDownloading,
                 )
                 // Face recognition runs fully on-device, so it works without an account too; a guest's
-                // face and person rows go under a local partition, the same way the map stores its fixes.
+                // face and person rows go under a local partition. Like semantic search, its toggle and
+                // controls live on the dedicated sub-page reached through this row; the subtitle reflects
+                // the live scan state while a walk runs, and the feature description while it is off.
                 RowDivider()
-                ToggleRow(
+                val faceProgress by viewModel.faceIndexingProgress.collectAsStateWithLifecycle()
+                val faceGroupCount by viewModel.faceGroupCount.collectAsStateWithLifecycle()
+                NavRow(
                     label = stringResource(R.string.settings_ai_face_toggle),
-                    // While the model fetches the row reads as busy, a failed fetch is stated in place so
-                    // the switch staying off is explained, and a switched-on feature whose model is no
-                    // longer on the device says so rather than looking as if it were still working.
-                    description = when {
-                        state.faceModelDownloading ->
-                            stringResource(R.string.settings_ai_face_downloading)
-                        state.faceModelDownloadFailed ->
-                            stringResource(R.string.settings_ai_face_download_failed)
-                        state.faceEnabled && !state.faceRecognitionAvailable ->
-                            stringResource(R.string.settings_ai_face_model_missing)
-                        else -> stringResource(R.string.settings_ai_face_desc)
+                    description = if (state.faceEnabled) {
+                        faceRowSubtitle(faceProgress.state, faceGroupCount)
+                    } else {
+                        stringResource(R.string.settings_ai_face_desc)
                     },
-                    checked = state.faceEnabled,
-                    onCheckedChange = viewModel::setFaceEnabled,
-                    enabled = !state.faceModelDownloading,
+                    onClick = onFaceRecognitionClick,
                 )
-                // A determinate bar under the toggle shows the model fetch really moving, with the byte
-                // count so far against the total, so a slow link reads as progress rather than a stall; a
-                // failed fetch adds a line saying the switch itself is the retry.
-                if (state.faceModelDownloading) {
-                    val faceTotalBytes = FaceModelAssets.TOTAL_DOWNLOAD_BYTES
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(start = 16.dp, end = 16.dp, bottom = 14.dp),
-                    ) {
-                        LinearProgressIndicator(
-                            progress = {
-                                if (faceTotalBytes > 0L) {
-                                    (state.faceModelDownloadedBytes.toFloat() / faceTotalBytes)
-                                        .coerceIn(0f, 1f)
-                                } else 0f
-                            },
-                            modifier = Modifier.fillMaxWidth(),
-                            color = colors.accent,
-                            trackColor = colors.trackBg,
-                        )
-                        Spacer(Modifier.height(6.dp))
-                        Text(
-                            text = stringResource(
-                                R.string.settings_ai_face_downloading_progress,
-                                formatBytes(state.faceModelDownloadedBytes),
-                                formatBytes(faceTotalBytes),
-                            ),
-                            color = colors.fgMute,
-                            fontSize = 12.sp,
-                        )
-                    }
-                } else if (state.faceModelDownloadFailed) {
-                    Text(
-                        text = stringResource(R.string.settings_ai_face_download_retry),
-                        color = colors.fgMute,
-                        fontSize = 12.5.sp,
-                        modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 14.dp),
-                    )
-                }
-            }
-
-            // The face management entry only makes sense once the scan is switched on, so its live
-            // subtitle reflects real progress; it stays hidden while face recognition is off.
-            if (state.faceEnabled) {
-                Spacer(Modifier.height(20.dp))
-                val progress by viewModel.faceIndexingProgress.collectAsStateWithLifecycle()
-                val peopleCount by viewModel.peopleCount.collectAsStateWithLifecycle()
-                SettingsCard {
-                    NavRow(
-                        label = stringResource(R.string.settings_face_section),
-                        description = faceRowSubtitle(progress.state, peopleCount),
-                        onClick = onFaceRecognitionClick,
-                    )
-                    RowDivider()
-                    NavRow(
-                        label = stringResource(R.string.settings_face_excluded),
-                        description = stringResource(R.string.settings_face_excluded_desc),
-                        onClick = onExcludedFacesClick,
-                    )
-                }
+                // Semantic search runs fully on-device too, so it works without an account; a guest's
+                // embeddings go under a local partition, the same way the face rows do. The toggle and its
+                // indexing progress live on the dedicated sub-page, reached through this row; the subtitle
+                // reflects the live scan state so the row reads as progress while a walk runs.
+                RowDivider()
+                val semanticProgress by viewModel.semanticIndexingProgress.collectAsStateWithLifecycle()
+                NavRow(
+                    label = stringResource(R.string.settings_ai_semantic),
+                    description = semanticRowSubtitle(semanticProgress.state),
+                    onClick = onSemanticSearchClick,
+                )
             }
 
             // Both Copy text model drawers, matching the app's other confirm sheets: the download
@@ -1157,75 +1109,43 @@ fun AiSettingsScreen(
                 OcrModelPrompt.None -> Unit
             }
 
-            // The face model drawers. Download is the consent raised when the feature is switched on with
-            // no model on disk; the size quoted is the figure that goes over the wire. Remove and
-            // ConfirmRemove form the two-stage disable, so an accidental tap cannot delete: Remove asks
-            // for a final confirmation, ConfirmRemove then wipes the model files and every detected face
-            // and name. Keep, Cancel, or a swipe leaves everything in place.
-            when (state.faceModelPrompt) {
-                FaceModelPrompt.Download -> ConfirmSheet(
-                    title = stringResource(R.string.settings_ai_face_download_title),
-                    // Off Wi-Fi the message states the fetch will use mobile data, so the large download
-                    // is confirmed rather than pulled silently over a metered link.
-                    message = stringResource(
-                        if (state.faceModelOnWifi) {
-                            R.string.settings_ai_face_download_message
-                        } else {
-                            R.string.settings_ai_face_download_message_metered
-                        },
-                        formatBytes(FaceModelAssets.TOTAL_DOWNLOAD_BYTES),
-                    ),
-                    confirmLabel = stringResource(R.string.settings_ai_face_download_confirm),
-                    dismissLabel = stringResource(R.string.cancel),
-                    onConfirm = viewModel::confirmFaceModelDownload,
-                    onDismiss = viewModel::dismissFaceModelPrompt,
-                )
-                FaceModelPrompt.Remove -> ConfirmSheet(
-                    title = stringResource(R.string.settings_ai_face_remove_title),
-                    message = stringResource(R.string.settings_ai_face_remove_message),
-                    confirmLabel = stringResource(R.string.settings_ai_face_remove_confirm),
-                    dismissLabel = stringResource(R.string.settings_ai_face_remove_keep),
-                    onConfirm = viewModel::requestFaceModelRemoval,
-                    onDismiss = viewModel::disableFaceKeepingData,
-                    onOutsideDismiss = viewModel::dismissFaceModelPrompt,
-                    destructive = true,
-                )
-                FaceModelPrompt.ConfirmRemove -> ConfirmSheet(
-                    title = stringResource(R.string.settings_ai_face_remove_confirm_title),
-                    message = stringResource(R.string.settings_ai_face_remove_confirm_message),
-                    confirmLabel = stringResource(R.string.settings_ai_face_remove_confirm),
-                    dismissLabel = stringResource(R.string.cancel),
-                    onConfirm = viewModel::confirmFaceModelRemoval,
-                    onDismiss = viewModel::backToFaceRemovePrompt,
-                    onOutsideDismiss = viewModel::dismissFaceModelPrompt,
-                    destructive = true,
-                )
-                FaceModelPrompt.None -> Unit
-            }
         }
         Spacer(Modifier.height(20.dp))
     }
 }
 
 /** Subtitle for the Face recognition row: the live scan state while a walk runs or is paused,
- *  otherwise the count of people found, so the row reads as a result when idle. */
+ *  otherwise the count of groups found (or the feature description when none), so the row reads as a
+ *  result when idle. */
 @Composable
-private fun faceRowSubtitle(state: FaceIndexingState, peopleCount: Int): String = when (state) {
+private fun faceRowSubtitle(state: FaceIndexingState, groupCount: Int): String = when (state) {
     FaceIndexingState.Running, FaceIndexingState.WaitingModel ->
         stringResource(R.string.settings_ai_indexing_running)
     FaceIndexingState.Paused -> stringResource(R.string.settings_ai_indexing_paused)
-    else -> pluralStringResource(R.plurals.settings_ai_indexing_people, peopleCount, peopleCount)
+    else -> if (groupCount == 0) stringResource(R.string.settings_ai_face_desc)
+        else stringResource(R.string.settings_ai_groups_found, groupCount)
+}
+
+/** Subtitle for the Semantic search row: the live scan state while a walk runs or is paused, otherwise
+ *  the feature's one-line description, so the row reads as a result when idle. Mirrors [faceRowSubtitle]. */
+@Composable
+private fun semanticRowSubtitle(state: SemanticIndexingState): String = when (state) {
+    SemanticIndexingState.Running, SemanticIndexingState.WaitingModel ->
+        stringResource(R.string.settings_ai_indexing_running)
+    SemanticIndexingState.Paused -> stringResource(R.string.settings_ai_indexing_paused)
+    else -> stringResource(R.string.settings_ai_semantic_desc)
 }
 
 // ── Face recognition sub-page ─────────────────────────────────────────────────
-// The on-device face scan and the controls to manage it: a status card (people found, scan state,
-// progress, a preview of the people, and Start / Pause / Resume), a Maintenance card (rescan / clear),
+// The on-device face scan and the controls to manage it: a status card (groups + faces found, scan
+// state, progress, a preview of the groups, and Pause / Resume), a Maintenance card (rescan / clear),
 // and a Transfer card (export / import the portable index).
 
 @Composable
 fun FaceRecognitionScreen(
     onBack: () -> Unit,
-    onSeeAllPeople: () -> Unit,
+    onOpenPerson: (Long) -> Unit,
+    onOpenExcluded: () -> Unit,
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val transferMsg by viewModel.faceTransferMsg.collectAsStateWithLifecycle()
@@ -1237,51 +1157,210 @@ fun FaceRecognitionScreen(
             viewModel.clearFaceTransferMsg()
         }
     }
+    // After a successful export, offer to send the file on through the system share sheet (another app or
+    // a nearby device), so the file the user just saved can be passed to another phone without digging it
+    // out first. Declining just keeps the saved file.
+    val exportedUri by viewModel.faceExportedUri.collectAsStateWithLifecycle()
+    exportedUri?.let { uri ->
+        ConfirmSheet(
+            title = stringResource(R.string.settings_ai_export_share_title),
+            message = stringResource(R.string.settings_ai_export_share_msg),
+            confirmLabel = stringResource(R.string.share_action),
+            dismissLabel = stringResource(R.string.person_merge_suggest_later),
+            onConfirm = {
+                viewModel.clearFaceExportedUri()
+                runCatching {
+                    val send = ShareIntentBuilder.buildSendIntent(transferCtx, listOf(uri), "application/octet-stream")
+                    transferCtx.startActivity(
+                        Intent.createChooser(send, transferCtx.getString(R.string.share_chooser_title)),
+                    )
+                }
+            },
+            onDismiss = { viewModel.clearFaceExportedUri() },
+        )
+    }
     val faceUi by viewModel.faceIndexingUi.collectAsStateWithLifecycle()
-    val peopleCount by viewModel.peopleCount.collectAsStateWithLifecycle()
-    val people by viewModel.people.collectAsStateWithLifecycle()
-    val settingsState by viewModel.uiState.collectAsStateWithLifecycle()
+    val faceMlActiveRail by viewModel.mlActiveRail.collectAsStateWithLifecycle()
+    val faceGroups by viewModel.faceGroups.collectAsStateWithLifecycle()
+    val faceCount by viewModel.faceCount.collectAsStateWithLifecycle()
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val colors = AppColors.current
 
-    SettingsSubPageScaffold(title = stringResource(R.string.settings_face_section), onBack = onBack) {
-        FaceStatusCard(
-            ui = faceUi,
-            peopleCount = peopleCount,
-            people = people,
-            onSetPaused = viewModel::setFaceIndexingPaused,
-            onSeeAllPeople = onSeeAllPeople,
-        )
-        Spacer(Modifier.height(20.dp))
-        FaceMaintenanceCard(
-            onRescan = viewModel::rescanFaces,
-            onClear = viewModel::clearFaceIndex,
-        )
-        // The encrypted export and import seal the face index to the account's own key, so they need
-        // an account; a guest has no key to seal to. Hidden without one, while the rest of the screen
-        // (the on-device scan, people and maintenance) runs for a guest just as it does signed in.
-        if (settingsState.isSignedIn) {
-            Spacer(Modifier.height(20.dp))
-            FaceTransferCard(
-                inProgress = transferInProgress,
-                onExport = viewModel::exportFaceIndex,
-                onImport = viewModel::importFaceIndex,
+    // Opening this screen resumes a scan the OS killed, so re-entry continues indexing without a
+    // pull-to-refresh. Paused-respecting and idempotent (see the VM), so it is safe on every entry.
+    LaunchedEffect(Unit) { viewModel.resumeFaceIndexingIfNeeded() }
+
+    SettingsSubPageScaffold(title = stringResource(R.string.settings_ai_face_toggle), onBack = onBack) {
+        // The enable toggle lives here on the dedicated sub-page (like semantic search), so the AI-menu
+        // row is a single always-present entry and the maintenance below stays reachable even when the
+        // feature is off. While the model fetches the row reads as busy, a failed fetch is stated in
+        // place, and a switched-on feature whose model is gone says so rather than looking as if it works.
+        SettingsCard {
+            ToggleRow(
+                label = stringResource(R.string.settings_ai_face_toggle),
+                description = when {
+                    state.faceModelDownloading ->
+                        stringResource(R.string.settings_ai_face_downloading)
+                    state.faceModelDownloadFailed ->
+                        stringResource(R.string.settings_ai_face_download_failed)
+                    state.faceEnabled && !state.faceRecognitionAvailable ->
+                        stringResource(R.string.settings_ai_face_model_missing)
+                    else -> stringResource(R.string.settings_ai_face_desc)
+                },
+                checked = state.faceEnabled,
+                onCheckedChange = viewModel::setFaceEnabled,
+                enabled = !state.faceModelDownloading,
             )
+            if (state.faceModelDownloading) {
+                val faceTotalBytes = FaceModelAssets.TOTAL_DOWNLOAD_BYTES
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 16.dp, end = 16.dp, bottom = 14.dp),
+                ) {
+                    LinearProgressIndicator(
+                        progress = {
+                            if (faceTotalBytes > 0L) {
+                                (state.faceModelDownloadedBytes.toFloat() / faceTotalBytes)
+                                    .coerceIn(0f, 1f)
+                            } else 0f
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        color = colors.accent,
+                        trackColor = colors.trackBg,
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        text = stringResource(
+                            R.string.settings_ai_face_downloading_progress,
+                            formatBytes(state.faceModelDownloadedBytes),
+                            formatBytes(faceTotalBytes),
+                        ),
+                        color = colors.fgMute,
+                        fontSize = 12.sp,
+                    )
+                }
+            } else if (state.faceModelDownloadFailed) {
+                Text(
+                    text = stringResource(R.string.settings_ai_face_download_retry),
+                    color = colors.fgMute,
+                    fontSize = 12.5.sp,
+                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 14.dp),
+                )
+            }
+        }
+
+        // Status, maintenance, transfer and excluded faces only make sense once the scan is switched on,
+        // so they stay hidden while face recognition is off.
+        if (state.faceEnabled) {
+            Spacer(Modifier.height(20.dp))
+            FaceStatusCard(
+                ui = faceUi,
+                groups = faceGroups,
+                faceCount = faceCount,
+                // Running state but the semantic walk holds the shared model gate = standing by behind it.
+                waitingForOther = faceMlActiveRail == eu.akoos.photos.util.MlRail.SEMANTIC &&
+                    faceUi.state == FaceIndexingState.Running,
+                onSetPaused = viewModel::setFaceIndexingPaused,
+                onOpenPerson = onOpenPerson,
+            )
+            Spacer(Modifier.height(20.dp))
+            SettingsCard {
+                ToggleRow(
+                    label = stringResource(R.string.settings_face_auto_merge),
+                    description = stringResource(R.string.settings_face_auto_merge_desc),
+                    checked = state.faceAutoMerge,
+                    onCheckedChange = viewModel::setFaceAutoMerge,
+                )
+            }
+            // Excluded faces sits directly under the groups, so the people set aside are next to the ones
+            // the scan grouped, ahead of the maintenance and transfer controls.
+            Spacer(Modifier.height(20.dp))
+            SettingsCard {
+                NavRow(
+                    label = stringResource(R.string.settings_face_excluded),
+                    description = stringResource(R.string.settings_face_excluded_desc),
+                    onClick = onOpenExcluded,
+                )
+            }
+            Spacer(Modifier.height(20.dp))
+            FaceMaintenanceCard(
+                onRescan = viewModel::rescanFaces,
+                onClear = viewModel::clearFaceIndex,
+            )
+            // The encrypted export and import seal the face index to the account's own key, so they need
+            // an account; a guest has no key to seal to. Hidden without one, while the rest of the screen
+            // (the on-device scan, people and maintenance) runs for a guest just as it does signed in.
+            if (state.isSignedIn) {
+                Spacer(Modifier.height(20.dp))
+                FaceTransferCard(
+                    inProgress = transferInProgress,
+                    onExport = viewModel::exportFaceIndex,
+                    onImport = viewModel::importFaceIndex,
+                )
+            }
+        }
+
+        // The face model drawers. Download is the consent raised when the feature is switched on with no
+        // model on disk; the size quoted is the figure that goes over the wire. Remove and ConfirmRemove
+        // form the two-stage disable so an accidental tap cannot delete: Remove asks for a final
+        // confirmation, ConfirmRemove then wipes the model files and every detected face and name. Keep,
+        // Cancel, or a swipe leaves everything in place.
+        when (state.faceModelPrompt) {
+            FaceModelPrompt.Download -> ConfirmSheet(
+                title = stringResource(R.string.settings_ai_face_download_title),
+                message = stringResource(
+                    if (state.faceModelOnWifi) {
+                        R.string.settings_ai_face_download_message
+                    } else {
+                        R.string.settings_ai_face_download_message_metered
+                    },
+                    formatBytes(FaceModelAssets.TOTAL_DOWNLOAD_BYTES),
+                ),
+                confirmLabel = stringResource(R.string.settings_ai_face_download_confirm),
+                dismissLabel = stringResource(R.string.cancel),
+                onConfirm = viewModel::confirmFaceModelDownload,
+                onDismiss = viewModel::dismissFaceModelPrompt,
+            )
+            FaceModelPrompt.Remove -> ConfirmSheet(
+                title = stringResource(R.string.settings_ai_face_remove_title),
+                message = stringResource(R.string.settings_ai_face_remove_message),
+                confirmLabel = stringResource(R.string.settings_ai_face_remove_confirm),
+                dismissLabel = stringResource(R.string.settings_ai_face_remove_keep),
+                onConfirm = viewModel::requestFaceModelRemoval,
+                onDismiss = viewModel::disableFaceKeepingData,
+                onOutsideDismiss = viewModel::dismissFaceModelPrompt,
+                destructive = true,
+            )
+            FaceModelPrompt.ConfirmRemove -> ConfirmSheet(
+                title = stringResource(R.string.settings_ai_face_remove_confirm_title),
+                message = stringResource(R.string.settings_ai_face_remove_confirm_message),
+                confirmLabel = stringResource(R.string.settings_ai_face_remove_confirm),
+                dismissLabel = stringResource(R.string.cancel),
+                onConfirm = viewModel::confirmFaceModelRemoval,
+                onDismiss = viewModel::backToFaceRemovePrompt,
+                onOutsideDismiss = viewModel::dismissFaceModelPrompt,
+                destructive = true,
+            )
+            FaceModelPrompt.None -> Unit
         }
         Spacer(Modifier.height(20.dp))
     }
 }
 
 /**
- * Status of the face scan: the people found, a one-line state label, a progress bar only while a walk
- * is running or paused, a preview row of the people, and one primary control that pauses a live walk
- * and starts a scan otherwise, so indexing can be kicked off from Idle or right after a launch.
+ * Status of the face scan: the groups found (named and not-yet-named) and the faces detected, a one-line
+ * state label, a progress bar only while a walk is running or paused, a preview row of the groups that
+ * opens one to name it, and a pause / resume control while a walk is live.
  */
 @Composable
 private fun FaceStatusCard(
     ui: FaceIndexingUi,
-    peopleCount: Int,
-    people: List<eu.akoos.photos.presentation.gallery.PersonUi>,
+    groups: List<eu.akoos.photos.presentation.gallery.PersonUi>,
+    faceCount: Int,
+    waitingForOther: Boolean,
     onSetPaused: (Boolean) -> Unit,
-    onSeeAllPeople: () -> Unit,
+    onOpenPerson: (Long) -> Unit,
 ) {
     val colors = AppColors.current
     val state = ui.state
@@ -1299,12 +1378,18 @@ private fun FaceStatusCard(
         null
     }
     // Indexing is automatic, so a status line only appears while something is actually happening; an
-    // idle or finished scan shows just the people summary, with no "not started" wording.
-    val stateLabel = healthLabel ?: when (state) {
-        FaceIndexingState.Running -> stringResource(R.string.settings_ai_indexing_running)
-        FaceIndexingState.WaitingModel -> stringResource(R.string.settings_ai_indexing_waiting)
-        FaceIndexingState.Paused -> stringResource(R.string.settings_ai_indexing_paused)
-        else -> null
+    // idle or finished scan shows just the people summary, with no "not started" wording. Standing by
+    // behind the semantic walk (they share one model gate) takes precedence over the plain running label,
+    // so a frozen count reads as the wait it is.
+    val stateLabel = if (waitingForOther && (state == FaceIndexingState.Running || state == FaceIndexingState.Paused)) {
+        stringResource(R.string.settings_ai_indexing_waiting_other)
+    } else {
+        healthLabel ?: when (state) {
+            FaceIndexingState.Running -> stringResource(R.string.settings_ai_indexing_running)
+            FaceIndexingState.WaitingModel -> stringResource(R.string.settings_ai_indexing_waiting)
+            FaceIndexingState.Paused -> stringResource(R.string.settings_ai_indexing_paused)
+            else -> null
+        }
     }
     val showBar = (state == FaceIndexingState.Running || state == FaceIndexingState.Paused) &&
         ui.total > 0
@@ -1312,11 +1397,26 @@ private fun FaceStatusCard(
     SettingsCard {
         Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
             Text(
-                pluralStringResource(R.plurals.settings_ai_indexing_people, peopleCount, peopleCount),
+                when {
+                    groups.isNotEmpty() -> stringResource(R.string.settings_ai_groups_found, groups.size)
+                    faceCount > 0 -> stringResource(R.string.settings_ai_faces_found, faceCount)
+                    else -> stringResource(R.string.settings_ai_face_desc)
+                },
                 color = colors.fgPrimary,
                 fontSize = 16.sp,
                 fontWeight = FontWeight.SemiBold,
             )
+            // Once groups have formed, the faces figure rides just below them so both counts show at
+            // once; before any group forms, the faces figure is already the headline, so it is not
+            // repeated here.
+            if (groups.isNotEmpty() && faceCount > 0) {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    stringResource(R.string.settings_ai_faces_found, faceCount),
+                    color = colors.fgMute,
+                    fontSize = 12.5.sp,
+                )
+            }
             if (stateLabel != null) {
                 Spacer(Modifier.height(4.dp))
                 Text(stateLabel, color = colors.fgMute, fontSize = 12.5.sp)
@@ -1337,15 +1437,16 @@ private fun FaceStatusCard(
                 )
             }
 
-            // The found people as round face tiles; tapping any opens the full People page to manage them.
-            if (people.isNotEmpty()) {
+            // The groups the scan has formed, named and not-yet-named alike, as round face tiles; tapping
+            // one opens that group to name it or browse its photos.
+            if (groups.isNotEmpty()) {
                 Spacer(Modifier.height(14.dp))
                 LazyRow(
                     modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    items(people, key = { it.personId }) { person ->
-                        PersonTile(person = person, selected = false, onClick = onSeeAllPeople)
+                    items(groups, key = { it.personId }) { person ->
+                        PersonTile(person = person, selected = false, onClick = { onOpenPerson(person.personId) })
                     }
                 }
             }
@@ -1493,6 +1594,279 @@ private fun FaceTransferCard(
             dismissLabel = stringResource(R.string.cancel),
             onConfirm = { showImportConfirm = false; importLauncher.launch(arrayOf("application/octet-stream", "*/*")) },
             onDismiss = { showImportConfirm = false },
+        )
+    }
+}
+
+// ── Semantic search sub-page ──────────────────────────────────────────────────
+// The on-device semantic index and the controls to manage it: the enable toggle with its model download
+// progress, a status card (scan state, progress, and Pause / Resume), and a Maintenance card (rescan /
+// clear). It works without an account, so a guest's embeddings index under a local partition.
+
+@Composable
+fun SemanticSearchScreen(
+    onBack: () -> Unit,
+    viewModel: SettingsViewModel = hiltViewModel(),
+) {
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val progress by viewModel.semanticIndexingProgress.collectAsStateWithLifecycle()
+    val mlActiveRail by viewModel.mlActiveRail.collectAsStateWithLifecycle()
+    val colors = AppColors.current
+
+    // Opening this screen resumes an indexing pass the OS killed, so re-entry continues without a manual
+    // kick. Paused-respecting and idempotent (see the VM), so it is safe on every entry.
+    LaunchedEffect(Unit) { viewModel.resumeSemanticIndexingIfNeeded() }
+
+    SettingsSubPageScaffold(title = stringResource(R.string.settings_ai_semantic), onBack = onBack) {
+        SettingsCard {
+            ToggleRow(
+                label = stringResource(R.string.settings_ai_semantic),
+                // While the models fetch the row reads as busy, and a failed fetch is stated in place so
+                // the switch staying off is explained rather than looking stuck.
+                description = when {
+                    state.semanticModelDownloading ->
+                        stringResource(R.string.settings_ai_semantic_downloading)
+                    state.semanticModelDownloadFailed ->
+                        stringResource(R.string.settings_ai_semantic_download_failed)
+                    else -> stringResource(R.string.settings_ai_semantic_desc)
+                },
+                checked = state.semanticEnabled,
+                onCheckedChange = viewModel::setSemanticEnabled,
+                enabled = !state.semanticModelDownloading,
+            )
+            // A determinate bar under the toggle shows the model fetch really moving, with the byte count
+            // so far against the total, so a slow link reads as progress rather than a stall; a failed
+            // fetch adds a line saying the switch itself is the retry.
+            if (state.semanticModelDownloading) {
+                val semanticTotalBytes = SemanticModelAssets.TOTAL_DOWNLOAD_BYTES
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 16.dp, end = 16.dp, bottom = 14.dp),
+                ) {
+                    LinearProgressIndicator(
+                        progress = {
+                            if (semanticTotalBytes > 0L) {
+                                (state.semanticModelDownloadProgress.toFloat() / semanticTotalBytes)
+                                    .coerceIn(0f, 1f)
+                            } else 0f
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        color = colors.accent,
+                        trackColor = colors.trackBg,
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        text = stringResource(
+                            R.string.settings_ai_semantic_downloading_progress,
+                            formatBytes(state.semanticModelDownloadProgress),
+                            formatBytes(semanticTotalBytes),
+                        ),
+                        color = colors.fgMute,
+                        fontSize = 12.sp,
+                    )
+                }
+            } else if (state.semanticModelDownloadFailed) {
+                Text(
+                    text = stringResource(R.string.settings_ai_semantic_download_retry),
+                    color = colors.fgMute,
+                    fontSize = 12.5.sp,
+                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 14.dp),
+                )
+            }
+        }
+
+        // The status and maintenance cards only make sense once indexing is switched on, so they stay
+        // hidden while the feature is off.
+        if (state.semanticEnabled) {
+            Spacer(Modifier.height(20.dp))
+            SemanticStatusCard(
+                progress = progress,
+                // Running state but the face walk holds the shared model gate = standing by behind it.
+                waitingForOther = mlActiveRail == eu.akoos.photos.util.MlRail.FACE &&
+                    progress.state == SemanticIndexingState.Running,
+                onSetPaused = viewModel::setSemanticIndexingPaused,
+            )
+            Spacer(Modifier.height(20.dp))
+            SemanticMaintenanceCard(
+                onRescan = viewModel::rescanSemantic,
+                onClear = viewModel::clearSemantic,
+            )
+        }
+
+        // The model drawers, matching the app's other confirm sheets: the download consent raised when the
+        // feature is switched on without the models, and the destructive removal raised when it is switched
+        // off. The size quoted is the figure that goes over the wire.
+        when (state.semanticModelPrompt) {
+            SemanticModelPrompt.Download -> ConfirmSheet(
+                title = stringResource(R.string.settings_ai_semantic_download_title),
+                // Off Wi-Fi the message states the fetch will use mobile data, so the large download is
+                // confirmed rather than pulled silently over a metered link.
+                message = stringResource(
+                    if (state.semanticModelOnWifi) {
+                        R.string.settings_ai_semantic_download_message
+                    } else {
+                        R.string.settings_ai_semantic_download_message_metered
+                    },
+                    formatBytes(SemanticModelAssets.TOTAL_DOWNLOAD_BYTES),
+                ),
+                confirmLabel = stringResource(R.string.settings_ai_semantic_download_confirm),
+                dismissLabel = stringResource(R.string.cancel),
+                onConfirm = viewModel::confirmSemanticModelDownload,
+                onDismiss = viewModel::dismissSemanticModelPrompt,
+            )
+            SemanticModelPrompt.Remove -> ConfirmSheet(
+                title = stringResource(R.string.settings_ai_semantic_remove_title),
+                message = stringResource(
+                    R.string.settings_ai_semantic_remove_message,
+                    formatBytes(SemanticModelAssets.TOTAL_DOWNLOAD_BYTES),
+                ),
+                confirmLabel = stringResource(R.string.settings_ai_semantic_remove_confirm),
+                dismissLabel = stringResource(R.string.settings_ai_semantic_remove_keep),
+                onConfirm = viewModel::confirmSemanticModelRemoval,
+                onDismiss = viewModel::disableSemanticKeepingModel,
+                onOutsideDismiss = viewModel::dismissSemanticModelPrompt,
+                destructive = true,
+            )
+            SemanticModelPrompt.None -> Unit
+        }
+        Spacer(Modifier.height(20.dp))
+    }
+}
+
+/**
+ * Status of the semantic index: a one-line state headline, a progress bar with "X of Y photos" while a
+ * walk is running or paused, and one primary control that pauses a live walk or resumes a paused one.
+ * Driven straight from [SemanticIndexingProgress], mirroring the face status card without a manual start,
+ * since indexing runs automatically and picks up new photos on its own.
+ */
+@Composable
+private fun SemanticStatusCard(
+    progress: SemanticIndexingProgress,
+    waitingForOther: Boolean,
+    onSetPaused: (Boolean) -> Unit,
+) {
+    val colors = AppColors.current
+    val state = progress.state
+    val title = when (state) {
+        SemanticIndexingState.Running -> stringResource(R.string.settings_ai_indexing_running)
+        SemanticIndexingState.WaitingModel -> stringResource(R.string.settings_ai_semantic_indexing_waiting)
+        SemanticIndexingState.Paused -> stringResource(R.string.settings_ai_indexing_paused)
+        // Done means the whole library is embedded; Idle (fresh, or right after a clear) has nothing
+        // indexed, so it must not claim the photos are searchable.
+        SemanticIndexingState.Done -> stringResource(R.string.settings_ai_semantic_ready)
+        else -> stringResource(R.string.settings_ai_semantic_not_indexed)
+    }
+    val showBar = (state == SemanticIndexingState.Running || state == SemanticIndexingState.Paused) &&
+        progress.total > 0
+
+    SettingsCard {
+        Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+            Text(title, color = colors.fgPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+
+            // Standing by behind the other on-device walk (they share one model gate), so say so rather
+            // than leave the count looking frozen.
+            if (waitingForOther) {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    stringResource(R.string.settings_ai_indexing_waiting_other),
+                    color = colors.fgMute,
+                    fontSize = 12.sp,
+                )
+            }
+
+            if (showBar) {
+                Spacer(Modifier.height(12.dp))
+                LinearProgressIndicator(
+                    progress = { progress.indexed.toFloat() / progress.total },
+                    modifier = Modifier.fillMaxWidth(),
+                    color = colors.accent,
+                )
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    stringResource(R.string.settings_ai_indexing_progress, progress.indexed, progress.total),
+                    color = colors.fgMute,
+                    fontSize = 12.sp,
+                )
+            }
+
+            // Indexing runs automatically and new photos are picked up on their own, so the only control is
+            // to pause a live walk or resume a paused one. Idle, finished and model-waiting states show none.
+            when (state) {
+                SemanticIndexingState.Running -> {
+                    Spacer(Modifier.height(16.dp))
+                    PrimaryButton(
+                        label = stringResource(R.string.settings_ai_pause),
+                        icon = Icons.Default.Pause,
+                        onClick = { onSetPaused(true) },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                SemanticIndexingState.Paused -> {
+                    Spacer(Modifier.height(16.dp))
+                    PrimaryButton(
+                        label = stringResource(R.string.settings_ai_resume),
+                        icon = Icons.Default.PlayArrow,
+                        onClick = { onSetPaused(false) },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                else -> {}
+            }
+        }
+    }
+}
+
+/**
+ * Maintenance actions, one destructive: rescan clears the search index and builds it again for every
+ * photo, clear wipes every stored embedding and leaves the library not indexed. Both confirm first.
+ */
+@Composable
+private fun SemanticMaintenanceCard(
+    onRescan: () -> Unit,
+    onClear: () -> Unit,
+) {
+    var showRescanConfirm by remember { mutableStateOf(false) }
+    var showClearConfirm by remember { mutableStateOf(false) }
+
+    SectionLabel(stringResource(R.string.settings_face_maintenance))
+    Spacer(Modifier.height(8.dp))
+    SettingsCard {
+        ActionRow(
+            label = stringResource(R.string.settings_ai_semantic_rescan),
+            description = stringResource(R.string.settings_ai_semantic_rescan_desc),
+            icon = Icons.Default.Refresh,
+            onClick = { showRescanConfirm = true },
+        )
+        RowDivider()
+        ActionRow(
+            label = stringResource(R.string.settings_ai_semantic_clear),
+            description = stringResource(R.string.settings_ai_semantic_clear_desc),
+            icon = Icons.Default.DeleteOutline,
+            destructive = true,
+            onClick = { showClearConfirm = true },
+        )
+    }
+
+    if (showRescanConfirm) {
+        ConfirmDialog(
+            title = stringResource(R.string.settings_ai_semantic_rescan_confirm_title),
+            message = stringResource(R.string.settings_ai_semantic_rescan_confirm_msg),
+            confirmLabel = stringResource(R.string.settings_ai_semantic_rescan),
+            dismissLabel = stringResource(R.string.cancel),
+            onConfirm = { showRescanConfirm = false; onRescan() },
+            onDismiss = { showRescanConfirm = false },
+        )
+    }
+    if (showClearConfirm) {
+        ConfirmDialog(
+            title = stringResource(R.string.settings_ai_semantic_clear_confirm_title),
+            message = stringResource(R.string.settings_ai_semantic_clear_confirm_msg),
+            confirmLabel = stringResource(R.string.settings_ai_semantic_clear),
+            dismissLabel = stringResource(R.string.cancel),
+            onConfirm = { showClearConfirm = false; onClear() },
+            onDismiss = { showClearConfirm = false },
+            destructive = true,
         )
     }
 }
@@ -1813,8 +2187,8 @@ fun BackupProcessingScreen(
                 },
             )
         }
-        // The type toggles and the shared quality tier: each toggle reveals the tier list below when
-        // either photos or videos are set to compress.
+        // The type toggles each carry their own quality tier list: photos and videos pick a tier
+        // independently, and each list is revealed only while its own toggle is on. (#108)
         SettingsCard {
             ToggleRow(
                 label = stringResource(R.string.settings_compress_photos),
@@ -1822,15 +2196,8 @@ fun BackupProcessingScreen(
                 checked = state.compressOnUpload,
                 onCheckedChange = viewModel::setCompressOnUpload,
             )
-            RowDivider()
-            ToggleRow(
-                label = stringResource(R.string.settings_compress_videos),
-                description = stringResource(R.string.settings_compress_videos_desc),
-                checked = state.compressVideosOnUpload,
-                onCheckedChange = viewModel::setCompressVideosOnUpload,
-            )
-            // The quality tier governs both paths, so it shows whenever either toggle is on.
-            if (state.compressOnUpload || state.compressVideosOnUpload) {
+            // Photo quality tier, bound to the photo tier state.
+            if (state.compressOnUpload) {
                 UploadCompressionTier.entries.forEach { tier ->
                     RowDivider()
                     CompressTierRow(
@@ -1838,6 +2205,25 @@ fun BackupProcessingScreen(
                         description = stringResource(tier.descRes),
                         selected = state.compressTier == tier,
                         onClick = { viewModel.setCompressTier(tier) },
+                    )
+                }
+            }
+            RowDivider()
+            ToggleRow(
+                label = stringResource(R.string.settings_compress_videos),
+                description = stringResource(R.string.settings_compress_videos_desc),
+                checked = state.compressVideosOnUpload,
+                onCheckedChange = viewModel::setCompressVideosOnUpload,
+            )
+            // Video quality tier, bound to the separate video tier state.
+            if (state.compressVideosOnUpload) {
+                UploadCompressionTier.entries.forEach { tier ->
+                    RowDivider()
+                    CompressTierRow(
+                        label = stringResource(tier.labelRes),
+                        description = stringResource(tier.descRes),
+                        selected = state.compressTierVideo == tier,
+                        onClick = { viewModel.setCompressTierVideo(tier) },
                     )
                 }
             }

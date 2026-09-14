@@ -488,6 +488,7 @@ private fun mergeSimilarClusters(
 
 /** L2-normalised mean of the members' embeddings, a cluster's mean direction. */
 private fun normalizedMean(members: List<Int>, samples: List<FaceSample>): FloatArray {
+    if (members.isEmpty()) return FloatArray(samples.firstOrNull()?.embedding?.size ?: 0)
     val dim = samples[members[0]].embedding.size
     val sum = FloatArray(dim)
     for (m in members) {

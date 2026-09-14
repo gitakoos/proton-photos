@@ -57,6 +57,7 @@ import eu.akoos.photos.domain.repository.LocalMediaRepository
 import eu.akoos.photos.domain.usecase.AlbumSortMode
 import eu.akoos.photos.domain.usecase.MoveToFolderUseCase
 import eu.akoos.photos.domain.usecase.PendingMove
+import eu.akoos.photos.domain.usecase.ResolveCoverGifUseCase
 import eu.akoos.photos.domain.usecase.decodeAlbumOrder
 import eu.akoos.photos.domain.usecase.encodeAlbumOrder
 import eu.akoos.photos.domain.usecase.sortAlbums
@@ -76,6 +77,10 @@ data class DeviceFolder(
     val name: String,
     val coverUri: String?,
     val itemCount: Int,
+    /** True when the cover file is a GIF, so its card can animate it when cover autoplay is on. The
+     *  cover uri is a MediaStore `content://` id that never reveals the extension, so gif-ness is
+     *  resolved from the cover item's mime type / display name when the card is built. */
+    val coverIsGif: Boolean = false,
 )
 
 /**
@@ -146,6 +151,7 @@ class AlbumsViewModel @Inject constructor(
     private val moveToFolder: MoveToFolderUseCase,
     private val networkObserver: eu.akoos.photos.util.NetworkObserver,
     private val albumListEvents: eu.akoos.photos.util.AlbumListEventBus,
+    private val resolveCoverGifUseCase: ResolveCoverGifUseCase,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(AlbumsUiState())
@@ -462,6 +468,16 @@ class AlbumsViewModel @Inject constructor(
 
     fun clearError() = _uiState.update { it.copy(error = null) }
 
+    /**
+     * A playable local GIF path (`file://…`) for the cloud album cover [coverLinkId], or null when it
+     * is not an animatable GIF, is unavailable under the Wi-Fi-only policy, or no account is signed in
+     * (covers then stay static). Delegates to [ResolveCoverGifUseCase], which runs off the main thread.
+     */
+    suspend fun resolveCoverGif(coverLinkId: String): String? {
+        val userId = accountManager.getPrimaryUserId().first() ?: return null
+        return resolveCoverGifUseCase.resolve(userId, coverLinkId)
+    }
+
     fun createAlbum(name: String) {
         val trimmed = name.trim()
         if (trimmed.isEmpty()) return
@@ -478,7 +494,7 @@ class AlbumsViewModel @Inject constructor(
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 _uiState.update { it.copy(
                     isCreatingAlbum = false,
-                    createAlbumError = e.message ?: context.getString(R.string.albums_create_failed),
+                    createAlbumError = e.message?.let(::sanitizeErrorMessage) ?: context.getString(R.string.albums_create_failed),
                 ) }
             }
         }
@@ -532,7 +548,7 @@ class AlbumsViewModel @Inject constructor(
             onSuccess = { emit(AlbumActionResult.Done) },
             onFailure = { e ->
                 if (e is kotlinx.coroutines.CancellationException) throw e
-                emit(AlbumActionResult.Failed(e.message ?: context.getString(R.string.albums_rename_failed)))
+                emit(AlbumActionResult.Failed(e.message?.let(::sanitizeErrorMessage) ?: context.getString(R.string.albums_rename_failed)))
             },
         )
     }
@@ -562,7 +578,7 @@ class AlbumsViewModel @Inject constructor(
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 // The dialog is its own window and the message lands on the scaffold behind it, so
                 // leaving it up hides the only feedback there is and the button reads as inert.
-                _uiState.update { it.copy(deleteWouldLosePhotosFor = null, error = context.getString(R.string.albums_delete_failed, e.message ?: "")) }
+                _uiState.update { it.copy(deleteWouldLosePhotosFor = null, error = context.getString(R.string.albums_delete_failed, e.message?.let(::sanitizeErrorMessage) ?: "")) }
             }
         }
     }

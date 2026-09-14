@@ -183,6 +183,56 @@ class AppDatabaseMigrationTest {
     }
 
     @Test
+    fun migrate_v40_to_v41_recreatesPerceptualHashTableWithTheDctFingerprintShape() {
+        // Start from the old single-column cache with a row in it, exactly what an upgrading device has.
+        Migrations.MIGRATION_13_14.migrate(db)
+        db.execSQL(
+            "INSERT INTO perceptual_hash (`key`, hash, isCloud, freshness, algoVersion, computedAt) " +
+                "VALUES ('old-1', 42, 1, 'old-1', 1, 5)"
+        )
+
+        Migrations.MIGRATION_40_41.migrate(db)
+
+        // The rebuildable cache is recreated empty in the new shape, so the pre-upgrade row is gone.
+        db.query("SELECT COUNT(*) FROM perceptual_hash").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals("the fingerprint cache is dropped and recreated empty", 0, cur.getInt(0))
+        }
+
+        // The new shape accepts a 256-bit fingerprint (four longs), a quality score and a colour blob.
+        db.execSQL(
+            "INSERT INTO perceptual_hash " +
+                "(`key`, h0, h1, h2, h3, quality, color, isCloud, freshness, algoVersion, computedAt) " +
+                "VALUES ('new-1', 1, 2, 3, 4, 75, X'0102030405', 0, 'a_10', 1, 9)"
+        )
+        db.query(
+            "SELECT `key`, h0, h3, quality, color, isCloud, freshness FROM perceptual_hash WHERE `key` = 'new-1'"
+        ).use { cur ->
+            assertTrue("the inserted fingerprint row is readable", cur.moveToFirst())
+            assertEquals("new-1", cur.getString(0))
+            assertEquals(1L, cur.getLong(1))
+            assertEquals(4L, cur.getLong(2))
+            assertEquals(75, cur.getInt(3))
+            assertEquals("the colour blob round-trips", 5, cur.getBlob(4).size)
+            assertEquals(0, cur.getInt(5))
+            assertEquals("a_10", cur.getString(6))
+        }
+
+        // `key` is still the primary key, so re-writing the same key replaces rather than duplicates.
+        db.execSQL(
+            "INSERT OR REPLACE INTO perceptual_hash " +
+                "(`key`, h0, h1, h2, h3, quality, color, isCloud, freshness, algoVersion, computedAt) " +
+                "VALUES ('new-1', 9, 9, 9, 9, 80, X'FF', 0, 'a_20', 1, 10)"
+        )
+        db.query("SELECT COUNT(*), MAX(h0), MAX(freshness) FROM perceptual_hash WHERE `key` = 'new-1'").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals("the key is a primary key, so only one row survives", 1, cur.getInt(0))
+            assertEquals("the replacement fingerprint won", 9L, cur.getLong(1))
+            assertEquals("the replacement freshness won", "a_20", cur.getString(2))
+        }
+    }
+
+    @Test
     fun migrate_v14_to_v15_addsQueueColumns_backfillsLocalOnly_andCreatesTargetTable() {
         // A pre-v15 sync_state table with the columns MIGRATION_14_15 touches. Only the queued
         // backfill depends on `status`, so the seed carries the minimum the migration reads.

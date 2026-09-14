@@ -1522,7 +1522,7 @@ class PhotoViewerViewModel @Inject constructor(
                             MediaStore.createWriteRequest(context.contentResolver, listOf(Uri.parse(uri))),
                         )
                     } else {
-                        RenameState.Failed(e.message ?: context.getString(R.string.viewer_rename_failed))
+                        RenameState.Failed(e.message?.let { eu.akoos.photos.util.sanitizeErrorMessage(it) } ?: context.getString(R.string.viewer_rename_failed))
                     }
                 },
             )
@@ -1804,7 +1804,7 @@ class PhotoViewerViewModel @Inject constructor(
                 .onFailure { e ->
                     _transientError.value = context.getString(
                         R.string.viewer_remove_from_album_failed,
-                        e.message ?: context.getString(R.string.viewer_unknown_error),
+                        e.message?.let { eu.akoos.photos.util.sanitizeErrorMessage(it) } ?: context.getString(R.string.viewer_unknown_error),
                     )
                 }
             _isAddingToAlbum.value = false
@@ -1827,7 +1827,7 @@ class PhotoViewerViewModel @Inject constructor(
                 .onFailure { e ->
                     _transientError.value = context.getString(
                         R.string.viewer_set_cover_failed,
-                        e.message ?: context.getString(R.string.viewer_unknown_error),
+                        e.message?.let { eu.akoos.photos.util.sanitizeErrorMessage(it) } ?: context.getString(R.string.viewer_unknown_error),
                     )
                 }
         }
@@ -1855,8 +1855,15 @@ class PhotoViewerViewModel @Inject constructor(
                 is GalleryItem.LocalOnly -> {
                     _isAddingToAlbum.value = true
                     runCatching { forceUploadLocalUris.queueForAlbum(userId, albumLinkId, listOf(item.local.uri)) }
+                        .onSuccess { if (targetName.isNotEmpty()) _addToAlbumDone.tryEmit(targetName) }
+                        .onFailure { e ->
+                            if (e is kotlinx.coroutines.CancellationException) throw e
+                            _transientError.value = context.getString(
+                                R.string.viewer_add_to_album_failed,
+                                e.message?.let { eu.akoos.photos.util.sanitizeErrorMessage(it) } ?: context.getString(R.string.viewer_unknown_error),
+                            )
+                        }
                     _isAddingToAlbum.value = false
-                    if (targetName.isNotEmpty()) _addToAlbumDone.tryEmit(targetName)
                     return@launch
                 }
             }
@@ -1875,7 +1882,7 @@ class PhotoViewerViewModel @Inject constructor(
                 .onFailure { e ->
                     _transientError.value = context.getString(
                         R.string.viewer_add_to_album_failed,
-                        e.message ?: context.getString(R.string.viewer_unknown_error),
+                        e.message?.let { eu.akoos.photos.util.sanitizeErrorMessage(it) } ?: context.getString(R.string.viewer_unknown_error),
                     )
                 }
             _isAddingToAlbum.value = false
@@ -1907,7 +1914,7 @@ class PhotoViewerViewModel @Inject constructor(
             }.onFailure { e ->
                 _transientError.value = context.getString(
                     R.string.viewer_create_album_failed,
-                    e.message ?: context.getString(R.string.viewer_unknown_error),
+                    e.message?.let { eu.akoos.photos.util.sanitizeErrorMessage(it) } ?: context.getString(R.string.viewer_unknown_error),
                 )
             }
             _isAddingToAlbum.value = false
@@ -2003,7 +2010,7 @@ class PhotoViewerViewModel @Inject constructor(
                 if (outcome.isFailure || (outcome.getOrNull()?.failed ?: 0) > 0) {
                     _transientError.value = context.getString(
                         R.string.viewer_save_to_device_failed,
-                        reason ?: context.getString(R.string.viewer_unknown_error),
+                        reason?.let { eu.akoos.photos.util.sanitizeErrorMessage(it) } ?: context.getString(R.string.viewer_unknown_error),
                     )
                 }
             } finally {
@@ -2064,7 +2071,7 @@ class PhotoViewerViewModel @Inject constructor(
             }.onFailure { e ->
                 _transientError.value = context.getString(
                     R.string.viewer_share_failed,
-                    e.message ?: context.getString(R.string.viewer_unknown_error),
+                    e.message?.let { eu.akoos.photos.util.sanitizeErrorMessage(it) } ?: context.getString(R.string.viewer_unknown_error),
                 )
             }
             _isSharing.value = false
@@ -2245,7 +2252,7 @@ class PhotoViewerViewModel @Inject constructor(
                 },
                 onFailure = { e ->
                     if (thumbUrl == null && _state.value.itemKey == itemKey) {
-                        _state.value = ViewerState.Error(e.message)
+                        _state.value = ViewerState.Error(eu.akoos.photos.util.sanitizeErrorMessage(e.message))
                     }
                     // else keep showing thumbnail silently
                 },

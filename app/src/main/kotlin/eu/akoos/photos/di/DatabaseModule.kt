@@ -55,6 +55,7 @@ import eu.akoos.photos.data.db.dao.ClusterSummaryDao
 import eu.akoos.photos.data.db.dao.DayMetaDao
 import eu.akoos.photos.data.db.dao.FaceDao
 import eu.akoos.photos.data.db.dao.FaceScanDao
+import eu.akoos.photos.data.db.dao.ImageEmbeddingDao
 import eu.akoos.photos.data.db.dao.ImportAlbumMemberDao
 import eu.akoos.photos.data.db.dao.ImportHistoryDao
 import eu.akoos.photos.data.db.dao.ImportStagedDao
@@ -232,5 +233,9 @@ abstract class DatabaseModule {
         @Provides
         @Singleton
         fun provideClusterSummaryDao(db: AppDatabase): ClusterSummaryDao = db.clusterSummaryDao()
+
+        @Provides
+        @Singleton
+        fun provideImageEmbeddingDao(db: AppDatabase): ImageEmbeddingDao = db.imageEmbeddingDao()
     }
 }

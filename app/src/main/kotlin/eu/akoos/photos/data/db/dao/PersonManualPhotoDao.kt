@@ -72,4 +72,12 @@ interface PersonManualPhotoDao {
 
     @Query("DELETE FROM person_manual_photo WHERE userId = :userId")
     suspend fun clearForUser(userId: String)
+
+    /** Re-keys every manual photo assignment from one owner to another, to carry a guest's curation on sign-in. */
+    @Query("UPDATE person_manual_photo SET userId = :to WHERE userId = :from")
+    suspend fun updateUserId(from: String, to: String)
+
+    /** Follows a manually assigned photo to its new key when a device photo is backed up to Drive. */
+    @Query("UPDATE person_manual_photo SET photoKey = :newKey WHERE userId = :userId AND photoKey = :oldKey")
+    suspend fun rekeyPhoto(userId: String, oldKey: String, newKey: String)
 }

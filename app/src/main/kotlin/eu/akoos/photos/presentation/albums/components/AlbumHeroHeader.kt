@@ -53,6 +53,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import eu.akoos.photos.presentation.albums.rememberCoverGifModel
 import eu.akoos.photos.presentation.common.fullBleedHorizontal
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.Bg2
@@ -67,6 +68,11 @@ import eu.akoos.photos.presentation.theme.PillBorder
 @Composable
 internal fun AlbumHeroHeader(
     coverModel: Any?,
+    /** linkId of the cover photo. When cover autoplay is on and it is a GIF, [resolveCoverGif]
+     *  resolves an animatable full-res file that replaces [coverModel]; null (the default) leaves
+     *  [coverModel] untouched, for callers that never animate their hero. */
+    coverLinkId: String? = null,
+    resolveCoverGif: suspend (String) -> String? = { null },
     title: String,
     photoCountText: String,
     /** Live scroll offset (px) of the header, read inside graphicsLayer so the cover can parallax
@@ -75,6 +81,9 @@ internal fun AlbumHeroHeader(
     titleActions: @Composable (RowScope.() -> Unit)? = null,
     metaLeading: @Composable (RowScope.() -> Unit)? = null,
 ) {
+    // Swap the still cover for its resolved full-res GIF when cover autoplay is on; otherwise the
+    // still thumbnail stands. A non-String model, or a caller that never animates, is left untouched.
+    val heroCover = rememberCoverGifModel(coverLinkId, coverModel as? String, resolveCoverGif) ?: coverModel
     // Full-bleed: cancel the parent grid's 20.dp side contentPadding so the cover banner and the
     // title block span edge-to-edge, while the photo cells below stay inset by that padding.
     Column(modifier = Modifier.fullBleedHorizontal(20.dp)) {
@@ -85,12 +94,12 @@ internal fun AlbumHeroHeader(
                 .clipToBounds()
                 .background(Bg2),
         ) {
-            if (coverModel != null) {
+            if (heroCover != null) {
                 // Crossfade to the new cover when it changes. The request is keyed on the model so
                 // it isn't rebuilt on every recomposition (which would reload and flicker).
                 val context = LocalContext.current
-                val coverRequest = remember(coverModel) {
-                    ImageRequest.Builder(context).data(coverModel).crossfade(400).build()
+                val coverRequest = remember(heroCover) {
+                    ImageRequest.Builder(context).data(heroCover).crossfade(400).build()
                 }
                 AsyncImage(
                     model = coverRequest,

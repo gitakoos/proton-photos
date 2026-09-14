@@ -622,5 +622,45 @@ object Migrations {
         }
     }
 
-    val ALL: Array<Migration> = arrayOf(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22, MIGRATION_22_23, MIGRATION_23_24, MIGRATION_24_25, MIGRATION_25_26, MIGRATION_26_27, MIGRATION_27_28, MIGRATION_28_29, MIGRATION_29_30, MIGRATION_30_31, MIGRATION_31_32, MIGRATION_32_33, MIGRATION_33_34, MIGRATION_34_35, MIGRATION_35_36, MIGRATION_36_37, MIGRATION_37_38, MIGRATION_38_39)
+    /** v39 to v40: new `image_embedding` table, one CLIP image embedding per photo backing on-device
+     *  semantic search. The row's presence doubles as the "already embedded" marker, so a re-run skips a
+     *  photo it has already indexed without a separate scan table. Additive and rebuildable: the empty
+     *  table is the correct state to arrive at, since an embedding comes from re-reading images this
+     *  migration cannot see, and the first indexing pass after the upgrade re-derives it. Existing tables
+     *  are untouched. */
+    val MIGRATION_39_40 = object : Migration(39, 40) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `image_embedding` (`userId` TEXT NOT NULL, " +
+                    "`photoKey` TEXT NOT NULL, `embedding` BLOB NOT NULL, " +
+                    "`modelVersion` INTEGER NOT NULL, `indexedAt` INTEGER NOT NULL, " +
+                    "PRIMARY KEY(`userId`, `photoKey`))"
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_image_embedding_userId` " +
+                    "ON `image_embedding` (`userId`)"
+            )
+        }
+    }
+
+    /** v40 to v41: the near-duplicate finder moves from a 64-bit difference hash to a 256-bit DCT
+     *  fingerprint carrying a quality score and a coarse colour signature (see
+     *  [eu.akoos.photos.util.PdqHash]). The old single-column `perceptual_hash` cache cannot hold the new
+     *  shape, and every row would have to be recomputed under the new algorithm anyway, so the rebuildable
+     *  cache is dropped and recreated empty; the background filler repopulates it on the next open. Every
+     *  other table is untouched. */
+    val MIGRATION_40_41 = object : Migration(40, 41) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("DROP TABLE IF EXISTS `perceptual_hash`")
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `perceptual_hash` (`key` TEXT NOT NULL, " +
+                    "`h0` INTEGER NOT NULL, `h1` INTEGER NOT NULL, `h2` INTEGER NOT NULL, " +
+                    "`h3` INTEGER NOT NULL, `quality` INTEGER NOT NULL, `color` BLOB NOT NULL, " +
+                    "`isCloud` INTEGER NOT NULL, `freshness` TEXT NOT NULL, " +
+                    "`algoVersion` INTEGER NOT NULL, `computedAt` INTEGER NOT NULL, PRIMARY KEY(`key`))"
+            )
+        }
+    }
+
+    val ALL: Array<Migration> = arrayOf(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22, MIGRATION_22_23, MIGRATION_23_24, MIGRATION_24_25, MIGRATION_25_26, MIGRATION_26_27, MIGRATION_27_28, MIGRATION_28_29, MIGRATION_29_30, MIGRATION_30_31, MIGRATION_31_32, MIGRATION_32_33, MIGRATION_33_34, MIGRATION_34_35, MIGRATION_35_36, MIGRATION_36_37, MIGRATION_37_38, MIGRATION_38_39, MIGRATION_39_40, MIGRATION_40_41)
 }

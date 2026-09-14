@@ -331,6 +331,9 @@ class UploadPendingUseCase @Inject constructor(
         val compressOnUpload = prefs[SettingsKeys.COMPRESS_ON_UPLOAD] ?: false
         val compressTier = UploadCompressionTier
             .fromOrdinalOrDefault(prefs[SettingsKeys.COMPRESS_UPLOAD_TIER] ?: -1)
+        // #108: the video path re-encodes at its own tier, seeded from the shared value on upgrade.
+        val videoCompressTier = UploadCompressionTier
+            .fromOrdinalOrDefault(prefs[SettingsKeys.COMPRESS_UPLOAD_TIER_VIDEO] ?: -1)
         val mirrorStripToLocal = prefs[SettingsKeys.MIRROR_STRIP_TO_LOCAL] ?: false
         val mirrorCompressToLocal = prefs[SettingsKeys.MIRROR_COMPRESS_TO_LOCAL] ?: false
         val compressVideosOnUpload = prefs[SettingsKeys.COMPRESS_VIDEO_ON_UPLOAD] ?: false
@@ -646,6 +649,7 @@ class UploadPendingUseCase @Inject constructor(
                                 stripOnUpload = stripOnUpload,
                                 compressOnUpload = compressOnUpload,
                                 compressTier = compressTier,
+                                videoCompressTier = videoCompressTier,
                                 mirrorStripToLocal = mirrorStripToLocal,
                                 mirrorCompressToLocal = mirrorCompressToLocal,
                                 compressVideosOnUpload = compressVideosOnUpload,
@@ -724,6 +728,7 @@ class UploadPendingUseCase @Inject constructor(
         stripOnUpload: Boolean,
         compressOnUpload: Boolean,
         compressTier: UploadCompressionTier,
+        videoCompressTier: UploadCompressionTier,
         mirrorStripToLocal: Boolean,
         mirrorCompressToLocal: Boolean,
         compressVideosOnUpload: Boolean,
@@ -1088,10 +1093,7 @@ class UploadPendingUseCase @Inject constructor(
                     eu.akoos.photos.data.upload.VideoUploadCompressor.compressToTemp(
                         context,
                         android.net.Uri.parse(strippedUploadUri),
-                        eu.akoos.photos.data.upload.VideoUploadCompressor.VideoCompressionParams(
-                            compressTier.videoMaxShortEdgePx,
-                            compressTier.videoBitrateBps,
-                        ),
+                        videoCompressionParamsFor(videoCompressTier),
                         localItem.dateTaken,
                     )
                 }
@@ -1099,7 +1101,7 @@ class UploadPendingUseCase @Inject constructor(
                     compressedFile = compressed
                     strippedFile?.delete()
                     strippedFile = null
-                    Log.d(UPLOAD_TAG, "Compressed video ${localItem.displayName} for upload (tier=${compressTier.name})")
+                    Log.d(UPLOAD_TAG, "Compressed video ${localItem.displayName} for upload (tier=${videoCompressTier.name})")
                     android.net.Uri.fromFile(compressed).toString()
                 } else {
                     strippedUploadUri
@@ -1984,3 +1986,16 @@ internal fun uploadDefersForWifiOnly(queueSource: String?, wifiOnly: Boolean, on
     wifiOnly && !onWifi &&
         queueSource != QueueSource.MANUAL &&
         queueSource != QueueSource.ALBUM_ADD
+
+/**
+ * #108: the video-transcode knobs the upload path derives from a compression [tier]: the short-edge
+ * cap and target bitrate the VIDEO path re-encodes at. The photo path hands the tier straight to the
+ * image compressor, so it has no equivalent.
+ */
+internal fun videoCompressionParamsFor(
+    tier: UploadCompressionTier,
+): eu.akoos.photos.data.upload.VideoUploadCompressor.VideoCompressionParams =
+    eu.akoos.photos.data.upload.VideoUploadCompressor.VideoCompressionParams(
+        tier.videoMaxShortEdgePx,
+        tier.videoBitrateBps,
+    )
