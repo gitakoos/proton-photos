@@ -53,8 +53,9 @@ data class NewsFeed(
 @Serializable
 data class NewsItem(
     /** The stable handle the read-state is kept by AND the short code shown on the entry and used to
-     *  open it on the website (photosforproton.eu/news/#id). Keep it short, e.g. "1024". */
-    val id: String,
+     *  open it on the website (photosforproton.eu/news/#id). Keep it short, e.g. "1024". Defaulted so
+     *  a single item missing its id cannot fail the whole feed decode; blank-id items are dropped. */
+    val id: String = "",
     /** Date the entry is shown under, e.g. "3 August 2026". Display-only, never parsed for logic. */
     val date: String = "",
     val title: String = "",

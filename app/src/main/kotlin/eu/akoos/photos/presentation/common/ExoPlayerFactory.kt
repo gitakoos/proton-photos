@@ -28,6 +28,6 @@ import androidx.media3.exoplayer.DefaultRenderersFactory
 
 // Retries with the next (often software) decoder when the primary MediaCodec decoder fails
 // to init or throws, fixing video glitches on quirky OEM ROMs. No effect on healthy decoders.
-@OptIn(UnstableApi::class)
+@androidx.annotation.OptIn(markerClass = [UnstableApi::class])
 fun decoderFallbackRenderersFactory(context: Context) =
     DefaultRenderersFactory(context).setEnableDecoderFallback(true)

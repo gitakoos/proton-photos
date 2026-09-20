@@ -925,6 +925,7 @@
     <string name="editor_save_cancelled">Salvataggio annullato</string>
     <string name="editor_no_permission">Nessuna autorizzazione per salvare</string>
     <string name="editor_save_failed">Salvataggio non riuscito</string>
+    <string name="editor_save_failed_no_network">Nessuna connessione a internet. Riconnettiti e riprova per salvare questa modifica nel tuo Drive.</string>
     <string name="editor_invalid_video_uri">Impossibile aprire questo video</string>
     <string name="editor_video_metadata_failed">Impossibile leggere i metadati del video</string>
     <string name="editor_cloud_video_download_failed">Download del video dal cloud non riuscito</string>
@@ -2032,6 +2033,14 @@
     <string name="whats_new_videoplay_body">I video si aprono senza una foto sbagliata o un lampo bianco, e vengono riprodotti anche sui telefoni il cui decoder principale prima falliva.</string>
     <string name="whats_new_mergefast_title">Suggerimenti sui volti più rapidi</string>
     <string name="whats_new_mergefast_body">I suggerimenti di unione rispondono nel momento in cui tocchi, restano raggiungibili, e una coppia torna se l\'unione non è stata completata.</string>
+    <string name="whats_new_videosmooth_title">Riproduzione video più fluida</string>
+    <string name="whats_new_videosmooth_body">Il video si riproduce in modo più fluido e affidabile nella vista foto.</string>
+    <string name="whats_new_focalzoom_title">Zoom dove pizzichi</string>
+    <string name="whats_new_focalzoom_body">Pizzica per ingrandire una foto o un video, e lo zoom si concentra sul punto tra le dita.</string>
+    <string name="whats_new_offlineedit_title">Modificare offline mantiene il tuo lavoro</string>
+    <string name="whats_new_offlineedit_body">Modificare una foto o un video del cloud senza connessione ti avvisa e conserva la tua modifica, invece di bloccarsi.</string>
+    <string name="whats_new_videoaudiodate_title">Modifiche video migliori</string>
+    <string name="whats_new_videoaudiodate_body">Aggiungere un mp3 o un\'altra colonna sonora a un video ora viene salvato, e un video del cloud modificato mantiene la sua data originale.</string>
     <string name="whats_new_diag_title">Stai provando questa anteprima?</string>
     <string name="whats_new_diag_body">Grazie per provare un\'anteprima. Se qualcosa non va, invia la diagnostica così un problema di file può essere distinto da qualcos\'altro: copiala dalle Impostazioni e scrivi a support@photosforproton.eu, oppure pubblica su Discord o GitHub.</string>
     <string name="whats_new_section_new">Novità</string>

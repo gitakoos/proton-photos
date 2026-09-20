@@ -251,16 +251,21 @@ internal class VideoReencoder(private val context: Context) {
             // A delayed overlay needs leading silence, which the copy fast path can't insert, so route it
             // through the PCM mix that prepends the offset.
             val overlayDelayed = useOverlayAudio && overlayOffsetUs > 0L
-            val needsAudioEncode =
-                // Multiple kept windows: the source audio must skip the removed gaps too, which only the
-                // PCM mix can concatenate cleanly (a stream-copy can't drop interior ranges in sync), so
-                // route it through the mix whenever there is audio to carry.
-                (isMultiWindow && (useSourceAudio || useOverlayAudio)) ||
-                (useSourceAudio && useOverlayAudio) ||
-                (useSourceAudio && originalAudioGain < 0.999f) ||
-                (useOverlayAudio && !useSourceAudio && musicAudioGain < 0.999f) ||
-                overlayHasGaps ||
-                overlayDelayed
+            // The MP4 muxer only stream-copies AAC audio. A non-AAC overlay (mp3, ogg, opus, flac) must be
+            // decoded and re-encoded to AAC through the mix path; stream-copying it would hand its raw
+            // format to MediaMuxer.addTrack, which rejects it ("Failed to add the track to the muxer"). An
+            // unreadable mime is treated as non-AAC so it takes the safe re-encode path.
+            val overlayIsAac = audioOverlayUri?.let { overlayAudioMime(it) } == MediaFormat.MIMETYPE_AUDIO_AAC
+            val needsAudioEncode = audioNeedsReencode(
+                isMultiWindow = isMultiWindow,
+                useSourceAudio = useSourceAudio,
+                useOverlayAudio = useOverlayAudio,
+                originalAudioGain = originalAudioGain,
+                musicAudioGain = musicAudioGain,
+                overlayIsAac = overlayIsAac,
+                overlayHasGaps = overlayHasGaps,
+                overlayDelayed = overlayDelayed,
+            )
             val streamCopySource = useSourceAudio && !useOverlayAudio && !needsAudioEncode
             val streamCopyOverlay = useOverlayAudio && !useSourceAudio && !needsAudioEncode
 
@@ -551,12 +556,19 @@ internal class VideoReencoder(private val context: Context) {
             val overlayHasGaps = useOvl && removedOverlaySpansMs.isNotEmpty()
             // A delayed overlay needs leading silence the copy path can't insert; route it through the mix.
             val overlayDelayed = useOvl && overlayOffsetUs > 0L
-            val needsAudioEncode =
-                (useSrc && useOvl) ||
-                (useSrc && originalAudioGain < 0.999f) ||
-                (useOvl && !useSrc && musicAudioGain < 0.999f) ||
-                overlayHasGaps ||
-                overlayDelayed
+            // Non-AAC overlays can't be stream-copied into MP4 (see [transcode]); force the AAC mix path.
+            val overlayIsAac = audioOverlayUri?.let { overlayAudioMime(it) } == MediaFormat.MIMETYPE_AUDIO_AAC
+            val needsAudioEncode = audioNeedsReencode(
+                // This lossless-video path is single-window by construction, so no multi-window rule.
+                isMultiWindow = false,
+                useSourceAudio = useSrc,
+                useOverlayAudio = useOvl,
+                originalAudioGain = originalAudioGain,
+                musicAudioGain = musicAudioGain,
+                overlayIsAac = overlayIsAac,
+                overlayHasGaps = overlayHasGaps,
+                overlayDelayed = overlayDelayed,
+            )
             val streamCopySrc = useSrc && !useOvl && !needsAudioEncode
             val streamCopyOvl = useOvl && !useSrc && !needsAudioEncode
 
@@ -730,6 +742,24 @@ internal class VideoReencoder(private val context: Context) {
         }
     }
 
+    /** The overlay audio track's MIME, or null when it can't be read. MP4's muxer stream-copies only
+     *  AAC (and AMR), so a non-AAC overlay must take the decode->PCM->AAC mix path; see [transcode]. */
+    private fun overlayAudioMime(uri: Uri): String? {
+        var pfd: ParcelFileDescriptor? = null
+        val extractor = MediaExtractor()
+        return try {
+            pfd = context.contentResolver.openFileDescriptor(uri, "r") ?: return null
+            extractor.setDataSource(pfd.fileDescriptor)
+            val idx = selectTrack(extractor, "audio/") ?: return null
+            extractor.getTrackFormat(idx).getString(MediaFormat.KEY_MIME)
+        } catch (e: Exception) {
+            null
+        } finally {
+            runCatching { extractor.release() }
+            runCatching { pfd?.close() }
+        }
+    }
+
     private fun selectTrack(extractor: MediaExtractor, mimePrefix: String): Int? {
         for (i in 0 until extractor.trackCount) {
             val fmt = extractor.getTrackFormat(i)
@@ -760,3 +790,31 @@ internal class VideoReencoder(private val context: Context) {
         }
     }
 }
+
+/**
+ * Whether a video save must decode and re-encode its audio to AAC instead of stream-copying it. The MP4
+ * container the app writes accepts only AAC (and AMR) for a stream-copy, and the PCM mix path is the
+ * only one that can attenuate, blend, concatenate across removed gaps, or insert leading silence. A
+ * re-encode is required when: one of several kept windows carries audio; source and overlay both play;
+ * the source plays at partial gain; an overlay-only track plays at partial gain; the overlay is not
+ * already AAC (mp3/ogg/opus/flac, which a stream-copy would hand to MediaMuxer.addTrack raw and fail
+ * with "Failed to add the track to the muxer"); the overlay has silenced spans; or the overlay is
+ * delayed. Pure, so the decision is unit-tested independently of the codec pipeline.
+ */
+internal fun audioNeedsReencode(
+    isMultiWindow: Boolean,
+    useSourceAudio: Boolean,
+    useOverlayAudio: Boolean,
+    originalAudioGain: Float,
+    musicAudioGain: Float,
+    overlayIsAac: Boolean,
+    overlayHasGaps: Boolean,
+    overlayDelayed: Boolean,
+): Boolean =
+    (isMultiWindow && (useSourceAudio || useOverlayAudio)) ||
+    (useSourceAudio && useOverlayAudio) ||
+    (useSourceAudio && originalAudioGain < 0.999f) ||
+    (useOverlayAudio && !useSourceAudio && musicAudioGain < 0.999f) ||
+    (useOverlayAudio && !overlayIsAac) ||
+    overlayHasGaps ||
+    overlayDelayed

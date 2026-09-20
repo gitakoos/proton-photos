@@ -1470,17 +1470,21 @@ class DriveCryptoHelper @Inject constructor(
             // useKeys and the follow-up unlock both enter libgojni; serialize each. Locks taken
             // per iteration so they're never held across loop control flow; addresses fetched above.
             val attempt = runCatching {
-                cryptoLock.withLock { address.useKeys(cryptoContext) { decryptData(sharePassphraseArmored) } }
-            }
-            if (attempt.isSuccess) {
-                val passphraseBytes = attempt.getOrThrow()
-                val keyBytes = cryptoLock.withLock {
+                // Decrypt AND unlock inside one guard: gopenpgp's decryptData can succeed with garbage
+                // bytes on a non-matching address, and only unlock() then throws. Keeping unlock here
+                // lets a wrong address fall through to the next instead of aborting the whole loop,
+                // mirroring getOrDecryptShareKey.
+                cryptoLock.withLock {
+                    val passphraseBytes = address.useKeys(cryptoContext) { decryptData(sharePassphraseArmored) }
                     val unlockedKey = cryptoContext.pgpCrypto.unlock(shareKeyArmored, passphraseBytes)
                     val bytes = unlockedKey.value.copyOf()
                     unlockedKey.close()
                     bytes
                 }
-                Log.d(TAG, "decryptExternalShareKey: succeeded (passphraseBytes=${passphraseBytes.size} keyBytes=${keyBytes.size})")
+            }
+            if (attempt.isSuccess) {
+                val keyBytes = attempt.getOrThrow()
+                Log.d(TAG, "decryptExternalShareKey: succeeded (keyBytes=${keyBytes.size})")
                 return keyBytes
             }
             lastError = attempt.exceptionOrNull()

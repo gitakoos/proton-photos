@@ -23,6 +23,7 @@
 package eu.akoos.photos.data.updater
 
 import android.content.Context
+import android.net.Uri
 import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.BuildConfig
 import kotlinx.coroutines.Dispatchers
@@ -88,6 +89,16 @@ class UpdateDownloader @Inject constructor(
             // mistaken for a complete, installable APK.
             updatesDir.listFiles()?.forEach { runCatching { it.delete() } }
             val outFile = File(updatesDir, apkAssetName)
+
+            // Defense in depth: only ever fetch an update from GitHub's own hosts. The APK is also
+            // signature-verified against the installed cert before install, but refusing an unexpected
+            // host stops a manipulated release JSON from pointing the download off-repo at all.
+            val host = Uri.parse(apkUrl).host
+            if (!apkUrl.startsWith("https://", ignoreCase = true) ||
+                host !in setOf("github.com", "objects.githubusercontent.com")
+            ) {
+                throw IOException("Refusing update from unexpected host: $host")
+            }
 
             val request = Request.Builder()
                 .url(apkUrl)

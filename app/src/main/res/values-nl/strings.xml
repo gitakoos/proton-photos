@@ -968,6 +968,7 @@
     <string name="editor_save_cancelled">Opslaan geannuleerd</string>
     <string name="editor_no_permission">Geen toestemming om op te slaan</string>
     <string name="editor_save_failed">Opslaan mislukt</string>
+    <string name="editor_save_failed_no_network">Geen internetverbinding. Maak opnieuw verbinding en probeer deze bewerking opnieuw op te slaan in je Drive.</string>
     <string name="editor_invalid_video_uri">Deze video kan niet worden geopend</string>
     <string name="editor_video_metadata_failed">Kon de videometadata niet lezen</string>
     <string name="editor_cloud_video_download_failed">Downloaden van cloudvideo mislukt</string>
@@ -2024,6 +2025,14 @@
     <string name="whats_new_videoplay_body">Video\'s openen zonder verkeerde foto of witte flits, en spelen af op telefoons waarvan de hoofddecoder eerder faalde.</string>
     <string name="whats_new_mergefast_title">Snellere gezichtssuggesties</string>
     <string name="whats_new_mergefast_body">Samenvoegsuggesties reageren zodra je tikt, blijven bereikbaar, en een paar komt terug als het samenvoegen niet is voltooid.</string>
+    <string name="whats_new_videosmooth_title">Soepelere videoweergave</string>
+    <string name="whats_new_videosmooth_body">Video speelt soepeler en betrouwbaarder af in de fotoweergave.</string>
+    <string name="whats_new_focalzoom_title">Zoom waar je knijpt</string>
+    <string name="whats_new_focalzoom_body">Knijp op een foto of video om in te zoomen op het punt tussen je vingers.</string>
+    <string name="whats_new_offlineedit_title">Offline bewerken bewaart je werk</string>
+    <string name="whats_new_offlineedit_body">Een cloudfoto of -video bewerken zonder verbinding geeft een melding en bewaart je bewerking, in plaats van vast te lopen.</string>
+    <string name="whats_new_videoaudiodate_title">Betere videobewerkingen</string>
+    <string name="whats_new_videoaudiodate_body">Een mp3 of ander geluidsspoor aan een video toevoegen kan nu worden opgeslagen, en een bewerkte cloudvideo behoudt zijn oorspronkelijke datum.</string>
     <string name="whats_new_diag_title">Test je deze preview?</string>
     <string name="whats_new_diag_body">Bedankt voor het testen van een previewversie. Als er iets misgaat, stuur dan de diagnostische gegevens zodat een bestandsprobleem van iets anders te onderscheiden is: kopieer ze in Instellingen en mail naar support@photosforproton.eu, of plaats ze op Discord of GitHub.</string>
     <string name="whats_new_section_new">Nieuw</string>

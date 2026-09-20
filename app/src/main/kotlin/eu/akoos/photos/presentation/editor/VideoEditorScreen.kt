@@ -358,17 +358,17 @@ fun VideoEditorScreen(
                 onSaved()
             }
             is VideoSaveResult.Failed -> {
-                // Surface a Toast with the error so the user sees WHAT failed — the
-                // previous flow dismissed the sheet (`showSaveSheet = false`) before the
-                // failure message could be rendered, leaving them with no feedback at
-                // all. The failure message also stays in state for the inline label
-                // below the panel; we leave `vm.consumeSaveResult()` deliberately
-                // un-called so the inline error persists until the next save attempt.
-                android.widget.Toast.makeText(
-                    context,
-                    (state.saveResult as VideoSaveResult.Failed).message,
-                    android.widget.Toast.LENGTH_LONG,
-                ).show()
+                // A blocking failure flagged for the dialog (a cloud edit with no internet) is shown by
+                // the bottom-sheet ConfirmDialog below, so skip the toast for it. Every other failure
+                // keeps the Toast + the inline label below the panel (consumeSaveResult is left un-called
+                // so the inline error persists until the next save attempt).
+                if (!(state.saveResult as VideoSaveResult.Failed).asDialog) {
+                    android.widget.Toast.makeText(
+                        context,
+                        (state.saveResult as VideoSaveResult.Failed).message,
+                        android.widget.Toast.LENGTH_LONG,
+                    ).show()
+                }
                 showSaveSheet = false
             }
             null -> Unit
@@ -988,7 +988,7 @@ fun VideoEditorScreen(
             }
 
             val saveResult = state.saveResult
-            if (saveResult is VideoSaveResult.Failed) {
+            if (saveResult is VideoSaveResult.Failed && !saveResult.asDialog) {
                 Text(
                     text = saveResult.message,
                     color = Color(0xFFFF3B30),
@@ -1032,6 +1032,22 @@ fun VideoEditorScreen(
             },
             onDismiss = { showDiscardDialog = false },
             destructive = true,
+        )
+    }
+
+    // A blocking save failure flagged for the dialog (a cloud video edit attempted with no internet).
+    // Shown as the app's own bottom-sheet dialog rather than the toast + inline label the other failures
+    // use; dismissing clears the result and leaves the editor open with the edit intact so the user can
+    // reconnect and save again, or discard.
+    val failedSave = (state.saveResult as? VideoSaveResult.Failed)?.takeIf { it.asDialog }
+    if (failedSave != null) {
+        ConfirmDialog(
+            title = stringResource(R.string.editor_save_failed),
+            message = failedSave.message,
+            confirmLabel = stringResource(android.R.string.ok),
+            dismissLabel = null,
+            onConfirm = { vm.consumeSaveResult() },
+            onDismiss = { vm.consumeSaveResult() },
         )
     }
 

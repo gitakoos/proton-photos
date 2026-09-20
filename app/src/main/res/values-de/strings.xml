@@ -912,6 +912,7 @@
     <string name="editor_save_cancelled">Speichern abgebrochen</string>
     <string name="editor_no_permission">Keine Berechtigung zum Speichern</string>
     <string name="editor_save_failed">Speichern fehlgeschlagen</string>
+    <string name="editor_save_failed_no_network">Keine Internetverbindung. Stelle die Verbindung wieder her und versuche erneut, diese Bearbeitung in deinem Drive zu speichern.</string>
     <string name="editor_invalid_video_uri">Dieses Video konnte nicht geöffnet werden</string>
     <string name="editor_video_metadata_failed">Videometadaten konnten nicht gelesen werden</string>
     <string name="editor_cloud_video_download_failed">Cloud-Video-Download fehlgeschlagen</string>
@@ -1997,6 +1998,14 @@
     <string name="whats_new_videoplay_body">Videos öffnen ohne falsches Foto oder weißes Aufblitzen und spielen auch auf Telefonen, deren Haupt-Decoder bisher versagt hat.</string>
     <string name="whats_new_mergefast_title">Schnellere Gesichtsvorschläge</string>
     <string name="whats_new_mergefast_body">Die Vorschläge zum Zusammenführen reagieren im selben Moment, in dem du tippst, bleiben erreichbar, und ein Paar kommt zurück, wenn die Zusammenführung nicht abgeschlossen wurde.</string>
+    <string name="whats_new_videosmooth_title">Flüssigere Videowiedergabe</string>
+    <string name="whats_new_videosmooth_body">Video wird im Viewer flüssiger und zuverlässiger abgespielt.</string>
+    <string name="whats_new_focalzoom_title">Zoom zwischen deinen Fingern</string>
+    <string name="whats_new_focalzoom_body">Zoome ein Foto oder Video mit zwei Fingern, und es zoomt auf den Punkt zwischen ihnen.</string>
+    <string name="whats_new_offlineedit_title">Offline-Bearbeitungen bleiben erhalten</string>
+    <string name="whats_new_offlineedit_body">Bearbeitest du ein Cloud-Foto oder -Video ohne Verbindung, bekommst du Bescheid und deine Bearbeitung bleibt erhalten, statt hängen zu bleiben.</string>
+    <string name="whats_new_videoaudiodate_title">Bessere Videobearbeitung</string>
+    <string name="whats_new_videoaudiodate_body">Fügst du einem Video eine mp3 oder andere Tonspur hinzu, wird das jetzt gespeichert, und ein bearbeitetes Cloud-Video behält sein ursprüngliches Datum.</string>
     <string name="whats_new_diag_title">Testest du diese Vorschau?</string>
     <string name="whats_new_diag_body">Danke, dass du eine Vorschauversion ausprobierst. Wenn etwas nicht stimmt, sende bitte die Diagnosedaten, damit sich ein Dateiproblem von etwas anderem unterscheiden lässt: Kopiere sie in den Einstellungen und schreibe an support@photosforproton.eu, oder poste auf Discord oder GitHub.</string>
     <string name="whats_new_section_new">Neu</string>

@@ -154,6 +154,7 @@
     <string name="editor_save_cancelled">Ukladanie zrušené</string>
     <string name="editor_no_permission">Žiadne oprávnenie na uloženie</string>
     <string name="editor_save_failed">Uloženie zlyhalo</string>
+    <string name="editor_save_failed_no_network">Žiadne pripojenie k internetu. Obnovte pripojenie a skúste túto úpravu znova uložiť na váš Drive.</string>
     <string name="editor_invalid_video_uri">Toto video sa nepodarilo otvoriť</string>
     <string name="editor_video_metadata_failed">Metadáta videa sa nepodarilo prečítať</string>
     <string name="editor_cloud_video_download_failed">Stiahnutie cloudového videa zlyhalo</string>
@@ -2094,6 +2095,14 @@
     <string name="whats_new_videoplay_body">Videá sa otvárajú bez nesprávnej fotky alebo bieleho bliknutia a prehrajú sa aj na telefónoch, ktorých hlavný dekodér predtým zlyhával.</string>
     <string name="whats_new_mergefast_title">Svižnejšie návrhy tvárí</string>
     <string name="whats_new_mergefast_body">Návrhy zlúčenia zareagujú vo chvíli, keď ťuknete, zostávajú dostupné, a dvojica sa vráti, ak zlúčenie neprebehlo celé.</string>
+    <string name="whats_new_videosmooth_title">Plynulejšie prehrávanie videa</string>
+    <string name="whats_new_videosmooth_body">Video sa v zobrazení fotky prehráva plynulejšie a spoľahlivejšie.</string>
+    <string name="whats_new_focalzoom_title">Priblíženie tam, kde stiahnete prsty</string>
+    <string name="whats_new_focalzoom_body">Stiahnutím prstov priblížte fotku alebo video a priblíži sa v bode medzi vašimi prstami.</string>
+    <string name="whats_new_offlineedit_title">Úpravy offline zostanú zachované</string>
+    <string name="whats_new_offlineedit_body">Úprava fotky alebo videa v cloude bez pripojenia vás upozorní a zachová vašu úpravu, namiesto toho, aby sa zasekla.</string>
+    <string name="whats_new_videoaudiodate_title">Lepšie úpravy videa</string>
+    <string name="whats_new_videoaudiodate_body">Pridanie mp3 alebo inej zvukovej stopy k videu sa teraz uloží a upravené cloudové video si zachová svoj pôvodný dátum.</string>
     <string name="whats_new_diag_title">Testujete túto verziu?</string>
     <string name="whats_new_diag_body">Ďakujem, že skúšate testovaciu verziu. Ak niečo nefunguje správne, pošlite prosím diagnostiku, aby sa dal odlíšiť problém so súborom od niečoho iného: skopírujte ju v Nastaveniach a napíšte na support@photosforproton.eu, alebo napíšte na Discorde či GitHube.</string>
     <string name="whats_new_section_new">Novinky</string>

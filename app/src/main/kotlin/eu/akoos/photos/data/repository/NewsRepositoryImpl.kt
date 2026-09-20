@@ -117,6 +117,9 @@ class NewsRepositoryImpl @Inject constructor(
     /** A malformed or absent cache reads as an empty feed rather than throwing into a collector. */
     private fun parse(cached: String?): NewsFeed {
         if (cached.isNullOrBlank()) return NewsFeed()
-        return runCatching { json.decodeFromString<NewsFeed>(cached) }.getOrDefault(NewsFeed())
+        val feed = runCatching { json.decodeFromString<NewsFeed>(cached) }.getOrDefault(NewsFeed())
+        // Drop any item without a stable id (read-state is keyed by id): one malformed entry must not
+        // sink the whole feed, and a blank-id item cannot be tracked as read anyway.
+        return feed.copy(items = feed.items.filter { it.id.isNotBlank() })
     }
 }

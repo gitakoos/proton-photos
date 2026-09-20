@@ -91,6 +91,13 @@ class SharedAlbumKeyStore @Inject constructor(
      * bytes are held in a [Singleton] that nothing else empties.
      */
     fun clear() {
+        // Zero the decrypted share/album key bytes before dropping the references, so a heap
+        // inspection after sign-out cannot recover them (clearing the map alone only drops references,
+        // leaving the arrays live until GC). Mirrors DriveCryptoHelper.clearAllCaches().
+        contexts.values.forEach {
+            it.sharedShareKeyBytes.fill(0)
+            it.albumKeyBytes.fill(0)
+        }
         contexts.clear()
     }
 

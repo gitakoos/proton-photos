@@ -202,6 +202,7 @@
     <string name="editor_saved_as_copy_toast">Original is read-only, saved as a copy to your gallery</string>
     <string name="editor_overwrite_coerced_to_copy">This file format can\'t be overwritten in place. The original was kept and the edit was saved as a new JPEG copy.</string>
     <string name="editor_overwrite_motion_coerced_to_copy">A motion photo cannot be overwritten in place without losing its video. The original was kept and the edit was saved as a new JPEG copy.</string>
+    <string name="editor_save_failed_no_network">No internet connection. Reconnect and try again to save this edit to your Drive.</string>
     <string name="editor_error_not_signed_in">You\'re not signed in</string>
     <string name="editor_error_download_failed">Couldn\'t download the image</string>
     <string name="editor_error_decode_failed">Couldn\'t decode the image</string>
@@ -2017,6 +2018,14 @@
     <string name="whats_new_videoplay_body">Videos open without a wrong-photo or white flash, and play on phones whose main decoder used to fail.</string>
     <string name="whats_new_mergefast_title">Snappier face suggestions</string>
     <string name="whats_new_mergefast_body">Merge suggestions respond the moment you tap, stay reachable, and a pair comes back if the merge did not finish.</string>
+    <string name="whats_new_videosmooth_title">Smoother video playback</string>
+    <string name="whats_new_videosmooth_body">Video plays more smoothly and reliably in the viewer.</string>
+    <string name="whats_new_focalzoom_title">Zoom where you pinch</string>
+    <string name="whats_new_focalzoom_body">Pinch to zoom a photo or video and it zooms in on the point between your fingers.</string>
+    <string name="whats_new_offlineedit_title">Editing offline keeps your work</string>
+    <string name="whats_new_offlineedit_body">Editing a cloud photo or video with no connection tells you and keeps your edit, instead of stalling.</string>
+    <string name="whats_new_videoaudiodate_title">Better video edits</string>
+    <string name="whats_new_videoaudiodate_body">Adding an mp3 or other soundtrack to a video now saves, and an edited cloud video keeps its original date.</string>
     <string name="whats_new_diag_title">Testing this preview?</string>
     <string name="whats_new_diag_body">Thanks for trying a preview build. If anything looks wrong, please send the diagnostics so a file problem can be told apart from something else: copy them from Settings, then email support@photosforproton.eu, or post on Discord or GitHub.</string>
     <string name="whats_new_section_new">New</string>

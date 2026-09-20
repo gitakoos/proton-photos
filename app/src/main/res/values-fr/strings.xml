@@ -912,6 +912,7 @@
     <string name="editor_save_cancelled">Enregistrement annulé</string>
     <string name="editor_no_permission">Pas d\'autorisation pour enregistrer</string>
     <string name="editor_save_failed">Échec de l\'enregistrement</string>
+    <string name="editor_save_failed_no_network">Aucune connexion Internet. Reconnectez-vous et réessayez pour enregistrer cette modification dans votre Drive.</string>
     <string name="editor_invalid_video_uri">Impossible d\'ouvrir cette vidéo</string>
     <string name="editor_video_metadata_failed">Impossible de lire les métadonnées de la vidéo</string>
     <string name="editor_cloud_video_download_failed">Échec du téléchargement de la vidéo du cloud</string>
@@ -1995,6 +1996,14 @@
     <string name="whats_new_videoplay_body">Les vidéos s\'ouvrent sans mauvaise photo ni flash blanc, et se lisent sur les téléphones dont le décodeur principal échouait jusqu\'ici.</string>
     <string name="whats_new_mergefast_title">Suggestions de visages plus réactives</string>
     <string name="whats_new_mergefast_body">Les suggestions de fusion réagissent dès que vous appuyez, restent accessibles, et une paire revient si la fusion ne s\'est pas terminée.</string>
+    <string name="whats_new_videosmooth_title">Lecture vidéo plus fluide</string>
+    <string name="whats_new_videosmooth_body">La vidéo se lit de façon plus fluide et fiable dans la vue photo.</string>
+    <string name="whats_new_focalzoom_title">Zoomer là où vous pincez</string>
+    <string name="whats_new_focalzoom_body">Pincez une photo ou une vidéo pour zoomer, et le zoom se centre sur le point entre vos doigts.</string>
+    <string name="whats_new_offlineedit_title">Modifier hors ligne garde votre travail</string>
+    <string name="whats_new_offlineedit_body">Modifier une photo ou une vidéo du cloud sans connexion vous prévient et conserve votre modification, au lieu de se bloquer.</string>
+    <string name="whats_new_videoaudiodate_title">De meilleures modifications vidéo</string>
+    <string name="whats_new_videoaudiodate_body">Ajouter un mp3 ou une autre bande-son à une vidéo s\'enregistre désormais, et une vidéo du cloud modifiée conserve sa date d\'origine.</string>
     <string name="whats_new_diag_title">Vous testez cette préversion ?</string>
     <string name="whats_new_diag_body">Merci d\'essayer une préversion. Si quelque chose ne va pas, envoyez les diagnostics pour qu\'un problème de fichier puisse être distingué d\'autre chose : copiez-les depuis les Paramètres, puis écrivez à support@photosforproton.eu, ou publiez sur Discord ou GitHub.</string>
     <string name="whats_new_section_new">Nouveautés</string>

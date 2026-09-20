@@ -147,5 +147,24 @@ class NetworkObserver @Inject constructor(
         }
     }
 
+    /**
+     * Whether an attached network has ACTUALLY-VALIDATED internet: the system confirmed real
+     * reachability through its connectivity probe, not merely that the link advertises the INTERNET
+     * capability. Stricter than [isOnline] on purpose. A Wi-Fi kept on in airplane mode, or a router
+     * that dropped its uplink, stays attached with NET_CAPABILITY_INTERNET but loses VALIDATED, so
+     * [isOnline] still reads true while nothing can actually reach the network. Used where starting
+     * work that needs real internet would otherwise hang on a dead connection (an editor save that can
+     * only go to Drive): this lets the caller fail fast instead. Same allNetworks enumeration and
+     * null-safety as the other probes.
+     */
+    fun currentlyValidated(): Boolean {
+        val manager = cm ?: return false
+        return manager.allNetworks.any { network ->
+            val caps = manager.getNetworkCapabilities(network) ?: return@any false
+            caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+                caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+        }
+    }
+
     companion object { private const val TAG = "NetworkObserver" }
 }

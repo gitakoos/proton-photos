@@ -110,7 +110,13 @@ class PhotoDownloadService @Inject constructor(
      * disk for whoever holds the phone next.
      */
     fun clearDecryptedCaches() {
-        runCatching { java.io.File(context.cacheDir, "fullres").deleteRecursively() }
+        // Decrypted image caches (all regenerable) plus the upload resume dirs. None is partitioned by
+        // user, so every sign-out route must clear them; the server-side force-logout path runs ONLY
+        // this method, so the decrypted thumbnails and Coil's on-disk images (cacheDir/coil_cache) have
+        // to be wiped here too, not just on the deliberate sign-out.
+        listOf("fullres", "fullres-session", "thumbnails", "import_thumbs", "coil_cache").forEach {
+            runCatching { java.io.File(context.cacheDir, it).deleteRecursively() }
+        }
         runCatching {
             context.cacheDir.listFiles()
                 ?.filter { it.isDirectory && it.name.startsWith("upload_") }

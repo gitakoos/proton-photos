@@ -154,6 +154,7 @@
     <string name="editor_save_cancelled">Anulowano zapis</string>
     <string name="editor_no_permission">Brak uprawnień do zapisu</string>
     <string name="editor_save_failed">Zapis nie powiódł się</string>
+    <string name="editor_save_failed_no_network">Brak połączenia z internetem. Połącz się ponownie i spróbuj ponownie zapisać tę edycję w Drive.</string>
     <string name="editor_invalid_video_uri">Nie udało się otworzyć tego wideo</string>
     <string name="editor_video_metadata_failed">Nie udało się odczytać metadanych wideo</string>
     <string name="editor_cloud_video_download_failed">Pobieranie filmu z chmury nie powiodło się</string>
@@ -2087,6 +2088,14 @@
     <string name="whats_new_videoplay_body">Wideo otwierają się bez niewłaściwego zdjęcia i białego mignięcia oraz odtwarzają się na telefonach, w których główny dekoder wcześniej zawodził.</string>
     <string name="whats_new_mergefast_title">Szybsze sugestie twarzy</string>
     <string name="whats_new_mergefast_body">Sugestie scalania reagują w chwili, gdy dotkniesz, pozostają dostępne, a para wraca, jeśli scalanie się nie zakończyło.</string>
+    <string name="whats_new_videosmooth_title">Płynniejsze odtwarzanie wideo</string>
+    <string name="whats_new_videosmooth_body">Wideo odtwarza się płynniej i bardziej niezawodnie w widoku zdjęcia.</string>
+    <string name="whats_new_focalzoom_title">Powiększenie tam, gdzie ściskasz palce</string>
+    <string name="whats_new_focalzoom_body">Ściśnij palce, aby powiększyć zdjęcie lub wideo, a obraz przybliży się w punkcie między nimi.</string>
+    <string name="whats_new_offlineedit_title">Edycja offline zachowuje twoją pracę</string>
+    <string name="whats_new_offlineedit_body">Edytowanie zdjęcia lub wideo w chmurze bez połączenia informuje cię i zachowuje zmiany, zamiast się zawieszać.</string>
+    <string name="whats_new_videoaudiodate_title">Lepsze edycje wideo</string>
+    <string name="whats_new_videoaudiodate_body">Dodanie mp3 lub innej ścieżki dźwiękowej do wideo teraz się zapisuje, a edytowane wideo w chmurze zachowuje swoją pierwotną datę.</string>
     <string name="whats_new_diag_title">Testujesz tę wersję zapoznawczą?</string>
     <string name="whats_new_diag_body">Dziękuję za testowanie wersji zapoznawczej. Jeśli coś działa źle, wyślij dane diagnostyczne, aby odróżnić problem z plikiem od czegoś innego: skopiuj je w Ustawieniach i napisz na support@photosforproton.eu lub opublikuj na Discordzie albo GitHubie.</string>
     <string name="whats_new_section_new">Nowości</string>

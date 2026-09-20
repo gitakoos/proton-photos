@@ -151,6 +151,11 @@ internal fun VideoPlayer(
     /** The decoded frame's on-screen size (pixel aspect and rotation applied), for pinning face tags
      *  over the playing surface. Reports [IntSize.Zero] until the decoder knows the size. */
     onVideoSize: (IntSize) -> Unit = {},
+    /** Pinch-zoom transform, applied to the PlayerView itself (view.scaleX / scaleY / translation)
+     *  rather than a Compose graphicsLayer, which cannot scale a SurfaceView's separate compositor
+     *  layer. The same shared center-pivot scale/offset the still image uses; 1f / Zero = no zoom. */
+    scale: Float = 1f,
+    offset: androidx.compose.ui.geometry.Offset = androidx.compose.ui.geometry.Offset.Zero,
 ) {
     val context = LocalContext.current
     val loop = onEnded == null
@@ -207,11 +212,13 @@ internal fun VideoPlayer(
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
-    // Inflate PlayerView from XML where surface_type="texture_view" is set. The TextureView surface
-    // lets Compose graphicsLayer scale the frames for pinch-zoom (a SurfaceView lives on its own
-    // compositor layer that ignores parent transforms), while resize_mode="fit" wraps it in an
-    // AspectRatioFrameLayout that letterboxes the video so its aspect ratio is preserved instead of
-    // stretched. The controller stays off; our own pill and the ExoPlayer listeners drive playback.
+    // Inflate PlayerView from XML where surface_type="surface_view" is set. The decoder writes straight
+    // to a dedicated compositor layer (lower power, and reliable on quirky hardware decoders that render
+    // a TextureView's GL surface wrong); pinch-zoom scales the PlayerView itself via view.scaleX /
+    // scaleY / translation in the update lambda below, because a SurfaceView's separate layer ignores a
+    // Compose graphicsLayer. resize_mode="fit" wraps it in an AspectRatioFrameLayout that letterboxes the
+    // video so its aspect ratio is preserved instead of stretched. The controller stays off; our own pill
+    // and the ExoPlayer listeners drive playback.
     // Fill the PlayerView shutter (shown until the first frame) and its letterbox with the viewer page
     // background (Bg0) in both themes, instead of the XML's opaque black, so a video opens without a white
     // flash or a white-to-black jump and matches the surrounding viewer and the photo path.
@@ -219,7 +226,7 @@ internal fun VideoPlayer(
     AndroidView(
         factory = { ctx ->
             (android.view.LayoutInflater.from(ctx)
-                .inflate(R.layout.view_video_player_texture, null) as PlayerView)
+                .inflate(R.layout.view_video_player, null) as PlayerView)
                 .apply {
                     player = exoPlayer
                     setShutterBackgroundColor(shutterColor)
@@ -232,6 +239,13 @@ internal fun VideoPlayer(
             view.setBackgroundColor(shutterColor)
             // Drives FLAG_KEEP_SCREEN_ON on the host window; auto-clears when keepOn goes false.
             view.keepScreenOn = keepOn
+            // Pinch-zoom: transform the PlayerView directly (its SurfaceView surface would ignore a
+            // Compose graphicsLayer). The View's default pivot is its centre, matching the still image's
+            // center-pivot scale/offset, so face-tag and text overlays keep lining up with the frame.
+            view.scaleX = scale
+            view.scaleY = scale
+            view.translationX = offset.x
+            view.translationY = offset.y
         },
         modifier = modifier,
     )

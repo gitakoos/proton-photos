@@ -154,6 +154,7 @@
     <string name="editor_save_cancelled">Ukládání zrušeno</string>
     <string name="editor_no_permission">Bez oprávnění k uložení</string>
     <string name="editor_save_failed">Uložení se nezdařilo</string>
+    <string name="editor_save_failed_no_network">Žádné připojení k internetu. Obnovte připojení a zkuste tuto úpravu znovu uložit na váš Drive.</string>
     <string name="editor_invalid_video_uri">Toto video se nepodařilo otevřít</string>
     <string name="editor_video_metadata_failed">Metadata videa se nepodařilo načíst</string>
     <string name="editor_cloud_video_download_failed">Stažení cloudového videa se nezdařilo</string>
@@ -2093,6 +2094,14 @@
     <string name="whats_new_videoplay_body">Videa se otevírají bez špatné fotky nebo bílého bliknutí a přehrají se i na telefonech, jejichž hlavní dekodér dříve selhával.</string>
     <string name="whats_new_mergefast_title">Svižnější návrhy tváří</string>
     <string name="whats_new_mergefast_body">Návrhy sloučení zareagují ve chvíli, kdy klepnete, zůstávají dostupné, a dvojice se vrátí, pokud sloučení neproběhlo celé.</string>
+    <string name="whats_new_videosmooth_title">Plynulejší přehrávání videa</string>
+    <string name="whats_new_videosmooth_body">Video se v prohlížeči přehrává plynuleji a spolehlivěji.</string>
+    <string name="whats_new_focalzoom_title">Přiblížení tam, kde sevřete prsty</string>
+    <string name="whats_new_focalzoom_body">Přibližte fotku nebo video sevřením prstů a přiblíží se přesně k bodu mezi nimi.</string>
+    <string name="whats_new_offlineedit_title">Úpravy offline zachovají vaši práci</string>
+    <string name="whats_new_offlineedit_body">Když upravujete cloudovou fotku nebo video bez připojení, dostanete upozornění a vaše úprava se zachová, místo aby se to zaseklo.</string>
+    <string name="whats_new_videoaudiodate_title">Lepší úpravy videa</string>
+    <string name="whats_new_videoaudiodate_body">Přidání mp3 nebo jiné zvukové stopy k videu se teď uloží a upravené cloudové video si ponechá své původní datum.</string>
     <string name="whats_new_diag_title">Testujete tuto verzi?</string>
     <string name="whats_new_diag_body">Děkuji, že zkoušíte testovací verzi. Pokud něco nefunguje správně, pošlete prosím diagnostiku, aby šlo odlišit problém se souborem od něčeho jiného: zkopírujte ji v Nastavení a napište na support@photosforproton.eu, nebo napište na Discordu či GitHubu.</string>
     <string name="whats_new_section_new">Novinky</string>

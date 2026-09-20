@@ -925,6 +925,7 @@
     <string name="editor_save_cancelled">Guardado cancelado</string>
     <string name="editor_no_permission">Sin permiso para guardar</string>
     <string name="editor_save_failed">Error al guardar</string>
+    <string name="editor_save_failed_no_network">No hay conexión a internet. Vuelve a conectarte e inténtalo de nuevo para guardar esta edición en tu Drive.</string>
     <string name="editor_invalid_video_uri">No se pudo abrir este vídeo</string>
     <string name="editor_video_metadata_failed">No se pudieron leer los metadatos del vídeo</string>
     <string name="editor_cloud_video_download_failed">Error al descargar el vídeo de la nube</string>
@@ -2030,6 +2031,14 @@
     <string name="whats_new_videoplay_body">Los vídeos se abren sin una foto equivocada ni un destello blanco, y se reproducen en teléfonos cuyo decodificador principal antes fallaba.</string>
     <string name="whats_new_mergefast_title">Sugerencias de caras más ágiles</string>
     <string name="whats_new_mergefast_body">Las sugerencias de combinación responden en cuanto tocas, siguen siendo accesibles, y un par vuelve si la combinación no terminó.</string>
+    <string name="whats_new_videosmooth_title">Reproducción de vídeo más fluida</string>
+    <string name="whats_new_videosmooth_body">El vídeo se reproduce de forma más fluida y fiable en el visor.</string>
+    <string name="whats_new_focalzoom_title">Amplía donde pellizcas</string>
+    <string name="whats_new_focalzoom_body">Pellizca para ampliar una foto o un vídeo y se acerca al punto entre tus dedos.</string>
+    <string name="whats_new_offlineedit_title">Editar sin conexión conserva tu trabajo</string>
+    <string name="whats_new_offlineedit_body">Editar una foto o un vídeo de la nube sin conexión te avisa y conserva tu edición, en lugar de bloquearse.</string>
+    <string name="whats_new_videoaudiodate_title">Mejores ediciones de vídeo</string>
+    <string name="whats_new_videoaudiodate_body">Añadir un mp3 u otra pista de sonido a un vídeo ahora se guarda, y un vídeo editado de la nube conserva su fecha original.</string>
     <string name="whats_new_diag_title">¿Estás probando esta versión preliminar?</string>
     <string name="whats_new_diag_body">Gracias por probar una versión preliminar. Si algo va mal, envía los diagnósticos para distinguir un problema de archivo de otra cosa: cópialos desde Ajustes y escribe a support@photosforproton.eu, o publica en Discord o GitHub.</string>
     <string name="whats_new_section_new">Novedades</string>

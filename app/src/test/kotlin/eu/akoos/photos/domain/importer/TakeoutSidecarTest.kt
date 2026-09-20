@@ -89,6 +89,20 @@ class TakeoutSidecarTest {
         assertFalse(meta.favorited)
     }
 
+    @Test fun `non-finite or out-of-range GPS is rejected as no location`() {
+        // A corrupt sidecar can parse to Infinity (1e999) or an impossible coordinate; neither must
+        // reach the encrypted xAttr or the location store.
+        assertNull(TakeoutSidecar.parse("""{ "geoData": { "latitude": 1e999, "longitude": 19.0 } }""")!!.lat)
+        assertNull(TakeoutSidecar.parse("""{ "geoData": { "latitude": 91.0, "longitude": 19.0 } }""")!!.lat)
+        assertNull(TakeoutSidecar.parse("""{ "geoData": { "latitude": 47.5, "longitude": -500.0 } }""")!!.lng)
+    }
+
+    @Test fun `valid in-range GPS at the extremes is kept`() {
+        val meta = TakeoutSidecar.parse("""{ "geoData": { "latitude": -33.8688, "longitude": 151.2093 } }""")!!
+        assertEquals(-33.8688, meta.lat!!, 1e-9)
+        assertEquals(151.2093, meta.lng!!, 1e-9)
+    }
+
     @Test fun `missing photoTakenTime leaves the date null`() {
         val meta = TakeoutSidecar.parse(
             """{ "title": "IMG_1.jpg", "creationTime": { "timestamp": "1673789696" } }""",

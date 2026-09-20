@@ -935,6 +935,7 @@
     <string name="editor_save_cancelled">Mentés megszakítva</string>
     <string name="editor_no_permission">Nincs jogosultság a mentéshez</string>
     <string name="editor_save_failed">A mentés sikertelen</string>
+    <string name="editor_save_failed_no_network">Nincs internetkapcsolat. Csatlakozz újra, és próbáld meg újra menteni ezt a szerkesztést a Drive-ra.</string>
     <string name="editor_invalid_video_uri">Ezt a videót nem sikerült megnyitni</string>
     <string name="editor_video_metadata_failed">Nem sikerült beolvasni a videó metaadatait</string>
     <string name="editor_cloud_video_download_failed">A felhőbeli videó letöltése sikertelen</string>
@@ -1996,6 +1997,14 @@
     <string name="whats_new_videoplay_body">A videók rossz fotó és fehér villanás nélkül nyílnak meg, és azokon a telefonokon is lejátszódnak, ahol a fő dekóder eddig hibázott.</string>
     <string name="whats_new_mergefast_title">Gyorsabb arcjavaslatok</string>
     <string name="whats_new_mergefast_body">Az egyesítési javaslatok abban a pillanatban reagálnak, amint rájuk koppintasz, elérhetők maradnak, és egy pár visszatér, ha az egyesítés nem fejeződött be.</string>
+    <string name="whats_new_videosmooth_title">Simább videólejátszás</string>
+    <string name="whats_new_videosmooth_body">A videó simábban és megbízhatóbban játszódik le a fotónézetben.</string>
+    <string name="whats_new_focalzoom_title">Oda nagyíts, ahol csippentesz</string>
+    <string name="whats_new_focalzoom_body">Csippents rá egy fotóra vagy videóra a nagyításhoz, és az ujjaid közötti pontra nagyít.</string>
+    <string name="whats_new_offlineedit_title">Az offline szerkesztés megőrzi a munkádat</string>
+    <string name="whats_new_offlineedit_body">Ha internet nélkül szerkesztesz egy felhős fotót vagy videót, szól neked és megőrzi a szerkesztésedet, ahelyett, hogy megakadna.</string>
+    <string name="whats_new_videoaudiodate_title">Jobb videószerkesztés</string>
+    <string name="whats_new_videoaudiodate_body">Egy mp3 vagy más hangsáv hozzáadása egy videóhoz mostantól elmentődik, egy szerkesztett felhős videó pedig megtartja az eredeti dátumát.</string>
     <string name="whats_new_diag_title">Teszteled ezt az előzetest?</string>
     <string name="whats_new_diag_body">Köszönöm, hogy kipróbálod ezt a tesztverziót. Ha valami hibásnak tűnik, küldd el a diagnosztikát, hogy egy fájlprobléma megkülönböztethető legyen valami mástól: másold ki a Beállításokból, majd írj a support@photosforproton.eu címre, vagy oszd meg Discordon vagy GitHubon.</string>
     <string name="whats_new_section_new">Új</string>

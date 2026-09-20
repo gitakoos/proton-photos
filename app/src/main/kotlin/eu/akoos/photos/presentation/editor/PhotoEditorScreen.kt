@@ -633,10 +633,12 @@ fun PhotoEditorScreen(
                 }
             }
 
-            val saveResult = state.saveResult
-            if (saveResult is SaveResult.Failed) {
+            // A benign / inline save failure (e.g. a user-cancelled overwrite) stays as a quiet hint
+            // above the tab bar; a blocking failure (no internet on a cloud edit) uses the dialog below.
+            val inlineFailure = state.saveResult as? SaveResult.Failed
+            if (inlineFailure != null && !inlineFailure.asDialog) {
                 Text(
-                    text = saveResult.message,
+                    text = inlineFailure.message,
                     color = Color(0xFFFF3B30),
                     fontSize = 13.sp,
                     modifier = Modifier.fillMaxWidth().padding(start = 18.dp, end = 18.dp),
@@ -679,6 +681,21 @@ fun PhotoEditorScreen(
             },
             onDismiss = { showDiscardDialog = false },
             destructive = true,
+        )
+    }
+
+    // A blocking save failure flagged for the dialog (a cloud edit attempted with no internet). Shown
+    // as the app's own bottom-sheet dialog rather than inline text; dismissing clears the result and
+    // leaves the editor open with the edit intact, so the user can reconnect and save again, or discard.
+    val failedResult = (state.saveResult as? SaveResult.Failed)?.takeIf { it.asDialog }
+    if (failedResult != null) {
+        ConfirmDialog(
+            title = stringResource(R.string.editor_save_failed),
+            message = failedResult.message,
+            confirmLabel = stringResource(android.R.string.ok),
+            dismissLabel = null,
+            onConfirm = { vm.consumeSaveResult() },
+            onDismiss = { vm.consumeSaveResult() },
         )
     }
 

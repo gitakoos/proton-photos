@@ -25,6 +25,7 @@ package eu.akoos.photos.presentation.editor
 import eu.akoos.photos.domain.entity.TimestampSanity
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -201,5 +202,76 @@ class VideoEditorSaveRulesTest {
                 assertTrue("$source + $user gave $out", out in 0..270 && out % 90 == 0)
             }
         }
+    }
+
+    // ── which audio path a save takes ───────────────────────────────────────────────────────────
+
+    @Test
+    fun `a non-AAC overlay replacing the audio must re-encode, not stream-copy raw`() {
+        // The regression this guards: "replace the soundtrack with an mp3 at full volume" (source muted,
+        // music full) used to take the stream-copy fast path, which handed the raw mp3 format to the MP4
+        // muxer and failed with "Failed to add the track to the muxer". A non-AAC overlay must re-encode.
+        assertTrue(
+            audioNeedsReencode(
+                isMultiWindow = false,
+                useSourceAudio = false,
+                useOverlayAudio = true,
+                originalAudioGain = 0f,
+                musicAudioGain = 1f,
+                overlayIsAac = false,
+                overlayHasGaps = false,
+                overlayDelayed = false,
+            ),
+        )
+    }
+
+    @Test
+    fun `an AAC overlay replacing the audio keeps the lossless stream-copy`() {
+        // The same full-volume replace with an AAC overlay is muxable directly, so it must NOT be forced
+        // through a needless re-encode.
+        assertFalse(
+            audioNeedsReencode(
+                isMultiWindow = false,
+                useSourceAudio = false,
+                useOverlayAudio = true,
+                originalAudioGain = 0f,
+                musicAudioGain = 1f,
+                overlayIsAac = true,
+                overlayHasGaps = false,
+                overlayDelayed = false,
+            ),
+        )
+    }
+
+    @Test
+    fun `no audio in play never re-encodes`() {
+        assertFalse(
+            audioNeedsReencode(
+                isMultiWindow = false,
+                useSourceAudio = false,
+                useOverlayAudio = false,
+                originalAudioGain = 0f,
+                musicAudioGain = 0f,
+                overlayIsAac = false,
+                overlayHasGaps = false,
+                overlayDelayed = false,
+            ),
+        )
+    }
+
+    @Test
+    fun `partial source gain re-encodes to attenuate the samples`() {
+        assertTrue(
+            audioNeedsReencode(
+                isMultiWindow = false,
+                useSourceAudio = true,
+                useOverlayAudio = false,
+                originalAudioGain = 0.5f,
+                musicAudioGain = 0f,
+                overlayIsAac = false,
+                overlayHasGaps = false,
+                overlayDelayed = false,
+            ),
+        )
     }
 }

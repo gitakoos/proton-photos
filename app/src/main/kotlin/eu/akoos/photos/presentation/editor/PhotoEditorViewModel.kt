@@ -282,7 +282,10 @@ sealed class SaveResult {
     /** Overwrite fell back to a new file (source read-only, or its format cannot be overwritten in
      *  place); original untouched, edit at [uri]. [messageRes] is the toast explaining which case. */
     data class SuccessAsCopy(val uri: Uri?, val messageRes: Int = R.string.editor_saved_as_copy_toast) : SaveResult()
-    data class Failed(val message: String) : SaveResult()
+    /** [message] is shown to the user. [asDialog] surfaces it in the bottom-sheet dialog for a genuine
+     *  blocking failure (e.g. no internet on a cloud edit); the default renders it as the inline hint,
+     *  which suits a benign outcome such as a user-cancelled overwrite (not an error worth a modal). */
+    data class Failed(val message: String, val asDialog: Boolean = false) : SaveResult()
 }
 
 /**
@@ -395,6 +398,9 @@ class PhotoEditorViewModel @Inject constructor(
     // Application-lifetime scope for the cloud upload that outlives the editor: it must keep running
     // after save() returns and the screen navigates away (viewModelScope is cancelled at that point).
     @eu.akoos.photos.di.AppScope private val appScope: CoroutineScope,
+    // Fast pre-check for a cloud edit's save: validated internet, so an offline save fails at once
+    // instead of starting an upload that hangs on a connected-but-dead network.
+    private val networkObserver: eu.akoos.photos.util.NetworkObserver,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(EditorUiState())
@@ -2063,12 +2069,27 @@ class PhotoEditorViewModel @Inject constructor(
                 is EditorSource.External -> editTimestampMs
             }
             val saveResult: SaveResult = try {
-                // Cloud-only edit: there is no local file to write, so the whole save is the network
-                // upload. Run it in appScope (survives navigation) and return an optimistic Success right
-                // away. This upload is best-effort: there is no local sync_state row to reconcile against
-                // (unlike a Synced edit), so a background failure is NOT retried, only logged in the
-                // transfer center. The user can re-edit to try again.
+                // Cloud-only edit: there is no local file to write, so the whole save IS the network upload.
                 if (source is EditorSource.Cloud) {
+                    // A cloud edit can only go to Drive. Check for actually-validated internet first: a
+                    // network can be attached with no usable internet (Wi-Fi kept on in airplane mode, a
+                    // dead router), which the plain online flag still reports as connected, so without this
+                    // the save would start an upload that just hangs. With no validated internet, fail at
+                    // once with a clear message and leave the editor open with the edit intact, so the user
+                    // can reconnect and save again, or discard it. Nothing is written locally.
+                    if (!networkObserver.currentlyValidated()) {
+                        _state.update {
+                            it.copy(
+                                isSaving = false,
+                                saveResult = SaveResult.Failed(
+                                    context.getString(R.string.editor_save_failed_no_network),
+                                    asDialog = true,
+                                ),
+                            )
+                        }
+                        return@launch
+                    }
+                    // Real internet: upload in appScope (survives navigation) and report success right away.
                     appScope.launch {
                         val thumbUri = "file://" + File(context.cacheDir, "thumbnails/thumb_${source.photo.linkId}.jpg").absolutePath
                         val tid = transferCenter.start(TransferCenter.Kind.UPLOAD, total = 1, items = listOf(thumbUri))

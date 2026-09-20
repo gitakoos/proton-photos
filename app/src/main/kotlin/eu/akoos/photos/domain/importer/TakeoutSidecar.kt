@@ -230,6 +230,10 @@ object TakeoutSidecar {
         val lat = geo?.double("latitude") ?: return null
         val lng = geo.double("longitude") ?: return null
         if (lat == 0.0 && lng == 0.0) return null
+        // Reject non-finite (a corrupt sidecar can parse to Infinity/NaN) or out-of-range values, so
+        // garbage never reaches the encrypted xAttr or photo_location, where it can throw on
+        // serialization or plot a broken pin / feed NaN into map math.
+        if (!lat.isFinite() || !lng.isFinite() || lat !in -90.0..90.0 || lng !in -180.0..180.0) return null
         return lat to lng
     }
 

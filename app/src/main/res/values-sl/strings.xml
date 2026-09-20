@@ -155,6 +155,7 @@
     <string name="editor_save_cancelled">Shranjevanje preklicano</string>
     <string name="editor_no_permission">Ni dovoljenja za shranjevanje</string>
     <string name="editor_save_failed">Shranjevanje ni uspelo</string>
+    <string name="editor_save_failed_no_network">Ni internetne povezave. Znova se povežite in poskusite to spremembo znova shraniti v vaš Drive.</string>
     <string name="editor_invalid_video_uri">Tega videoposnetka ni bilo mogoče odpreti</string>
     <string name="editor_video_metadata_failed">Metapodatkov videa ni bilo mogoče prebrati</string>
     <string name="editor_cloud_video_download_failed">Prenos videa iz oblaka ni uspel</string>
@@ -2087,6 +2088,14 @@
     <string name="whats_new_videoplay_body">Videi se odprejo brez napačne fotografije ali belega bliska in se predvajajo tudi v telefonih, katerih glavni dekodirnik je prej odpovedoval.</string>
     <string name="whats_new_mergefast_title">Hitrejši predlogi obrazov</string>
     <string name="whats_new_mergefast_body">Predlogi za združevanje se odzovejo v trenutku, ko tapnete, ostanejo dosegljivi, in par se vrne, če združevanje ni bilo dokončano.</string>
+    <string name="whats_new_videosmooth_title">Bolj gladko predvajanje videa</string>
+    <string name="whats_new_videosmooth_body">Video se v pogledu fotografije predvaja bolj gladko in zanesljivo.</string>
+    <string name="whats_new_focalzoom_title">Povečava tam, kjer uščipnete</string>
+    <string name="whats_new_focalzoom_body">Uščipnite, da povečate fotografijo ali video, in približa se točki med vašima prstoma.</string>
+    <string name="whats_new_offlineedit_title">Urejanje brez povezave ohrani vaše delo</string>
+    <string name="whats_new_offlineedit_body">Urejanje fotografije ali videa v oblaku brez povezave vas obvesti in ohrani urejanje, namesto da bi obtičalo.</string>
+    <string name="whats_new_videoaudiodate_title">Boljše urejanje videa</string>
+    <string name="whats_new_videoaudiodate_body">Dodajanje mp3 ali druge zvočne podlage videu se zdaj shrani, urejeni video iz oblaka pa ohrani svoj prvotni datum.</string>
     <string name="whats_new_diag_title">Preizkušate to predogledno različico?</string>
     <string name="whats_new_diag_body">Hvala, ker preizkušate predogledno različico. Če kaj ne deluje pravilno, pošljite diagnostiko, da je mogoče ločiti težavo z datoteko od česa drugega: kopirajte jo v Nastavitvah in pišite na support@photosforproton.eu ali objavite na Discordu ali GitHubu.</string>
     <string name="whats_new_section_new">Novo</string>

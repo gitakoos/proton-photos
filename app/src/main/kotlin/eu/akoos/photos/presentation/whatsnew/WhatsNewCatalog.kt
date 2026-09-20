@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.Campaign
 import androidx.compose.material.icons.filled.Checklist
 import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.CloudDownload
+import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.Compress
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.AutoAwesome
@@ -55,6 +56,7 @@ import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.TextFields
+import androidx.compose.material.icons.filled.ZoomIn
 import androidx.compose.ui.graphics.vector.ImageVector
 import eu.akoos.photos.R
 
@@ -124,11 +126,10 @@ internal val WhatsNewReleases: List<WhatsNewRelease> = listOf(
         version = "2.5.0",
         hero = null,
         features = listOf(
-            WhatsNewFeature(Icons.Default.Movie, R.string.whats_new_videoeditor_title, R.string.whats_new_videoeditor_body, WhatsNewCategory.New),
-            WhatsNewFeature(Icons.Default.PhotoAlbum, R.string.whats_new_movetoalbum_title, R.string.whats_new_movetoalbum_body, WhatsNewCategory.New),
-            WhatsNewFeature(Icons.Default.Schedule, R.string.whats_new_indexsettle_title, R.string.whats_new_indexsettle_body, WhatsNewCategory.Improved),
-            WhatsNewFeature(Icons.Default.PlayCircle, R.string.whats_new_videoplay_title, R.string.whats_new_videoplay_body, WhatsNewCategory.Improved),
-            WhatsNewFeature(Icons.Default.GroupAdd, R.string.whats_new_mergefast_title, R.string.whats_new_mergefast_body, WhatsNewCategory.Improved),
+            WhatsNewFeature(Icons.Default.PlayCircle, R.string.whats_new_videosmooth_title, R.string.whats_new_videosmooth_body, WhatsNewCategory.Improved),
+            WhatsNewFeature(Icons.Default.ZoomIn, R.string.whats_new_focalzoom_title, R.string.whats_new_focalzoom_body, WhatsNewCategory.Improved),
+            WhatsNewFeature(Icons.Default.CloudOff, R.string.whats_new_offlineedit_title, R.string.whats_new_offlineedit_body, WhatsNewCategory.Improved),
+            WhatsNewFeature(Icons.Default.Movie, R.string.whats_new_videoaudiodate_title, R.string.whats_new_videoaudiodate_body, WhatsNewCategory.Improved),
         ),
     ),
     WhatsNewRelease(
@@ -212,6 +213,12 @@ internal val WhatsNew250EarlierPreviews: List<WhatsNewFeature> = listOf(
     WhatsNewFeature(Icons.Default.Face, R.string.whats_new_people_accurate_title, R.string.whats_new_people_accurate_body, WhatsNewCategory.Improved),
     WhatsNewFeature(Icons.Default.Schedule, R.string.whats_new_facescan_title, R.string.whats_new_facescan_body, WhatsNewCategory.Improved),
     WhatsNewFeature(Icons.Default.CloudDownload, R.string.whats_new_bgdownloads_title, R.string.whats_new_bgdownloads_body, WhatsNewCategory.Improved),
+    // Moved down from the 2.5.0 head card when test7 took the head: these are the test6 cards.
+    WhatsNewFeature(Icons.Default.Movie, R.string.whats_new_videoeditor_title, R.string.whats_new_videoeditor_body, WhatsNewCategory.New),
+    WhatsNewFeature(Icons.Default.PhotoAlbum, R.string.whats_new_movetoalbum_title, R.string.whats_new_movetoalbum_body, WhatsNewCategory.New),
+    WhatsNewFeature(Icons.Default.Schedule, R.string.whats_new_indexsettle_title, R.string.whats_new_indexsettle_body, WhatsNewCategory.Improved),
+    WhatsNewFeature(Icons.Default.PlayCircle, R.string.whats_new_videoplay_title, R.string.whats_new_videoplay_body, WhatsNewCategory.Improved),
+    WhatsNewFeature(Icons.Default.GroupAdd, R.string.whats_new_mergefast_title, R.string.whats_new_mergefast_body, WhatsNewCategory.Improved),
 )
 
 /** Looks up a release by its version string, falling back to the newest for an unknown one. */

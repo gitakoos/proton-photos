@@ -135,7 +135,12 @@ class SyncWorker @AssistedInject constructor(
             val pass = runSyncPass(userId, firstPass = true)
             val uploadFailed = pass.failed
 
-            context.settingsDataStore.edit { it[SettingsKeys.LAST_SYNC_MS] = System.currentTimeMillis() }
+            // Only stamp a successful sync time. A fully-failed batch that still wrote LAST_SYNC_MS made
+            // Settings show "synced just now" over a broken backup (and reset the resume-refresh gate),
+            // contradicting the allFailed contract in UploadPendingUseCase.
+            if (!uploadFailed) {
+                context.settingsDataStore.edit { it[SettingsKeys.LAST_SYNC_MS] = System.currentTimeMillis() }
+            }
             return@coroutineScope if (uploadFailed && runAttemptCount < 3) Result.retry()
             else if (uploadFailed) Result.failure()
             else Result.success()

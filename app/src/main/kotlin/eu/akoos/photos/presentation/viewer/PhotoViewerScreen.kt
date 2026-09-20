@@ -36,6 +36,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculateCentroid
 import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.material.icons.filled.Close
@@ -627,25 +628,34 @@ fun PhotoViewerScreen(
     var textZoomBefore by remember { mutableStateOf<ViewerZoom?>(null) }
     LaunchedEffect(pagerState.settledPage, pageGeneration) { scale = 1f; offset = Offset.Zero }
 
-    val onZoomPan by rememberUpdatedState<(Float, Offset) -> Unit>({ zoomChange, panChange ->
+    val onZoomPan by rememberUpdatedState<(Float, Offset, Offset) -> Unit>({ zoomChange, panChange, centroid ->
         // The user's own fingers on the photo outrank anything text mode set up: from here the page
         // is theirs and there is no earlier zoom left to restore.
         textZoomBefore = null
-        scale = (scale * zoomChange).coerceIn(1f, 6f)
-        if (scale > 1f) {
-            // graphicsLayer scales around center, so the reachable pan is ±(viewport*(scale-1)/2).
-            val maxX = (containerSize.width  * (scale - 1f)) / 2f
-            val maxY = (containerSize.height * (scale - 1f)) / 2f
-            val unclamped = offset + panChange
+        val newScale = (scale * zoomChange).coerceIn(1f, 6f)
+        if (newScale > 1f) {
+            // Zoom toward the pinch point (the centroid between the fingers), not the view centre, then
+            // add the finger pan. Both surfaces scale around the view centre (graphicsLayer for a still,
+            // view.scaleX for a video), so to keep the content under the centroid fixed as the scale goes
+            // from `scale` to `newScale`: offset' = (centroid - centre) * (1 - z) + z * offset, where
+            // z = newScale/scale is the zoom actually applied after clamping. This matches the double-tap
+            // zoomToward. Reachable pan is +/-(viewport * (newScale - 1) / 2).
+            val z = if (scale != 0f) newScale / scale else 1f
+            val cx = containerSize.width / 2f
+            val cy = containerSize.height / 2f
+            val maxX = (containerSize.width  * (newScale - 1f)) / 2f
+            val maxY = (containerSize.height * (newScale - 1f)) / 2f
+            scale = newScale
             offset = Offset(
-                unclamped.x.coerceIn(-maxX, maxX),
-                unclamped.y.coerceIn(-maxY, maxY),
+                ((centroid.x - cx) * (1f - z) + z * offset.x + panChange.x).coerceIn(-maxX, maxX),
+                ((centroid.y - cy) * (1f - z) + z * offset.y + panChange.y).coerceIn(-maxY, maxY),
             )
             // A zoomed photo never pages to its neighbour: panning past the edge just stops at the
             // bound. An accidental sideways drag at the edge cannot swap the photo, and no page
             // animation runs while still zoomed, so the neighbour never flashes underneath.
             // To change photo, zoom back out first, exactly as a phone gallery does.
         } else {
+            scale = newScale
             offset = Offset.Zero
         }
     })
@@ -1277,7 +1287,9 @@ fun PhotoViewerScreen(
                             val zoomChange = event.calculateZoom()
                             val panChange = event.calculatePan()
                             if (zoomChange != 1f || panChange != Offset.Zero) {
-                                onZoomPan(zoomChange, panChange)
+                                // Pass the pinch centroid so the zoom focuses on the point between the
+                                // fingers (in the same root-box coords as containerSize), not the centre.
+                                onZoomPan(zoomChange, panChange, event.calculateCentroid())
                             }
                             event.changes.forEach { if (it.pressed) it.consume() }
                         }
@@ -1581,14 +1593,12 @@ fun PhotoViewerScreen(
                                     keepOn = isVideoPlaying,
                                     // Same pinch-zoom transform the still uses: the shared per-page
                                     // scale/offset (reset on settledPage change) with edge-paging,
-                                    // panning only once zoomed in. The TextureView surface scales
-                                    // with graphicsLayer.
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .graphicsLayer(
-                                            scaleX = scale, scaleY = scale,
-                                            translationX = offset.x, translationY = offset.y,
-                                        ),
+                                    // panning only once zoomed in. Passed as parameters because the
+                                    // SurfaceView surface is transformed on the PlayerView itself, not
+                                    // via a Compose graphicsLayer (which does not scale a SurfaceView).
+                                    scale = scale,
+                                    offset = offset,
+                                    modifier = Modifier.fillMaxSize(),
                                 )
                             }
                             // No play overlay — play button is in the VideoControlPill below filmstrip

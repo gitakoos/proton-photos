@@ -187,7 +187,10 @@ fun VideoEditorUiState.effectiveColorMatrix4x4(): FloatArray? =
 
 sealed class VideoSaveResult {
     data class Success(val uri: Uri?) : VideoSaveResult()
-    data class Failed(val message: String) : VideoSaveResult()
+    /** [message] is shown to the user. [asDialog] surfaces it in the bottom-sheet dialog for a genuine
+     *  blocking failure (e.g. no internet on a cloud edit); the default keeps the existing toast + inline
+     *  label, which suits the other, less severe save outcomes. */
+    data class Failed(val message: String, val asDialog: Boolean = false) : VideoSaveResult()
 }
 
 /** One-shot outcome of grabbing the current frame as a JPEG. */
@@ -583,6 +586,9 @@ class VideoEditorViewModel @Inject constructor(
     // Application-lifetime scope for the cloud re-upload that outlives the editor: it must keep
     // running after save() returns and the screen navigates away (viewModelScope is cancelled then).
     @eu.akoos.photos.di.AppScope private val appScope: CoroutineScope,
+    // Fast pre-check for a cloud edit's save: validated internet, so an offline save fails at once
+    // instead of re-encoding and starting an upload that hangs on a connected-but-dead network.
+    private val networkObserver: eu.akoos.photos.util.NetworkObserver,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(VideoEditorUiState())
@@ -1802,11 +1808,33 @@ class VideoEditorViewModel @Inject constructor(
                 // and return an optimistic Success so the editor closes immediately. A background
                 // upload failure surfaces through the normal sync status, not here.
                 if (cloudPhoto != null) {
+                    // No validated internet: a cloud video edit can only go to Drive, and re-encoding +
+                    // uploading now would waste the transcode and then hang. Fail fast with a clear message
+                    // and keep the editor open with the edit intact (nothing written locally), so the user
+                    // can reconnect and save again, or discard.
+                    if (!networkObserver.currentlyValidated()) {
+                        _state.update {
+                            it.copy(
+                                isSaving = false,
+                                saveResult = VideoSaveResult.Failed(
+                                    context.getString(R.string.editor_save_failed_no_network),
+                                    asDialog = true,
+                                ),
+                                saveProgress = null,
+                                saveStage = VideoSaveStage.Idle,
+                            )
+                        }
+                        return@launch
+                    }
                     val cloudTempFile = muxCloudEditToTemp(s, finalRotation, needsReencode)
+                    // The ORIGINAL cloud photo's capture time, so the edited copy keeps the original date
+                    // (and sorts next to the source) instead of the mux/edit time. Falls back to the edit
+                    // time only when the source carries no usable capture time.
+                    val cloudCaptureMs = editedVideoCaptureMs(cloudPhoto.captureTime, editTimestampMs)
                     // Stamp the cloud copy's mvhd with the same capture time uploadCloudEdit sends, so
                     // a later download (which reads DATE_TAKEN from the mvhd) restores the original
                     // date instead of the mux time.
-                    eu.akoos.photos.util.Mp4CreationTime.stamp(cloudTempFile, editTimestampMs)
+                    eu.akoos.photos.util.Mp4CreationTime.stamp(cloudTempFile, cloudCaptureMs)
                     val userId = accountManager.getPrimaryUserId().first()
                     if (userId == null) {
                         cloudTempFile.delete()
@@ -1828,7 +1856,7 @@ class VideoEditorViewModel @Inject constructor(
                         val uploadUri = Uri.fromFile(cloudTempFile).toString()
                         val tid = transferCenter.start(TransferCenter.Kind.UPLOAD, total = 1, items = listOf(uploadUri))
                         try {
-                            uploadCloudEdit(s, cloudPhoto, editTimestampMs, cloudTempFile, userId)
+                            uploadCloudEdit(s, cloudPhoto, editTimestampMs, cloudCaptureMs, cloudTempFile, userId)
                             transferCenter.progress(tid, 1)
                             transferCenter.log(
                                 TransferCenter.Kind.UPLOAD, count = 1,
@@ -2267,6 +2295,9 @@ class VideoEditorViewModel @Inject constructor(
         s: VideoEditorUiState,
         cloudPhoto: CloudPhoto,
         editTimestampMs: Long,
+        /** The ORIGINAL capture time (ms) stamped on the Drive copy so it keeps the source's date;
+         *  [editTimestampMs] is used only for the distinct edited file name. */
+        captureTimestampMs: Long,
         tempFile: File,
         userId: me.proton.core.domain.entity.UserId,
     ): String = withContext(Dispatchers.IO) {
@@ -2274,7 +2305,7 @@ class VideoEditorViewModel @Inject constructor(
         val outMime = if (s.mimeType.startsWith("video/")) s.mimeType else "video/mp4"
         // Honour strip-on-upload for the cloud copy only: may produce a separate stripped file while
         // [tempFile] stays intact (the caller owns its cleanup).
-        val (uploadFile, captureMs) = stripCopyForCloudUpload(tempFile, editTimestampMs)
+        val (uploadFile, captureMs) = stripCopyForCloudUpload(tempFile, captureTimestampMs)
         val uploadUri = Uri.fromFile(uploadFile).toString()
         val item = LocalMediaItem(
             uri = uploadUri,
