@@ -192,6 +192,7 @@
     <string name="delete_multi_remove_cloud_desc">Auf diesem Gerät behalten, die Sicherung in den Drive-Papierkorb verschieben</string>
     <string name="delete_multi_move_trash_everywhere">Überall in den Papierkorb</string>
     <string name="delete_multi_move_trash_everywhere_desc">Verschiebt in den Gerät- und Proton Drive-Papierkorb</string>
+    <string name="delete_frees_note">(gibt ~%1$s frei)</string>
     <string name="delete_multi_drive_trash">In Drive-Papierkorb verschieben</string>
     <string name="delete_multi_drive_trash_desc">In Drive Kürzlich gelöscht verschoben, wiederherstellbar</string>
 
@@ -219,15 +220,10 @@
     <string name="settings_sign_out">Abmelden</string>
     <string name="settings_sign_out_desc">Sitzung auf diesem Gerät beenden.</string>
     <string name="sign_out_dialog_title">Abmelden?</string>
-    <string name="sign_out_dialog_message">Möchtest du dich wirklich von deinem Proton-Konto abmelden?</string>
-    <plurals name="sign_out_dialog_vault_warning">
-        <item quantity="one">Beim Abmelden wird auch „Versteckte Fotos“ geleert: %1$d Foto wird endgültig von diesem Gerät gelöscht.</item>
-        <item quantity="other">Beim Abmelden wird auch „Versteckte Fotos“ geleert: %1$d Fotos werden endgültig von diesem Gerät gelöscht.</item>
-    </plurals>
-    <plurals name="sign_out_dialog_vault_cloud">
-        <item quantity="one">%1$d davon liegt auch in Proton Drive und kann nach dem erneuten Anmelden wieder heruntergeladen werden.</item>
-        <item quantity="other">%1$d davon liegen auch in Proton Drive und können nach dem erneuten Anmelden wieder heruntergeladen werden.</item>
-    </plurals>
+    <string name="sign_out_dialog_message">Beim Abmelden werden diese Daten auf diesem Gerät gelöscht und beim erneuten Anmelden nicht wiederhergestellt (exportiere sie vorher, falls du sie brauchst):</string>
+    <string name="sign_out_dialog_item_faces">Benannte Personen und Gesichtsdaten</string>
+    <string name="sign_out_dialog_item_day_notes">Kalendernotizen</string>
+    <string name="sign_out_dialog_item_vault">Versteckte Fotos</string>
     <string name="sign_out_dialog_confirm">Abmelden</string>
     <string name="sign_out_dialog_cancel">Abbrechen</string>
     <string name="settings_account_storage">Drive Speicher</string>
@@ -357,6 +353,9 @@
     <string name="settings_app_lock_timeout">Sperren nach</string>
     <string name="settings_app_lock_timeout_desc">App nach dieser Zeit im Hintergrund erneut sperren</string>
     <string name="settings_app_lock_timeout_immediate">Sofort</string>
+    <string name="settings_app_lock_timeout_5sec">5 Sekunden</string>
+    <string name="settings_app_lock_timeout_10sec">10 Sekunden</string>
+    <string name="settings_app_lock_timeout_30sec">30 Sekunden</string>
     <string name="settings_app_lock_timeout_1min">1 Minute</string>
     <string name="settings_app_lock_timeout_5min">5 Minuten</string>
     <string name="settings_app_lock_timeout_10min">10 Minuten</string>
@@ -464,6 +463,10 @@
     <string name="albums_reorder">Alben neu anordnen</string>
     <string name="album_rename_confirm">Umbenennen</string>
     <string name="album_remove_from_album">Aus Album entfernen</string>
+    <string name="album_move_to_album">In Album verschieben</string>
+    <string name="album_moved_to_album">Verschoben nach \"%1$s\"</string>
+    <string name="album_move_shared_copy_note">Zu einem geteilten Album hinzugefügte Fotos werden für den Albumbesitzer kopiert.</string>
+    <string name="op_moving_to_album">Wird in Album verschoben…</string>
     <string name="album_set_as_cover">Als Titelbild festlegen</string>
     <string name="album_set_as_album_cover">Als Albumtitelbild festlegen</string>
     <string name="gallery_action_select">Auswählen</string>
@@ -749,6 +752,7 @@
     <!-- Suche -->
     <string name="search_title">Suche</string>
     <string name="search_placeholder">Nach Dateinamen suchen</string>
+    <string name="search_placeholder_semantic">Fotos durchsuchen</string>
     <string name="search_empty_idle">Namen eingeben, um zu suchen</string>
     <string name="search_empty_no_results">Keine Treffer</string>
 
@@ -862,9 +866,8 @@
     <string name="video_editor_crop">Beschneiden</string>
     <string name="video_editor_audio">Musik</string>
     <string name="video_editor_add_music">Musik hinzufügen</string>
+    <string name="video_editor_replace_music">Musik ersetzen</string>
     <string name="video_editor_remove_music">Entfernen</string>
-    <string name="video_editor_music_start">Musikstart</string>
-    <string name="video_editor_music_end">Musikende</string>
     <string name="video_editor_reset_crop">Zuschnitt zurücksetzen</string>
     <string name="video_editor_reencoding">Video wird neu kodiert…</string>
     <string name="video_editor_encrypting">Wird verschlüsselt…</string>
@@ -1240,6 +1243,7 @@
     <string name="album_picker_title">Zum Album hinzufügen</string>
     <string name="album_picker_selected">%1$d ausgewählt</string>
     <string name="album_add_count">Hinzufügen (%1$d)</string>
+    <string name="picker_selection_limit">Du kannst höchstens %1$d auf einmal auswählen</string>
     <string name="album_picker_empty">Keine Fotos zum Hinzufügen.</string>
 
     <!-- Album create/rename/delete snackbar fallbacks -->
@@ -1904,6 +1908,24 @@
 
     <!-- Video editor -->
     <string name="video_editor_frame_failed">Einzelbild konnte nicht gespeichert werden</string>
+    <string name="video_editor_split">Teilen</string>
+    <string name="video_editor_remove_section">Abschnitt entfernen</string>
+    <string name="video_editor_sections_lossless_only">Abschnittsschnitte gelten nur für den verlustfreien Export.</string>
+    <string name="video_editor_split_music">Musik teilen</string>
+    <string name="video_editor_silence_section">Abschnitt stummschalten</string>
+    <string name="video_editor_restore_section">Abschnitt wiederherstellen</string>
+    <string name="video_editor_reorder">Neu anordnen</string>
+    <string name="video_editor_add_video">Video hinzufügen</string>
+    <string name="video_editor_max_sources">Du kannst bis zu %1$d Videos kombinieren</string>
+    <string name="video_editor_low_space">Nicht genügend freier Speicher, um das Video zu speichern</string>
+    <string name="video_editor_reencode_sections_pending">Zuschnitt, Filter, Drehung und Lautstärke können noch nicht auf geschnittene oder neu angeordnete Abschnitte angewendet werden.</string>
+    <string name="video_editor_volume">Lautstärke</string>
+    <string name="video_editor_duplicate">Duplizieren</string>
+    <string name="video_editor_delete">Löschen</string>
+    <string name="video_editor_restore">Wiederherstellen</string>
+    <string name="video_editor_unmute">Ton ein</string>
+    <string name="video_editor_audio_lane">Audio</string>
+    <string name="video_editor_history_title">Bearbeitungsverlauf</string>
     <string name="video_editor_frame_saved">Einzelbild in Galerie gespeichert</string>
     <string name="video_editor_grab_frame">Einzelbild aufnehmen</string>
     <string name="video_editor_mute">Stumm</string>
@@ -1949,6 +1971,34 @@
     <string name="whats_new_dup_nobackup_body">Der Duplikat-Finder durchsucht jetzt die Fotos auf deinem Gerät, ganz ohne Konto oder Backup.</string>
     <string name="whats_new_compress_split_title">Getrennte Foto- und Videoqualität</string>
     <string name="whats_new_compress_split_body">Foto- und Videokomprimierung haben jetzt jeweils eine eigene Qualitätsstufe. Sieh in den Einstellungen unter Qualität und Größe nach.</string>
+    <string name="whats_new_semantic_title">Fotos über eine Beschreibung finden</string>
+    <string name="whats_new_semantic_body">Tippe ein, woran du dich erinnerst, etwa einen verschneiten Berg oder eine Geburtstagstorte, und passende Fotos tauchen auf. Alles läuft auf deinem Telefon; schalte es in den Einstellungen ein.</string>
+    <string name="whats_new_gifmaker_title">Aus einem Video ein GIF machen</string>
+    <string name="whats_new_gifmaker_body">Kürze einen Clip, wähle eine Größe und speichere oder teile das GIF. Das GIF eines Cloud-Videos wird zurück in deine Mediathek geladen.</string>
+    <string name="whats_new_gifplay_title">GIFs an Ort und Stelle abspielen</string>
+    <string name="whats_new_gifplay_body">Zwei Einstellungen lassen GIFs in den Fotorastern und auf Albumcovern animieren, auch bei Cloud-Covern. Standardmäßig aus.</string>
+    <string name="whats_new_automerge_title">Dieselbe Person automatisch zusammenführen</string>
+    <string name="whats_new_automerge_body">Eine optionale Einstellung übernimmt die stärksten Vorschläge zur selben Person für dich, damit sich die Fotos einer Person von allein sammeln.</string>
+    <string name="whats_new_categoryhide_title">Kategorien ausblenden, die du überspringst</string>
+    <string name="whats_new_categoryhide_body">Ein Augensymbol an jeder Zeitleisten-Kategorie blendet sie aus Zeitleiste und Suche aus. Dort lassen sie sich auch neu anordnen.</string>
+    <string name="whats_new_people_accurate_title">Personenzahlen bleiben korrekt</string>
+    <string name="whats_new_people_accurate_body">Eine Person bleibt korrekt, nachdem du Fotos zusammenführst, verschiebst oder ausblendest, und die Gesichter eines Fotos werden bei der Sicherung wiederverwendet.</string>
+    <string name="whats_new_facescan_title">Stabileres Scannen nach Gesichtern</string>
+    <string name="whats_new_facescan_body">Das Scannen wird fortgesetzt, sobald WLAN zurück ist, und ein hängendes Foto blockiert nicht mehr den ganzen Durchlauf.</string>
+    <string name="whats_new_bgdownloads_title">Downloads laufen weiter</string>
+    <string name="whats_new_bgdownloads_body">KI-Modell-Downloads laufen im Hintergrund weiter, mit einer Fortschritts-Benachrichtigung, sodass das Verlassen der Einstellungen sie nicht mehr stoppt.</string>
+    <string name="whats_new_videoeditor_title">Video-Editor für mehrere Clips</string>
+    <string name="whats_new_videoeditor_body">Der Video-Editor ist jetzt eine Zeitleiste. Füge Clips hinzu, kürze, ordne und lösche sie, lege Musik darunter, stimme Farbe und Licht ab und exportiere alles als ein einziges Video.</string>
+    <string name="whats_new_movetoalbum_title">In ein Album verschieben</string>
+    <string name="whats_new_movetoalbum_body">Verschiebe ausgewählte Fotos aus einem Album direkt in ein anderes.</string>
+    <string name="whats_new_indexsettle_title">Die Indexierung wirkt nicht mehr blockiert</string>
+    <string name="whats_new_indexsettle_body">Wenn die letzten paar Elemente gerade nicht gelesen werden können, kommt die Gesichts- und Fotoindexierung zur Ruhe und versucht es später erneut, statt am Fortschrittsbalken einzufrieren.</string>
+    <string name="whats_new_videoplay_title">Sauberere, zuverlässigere Videos</string>
+    <string name="whats_new_videoplay_body">Videos öffnen ohne falsches Foto oder weißes Aufblitzen und spielen auch auf Telefonen, deren Haupt-Decoder bisher versagt hat.</string>
+    <string name="whats_new_mergefast_title">Schnellere Gesichtsvorschläge</string>
+    <string name="whats_new_mergefast_body">Die Vorschläge zum Zusammenführen reagieren im selben Moment, in dem du tippst, bleiben erreichbar, und ein Paar kommt zurück, wenn die Zusammenführung nicht abgeschlossen wurde.</string>
+    <string name="whats_new_diag_title">Testest du diese Vorschau?</string>
+    <string name="whats_new_diag_body">Danke, dass du eine Vorschauversion ausprobierst. Wenn etwas nicht stimmt, sende bitte die Diagnosedaten, damit sich ein Dateiproblem von etwas anderem unterscheiden lässt: Kopiere sie in den Einstellungen und schreibe an support@photosforproton.eu, oder poste auf Discord oder GitHub.</string>
     <string name="whats_new_section_new">Neu</string>
     <string name="whats_new_section_improved">Verbesserungen</string>
 
@@ -1983,7 +2033,6 @@
     <string name="albums_search_no_results">Keine Alben entsprechen der Suche.</string>
     <string name="settings_ai_groups_found">%1$d Gruppen</string>
     <string name="settings_ai_faces_found">%1$d Gesichter</string>
-    <string name="sign_out_dialog_face_warning">Deine benannten Personen und Gesichtsgruppen auf diesem Gerät werden ebenfalls entfernt und nicht wiederhergestellt, wenn du dich wieder anmeldest.</string>
     <string name="person_rename_merge_confirm_title">Mit vorhandener Person zusammenführen?</string>
     <string name="person_rename_merge_confirm_body">Eine Person namens %1$s existiert bereits. Dieser Name führt die beiden zu einer zusammen, was nicht rückgängig gemacht werden kann. Zusammenführen?</string>
     <string name="person_move_confirm_title">Zu dieser Person verschieben?</string>

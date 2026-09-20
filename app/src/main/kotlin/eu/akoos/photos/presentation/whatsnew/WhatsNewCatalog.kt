@@ -50,8 +50,10 @@ import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.NoAccounts
 import androidx.compose.material.icons.filled.PhotoAlbum
 import androidx.compose.material.icons.filled.PlayCircle
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.SwapVert
+import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.ui.graphics.vector.ImageVector
 import eu.akoos.photos.R
@@ -122,13 +124,11 @@ internal val WhatsNewReleases: List<WhatsNewRelease> = listOf(
         version = "2.5.0",
         hero = null,
         features = listOf(
-            WhatsNewFeature(Icons.Default.SwapVert, R.string.whats_new_import_title, R.string.whats_new_import_body, WhatsNewCategory.New),
-            WhatsNewFeature(Icons.Default.Email, R.string.whats_new_share_email_title, R.string.whats_new_share_email_body, WhatsNewCategory.New),
-            WhatsNewFeature(Icons.Default.Movie, R.string.whats_new_video_faces_title, R.string.whats_new_video_faces_body, WhatsNewCategory.New),
-            WhatsNewFeature(Icons.Default.Face, R.string.whats_new_faces_rework_title, R.string.whats_new_faces_rework_body, WhatsNewCategory.Improved),
-            WhatsNewFeature(Icons.Default.NoAccounts, R.string.whats_new_guest_title, R.string.whats_new_guest_body, WhatsNewCategory.Improved),
-            WhatsNewFeature(Icons.Default.Difference, R.string.whats_new_dup_nobackup_title, R.string.whats_new_dup_nobackup_body, WhatsNewCategory.Improved),
-            WhatsNewFeature(Icons.Default.Compress, R.string.whats_new_compress_split_title, R.string.whats_new_compress_split_body, WhatsNewCategory.Improved),
+            WhatsNewFeature(Icons.Default.Movie, R.string.whats_new_videoeditor_title, R.string.whats_new_videoeditor_body, WhatsNewCategory.New),
+            WhatsNewFeature(Icons.Default.PhotoAlbum, R.string.whats_new_movetoalbum_title, R.string.whats_new_movetoalbum_body, WhatsNewCategory.New),
+            WhatsNewFeature(Icons.Default.Schedule, R.string.whats_new_indexsettle_title, R.string.whats_new_indexsettle_body, WhatsNewCategory.Improved),
+            WhatsNewFeature(Icons.Default.PlayCircle, R.string.whats_new_videoplay_title, R.string.whats_new_videoplay_body, WhatsNewCategory.Improved),
+            WhatsNewFeature(Icons.Default.GroupAdd, R.string.whats_new_mergefast_title, R.string.whats_new_mergefast_body, WhatsNewCategory.Improved),
         ),
     ),
     WhatsNewRelease(
@@ -176,7 +176,7 @@ internal val WhatsNewReleases: List<WhatsNewRelease> = listOf(
 internal val LatestWhatsNewRelease: WhatsNewRelease get() = WhatsNewReleases.first()
 
 /**
- * The cards that shipped across the earlier 2.5.0 preview builds (test1 / test2 / test3). They are held
+ * The cards that shipped across the earlier 2.5.0 preview builds (test1 through test4). They are held
  * out of the 2.5.0 card above so each PREVIEW announces only what THAT preview added; prepend them to the
  * 2.5.0 card's features for the STABLE release, where someone updating from 2.4.0 meets all of 2.5.0
  * at once. Referencing the strings here also keeps them from reading as unused until then.
@@ -196,6 +196,22 @@ internal val WhatsNew250EarlierPreviews: List<WhatsNewFeature> = listOf(
     WhatsNewFeature(Icons.Default.AutoAwesome, R.string.whats_new_smooth_title, R.string.whats_new_smooth_body),
     WhatsNewFeature(Icons.Default.Difference, R.string.whats_new_dupreview_title, R.string.whats_new_dupreview_body),
     WhatsNewFeature(Icons.Default.Schedule, R.string.whats_new_filedate_title, R.string.whats_new_filedate_body),
+    WhatsNewFeature(Icons.Default.SwapVert, R.string.whats_new_import_title, R.string.whats_new_import_body, WhatsNewCategory.New),
+    WhatsNewFeature(Icons.Default.Email, R.string.whats_new_share_email_title, R.string.whats_new_share_email_body, WhatsNewCategory.New),
+    WhatsNewFeature(Icons.Default.Movie, R.string.whats_new_video_faces_title, R.string.whats_new_video_faces_body, WhatsNewCategory.New),
+    WhatsNewFeature(Icons.Default.Face, R.string.whats_new_faces_rework_title, R.string.whats_new_faces_rework_body, WhatsNewCategory.Improved),
+    WhatsNewFeature(Icons.Default.NoAccounts, R.string.whats_new_guest_title, R.string.whats_new_guest_body, WhatsNewCategory.Improved),
+    WhatsNewFeature(Icons.Default.Difference, R.string.whats_new_dup_nobackup_title, R.string.whats_new_dup_nobackup_body, WhatsNewCategory.Improved),
+    // Moved down from the 2.5.0 head card when test6 took the head: these are the test5 cards.
+    WhatsNewFeature(Icons.Default.Search, R.string.whats_new_semantic_title, R.string.whats_new_semantic_body, WhatsNewCategory.New),
+    WhatsNewFeature(Icons.Default.Movie, R.string.whats_new_gifmaker_title, R.string.whats_new_gifmaker_body, WhatsNewCategory.New),
+    WhatsNewFeature(Icons.Default.PlayCircle, R.string.whats_new_gifplay_title, R.string.whats_new_gifplay_body, WhatsNewCategory.New),
+    WhatsNewFeature(Icons.Default.GroupAdd, R.string.whats_new_automerge_title, R.string.whats_new_automerge_body, WhatsNewCategory.New),
+    WhatsNewFeature(Icons.Default.Visibility, R.string.whats_new_categoryhide_title, R.string.whats_new_categoryhide_body, WhatsNewCategory.New),
+    WhatsNewFeature(Icons.Default.Compress, R.string.whats_new_compress_split_title, R.string.whats_new_compress_split_body, WhatsNewCategory.New),
+    WhatsNewFeature(Icons.Default.Face, R.string.whats_new_people_accurate_title, R.string.whats_new_people_accurate_body, WhatsNewCategory.Improved),
+    WhatsNewFeature(Icons.Default.Schedule, R.string.whats_new_facescan_title, R.string.whats_new_facescan_body, WhatsNewCategory.Improved),
+    WhatsNewFeature(Icons.Default.CloudDownload, R.string.whats_new_bgdownloads_title, R.string.whats_new_bgdownloads_body, WhatsNewCategory.Improved),
 )
 
 /** Looks up a release by its version string, falling back to the newest for an unknown one. */

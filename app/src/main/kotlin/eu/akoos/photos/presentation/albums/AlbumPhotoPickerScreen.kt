@@ -116,6 +116,14 @@ import androidx.compose.runtime.snapshotFlow
 /** Type filter for the album photo picker: everything, cloud-backed only, or on-device only. */
 private enum class PickerFilter { All, Cloud, Device }
 
+/** Mime type of a gallery item across all three states, for the videos-only picker filter. Prefers the
+ *  device original's type when present, else the cloud record's. */
+private fun pickerMimeTypeOf(item: GalleryItem): String? = when (item) {
+    is GalleryItem.LocalOnly -> item.local.mimeType
+    is GalleryItem.Synced -> item.local.mimeType
+    is GalleryItem.CloudOnly -> item.cloud.mimeType
+}
+
 @Composable
 fun AlbumPhotoPickerScreen(
     albumLinkId: String = "",
@@ -131,6 +139,19 @@ fun AlbumPhotoPickerScreen(
     // original (LocalOnly + Synced), since a folder move relocates a device file, and the
     // All/Cloud/Device filter row is hidden because the source is locked to Device.
     deviceOnly: Boolean = false,
+    // Return-mode filter to videos only (the video editor's "+" picker): drops non-video items so the
+    // grid offers only addable clips. The All/Cloud/Device source filter still applies on top, and no
+    // source is forced, so a guest with no account still sees device videos.
+    videosOnly: Boolean = false,
+    // Return-mode cap on how many items may be picked at once (the video editor's source cap). Once
+    // reached, unselected tiles stop toggling on and a drag-sweep is clamped. Null = no cap.
+    maxSelectable: Int? = null,
+    // Return-mode source manager: keys to seed the selection with when the picker opens (the videos already
+    // on the timeline), so the manager shows them pre-selected. Seeded once, since the VM is fresh per open.
+    preselectedKeys: Set<String> = emptySet(),
+    // Keys that cannot be deselected (the video editor's locked primary): tapping one does nothing, so the
+    // video being edited always stays selected.
+    lockedKeys: Set<String> = emptySet(),
     // Header title when nothing is picked yet. Defaults to the "Add to album" wording; a return-mode
     // caller (collage, person) passes its own so the picker reads for its context.
     titleRes: Int = R.string.album_picker_title,
@@ -145,6 +166,11 @@ fun AlbumPhotoPickerScreen(
     val gridState = rememberLazyGridState()
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    // Seed the source manager's pre-selection once. The picker VM is fresh per route open, so this runs a
+    // single time to mark the videos already on the timeline as selected.
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        if (preselectedKeys.isNotEmpty()) viewModel.setSelection(preselectedKeys)
+    }
     val showScrollTop by remember { derivedStateOf { gridState.firstVisibleItemIndex > 4 } }
     var pickerFilter by remember { mutableStateOf(PickerFilter.All) }
     var unfiledOnly by remember { mutableStateOf(false) }
@@ -173,13 +199,14 @@ fun AlbumPhotoPickerScreen(
     // Type filter (#40): narrow the mixed library to cloud-backed photos (CloudOnly + Synced) or
     // on-device-only photos (LocalOnly), so it is clear which source a photo comes from. The
     // unfiled-only filter (#73) then composes on top, so a pick like "cloud AND unfiled" holds.
-    val photos = remember(basePhotos, pickerFilter, unfiledOnly, inAnyAlbumLinkIds) {
+    val photos = remember(basePhotos, pickerFilter, unfiledOnly, inAnyAlbumLinkIds, videosOnly) {
         val bySource = when (pickerFilter) {
             PickerFilter.All -> basePhotos
             PickerFilter.Cloud -> basePhotos.filter { it is GalleryItem.CloudOnly || it is GalleryItem.Synced }
             PickerFilter.Device -> basePhotos.filter { it is GalleryItem.LocalOnly }
         }
-        if (unfiledOnly) bySource.filter { isUnfiled(it, inAnyAlbumLinkIds) } else bySource
+        val byType = if (videosOnly) bySource.filter { pickerMimeTypeOf(it)?.startsWith("video/") == true } else bySource
+        if (unfiledOnly) byType.filter { isUnfiled(it, inAnyAlbumLinkIds) } else byType
     }
 
     // Pop back to the album once the add succeeds.
@@ -249,7 +276,22 @@ fun AlbumPhotoPickerScreen(
             items = photoKeys,
             indexByKey = indexByKey,
             selected = selected,
-            onSelectionChange = viewModel::setSelection,
+            onSelectionChange = { proposed ->
+                // A locked key (the video editor's primary) stays selected even through a drag-sweep.
+                val withLocked = if (lockedKeys.isEmpty()) proposed else proposed + lockedKeys
+                viewModel.setSelection(
+                    if (maxSelectable == null || withLocked.size <= maxSelectable) {
+                        withLocked
+                    } else {
+                        // Over the cap: keep every locked key first, then fill the remaining budget
+                        // from the swept keys in grid order. Taking the first N of the whole set
+                        // instead could drop a locked key sitting past the first N swept tiles,
+                        // briefly showing the primary unselected.
+                        val remaining = (maxSelectable - lockedKeys.size).coerceAtLeast(0)
+                        lockedKeys + photoKeys.filter { it in withLocked && it !in lockedKeys }.take(remaining)
+                    },
+                )
+            },
             tapGuard = tapGuard,
         )
         val pinchModifier = rememberGridPinchZoomModifier(levelIndex, GridZoom.LEVELS.size) { levelIndex = it }
@@ -325,7 +367,13 @@ fun AlbumPhotoPickerScreen(
                                 // Skip the release-tap that follows a long-press select; it would
                                 // otherwise toggle the just-anchored cell back off.
                                 if (tapGuard.value) tapGuard.value = false
-                                else viewModel.toggle(key)
+                                // A locked key (the video editor's primary) can never be deselected.
+                                else if (key in lockedKeys) {}
+                                else if (key in selected || maxSelectable == null || selected.size < maxSelectable) viewModel.toggle(key)
+                                else android.widget.Toast.makeText(
+                                    context, context.getString(R.string.picker_selection_limit, maxSelectable),
+                                    android.widget.Toast.LENGTH_SHORT,
+                                ).show()
                             },
                         )
                     }

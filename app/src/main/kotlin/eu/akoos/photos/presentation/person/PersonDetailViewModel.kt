@@ -23,6 +23,7 @@
 package eu.akoos.photos.presentation.person
 
 import android.content.Context
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -249,6 +250,13 @@ class PersonDetailViewModel @Inject constructor(
     private suspend fun foldPersonInto(account: String, fromPersonId: Long, name: String): Long =
         assignPersonName(account, fromPersonId, name)
 
+    // Candidate faces the user already accepted or dismissed this session. A re-cluster can re-split
+    // just-merged faces into a fresh cluster that clears the threshold again and gets re-offered, so
+    // exclude by FACE ID (survives the cluster id changing) rather than by cluster id.
+    // Synchronized: written on Dispatchers.IO (accept/dismiss) and read on Dispatchers.Default (the
+    // candidate scan). Only atomic add/contains are used, never a bare iteration, so this is enough.
+    private val handledCandidateFaceIds = java.util.Collections.synchronizedSet(mutableSetOf<String>())
+
     /**
      * Find the best "might also be this person" merge suggestion for [personId] (a named person): the
      * closest OTHER cluster whose mean face clears [FACE_SUGGEST_THRESHOLD], skipping any whose faces the
@@ -283,6 +291,10 @@ class PersonDetailViewModel @Inject constructor(
                     if (pid == otherId) continue
                     // Never re-offer a cluster the user already said is not this person.
                     if (faceIdsByPerson[pid]?.any { it in rejectedFaceIds } == true) continue
+                    // Nor one already accepted/dismissed this session, even if a recluster re-split it
+                    // under a new id: match on the face ids that were handled.
+                    val pidFaces = faceIdsByPerson[pid]
+                    if (pidFaces != null && pidFaces.isNotEmpty() && pidFaces.all { it in handledCandidateFaceIds }) continue
                     val s = cosineSimilarity(target, c)
                     if (s > bestSim) { bestSim = s; chosen = pid }
                 }
@@ -314,13 +326,26 @@ class PersonDetailViewModel @Inject constructor(
     fun acceptMergeSuggestion(personId: Long, candidateId: Long) {
         val name = _uiState.value.personName?.trim().orEmpty()
         if (name.isEmpty()) return
-        // Keep the current card in place: the reload below swaps it straight to the next candidate, so the
-        // banner never collapses to empty and back, which is what jerked the grid under it.
+        // Drop the card at once so the accept feels instant instead of "nothing happened, then a new
+        // card seconds later"; the fold + recluster + next-lookup run in the background and swap in the
+        // next candidate when ready.
+        _mergeSuggestion.value = null
         viewModelScope.launch(Dispatchers.IO) {
             val userId = accountManager.getPrimaryUserId().first()
             val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
-            foldPersonInto(account, candidateId, name)
-            faceIndexingScheduler.requestRecluster(userId)
+            // Capture the faces BEFORE the fold (after it, candidateId owns none) so a recluster that
+            // re-splits them can't re-offer the same faces.
+            val faceIds = faceDao.faceIdsForPerson(account, candidateId)
+            val folded = runCatching { foldPersonInto(account, candidateId, name) }
+                .onFailure { Log.w("PersonDetailVM", "acceptMergeSuggestion fold failed: ${it.message}") }
+                .isSuccess
+            // Only suppress re-offering these faces once the merge actually landed: a failed fold leaves
+            // the pair available again (loadMergeSuggestion below re-derives and re-offers it) instead of
+            // silently hiding a merge that never happened.
+            if (folded) {
+                handledCandidateFaceIds += faceIds
+                faceIndexingScheduler.requestRecluster(userId)
+            }
             loadMergeSuggestion(personId)
         }
     }
@@ -331,12 +356,14 @@ class PersonDetailViewModel @Inject constructor(
     fun dismissMergeSuggestion(personId: Long, candidateId: Long) {
         val name = _uiState.value.personName?.trim().orEmpty()
         if (name.isEmpty()) return
-        // As with accept, leave the current card up until the reload swaps in the next candidate, so the
-        // list under the banner does not jump as it disappears and reappears.
+        // Drop the card at once for instant feedback; the persistent "not this person" record and the
+        // next-lookup run in the background.
+        _mergeSuggestion.value = null
         viewModelScope.launch(Dispatchers.IO) {
             val account = accountManager.getPrimaryUserId().first()?.id ?: PhotoLocationEntity.LOCAL_USER
             val faceIds = faceDao.faceIdsForPerson(account, candidateId)
             if (faceIds.isNotEmpty()) notPersonDao.add(faceIds.map { NotPersonEntity(account, name, it) })
+            handledCandidateFaceIds += faceIds
             loadMergeSuggestion(personId)
         }
     }

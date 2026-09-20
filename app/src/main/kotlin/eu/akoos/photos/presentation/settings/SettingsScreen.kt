@@ -2391,8 +2391,8 @@ fun PrivacySecuritySettingsScreen(
                 AppLockTimeoutRow(
                     label = stringResource(R.string.settings_app_lock_timeout),
                     description = stringResource(R.string.settings_app_lock_timeout_desc),
-                    selectedMinutes = state.appLockTimeoutMinutes,
-                    onSelected = viewModel::setAppLockTimeoutMinutes,
+                    selectedSeconds = state.appLockTimeoutSeconds,
+                    onSelected = viewModel::setAppLockTimeoutSeconds,
                 )
             }
         }

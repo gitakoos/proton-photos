@@ -479,6 +479,7 @@
     <string name="album_picker_title">Add to album</string>
     <string name="album_picker_selected">%1$d selected</string>
     <string name="album_add_count">Add (%1$d)</string>
+    <string name="picker_selection_limit">You can select up to %1$d at once</string>
     <string name="album_picker_empty">No photos to add.</string>
     <string name="picker_filter_all">All</string>
     <string name="picker_filter_cloud">Cloud</string>
@@ -580,6 +581,7 @@
     <string name="delete_multi_remove_cloud_desc">Keep it on this device, move the backup to Drive trash</string>
     <string name="delete_multi_move_trash_everywhere">Move to trash everywhere</string>
     <string name="delete_multi_move_trash_everywhere_desc">Moves to device trash &amp; Proton Drive trash</string>
+    <string name="delete_frees_note">(frees ~%1$s)</string>
     <string name="delete_multi_drive_trash">Move to Drive trash</string>
     <string name="delete_multi_drive_trash_desc">Moved to Drive Recently Deleted, recoverable</string>
 
@@ -603,15 +605,10 @@
     <string name="settings_sign_out">Sign out</string>
     <string name="settings_sign_out_desc">End this session on this device.</string>
     <string name="sign_out_dialog_title">Sign out?</string>
-    <string name="sign_out_dialog_message">Are you sure you want to sign out of your Proton account?</string>
-    <plurals name="sign_out_dialog_vault_warning">
-        <item quantity="one">Signing out also empties Hidden Photos: its %1$d photo is deleted from this device for good.</item>
-        <item quantity="other">Signing out also empties Hidden Photos: its %1$d photos are deleted from this device for good.</item>
-    </plurals>
-    <plurals name="sign_out_dialog_vault_cloud">
-        <item quantity="one">%1$d of them is also in Proton Drive and can be downloaded again after signing back in.</item>
-        <item quantity="other">%1$d of them are also in Proton Drive and can be downloaded again after signing back in.</item>
-    </plurals>
+    <string name="sign_out_dialog_message">Signing out deletes this on-device data, and it is not restored when you sign back in (export it first if needed):</string>
+    <string name="sign_out_dialog_item_faces">Named people and face data</string>
+    <string name="sign_out_dialog_item_day_notes">Calendar notes</string>
+    <string name="sign_out_dialog_item_vault">Hidden Photos</string>
     <string name="sign_out_dialog_confirm">Sign out</string>
     <string name="sign_out_dialog_cancel">Cancel</string>
     <string name="settings_account_storage">Drive storage</string>
@@ -878,6 +875,9 @@
     <string name="settings_app_lock_timeout">Lock after</string>
     <string name="settings_app_lock_timeout_desc">Re-lock the app after this much time in the background</string>
     <string name="settings_app_lock_timeout_immediate">Immediately</string>
+    <string name="settings_app_lock_timeout_5sec">5 seconds</string>
+    <string name="settings_app_lock_timeout_10sec">10 seconds</string>
+    <string name="settings_app_lock_timeout_30sec">30 seconds</string>
     <string name="settings_app_lock_timeout_1min">1 minute</string>
     <string name="settings_app_lock_timeout_5min">5 minutes</string>
     <string name="settings_app_lock_timeout_10min">10 minutes</string>
@@ -956,6 +956,9 @@
     <string name="albums_reorder">Reorder albums</string>
     <string name="album_rename_confirm">Rename</string>
     <string name="album_remove_from_album">Remove from album</string>
+    <string name="album_move_to_album">Move to album</string>
+    <string name="album_moved_to_album">Moved to \"%1$s\"</string>
+    <string name="album_move_shared_copy_note">Photos added to a shared album are copied to the album owner.</string>
     <string name="album_set_as_cover">Set as cover</string>
     <string name="gallery_action_select">Select</string>
     <string name="album_cover_updated">Cover updated</string>
@@ -1287,6 +1290,7 @@
     <!-- Search -->
     <string name="search_title">Search</string>
     <string name="search_placeholder">Search by filename</string>
+    <string name="search_placeholder_semantic">Search your photos</string>
     <string name="search_empty_idle">Type a name to start searching</string>
     <string name="search_empty_no_results">No matches</string>
     <string name="search_section_on_this_day">On this day</string>
@@ -1500,9 +1504,8 @@
     <string name="video_editor_crop">Crop</string>
     <string name="video_editor_audio">Music</string>
     <string name="video_editor_add_music">Add music</string>
+    <string name="video_editor_replace_music">Replace music</string>
     <string name="video_editor_remove_music">Remove</string>
-    <string name="video_editor_music_start">Music start</string>
-    <string name="video_editor_music_end">Music end</string>
     <string name="video_editor_reset_crop">Reset crop</string>
     <string name="video_editor_reencoding">Re-encoding video…</string>
     <string name="video_editor_encrypting">Encrypting…</string>
@@ -1512,6 +1515,24 @@
     <string name="video_editor_grab_frame">Grab frame</string>
     <string name="video_editor_frame_saved">Frame saved to gallery</string>
     <string name="video_editor_frame_failed">Could not save the frame</string>
+    <string name="video_editor_split">Split</string>
+    <string name="video_editor_remove_section">Remove section</string>
+    <string name="video_editor_sections_lossless_only">Section cuts apply to lossless export only.</string>
+    <string name="video_editor_split_music">Split music</string>
+    <string name="video_editor_silence_section">Silence section</string>
+    <string name="video_editor_restore_section">Restore section</string>
+    <string name="video_editor_reorder">Reorder</string>
+    <string name="video_editor_add_video">Add video</string>
+    <string name="video_editor_max_sources">You can combine up to %1$d videos</string>
+    <string name="video_editor_low_space">Not enough free space to save the video</string>
+    <string name="video_editor_reencode_sections_pending">Crop, filters, rotation and volume can\'t be applied to cut or reordered sections yet.</string>
+    <string name="video_editor_volume">Volume</string>
+    <string name="video_editor_duplicate">Duplicate</string>
+    <string name="video_editor_delete">Delete</string>
+    <string name="video_editor_restore">Restore</string>
+    <string name="video_editor_unmute">Unmute</string>
+    <string name="video_editor_audio_lane">Audio</string>
+    <string name="video_editor_history_title">Edit history</string>
     <string name="editor_discard_changes_title">Discard changes?</string>
     <string name="editor_discard_changes_message">Your unsaved edits will be lost.</string>
     <string name="editor_discard_changes_confirm">Discard</string>
@@ -1573,6 +1594,7 @@
     <string name="op_deleting">Deleting…</string>
     <string name="op_hiding">Hiding…</string>
     <string name="op_removing_from_album">Removing from album…</string>
+    <string name="op_moving_to_album">Moving to album…</string>
     <string name="action_save">Save</string>
     <string name="gallery_picker_drive_albums">Drive albums</string>
     <string name="album_card_folder_badge">Folder</string>
@@ -1969,6 +1991,34 @@
     <string name="whats_new_dup_nobackup_body">The duplicate finder now scans the photos on your device with no account or backup needed.</string>
     <string name="whats_new_compress_split_title">Separate photo and video quality</string>
     <string name="whats_new_compress_split_body">Photo and video compression now have their own quality levels. Check yours in Settings, under Quality and size.</string>
+    <string name="whats_new_semantic_title">Search photos by describing them</string>
+    <string name="whats_new_semantic_body">Type what you remember, like a snowy mountain or a birthday cake, and matching photos surface. It all runs on your phone; turn it on in Settings.</string>
+    <string name="whats_new_gifmaker_title">Turn a video into a GIF</string>
+    <string name="whats_new_gifmaker_body">Trim a clip, pick a size, and save or share the GIF. A cloud video\'s GIF uploads back to your library.</string>
+    <string name="whats_new_gifplay_title">Play GIFs in place</string>
+    <string name="whats_new_gifplay_body">Two settings let GIFs animate in the photo grids and on album covers, cloud covers included. Off by default.</string>
+    <string name="whats_new_automerge_title">Auto-merge the same person</string>
+    <string name="whats_new_automerge_body">An opt-in setting accepts the strongest same-person suggestions for you, so a person\'s photos gather on their own.</string>
+    <string name="whats_new_categoryhide_title">Hide categories you skip</string>
+    <string name="whats_new_categoryhide_body">An eye toggle on each timeline category hides it from the timeline and search bars. Reorder them there too.</string>
+    <string name="whats_new_people_accurate_title">People counts stay right</string>
+    <string name="whats_new_people_accurate_body">A person stays accurate after merging, moving or hiding photos, and a photo\'s faces are reused when it backs up.</string>
+    <string name="whats_new_facescan_title">Steadier face scanning</string>
+    <string name="whats_new_facescan_body">Scanning resumes when Wi-Fi returns, and one stuck photo no longer freezes the whole run.</string>
+    <string name="whats_new_bgdownloads_title">Downloads keep running</string>
+    <string name="whats_new_bgdownloads_body">AI model downloads continue in the background with a progress notification, so leaving Settings no longer stops them.</string>
+    <string name="whats_new_videoeditor_title">Multi-clip video editor</string>
+    <string name="whats_new_videoeditor_body">The video editor is now a timeline. Add clips, trim, reorder and delete them, layer music, tune color and light, and export it all as one video.</string>
+    <string name="whats_new_movetoalbum_title">Move to album</string>
+    <string name="whats_new_movetoalbum_body">Move selected photos from one album straight into another.</string>
+    <string name="whats_new_indexsettle_title">Indexing no longer looks stuck</string>
+    <string name="whats_new_indexsettle_body">When the last few items cannot be read right now, face and photo indexing settle and retry later instead of freezing on the progress bar.</string>
+    <string name="whats_new_videoplay_title">Cleaner, more reliable video</string>
+    <string name="whats_new_videoplay_body">Videos open without a wrong-photo or white flash, and play on phones whose main decoder used to fail.</string>
+    <string name="whats_new_mergefast_title">Snappier face suggestions</string>
+    <string name="whats_new_mergefast_body">Merge suggestions respond the moment you tap, stay reachable, and a pair comes back if the merge did not finish.</string>
+    <string name="whats_new_diag_title">Testing this preview?</string>
+    <string name="whats_new_diag_body">Thanks for trying a preview build. If anything looks wrong, please send the diagnostics so a file problem can be told apart from something else: copy them from Settings, then email support@photosforproton.eu, or post on Discord or GitHub.</string>
     <string name="whats_new_section_new">New</string>
     <string name="whats_new_section_improved">Improved</string>
     <string name="whats_new_more_240">Plus copied links stay hidden in the clipboard preview, file sizes match everywhere they appear, automatic free-up checks with Drive before removing a copy from your phone, and large albums and selections hold together better.</string>
@@ -2016,7 +2066,6 @@
     <string name="albums_search_no_results">No albums match your search.</string>
     <string name="settings_ai_groups_found">%1$d groups</string>
     <string name="settings_ai_faces_found">%1$d faces</string>
-    <string name="sign_out_dialog_face_warning">Your named people and face groups on this device are also removed, and are not restored when you sign back in.</string>
     <string name="person_rename_merge_confirm_title">Merge with existing person?</string>
     <string name="person_rename_merge_confirm_body">A person named %1$s already exists. Using that name merges the two into one, which cannot be undone. Merge them?</string>
     <string name="person_move_confirm_title">Move to this person?</string>

@@ -212,6 +212,7 @@
     <string name="delete_multi_remove_cloud_desc">Ezen az eszközön marad, a biztonsági mentés a Drive kukájába kerül</string>
     <string name="delete_multi_move_trash_everywhere">Mindenhol kukába helyezés</string>
     <string name="delete_multi_move_trash_everywhere_desc">Áthelyezés az eszköz és a Proton Drive kukájába</string>
+    <string name="delete_frees_note">(~%1$s felszabadul)</string>
     <string name="delete_multi_drive_trash">Drive kukába helyezés</string>
     <string name="delete_multi_drive_trash_desc">A Drive kukájába kerül, visszaállítható</string>
 
@@ -237,15 +238,10 @@
     <string name="settings_sign_out">Kijelentkezés</string>
     <string name="settings_sign_out_desc">Munkamenet befejezése ezen az eszközön.</string>
     <string name="sign_out_dialog_title">Kijelentkezés?</string>
-    <string name="sign_out_dialog_message">Biztosan ki akarsz jelentkezni a Proton-fiókodból?</string>
-    <plurals name="sign_out_dialog_vault_warning">
-        <item quantity="one">A kijelentkezés a Rejtett fotókat is kiüríti: %1$d fotó véglegesen törlődik erről az eszközről.</item>
-        <item quantity="other">A kijelentkezés a Rejtett fotókat is kiüríti: %1$d fotó véglegesen törlődik erről az eszközről.</item>
-    </plurals>
-    <plurals name="sign_out_dialog_vault_cloud">
-        <item quantity="one">Közülük %1$d a Proton Drive-on is megvan, és ismételt bejelentkezés után újra letölthető.</item>
-        <item quantity="other">Közülük %1$d a Proton Drive-on is megvan, és ismételt bejelentkezés után újra letölthető.</item>
-    </plurals>
+    <string name="sign_out_dialog_message">A kijelentkezés törli ezeket az eszközön tárolt adatokat, és nem állnak vissza, amikor újra bejelentkezel (ha szükséged van rájuk, előbb exportáld őket):</string>
+    <string name="sign_out_dialog_item_faces">Elnevezett emberek és arcadatok</string>
+    <string name="sign_out_dialog_item_day_notes">Naptárjegyzetek</string>
+    <string name="sign_out_dialog_item_vault">Rejtett fotók</string>
     <string name="sign_out_dialog_confirm">Kijelentkezés</string>
     <string name="sign_out_dialog_cancel">Mégse</string>
     <string name="settings_account_storage">Drive tárhely</string>
@@ -380,6 +376,9 @@
     <string name="settings_app_lock_timeout">Zárolás ennyi után</string>
     <string name="settings_app_lock_timeout_desc">Ennyi háttérben töltött idő után újra lezárja az appot</string>
     <string name="settings_app_lock_timeout_immediate">Azonnal</string>
+    <string name="settings_app_lock_timeout_5sec">5 másodperc</string>
+    <string name="settings_app_lock_timeout_10sec">10 másodperc</string>
+    <string name="settings_app_lock_timeout_30sec">30 másodperc</string>
     <string name="settings_app_lock_timeout_1min">1 perc</string>
     <string name="settings_app_lock_timeout_5min">5 perc</string>
     <string name="settings_app_lock_timeout_10min">10 perc</string>
@@ -487,6 +486,10 @@
     <string name="albums_reorder">Albumok átrendezése</string>
     <string name="album_rename_confirm">Átnevez</string>
     <string name="album_remove_from_album">Eltávolítás az albumból</string>
+    <string name="album_move_to_album">Áthelyezés albumba</string>
+    <string name="album_moved_to_album">Áthelyezve ide: \"%1$s\"</string>
+    <string name="album_move_shared_copy_note">A megosztott albumhoz adott fotókról másolat készül az album tulajdonosának.</string>
+    <string name="op_moving_to_album">Áthelyezés albumba…</string>
     <string name="album_set_as_cover">Beállítás borítóként</string>
     <string name="album_set_as_album_cover">Beállítás albumborítóként</string>
     <string name="gallery_action_select">Kijelölés</string>
@@ -772,6 +775,7 @@
     <!-- Keresés -->
     <string name="search_title">Keresés</string>
     <string name="search_placeholder">Keresés fájlnév szerint</string>
+    <string name="search_placeholder_semantic">Fotók keresése</string>
     <string name="search_empty_idle">Írj be egy nevet a kereséshez</string>
     <string name="search_empty_no_results">Nincs találat</string>
 
@@ -885,9 +889,8 @@
     <string name="video_editor_crop">Kivágás</string>
     <string name="video_editor_audio">Zene</string>
     <string name="video_editor_add_music">Zene hozzáadása</string>
+    <string name="video_editor_replace_music">Zene cseréje</string>
     <string name="video_editor_remove_music">Eltávolítás</string>
-    <string name="video_editor_music_start">Zene kezdete</string>
-    <string name="video_editor_music_end">Zene vége</string>
     <string name="video_editor_reset_crop">Vágás visszaállítása</string>
     <string name="video_editor_reencoding">Videó újrakódolása…</string>
     <string name="video_editor_encrypting">Titkosítás…</string>
@@ -1263,6 +1266,7 @@
     <string name="album_picker_title">Albumhoz adás</string>
     <string name="album_picker_selected">%1$d kijelölve</string>
     <string name="album_add_count">Hozzáadás (%1$d)</string>
+    <string name="picker_selection_limit">Egyszerre legfeljebb %1$d elemet választhatsz ki</string>
     <string name="album_picker_empty">Nincs hozzáadható fotó.</string>
 
     <!-- Album create/rename/delete snackbar fallbacks -->
@@ -1903,6 +1907,24 @@
 
     <!-- Video editor -->
     <string name="video_editor_frame_failed">A képkockát nem sikerült menteni</string>
+    <string name="video_editor_split">Felosztás</string>
+    <string name="video_editor_remove_section">Szakasz eltávolítása</string>
+    <string name="video_editor_sections_lossless_only">A szakaszvágások csak veszteségmentes exportnál érvényesülnek.</string>
+    <string name="video_editor_split_music">Zene felosztása</string>
+    <string name="video_editor_silence_section">Szakasz némítása</string>
+    <string name="video_editor_restore_section">Szakasz visszaállítása</string>
+    <string name="video_editor_reorder">Átrendezés</string>
+    <string name="video_editor_add_video">Videó hozzáadása</string>
+    <string name="video_editor_max_sources">Legfeljebb %1$d videót fűzhetsz össze</string>
+    <string name="video_editor_low_space">Nincs elég szabad hely a videó mentéséhez</string>
+    <string name="video_editor_reencode_sections_pending">Vágás, szűrők, forgatás és hangerő még nem alkalmazható darabolt vagy átrendezett szakaszokra.</string>
+    <string name="video_editor_volume">Hangerő</string>
+    <string name="video_editor_duplicate">Duplikálás</string>
+    <string name="video_editor_delete">Törlés</string>
+    <string name="video_editor_restore">Visszaállítás</string>
+    <string name="video_editor_unmute">Visszahangosítás</string>
+    <string name="video_editor_audio_lane">Hang</string>
+    <string name="video_editor_history_title">Szerkesztési előzmények</string>
     <string name="video_editor_frame_saved">Képkocka mentve a galériába</string>
     <string name="video_editor_grab_frame">Képkocka mentése</string>
     <string name="video_editor_mute">Némítás</string>
@@ -1948,6 +1970,34 @@
     <string name="whats_new_dup_nobackup_body">A duplikátumkereső mostantól a készülékeden lévő fotókat vizsgálja, fiók és biztonsági mentés nélkül.</string>
     <string name="whats_new_compress_split_title">Külön fotó- és videóminőség</string>
     <string name="whats_new_compress_split_body">A fotók és a videók tömörítésének mostantól külön minőségi szintje van. Ellenőrizd a Beállítások Minőség és méret részében.</string>
+    <string name="whats_new_semantic_title">Fotók keresése leírással</string>
+    <string name="whats_new_semantic_body">Írd be, amire emlékszel, például havas hegy vagy születésnapi torta, és megjelennek az egyező fotók. Minden a telefonodon fut; kapcsold be a Beállításokban.</string>
+    <string name="whats_new_gifmaker_title">Alakíts videót GIF-fé</string>
+    <string name="whats_new_gifmaker_body">Vágj meg egy klipet, válassz méretet, majd mentsd vagy oszd meg a GIF-et. Egy felhős videó GIF-je visszatöltődik a gyűjteményedbe.</string>
+    <string name="whats_new_gifplay_title">GIF-ek lejátszása helyben</string>
+    <string name="whats_new_gifplay_body">Két beállítással a GIF-ek animálnak a fotórácsokban és az album borítóin, a felhős borítókat is beleértve. Alapból kikapcsolva.</string>
+    <string name="whats_new_automerge_title">Ugyanaz a személy automatikus egyesítése</string>
+    <string name="whats_new_automerge_body">Egy választható beállítás helyetted elfogadja az ugyanarra a személyre vonatkozó legbiztosabb javaslatokat, így egy személy fotói maguktól összegyűlnek.</string>
+    <string name="whats_new_categoryhide_title">Rejtsd el a kihagyott kategóriákat</string>
+    <string name="whats_new_categoryhide_body">Az idővonal minden kategóriája mellett egy szem ikon elrejti azt az idővonalról és a keresésből. Ott át is rendezheted őket.</string>
+    <string name="whats_new_people_accurate_title">Az emberek száma pontos marad</string>
+    <string name="whats_new_people_accurate_body">Egy személy pontos marad fotók egyesítése, áthelyezése vagy elrejtése után is, és egy fotó arcait a rendszer újrahasznosítja, amikor mentés készül róla.</string>
+    <string name="whats_new_facescan_title">Stabilabb arckeresés</string>
+    <string name="whats_new_facescan_body">A keresés folytatódik, amint visszatér a Wi-Fi, és egy elakadt fotó már nem fagyasztja le az egész folyamatot.</string>
+    <string name="whats_new_bgdownloads_title">A letöltések tovább futnak</string>
+    <string name="whats_new_bgdownloads_body">Az MI-modellek letöltése a háttérben folytatódik, folyamatjelző értesítéssel, így a Beállításokból kilépve sem áll le.</string>
+    <string name="whats_new_videoeditor_title">Több klipes videószerkesztő</string>
+    <string name="whats_new_videoeditor_body">A videószerkesztő mostantól idővonal. Adj hozzá klipeket, vágd, rendezd át és töröld őket, tegyél alá zenét, hangold a színt és a fényt, majd exportáld az egészet egyetlen videóként.</string>
+    <string name="whats_new_movetoalbum_title">Áthelyezés albumba</string>
+    <string name="whats_new_movetoalbum_body">Helyezd át a kijelölt fotókat az egyik albumból egyenesen egy másikba.</string>
+    <string name="whats_new_indexsettle_title">Az indexelés már nem tűnik elakadtnak</string>
+    <string name="whats_new_indexsettle_body">Ha az utolsó néhány elem éppen nem olvasható be, az arc- és fotóindexelés szépen befejeződik, és később újrapróbálja, ahelyett hogy a folyamatjelzőn lefagyna.</string>
+    <string name="whats_new_videoplay_title">Tisztább, megbízhatóbb videó</string>
+    <string name="whats_new_videoplay_body">A videók rossz fotó és fehér villanás nélkül nyílnak meg, és azokon a telefonokon is lejátszódnak, ahol a fő dekóder eddig hibázott.</string>
+    <string name="whats_new_mergefast_title">Gyorsabb arcjavaslatok</string>
+    <string name="whats_new_mergefast_body">Az egyesítési javaslatok abban a pillanatban reagálnak, amint rájuk koppintasz, elérhetők maradnak, és egy pár visszatér, ha az egyesítés nem fejeződött be.</string>
+    <string name="whats_new_diag_title">Teszteled ezt az előzetest?</string>
+    <string name="whats_new_diag_body">Köszönöm, hogy kipróbálod ezt a tesztverziót. Ha valami hibásnak tűnik, küldd el a diagnosztikát, hogy egy fájlprobléma megkülönböztethető legyen valami mástól: másold ki a Beállításokból, majd írj a support@photosforproton.eu címre, vagy oszd meg Discordon vagy GitHubon.</string>
     <string name="whats_new_section_new">Új</string>
     <string name="whats_new_section_improved">Fejlesztések</string>
 
@@ -1982,7 +2032,6 @@
     <string name="albums_search_no_results">Nincs a keresésnek megfelelő album.</string>
     <string name="settings_ai_groups_found">%1$d csoport</string>
     <string name="settings_ai_faces_found">%1$d arc</string>
-    <string name="sign_out_dialog_face_warning">Az ezen az eszközön elnevezett emberek és arc-csoportok is törlődnek, és nem állnak vissza, amikor újra bejelentkezel.</string>
     <string name="person_rename_merge_confirm_title">Összevonás a meglévő személlyel?</string>
     <string name="person_rename_merge_confirm_body">Már létezik egy %1$s nevű személy. Ezt a nevet használva a kettő eggyé olvad, ami nem vonható vissza. Összevonod?</string>
     <string name="person_move_confirm_title">Áthelyezed ehhez a személyhez?</string>

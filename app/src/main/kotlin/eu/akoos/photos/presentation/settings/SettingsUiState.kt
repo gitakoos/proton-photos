@@ -219,8 +219,8 @@ data class SettingsUiState(
     val stripShareAuthorship: Boolean = false,
     // App lock
     val appLockEnabled: Boolean = false,
-    /** Lock-on-return timeout in minutes. 0 = immediate; common picks: 5 / 10 / 15 / 60. */
-    val appLockTimeoutMinutes: Int = 0,
+    /** Lock-on-return timeout in seconds. 0 = immediate; common picks: 5 / 10 / 30 / 60 / 300. */
+    val appLockTimeoutSeconds: Int = 0,
     /** Privacy opt-in: wipe `cacheDir/fullres/` on every process backgrounding. Off by
      *  default — the 30-min TTL + offline-grace sweeper is the regular behaviour. */
     val clearCacheOnAppClose: Boolean = false,

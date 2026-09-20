@@ -251,7 +251,7 @@ class OnboardingViewModel @Inject constructor(
         palette: ThemePalette,
         language: String,
         appLockEnabled: Boolean,
-        appLockTimeoutMinutes: Int,
+        appLockTimeoutSeconds: Int,
         albumMirrorSelection: Set<String>,
         albumMirrorCustom: Set<String>,
         onAppliedLocale: () -> Unit,
@@ -289,7 +289,7 @@ class OnboardingViewModel @Inject constructor(
                 p[SettingsKeys.THEME_PALETTE] = palette.storageKey
                 p[SettingsKeys.LANGUAGE] = language
                 p[SettingsKeys.APP_LOCK_ENABLED] = appLockEnabled
-                p[SettingsKeys.APP_LOCK_TIMEOUT_MINUTES] = appLockTimeoutMinutes
+                p[SettingsKeys.APP_LOCK_TIMEOUT_SECONDS] = appLockTimeoutSeconds
                 // Album-mirror opt-in: persist the chosen folder names (the
                 // custom set is already a subset of the selection because every
                 // add-custom flow auto-checks the new row) and flip the
@@ -347,7 +347,7 @@ fun OnboardingScreen(
     val palette by viewModel.palette.collectAsStateWithLifecycle()
     val language by viewModel.language.collectAsStateWithLifecycle()
     var appLockEnabled by rememberSaveable { mutableStateOf(false) }
-    var appLockTimeoutMinutes by rememberSaveable { mutableIntStateOf(5) }
+    var appLockTimeoutSeconds by rememberSaveable { mutableIntStateOf(300) }
 
     var notificationGranted by rememberSaveable { mutableStateOf(false) }
     var mediaGranted by rememberSaveable {
@@ -555,9 +555,9 @@ fun OnboardingScreen(
                         )
                         OnboardingStep.AppLock -> AppLockStep(
                             enabled = appLockEnabled,
-                            timeoutMinutes = appLockTimeoutMinutes,
+                            timeoutSeconds = appLockTimeoutSeconds,
                             onEnabledChange = { appLockEnabled = it },
-                            onTimeoutChange = { appLockTimeoutMinutes = it },
+                            onTimeoutChange = { appLockTimeoutSeconds = it },
                         )
                         OnboardingStep.Notifications -> NotificationsStep(
                             granted = notificationGranted,
@@ -641,7 +641,7 @@ fun OnboardingScreen(
                                 palette = palette,
                                 language = language,
                                 appLockEnabled = appLockEnabled,
-                                appLockTimeoutMinutes = appLockTimeoutMinutes,
+                                appLockTimeoutSeconds = appLockTimeoutSeconds,
                                 albumMirrorSelection = albumMirrorSelection,
                                 albumMirrorCustom = albumMirrorCustom,
                                 onAppliedLocale = onComplete,

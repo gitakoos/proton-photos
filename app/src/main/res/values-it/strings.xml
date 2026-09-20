@@ -193,6 +193,7 @@
     <string name="delete_multi_remove_cloud_desc">Mantienila su questo dispositivo, sposta il backup nel cestino di Drive</string>
     <string name="delete_multi_move_trash_everywhere">Sposta nel cestino ovunque</string>
     <string name="delete_multi_move_trash_everywhere_desc">Sposta nel cestino del dispositivo e di Proton Drive</string>
+    <string name="delete_frees_note">(libera ~%1$s)</string>
     <string name="delete_multi_drive_trash">Sposta nel cestino di Drive</string>
     <string name="delete_multi_drive_trash_desc">Spostato in Eliminati di recente di Drive, recuperabile</string>
 
@@ -220,17 +221,10 @@
     <string name="settings_sign_out">Esci</string>
     <string name="settings_sign_out_desc">Termina la sessione su questo dispositivo.</string>
     <string name="sign_out_dialog_title">Uscire?</string>
-    <string name="sign_out_dialog_message">Vuoi davvero uscire dal tuo account Proton?</string>
-    <plurals name="sign_out_dialog_vault_warning">
-        <item quantity="one">Uscendo si svuota anche la sezione Foto nascoste: %1$d foto viene eliminata da questo dispositivo in modo definitivo.</item>
-        <item quantity="many">Uscendo si svuota anche la sezione Foto nascoste: %1$d foto vengono eliminate da questo dispositivo in modo definitivo.</item>
-        <item quantity="other">Uscendo si svuota anche la sezione Foto nascoste: %1$d foto vengono eliminate da questo dispositivo in modo definitivo.</item>
-    </plurals>
-    <plurals name="sign_out_dialog_vault_cloud">
-        <item quantity="one">%1$d di queste è anche su Proton Drive e può essere scaricata di nuovo dopo aver effettuato l\'accesso.</item>
-        <item quantity="many">%1$d di queste sono anche su Proton Drive e possono essere scaricate di nuovo dopo aver effettuato l\'accesso.</item>
-        <item quantity="other">%1$d di queste sono anche su Proton Drive e possono essere scaricate di nuovo dopo aver effettuato l\'accesso.</item>
-    </plurals>
+    <string name="sign_out_dialog_message">Uscendo, questi dati su questo dispositivo vengono eliminati e non vengono ripristinati al nuovo accesso (esportali prima, se ti servono):</string>
+    <string name="sign_out_dialog_item_faces">Persone con nome e dati dei volti</string>
+    <string name="sign_out_dialog_item_day_notes">Note del Calendario</string>
+    <string name="sign_out_dialog_item_vault">Foto nascoste</string>
     <string name="sign_out_dialog_confirm">Esci</string>
     <string name="sign_out_dialog_cancel">Annulla</string>
     <string name="settings_account_storage">Spazio Drive</string>
@@ -363,6 +357,9 @@
     <string name="settings_app_lock_timeout">Blocca dopo</string>
     <string name="settings_app_lock_timeout_desc">Riblocca l\'app dopo questo tempo in background</string>
     <string name="settings_app_lock_timeout_immediate">Immediatamente</string>
+    <string name="settings_app_lock_timeout_5sec">5 secondi</string>
+    <string name="settings_app_lock_timeout_10sec">10 secondi</string>
+    <string name="settings_app_lock_timeout_30sec">30 secondi</string>
     <string name="settings_app_lock_timeout_1min">1 minuto</string>
     <string name="settings_app_lock_timeout_5min">5 minuti</string>
     <string name="settings_app_lock_timeout_10min">10 minuti</string>
@@ -470,6 +467,10 @@
     <string name="albums_reorder">Riordina album</string>
     <string name="album_rename_confirm">Rinomina</string>
     <string name="album_remove_from_album">Rimuovi dall\'album</string>
+    <string name="album_move_to_album">Sposta nell\'album</string>
+    <string name="album_moved_to_album">Spostato in \"%1$s\"</string>
+    <string name="album_move_shared_copy_note">Le foto aggiunte a un album condiviso vengono copiate al proprietario dell\'album.</string>
+    <string name="op_moving_to_album">Spostamento nell\'album…</string>
     <string name="album_set_as_cover">Imposta come copertina</string>
     <string name="album_set_as_album_cover">Imposta come copertina dell\'album</string>
     <string name="gallery_action_select">Seleziona</string>
@@ -755,6 +756,7 @@
     <!-- Ricerca -->
     <string name="search_title">Cerca</string>
     <string name="search_placeholder">Cerca per nome file</string>
+    <string name="search_placeholder_semantic">Cerca le tue foto</string>
     <string name="search_empty_idle">Digita un nome per iniziare</string>
     <string name="search_empty_no_results">Nessun risultato</string>
 
@@ -877,9 +879,8 @@
     <string name="video_editor_crop">Ritaglia</string>
     <string name="video_editor_audio">Musica</string>
     <string name="video_editor_add_music">Aggiungi musica</string>
+    <string name="video_editor_replace_music">Sostituisci musica</string>
     <string name="video_editor_remove_music">Rimuovi</string>
-    <string name="video_editor_music_start">Inizio musica</string>
-    <string name="video_editor_music_end">Fine musica</string>
     <string name="video_editor_reset_crop">Reimposta ritaglio</string>
     <string name="video_editor_reencoding">Ricodifica del video…</string>
     <string name="video_editor_encrypting">Cifratura…</string>
@@ -1256,6 +1257,7 @@
     <string name="album_picker_title">Aggiungi all\'album</string>
     <string name="album_picker_selected">%1$d selezionate</string>
     <string name="album_add_count">Aggiungi (%1$d)</string>
+    <string name="picker_selection_limit">Puoi selezionarne al massimo %1$d alla volta</string>
     <string name="album_picker_empty">Nessuna foto da aggiungere.</string>
 
     <!-- Album create/rename/delete snackbar fallbacks -->
@@ -1941,6 +1943,24 @@
 
     <!-- Video editor -->
     <string name="video_editor_frame_failed">Impossibile salvare il fotogramma</string>
+    <string name="video_editor_split">Dividi</string>
+    <string name="video_editor_remove_section">Rimuovi sezione</string>
+    <string name="video_editor_sections_lossless_only">I tagli delle sezioni si applicano solo all\'esportazione senza perdita.</string>
+    <string name="video_editor_split_music">Dividi la musica</string>
+    <string name="video_editor_silence_section">Silenzia la sezione</string>
+    <string name="video_editor_restore_section">Ripristina la sezione</string>
+    <string name="video_editor_reorder">Riordina</string>
+    <string name="video_editor_add_video">Aggiungi video</string>
+    <string name="video_editor_max_sources">Puoi combinare fino a %1$d video</string>
+    <string name="video_editor_low_space">Spazio libero insufficiente per salvare il video</string>
+    <string name="video_editor_reencode_sections_pending">Ritaglio, filtri, rotazione e volume non possono ancora essere applicati a sezioni tagliate o riordinate.</string>
+    <string name="video_editor_volume">Volume</string>
+    <string name="video_editor_duplicate">Duplica</string>
+    <string name="video_editor_delete">Elimina</string>
+    <string name="video_editor_restore">Ripristina</string>
+    <string name="video_editor_unmute">Riattiva audio</string>
+    <string name="video_editor_audio_lane">Audio</string>
+    <string name="video_editor_history_title">Cronologia modifiche</string>
     <string name="video_editor_frame_saved">Fotogramma salvato nella galleria</string>
     <string name="video_editor_grab_frame">Cattura fotogramma</string>
     <string name="video_editor_mute">Muto</string>
@@ -1986,6 +2006,34 @@
     <string name="whats_new_dup_nobackup_body">Il rilevatore di duplicati ora analizza le foto sul tuo dispositivo senza bisogno di account o backup.</string>
     <string name="whats_new_compress_split_title">Qualità separata per foto e video</string>
     <string name="whats_new_compress_split_body">La compressione di foto e video ora ha i propri livelli di qualità. Controllali nelle Impostazioni, in Qualità e dimensione.</string>
+    <string name="whats_new_semantic_title">Cerca le foto descrivendole</string>
+    <string name="whats_new_semantic_body">Scrivi ciò che ricordi, come una montagna innevata o una torta di compleanno, e le foto corrispondenti compaiono. Funziona tutto sul tuo telefono; attivala nelle Impostazioni.</string>
+    <string name="whats_new_gifmaker_title">Trasforma un video in una GIF</string>
+    <string name="whats_new_gifmaker_body">Taglia un clip, scegli una dimensione e salva o condividi la GIF. La GIF di un video del cloud viene caricata di nuovo nella tua libreria.</string>
+    <string name="whats_new_gifplay_title">Riproduci le GIF dove sono</string>
+    <string name="whats_new_gifplay_body">Due impostazioni animano le GIF nelle griglie di foto e sulle copertine degli album, incluse quelle del cloud. Disattivato per impostazione predefinita.</string>
+    <string name="whats_new_automerge_title">Unisci automaticamente la stessa persona</string>
+    <string name="whats_new_automerge_body">Un\'impostazione facoltativa accetta per te i suggerimenti più sicuri sulla stessa persona, così le foto di qualcuno si raccolgono da sole.</string>
+    <string name="whats_new_categoryhide_title">Nascondi le categorie che salti</string>
+    <string name="whats_new_categoryhide_body">Un\'icona a forma di occhio su ogni categoria della cronologia la nasconde dalla cronologia e dalla ricerca. Lì puoi anche riordinarle.</string>
+    <string name="whats_new_people_accurate_title">I conteggi delle persone restano giusti</string>
+    <string name="whats_new_people_accurate_body">Una persona resta corretta dopo aver unito, spostato o nascosto foto, e i volti di una foto vengono riutilizzati durante il backup.</string>
+    <string name="whats_new_facescan_title">Analisi dei volti più stabile</string>
+    <string name="whats_new_facescan_body">L\'analisi riprende quando torna il Wi-Fi, e una foto bloccata non congela più l\'intera scansione.</string>
+    <string name="whats_new_bgdownloads_title">I download continuano</string>
+    <string name="whats_new_bgdownloads_body">I download dei modelli di IA proseguono in background con una notifica di avanzamento, così uscire dalle Impostazioni non li interrompe più.</string>
+    <string name="whats_new_videoeditor_title">Editor video multiclip</string>
+    <string name="whats_new_videoeditor_body">L\'editor video è ora una linea temporale. Aggiungi clip, tagliali, riordinali ed eliminali, aggiungi una musica di sottofondo, regola colore e luce, poi esporta tutto come un unico video.</string>
+    <string name="whats_new_movetoalbum_title">Sposta in un album</string>
+    <string name="whats_new_movetoalbum_body">Sposta le foto selezionate da un album direttamente in un altro.</string>
+    <string name="whats_new_indexsettle_title">L\'indicizzazione non sembra più bloccata</string>
+    <string name="whats_new_indexsettle_body">Quando gli ultimi elementi non possono essere letti al momento, l\'indicizzazione dei volti e delle foto si assesta e riprova più tardi, invece di bloccarsi sulla barra di avanzamento.</string>
+    <string name="whats_new_videoplay_title">Video più pulito e affidabile</string>
+    <string name="whats_new_videoplay_body">I video si aprono senza una foto sbagliata o un lampo bianco, e vengono riprodotti anche sui telefoni il cui decoder principale prima falliva.</string>
+    <string name="whats_new_mergefast_title">Suggerimenti sui volti più rapidi</string>
+    <string name="whats_new_mergefast_body">I suggerimenti di unione rispondono nel momento in cui tocchi, restano raggiungibili, e una coppia torna se l\'unione non è stata completata.</string>
+    <string name="whats_new_diag_title">Stai provando questa anteprima?</string>
+    <string name="whats_new_diag_body">Grazie per provare un\'anteprima. Se qualcosa non va, invia la diagnostica così un problema di file può essere distinto da qualcos\'altro: copiala dalle Impostazioni e scrivi a support@photosforproton.eu, oppure pubblica su Discord o GitHub.</string>
     <string name="whats_new_section_new">Novità</string>
     <string name="whats_new_section_improved">Miglioramenti</string>
 
@@ -2020,7 +2068,6 @@
     <string name="albums_search_no_results">Nessun album corrisponde alla ricerca.</string>
     <string name="settings_ai_groups_found">%1$d gruppi</string>
     <string name="settings_ai_faces_found">%1$d volti</string>
-    <string name="sign_out_dialog_face_warning">Le persone con nome e i gruppi di volti su questo dispositivo vengono rimossi e non vengono ripristinati al nuovo accesso.</string>
     <string name="person_rename_merge_confirm_title">Unire alla persona esistente?</string>
     <string name="person_rename_merge_confirm_body">Esiste già una persona di nome %1$s. Usare quel nome unisce le due in una sola, operazione irreversibile. Unire?</string>
     <string name="person_move_confirm_title">Spostare a questa persona?</string>

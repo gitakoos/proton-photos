@@ -302,7 +302,7 @@ class MainActivity : AppCompatActivity() {
         // DataStore flow's first emission and turned "Lock after 5 min" into "Lock immediately".
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
-                val timeoutMs = appLockManager.lockTimeoutMinutes.first().toLong() * 60_000L
+                val timeoutMs = appLockManager.lockTimeoutSeconds.first().toLong() * 1000L
                 val now = System.currentTimeMillis()
                 val sinceUnlock = now - lastUnlockMs
                 val sinceBackground = if (lastBackgroundMs == 0L) 0L else now - lastBackgroundMs

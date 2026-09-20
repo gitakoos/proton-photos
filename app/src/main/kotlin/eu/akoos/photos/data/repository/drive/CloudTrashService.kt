@@ -80,16 +80,29 @@ data class CloudTrashOutcome(
     val failedLinkIds: Set<String>,
 )
 
+/** Proton per-link code for "the server no longer holds this link" (same value PhotoStreamService
+ *  reads as EVENT_ANCHOR_NOT_EXISTS). In a trash / delete response it means the link is already gone,
+ *  which is success, not a failure to retry. */
+private const val LINK_NOT_EXISTS_CODE = 2501
+
 /**
  * The linkIds in a `*_multiple` trash response the server REJECTED (per-link code != 1000).
  * The top-level Code only means the batch was processed, so each entry's own code is the truth
  * for whether that link actually moved. Shared by the trash + permanent-delete paths so the
  * per-link accounting lives in one place. Entries the response omits aren't reported failed —
  * a server that returns no per-link array (only a top-level Code) then degrades to "all ok".
+ *
+ * A [LINK_NOT_EXISTS_CODE] entry is NOT counted rejected: the link is already gone server-side, so
+ * for a trash/delete that is a success. Counting it as failed is what stranded a just-trashed photo
+ * as a still-on-cloud row that then errored on a second delete attempt (its cloud copy was actually
+ * gone). Any other non-1000 code is a real rejection (the link stayed on the cloud).
  */
 internal fun rejectedLinkIds(
     responses: List<eu.akoos.photos.data.api.dto.TrashActionOutcomeEntry>,
-): Set<String> = responses.filter { it.response.code != 1000 }.map { it.linkId }.toSet()
+): Set<String> = responses
+    .filter { it.response.code != 1000 && it.response.code != LINK_NOT_EXISTS_CODE }
+    .map { it.linkId }
+    .toSet()
 
 /** Which key set a photo rename may use, decided from the photo's wire parent. */
 internal enum class RenameParent {

@@ -45,20 +45,18 @@ import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.systemGestureExclusion
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
@@ -243,11 +241,6 @@ fun PhotoEditorScreen(
         Tool.entries.filter { it != Tool.HideFaces || (aiFeaturesEnabled && faceEnabled) }
     }
     var activeTool by remember { mutableStateOf(Tool.Adjust) }
-    // Adjust tab exposes ONE slider at a time — the user picks which adjustment
-    // (Brightness / Exposure / Contrast / Highlights / Shadows / Saturation / Tone /
-    // Temperature) via the pill row, and only then does the floating slider pill appear
-    // above the row. Null = no slider shown.
-    var activeAdjustment by remember { mutableStateOf<Adjustment?>(null) }
     // Pen tool: current stroke colour + width (screen dp), used by the Draw overlay and panel.
     var drawColor by remember { mutableStateOf(DRAW_COLORS.first()) }
     var drawWidth by remember { mutableFloatStateOf(8f) }
@@ -257,10 +250,7 @@ fun PhotoEditorScreen(
     var hslBandIndex by remember { mutableIntStateOf(0) }
     // Text tool: which overlay is open for inline editing (typed directly on the photo), if any.
     var editingTextId by remember { mutableStateOf<Int?>(null) }
-    // Resetting back to null whenever the tool changes prevents a "stale" slider
-    // pill flashing when the user pops between tabs.
     androidx.compose.runtime.LaunchedEffect(activeTool) {
-        if (activeTool != Tool.Adjust) activeAdjustment = null
         // Leaving the Text tool: close any open inline editor first, then bake the text back into the
         // preview (in the tool the overlay draws it live, so a move is a cheap redraw, not a re-bake).
         if (activeTool != Tool.Text) {
@@ -580,82 +570,13 @@ fun PhotoEditorScreen(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                // Keep the system back / edge-swipe gesture out of the control area: dragging an adjustment
+                // slider or a crop handle that starts near the screen edge must not turn into a back nav.
+                .systemGestureExclusion()
                 .navigationBarsPadding()
                 .padding(bottom = 10.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            // Slider pill — Adjust tab + an adjustment selected. Hidden otherwise.
-            // Keep the last picked adjustment so the pill can animate OUT with the right content after
-            // activeAdjustment goes null (tapping the chip again or leaving the tool).
-            var lastAdj by remember { mutableStateOf(Adjustment.Brightness) }
-            activeAdjustment?.let { lastAdj = it }
-            AnimatedVisibility(
-                visible = activeTool == Tool.Adjust && activeAdjustment != null,
-                enter = fadeIn(tween(180)) + expandVertically(tween(200)),
-                exit = fadeOut(tween(140)) + shrinkVertically(tween(160)),
-            ) {
-                val adj = lastAdj
-                val value = when (adj) {
-                    Adjustment.Brightness  -> state.adjustments.brightness
-                    Adjustment.Exposure    -> state.adjustments.exposure
-                    Adjustment.Contrast    -> state.adjustments.contrast
-                    Adjustment.Highlights  -> state.adjustments.highlights
-                    Adjustment.Shadows     -> state.adjustments.shadows
-                    Adjustment.Saturation  -> state.adjustments.saturation
-                    Adjustment.Vibrance    -> state.adjustments.vibrance
-                    Adjustment.Tone        -> state.adjustments.tone
-                    Adjustment.Temperature -> state.adjustments.temperature
-                    Adjustment.Sharpen     -> state.adjustments.sharpen
-                    Adjustment.Grain       -> state.adjustments.grain
-                    Adjustment.Vignette    -> state.adjustments.vignette
-                    Adjustment.Fade        -> state.adjustments.fade
-                }
-                val label = stringResource(
-                    when (adj) {
-                        Adjustment.Brightness  -> R.string.editor_adj_brightness
-                        Adjustment.Exposure    -> R.string.editor_adj_exposure
-                        Adjustment.Contrast    -> R.string.editor_adj_contrast
-                        Adjustment.Highlights  -> R.string.editor_adj_highlights
-                        Adjustment.Shadows     -> R.string.editor_adj_shadows
-                        Adjustment.Saturation  -> R.string.editor_adj_saturation
-                        Adjustment.Vibrance    -> R.string.editor_adj_vibrance
-                        Adjustment.Tone        -> R.string.editor_adj_tone
-                        Adjustment.Temperature -> R.string.editor_adj_temperature
-                        Adjustment.Sharpen     -> R.string.editor_adj_sharpen
-                        Adjustment.Grain       -> R.string.editor_adj_grain
-                        Adjustment.Vignette    -> R.string.editor_adj_vignette
-                        Adjustment.Fade        -> R.string.editor_adj_fade
-                    }
-                )
-                val onChange: (Int) -> Unit = when (adj) {
-                    Adjustment.Brightness  -> { v -> vm.updateBrightness(v) }
-                    Adjustment.Exposure    -> { v -> vm.updateExposure(v) }
-                    Adjustment.Contrast    -> { v -> vm.updateContrast(v) }
-                    Adjustment.Highlights  -> { v -> vm.updateHighlights(v) }
-                    Adjustment.Shadows     -> { v -> vm.updateShadows(v) }
-                    Adjustment.Saturation  -> { v -> vm.updateSaturation(v) }
-                    Adjustment.Vibrance    -> { v -> vm.updateVibrance(v) }
-                    Adjustment.Tone        -> { v -> vm.updateTone(v) }
-                    Adjustment.Temperature -> { v -> vm.updateTemperature(v) }
-                    Adjustment.Sharpen     -> { v -> vm.updateSharpen(v) }
-                    Adjustment.Grain       -> { v -> vm.updateGrain(v) }
-                    Adjustment.Vignette    -> { v -> vm.updateVignette(v) }
-                    Adjustment.Fade        -> { v -> vm.updateFade(v) }
-                }
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 22.dp),
-                ) {
-                    SliderRow(
-                        label = label,
-                        value = value,
-                        onChange = onChange,
-                        onChangeFinished = { vm.finalizeAdjustments() },
-                    )
-                }
-            }
-
             // Panel — varies per tool. Lives in horizontal-padding so the inner pills
             // don't kiss the screen edges, but does not have its own outer pill:
             // adjustment chips are individual loose capsules, and the filter / crop /
@@ -672,34 +593,7 @@ fun PhotoEditorScreen(
                     label = "editor_panel",
                 ) { tool ->
                     when (tool) {
-                        Tool.Adjust -> AdjustPanel(
-                        active = activeAdjustment,
-                        adjustments = state.adjustments,
-                        onSelect = { next ->
-                            // Tap-to-toggle: tapping the active chip hides the slider again.
-                            activeAdjustment = if (activeAdjustment == next) null else next
-                        },
-                        onReset = { adj ->
-                            vm.resetAdjustment { a ->
-                                when (adj) {
-                                    Adjustment.Brightness  -> a.copy(brightness = 0)
-                                    Adjustment.Exposure    -> a.copy(exposure = 0)
-                                    Adjustment.Contrast    -> a.copy(contrast = 0)
-                                    Adjustment.Highlights  -> a.copy(highlights = 0)
-                                    Adjustment.Shadows     -> a.copy(shadows = 0)
-                                    Adjustment.Saturation  -> a.copy(saturation = 0)
-                                    Adjustment.Vibrance    -> a.copy(vibrance = 0)
-                                    Adjustment.Tone        -> a.copy(tone = 0)
-                                    Adjustment.Temperature -> a.copy(temperature = 0)
-                                    Adjustment.Sharpen     -> a.copy(sharpen = 0)
-                                    Adjustment.Grain       -> a.copy(grain = 0)
-                                    Adjustment.Vignette    -> a.copy(vignette = 0)
-                                    Adjustment.Fade        -> a.copy(fade = 0)
-                                }
-                            }
-                        },
-                        onAutoFix = { vm.autoFix() },
-                    )
+                    Tool.Adjust -> AdjustPanel(adjustments = state.adjustments, vm = vm)
                     Tool.Filter -> FilterPanel(state, vm)
                     Tool.Color -> ColorPanel(
                         state = state,
@@ -1024,22 +918,21 @@ private fun TopBar(
 
 @Composable
 private fun SavePill(isSaving: Boolean, onClick: () -> Unit) {
-    Row(
+    // Icon-only confirm: a round accent button with just a checkmark (a spinner while saving), no label,
+    // matching the video editor's top-bar confirm so the two editors read as one design.
+    Box(
         modifier = Modifier
-            .height(40.dp)
-            .clip(RoundedCornerShape(20.dp))
+            .size(40.dp)
+            .clip(CircleShape)
             .background(Accent)
-            .clickable(enabled = !isSaving, onClick = onClick)
-            .padding(horizontal = 18.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
+            .clickable(enabled = !isSaving, onClick = onClick),
+        contentAlignment = Alignment.Center,
     ) {
         if (isSaving) {
-            CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(14.dp))
+            CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(16.dp))
         } else {
-            Icon(Icons.Default.Check, null, tint = Color.White, modifier = Modifier.size(16.dp))
+            Icon(Icons.Default.Check, stringResource(R.string.action_save), tint = Color.White, modifier = Modifier.size(20.dp))
         }
-        Text(stringResource(R.string.action_save), color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
     }
 }
 
@@ -1517,20 +1410,20 @@ private fun TextOverlay(
 
 // ─── Tool panels ────────────────────────────────────────────────────────────
 
-/** Adjust tab — loose individual capsule pills (LazyRow). One Auto-Fix pill that
- *  fires `vm.autoFix()` instantly and three adjustment selector pills. Picking a
- *  selector toggles the floating slider pill above; tapping the active one again
- *  hides it. Visual recipe is the same PillBg / PillBorder / pillShape used on
- *  the photos page filter row. */
+/** Adjust tab: the video editor's Adjust recipe adapted to the 13 photo adjustments. A horizontally
+ *  scrollable pill row picks the adjustment to edit; the leading Auto-Fix pill fires `vm.autoFix()`
+ *  instead of selecting. Below the row a header shows the selected adjustment's name, a signed value
+ *  readout that turns accent when off-zero, and a Reset that clears all 13 at once (shown only while
+ *  something is off-zero); one slider drives the selected adjustment's -100..100 value. Setters route
+ *  through updateAdjustmentsFast for the live preview and fold into one undo entry on release via
+ *  finalizeAdjustments. Long-pressing a chip still resets that single adjustment. */
 @Composable
 private fun AdjustPanel(
-    active: Adjustment?,
     adjustments: EditorAdjustments,
-    onSelect: (Adjustment) -> Unit,
-    onReset: (Adjustment) -> Unit,
-    onAutoFix: () -> Unit,
+    vm: PhotoEditorViewModel,
 ) {
-    // (adjustment, label, icon, current value); a non-zero value lights the "modified" dot.
+    var selected by remember { mutableStateOf(Adjustment.Brightness) }
+    // (adjustment, label, icon, current value); a non-zero value lights the chip's "modified" dot.
     val chips = listOf(
         AdjChip(Adjustment.Brightness, R.string.editor_adj_brightness, Icons.Default.BrightnessMedium, adjustments.brightness),
         AdjChip(Adjustment.Exposure, R.string.editor_adj_exposure, Icons.Default.AutoFixHigh, adjustments.exposure),
@@ -1546,26 +1439,126 @@ private fun AdjustPanel(
         AdjChip(Adjustment.Vignette, R.string.editor_adj_vignette, Icons.Default.Vignette, adjustments.vignette),
         AdjChip(Adjustment.Fade, R.string.editor_adj_fade, Icons.Default.Gradient, adjustments.fade),
     )
-    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        item(key = "auto_fix") {
-            AdjustCapsulePill(
-                label = stringResource(R.string.editor_auto_fix),
-                icon = Icons.Default.AutoFixHigh,
-                selected = false,
-                accentIcon = true,
-                onClick = onAutoFix,
-            )
+    val selectedChip = chips.first { it.adj == selected }
+    val value = selectedChip.value
+    val onChange: (Int) -> Unit = when (selected) {
+        Adjustment.Brightness  -> { v -> vm.updateBrightness(v) }
+        Adjustment.Exposure    -> { v -> vm.updateExposure(v) }
+        Adjustment.Contrast    -> { v -> vm.updateContrast(v) }
+        Adjustment.Highlights  -> { v -> vm.updateHighlights(v) }
+        Adjustment.Shadows     -> { v -> vm.updateShadows(v) }
+        Adjustment.Saturation  -> { v -> vm.updateSaturation(v) }
+        Adjustment.Vibrance    -> { v -> vm.updateVibrance(v) }
+        Adjustment.Tone        -> { v -> vm.updateTone(v) }
+        Adjustment.Temperature -> { v -> vm.updateTemperature(v) }
+        Adjustment.Sharpen     -> { v -> vm.updateSharpen(v) }
+        Adjustment.Grain       -> { v -> vm.updateGrain(v) }
+        Adjustment.Vignette    -> { v -> vm.updateVignette(v) }
+        Adjustment.Fade        -> { v -> vm.updateFade(v) }
+    }
+    val anyEdited = chips.any { it.value != 0 }
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(top = 2.dp, bottom = 6.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            item(key = "auto_fix") {
+                AdjustCapsulePill(
+                    label = stringResource(R.string.editor_auto_fix),
+                    icon = Icons.Default.AutoFixHigh,
+                    selected = false,
+                    accentIcon = true,
+                    onClick = { vm.autoFix() },
+                )
+            }
+            items(chips, key = { it.adj.name }) { chip ->
+                AdjustCapsulePill(
+                    label = stringResource(chip.labelRes),
+                    icon = chip.icon,
+                    selected = selected == chip.adj,
+                    modified = chip.value != 0,
+                    onClick = { selected = chip.adj },
+                    // Long-press a chip to reset just that one adjustment (one undo entry via resetAdjustment).
+                    onReset = {
+                        vm.resetAdjustment { a ->
+                            when (chip.adj) {
+                                Adjustment.Brightness  -> a.copy(brightness = 0)
+                                Adjustment.Exposure    -> a.copy(exposure = 0)
+                                Adjustment.Contrast    -> a.copy(contrast = 0)
+                                Adjustment.Highlights  -> a.copy(highlights = 0)
+                                Adjustment.Shadows     -> a.copy(shadows = 0)
+                                Adjustment.Saturation  -> a.copy(saturation = 0)
+                                Adjustment.Vibrance    -> a.copy(vibrance = 0)
+                                Adjustment.Tone        -> a.copy(tone = 0)
+                                Adjustment.Temperature -> a.copy(temperature = 0)
+                                Adjustment.Sharpen     -> a.copy(sharpen = 0)
+                                Adjustment.Grain       -> a.copy(grain = 0)
+                                Adjustment.Vignette    -> a.copy(vignette = 0)
+                                Adjustment.Fade        -> a.copy(fade = 0)
+                            }
+                        }
+                    },
+                )
+            }
         }
-        items(chips, key = { it.adj.name }) { chip ->
-            AdjustCapsulePill(
-                label = stringResource(chip.labelRes),
-                icon = chip.icon,
-                selected = active == chip.adj,
-                modified = chip.value != 0,
-                onClick = { onSelect(chip.adj) },
-                onReset = { onReset(chip.adj) },
+        // Selected adjustment's name, a signed value readout, and a reset that clears every adjustment
+        // in one gesture (one undo entry). Reset only shows while at least one adjustment is off-zero; the
+        // row is a fixed height so revealing it does not grow the row and jolt the whole panel.
+        Row(
+            modifier = Modifier.fillMaxWidth().height(30.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                stringResource(selectedChip.labelRes),
+                color = FgPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium,
+                modifier = Modifier.weight(1f),
+                maxLines = 1,
             )
+            Text(
+                if (value > 0) "+$value" else value.toString(),
+                color = if (value != 0) Accent else FgMute,
+                fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+            )
+            if (anyEdited) {
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(999.dp))
+                        .clickable {
+                            vm.resetAdjustment { a ->
+                                a.copy(
+                                    brightness = 0, exposure = 0, contrast = 0, highlights = 0,
+                                    shadows = 0, saturation = 0, vibrance = 0, tone = 0,
+                                    temperature = 0, sharpen = 0, grain = 0, vignette = 0, fade = 0,
+                                )
+                            }
+                        }
+                        .padding(horizontal = 10.dp, vertical = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                ) {
+                    Icon(Icons.Default.Restore, null, tint = FgDim, modifier = Modifier.size(15.dp))
+                    Text(
+                        stringResource(R.string.filter_reset),
+                        color = FgPrimary, fontSize = 12.sp, fontWeight = FontWeight.Medium,
+                    )
+                }
+            }
         }
+        // House-style slider: the live preview tints per tick through updateAdjustmentsFast, and the drag
+        // folds into one undo entry on release via finalizeAdjustments.
+        Slider(
+            value = value.toFloat(),
+            onValueChange = { onChange(it.roundToInt()) },
+            onValueChangeFinished = { vm.finalizeAdjustments() },
+            valueRange = -100f..100f,
+            modifier = Modifier.fillMaxWidth(),
+            colors = SliderDefaults.colors(
+                thumbColor = Accent,
+                activeTrackColor = Accent,
+                inactiveTrackColor = PanelChip,
+            ),
+        )
     }
 }
 
@@ -1577,9 +1570,11 @@ private data class AdjChip(
     val value: Int,
 )
 
-/** Individual capsule pill matching the photos page filter row recipe verbatim.
- *  Selected = Accent.copy(alpha = 0.18f) fill (no border, like the gallery's
- *  active filter pill). Unselected = PillBg + 0.5.dp PillBorder. */
+/** One Adjust chip in the pill recipe shared with the video editor: PillBg + a 0.5.dp PillBorder, an
+ *  Accent 0.22 fill when selected. The icon lights accent when the chip is selected, when it carries an
+ *  off-zero value, or for the always-accent Auto-Fix pill; an unselected off-zero chip shows an accent
+ *  dot (the selected chip's value is read out in the header instead). Long-pressing (when onReset is
+ *  set) resets that single adjustment. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun AdjustCapsulePill(
@@ -1594,7 +1589,7 @@ private fun AdjustCapsulePill(
     Row(
         modifier = Modifier
             .height(38.dp)
-            .background(if (selected) Accent.copy(alpha = 0.18f) else PillBg, pillShape)
+            .background(if (selected) Accent.copy(alpha = 0.22f) else PillBg, pillShape)
             .then(if (!selected) Modifier.border(0.5.dp, PillBorder, pillShape) else Modifier)
             .then(
                 // Long-press a chip to reset that one adjustment.
@@ -1608,22 +1603,20 @@ private fun AdjustCapsulePill(
         Icon(
             icon,
             null,
-            tint = when {
-                selected   -> Accent
-                accentIcon -> Accent
-                else       -> FgDim
-            },
-            modifier = Modifier.size(14.dp),
+            tint = if (selected || accentIcon || modified) Accent else FgDim,
+            modifier = Modifier.size(15.dp),
         )
         Text(
             label,
             color = if (selected) Accent else FgPrimary,
             fontSize = 13.sp,
             fontWeight = FontWeight.Medium,
+            maxLines = 1,
+            softWrap = false,
         )
-        // Non-zero adjustment marker, so applied edits are visible without opening each slider.
-        if (modified) {
-            Box(Modifier.size(6.dp).background(Accent, CircleShape))
+        // Off-zero marker on an unselected chip, so applied edits are visible without opening each slider.
+        if (modified && !selected) {
+            Box(Modifier.size(5.dp).background(Accent, CircleShape))
         }
     }
 }

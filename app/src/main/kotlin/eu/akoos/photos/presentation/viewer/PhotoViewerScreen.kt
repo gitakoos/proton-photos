@@ -74,6 +74,8 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.runtime.key
+import androidx.compose.ui.graphics.painter.ColorPainter
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -160,11 +162,13 @@ import eu.akoos.photos.data.ocr.OcrModelPreparation
 import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.usecase.DeletePhotoUseCase
+import eu.akoos.photos.presentation.common.LocalVideoThumb
+import eu.akoos.photos.presentation.common.rememberLocalVideoThumbnail
 import eu.akoos.photos.presentation.gallery.LocalThumbnailUrls
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.Bg0
-import eu.akoos.photos.presentation.theme.LocalTintCloudWithAccent
-import eu.akoos.photos.presentation.theme.StatusSynced
+import eu.akoos.photos.presentation.theme.CloudBadgeSurface
+import eu.akoos.photos.presentation.theme.cloudBadgeTint
 import eu.akoos.photos.presentation.theme.SheetBg
 import eu.akoos.photos.presentation.theme.ErrorColor
 import eu.akoos.photos.presentation.theme.FgDim
@@ -658,13 +662,28 @@ fun PhotoViewerScreen(
         }
     }
     LaunchedEffect(state, pagerState.settledPage, pageGeneration) {
-        if (state is PhotoViewerViewModel.ViewerState.ShowImage) {
-            val page = pagerState.settledPage
-            pageImageCache[page] = (state as PhotoViewerViewModel.ViewerState.ShowImage).model
-            // Bound the cache to a small window around the current page so paging a large album
-            // doesn't retain one full-res model per visited page for the whole viewer session.
-            pageImageCache.keys.retainAll { it in (page - 2)..(page + 2) }
+        val shown = state as? PhotoViewerViewModel.ViewerState.ShowImage ?: return@LaunchedEffect
+        val page = pagerState.settledPage
+        // Cache only when the loaded image actually belongs to the item now settled on this page.
+        // During a settle onto a new page, `state` still holds the PREVIOUS page's ShowImage for a
+        // frame while settledPage has already flipped, so an unguarded write files the neighbour's
+        // model under the new page's index. A photo self-corrects a frame later when its own
+        // ShowImage lands and overwrites it, but a VIDEO never emits ShowImage (it goes straight to
+        // ShowVideo), so the neighbour's model stays cached under the video's index and the
+        // non-settled block below repaints it as a "wrong photo" flash every time the video page is
+        // swiped past. Matching the loaded image's itemKey to the settled item's key drops the
+        // mismatched neighbour before it can poison the cache.
+        val settledKey = when (val settled = items.getOrNull(page)) {
+            is GalleryItem.LocalOnly -> settled.local.uri
+            is GalleryItem.Synced    -> settled.local.uri
+            is GalleryItem.CloudOnly -> settled.cloud.linkId
+            null -> null
         }
+        if (shown.itemKey != settledKey) return@LaunchedEffect
+        pageImageCache[page] = shown.model
+        // Bound the cache to a small window around the current page so paging a large album
+        // doesn't retain one full-res model per visited page for the whole viewer session.
+        pageImageCache.keys.retainAll { it in (page - 2)..(page + 2) }
     }
 
     // Video state — reset when page changes
@@ -1299,23 +1318,15 @@ fun PhotoViewerScreen(
                     .background(Bg0),
                 contentAlignment = Alignment.Center,
             ) {
-                // Videos: Coil's VideoFrameDecoder grabs a frame via MediaMetadataRetriever, which
-                // ignores the MP4 rotation atom → a sideways full-screen poster flash before the
-                // player paints. Use the correctly-oriented cloud thumbnail when there is one
-                // (Synced/CloudOnly); for a not-yet-uploaded local video draw no poster at all (the
-                // themed background covers the brief pre-first-frame gap) rather than flash the
-                // rotation-broken frame. Photos keep their local-URI poster (Coil honours EXIF).
-                // The timeline projection no longer carries a cloud row's thumbnail URL, so resolve it
-                // from the shared store (falling back to any URL still on the item, e.g. an album row).
+                // The poster is the SAME thumbnail the grid and the bottom reel show for this item, so
+                // paging onto a video shows the video's OWN thumbnail while it loads, not a blank or a
+                // neighbour: a device photo or video decodes from its own file (Coil's VideoFrameDecoder
+                // grabs a frame for a video), and a cloud-only item uses its cloud thumbnail resolved from
+                // the shared store (falling back to any URL still on the item, e.g. an album row).
                 val thumbUrls = LocalThumbnailUrls.current.value
                 val thumbModel: Any? = when (item) {
-                    is GalleryItem.LocalOnly ->
-                        if (item.local.mimeType.startsWith("video/")) null
-                        else Uri.parse(item.local.uri)
-                    is GalleryItem.Synced ->
-                        if (item.local.mimeType.startsWith("video/"))
-                            thumbUrls[item.cloud.linkId] ?: item.cloud.thumbnailUrl
-                        else Uri.parse(item.local.uri)
+                    is GalleryItem.LocalOnly -> Uri.parse(item.local.uri)
+                    is GalleryItem.Synced -> Uri.parse(item.local.uri)
                     is GalleryItem.CloudOnly -> thumbUrls[item.cloud.linkId] ?: item.cloud.thumbnailUrl
                     null -> null
                 }
@@ -1358,13 +1369,38 @@ fun PhotoViewerScreen(
                 // the Bg0 background through the full-res decode AND its crossfade-in, at scale 1 or zoomed
                 // alike, so the background can never flash through while the sharp image morphs in. Hidden
                 // only for a video once its first frame has painted (the player takes over there).
-                if (thumbModel != null && !suppressThumbForVideo) {
+                // Key the poster to THIS page's item so a recycled LazyLayout slot cannot hand it a
+                // neighbouring page's retained image while this video's own poster loads.
+                key(currentItemKey) {
+                // For a device video, prefer the OS thumbnail (rotation-correct and instant, exactly what
+                // the grid shows) over Coil's VideoFrameDecoder frame, which can pop in sideways or late for
+                // a portrait/rotated clip. While it loads, draw nothing so the Bg0 page background covers
+                // rather than kicking off a frame decode; a pre-Q device with no OS thumbnail falls back to
+                // the URI. Photos and cloud items keep their normal model.
+                val localVideoUri: String? = if (isVideoItemThumb) when (item) {
+                    is GalleryItem.LocalOnly -> item.local.uri
+                    is GalleryItem.Synced -> item.local.uri
+                    else -> null
+                } else null
+                val osVideoThumb = if (localVideoUri != null) {
+                    rememberLocalVideoThumbnail(localVideoUri, 1024).value
+                } else null
+                val posterModel: Any? = when (osVideoThumb) {
+                    is LocalVideoThumb.Loaded -> osVideoThumb.bitmap
+                    LocalVideoThumb.Loading -> null
+                    LocalVideoThumb.Unavailable -> thumbModel
+                    null -> thumbModel
+                }
+                if (posterModel != null && !suppressThumbForVideo) {
                     val thumbCtx = LocalContext.current
                     AsyncImage(
                         // No crossfade on the thumb itself: it is the instant base the full-res morphs over.
-                        model = remember(thumbModel) {
-                            ImageRequest.Builder(thumbCtx).data(thumbModel).crossfade(false).build()
+                        model = remember(posterModel) {
+                            ImageRequest.Builder(thumbCtx).data(posterModel).crossfade(false).build()
                         },
+                        // On a cache miss (this video's own poster not yet decoded) paint the themed
+                        // background at once, never the image a recycled pager slot kept from a neighbour.
+                        placeholder = ColorPainter(Bg0),
                         contentDescription = null,
                         contentScale = ContentScale.Fit,
                         modifier = Modifier
@@ -1385,9 +1421,14 @@ fun PhotoViewerScreen(
                             ),
                     )
                 }
+                }
                 // Non-settled pages: show cached full-res so they don't visually
-                // downgrade to thumbnail during the exit swipe animation.
-                if (!isSettled) {
+                // downgrade to thumbnail during the exit swipe animation. Never on a video
+                // page: a video has no full-res still of its own to cache, so the only thing
+                // the page-index cache could hold there is a neighbour's model, and painting
+                // it is exactly the "wrong photo before the video" flash. The video's own
+                // poster frame (above) is the correct base while the player prepares.
+                if (!isSettled && !isVideoItemThumb) {
                     val cached = pageImageCache[page]
                     if (cached != null) {
                         val cachedCtx = LocalContext.current
@@ -2355,7 +2396,7 @@ fun PhotoViewerScreen(
                         Icon(
                             Icons.Default.Cloud,
                             contentDescription = stringResource(R.string.cd_status_backed_up_device),
-                            tint = if (LocalTintCloudWithAccent.current) Accent else StatusSynced,
+                            tint = cloudBadgeTint(CloudBadgeSurface.Pill),
                             modifier = Modifier.size(13.dp),
                         )
                         Text("·", color = FgMute, fontSize = 13.sp)

@@ -275,6 +275,7 @@
     <string name="delete_multi_remove_cloud_desc">Bewaart het op dit apparaat, verplaatst de back-up naar de Drive-prullenbak</string>
     <string name="delete_multi_move_trash_everywhere">Overal naar prullenbak verplaatsen</string>
     <string name="delete_multi_move_trash_everywhere_desc">Verplaatst naar de apparaatprullenbak &amp; Proton Drive-prullenbak</string>
+    <string name="delete_frees_note">(maakt ~%1$s vrij)</string>
     <string name="delete_multi_drive_trash">Naar Drive-prullenbak verplaatsen</string>
     <string name="delete_multi_drive_trash_desc">Verplaatst naar Drive Recent verwijderd, herstelbaar</string>
 
@@ -300,15 +301,10 @@
     <string name="settings_sign_out">Afmelden</string>
     <string name="settings_sign_out_desc">Beëindig deze sessie op dit apparaat.</string>
     <string name="sign_out_dialog_title">Afmelden?</string>
-    <string name="sign_out_dialog_message">Weet je zeker dat je je wilt afmelden bij je Proton-account?</string>
-    <plurals name="sign_out_dialog_vault_warning">
-        <item quantity="one">Afmelden leegt ook Verborgen foto\'s: %1$d foto wordt definitief van dit apparaat verwijderd.</item>
-        <item quantity="other">Afmelden leegt ook Verborgen foto\'s: %1$d foto\'s worden definitief van dit apparaat verwijderd.</item>
-    </plurals>
-    <plurals name="sign_out_dialog_vault_cloud">
-        <item quantity="one">%1$d daarvan staat ook in Proton Drive en kan na opnieuw aanmelden weer worden gedownload.</item>
-        <item quantity="other">%1$d daarvan staan ook in Proton Drive en kunnen na opnieuw aanmelden weer worden gedownload.</item>
-    </plurals>
+    <string name="sign_out_dialog_message">Bij afmelden worden deze gegevens op dit apparaat verwijderd en niet hersteld wanneer je opnieuw inlogt (exporteer ze eerst als je ze nodig hebt):</string>
+    <string name="sign_out_dialog_item_faces">Personen met een naam en gezichtsgegevens</string>
+    <string name="sign_out_dialog_item_day_notes">Kalendernotities</string>
+    <string name="sign_out_dialog_item_vault">Verborgen foto\'s</string>
     <string name="sign_out_dialog_confirm">Afmelden</string>
     <string name="sign_out_dialog_cancel">Annuleren</string>
     <string name="settings_account_storage">Drive-opslag</string>
@@ -440,6 +436,9 @@
     <string name="settings_app_lock_timeout">Vergrendelen na</string>
     <string name="settings_app_lock_timeout_desc">De app opnieuw vergrendelen na zoveel tijd op de achtergrond</string>
     <string name="settings_app_lock_timeout_immediate">Direct</string>
+    <string name="settings_app_lock_timeout_5sec">5 seconden</string>
+    <string name="settings_app_lock_timeout_10sec">10 seconden</string>
+    <string name="settings_app_lock_timeout_30sec">30 seconden</string>
     <string name="settings_app_lock_timeout_1min">1 minuut</string>
     <string name="settings_app_lock_timeout_5min">5 minuten</string>
     <string name="settings_app_lock_timeout_10min">10 minuten</string>
@@ -510,6 +509,10 @@
     <string name="albums_reorder">Albums herschikken</string>
     <string name="album_rename_confirm">Hernoemen</string>
     <string name="album_remove_from_album">Uit album verwijderen</string>
+    <string name="album_move_to_album">Naar album verplaatsen</string>
+    <string name="album_moved_to_album">Verplaatst naar \"%1$s\"</string>
+    <string name="album_move_shared_copy_note">Foto\'s die aan een gedeeld album worden toegevoegd, worden naar de albumeigenaar gekopieerd.</string>
+    <string name="op_moving_to_album">Naar album verplaatsen…</string>
     <string name="album_set_as_cover">Als omslag instellen</string>
     <string name="gallery_action_select">Selecteren</string>
     <string name="album_cover_updated">Omslag bijgewerkt</string>
@@ -783,6 +786,7 @@
     <!-- Search -->
     <string name="search_title">Zoeken</string>
     <string name="search_placeholder">Zoeken op bestandsnaam</string>
+    <string name="search_placeholder_semantic">Foto\'s zoeken</string>
     <string name="search_empty_idle">Typ een naam om te beginnen met zoeken</string>
     <string name="search_empty_no_results">Geen overeenkomsten</string>
     <string name="search_section_on_this_day">Op deze dag</string>
@@ -918,9 +922,8 @@
     <string name="video_editor_crop">Bijsnijden</string>
     <string name="video_editor_audio">Muziek</string>
     <string name="video_editor_add_music">Muziek toevoegen</string>
+    <string name="video_editor_replace_music">Muziek vervangen</string>
     <string name="video_editor_remove_music">Verwijderen</string>
-    <string name="video_editor_music_start">Muziekstart</string>
-    <string name="video_editor_music_end">Muziekeinde</string>
     <string name="video_editor_reset_crop">Bijsnijden herstellen</string>
     <string name="video_editor_reencoding">Video wordt opnieuw gecodeerd…</string>
     <string name="video_editor_encrypting">Versleutelen…</string>
@@ -1256,6 +1259,7 @@
     <string name="album_picker_title">Aan album toevoegen</string>
     <string name="album_picker_selected">%1$d geselecteerd</string>
     <string name="album_add_count">Toevoegen (%1$d)</string>
+    <string name="picker_selection_limit">Je kunt er maximaal %1$d tegelijk selecteren</string>
     <string name="album_picker_empty">Geen foto\'s om toe te voegen.</string>
 
     <!-- Album create/rename/delete snackbar fallbacks -->
@@ -1931,6 +1935,24 @@
 
     <!-- Video editor -->
     <string name="video_editor_frame_failed">Kon het frame niet opslaan</string>
+    <string name="video_editor_split">Splitsen</string>
+    <string name="video_editor_remove_section">Sectie verwijderen</string>
+    <string name="video_editor_sections_lossless_only">Sectieknippen gelden alleen voor verliesvrij exporteren.</string>
+    <string name="video_editor_split_music">Muziek splitsen</string>
+    <string name="video_editor_silence_section">Sectie dempen</string>
+    <string name="video_editor_restore_section">Sectie herstellen</string>
+    <string name="video_editor_reorder">Volgorde wijzigen</string>
+    <string name="video_editor_add_video">Video toevoegen</string>
+    <string name="video_editor_max_sources">Je kunt tot %1$d video\'s combineren</string>
+    <string name="video_editor_low_space">Niet genoeg vrije ruimte om de video op te slaan</string>
+    <string name="video_editor_reencode_sections_pending">Bijsnijden, filters, rotatie en volume kunnen nog niet worden toegepast op geknipte of herschikte fragmenten.</string>
+    <string name="video_editor_volume">Volume</string>
+    <string name="video_editor_duplicate">Dupliceren</string>
+    <string name="video_editor_delete">Verwijderen</string>
+    <string name="video_editor_restore">Herstellen</string>
+    <string name="video_editor_unmute">Dempen opheffen</string>
+    <string name="video_editor_audio_lane">Audio</string>
+    <string name="video_editor_history_title">Bewerkingsgeschiedenis</string>
     <string name="video_editor_frame_saved">Frame opgeslagen in galerij</string>
     <string name="video_editor_grab_frame">Frame vastleggen</string>
     <string name="video_editor_mute">Dempen</string>
@@ -1976,6 +1998,34 @@
     <string name="whats_new_dup_nobackup_body">De duplicaatzoeker scant nu de foto\'s op je apparaat, zonder account of back-up.</string>
     <string name="whats_new_compress_split_title">Aparte kwaliteit voor foto\'s en video\'s</string>
     <string name="whats_new_compress_split_body">Foto- en videocompressie hebben nu elk een eigen kwaliteitsniveau. Controleer ze in Instellingen, onder Kwaliteit en grootte.</string>
+    <string name="whats_new_semantic_title">Zoek foto\'s door ze te beschrijven</string>
+    <string name="whats_new_semantic_body">Typ wat je je herinnert, zoals een besneeuwde berg of een verjaardagstaart, en passende foto\'s verschijnen. Alles draait op je telefoon; zet het aan in Instellingen.</string>
+    <string name="whats_new_gifmaker_title">Maak van een video een GIF</string>
+    <string name="whats_new_gifmaker_body">Kort een clip in, kies een grootte en sla de GIF op of deel hem. De GIF van een cloudvideo wordt terug naar je bibliotheek geüpload.</string>
+    <string name="whats_new_gifplay_title">Speel gifs af waar ze staan</string>
+    <string name="whats_new_gifplay_body">Twee instellingen laten gifs animeren in de fotorasters en op albumhoezen, ook die uit de cloud. Standaard uit.</string>
+    <string name="whats_new_automerge_title">Dezelfde persoon automatisch samenvoegen</string>
+    <string name="whats_new_automerge_body">Een optionele instelling accepteert de sterkste suggesties voor dezelfde persoon voor je, zodat de foto\'s van iemand zich vanzelf verzamelen.</string>
+    <string name="whats_new_categoryhide_title">Verberg categorieën die je overslaat</string>
+    <string name="whats_new_categoryhide_body">Een oogpictogram bij elke categorie op de tijdlijn verbergt hem van de tijdlijn en van zoeken. Je kunt ze daar ook herschikken.</string>
+    <string name="whats_new_people_accurate_title">Aantallen personen blijven kloppen</string>
+    <string name="whats_new_people_accurate_body">Een persoon blijft kloppen na het samenvoegen, verplaatsen of verbergen van foto\'s, en de gezichten van een foto worden hergebruikt bij de back-up.</string>
+    <string name="whats_new_facescan_title">Stabielere gezichtsscan</string>
+    <string name="whats_new_facescan_body">Het scannen gaat verder zodra wifi terug is, en één vastgelopen foto blokkeert niet langer de hele reeks.</string>
+    <string name="whats_new_bgdownloads_title">Downloads blijven doorgaan</string>
+    <string name="whats_new_bgdownloads_body">AI-modeldownloads gaan door op de achtergrond met een voortgangsmelding, zodat het verlaten van Instellingen ze niet meer stopt.</string>
+    <string name="whats_new_videoeditor_title">Video-editor met meerdere clips</string>
+    <string name="whats_new_videoeditor_body">De video-editor is nu een tijdlijn. Voeg clips toe, kort ze in, herschik en verwijder ze, leg muziek eronder, stem kleur en licht af, en exporteer het geheel als één video.</string>
+    <string name="whats_new_movetoalbum_title">Naar album verplaatsen</string>
+    <string name="whats_new_movetoalbum_body">Verplaats geselecteerde foto\'s van het ene album rechtstreeks naar het andere.</string>
+    <string name="whats_new_indexsettle_title">Indexering lijkt niet langer vast te lopen</string>
+    <string name="whats_new_indexsettle_body">Als de laatste paar items nu niet gelezen kunnen worden, komt de gezichts- en foto-indexering tot rust en probeert het later opnieuw, in plaats van vast te blijven staan op de voortgangsbalk.</string>
+    <string name="whats_new_videoplay_title">Schoner, betrouwbaarder video</string>
+    <string name="whats_new_videoplay_body">Video\'s openen zonder verkeerde foto of witte flits, en spelen af op telefoons waarvan de hoofddecoder eerder faalde.</string>
+    <string name="whats_new_mergefast_title">Snellere gezichtssuggesties</string>
+    <string name="whats_new_mergefast_body">Samenvoegsuggesties reageren zodra je tikt, blijven bereikbaar, en een paar komt terug als het samenvoegen niet is voltooid.</string>
+    <string name="whats_new_diag_title">Test je deze preview?</string>
+    <string name="whats_new_diag_body">Bedankt voor het testen van een previewversie. Als er iets misgaat, stuur dan de diagnostische gegevens zodat een bestandsprobleem van iets anders te onderscheiden is: kopieer ze in Instellingen en mail naar support@photosforproton.eu, of plaats ze op Discord of GitHub.</string>
     <string name="whats_new_section_new">Nieuw</string>
     <string name="whats_new_section_improved">Verbeteringen</string>
 
@@ -2010,7 +2060,6 @@
     <string name="albums_search_no_results">Geen album komt overeen met de zoekopdracht.</string>
     <string name="settings_ai_groups_found">%1$d groepen</string>
     <string name="settings_ai_faces_found">%1$d gezichten</string>
-    <string name="sign_out_dialog_face_warning">De personen met een naam en gezichtsgroepen op dit apparaat worden ook verwijderd en worden niet hersteld wanneer je opnieuw inlogt.</string>
     <string name="person_rename_merge_confirm_title">Samenvoegen met bestaande persoon?</string>
     <string name="person_rename_merge_confirm_body">Er bestaat al een persoon met de naam %1$s. Die naam voegt de twee samen tot één, wat niet ongedaan kan worden gemaakt. Samenvoegen?</string>
     <string name="person_move_confirm_title">Naar deze persoon verplaatsen?</string>

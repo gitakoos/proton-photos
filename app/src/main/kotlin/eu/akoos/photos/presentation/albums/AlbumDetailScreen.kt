@@ -74,6 +74,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.DriveFileMove
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.DeleteOutline
@@ -240,6 +241,9 @@ fun AlbumDetailScreen(
     var showAddToPersonSheet by remember { mutableStateOf(false) }
     val addToPersonSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val albumPeople by viewModel.people.collectAsStateWithLifecycle()
+    var showMoveToAlbumSheet by remember { mutableStateOf(false) }
+    val moveToAlbumSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var showCreateAlbumForMove by remember { mutableStateOf(false) }
 
     // The cloud metadata save drawer's live view, shared with the timeline through the app-scoped
     // controller, so a save started in this album shows its progress here rather than only on the feed.
@@ -455,6 +459,24 @@ fun AlbumDetailScreen(
     val enqueuedMsg = stringResource(R.string.download_started_background)
     LaunchedEffect(Unit) {
         viewModel.downloadStarted.collect { snackbarHostState.showSnackbar(enqueuedMsg) }
+    }
+    // Move-to-album outcome. A shared-with-me target is the #80 copy, so it says the photos were
+    // copied to the owner; an own target confirms the destination like the device-folder move does.
+    val movedToSharedNote = stringResource(R.string.album_move_shared_copy_note)
+    val movedToAlbumFmt = stringResource(R.string.album_moved_to_album)
+    val addedToAlbumFmt = stringResource(R.string.viewer_added_to_album)
+    LaunchedEffect(Unit) {
+        viewModel.moveResult.collect { r ->
+            // An own target only reads as "moved" once the source removal is confirmed; if the add
+            // landed but the removal did not, the photos are in both albums, so say "added" to match
+            // what the grid still shows here. A shared-with-me target keeps its copy note either way.
+            val msg = when {
+                r.copiedToSharedTarget -> movedToSharedNote
+                r.removedFromSource -> movedToAlbumFmt.format(r.targetName)
+                else -> addedToAlbumFmt.format(r.targetName)
+            }
+            snackbarHostState.showSnackbar(msg)
+        }
     }
     LaunchedEffect(state.downloadState) {
         if (state.downloadState is AlbumDownloadState.Enqueued) viewModel.resetDownloadState()
@@ -977,6 +999,19 @@ fun AlbumDetailScreen(
                     )
                 )
             }
+            // Move the selection into another album: add it there, then take it out of this one.
+            // Own albums only, since a shared-with-me album's photos live on the owner's volume and
+            // this album cannot rewrite that membership. Sits beside Remove, the other membership edit.
+            if (!state.isSharedWithMe && state.canAddPhotos) {
+                add(
+                    SelectionAction(
+                        icon = Icons.AutoMirrored.Filled.DriveFileMove,
+                        label = stringResource(R.string.album_move_to_album),
+                        enabled = !state.isDeletingPhotos,
+                        onClick = { showMoveToAlbumSheet = true },
+                    )
+                )
+            }
             // Removing is an edit, so it follows the same right as adding rather than plain
             // ownership. An editor on a shared album may take photos back out of it, including
             // ones another member added: album membership records no contributor, so "only your
@@ -1066,10 +1101,12 @@ fun AlbumDetailScreen(
         // into a half-finished bulk action; the pill above stays for background downloads/shares.
         val opDeletingLabel = stringResource(R.string.op_deleting)
         val opRemovingLabel = stringResource(R.string.op_removing_from_album)
+        val opMovingLabel = stringResource(R.string.op_moving_to_album)
         val opHidingLabel = stringResource(R.string.op_hiding)
         val albumBusyProgress = if (state.isDeletingPhotos) {
             val label = when (state.busyOp) {
                 AlbumBusyOp.Removing -> opRemovingLabel
+                AlbumBusyOp.Moving -> opMovingLabel
                 AlbumBusyOp.Hiding -> opHidingLabel
                 else -> opDeletingLabel
             }
@@ -1090,6 +1127,51 @@ fun AlbumDetailScreen(
                 viewModel.addSelectedToPerson(personId)
             },
             onDismiss = { showAddToPersonSheet = false },
+        )
+    }
+
+    // Move the album selection into another album. Reuses the gallery's add-to-album picker: this
+    // album is filtered out of the target list, and picking a shared-with-me album makes the #80
+    // cross-volume copy, which the move result flags so the collector above can say so.
+    if (showMoveToAlbumSheet && state.selectedCount > 0) {
+        // The album list (the gallery's add-to-album sheet, this album filtered out) is observed only
+        // while the move sheet is open, so opening an album doesn't load every album until a move.
+        val albumsViewModel: AlbumsViewModel = hiltViewModel()
+        val albumsState by albumsViewModel.uiState.collectAsStateWithLifecycle()
+        val moveItems = remember(
+            state.selectedPhotos, state.photos, state.localItemByLinkId, state.localUriByLinkId,
+        ) {
+            val byId = state.photos.associateBy { it.linkId }
+            state.selectedPhotos.mapNotNull { linkId ->
+                val photo = byId[linkId] ?: return@mapNotNull null
+                AlbumPhotoItems.galleryItem(
+                    photo, state.localItemByLinkId[linkId], state.localUriByLinkId[linkId],
+                )
+            }.toSet()
+        }
+        eu.akoos.photos.presentation.gallery.GalleryAddToAlbumDialog(
+            selectedItems = moveItems,
+            cloudAlbums = albumsState.addableAlbums.filter { it.linkId != state.albumLinkId },
+            sheetState = moveToAlbumSheetState,
+            onCreateNew = {
+                showMoveToAlbumSheet = false
+                showCreateAlbumForMove = true
+            },
+            onCloudAlbumSelected = { album ->
+                showMoveToAlbumSheet = false
+                viewModel.moveSelectedToAlbum(album.linkId, album.name, album.isSharedWithMe)
+            },
+            onDismiss = { showMoveToAlbumSheet = false },
+            hiddenAlbumIds = albumsState.hiddenAlbumIds,
+        )
+    }
+    if (showCreateAlbumForMove && state.selectedCount > 0) {
+        eu.akoos.photos.presentation.gallery.GalleryNewAlbumDialog(
+            onDismiss = { showCreateAlbumForMove = false },
+            onCreate = { name ->
+                showCreateAlbumForMove = false
+                viewModel.createAlbumThenMoveSelected(name)
+            },
         )
     }
 

@@ -209,34 +209,19 @@ fun AccountScreen(
                 }
             }
         }
-        // Signing out empties the hidden vault, and a hide takes the device copy with it, so the vault
-        // file is the last one on the phone. This confirmation is the last chance to reveal them,
-        // which is why it names how many there are — and why it waits on the count being measured
-        // rather than opening on the zero that stands in until then.
-        //
-        // The photos that kept a Drive copy are named separately, because for them the wipe costs the
-        // device bytes alone: signing back in downloads them again. Saying only the total would put a
-        // photo the user can get back and one they cannot behind the same sentence.
+        // The dialog waits on the vault count so the Hidden Photos item is listed only when photos
+        // would really be deleted, not on the zero that stands in until the count settles.
         if (showSignOutDialog && state.vaultedCountSettled) {
-            val vaultWarning = if (state.vaultedPhotoCount > 0) {
-                val total = androidx.compose.ui.res.pluralStringResource(
-                    R.plurals.sign_out_dialog_vault_warning,
-                    state.vaultedPhotoCount,
-                    state.vaultedPhotoCount,
-                )
-                val recoverable = if (state.vaultedCloudBackedCount > 0) {
-                    " " + androidx.compose.ui.res.pluralStringResource(
-                        R.plurals.sign_out_dialog_vault_cloud,
-                        state.vaultedCloudBackedCount,
-                        state.vaultedCloudBackedCount,
-                    )
-                } else ""
-                "\n\n" + total + recoverable
-            } else ""
-            // Signing out also wipes the on-device face index, so when face recognition is on the message
-            // says the names and groups go too, rather than letting the loss come as a surprise.
-            val faceWarning = if (state.faceEnabled) "\n\n" + stringResource(R.string.sign_out_dialog_face_warning) else ""
-            val signOutMessage = stringResource(R.string.sign_out_dialog_message) + vaultWarning + faceWarning
+            val faceItem = stringResource(R.string.sign_out_dialog_item_faces)
+            val dayNotesItem = stringResource(R.string.sign_out_dialog_item_day_notes)
+            val vaultItem = stringResource(R.string.sign_out_dialog_item_vault)
+            val items = buildList {
+                if (state.faceEnabled) add(faceItem)
+                add(dayNotesItem)
+                if (state.vaultedPhotoCount > 0) add(vaultItem)
+            }
+            val signOutMessage = stringResource(R.string.sign_out_dialog_message) +
+                items.joinToString(separator = "\n", prefix = "\n") { "· " + it }
             ConfirmDialog(
                 title = stringResource(R.string.sign_out_dialog_title),
                 message = signOutMessage,

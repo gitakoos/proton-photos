@@ -80,7 +80,7 @@ import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.presentation.common.deleteConfirmRows
-import eu.akoos.photos.presentation.common.deleteRowDescRes
+import eu.akoos.photos.presentation.common.deleteRowDescription
 import eu.akoos.photos.presentation.common.deleteRowTitleRes
 import eu.akoos.photos.presentation.gallery.LocalThumbnailUrls
 import eu.akoos.photos.presentation.theme.Accent
@@ -370,7 +370,14 @@ internal fun DeleteConfirmSheet(
 
         val hasLocal = item is GalleryItem.LocalOnly || item is GalleryItem.Synced
         val hasCloud = item is GalleryItem.Synced || item is GalleryItem.CloudOnly
-        val rows = deleteConfirmRows(hasLocal, hasCloud)
+        val rows = deleteConfirmRows(
+            hasLocal, hasCloud,
+            reclaimableBytes = when (item) {
+                is GalleryItem.LocalOnly -> item.local.sizeBytes
+                is GalleryItem.Synced -> item.local.sizeBytes
+                is GalleryItem.CloudOnly -> 0L
+            },
+        )
         if (rows.size > 1) {
             Text(
                 stringResource(R.string.delete_multi_mixed_msg),
@@ -381,7 +388,7 @@ internal fun DeleteConfirmSheet(
         rows.forEach { row ->
             DangerRow(
                 title = stringResource(deleteRowTitleRes(row.kind, isVaulted)),
-                subtitle = stringResource(deleteRowDescRes(row.kind, isVaulted)),
+                subtitle = deleteRowDescription(row, isVaulted),
                 isDestructive = row.destructive,
                 onClick = { onDelete(row.freeUpSpace, row.deleteFromCloud) },
             )

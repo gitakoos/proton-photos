@@ -122,11 +122,23 @@ fun PersonDetailScreen(
     onAcceptSuggestion: (Long) -> Unit = {},
     onDismissSuggestion: (Long) -> Unit = {},
     onLeaveSuggestion: () -> Unit = {},
+    /** Opens the suggested candidate's own grid, so the user can look past the tiny face crop before
+     *  deciding merge vs. different person. */
+    onPreviewCandidate: (Long) -> Unit = {},
     /** Opens the sweep that looks for more photos of this person among the ones no face was found on. */
     onFindMore: () -> Unit = {},
 ) {
     val appColors = AppColors.current
     val gridState = rememberLazyGridState()
+    // The merge suggestion is the grid's first item and arrives async, so it can insert above the
+    // current scroll offset and render clipped at the top edge. When one appears while the grid is at
+    // (or near) the top, pull it fully into view; if the user has scrolled down into the photos leave
+    // their position alone (the banner is off-screen above anyway).
+    LaunchedEffect(mergeSuggestion != null) {
+        if (mergeSuggestion != null && gridState.firstVisibleItemIndex <= 1) {
+            gridState.animateScrollToItem(0)
+        }
+    }
     var showRename by remember { mutableStateOf(false) }
     var showRemoveConfirm by remember { mutableStateOf(false) }
     var showIgnoreConfirm by remember { mutableStateOf(false) }
@@ -275,6 +287,7 @@ fun PersonDetailScreen(
                         item(span = { GridItemSpan(maxLineSpan) }, key = "merge_suggestion") {
                             MergeSuggestionBanner(
                                 candidate = mergeSuggestion,
+                                onPreview = { onPreviewCandidate(mergeSuggestion.personId) },
                                 onMerge = { onAcceptSuggestion(mergeSuggestion.personId) },
                                 onDismiss = { onDismissSuggestion(mergeSuggestion.personId) },
                                 onLeave = onLeaveSuggestion,
@@ -672,6 +685,7 @@ fun PersonDetailScreen(
 @Composable
 private fun MergeSuggestionBanner(
     candidate: PersonUi,
+    onPreview: () -> Unit,
     onMerge: () -> Unit,
     onDismiss: () -> Unit,
     onLeave: () -> Unit,
@@ -690,7 +704,9 @@ private fun MergeSuggestionBanner(
             .padding(16.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            PersonTile(person = candidate, selected = false, onClick = onMerge)
+            // Tapping the face opens the candidate's grid to look closer, rather than merging on a
+            // single tap of a tiny crop; the explicit Merge button below is the merge action.
+            PersonTile(person = candidate, selected = false, onClick = onPreview)
             Spacer(Modifier.width(14.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(

@@ -414,27 +414,30 @@ internal fun SelectRow(
 
 /**
  * App-lock timeout picker. 0 = lock immediately on background; non-zero values mean the
- * lock only kicks in after that many minutes in the background, so a quick app-switch
+ * lock only kicks in after that many seconds in the background, so a quick app-switch
  * doesn't re-prompt for biometrics every time.
  */
 @Composable
 internal fun AppLockTimeoutRow(
     label: String,
     description: String? = null,
-    selectedMinutes: Int,
+    selectedSeconds: Int,
     onSelected: (Int) -> Unit,
 ) {
     val colors = AppColors.current
     var expanded by remember { mutableStateOf(false) }
     val options: List<Pair<Int, Int>> = listOf(
-        0   to R.string.settings_app_lock_timeout_immediate,
-        1   to R.string.settings_app_lock_timeout_1min,
-        5   to R.string.settings_app_lock_timeout_5min,
-        10  to R.string.settings_app_lock_timeout_10min,
-        15  to R.string.settings_app_lock_timeout_15min,
-        60  to R.string.settings_app_lock_timeout_1h,
+        0    to R.string.settings_app_lock_timeout_immediate,
+        5    to R.string.settings_app_lock_timeout_5sec,
+        10   to R.string.settings_app_lock_timeout_10sec,
+        30   to R.string.settings_app_lock_timeout_30sec,
+        60   to R.string.settings_app_lock_timeout_1min,
+        300  to R.string.settings_app_lock_timeout_5min,
+        600  to R.string.settings_app_lock_timeout_10min,
+        900  to R.string.settings_app_lock_timeout_15min,
+        3600 to R.string.settings_app_lock_timeout_1h,
     )
-    val selectedLabel = options.firstOrNull { it.first == selectedMinutes }?.second
+    val selectedLabel = options.firstOrNull { it.first == selectedSeconds }?.second
         ?: R.string.settings_app_lock_timeout_immediate
     Row(
         modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 11.dp, bottom = 11.dp),
@@ -461,10 +464,10 @@ internal fun AppLockTimeoutRow(
                 containerColor = colors.cardBg,
                 border = BorderStroke(0.5.dp, colors.pillBorder),
             ) {
-                options.forEach { (minutes, labelRes) ->
+                options.forEach { (seconds, labelRes) ->
                     DropdownMenuItem(
                         text = { Text(stringResource(labelRes), color = colors.fgPrimary) },
-                        onClick = { onSelected(minutes); expanded = false },
+                        onClick = { onSelected(seconds); expanded = false },
                     )
                 }
             }

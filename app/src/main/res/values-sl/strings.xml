@@ -331,6 +331,7 @@
     <string name="album_picker_title">Dodaj v album</string>
     <string name="album_picker_selected">Izbranih: %1$d</string>
     <string name="album_add_count">Dodaj (%1$d)</string>
+    <string name="picker_selection_limit">Naenkrat lahko izbereš največ %1$d</string>
     <string name="album_picker_empty">Ni fotografij za dodajanje.</string>
 
     <!-- Permission -->
@@ -402,6 +403,7 @@
     <string name="delete_multi_remove_cloud_desc">Obdrži jo v tej napravi, varnostno kopijo premakni v koš Drive</string>
     <string name="delete_multi_move_trash_everywhere">Premakni v koš povsod</string>
     <string name="delete_multi_move_trash_everywhere_desc">Premakne v koš naprave in koš Proton Drive</string>
+    <string name="delete_frees_note">(sprosti ~%1$s)</string>
     <string name="delete_multi_drive_trash">Premakni v koš Drive</string>
     <string name="delete_multi_drive_trash_desc">Premaknjeno med Nedavno izbrisano v Drive, obnovljivo</string>
 
@@ -427,19 +429,10 @@
     <string name="settings_sign_out">Odjava</string>
     <string name="settings_sign_out_desc">Končaj to sejo v tej napravi.</string>
     <string name="sign_out_dialog_title">Odjava?</string>
-    <string name="sign_out_dialog_message">Ali se res želite odjaviti iz svojega računa Proton?</string>
-    <plurals name="sign_out_dialog_vault_warning">
-        <item quantity="one">Ob odjavi se izpraznijo tudi Skrite fotografije: %1$d fotografija bo trajno izbrisana iz te naprave.</item>
-        <item quantity="two">Ob odjavi se izpraznijo tudi Skrite fotografije: %1$d fotografiji bosta trajno izbrisani iz te naprave.</item>
-        <item quantity="few">Ob odjavi se izpraznijo tudi Skrite fotografije: %1$d fotografije bodo trajno izbrisane iz te naprave.</item>
-        <item quantity="other">Ob odjavi se izpraznijo tudi Skrite fotografije: %1$d fotografij bo trajno izbrisanih iz te naprave.</item>
-    </plurals>
-    <plurals name="sign_out_dialog_vault_cloud">
-        <item quantity="one">%1$d od njih je tudi v Proton Drive in jo je po ponovni prijavi mogoče znova prenesti.</item>
-        <item quantity="two">%1$d od njih sta tudi v Proton Drive in ju je po ponovni prijavi mogoče znova prenesti.</item>
-        <item quantity="few">%1$d od njih so tudi v Proton Drive in jih je po ponovni prijavi mogoče znova prenesti.</item>
-        <item quantity="other">%1$d od njih je tudi v Proton Drive in jih je po ponovni prijavi mogoče znova prenesti.</item>
-    </plurals>
+    <string name="sign_out_dialog_message">Z odjavo se ti podatki v tej napravi izbrišejo in se ob ponovni prijavi ne obnovijo (če jih potrebujete, jih najprej izvozite):</string>
+    <string name="sign_out_dialog_item_faces">Poimenovane osebe in podatki o obrazih</string>
+    <string name="sign_out_dialog_item_day_notes">Opombe v koledarju</string>
+    <string name="sign_out_dialog_item_vault">Skrite fotografije</string>
     <string name="sign_out_dialog_confirm">Odjava</string>
     <string name="sign_out_dialog_cancel">Prekliči</string>
     <string name="settings_account_storage">Shramba Drive</string>
@@ -601,6 +594,9 @@
     <string name="settings_app_lock_timeout">Zakleni po</string>
     <string name="settings_app_lock_timeout_desc">Znova zakleni aplikacijo po tem času v ozadju</string>
     <string name="settings_app_lock_timeout_immediate">Takoj</string>
+    <string name="settings_app_lock_timeout_5sec">5 sekund</string>
+    <string name="settings_app_lock_timeout_10sec">10 sekund</string>
+    <string name="settings_app_lock_timeout_30sec">30 sekund</string>
     <string name="settings_app_lock_timeout_1min">1 minuta</string>
     <string name="settings_app_lock_timeout_5min">5 minut</string>
     <string name="settings_app_lock_timeout_10min">10 minut</string>
@@ -671,6 +667,10 @@
     <string name="albums_reorder">Prerazporedi albume</string>
     <string name="album_rename_confirm">Preimenuj</string>
     <string name="album_remove_from_album">Odstrani iz albuma</string>
+    <string name="album_move_to_album">Premakni v album</string>
+    <string name="album_moved_to_album">Premaknjeno v \"%1$s\"</string>
+    <string name="album_move_shared_copy_note">Fotografije, dodane v album v skupni rabi, se kopirajo lastniku albuma.</string>
+    <string name="op_moving_to_album">Premikanje v album…</string>
     <string name="album_set_as_cover">Nastavi kot naslovnico</string>
     <string name="gallery_action_select">Izberi</string>
     <string name="album_cover_updated">Naslovnica posodobljena</string>
@@ -961,6 +961,7 @@
     <!-- Search -->
     <string name="search_title">Iskanje</string>
     <string name="search_placeholder">Iskanje po imenu datoteke</string>
+    <string name="search_placeholder_semantic">Iskanje fotografij</string>
     <string name="search_empty_idle">Za začetek iskanja vnesite ime</string>
     <string name="search_empty_no_results">Ni zadetkov</string>
     <string name="search_section_on_this_day">Na ta dan</string>
@@ -1116,9 +1117,8 @@
     <string name="video_editor_crop">Obreži</string>
     <string name="video_editor_audio">Glasba</string>
     <string name="video_editor_add_music">Dodaj glasbo</string>
+    <string name="video_editor_replace_music">Zamenjaj glasbo</string>
     <string name="video_editor_remove_music">Odstrani</string>
-    <string name="video_editor_music_start">Začetek glasbe</string>
-    <string name="video_editor_music_end">Konec glasbe</string>
     <string name="video_editor_reset_crop">Ponastavi obrez</string>
     <string name="video_editor_reencoding">Vnovično kodiranje videa…</string>
     <string name="video_editor_encrypting">Šifriranje…</string>
@@ -1999,6 +1999,24 @@
     <string name="editor_tool_draw">Riši</string>
     <string name="editor_tool_text">Besedilo</string>
     <string name="video_editor_frame_failed">Sličice ni bilo mogoče shraniti</string>
+    <string name="video_editor_split">Razdeli</string>
+    <string name="video_editor_remove_section">Odstrani odsek</string>
+    <string name="video_editor_sections_lossless_only">Rezi odsekov veljajo samo za izvoz brez izgub.</string>
+    <string name="video_editor_split_music">Razdeli glasbo</string>
+    <string name="video_editor_silence_section">Utišaj odsek</string>
+    <string name="video_editor_restore_section">Obnovi odsek</string>
+    <string name="video_editor_reorder">Prerazporedi</string>
+    <string name="video_editor_add_video">Dodaj videoposnetek</string>
+    <string name="video_editor_max_sources">Združite lahko največ %1$d videoposnetkov</string>
+    <string name="video_editor_low_space">Ni dovolj prostora za shranjevanje videoposnetka</string>
+    <string name="video_editor_reencode_sections_pending">Obrezovanja, filtrov, vrtenja in glasnosti še ni mogoče uporabiti za razdeljene ali prerazporejene odseke.</string>
+    <string name="video_editor_volume">Glasnost</string>
+    <string name="video_editor_duplicate">Podvoji</string>
+    <string name="video_editor_delete">Izbriši</string>
+    <string name="video_editor_restore">Obnovi</string>
+    <string name="video_editor_unmute">Vklopi zvok</string>
+    <string name="video_editor_audio_lane">Zvok</string>
+    <string name="video_editor_history_title">Zgodovina urejanja</string>
     <string name="video_editor_frame_saved">Sličica shranjena v galerijo</string>
     <string name="video_editor_grab_frame">Zajemi sličico</string>
     <string name="video_editor_mute">Utišaj</string>
@@ -2043,6 +2061,34 @@
     <string name="whats_new_dup_nobackup_body">Iskalnik dvojnikov zdaj pregleda fotografije v vaši napravi brez računa ali varnostne kopije.</string>
     <string name="whats_new_compress_split_title">Ločena kakovost za fotografije in videoposnetke</string>
     <string name="whats_new_compress_split_body">Stiskanje fotografij in videoposnetkov ima zdaj svoje ravni kakovosti. Preverite jih v Nastavitvah, pod Kakovost in velikost.</string>
+    <string name="whats_new_semantic_title">Iščite fotografije z opisom</string>
+    <string name="whats_new_semantic_body">Vpišite, česa se spomnite, na primer zasnežene gore ali rojstnodnevne torte, in ujemajoče se fotografije se prikažejo. Vse teče v vašem telefonu; vklopite to v Nastavitvah.</string>
+    <string name="whats_new_gifmaker_title">Spremenite video v GIF</string>
+    <string name="whats_new_gifmaker_body">Obrežite posnetek, izberite velikost ter shranite ali delite GIF. GIF videa iz oblaka se naloži nazaj v vašo knjižnico.</string>
+    <string name="whats_new_gifplay_title">Predvajajte GIF-e na mestu</string>
+    <string name="whats_new_gifplay_body">Dve nastavitvi omogočita animacijo GIF-ov v mrežah fotografij in na ovitkih albumov, tudi tistih v oblaku. Privzeto izklopljeno.</string>
+    <string name="whats_new_automerge_title">Samodejno združi isto osebo</string>
+    <string name="whats_new_automerge_body">Izbirna nastavitev namesto vas sprejme najzanesljivejše predloge za isto osebo, tako da se fotografije osebe zberejo same.</string>
+    <string name="whats_new_categoryhide_title">Skrijte kategorije, ki jih preskočite</string>
+    <string name="whats_new_categoryhide_body">Ikona očesa pri vsaki kategoriji na časovnici jo skrije s časovnice in iz iskanja. Tam jih lahko tudi prerazporedite.</string>
+    <string name="whats_new_people_accurate_title">Števila oseb ostanejo pravilna</string>
+    <string name="whats_new_people_accurate_body">Oseba ostane pravilna po združevanju, premikanju ali skrivanju fotografij, obrazi s fotografije pa se znova uporabijo ob njenem varnostnem kopiranju.</string>
+    <string name="whats_new_facescan_title">Stabilnejše pregledovanje obrazov</string>
+    <string name="whats_new_facescan_body">Pregledovanje se nadaljuje, ko se Wi-Fi vrne, in ena zataknjena fotografija ne zamrzne več celotnega poteka.</string>
+    <string name="whats_new_bgdownloads_title">Prenosi tečejo naprej</string>
+    <string name="whats_new_bgdownloads_body">Prenosi modelov AI se nadaljujejo v ozadju z obvestilom o napredku, tako da jih izhod iz Nastavitev ne ustavi več.</string>
+    <string name="whats_new_videoeditor_title">Videourejevalnik z več posnetki</string>
+    <string name="whats_new_videoeditor_body">Videourejevalnik je zdaj časovnica. Dodajajte posnetke, jih obrezujte, prerazporejajte in brišite, podložite glasbo, uravnajte barvo in svetlobo ter vse skupaj izvozite kot en video.</string>
+    <string name="whats_new_movetoalbum_title">Premik v album</string>
+    <string name="whats_new_movetoalbum_body">Premaknite izbrane fotografije iz enega albuma naravnost v drugega.</string>
+    <string name="whats_new_indexsettle_title">Indeksiranje ni več videti zataknjeno</string>
+    <string name="whats_new_indexsettle_body">Ko zadnjih nekaj elementov trenutno ni mogoče prebrati, se indeksiranje obrazov in fotografij umiri in poskusi znova pozneje, namesto da zamrzne na vrstici napredka.</string>
+    <string name="whats_new_videoplay_title">Čistejši in zanesljivejši video</string>
+    <string name="whats_new_videoplay_body">Videi se odprejo brez napačne fotografije ali belega bliska in se predvajajo tudi v telefonih, katerih glavni dekodirnik je prej odpovedoval.</string>
+    <string name="whats_new_mergefast_title">Hitrejši predlogi obrazov</string>
+    <string name="whats_new_mergefast_body">Predlogi za združevanje se odzovejo v trenutku, ko tapnete, ostanejo dosegljivi, in par se vrne, če združevanje ni bilo dokončano.</string>
+    <string name="whats_new_diag_title">Preizkušate to predogledno različico?</string>
+    <string name="whats_new_diag_body">Hvala, ker preizkušate predogledno različico. Če kaj ne deluje pravilno, pošljite diagnostiko, da je mogoče ločiti težavo z datoteko od česa drugega: kopirajte jo v Nastavitvah in pišite na support@photosforproton.eu ali objavite na Discordu ali GitHubu.</string>
     <string name="whats_new_section_new">Novo</string>
     <string name="whats_new_section_improved">Izboljšave</string>
 
@@ -2077,7 +2123,6 @@
     <string name="albums_search_no_results">Noben album se ne ujema z iskanjem.</string>
     <string name="settings_ai_groups_found">%1$d skupin</string>
     <string name="settings_ai_faces_found">%1$d obrazov</string>
-    <string name="sign_out_dialog_face_warning">Poimenovane osebe in skupine obrazov v tej napravi bodo prav tako odstranjene in se ob ponovni prijavi ne obnovijo.</string>
     <string name="person_rename_merge_confirm_title">Združiti z obstoječo osebo?</string>
     <string name="person_rename_merge_confirm_body">Oseba z imenom %1$s že obstaja. Uporaba tega imena združi obe v eno, česar ni mogoče razveljaviti. Združiti?</string>
     <string name="person_move_confirm_title">Premakniti k tej osebi?</string>

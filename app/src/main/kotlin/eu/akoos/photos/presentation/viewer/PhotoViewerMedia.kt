@@ -101,8 +101,11 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.SeekParameters
 import androidx.media3.ui.PlayerView
 import eu.akoos.photos.R
+import eu.akoos.photos.presentation.common.decoderFallbackRenderersFactory
 import eu.akoos.photos.presentation.common.rememberVideoFilmstripFrames
 import eu.akoos.photos.presentation.theme.FgPrimary
+import androidx.compose.ui.graphics.toArgb
+import eu.akoos.photos.presentation.theme.Bg0
 import eu.akoos.photos.presentation.theme.PillBg
 import eu.akoos.photos.presentation.theme.PillBorder
 import eu.akoos.photos.presentation.util.formatVideoTime
@@ -152,7 +155,7 @@ internal fun VideoPlayer(
     val context = LocalContext.current
     val loop = onEnded == null
     val exoPlayer = remember(uri, reloadKey) {
-        ExoPlayer.Builder(context).build().apply {
+        ExoPlayer.Builder(context, decoderFallbackRenderersFactory(context)).build().apply {
             setMediaItem(MediaItem.fromUri(uri))
             prepare()
             playWhenReady = autoPlay
@@ -209,14 +212,24 @@ internal fun VideoPlayer(
     // compositor layer that ignores parent transforms), while resize_mode="fit" wraps it in an
     // AspectRatioFrameLayout that letterboxes the video so its aspect ratio is preserved instead of
     // stretched. The controller stays off; our own pill and the ExoPlayer listeners drive playback.
+    // Fill the PlayerView shutter (shown until the first frame) and its letterbox with the viewer page
+    // background (Bg0) in both themes, instead of the XML's opaque black, so a video opens without a white
+    // flash or a white-to-black jump and matches the surrounding viewer and the photo path.
+    val shutterColor = Bg0.toArgb()
     AndroidView(
         factory = { ctx ->
             (android.view.LayoutInflater.from(ctx)
                 .inflate(R.layout.view_video_player_texture, null) as PlayerView)
-                .apply { player = exoPlayer }
+                .apply {
+                    player = exoPlayer
+                    setShutterBackgroundColor(shutterColor)
+                    setBackgroundColor(shutterColor)
+                }
         },
         update = { view ->
             view.player = exoPlayer
+            view.setShutterBackgroundColor(shutterColor)
+            view.setBackgroundColor(shutterColor)
             // Drives FLAG_KEEP_SCREEN_ON on the host window; auto-clears when keepOn goes false.
             view.keepScreenOn = keepOn
         },

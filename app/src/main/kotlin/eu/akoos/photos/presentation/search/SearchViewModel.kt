@@ -332,6 +332,11 @@ class SearchViewModel @Inject constructor(
         .map { it[SettingsKeys.AI_FEATURES_ENABLED] == true && it[SettingsKeys.SEMANTIC_ENABLED] == true }
         .distinctUntilChanged()
 
+    /** Exposed for the search bar placeholder: with semantic search on the field matches any
+     *  description, not just filenames, so the hint text switches accordingly. */
+    val semanticSearchEnabled: StateFlow<Boolean> = semanticEnabled
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
     /** The content-search feed: whether a search is still running for the current query, and the
      *  resolved matches so far. Held as one value so the loading flag and the matches never disagree. */
     private data class SemanticFeed(val loading: Boolean, val items: List<GalleryItem>)

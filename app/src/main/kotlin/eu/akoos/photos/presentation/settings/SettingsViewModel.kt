@@ -970,7 +970,8 @@ class SettingsViewModel @Inject constructor(
                     stripShareSoftwareInfo = migratedPrefs[SettingsKeys.STRIP_SHARE_SOFTWARE_INFO] ?: false,
                     stripShareAuthorship = migratedPrefs[SettingsKeys.STRIP_SHARE_AUTHORSHIP] ?: false,
                     appLockEnabled = migratedPrefs[SettingsKeys.APP_LOCK_ENABLED] ?: false,
-                    appLockTimeoutMinutes = migratedPrefs[SettingsKeys.APP_LOCK_TIMEOUT_MINUTES] ?: 0,
+                    appLockTimeoutSeconds = migratedPrefs[SettingsKeys.APP_LOCK_TIMEOUT_SECONDS]
+                        ?: migratedPrefs[SettingsKeys.APP_LOCK_TIMEOUT_MINUTES]?.let { it * 60 } ?: 0,
                     clearCacheOnAppClose = migratedPrefs[SettingsKeys.CLEAR_CACHE_ON_APP_CLOSE] ?: false,
                     screenshotOverlayEnabled = migratedPrefs[SettingsKeys.SCREENSHOT_OVERLAY_ENABLED] ?: false,
                     showScrollDate = migratedPrefs[SettingsKeys.SHOW_SCROLL_DATE] ?: false,
@@ -2000,10 +2001,10 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    fun setAppLockTimeoutMinutes(minutes: Int) {
+    fun setAppLockTimeoutSeconds(seconds: Int) {
         viewModelScope.launch {
-            appLockManager.setLockTimeoutMinutes(minutes)
-            _uiState.update { it.copy(appLockTimeoutMinutes = minutes) }
+            appLockManager.setLockTimeoutSeconds(seconds)
+            _uiState.update { it.copy(appLockTimeoutSeconds = seconds) }
         }
     }
 

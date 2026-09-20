@@ -107,6 +107,7 @@ import androidx.media3.ui.PlayerView
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.presentation.common.IconBubble
+import eu.akoos.photos.presentation.common.decoderFallbackRenderersFactory
 import eu.akoos.photos.presentation.common.rememberVideoFilmstripFrames
 import eu.akoos.photos.presentation.editor.components.VideoFilmstripTrimmer
 import eu.akoos.photos.presentation.gallery.FilterChip
@@ -211,7 +212,7 @@ private fun GifMakerContent(
     // A muted preview player for the source. Looping is handled below against the selected range, so its
     // own repeat mode is off.
     val previewPlayer = remember(videoUri) {
-        ExoPlayer.Builder(context).build().apply {
+        ExoPlayer.Builder(context, decoderFallbackRenderersFactory(context)).build().apply {
             setMediaItem(MediaItem.fromUri(Uri.parse(videoUri)))
             prepare()
             playWhenReady = true

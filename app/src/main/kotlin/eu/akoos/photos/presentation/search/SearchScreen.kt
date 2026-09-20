@@ -194,6 +194,7 @@ fun SearchScreen(
     val peopleSuggestions by vm.peopleSuggestions.collectAsStateWithLifecycle()
     val results by vm.results.collectAsStateWithLifecycle()
     val semanticSearching by vm.semanticSearching.collectAsStateWithLifecycle()
+    val semanticSearchEnabled by vm.semanticSearchEnabled.collectAsStateWithLifecycle()
     val filter by vm.contentFilter.collectAsStateWithLifecycle()
     val selectedCategory by vm.selectedCategory.collectAsStateWithLifecycle()
     val people by vm.people.collectAsStateWithLifecycle()
@@ -657,7 +658,12 @@ fun SearchScreen(
                 AppSearchField(
                     query = query,
                     onQueryChange = vm::setQuery,
-                    placeholder = stringResource(R.string.search_placeholder),
+                    // With semantic search on the field matches any description, so "by filename"
+                    // would read as wrong; fall back to it only when semantic search is off.
+                    placeholder = stringResource(
+                        if (semanticSearchEnabled) R.string.search_placeholder_semantic
+                        else R.string.search_placeholder,
+                    ),
                     modifier = Modifier.weight(1f),
                 )
                 // Filter button beside the search field — opens the sheet (sync status). Accent

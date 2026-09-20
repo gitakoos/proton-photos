@@ -91,4 +91,30 @@ class DeleteConfirmRowsTest {
     fun `an empty selection offers no rows`() {
         assertTrue(deleteConfirmRows(hasLocal = false, hasCloud = false).isEmpty())
     }
+
+    @Test
+    fun `a reclaimable figure rides only the space-freeing rows`() {
+        val rows = deleteConfirmRows(hasLocal = true, hasCloud = true, reclaimableBytes = 2_048L)
+        // The two rows that drop the device copy carry the figure; the cloud-only removal keeps the
+        // device copy, so it frees nothing on this device and stays null.
+        assertEquals(2_048L, rows.first { it.kind == DeleteRowKind.RemoveDevice }.freedBytes)
+        assertEquals(2_048L, rows.first { it.kind == DeleteRowKind.RemoveEverywhere }.freedBytes)
+        assertEquals(null, rows.first { it.kind == DeleteRowKind.RemoveCloud }.freedBytes)
+        rows.forEach { assertEquals(it.freeUpSpace, it.freedBytes != null) }
+    }
+
+    @Test
+    fun `no figure, zero, or negative leaves every row without a note`() {
+        listOf(
+            deleteConfirmRows(hasLocal = true, hasCloud = true),
+            deleteConfirmRows(hasLocal = true, hasCloud = true, reclaimableBytes = 0L),
+            deleteConfirmRows(hasLocal = true, hasCloud = true, reclaimableBytes = -1L),
+        ).forEach { rows -> rows.forEach { assertEquals(null, it.freedBytes) } }
+    }
+
+    @Test
+    fun `a device-only trash row carries the figure`() {
+        val row = deleteConfirmRows(hasLocal = true, hasCloud = false, reclaimableBytes = 512L).single()
+        assertEquals(512L, row.freedBytes)
+    }
 }

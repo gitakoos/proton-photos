@@ -84,7 +84,8 @@ import eu.akoos.photos.presentation.theme.ErrorColor
 import eu.akoos.photos.presentation.theme.FgDim
 import eu.akoos.photos.presentation.theme.LocalGifAutoplayGrid
 import eu.akoos.photos.presentation.theme.LocalStaticImageLoader
-import eu.akoos.photos.presentation.theme.StatusSynced
+import eu.akoos.photos.presentation.theme.CloudBadgeSurface
+import eu.akoos.photos.presentation.theme.cloudBadgeTint
 import eu.akoos.photos.presentation.util.formatVideoTime
 
 /** Pixel budget for the OS video poster in album tiles. Matches the gallery grid so a synced
@@ -295,7 +296,7 @@ internal fun PhotoCell(
             Icon(
                 Icons.Default.Cloud,
                 contentDescription = null,
-                tint = if (localUri != null) StatusSynced else Color.White,
+                tint = if (localUri != null) cloudBadgeTint(CloudBadgeSurface.DarkChip) else Color.White,
                 modifier = Modifier.size(11.dp),
             )
         }

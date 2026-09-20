@@ -132,8 +132,16 @@ fun ViewerFaceTags(
     val placed = ArrayList<FloatArray>() // l, t, r, b of each chosen pill
     val anchors = HashMap<String, Offset>() // pill centre per FACE (Unsorted faces share one personId, so a
     // person-id key would collide and stack every "+" on one face; the face id is unique per rect)
-    fun overlaps(a: FloatArray, b: FloatArray) =
-        a[0] < b[2] && a[2] > b[0] && a[1] < b[3] && a[3] > b[1]
+    // Allocation-free: this runs for every candidate of every face, and the whole placement re-runs
+    // each gesture frame while tags are shown, so it must not churn a FloatArray + a lambda per call.
+    fun free(cx: Float, cy: Float, w: Float): Boolean {
+        val l = cx - w / 2f; val t = cy - pillH / 2f; val r = cx + w / 2f; val b = cy + pillH / 2f
+        for (i in placed.indices) {
+            val p = placed[i]
+            if (p[0] < r && p[2] > l && p[1] < b && p[3] > t) return false
+        }
+        return true
+    }
     for (fr in rects.sortedByDescending { (it.right - it.left) * (it.bottom - it.top) }) {
         val w = pillW(fr.person.name)
         val candidates = listOf(
@@ -143,12 +151,27 @@ fun ViewerFaceTags(
             Offset(fr.left - gap - w / 2f, fr.centreY),
         )
         var chosen = candidates[0]
+        var found = false
         for (c in candidates) {
             val cx = c.x.coerceIn(w / 2f, containerW - w / 2f)
             val cy = c.y.coerceIn(pillH / 2f, containerH - pillH / 2f)
-            val rect = floatArrayOf(cx - w / 2f, cy - pillH / 2f, cx + w / 2f, cy + pillH / 2f)
-            if (placed.none { overlaps(it, rect) }) { chosen = Offset(cx, cy); break }
-            if (c == candidates.last()) chosen = Offset(cx, cy) // all collide: keep the last (clamped)
+            if (free(cx, cy, w)) { chosen = Offset(cx, cy); found = true; break }
+        }
+        if (!found) {
+            // All four primary spots collide with an already-placed pill (small, clustered faces when
+            // zoomed out). Stacking this pill on top of another hides it, and an unnamed "+" hidden that
+            // way can't be tapped to attach a name. Nudge downward in pill-height steps to the first free
+            // slot so every pill stays reachable, falling back to the bottom edge if the column fills.
+            val cx = fr.centreX.coerceIn(w / 2f, containerW - w / 2f)
+            val step = pillH + gap
+            var cy = fr.bottom + gap + pillH / 2f
+            chosen = Offset(cx, (containerH - pillH / 2f).coerceAtLeast(pillH / 2f))
+            var guard = 0
+            while (guard++ < 64 && cy <= containerH - pillH / 2f) {
+                val ccy = cy.coerceIn(pillH / 2f, containerH - pillH / 2f)
+                if (free(cx, ccy, w)) { chosen = Offset(cx, ccy); break }
+                cy += step
+            }
         }
         val fx = chosen.x.coerceIn(w / 2f, containerW - w / 2f)
         val fy = chosen.y.coerceIn(pillH / 2f, containerH - pillH / 2f)

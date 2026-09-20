@@ -44,6 +44,10 @@ private const val TAG = "AudioMixer"
  */
 internal object AudioMixer {
 
+    // Hard ceiling on in-memory PCM, per decoded clip and for the mixed output: ~96 MB, roughly
+    // 9 min of 44.1 kHz stereo. Keeps a pathologically long clip a catchable error, not an OOM.
+    private const val MAX_PCM_SAMPLES = 48_000_000
+
     /**
      * Runs the mix/gain pipeline and writes AAC samples to [muxer] track [audioMuxerTrackIdx].
      * Caller must have already addTrack'd an AAC LC format (via [synthesizeAacFormat]) and started the muxer.
@@ -58,6 +62,18 @@ internal object AudioMixer {
         overlayTrimEndUs: Long,
         sourceGain: Float,
         overlayGain: Float,
+        /** Start position of the overlay on the edited timeline, in microseconds: the overlay PCM is
+         *  delayed by this many samples of leading silence so the music begins here instead of at the video
+         *  start. 0 keeps the overlay flush with the first frame. */
+        overlayOffsetUs: Long = 0L,
+        /** Silenced spans inside the music slice, in absolute overlay-file ms. The overlay samples that
+         *  fall in these spans are zeroed, so those spans are silent while the video plays on. */
+        removedOverlaySpansMs: List<VideoSegment> = emptyList(),
+        /** Kept source ranges (microseconds), in play order, when the video is a cut/reordered timeline.
+         *  null or one entry = the single [sourceTrimStartUs, sourceTrimEndUs] slice. More than one: the
+         *  source audio is decoded per window and concatenated so it skips the removed gaps, matching the
+         *  windowed video; the overlay stays a single continuous track capped to the total kept length. */
+        sourceWindowsUs: List<LongRange>? = null,
         targetSampleRate: Int,
         targetChannels: Int,
         muxer: MediaMuxer,
@@ -67,16 +83,61 @@ internal object AudioMixer {
         val useOverlay = overlayUri != null && overlayGain > 0.001f
         if (!useSource && !useOverlay) return
 
-        val srcPcm = if (useSource) decodeAudioToPcm(
-            context, sourceUri, sourceTrimStartUs, sourceTrimEndUs,
-            targetSampleRate, targetChannels,
-        ) else null
+        val multiWindow = sourceWindowsUs != null && sourceWindowsUs.size > 1
+        val srcPcm = if (useSource) {
+            if (multiWindow) {
+                // Concatenate each kept window's PCM so the mixed track skips the removed gaps like the video.
+                val parts = sourceWindowsUs!!.map { w ->
+                    decodeAudioToPcm(context, sourceUri, w.first, w.last, targetSampleRate, targetChannels)
+                }
+                ShortArray(parts.sumOf { it.size }).also { out ->
+                    var off = 0
+                    for (p in parts) { p.copyInto(out, off); off += p.size }
+                }
+            } else {
+                decodeAudioToPcm(context, sourceUri, sourceTrimStartUs, sourceTrimEndUs, targetSampleRate, targetChannels)
+            }
+        } else null
         val ovlPcm = if (useOverlay) decodeAudioToPcm(
             context, overlayUri!!, overlayTrimStartUs, overlayTrimEndUs,
             targetSampleRate, targetChannels,
         ) else null
 
-        val mixed = mixPcm(srcPcm, ovlPcm, sourceGain, overlayGain)
+        // The mixed track never outlives the video window: the overlay fills up to the kept length and is
+        // cut there rather than extending audio past the last frame. With cut windows the kept length is
+        // the SUM of the windows (the removed gaps are gone), not the [start, end] span.
+        val keptUs = if (multiWindow) {
+            sourceWindowsUs!!.sumOf { (it.last - it.first).coerceAtLeast(0L) }
+        } else {
+            (sourceTrimEndUs - sourceTrimStartUs).coerceAtLeast(0L)
+        }
+        val videoSamples = pcmSamplesForWindow(keptUs, targetSampleRate, targetChannels)
+        // Silenced music spans map to interleaved-sample ranges against the overlay slice timeline
+        // (overlayTrimStartUs is the sample-0 origin), so mixPcm can zero exactly those overlay samples.
+        val overlaySilenced = overlaySilencedRanges(
+            removedOverlaySpansMs, overlayTrimStartUs, targetSampleRate, targetChannels,
+        )
+        // Delay the overlay by the offset: prepend that many interleaved silent samples so the music begins
+        // at the chosen point on the edited timeline instead of at sample 0. The mix below still caps to the
+        // kept video length, so an offset that pushes the slice past the end simply trims what plays. The
+        // silenced ranges index into the overlay slice (sample 0 = overlayTrimStartUs), so the same delay
+        // shifts them right to stay aligned with the placed overlay.
+        val offsetSamples = if (overlayOffsetUs > 0L)
+            pcmSamplesForWindow(overlayOffsetUs, targetSampleRate, targetChannels) else 0
+        val placedOvl = if (ovlPcm != null && offsetSamples > 0) {
+            val cap = if (videoSamples > 0) videoSamples else ovlPcm.size + offsetSamples
+            val len = (offsetSamples.toLong() + ovlPcm.size.toLong()).coerceAtMost(cap.toLong()).toInt()
+            ShortArray(len).also { out ->
+                val room = len - offsetSamples
+                if (room > 0) System.arraycopy(ovlPcm, 0, out, offsetSamples, minOf(room, ovlPcm.size))
+            }
+        } else {
+            ovlPcm
+        }
+        val placedSilenced = if (offsetSamples > 0)
+            overlaySilenced.map { intArrayOf(it[0] + offsetSamples, it[1] + offsetSamples) }
+        else overlaySilenced
+        val mixed = mixPcm(srcPcm, placedOvl, sourceGain, overlayGain, videoSamples, placedSilenced)
         if (mixed.isEmpty()) return
 
         val durationUs = (mixed.size.toLong() * 1_000_000L) /
@@ -167,7 +228,7 @@ internal object AudioMixer {
             // trim window + 5% headroom, then array-double if the decoder produces more. The hard cap
             // turns a pathologically long clip into a catchable error (overlay audio is dropped)
             // instead of an uncatchable OutOfMemoryError that would crash the whole save.
-            val maxPcmSamples = 48_000_000 // ~96 MB, roughly 9 min of 44.1 kHz stereo
+            val maxPcmSamples = MAX_PCM_SAMPLES
             val expectedSamples = (((trimEndUs - trimStartUs).coerceAtLeast(0L) / 1_000_000.0) *
                 srcSampleRate.toDouble() * srcChannels.toDouble() * 1.05).toLong().coerceAtLeast(1024L)
             var accum = ShortArray(expectedSamples.coerceIn(1024L, maxPcmSamples.toLong()).toInt())
@@ -284,11 +345,34 @@ internal object AudioMixer {
 
     // ── Mix ───────────────────────────────────────────────────────────────────
 
-    /** Mixes source + overlay PCM at the given gains, clamped to int16; the longer input plays on alone. */
-    private fun mixPcm(src: ShortArray?, ovl: ShortArray?, srcGain: Float, ovlGain: Float): ShortArray {
+    /**
+     * Mixes source + overlay PCM at the given gains, clamped to int16. [videoSamples] is the base
+     * (video) window in interleaved samples: the output is cut to it so a music slice longer than
+     * the video leaves no audio-only tail, and a shorter slice is padded with silence to the end.
+     *
+     * [overlaySilencedRanges] are interleaved-sample ranges (end-exclusive) of the OVERLAY buffer to
+     * silence: those samples are zeroed in place before the mix, so a removed music span comes out
+     * quiet (only source audio, when kept, survives there) while the video keeps playing.
+     */
+    private fun mixPcm(
+        src: ShortArray?,
+        ovl: ShortArray?,
+        srcGain: Float,
+        ovlGain: Float,
+        videoSamples: Int,
+        overlaySilencedRanges: List<IntArray> = emptyList(),
+    ): ShortArray {
         val a = src ?: ShortArray(0)
         val b = ovl ?: ShortArray(0)
-        val length = maxOf(a.size, b.size)
+        if (a.isEmpty() && b.isEmpty()) return ShortArray(0)
+        if (b.isNotEmpty() && overlaySilencedRanges.isNotEmpty()) {
+            for (r in overlaySilencedRanges) {
+                val from = r[0].coerceIn(0, b.size)
+                val to = r[1].coerceIn(0, b.size)
+                if (to > from) java.util.Arrays.fill(b, from, to, 0.toShort())
+            }
+        }
+        val length = if (videoSamples > 0) videoSamples else maxOf(a.size, b.size)
         val out = ShortArray(length)
         for (i in 0 until length) {
             val sv = if (i < a.size) (a[i] * srcGain) else 0f
@@ -296,6 +380,39 @@ internal object AudioMixer {
             out[i] = (sv + ov).toInt().coerceIn(-32768, 32767).toShort()
         }
         return out
+    }
+
+    /**
+     * Maps silenced music spans (absolute overlay-file ms) to interleaved-sample ranges of the decoded
+     * overlay buffer, whose sample 0 sits at [overlayTrimStartUs]. Spans before the slice or past its
+     * decoded end collapse or drop out via the caller's array-bounds clamp. Pure.
+     */
+    private fun overlaySilencedRanges(
+        removedSpansMs: List<VideoSegment>,
+        overlayTrimStartUs: Long,
+        sampleRate: Int,
+        channels: Int,
+    ): List<IntArray> {
+        if (removedSpansMs.isEmpty()) return emptyList()
+        return removedSpansMs.mapNotNull { span ->
+            val relStartUs = (span.startMs * 1000L - overlayTrimStartUs).coerceAtLeast(0L)
+            val relEndUs = (span.endMs * 1000L - overlayTrimStartUs).coerceAtLeast(0L)
+            if (relEndUs <= relStartUs) return@mapNotNull null
+            val startFrame = (relStartUs / 1_000_000.0 * sampleRate).toLong()
+            val endFrame = (relEndUs / 1_000_000.0 * sampleRate).toLong()
+            val startIdx = (startFrame * channels).coerceIn(0L, Int.MAX_VALUE.toLong()).toInt()
+            val endIdx = (endFrame * channels).coerceIn(0L, Int.MAX_VALUE.toLong()).toInt()
+            if (endIdx > startIdx) intArrayOf(startIdx, endIdx) else null
+        }
+    }
+
+    /**
+     * Interleaved 16-bit sample count for a [durationUs] window at the target format, capped to
+     * [MAX_PCM_SAMPLES] so the mixed output honours the same in-memory ceiling as a decoded clip.
+     */
+    private fun pcmSamplesForWindow(durationUs: Long, sampleRate: Int, channels: Int): Int {
+        val frames = ((durationUs.coerceAtLeast(0L) / 1_000_000.0) * sampleRate.toDouble()).toLong()
+        return (frames * channels.toLong()).coerceIn(0L, MAX_PCM_SAMPLES.toLong()).toInt()
     }
 
     // ── AAC encode → muxer ────────────────────────────────────────────────────

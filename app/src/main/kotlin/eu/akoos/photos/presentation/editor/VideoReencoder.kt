@@ -65,6 +65,9 @@ internal class VideoReencoder(private val context: Context) {
         cropWidth: Int,
         cropHeight: Int,
         rotationDegrees: Int,
+        /** Colour filter as a 4x4 column-major matrix (see VideoFilter.colorMatrix4x4), baked into every
+         *  frame by the GL shader; null leaves colour untouched. */
+        colorMatrix: FloatArray? = null,
         audioOverlayUri: Uri?,
         audioTrimStartUs: Long,
         audioTrimEndUs: Long,
@@ -72,6 +75,19 @@ internal class VideoReencoder(private val context: Context) {
         originalAudioGain: Float = 1.0f,
         /** Overlay-music gain [0..1], ignored when [audioOverlayUri] is null. */
         musicAudioGain: Float = 1.0f,
+        /** Start of the overlay on the edited timeline, in microseconds. A positive value delays the music
+         *  by that much leading silence, and forces the PCM mix path because a stream-copy cannot delay
+         *  contiguous packets. */
+        overlayOffsetUs: Long = 0L,
+        /** Silenced spans inside the music slice, in absolute overlay-file ms. Non-empty forces the PCM
+         *  mix path (stream-copy can't express gaps) so those spans come out silent. */
+        removedOverlaySpansMs: List<VideoSegment> = emptyList(),
+        /** Kept source ranges (microseconds) to write, in play order. null = the single [trimStartUs,
+         *  trimEndUs] span. When there is more than one (a cut / reordered timeline), frames in the removed
+         *  gaps are decoded (as references) but NOT rendered, and each window is rebased onto a continuous
+         *  output timeline so the cuts are seamless; the audio is then routed through the windowed PCM mix
+         *  so it stays in sync. */
+        keptWindowsUs: List<LongRange>? = null,
         onProgress: (Float) -> Unit,
         /** Cooperative cancellation probe checked per loop iteration; false → release codecs and throw. */
         isActive: () -> Boolean = { true },
@@ -170,7 +186,7 @@ internal class VideoReencoder(private val context: Context) {
             inputSurface.makeCurrent()
             encoder.start()
 
-            outputSurface = OutputSurface()
+            outputSurface = OutputSurface(colorMatrix)
             val decoderMime = srcVideoFormat.getString(MediaFormat.KEY_MIME)
                 ?: error("Source video track has no MIME type")
             decoder = MediaCodec.createDecoderByType(decoderMime)
@@ -199,20 +215,52 @@ internal class VideoReencoder(private val context: Context) {
 
             videoExtractor.seekTo(trimStartUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
 
+            // Kept windows (source us) to write, in play order. Default: the whole [trimStart, trimEnd].
+            // keptBeforeUs[i] is the output offset where window i begins (sum of earlier windows' kept
+            // duration), so a frame at source `pts` in window i is written at keptBeforeUs[i] + (pts - start).
+            val windows: List<LongRange> =
+                keptWindowsUs?.filter { !it.isEmpty() }?.takeIf { it.isNotEmpty() } ?: listOf(trimStartUs..trimEndUs)
+            val keptBeforeUs = LongArray(windows.size)
+            run {
+                var acc = 0L
+                for (i in windows.indices) {
+                    keptBeforeUs[i] = acc
+                    acc += (windows[i].last - windows[i].first).coerceAtLeast(0L)
+                }
+            }
+            val totalKeptUs = windows.sumOf { (it.last - it.first).coerceAtLeast(0L) }.coerceAtLeast(1L)
+            val isMultiWindow = windows.size > 1
+
             // Audio path: stream-copy (one track at gain 1.0, lossless), decode-encode (partial gain or
             // mix, via AudioMixer), or silent (both gains ~0). See AudioMixer for the full reasoning.
             val sourceHasAudio = run {
-                val probe = MediaExtractor().apply { setDataSource(sourcePfd.fileDescriptor) }
-                val has = selectTrack(probe, "audio/") != null
-                probe.release()
-                has
+                val probe = MediaExtractor()
+                try {
+                    probe.setDataSource(sourcePfd.fileDescriptor)
+                    selectTrack(probe, "audio/") != null
+                } finally {
+                    // try/finally so a setDataSource/selectTrack throw doesn't leak the native extractor.
+                    runCatching { probe.release() }
+                }
             }
             val useSourceAudio = sourceHasAudio && originalAudioGain > 0.001f
             val useOverlayAudio = audioOverlayUri != null && musicAudioGain > 0.001f
+            // A stream-copied overlay can only copy contiguous packets, so silenced music spans force
+            // the PCM mix path (AudioMixer zeroes those samples) rather than the copy fast path.
+            val overlayHasGaps = useOverlayAudio && removedOverlaySpansMs.isNotEmpty()
+            // A delayed overlay needs leading silence, which the copy fast path can't insert, so route it
+            // through the PCM mix that prepends the offset.
+            val overlayDelayed = useOverlayAudio && overlayOffsetUs > 0L
             val needsAudioEncode =
+                // Multiple kept windows: the source audio must skip the removed gaps too, which only the
+                // PCM mix can concatenate cleanly (a stream-copy can't drop interior ranges in sync), so
+                // route it through the mix whenever there is audio to carry.
+                (isMultiWindow && (useSourceAudio || useOverlayAudio)) ||
                 (useSourceAudio && useOverlayAudio) ||
                 (useSourceAudio && originalAudioGain < 0.999f) ||
-                (useOverlayAudio && !useSourceAudio && musicAudioGain < 0.999f)
+                (useOverlayAudio && !useSourceAudio && musicAudioGain < 0.999f) ||
+                overlayHasGaps ||
+                overlayDelayed
             val streamCopySource = useSourceAudio && !useOverlayAudio && !needsAudioEncode
             val streamCopyOverlay = useOverlayAudio && !useSourceAudio && !needsAudioEncode
 
@@ -323,7 +371,7 @@ internal class VideoReencoder(private val context: Context) {
                                 encodedBuffer.limit(bufferInfo.offset + bufferInfo.size)
                                 muxer.writeSampleData(videoMuxerTrackIdx, encodedBuffer, bufferInfo)
                                 val progress = (bufferInfo.presentationTimeUs.toFloat() /
-                                    (trimEndUs - trimStartUs).toFloat()).coerceIn(0f, 1f)
+                                    totalKeptUs.toFloat()).coerceIn(0f, 1f)
                                 if (progress - lastReportedProgress >= 0.02f || progress >= 1f) {
                                     lastReportedProgress = progress
                                     onProgress(progress)
@@ -346,14 +394,22 @@ internal class VideoReencoder(private val context: Context) {
                         outIdx >= 0 -> {
                             val isEos = (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0
                             val pts = bufferInfo.presentationTimeUs
-                            val withinRange = pts in trimStartUs..trimEndUs
+                            // Which kept window holds this frame? A frame in a removed gap is decoded (its
+                            // data may be referenced by later frames) but not rendered to the encoder.
+                            var winIdx = -1
+                            for (i in windows.indices) {
+                                if (pts >= windows[i].first && pts <= windows[i].last) { winIdx = i; break }
+                            }
+                            val render = winIdx >= 0 && bufferInfo.size > 0
                             // releaseOutputBuffer(_, true) renders the frame to OutputSurface.surface.
-                            decoder.releaseOutputBuffer(outIdx, withinRange && bufferInfo.size > 0)
-                            if (withinRange && bufferInfo.size > 0) {
+                            decoder.releaseOutputBuffer(outIdx, render)
+                            if (render) {
                                 outputSurface.awaitNewImage()
                                 outputSurface.drawImage(cropMatrix)
-                                // Time origin shifts so output starts at 0.
-                                inputSurface.setPresentationTime((pts - trimStartUs) * 1000L)
+                                // Rebase onto the continuous kept timeline (output starts at 0, removed gaps
+                                // close up), so a cut/reordered edit re-encodes seamlessly.
+                                val outUs = keptBeforeUs[winIdx] + (pts - windows[winIdx].first)
+                                inputSurface.setPresentationTime(outUs * 1000L)
                                 inputSurface.swapBuffers()
                             }
                             if (isEos) {
@@ -366,13 +422,16 @@ internal class VideoReencoder(private val context: Context) {
             }
 
             // Audio: stream-copy the single track, or mix source+overlay PCM at user gains and AAC-encode.
+            // A stream-copied music overlay is cut at the video window so a slice longer than the trim
+            // cannot leave an audio-only tail past the last frame.
+            val overlayCopyEndUs = min(audioTrimEndUs, audioTrimStartUs + (trimEndUs - trimStartUs))
             if (audioMuxerTrackIdx >= 0 && audioExtractor != null && !needsAudioEncode) {
                 copyAudioSamples(
                     extractor = audioExtractor,
                     muxer = muxer,
                     muxerTrackIdx = audioMuxerTrackIdx,
                     startUs = if (streamCopyOverlay) audioTrimStartUs else trimStartUs,
-                    endUs = if (streamCopyOverlay) audioTrimEndUs else trimEndUs,
+                    endUs = if (streamCopyOverlay) overlayCopyEndUs else trimEndUs,
                     timeOriginUs = if (streamCopyOverlay) audioTrimStartUs else trimStartUs,
                     isActive = isActive,
                 )
@@ -388,6 +447,11 @@ internal class VideoReencoder(private val context: Context) {
                     overlayTrimEndUs = audioTrimEndUs,
                     sourceGain = if (useSourceAudio) originalAudioGain else 0f,
                     overlayGain = if (useOverlayAudio) musicAudioGain else 0f,
+                    overlayOffsetUs = overlayOffsetUs,
+                    removedOverlaySpansMs = removedOverlaySpansMs,
+                    // Multiple windows: hand the source's kept ranges to the mix so it concatenates only
+                    // those (skipping the removed gaps) to match the windowed video.
+                    sourceWindowsUs = if (isMultiWindow) windows else null,
                     targetSampleRate = sr,
                     targetChannels = ch,
                     muxer = muxer,
@@ -438,6 +502,12 @@ internal class VideoReencoder(private val context: Context) {
         audioTrimEndUs: Long,
         originalAudioGain: Float,
         musicAudioGain: Float,
+        /** Start of the overlay on the edited timeline, in microseconds; a positive value delays the music
+         *  by that much leading silence and forces the PCM mix path (see [transcode]). */
+        overlayOffsetUs: Long = 0L,
+        /** Silenced spans inside the music slice, in absolute overlay-file ms; non-empty forces the mix
+         *  path so those spans come out silent (see [transcode]). */
+        removedOverlaySpansMs: List<VideoSegment> = emptyList(),
         onProgress: (Float) -> Unit,
         /** Cancellation probe; see [transcode]. */
         isActive: () -> Boolean = { true },
@@ -464,18 +534,29 @@ internal class VideoReencoder(private val context: Context) {
             // Audio decision tree — same logic as transcode's audio path.
             val sourceHasAudio = run {
                 val probePfd = context.contentResolver.openFileDescriptor(sourceUri, "r")
-                val probe = MediaExtractor().apply { setDataSource(probePfd!!.fileDescriptor) }
-                val has = selectTrack(probe, "audio/") != null
-                probe.release()
-                probePfd?.close()
-                has
+                val probe = MediaExtractor()
+                try {
+                    probe.setDataSource(probePfd!!.fileDescriptor)
+                    selectTrack(probe, "audio/") != null
+                } finally {
+                    // try/finally so a throw can't leak the native extractor or the file descriptor.
+                    runCatching { probe.release() }
+                    runCatching { probePfd?.close() }
+                }
             }
             val useSrc = sourceHasAudio && originalAudioGain > 0.001f
             val useOvl = audioOverlayUri != null && musicAudioGain > 0.001f
+            // Silenced music spans can't be expressed by a contiguous packet copy, so route the overlay
+            // through the PCM mix (AudioMixer zeroes those samples) instead of the stream-copy fast path.
+            val overlayHasGaps = useOvl && removedOverlaySpansMs.isNotEmpty()
+            // A delayed overlay needs leading silence the copy path can't insert; route it through the mix.
+            val overlayDelayed = useOvl && overlayOffsetUs > 0L
             val needsAudioEncode =
                 (useSrc && useOvl) ||
                 (useSrc && originalAudioGain < 0.999f) ||
-                (useOvl && !useSrc && musicAudioGain < 0.999f)
+                (useOvl && !useSrc && musicAudioGain < 0.999f) ||
+                overlayHasGaps ||
+                overlayDelayed
             val streamCopySrc = useSrc && !useOvl && !needsAudioEncode
             val streamCopyOvl = useOvl && !useSrc && !needsAudioEncode
 
@@ -545,13 +626,16 @@ internal class VideoReencoder(private val context: Context) {
             }
 
             // ── Audio (stream-copy or mix-encode) ──
+            // A stream-copied music overlay is cut at the video window so a slice longer than the trim
+            // cannot leave an audio-only tail past the last frame.
+            val overlayCopyEndUs = min(audioTrimEndUs, audioTrimStartUs + (trimEndUs - trimStartUs))
             if (audioMuxerTrack >= 0 && streamCopyAudioExtractor != null) {
                 copyAudioSamples(
                     extractor = streamCopyAudioExtractor,
                     muxer = muxer,
                     muxerTrackIdx = audioMuxerTrack,
                     startUs = if (streamCopyOvl) audioTrimStartUs else trimStartUs,
-                    endUs = if (streamCopyOvl) audioTrimEndUs else trimEndUs,
+                    endUs = if (streamCopyOvl) overlayCopyEndUs else trimEndUs,
                     timeOriginUs = if (streamCopyOvl) audioTrimStartUs else trimStartUs,
                     isActive = isActive,
                 )
@@ -567,6 +651,8 @@ internal class VideoReencoder(private val context: Context) {
                     overlayTrimEndUs = audioTrimEndUs,
                     sourceGain = if (useSrc) originalAudioGain else 0f,
                     overlayGain = if (useOvl) musicAudioGain else 0f,
+                    overlayOffsetUs = overlayOffsetUs,
+                    removedOverlaySpansMs = removedOverlaySpansMs,
                     targetSampleRate = sr,
                     targetChannels = ch,
                     muxer = muxer,

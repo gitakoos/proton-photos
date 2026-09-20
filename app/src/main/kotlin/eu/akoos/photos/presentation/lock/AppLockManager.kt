@@ -44,20 +44,25 @@ class AppLockManager @Inject constructor(
         .map { it[SettingsKeys.APP_LOCK_ENABLED] ?: false }
 
     /**
-     * Timeout in minutes between backgrounding the app and re-locking it on resume.
+     * Timeout in seconds between backgrounding the app and re-locking it on resume.
      * 0 = lock immediately (the default before this option existed). Larger values let the user briefly
-     * switch to other apps without re-authenticating on every return.
+     * switch to other apps without re-authenticating on every return. A value saved under the old
+     * minutes key migrates read-side (seconds = minutes * 60) when the seconds key is absent.
      */
-    val lockTimeoutMinutes: Flow<Int> = context.settingsDataStore.data
-        .map { it[SettingsKeys.APP_LOCK_TIMEOUT_MINUTES] ?: 0 }
+    val lockTimeoutSeconds: Flow<Int> = context.settingsDataStore.data
+        .map { prefs ->
+            prefs[SettingsKeys.APP_LOCK_TIMEOUT_SECONDS]
+                ?: prefs[SettingsKeys.APP_LOCK_TIMEOUT_MINUTES]?.let { it * 60 }
+                ?: 0
+        }
 
     suspend fun setLockEnabled(enabled: Boolean) {
         context.settingsDataStore.edit { it[SettingsKeys.APP_LOCK_ENABLED] = enabled }
     }
 
-    suspend fun setLockTimeoutMinutes(minutes: Int) {
-        val clamped = minutes.coerceAtLeast(0)
-        context.settingsDataStore.edit { it[SettingsKeys.APP_LOCK_TIMEOUT_MINUTES] = clamped }
+    suspend fun setLockTimeoutSeconds(seconds: Int) {
+        val clamped = seconds.coerceAtLeast(0)
+        context.settingsDataStore.edit { it[SettingsKeys.APP_LOCK_TIMEOUT_SECONDS] = clamped }
     }
 
     /**

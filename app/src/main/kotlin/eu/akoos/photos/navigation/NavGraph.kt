@@ -84,6 +84,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import eu.akoos.photos.presentation.albums.AlbumDetailScreen
 import eu.akoos.photos.presentation.albums.AlbumOpenAction
 import eu.akoos.photos.presentation.albums.AlbumPhotoPickerScreen
+import eu.akoos.photos.presentation.albums.AlbumPhotoPickerViewModel
 import eu.akoos.photos.presentation.auth.SignInScreen
 import eu.akoos.photos.presentation.calendar.CalendarScreen
 import eu.akoos.photos.presentation.calendar.DayDetailScreen
@@ -187,6 +188,7 @@ sealed class Screen(val route: String) {
     data object CollagePhotoPicker : Screen("collage_photo_picker")
     data object GifMaker : Screen("gif_maker")
     data object LocalFolderPhotoPicker : Screen("local_folder_photo_picker")
+    data object EditorVideoPicker : Screen("editor_video_picker")
     data object Loading : Screen("loading")
     data object Login : Screen("login")
     data object About : Screen("about")
@@ -418,6 +420,14 @@ fun NavGraph(
     var collageItems by remember { mutableStateOf<List<GalleryItem>>(emptyList()) }
     // Photos the in-app picker returned to add to the open collage.
     var collagePicked by remember { mutableStateOf<List<GalleryItem>?>(null) }
+    // The source manager's confirmed selection returned to the open video editor. Null (the initial and
+    // post-consume value) is the no-pick sentinel; a non-null list is a real return, so an empty one still
+    // removes every deselected source rather than reading as "nothing picked".
+    var editorVideoPicked by remember { mutableStateOf<List<GalleryItem>?>(null) }
+    // Keys already on the timeline (pre-selected in the manager) and the primary's key (locked, never
+    // deselectable), handed to the picker each time the "+" opens it.
+    var editorVideoPreselected by remember { mutableStateOf(emptyList<String>()) }
+    var editorVideoLocked by remember { mutableStateOf(emptyList<String>()) }
     // The source handed to the GIF maker, in nav scope because it reaches the screen the same way the
     // collage items do. A device video carries its URI; a cloud-only video carries the CloudPhoto so the
     // maker downloads it first, exactly the way the video editor's cloud path does.
@@ -933,6 +943,7 @@ fun NavGraph(
                 onAcceptSuggestion = { candidateId -> personVm.acceptMergeSuggestion(personId, candidateId) },
                 onDismissSuggestion = { candidateId -> personVm.dismissMergeSuggestion(personId, candidateId) },
                 onLeaveSuggestion = { personVm.clearMergeSuggestion() },
+                onPreviewCandidate = { candidateId -> navController.navigate(Screen.PersonDetail.create(candidateId)) },
                 onFindMore = { navController.navigate(Screen.FindMorePhotos.create(personId)) },
             )
         }
@@ -1064,8 +1075,12 @@ fun NavGraph(
                         localDisplayName = external.displayName,
                         localMimeType    = external.mimeType,
                         externalRequest  = external,
+                        primaryGalleryKey = null,
                         onBack           = leaveOverlayScreen,
                         onSaved          = leaveOverlayScreen,
+                        pendingAddVideos = editorVideoPicked,
+                        onPendingAddVideosConsumed = { editorVideoPicked = null },
+                        onAddVideoRequested = { pre, lock -> editorVideoPreselected = pre; editorVideoLocked = lock; navController.navigate(Screen.EditorVideoPicker.route) },
                     )
                 } else {
                     PhotoEditorScreen(
@@ -1096,6 +1111,10 @@ fun NavGraph(
                             localUri         = item.local.uri,
                             localDisplayName = item.local.displayName,
                             localMimeType    = item.local.mimeType,
+                            primaryGalleryKey = AlbumPhotoPickerViewModel.stableKeyOf(item),
+                            pendingAddVideos = editorVideoPicked,
+                            onPendingAddVideosConsumed = { editorVideoPicked = null },
+                            onAddVideoRequested = { pre, lock -> editorVideoPreselected = pre; editorVideoLocked = lock; navController.navigate(Screen.EditorVideoPicker.route) },
                             onBack           = { navController.popBackStack() },
                             onSaved          = {
                                 // Tell the viewer behind us to drop its bitmap cache + reload —
@@ -1141,6 +1160,10 @@ fun NavGraph(
                             cloudPhoto       = null,
                             sourceAlbumLinkId = sourceAlbumLinkId,
                             syncedCloudCounterpart = item.cloud,
+                            primaryGalleryKey = AlbumPhotoPickerViewModel.stableKeyOf(item),
+                            pendingAddVideos = editorVideoPicked,
+                            onPendingAddVideosConsumed = { editorVideoPicked = null },
+                            onAddVideoRequested = { pre, lock -> editorVideoPreselected = pre; editorVideoLocked = lock; navController.navigate(Screen.EditorVideoPicker.route) },
                             onBack           = { navController.popBackStack() },
                             onSaved          = {
                                 // Tell the viewer behind us to drop its bitmap cache + reload —
@@ -1189,6 +1212,10 @@ fun NavGraph(
                             localMimeType    = item.cloud.mimeType,
                             cloudPhoto       = item.cloud,
                             sourceAlbumLinkId = sourceAlbumLinkId,
+                            primaryGalleryKey = AlbumPhotoPickerViewModel.stableKeyOf(item),
+                            pendingAddVideos = editorVideoPicked,
+                            onPendingAddVideosConsumed = { editorVideoPicked = null },
+                            onAddVideoRequested = { pre, lock -> editorVideoPreselected = pre; editorVideoLocked = lock; navController.navigate(Screen.EditorVideoPicker.route) },
                             onBack           = { navController.popBackStack() },
                             onSaved          = {
                                 // Tell the viewer behind us to drop its bitmap cache + reload —
@@ -1287,6 +1314,24 @@ fun NavGraph(
                 onBack = { navController.popBackStack() },
                 onPick = { picked ->
                     localFolderPicked = picked
+                    navController.popBackStack()
+                },
+            )
+        }
+
+        composable(Screen.EditorVideoPicker.route) {
+            // The video editor's source manager: the album picker in "return" mode, filtered to videos,
+            // seeded with the videos already on the timeline (pre-selected) and the primary locked. The
+            // confirmed selection returns as the full desired set, reconciled against the timeline as a diff.
+            AlbumPhotoPickerScreen(
+                videosOnly = true,
+                maxSelectable = eu.akoos.photos.presentation.editor.MAX_VIDEO_SOURCES,
+                preselectedKeys = editorVideoPreselected.toSet(),
+                lockedKeys = editorVideoLocked.toSet(),
+                titleRes = R.string.video_editor_add_video,
+                onBack = { navController.popBackStack() },
+                onPick = {
+                    editorVideoPicked = it
                     navController.popBackStack()
                 },
             )

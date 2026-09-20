@@ -125,6 +125,20 @@ sealed class AlbumDownloadState {
  */
 data class AlbumDownloadResult(val saved: Int, val failed: Int)
 
+/** One-shot outcome of a [AlbumDetailViewModel.moveSelectedToAlbum]. [copiedToSharedTarget] is true
+ *  when the target was a shared-with-me album, where the add is the #80 cross-volume copy rather than
+ *  a membership move, so the screen can say the photos were copied to the album owner. */
+data class MoveToAlbumResult(
+    val targetName: String,
+    val copiedToSharedTarget: Boolean,
+    /** True when at least one photo was confirmed removed from the source album, so the outcome is a
+     *  real move. False means the add to the target succeeded but the source removal did not land
+     *  (e.g. a dropped connection between the two calls): the photos are safely in the target but
+     *  still here, so the screen says "added" rather than "moved". Ignored for a shared-with-me
+     *  target, whose copy note holds regardless of the source removal. */
+    val removedFromSource: Boolean,
+)
+
 /** Progress of a share-to-other-apps batch. [Working] advances per resolved photo — cloud-only
  *  album photos decrypt to a temp file first, so the share pill shows a determinate ring. */
 sealed class AlbumShareState {
@@ -133,8 +147,8 @@ sealed class AlbumShareState {
 }
 
 /** Which foreground bulk action is in flight, so the blocking drawer can label it correctly —
- *  delete, remove-from-album and hide all raise [AlbumDetailUiState.isDeletingPhotos]. */
-enum class AlbumBusyOp { None, Deleting, Removing, Hiding }
+ *  delete, remove-from-album, move-to-album and hide all raise [AlbumDetailUiState.isDeletingPhotos]. */
+enum class AlbumBusyOp { None, Deleting, Removing, Moving, Hiding }
 
 data class AlbumDetailUiState(
     val albumName: String = "",
@@ -292,6 +306,10 @@ class AlbumDetailViewModel @Inject constructor(
      */
     private val _downloadStarted = MutableSharedFlow<Unit>(replay = 0, extraBufferCapacity = 1)
     val downloadStarted: SharedFlow<Unit> = _downloadStarted.asSharedFlow()
+
+    /** Outcome of a finished move-to-album, emitted once per move. See [MoveToAlbumResult]. */
+    private val _moveResult = MutableSharedFlow<MoveToAlbumResult>(replay = 0, extraBufferCapacity = 1)
+    val moveResult: SharedFlow<MoveToAlbumResult> = _moveResult.asSharedFlow()
 
     /** Cached primary userId — same rationale as GalleryViewModel.primaryUserId. */
     @Volatile private var primaryUserId: me.proton.core.domain.entity.UserId? = null
@@ -1330,6 +1348,119 @@ class AlbumDetailViewModel @Inject constructor(
             } finally {
                 suppressSelfRefresh = false
             }
+        }
+    }
+
+    /** Move the current selection out of this album into [targetLinkId]: add it there, then drop from
+     *  here the ids the target confirmed. An own-volume target is a membership move; a shared-with-me
+     *  target takes the #80 cross-volume copy, flagged back through [MoveToAlbumResult.copiedToSharedTarget].
+     *  No Undo is offered: reversing a move must both re-add here and remove there, and the album-remove
+     *  undo only re-adds, so a partial undo would leave the photo in both albums. */
+    fun moveSelectedToAlbum(targetLinkId: String, targetName: String, targetIsSharedWithMe: Boolean) {
+        val sourceLinkId = _uiState.value.albumLinkId.ifBlank { return }
+        if (targetLinkId.isBlank() || targetLinkId == sourceLinkId) return
+        val linkIds = _uiState.value.selectedPhotos.toList()
+        if (linkIds.isEmpty()) return
+        viewModelScope.launch {
+            val userId = accountManager.getPrimaryUserId().first() ?: return@launch
+            performMoveToAlbum(userId, sourceLinkId, targetLinkId, targetName, targetIsSharedWithMe, linkIds)
+        }
+    }
+
+    /** Inline create-then-move: make a new own album, then move the selection into it. A freshly
+     *  created album is always own-volume, so the move is a plain membership move. */
+    fun createAlbumThenMoveSelected(name: String) {
+        val sourceLinkId = _uiState.value.albumLinkId.ifBlank { return }
+        val trimmed = name.trim()
+        if (trimmed.isEmpty()) {
+            _uiState.update { it.copy(error = context.getString(R.string.albums_name_empty)) }
+            return
+        }
+        val linkIds = _uiState.value.selectedPhotos.toList()
+        if (linkIds.isEmpty()) return
+        viewModelScope.launch {
+            val userId = accountManager.getPrimaryUserId().first() ?: return@launch
+            _uiState.update { it.copy(isDeletingPhotos = true, busyOp = AlbumBusyOp.Moving) }
+            val newAlbumLinkId = runCatching { driveRepo.createDriveAlbum(userId, trimmed).linkId }
+                .getOrElse { e ->
+                    if (e is kotlinx.coroutines.CancellationException) throw e
+                    Log.e("AlbumDetailVM", "createAlbumThenMoveSelected create failed", e)
+                    _uiState.update {
+                        it.copy(
+                            isDeletingPhotos = false,
+                            busyOp = AlbumBusyOp.None,
+                            error = context.getString(R.string.gallery_create_album_failed, e.message ?: ""),
+                        )
+                    }
+                    return@launch
+                }
+            performMoveToAlbum(userId, sourceLinkId, newAlbumLinkId, trimmed, targetIsSharedWithMe = false, linkIds)
+        }
+    }
+
+    private suspend fun performMoveToAlbum(
+        userId: me.proton.core.domain.entity.UserId,
+        sourceLinkId: String,
+        targetLinkId: String,
+        targetName: String,
+        targetIsSharedWithMe: Boolean,
+        linkIds: List<String>,
+    ) {
+        _uiState.update { it.copy(isDeletingPhotos = true, busyOp = AlbumBusyOp.Moving) }
+        suppressSelfRefresh = true
+        try {
+            val added = runCatching { driveRepo.addPhotosToAlbum(userId, targetLinkId, linkIds) }
+                .getOrElse { e ->
+                    if (e is kotlinx.coroutines.CancellationException) throw e
+                    Log.e("AlbumDetailVM", "moveSelectedToAlbum add failed", e)
+                    val friendly = friendlyNetworkError(e, networkObserver.isOnline.value, context)
+                    _uiState.update {
+                        it.copy(
+                            isDeletingPhotos = false,
+                            busyOp = AlbumBusyOp.None,
+                            error = friendly ?: context.getString(R.string.gallery_add_to_album_failed),
+                        )
+                    }
+                    return
+                }
+            val addedIds = added.succeededLinkIds
+            if (addedIds.isEmpty()) {
+                _uiState.update {
+                    it.copy(
+                        isDeletingPhotos = false,
+                        busyOp = AlbumBusyOp.None,
+                        error = context.getString(R.string.gallery_add_to_album_failed),
+                    )
+                }
+                return
+            }
+            // Drop only the ids the target accepted, so a crypto-failed entry stays in this album
+            // instead of vanishing from both.
+            val removed = runCatching { driveRepo.removePhotosFromAlbum(userId, sourceLinkId, addedIds) }
+                .getOrElse { e ->
+                    if (e is kotlinx.coroutines.CancellationException) throw e
+                    Log.e("AlbumDetailVM", "moveSelectedToAlbum remove failed", e)
+                    emptyList()
+                }
+            val removedSet = removed.toSet()
+            _uiState.update { state ->
+                state.copy(
+                    isDeletingPhotos = false,
+                    busyOp = AlbumBusyOp.None,
+                    selectedPhotos = emptySet(),
+                    photos = state.photos.filter { it.linkId !in removedSet },
+                )
+            }
+            if (removedSet.isNotEmpty()) {
+                val surviving = observedLinkIds.filter { it !in removedSet }
+                startPhotoObserve(surviving)
+            }
+            // The target gained photos and this album lost some, so wake the Albums grid to refresh
+            // both covers and counts. This album's own collector skips it while the move is in flight.
+            albumListEvents.notifyChanged()
+            _moveResult.emit(MoveToAlbumResult(targetName, targetIsSharedWithMe, removedSet.isNotEmpty()))
+        } finally {
+            suppressSelfRefresh = false
         }
     }
 

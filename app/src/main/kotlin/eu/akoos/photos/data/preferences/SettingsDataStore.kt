@@ -109,12 +109,17 @@ object SettingsKeys {
      *  thumbnail layer (those are tiny and load freely). */
     val FULLRES_WIFI_ONLY = booleanPreferencesKey("fullres_wifi_only")
     /**
-     * App-lock timeout in minutes — how long the app can be in the background before re-locking
-     * on resume. 0 = lock immediately (the default before this option existed). Larger values mean the
-     * user can quickly switch to another app and back without re-authenticating.
-     * Common picks: 0 (immediate), 1, 5, 10, 15, 60.
+     * Legacy app-lock timeout in minutes. Superseded by [APP_LOCK_TIMEOUT_SECONDS]; kept only so old
+     * installs migrate cleanly (read-side: seconds = minutes * 60 when the seconds key is absent).
      */
     val APP_LOCK_TIMEOUT_MINUTES = intPreferencesKey("app_lock_timeout_minutes")
+    /**
+     * App-lock timeout in seconds: how long the app can be in the background before re-locking on
+     * resume. 0 = lock immediately (the default before this option existed). Larger values mean the
+     * user can quickly switch to another app and back without re-authenticating.
+     * Common picks: 0 (immediate), 5, 10, 30, 60, 300, 600, 900, 3600.
+     */
+    val APP_LOCK_TIMEOUT_SECONDS = intPreferencesKey("app_lock_timeout_seconds")
     val AUTO_FREE_UP = booleanPreferencesKey("auto_free_up")
     val FREE_UP_INTERVAL = stringPreferencesKey("free_up_interval")
     /**

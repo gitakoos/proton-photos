@@ -124,7 +124,11 @@ fun PeopleScreen(
                     // Skeleton grid matching the 2-column PersonCard layout so there is no jump when
                     // the real cards arrive.
                     LazyVerticalGrid(
-                        columns = GridCells.Fixed(2),
+                        // Width-adaptive so a tablet fits more, smaller person tiles instead of two
+                        // huge ones (a low-res cover blown up into a half-screen tile reads as a
+                        // blurry mush). ~140dp keeps every phone (down to ~320dp wide, incl. a larger
+                        // display-size setting) at two columns and only adds columns past that.
+                        columns = GridCells.Adaptive(140.dp),
                         contentPadding = PaddingValues(
                             start = 14.dp,
                             end = 14.dp,
@@ -169,7 +173,7 @@ fun PeopleScreen(
                     }
                 else ->
                     LazyVerticalGrid(
-                        columns = GridCells.Fixed(2),
+                        columns = GridCells.Adaptive(140.dp),
                         contentPadding = PaddingValues(
                             start = 14.dp,
                             end = 14.dp,

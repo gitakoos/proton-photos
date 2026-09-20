@@ -114,8 +114,8 @@ import eu.akoos.photos.presentation.albums.DeviceFolder
 import eu.akoos.photos.presentation.albums.UnifiedAlbumCard
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.Bg0
-import eu.akoos.photos.presentation.theme.LocalTintCloudWithAccent
-import eu.akoos.photos.presentation.theme.StatusSynced
+import eu.akoos.photos.presentation.theme.CloudBadgeSurface
+import eu.akoos.photos.presentation.theme.cloudBadgeTint
 import eu.akoos.photos.presentation.theme.Bg2
 import eu.akoos.photos.presentation.theme.ErrorColor
 import eu.akoos.photos.presentation.theme.FgDim
@@ -766,7 +766,7 @@ private fun HiddenPhotoCell(
                     // Drive" colour stays consistent between Hidden and the regular timeline:
                     // the fixed green by default, or the palette accent everywhere when the
                     // appearance setting opts in.
-                    tint = if (LocalTintCloudWithAccent.current) Accent else StatusSynced,
+                    tint = cloudBadgeTint(CloudBadgeSurface.DarkChip),
                     modifier = Modifier.size(12.dp),
                 )
             }

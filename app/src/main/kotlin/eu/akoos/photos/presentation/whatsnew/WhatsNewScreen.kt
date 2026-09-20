@@ -46,6 +46,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Sort
+import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Smartphone
@@ -197,6 +198,11 @@ fun WhatsNewScreen(
     val colors = AppColors.current
     val release = remember(version) { whatsNewReleaseFor(version) }
 
+    // On a preview (test) build, lead with a card asking testers to send the diagnostics when
+    // something looks wrong, so a file problem can be told apart from something else. A public
+    // release name has no "-test" suffix, so the card never shows there.
+    val showDiagnosticsIntro = remember { BuildConfig.VERSION_NAME.contains("-test") }
+
     // A system back gesture pops this screen through the host's own handler, which never reaches the
     // header's onBack, so the version stayed unseen and the screen returned on every launch. Marking
     // it here first makes the gesture settle the gate exactly as the button and the arrow do.
@@ -224,9 +230,11 @@ fun WhatsNewScreen(
                 categoryFeaturePages(release, pageHeight, WhatsNewCardEstimate, 12.dp, WhatsNewSectionHeaderHeight)
             }
             // A headline card, where the release has one, takes page 0 on its own; the feature
-            // pages follow. A release without one starts straight at its features.
+            // pages follow. A release without one starts straight at its features. On a preview
+            // build the diagnostics card takes the very first page, ahead of everything else.
+            val introPages = if (showDiagnosticsIntro) 1 else 0
             val heroPages = if (release.hero != null) 1 else 0
-            val pageCount = heroPages + featurePages.size
+            val pageCount = introPages + heroPages + featurePages.size
             val pagerState = rememberPagerState(pageCount = { pageCount })
 
             Column(modifier = Modifier.fillMaxSize()) {
@@ -247,23 +255,28 @@ fun WhatsNewScreen(
                                 .padding(horizontal = 16.dp),
                             verticalArrangement = Arrangement.spacedBy(12.dp),
                         ) {
-                            if (heroPages == 1 && page == 0) {
-                                when (release.hero) {
-                                    WhatsNewHero.Hide -> WhatsNewHideCard()
-                                    WhatsNewHero.AlbumOrder -> WhatsNewAlbumOrderCard()
-                                    null -> Unit
-                                }
+                            if (introPages == 1 && page == 0) {
+                                WhatsNewDiagnosticsCard()
                             } else {
-                                val featurePage = featurePages[page - heroPages]
-                                featurePage.headerRes?.let { headerRes ->
-                                    WhatsNewSectionHeader(stringResource(headerRes))
-                                }
-                                for (feature in featurePage.features) {
-                                    WhatsNewCard(
-                                        icon = feature.icon,
-                                        title = stringResource(feature.titleRes),
-                                        body = stringResource(feature.bodyRes),
-                                    )
+                                val innerPage = page - introPages
+                                if (heroPages == 1 && innerPage == 0) {
+                                    when (release.hero) {
+                                        WhatsNewHero.Hide -> WhatsNewHideCard()
+                                        WhatsNewHero.AlbumOrder -> WhatsNewAlbumOrderCard()
+                                        null -> Unit
+                                    }
+                                } else {
+                                    val featurePage = featurePages[innerPage - heroPages]
+                                    featurePage.headerRes?.let { headerRes ->
+                                        WhatsNewSectionHeader(stringResource(headerRes))
+                                    }
+                                    for (feature in featurePage.features) {
+                                        WhatsNewCard(
+                                            icon = feature.icon,
+                                            title = stringResource(feature.titleRes),
+                                            body = stringResource(feature.bodyRes),
+                                        )
+                                    }
                                 }
                             }
                             // The closing line comes from the release being read, not from the app, so
@@ -419,6 +432,44 @@ private fun WhatsNewCard(
             Text(title, color = colors.fgPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
             Text(body, color = colors.fgDim, fontSize = 13.sp)
         }
+    }
+}
+
+/**
+ * The lead card on a preview build: it asks the tester to send the diagnostics when something looks
+ * wrong, so a file problem can be told apart from something else. Gated to test builds in
+ * [WhatsNewScreen], so a public release never shows it.
+ */
+@Composable
+private fun WhatsNewDiagnosticsCard() {
+    val colors = AppColors.current
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(PillBg)
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(colors.accent.copy(alpha = 0.16f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Default.BugReport, null, tint = colors.accent, modifier = Modifier.size(22.dp))
+            }
+            Text(
+                stringResource(R.string.whats_new_diag_title),
+                color = colors.fgPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
+            )
+        }
+        Text(stringResource(R.string.whats_new_diag_body), color = colors.fgDim, fontSize = 13.sp)
     }
 }
 

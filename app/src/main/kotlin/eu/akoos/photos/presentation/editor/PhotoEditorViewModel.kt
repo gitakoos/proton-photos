@@ -1919,110 +1919,19 @@ class PhotoEditorViewModel @Inject constructor(
     }
 
     private fun buildColorMatrix(adj: EditorAdjustments): ColorMatrix? {
-        if (adj.brightness == 0 && adj.contrast == 0 && adj.saturation == 0
-            && adj.exposure == 0 && adj.highlights == 0 && adj.shadows == 0
-            && adj.temperature == 0 && adj.tone == 0 && adj.fade == 0
-            && adj.filter == FilterPreset.None) {
-            return null
+        // Adjustment math lives in the shared, JVM-testable colorAdjustmentMatrix; the filter preset is
+        // still composed here (postConcat last, so it applies after the adjustments) to keep this path and
+        // its return-null-when-nothing-to-do behaviour identical to before the extraction.
+        val adjustments = colorAdjustmentMatrix(
+            adj.brightness, adj.exposure, adj.contrast, adj.highlights, adj.shadows,
+            adj.saturation, adj.temperature, adj.tone, adj.fade,
+        )?.let { ColorMatrix(it) }
+        val filter = filterMatrix(adj.filter)
+        return when {
+            adjustments == null -> filter
+            filter == null -> adjustments
+            else -> adjustments.apply { postConcat(filter) }
         }
-        val brightness = adj.brightness * 1.5f       // -150..150 range on 0..255 channel
-        val contrast = 1f + adj.contrast / 100f       // 0..2 multiplier
-        val saturation = 1f + adj.saturation / 100f   // 0..2 multiplier
-        val translate = (1f - contrast) * 128f + brightness
-
-        val mAdjust = ColorMatrix(floatArrayOf(
-            contrast, 0f, 0f, 0f, translate,
-            0f, contrast, 0f, 0f, translate,
-            0f, 0f, contrast, 0f, translate,
-            0f, 0f, 0f, 1f, 0f,
-        ))
-        val mSat = ColorMatrix().apply { setSaturation(saturation) }
-        val mFilter = filterMatrix(adj.filter)
-
-        val combined = ColorMatrix()
-        combined.postConcat(mSat)
-        combined.postConcat(mAdjust)
-
-        // Exposure: multiplicative RGB gain (1 + exposure/100) — proportional, unlike additive brightness.
-        if (adj.exposure != 0) {
-            val expScale = 1f + adj.exposure / 100f
-            val mExposure = ColorMatrix(floatArrayOf(
-                expScale, 0f, 0f, 0f, 0f,
-                0f, expScale, 0f, 0f, 0f,
-                0f, 0f, expScale, 0f, 0f,
-                0f, 0f, 0f, 1f, 0f,
-            ))
-            combined.postConcat(mExposure)
-        }
-
-        // Highlights: scale RGB by (1 - h/200) plus a small offset — pulls brights down without crushing
-        // midtones. ColorMatrix approximation of a real per-pixel highlight curve.
-        if (adj.highlights != 0) {
-            val hScale = 1f - adj.highlights / 200f  // -0.5..+0.5 → 1.5..0.5 scale
-            val hOffset = -adj.highlights * 0.3f      // tiny additive push back
-            val mHigh = ColorMatrix(floatArrayOf(
-                hScale, 0f, 0f, 0f, hOffset,
-                0f, hScale, 0f, 0f, hOffset,
-                0f, 0f, hScale, 0f, hOffset,
-                0f, 0f, 0f, 1f, 0f,
-            ))
-            combined.postConcat(mHigh)
-        }
-
-        // Shadows: opposite of highlights — positive scale + offset lift the dark end.
-        if (adj.shadows != 0) {
-            val sScale = 1f + adj.shadows / 200f      // -0.5..+0.5 → 0.5..1.5 scale
-            val sOffset = adj.shadows * 0.3f          // additive lift on darks
-            val mShadow = ColorMatrix(floatArrayOf(
-                sScale, 0f, 0f, 0f, sOffset,
-                0f, sScale, 0f, 0f, sOffset,
-                0f, 0f, sScale, 0f, sOffset,
-                0f, 0f, 0f, 1f, 0f,
-            ))
-            combined.postConcat(mShadow)
-        }
-
-        // Temperature: warm (+) shifts R up / B down, cool (-) the reverse; 0.5 scale (+100 → ±50).
-        if (adj.temperature != 0) {
-            val t = adj.temperature * 0.5f
-            val mTemp = ColorMatrix(floatArrayOf(
-                1f, 0f, 0f, 0f, t,
-                0f, 1f, 0f, 0f, 0f,
-                0f, 0f, 1f, 0f, -t,
-                0f, 0f, 0f, 1f, 0f,
-            ))
-            combined.postConcat(mTemp)
-        }
-
-        // Tone: green (+) / magenta (-) shifts only G; 0.5 scale to match temperature.
-        if (adj.tone != 0) {
-            val g = adj.tone * 0.5f
-            val mTone = ColorMatrix(floatArrayOf(
-                1f, 0f, 0f, 0f, 0f,
-                0f, 1f, 0f, 0f, g,
-                0f, 0f, 1f, 0f, 0f,
-                0f, 0f, 0f, 1f, 0f,
-            ))
-            combined.postConcat(mTone)
-        }
-
-        // Fade / matte: positive lifts the black point and eases contrast for a washed film look; negative
-        // deepens blacks and adds contrast (punch). Contrast scale and lift folded into one matrix.
-        if (adj.fade != 0) {
-            val f = adj.fade / 100f              // -1..1
-            val fadeContrast = 1f - f * 0.2f     // fade -> 0.8x, punch -> 1.2x
-            val fadeLift = f * 30f               // fade -> +30 lift, punch -> -30 deepen
-            val mFade = ColorMatrix(floatArrayOf(
-                fadeContrast, 0f, 0f, 0f, fadeLift,
-                0f, fadeContrast, 0f, 0f, fadeLift,
-                0f, 0f, fadeContrast, 0f, fadeLift,
-                0f, 0f, 0f, 1f, 0f,
-            ))
-            combined.postConcat(mFade)
-        }
-
-        mFilter?.let { combined.postConcat(it) }
-        return combined
     }
 
     private fun filterMatrix(filter: FilterPreset): ColorMatrix? = when (filter) {

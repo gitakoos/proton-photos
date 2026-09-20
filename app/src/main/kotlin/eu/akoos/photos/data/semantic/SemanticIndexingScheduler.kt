@@ -370,7 +370,15 @@ class SemanticIndexingScheduler @Inject constructor(
                 // Not Done here: a non-drained pass hands off to the next through the tail re-kick, and the
                 // drained branch above is the only place that reports Done.
                 paused || stopRequested -> SemanticIndexingProgress(SemanticIndexingState.Paused, indexedNow, libraryTotal)
-                else -> SemanticIndexingProgress(SemanticIndexingState.Running, indexedNow, libraryTotal)
+                // A re-kick is coming (this pass wrote a row, or a restart is already queued), so stay
+                // Running to match the tail re-kick below and not flap the foreground service.
+                embeddedThisPass.get() > 0 || restartRequested -> SemanticIndexingProgress(SemanticIndexingState.Running, indexedNow, libraryTotal)
+                // A full pass that embedded nothing and is not paused means the remainder can't be
+                // processed right now (deferred off Wi-Fi, or a few undecodable / low-memory cloud items).
+                // There is no re-kick in that case, so settle to Idle rather than leave a Running spinner
+                // that reads as "scanning forever, stuck at N of M". The pending items stay pending and are
+                // retried on the next trigger (Wi-Fi returns, app relaunch, new photos).
+                else -> SemanticIndexingProgress(SemanticIndexingState.Idle, indexedNow, libraryTotal)
             }
         } finally {
             running.set(false)

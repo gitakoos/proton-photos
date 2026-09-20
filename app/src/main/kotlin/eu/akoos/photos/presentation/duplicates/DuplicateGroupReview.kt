@@ -85,6 +85,7 @@ import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -302,16 +303,34 @@ internal fun DuplicateGroupReview(
                 // load to black, so fall back to the thumbnail (the view model re-fetches it meanwhile).
                 val fullResUri = (item as? GalleryItem.CloudOnly)?.let { cloudFullRes[it.cloud.linkId]?.uri }
                     ?.takeIf { fileUriExists(it) }
-                val model = fullResUri ?: inputs.imageData ?: LocalThumbnailUrls.current.value[inputs.stableKey]
+                // The instant base layer (device file, or a cloud copy's decrypted thumbnail) stays drawn
+                // under the full-res so the sharp image fades in over it, not over Bg0: the same technique
+                // the photo viewer uses so the swap morphs instead of flashing white.
+                val thumbModel = inputs.imageData ?: LocalThumbnailUrls.current.value[inputs.stableKey]
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    if (model != null) {
+                    if (thumbModel != null) {
                         AsyncImage(
-                            model = model,
+                            // No crossfade on the base: it is the instant layer the full-res fades over.
+                            model = remember(thumbModel) {
+                                ImageRequest.Builder(context).data(thumbModel).crossfade(false).build()
+                            },
                             contentDescription = null,
                             contentScale = ContentScale.Fit,
                             modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 12.dp),
                         )
-                    } else {
+                    }
+                    if (fullResUri != null) {
+                        AsyncImage(
+                            // Fade the full-res in over the still-visible thumb for a blurry->sharp morph.
+                            model = remember(fullResUri) {
+                                ImageRequest.Builder(context).data(fullResUri).crossfade(220).build()
+                            },
+                            contentDescription = null,
+                            contentScale = ContentScale.Fit,
+                            modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 12.dp),
+                        )
+                    }
+                    if (thumbModel == null && fullResUri == null) {
                         Icon(
                             Icons.Default.Photo,
                             contentDescription = null,

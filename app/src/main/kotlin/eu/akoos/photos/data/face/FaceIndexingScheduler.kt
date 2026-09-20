@@ -567,7 +567,14 @@ class FaceIndexingScheduler @Inject constructor(
                 // the drained branch above is the only place that reports Done. Reporting Done at every
                 // pass end is what made the bar look like it kept finishing and starting over.
                 paused || stopRequested -> FaceIndexingProgress(FaceIndexingState.Paused, indexedNow, libraryTotal)
-                else -> FaceIndexingProgress(FaceIndexingState.Running, indexedNow, libraryTotal)
+                // A re-kick is coming (this pass loaded a source, or a restart is already queued), so
+                // stay Running to match the tail re-kick below and not flap the foreground service.
+                sourcesLoaded.get() > 0 || restartRequested -> FaceIndexingProgress(FaceIndexingState.Running, indexedNow, libraryTotal)
+                // A full pass that loaded no source and is not paused means the remainder can't be scanned
+                // right now (deferred off Wi-Fi, or a few undecodable / low-memory cloud items). There is
+                // no re-kick then, so settle to Idle rather than a Running spinner that reads as "scanning
+                // forever, stuck at N of M". The pending items stay pending and retry on the next trigger.
+                else -> FaceIndexingProgress(FaceIndexingState.Idle, indexedNow, libraryTotal)
             }
         } finally {
             running.set(false)

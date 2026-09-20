@@ -330,6 +330,7 @@
     <string name="album_picker_title">Pridať do albumu</string>
     <string name="album_picker_selected">Vybraných: %1$d</string>
     <string name="album_add_count">Pridať (%1$d)</string>
+    <string name="picker_selection_limit">Naraz môžeš vybrať najviac %1$d</string>
     <string name="album_picker_empty">Žiadne fotky na pridanie.</string>
 
     <!-- Permission -->
@@ -401,6 +402,7 @@
     <string name="delete_multi_remove_cloud_desc">Ponechať v tomto zariadení, zálohu presunúť do koša Drive</string>
     <string name="delete_multi_move_trash_everywhere">Presunúť do koša všade</string>
     <string name="delete_multi_move_trash_everywhere_desc">Presunie do koša zariadenia a koša Proton Drive</string>
+    <string name="delete_frees_note">(uvoľní ~%1$s)</string>
     <string name="delete_multi_drive_trash">Presunúť do koša Drive</string>
     <string name="delete_multi_drive_trash_desc">Presunuté do Nedávno odstránených na Drive, obnoviteľné</string>
 
@@ -426,19 +428,10 @@
     <string name="settings_sign_out">Odhlásiť sa</string>
     <string name="settings_sign_out_desc">Ukončiť túto reláciu v tomto zariadení.</string>
     <string name="sign_out_dialog_title">Odhlásiť sa?</string>
-    <string name="sign_out_dialog_message">Naozaj sa chcete odhlásiť zo svojho účtu Proton?</string>
-    <plurals name="sign_out_dialog_vault_warning">
-        <item quantity="one">Odhlásenie vyprázdni aj Skryté fotky: %1$d fotka sa z tohto zariadenia natrvalo odstráni.</item>
-        <item quantity="few">Odhlásenie vyprázdni aj Skryté fotky: %1$d fotky sa z tohto zariadenia natrvalo odstránia.</item>
-        <item quantity="many">Odhlásenie vyprázdni aj Skryté fotky: %1$d fotky sa z tohto zariadenia natrvalo odstráni.</item>
-        <item quantity="other">Odhlásenie vyprázdni aj Skryté fotky: %1$d fotiek sa z tohto zariadenia natrvalo odstráni.</item>
-    </plurals>
-    <plurals name="sign_out_dialog_vault_cloud">
-        <item quantity="one">%1$d z nich je aj na Proton Drive a po opätovnom prihlásení sa dá znova stiahnuť.</item>
-        <item quantity="few">%1$d z nich sú aj na Proton Drive a po opätovnom prihlásení sa dajú znova stiahnuť.</item>
-        <item quantity="many">%1$d z nich sú aj na Proton Drive a po opätovnom prihlásení sa dajú znova stiahnuť.</item>
-        <item quantity="other">%1$d z nich je aj na Proton Drive a po opätovnom prihlásení sa dajú znova stiahnuť.</item>
-    </plurals>
+    <string name="sign_out_dialog_message">Odhlásením sa tieto údaje v tomto zariadení odstránia a po opätovnom prihlásení sa neobnovia (ak ich potrebujete, najskôr si ich vyexportujte):</string>
+    <string name="sign_out_dialog_item_faces">Pomenované osoby a údaje o tvárach</string>
+    <string name="sign_out_dialog_item_day_notes">Poznámky v Kalendári</string>
+    <string name="sign_out_dialog_item_vault">Skryté fotky</string>
     <string name="sign_out_dialog_confirm">Odhlásiť sa</string>
     <string name="sign_out_dialog_cancel">Zrušiť</string>
     <string name="settings_account_storage">Úložisko Drive</string>
@@ -600,6 +593,9 @@
     <string name="settings_app_lock_timeout">Uzamknúť po</string>
     <string name="settings_app_lock_timeout_desc">Znova uzamknúť aplikáciu po tomto čase v pozadí</string>
     <string name="settings_app_lock_timeout_immediate">Okamžite</string>
+    <string name="settings_app_lock_timeout_5sec">5 sekúnd</string>
+    <string name="settings_app_lock_timeout_10sec">10 sekúnd</string>
+    <string name="settings_app_lock_timeout_30sec">30 sekúnd</string>
     <string name="settings_app_lock_timeout_1min">1 minúta</string>
     <string name="settings_app_lock_timeout_5min">5 minút</string>
     <string name="settings_app_lock_timeout_10min">10 minút</string>
@@ -670,6 +666,10 @@
     <string name="albums_reorder">Zmeniť poradie albumov</string>
     <string name="album_rename_confirm">Premenovať</string>
     <string name="album_remove_from_album">Odstrániť z albumu</string>
+    <string name="album_move_to_album">Presunúť do albumu</string>
+    <string name="album_moved_to_album">Presunuté do \"%1$s\"</string>
+    <string name="album_move_shared_copy_note">Fotky pridané do zdieľaného albumu sa skopírujú vlastníkovi albumu.</string>
+    <string name="op_moving_to_album">Presúva sa do albumu…</string>
     <string name="album_set_as_cover">Nastaviť ako obal</string>
     <string name="gallery_action_select">Vybrať</string>
     <string name="album_cover_updated">Obal aktualizovaný</string>
@@ -960,6 +960,7 @@
     <!-- Search -->
     <string name="search_title">Hľadať</string>
     <string name="search_placeholder">Hľadať podľa názvu súboru</string>
+    <string name="search_placeholder_semantic">Hľadať fotky</string>
     <string name="search_empty_idle">Začnite hľadať zadaním názvu</string>
     <string name="search_empty_no_results">Žiadne zhody</string>
     <string name="search_section_on_this_day">V tento deň</string>
@@ -1115,9 +1116,8 @@
     <string name="video_editor_crop">Orezať</string>
     <string name="video_editor_audio">Hudba</string>
     <string name="video_editor_add_music">Pridať hudbu</string>
+    <string name="video_editor_replace_music">Nahradiť hudbu</string>
     <string name="video_editor_remove_music">Odstrániť</string>
-    <string name="video_editor_music_start">Začiatok hudby</string>
-    <string name="video_editor_music_end">Koniec hudby</string>
     <string name="video_editor_reset_crop">Obnoviť orezanie</string>
     <string name="video_editor_reencoding">Video sa znova kóduje…</string>
     <string name="video_editor_encrypting">Šifruje sa…</string>
@@ -2006,6 +2006,24 @@
     <string name="editor_tool_draw">Kresliť</string>
     <string name="editor_tool_text">Text</string>
     <string name="video_editor_frame_failed">Snímku sa nepodarilo uložiť</string>
+    <string name="video_editor_split">Rozdeliť</string>
+    <string name="video_editor_remove_section">Odstrániť úsek</string>
+    <string name="video_editor_sections_lossless_only">Rezy úsekov sa použijú len pri bezstratovom exporte.</string>
+    <string name="video_editor_split_music">Rozdeliť hudbu</string>
+    <string name="video_editor_silence_section">Stlmiť úsek</string>
+    <string name="video_editor_restore_section">Obnoviť úsek</string>
+    <string name="video_editor_reorder">Preusporiadať</string>
+    <string name="video_editor_add_video">Pridať video</string>
+    <string name="video_editor_max_sources">Môžete spojiť najviac %1$d videí</string>
+    <string name="video_editor_low_space">Nedostatok voľného miesta na uloženie videa</string>
+    <string name="video_editor_reencode_sections_pending">Orezanie, filtre, otočenie a hlasitosť zatiaľ nemožno použiť na rozdelené alebo presunuté časti.</string>
+    <string name="video_editor_volume">Hlasitosť</string>
+    <string name="video_editor_duplicate">Duplikovať</string>
+    <string name="video_editor_delete">Odstrániť</string>
+    <string name="video_editor_restore">Obnoviť</string>
+    <string name="video_editor_unmute">Zrušiť stlmenie</string>
+    <string name="video_editor_audio_lane">Zvuk</string>
+    <string name="video_editor_history_title">História úprav</string>
     <string name="video_editor_frame_saved">Snímka uložená do galérie</string>
     <string name="video_editor_grab_frame">Zachytiť snímku</string>
     <string name="video_editor_mute">Stlmiť</string>
@@ -2050,6 +2068,34 @@
     <string name="whats_new_dup_nobackup_body">Vyhľadávač duplikátov teraz prehľadá fotky vo vašom zariadení bez účtu aj bez zálohy.</string>
     <string name="whats_new_compress_split_title">Samostatná kvalita fotiek a videí</string>
     <string name="whats_new_compress_split_body">Kompresia fotiek a videí má teraz vlastné úrovne kvality. Skontrolujte ich v Nastaveniach, v časti Kvalita a veľkosť.</string>
+    <string name="whats_new_semantic_title">Hľadajte fotky ich opisom</string>
+    <string name="whats_new_semantic_body">Napíšte, čo si pamätáte, napríklad zasneženú horu alebo narodeninovú tortu, a zodpovedajúce fotky sa zobrazia. Všetko beží vo vašom telefóne; zapnite to v Nastaveniach.</string>
+    <string name="whats_new_gifmaker_title">Premeňte video na GIF</string>
+    <string name="whats_new_gifmaker_body">Orežte klip, zvoľte veľkosť a GIF uložte alebo zdieľajte. GIF z cloudového videa sa nahrá späť do vašej knižnice.</string>
+    <string name="whats_new_gifplay_title">Prehrávajte GIFy na mieste</string>
+    <string name="whats_new_gifplay_body">Dve nastavenia nechajú GIFy prehrávať v mriežkach fotiek a na obaloch albumov, vrátane cloudových. Predvolene vypnuté.</string>
+    <string name="whats_new_automerge_title">Automaticky zlúčiť tú istú osobu</string>
+    <string name="whats_new_automerge_body">Voliteľné nastavenie za vás prijme najistejšie návrhy tej istej osoby, takže sa fotky danej osoby zhromaždia samy.</string>
+    <string name="whats_new_categoryhide_title">Skryte kategórie, ktoré preskakujete</string>
+    <string name="whats_new_categoryhide_body">Ikona oka pri každej kategórii na časovej osi ju skryje z časovej osi aj z vyhľadávania. Tam ich môžete aj preusporiadať.</string>
+    <string name="whats_new_people_accurate_title">Počty ľudí zostávajú správne</string>
+    <string name="whats_new_people_accurate_body">Osoba zostane správna aj po zlúčení, presune alebo skrytí fotiek a tváre z fotky sa znova použijú pri jej zálohovaní.</string>
+    <string name="whats_new_facescan_title">Stabilnejšie skenovanie tvárí</string>
+    <string name="whats_new_facescan_body">Skenovanie pokračuje, hneď ako sa vráti Wi-Fi, a jedna zaseknutá fotka už nezastaví celý priebeh.</string>
+    <string name="whats_new_bgdownloads_title">Sťahovanie beží ďalej</string>
+    <string name="whats_new_bgdownloads_body">Sťahovanie modelov AI pokračuje na pozadí s upozornením o priebehu, takže odchod z Nastavení ich už nezastaví.</string>
+    <string name="whats_new_videoeditor_title">Editor videa s viacerými klipmi</string>
+    <string name="whats_new_videoeditor_body">Editor videa je teraz časová os. Pridávajte klipy, orezávajte ich, meňte ich poradie a mažte ich, podložte hudbu, dolaďte farbu a svetlo a potom všetko exportujte ako jedno video.</string>
+    <string name="whats_new_movetoalbum_title">Presunúť do albumu</string>
+    <string name="whats_new_movetoalbum_body">Presuňte vybrané fotky z jedného albumu rovno do iného.</string>
+    <string name="whats_new_indexsettle_title">Indexovanie už nevyzerá zaseknuté</string>
+    <string name="whats_new_indexsettle_body">Keď posledných pár položiek teraz nemožno načítať, indexovanie tvárí a fotiek sa ustáli a skúsi to znova neskôr, namiesto zamrznutia na ukazovateli priebehu.</string>
+    <string name="whats_new_videoplay_title">Čistejšie a spoľahlivejšie video</string>
+    <string name="whats_new_videoplay_body">Videá sa otvárajú bez nesprávnej fotky alebo bieleho bliknutia a prehrajú sa aj na telefónoch, ktorých hlavný dekodér predtým zlyhával.</string>
+    <string name="whats_new_mergefast_title">Svižnejšie návrhy tvárí</string>
+    <string name="whats_new_mergefast_body">Návrhy zlúčenia zareagujú vo chvíli, keď ťuknete, zostávajú dostupné, a dvojica sa vráti, ak zlúčenie neprebehlo celé.</string>
+    <string name="whats_new_diag_title">Testujete túto verziu?</string>
+    <string name="whats_new_diag_body">Ďakujem, že skúšate testovaciu verziu. Ak niečo nefunguje správne, pošlite prosím diagnostiku, aby sa dal odlíšiť problém so súborom od niečoho iného: skopírujte ju v Nastaveniach a napíšte na support@photosforproton.eu, alebo napíšte na Discorde či GitHube.</string>
     <string name="whats_new_section_new">Novinky</string>
     <string name="whats_new_section_improved">Vylepšenia</string>
 
@@ -2084,7 +2130,6 @@
     <string name="albums_search_no_results">Žiadne albumy nezodpovedajú hľadaniu.</string>
     <string name="settings_ai_groups_found">%1$d skupín</string>
     <string name="settings_ai_faces_found">%1$d tvárí</string>
-    <string name="sign_out_dialog_face_warning">Pomenované osoby a skupiny tvárí v tomto zariadení sa tiež odstránia a po opätovnom prihlásení sa neobnovia.</string>
     <string name="person_rename_merge_confirm_title">Zlúčiť s existujúcou osobou?</string>
     <string name="person_rename_merge_confirm_body">Osoba s menom %1$s už existuje. Použitie tohto mena zlúči obe do jednej, čo nemožno vrátiť späť. Zlúčiť?</string>
     <string name="person_move_confirm_title">Presunúť k tejto osobe?</string>

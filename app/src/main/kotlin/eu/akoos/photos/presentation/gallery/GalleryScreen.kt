@@ -198,7 +198,7 @@ import eu.akoos.photos.presentation.common.ConfirmDialog
 import eu.akoos.photos.presentation.common.albumMembershipState
 import eu.akoos.photos.presentation.common.anyLocalOnly
 import eu.akoos.photos.presentation.common.deleteConfirmRows
-import eu.akoos.photos.presentation.common.deleteRowDescRes
+import eu.akoos.photos.presentation.common.deleteRowDescription
 import eu.akoos.photos.presentation.common.deleteRowTitleRes
 import eu.akoos.photos.presentation.common.ConfirmSheet
 import eu.akoos.photos.presentation.common.HideConfirmSheet
@@ -2016,7 +2016,16 @@ internal fun MultiDeleteSheet(
             color = colors.fgPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
         )
 
-        val rows = deleteConfirmRows(hasLocal, hasCloud)
+        val rows = deleteConfirmRows(
+            hasLocal, hasCloud,
+            reclaimableBytes = selectedItems.sumOf {
+                when (it) {
+                    is GalleryItem.LocalOnly -> it.local.sizeBytes
+                    is GalleryItem.Synced -> it.local.sizeBytes
+                    is GalleryItem.CloudOnly -> 0L
+                }
+            },
+        )
         if (rows.size > 1) {
             Text(
                 stringResource(R.string.delete_multi_mixed_msg),
@@ -2040,7 +2049,7 @@ internal fun MultiDeleteSheet(
                     color = titleColor, fontSize = 15.sp, fontWeight = FontWeight.Medium,
                 )
                 Text(
-                    stringResource(deleteRowDescRes(row.kind)),
+                    deleteRowDescription(row),
                     color = colors.fgMute, fontSize = 12.sp,
                 )
             }

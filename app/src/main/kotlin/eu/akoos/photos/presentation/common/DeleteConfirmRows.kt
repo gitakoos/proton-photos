@@ -23,7 +23,10 @@
 package eu.akoos.photos.presentation.common
 
 import androidx.annotation.StringRes
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.res.stringResource
 import eu.akoos.photos.R
+import eu.akoos.photos.presentation.util.formatBytes
 
 /** Which copy a delete-confirm row removes, so each surface can label it in its own words. */
 enum class DeleteRowKind { RemoveDevice, RemoveCloud, RemoveEverywhere, TrashLocal, TrashCloud }
@@ -37,6 +40,9 @@ data class DeleteRow(
     val destructive: Boolean,
     val freeUpSpace: Boolean,
     val deleteFromCloud: Boolean,
+    /** Device bytes this row reclaims, appended to its description as a freed-space note. Set only on
+     *  [freeUpSpace] rows, and only when [deleteConfirmRows] was given a positive figure. */
+    val freedBytes: Long? = null,
 )
 
 /**
@@ -48,20 +54,31 @@ data class DeleteRow(
  * sides offers two neutral partial removals then the red everywhere; a one-sided selection offers
  * only its own red trash row. A partial removal is neutral because it leaves the other copy in place,
  * so only the row that takes the last copy of everything is destructive.
+ *
+ * [reclaimableBytes] is the device space the selection occupies, when a caller has resolved it. When
+ * positive it is carried on every space-freeing row as [DeleteRow.freedBytes] so the sheet can show
+ * how much a removal frees, matching the free-up screen.
  */
-fun deleteConfirmRows(hasLocal: Boolean, hasCloud: Boolean): List<DeleteRow> = when {
-    hasLocal && hasCloud -> listOf(
-        DeleteRow(DeleteRowKind.RemoveDevice, destructive = false, freeUpSpace = true, deleteFromCloud = false),
-        DeleteRow(DeleteRowKind.RemoveCloud, destructive = false, freeUpSpace = false, deleteFromCloud = true),
-        DeleteRow(DeleteRowKind.RemoveEverywhere, destructive = true, freeUpSpace = true, deleteFromCloud = true),
-    )
-    hasLocal -> listOf(
-        DeleteRow(DeleteRowKind.TrashLocal, destructive = true, freeUpSpace = true, deleteFromCloud = false),
-    )
-    hasCloud -> listOf(
-        DeleteRow(DeleteRowKind.TrashCloud, destructive = true, freeUpSpace = false, deleteFromCloud = true),
-    )
-    else -> emptyList()
+fun deleteConfirmRows(
+    hasLocal: Boolean,
+    hasCloud: Boolean,
+    reclaimableBytes: Long? = null,
+): List<DeleteRow> {
+    val freed = reclaimableBytes?.takeIf { it > 0L }
+    return when {
+        hasLocal && hasCloud -> listOf(
+            DeleteRow(DeleteRowKind.RemoveDevice, destructive = false, freeUpSpace = true, deleteFromCloud = false, freedBytes = freed),
+            DeleteRow(DeleteRowKind.RemoveCloud, destructive = false, freeUpSpace = false, deleteFromCloud = true),
+            DeleteRow(DeleteRowKind.RemoveEverywhere, destructive = true, freeUpSpace = true, deleteFromCloud = true, freedBytes = freed),
+        )
+        hasLocal -> listOf(
+            DeleteRow(DeleteRowKind.TrashLocal, destructive = true, freeUpSpace = true, deleteFromCloud = false, freedBytes = freed),
+        )
+        hasCloud -> listOf(
+            DeleteRow(DeleteRowKind.TrashCloud, destructive = true, freeUpSpace = false, deleteFromCloud = true),
+        )
+        else -> emptyList()
+    }
 }
 
 /**
@@ -86,4 +103,16 @@ fun deleteRowDescRes(kind: DeleteRowKind, vaulted: Boolean = false): Int = when 
     DeleteRowKind.RemoveEverywhere -> R.string.delete_multi_move_trash_everywhere_desc
     DeleteRowKind.TrashLocal -> if (vaulted) R.string.viewer_delete_vault_body else R.string.delete_multi_move_trash_desc
     DeleteRowKind.TrashCloud -> R.string.delete_multi_drive_trash_desc
+}
+
+/**
+ * The description line for [row], with a freed-space note appended when the row reclaims device
+ * bytes (see [DeleteRow.freedBytes]). One helper so both delete sheets word that note identically;
+ * see [deleteRowTitleRes] for [vaulted].
+ */
+@Composable
+fun deleteRowDescription(row: DeleteRow, vaulted: Boolean = false): String {
+    val base = stringResource(deleteRowDescRes(row.kind, vaulted))
+    val bytes = row.freedBytes ?: return base
+    return base + " " + stringResource(R.string.delete_frees_note, formatBytes(bytes))
 }

@@ -62,8 +62,8 @@ import eu.akoos.photos.R
 import eu.akoos.photos.presentation.gallery.LocalThumbnailUrls
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.Bg2
-import eu.akoos.photos.presentation.theme.LocalTintCloudWithAccent
-import eu.akoos.photos.presentation.theme.StatusSynced
+import eu.akoos.photos.presentation.theme.CloudBadgeSurface
+import eu.akoos.photos.presentation.theme.cloudBadgeTint
 import eu.akoos.photos.presentation.theme.FgDim
 import kotlinx.coroutines.delay
 
@@ -314,7 +314,7 @@ private fun BoxScope.SyncedCloudBadge() {
         Icon(
             Icons.Default.Cloud,
             contentDescription = stringResource(R.string.cd_status_backed_up_device),
-            tint = if (LocalTintCloudWithAccent.current) Accent else StatusSynced,
+            tint = cloudBadgeTint(CloudBadgeSurface.DarkChip),
             modifier = Modifier.size(12.dp),
         )
     }

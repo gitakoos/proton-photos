@@ -142,6 +142,9 @@ data class AppColorsTokens(
     val fgMute: Color,
     val accent: Color,
     val accent2: Color,
+    // Bright (dark-mode) accent for the active palette. Badges pinned to a fixed near-black chip tint
+    // with this so an accent glyph reads on that chip in light mode too, where `accent` darkens.
+    val accentBright: Color,
     val line: Color,
     val line2: Color,
     val pillBg: Color,
@@ -220,6 +223,7 @@ private fun darkAppColors(palette: ThemePalette, amoled: Boolean = false): AppCo
         fgMute         = FgMuteDark,
         accent         = accent,
         accent2        = accent2,
+        accentBright   = accent,
         line           = LineDark,
         line2          = Line2Dark,
         pillBg         = PillBgDark,
@@ -256,6 +260,7 @@ private fun lightAppColors(palette: ThemePalette): AppColorsTokens {
         fgMute         = FgMuteLight,
         accent         = accent,
         accent2        = accent2,
+        accentBright   = darkAccentFor(palette).first,
         line           = LineLight,
         line2          = Line2Light,
         pillBg         = PillBgLight,
@@ -396,6 +401,10 @@ val Accent2: Color
     @Composable @ReadOnlyComposable
     get() = LocalAppColors.current.accent2
 
+val AccentBright: Color
+    @Composable @ReadOnlyComposable
+    get() = LocalAppColors.current.accentBright
+
 val Line: Color
     @Composable @ReadOnlyComposable
     get() = LocalAppColors.current.line
@@ -463,6 +472,30 @@ val ErrorChipBg: Color
 val ArcTrack: Color
     @Composable @ReadOnlyComposable
     get() = LocalAppColors.current.arcTrack
+
+/** Surface a synced-cloud badge is painted on, so its tint stays legible there. DarkChip is the
+ *  fixed near-black rounded chip behind the grid badges (identical in both themes); Pill is the
+ *  viewer's info pill, which turns near-white in light mode. */
+enum class CloudBadgeSurface { DarkChip, Pill }
+
+/** Tint for the green "synced" (backed up and still on device) cloud glyph, kept readable per surface.
+ *  On the fixed-dark chip the accent option uses the bright accent so it reads in light mode too, where
+ *  the plain accent darkens; on the near-white pill the default is the theme foreground so the glyph
+ *  never washes out, matching the adjacent cloud-only badge. Honors [LocalTintCloudWithAccent]. */
+@Composable
+@ReadOnlyComposable
+fun cloudBadgeTint(surface: CloudBadgeSurface): Color =
+    if (LocalTintCloudWithAccent.current) {
+        when (surface) {
+            CloudBadgeSurface.DarkChip -> AccentBright
+            CloudBadgeSurface.Pill     -> Accent
+        }
+    } else {
+        when (surface) {
+            CloudBadgeSurface.DarkChip -> StatusSynced
+            CloudBadgeSurface.Pill     -> FgPrimary
+        }
+    }
 
 // ── App font — Inter (variable .ttf; the wght axis resolves weights on API 26+). ──────
 // Applied app-wide via the Material typography + LocalTextStyle so every Text() renders in

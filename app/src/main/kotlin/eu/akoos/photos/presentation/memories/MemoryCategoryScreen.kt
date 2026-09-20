@@ -32,6 +32,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -135,7 +136,7 @@ fun MemoryCategoryScreen(
             // Skeleton grid matching the 2-column card layout so there is no jump when the real cards
             // arrive.
             LazyVerticalGrid(
-                columns = GridCells.Fixed(2),
+                columns = GridCells.Adaptive(140.dp),
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(
                     start = 14.dp, end = 14.dp, top = contentTopPad, bottom = 24.dp,
@@ -145,14 +146,14 @@ fun MemoryCategoryScreen(
             ) {
                 items(8) {
                     ShimmerBox(
-                        modifier = Modifier.size(width = 132.dp, height = 168.dp),
+                        modifier = Modifier.fillMaxWidth().aspectRatio(132f / 168f),
                         cornerRadius = 16.dp,
                     )
                 }
             }
         } else {
         LazyVerticalGrid(
-            columns = GridCells.Fixed(2),
+            columns = GridCells.Adaptive(140.dp),
             state = gridState,
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(
@@ -168,6 +169,7 @@ fun MemoryCategoryScreen(
                             coverItem = items.first(),
                             yearsAgo = (now - year).coerceAtLeast(1),
                             count = items.size,
+                            modifier = Modifier.fillMaxWidth().aspectRatio(132f / 168f),
                             onClick = { onPhotoClick(items, 0) },
                         )
                     }
@@ -182,6 +184,7 @@ fun MemoryCategoryScreen(
                             coverItem = bucket.cover,
                             title = bucket.title,
                             count = bucket.items.size,
+                            modifier = Modifier.fillMaxWidth().aspectRatio(132f / 168f),
                             onClick = { onPhotoClick(bucket.items, 0) },
                         )
                     }
