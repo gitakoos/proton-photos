@@ -56,6 +56,8 @@ import androidx.navigation.navArgument
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import android.content.Context
+import android.content.Intent
+import androidx.core.net.toUri
 import androidx.compose.ui.platform.LocalContext
 import eu.akoos.photos.presentation.util.findActivity
 import eu.akoos.photos.BuildConfig
@@ -113,6 +115,8 @@ import eu.akoos.photos.presentation.gifmaker.GifMakerScreen
 import eu.akoos.photos.presentation.metadata.MetadataEditorScreen
 import eu.akoos.photos.presentation.onboarding.OnboardingScreen
 import eu.akoos.photos.presentation.settings.AboutScreen
+import eu.akoos.photos.presentation.whatsnew.ThankYouDialog
+import eu.akoos.photos.presentation.whatsnew.ThankYouViewModel
 import eu.akoos.photos.presentation.settings.AccountScreen
 import eu.akoos.photos.presentation.settings.FaqScreen
 import eu.akoos.photos.presentation.settings.AiSettingsScreen
@@ -354,6 +358,10 @@ fun NavGraph(
     // the store in, and a decrypt mid-scroll rebinds only the changed tiles, not the nav root.
     val thumbnailUrlsViewModel: ThumbnailUrlsViewModel = hiltViewModel()
     val thumbnailUrlsState = thumbnailUrlsViewModel.urls.collectAsStateWithLifecycle()
+    // One-time 2.5.0 thank-you popup. The view-model shares a @Singleton controller with the About
+    // screen's hidden preview trigger, so either place can raise the dialog rendered here at the root.
+    val thankYouVm: ThankYouViewModel = hiltViewModel()
+    val thanksVisible by thankYouVm.visible.collectAsStateWithLifecycle()
     // Which map the entry points open: false (default) = the modern world map, true = the classic OSM map.
     val mapEntryCtx = LocalContext.current
     val mapStyleOsm by remember(mapEntryCtx) {
@@ -713,7 +721,13 @@ fun NavGraph(
                 if (whatsNewChecked) return@LaunchedEffect
                 whatsNewChecked = true
                 val seen = whatsNewContext.settingsDataStore.data.first()[SettingsKeys.WHATS_NEW_SEEN_VERSION] ?: 0
-                if (seen < BuildConfig.VERSION_CODE) {
+                val whatsNewPending = seen < BuildConfig.VERSION_CODE
+                if (thankYouVm.shouldShow()) {
+                    // On the 2.5.0 update the thank-you leads: it shows first, and What's New (if still
+                    // pending) opens when it is dismissed. showReal marks it seen at once, so it is a
+                    // single lifetime appearance. The whatsNewChecked latch keeps this to one run.
+                    thankYouVm.showReal(thenWhatsNew = whatsNewPending)
+                } else if (whatsNewPending) {
                     navController.navigate(Screen.WhatsNew.route)
                 }
             }
@@ -1944,6 +1958,24 @@ fun NavGraph(
                     // way neither apply a style nor navigate anywhere.
                     showMapStyleChooser = false
                     mapStyleSwitchFrom = null
+                },
+            )
+        }
+
+        // One-time 2.5.0 thank-you popup, rendered at the nav root so it sits over whatever route is on
+        // top (the gallery on update, or the About screen for the owner's hidden preview).
+        if (thanksVisible) {
+            ThankYouDialog(
+                onDismiss = {
+                    // Dismissing the thank-you opens What's New next when it is still pending (the
+                    // first-run order: thank-you first, highlights after).
+                    if (thankYouVm.dismiss()) {
+                        navController.navigate(Screen.WhatsNew.route)
+                    }
+                },
+                onOpenUrl = { url ->
+                    val intent = Intent(Intent.ACTION_VIEW, url.toUri())
+                    runCatching { navContext.startActivity(intent) }
                 },
             )
         }

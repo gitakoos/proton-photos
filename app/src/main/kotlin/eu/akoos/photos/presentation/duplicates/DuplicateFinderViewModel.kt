@@ -264,7 +264,7 @@ class DuplicateFinderViewModel @Inject constructor(
                 }
                 // A photo already grouped as an exact ("Identical") duplicate is kept out of the
                 // "Similar" groups, so the same photo is never listed and separately ticked in both
-                // sections (which double-counted the delete tally the tester saw).
+                // sections (which double-counted the delete tally shown across both sections).
                 val exactIds = (result.deviceGroups + result.cloudGroups)
                     .flatMapTo(HashSet<String>()) { g -> g.items.map { it.stableId } }
                 groupSimilarFromStored(items, p.freshHashes, exactIds)

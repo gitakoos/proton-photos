@@ -49,7 +49,9 @@ import androidx.compose.material.icons.filled.GroupAdd
 import androidx.compose.material.icons.filled.HdrOn
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.NoAccounts
+import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.PhotoAlbum
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Shield
@@ -118,36 +120,32 @@ internal data class WhatsNewRelease(
  * fails if a card is repeated from an older entry.
  */
 internal val WhatsNewReleases: List<WhatsNewRelease> = listOf(
-    // NOTE for the 2.5.0 STABLE release: prepend WhatsNew250EarlierPreviews (below) to this card's
-    // features so a user updating from 2.4.0 meets the whole of 2.5.0 at once. Each PREVIEW keeps only
-    // its own new cards, so this card lists the newest preview's cards alone. Smaller changes are their
-    // own cards too rather than a closing line, so they are swiped through and actually read.
+    // 2.5.0 STABLE: the whole release since 2.4.0, consolidated to its main features so someone
+    // updating from 2.4.0 meets 2.5.0 as a tight set of cards rather than every preview's delta.
+    // All cards are New here, so no section labels show; the closing line covers the smaller changes.
     WhatsNewRelease(
         version = "2.5.0",
         hero = null,
         features = listOf(
-            WhatsNewFeature(Icons.Default.Search, R.string.whats_new_searchready_title, R.string.whats_new_searchready_body, WhatsNewCategory.Improved),
-            WhatsNewFeature(Icons.Default.DeleteSweep, R.string.whats_new_dupleave_title, R.string.whats_new_dupleave_body, WhatsNewCategory.Improved),
-            WhatsNewFeature(Icons.Default.GridView, R.string.whats_new_collectionwide_title, R.string.whats_new_collectionwide_body, WhatsNewCategory.Improved),
-            WhatsNewFeature(Icons.Default.GroupAdd, R.string.whats_new_searchperson_title, R.string.whats_new_searchperson_body, WhatsNewCategory.Improved),
+            WhatsNewFeature(Icons.Default.Face, R.string.whats_new_250_faces_title, R.string.whats_new_250_faces_body),
+            WhatsNewFeature(Icons.Default.NoAccounts, R.string.whats_new_250_noaccount_title, R.string.whats_new_250_noaccount_body),
+            WhatsNewFeature(Icons.Default.Search, R.string.whats_new_250_search_title, R.string.whats_new_250_search_body),
+            WhatsNewFeature(Icons.Default.Public, R.string.whats_new_250_map_title, R.string.whats_new_250_map_body),
+            WhatsNewFeature(Icons.Default.SwapVert, R.string.whats_new_250_import_title, R.string.whats_new_250_import_body),
+            WhatsNewFeature(Icons.Default.Brush, R.string.whats_new_250_editor_title, R.string.whats_new_250_editor_body),
+            WhatsNewFeature(Icons.Default.Movie, R.string.whats_new_250_video_title, R.string.whats_new_250_video_body),
+            WhatsNewFeature(Icons.Default.Edit, R.string.whats_new_250_details_title, R.string.whats_new_250_details_body),
+            WhatsNewFeature(Icons.Default.TextFields, R.string.whats_new_250_text_title, R.string.whats_new_250_text_body),
+            WhatsNewFeature(Icons.Default.Difference, R.string.whats_new_250_duplicates_title, R.string.whats_new_250_duplicates_body),
+            WhatsNewFeature(Icons.Default.HdrOn, R.string.whats_new_250_hdr_title, R.string.whats_new_250_hdr_body),
+            WhatsNewFeature(Icons.Default.DeleteSweep, R.string.whats_new_250_trash_title, R.string.whats_new_250_trash_body),
+            WhatsNewFeature(Icons.Default.Shield, R.string.whats_new_250_privateshare_title, R.string.whats_new_250_privateshare_body),
+            WhatsNewFeature(Icons.Default.PhoneAndroid, R.string.whats_new_250_defaultgallery_title, R.string.whats_new_250_defaultgallery_body),
+            WhatsNewFeature(Icons.Default.Palette, R.string.whats_new_250_themes_title, R.string.whats_new_250_themes_body),
+            WhatsNewFeature(Icons.Default.Compress, R.string.whats_new_250_compression_title, R.string.whats_new_250_compression_body),
+            WhatsNewFeature(Icons.Default.Settings, R.string.whats_new_250_settingssearch_title, R.string.whats_new_250_settingssearch_body),
         ),
-    ),
-    WhatsNewRelease(
-        version = "2.4.1",
-        hero = WhatsNewHero.AlbumOrder,
-        features = listOf(
-            WhatsNewFeature(Icons.Default.Crop, R.string.whats_new_crop_title, R.string.whats_new_crop_body),
-            WhatsNewFeature(Icons.Default.Edit, R.string.whats_new_metadata_title, R.string.whats_new_metadata_body),
-            WhatsNewFeature(Icons.Default.TextFields, R.string.whats_new_text_title, R.string.whats_new_text_body),
-            WhatsNewFeature(Icons.Default.HdrOn, R.string.whats_new_hdr_title, R.string.whats_new_hdr_body),
-            WhatsNewFeature(Icons.Default.GroupAdd, R.string.whats_new_shared_add_title, R.string.whats_new_shared_add_body),
-            WhatsNewFeature(Icons.Default.Checklist, R.string.whats_new_selection_title, R.string.whats_new_selection_body),
-            WhatsNewFeature(Icons.Default.DeleteSweep, R.string.whats_new_freeup_review_title, R.string.whats_new_freeup_review_body),
-            WhatsNewFeature(Icons.Default.Campaign, R.string.whats_new_news_title, R.string.whats_new_news_body),
-            WhatsNewFeature(Icons.Default.Bookmark, R.string.whats_new_viewer_place_title, R.string.whats_new_viewer_place_body),
-            WhatsNewFeature(Icons.Default.Shield, R.string.whats_new_album_guard_title, R.string.whats_new_album_guard_body),
-        ),
-        moreRes = R.string.whats_new_more_241,
+        moreRes = R.string.whats_new_250_more,
     ),
     WhatsNewRelease(
         version = "2.4.0",
@@ -175,56 +173,6 @@ internal val WhatsNewReleases: List<WhatsNewRelease> = listOf(
 
 /** The release the post-update screen announces, and the one Settings opens by default. */
 internal val LatestWhatsNewRelease: WhatsNewRelease get() = WhatsNewReleases.first()
-
-/**
- * The cards that shipped across the earlier 2.5.0 preview builds (test1 through test4). They are held
- * out of the 2.5.0 card above so each PREVIEW announces only what THAT preview added; prepend them to the
- * 2.5.0 card's features for the STABLE release, where someone updating from 2.4.0 meets all of 2.5.0
- * at once. Referencing the strings here also keeps them from reading as unused until then.
- */
-@Suppress("unused")
-internal val WhatsNew250EarlierPreviews: List<WhatsNewFeature> = listOf(
-    WhatsNewFeature(Icons.Default.Face, R.string.whats_new_faces_title, R.string.whats_new_faces_body, WhatsNewCategory.New),
-    WhatsNewFeature(Icons.Default.PhoneAndroid, R.string.whats_new_localonly_title, R.string.whats_new_localonly_body, WhatsNewCategory.New),
-    WhatsNewFeature(Icons.Default.Public, R.string.whats_new_map_title, R.string.whats_new_map_body, WhatsNewCategory.Improved),
-    WhatsNewFeature(Icons.Default.Difference, R.string.whats_new_dupfinder_title, R.string.whats_new_dupfinder_body, WhatsNewCategory.Improved),
-    WhatsNewFeature(Icons.Default.GridView, R.string.whats_new_albumcover_title, R.string.whats_new_albumcover_body, WhatsNewCategory.Improved),
-    WhatsNewFeature(Icons.Default.DensitySmall, R.string.whats_new_denser_title, R.string.whats_new_denser_body, WhatsNewCategory.Improved),
-    WhatsNewFeature(Icons.Default.Brush, R.string.whats_new_editor_title, R.string.whats_new_editor_body),
-    WhatsNewFeature(Icons.Default.GridView, R.string.whats_new_collage_title, R.string.whats_new_collage_body),
-    WhatsNewFeature(Icons.Default.SaveAlt, R.string.whats_new_export_title, R.string.whats_new_export_body),
-    WhatsNewFeature(Icons.Default.Movie, R.string.whats_new_video_title, R.string.whats_new_video_body),
-    WhatsNewFeature(Icons.Default.AutoAwesome, R.string.whats_new_smooth_title, R.string.whats_new_smooth_body),
-    WhatsNewFeature(Icons.Default.Difference, R.string.whats_new_dupreview_title, R.string.whats_new_dupreview_body),
-    WhatsNewFeature(Icons.Default.Schedule, R.string.whats_new_filedate_title, R.string.whats_new_filedate_body),
-    WhatsNewFeature(Icons.Default.SwapVert, R.string.whats_new_import_title, R.string.whats_new_import_body, WhatsNewCategory.New),
-    WhatsNewFeature(Icons.Default.Email, R.string.whats_new_share_email_title, R.string.whats_new_share_email_body, WhatsNewCategory.New),
-    WhatsNewFeature(Icons.Default.Movie, R.string.whats_new_video_faces_title, R.string.whats_new_video_faces_body, WhatsNewCategory.New),
-    WhatsNewFeature(Icons.Default.Face, R.string.whats_new_faces_rework_title, R.string.whats_new_faces_rework_body, WhatsNewCategory.Improved),
-    WhatsNewFeature(Icons.Default.NoAccounts, R.string.whats_new_guest_title, R.string.whats_new_guest_body, WhatsNewCategory.Improved),
-    WhatsNewFeature(Icons.Default.Difference, R.string.whats_new_dup_nobackup_title, R.string.whats_new_dup_nobackup_body, WhatsNewCategory.Improved),
-    // Moved down from the 2.5.0 head card when test6 took the head: these are the test5 cards.
-    WhatsNewFeature(Icons.Default.Search, R.string.whats_new_semantic_title, R.string.whats_new_semantic_body, WhatsNewCategory.New),
-    WhatsNewFeature(Icons.Default.Movie, R.string.whats_new_gifmaker_title, R.string.whats_new_gifmaker_body, WhatsNewCategory.New),
-    WhatsNewFeature(Icons.Default.PlayCircle, R.string.whats_new_gifplay_title, R.string.whats_new_gifplay_body, WhatsNewCategory.New),
-    WhatsNewFeature(Icons.Default.GroupAdd, R.string.whats_new_automerge_title, R.string.whats_new_automerge_body, WhatsNewCategory.New),
-    WhatsNewFeature(Icons.Default.Visibility, R.string.whats_new_categoryhide_title, R.string.whats_new_categoryhide_body, WhatsNewCategory.New),
-    WhatsNewFeature(Icons.Default.Compress, R.string.whats_new_compress_split_title, R.string.whats_new_compress_split_body, WhatsNewCategory.New),
-    WhatsNewFeature(Icons.Default.Face, R.string.whats_new_people_accurate_title, R.string.whats_new_people_accurate_body, WhatsNewCategory.Improved),
-    WhatsNewFeature(Icons.Default.Schedule, R.string.whats_new_facescan_title, R.string.whats_new_facescan_body, WhatsNewCategory.Improved),
-    WhatsNewFeature(Icons.Default.CloudDownload, R.string.whats_new_bgdownloads_title, R.string.whats_new_bgdownloads_body, WhatsNewCategory.Improved),
-    // Moved down from the 2.5.0 head card when test7 took the head: these are the test6 cards.
-    WhatsNewFeature(Icons.Default.Movie, R.string.whats_new_videoeditor_title, R.string.whats_new_videoeditor_body, WhatsNewCategory.New),
-    WhatsNewFeature(Icons.Default.PhotoAlbum, R.string.whats_new_movetoalbum_title, R.string.whats_new_movetoalbum_body, WhatsNewCategory.New),
-    WhatsNewFeature(Icons.Default.Schedule, R.string.whats_new_indexsettle_title, R.string.whats_new_indexsettle_body, WhatsNewCategory.Improved),
-    WhatsNewFeature(Icons.Default.PlayCircle, R.string.whats_new_videoplay_title, R.string.whats_new_videoplay_body, WhatsNewCategory.Improved),
-    WhatsNewFeature(Icons.Default.GroupAdd, R.string.whats_new_mergefast_title, R.string.whats_new_mergefast_body, WhatsNewCategory.Improved),
-    // Moved down from the 2.5.0 head card when test8 took the head: these are the test7 cards.
-    WhatsNewFeature(Icons.Default.PlayCircle, R.string.whats_new_videosmooth_title, R.string.whats_new_videosmooth_body, WhatsNewCategory.Improved),
-    WhatsNewFeature(Icons.Default.ZoomIn, R.string.whats_new_focalzoom_title, R.string.whats_new_focalzoom_body, WhatsNewCategory.Improved),
-    WhatsNewFeature(Icons.Default.CloudOff, R.string.whats_new_offlineedit_title, R.string.whats_new_offlineedit_body, WhatsNewCategory.Improved),
-    WhatsNewFeature(Icons.Default.Movie, R.string.whats_new_videoaudiodate_title, R.string.whats_new_videoaudiodate_body, WhatsNewCategory.Improved),
-)
 
 /** Looks up a release by its version string, falling back to the newest for an unknown one. */
 internal fun whatsNewReleaseFor(version: String?): WhatsNewRelease =

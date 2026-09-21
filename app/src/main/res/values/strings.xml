@@ -1888,6 +1888,42 @@
     <!-- What's new -->
     <string name="whats_new_title">What\'s new</string>
     <string name="whats_new_done">Got it</string>
+    <!-- 2.5.0 stable: consolidated main features -->
+    <string name="whats_new_250_faces_title">Face recognition</string>
+    <string name="whats_new_250_faces_body">Find and name the people in your photos.</string>
+    <string name="whats_new_250_noaccount_title">No account needed</string>
+    <string name="whats_new_250_noaccount_body">Use the whole app without a Proton account.</string>
+    <string name="whats_new_250_search_title">Semantic search</string>
+    <string name="whats_new_250_search_body">Find your photos just by describing them.</string>
+    <string name="whats_new_250_map_title">Map and places</string>
+    <string name="whats_new_250_map_body">See your photos on a map and browse them by place.</string>
+    <string name="whats_new_250_import_title">Import</string>
+    <string name="whats_new_250_import_body">Bring your Google Photos or Ente library into Proton Drive.</string>
+    <string name="whats_new_250_editor_title">Photo editor</string>
+    <string name="whats_new_250_editor_body">More tools, plus a collage maker and a way to hide faces.</string>
+    <string name="whats_new_250_video_title">Video editor</string>
+    <string name="whats_new_250_video_body">Trim and combine clips, add music, or make a GIF.</string>
+    <string name="whats_new_250_details_title">Photo details</string>
+    <string name="whats_new_250_details_body">Edit a photo\'s date, place and description.</string>
+    <string name="whats_new_250_text_title">Text in photos</string>
+    <string name="whats_new_250_text_body">Read and copy the text in any photo.</string>
+    <string name="whats_new_250_duplicates_title">Duplicate finder</string>
+    <string name="whats_new_250_duplicates_body">More accurate, and works with or without a backup.</string>
+    <string name="whats_new_250_hdr_title">Ultra HDR</string>
+    <string name="whats_new_250_hdr_body">Photos shown in their full brightness range.</string>
+    <string name="whats_new_250_trash_title">Trash</string>
+    <string name="whats_new_250_trash_body">Open trashed photos to view, restore or delete them.</string>
+    <string name="whats_new_250_privateshare_title">Private sharing</string>
+    <string name="whats_new_250_privateshare_body">Remove location and metadata when you share a photo to another app.</string>
+    <string name="whats_new_250_defaultgallery_title">Default gallery</string>
+    <string name="whats_new_250_defaultgallery_body">Set the app as your phone\'s gallery.</string>
+    <string name="whats_new_250_themes_title">Colour themes</string>
+    <string name="whats_new_250_themes_body">Choose from eleven colour palettes.</string>
+    <string name="whats_new_250_compression_title">Compression</string>
+    <string name="whats_new_250_compression_body">Choose the upload quality for photos and videos.</string>
+    <string name="whats_new_250_settingssearch_title">Settings search</string>
+    <string name="whats_new_250_settingssearch_body">Find any setting by searching.</string>
+    <string name="whats_new_250_more">Plus smoother viewing, more reliable video playback, faster free-up, album sorting, and lots more fixes and stability improvements.</string>
     <string name="whats_new_hide_title">Hide photos and albums</string>
     <string name="whats_new_hide_intro">Hide anything you don\'t want in your timeline, and unhide it any time from Hidden Photos. What happens depends on the photo\'s badge:</string>
     <string name="whats_new_hide_device">Only on this phone: it moves into Hidden Photos, locked inside this app, and out of the device gallery, so no other app can see it.</string>
@@ -2042,6 +2078,14 @@
     <string name="whats_new_section_new">New</string>
     <string name="whats_new_section_improved">Improved</string>
     <string name="whats_new_more_240">Plus copied links stay hidden in the clipboard preview, file sizes match everywhere they appear, automatic free-up checks with Drive before removing a copy from your phone, and large albums and selections hold together better.</string>
+    <!-- One-time 2.5.0 thank-you popup -->
+    <string name="thanks_2_5_0_title">Thank you.</string>
+    <string name="thanks_2_5_0_greeting">Hey everyone, I\'m Ákos, 21, from Hungary.</string>
+    <string name="thanks_2_5_0_body">Thank you to everyone who gave the app a try and stuck with it, and thank you for all the positive feedback and the trust. I hope this update makes everything even better, and that you enjoy using the app.\n\nBigger features like face recognition and semantic search may still have some problems. If you run into one, tell me and I\'ll fix it in a patch as soon as I can. I hope everything else works perfectly for you.\n\nThanks again for the trust, and for using the app. It felt good to finally build something that turned out to be genuinely useful.</string>
+    <string name="thanks_2_5_0_discord">Discord</string>
+    <string name="thanks_2_5_0_website">Website</string>
+    <string name="thanks_2_5_0_coffee">Buy me a coffee</string>
+    <string name="thanks_2_5_0_dismiss">Dismiss</string>
     <string name="duplicates_filter_identical">Identical</string>
     <string name="duplicates_filter_similar">Similar</string>
     <string name="duplicates_filter_match_label">Match type</string>

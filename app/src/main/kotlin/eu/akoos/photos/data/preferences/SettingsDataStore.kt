@@ -601,6 +601,11 @@ object SettingsKeys {
      */
     val WHATS_NEW_SEEN_VERSION = intPreferencesKey("whats_new_seen_version")
 
+    /** True once the one-time 2.5.0 thank-you popup has been shown and dismissed. Absent reads as
+     *  false, so the popup surfaces once on the first launch of the 2.5.0 stable build. Device-wide
+     *  (not account-scoped): it is never cleared on sign-out. */
+    val THANKS_2_5_0_SEEN = booleanPreferencesKey("thanks_2_5_0_seen")
+
     /** Off switch for the news feed. Absent reads as on. When off, the feed is not fetched and the
      *  unread dot never shows, so a user who does not want it pays nothing for it. */
     val NEWS_ENABLED = booleanPreferencesKey("news_enabled")
@@ -861,4 +866,14 @@ val Context.continueWithoutAccount: Flow<Boolean>
 /** Persists the local-only choice read by [continueWithoutAccount]. */
 suspend fun Context.setContinueWithoutAccount(value: Boolean) {
     settingsDataStore.edit { it[SettingsKeys.CONTINUE_WITHOUT_ACCOUNT] = value }
+}
+
+/** True once the one-time 2.5.0 thank-you popup has been shown. Absent reads as false so it can
+ *  surface once. Device-wide, so it survives a sign-out. */
+val Context.thanks250Seen: Flow<Boolean>
+    get() = settingsDataStore.data.map { it[SettingsKeys.THANKS_2_5_0_SEEN] ?: false }
+
+/** Persists that the 2.5.0 thank-you popup read by [thanks250Seen] has been dismissed. */
+suspend fun Context.setThanks250Seen(value: Boolean) {
+    settingsDataStore.edit { it[SettingsKeys.THANKS_2_5_0_SEEN] = value }
 }

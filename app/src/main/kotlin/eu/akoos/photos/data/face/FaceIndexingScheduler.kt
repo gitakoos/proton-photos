@@ -545,7 +545,7 @@ class FaceIndexingScheduler @Inject constructor(
             // bounded and cancellable (cluster() runs under a timeout): (1) the walk is about to pause
             // rather than continue (off Wi-Fi, health-parked, nothing more to source this pass), so
             // group what is indexed instead of leaving it until a drain that may never come, the
-            // reported "scan stalls, no groups" case; (2) a long continuous drain crossed the refresh
+            // "scan stalls, no groups" failure case; (2) a long continuous drain crossed the refresh
             // interval, so people appear and grow as the scan runs. Rate-limited by the interval so a
             // fast drain does not re-cluster every pass.
             val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER

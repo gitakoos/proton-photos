@@ -457,7 +457,7 @@ fun VideoEditorScreen(
                 setSeekParameters(SeekParameters.EXACT)
                 // Pause + rewind at the FIRST ready, at the player itself rather than inside a preview
                 // panel — so it holds whichever tab is showing when the source finishes loading (the Crop
-                // panel installs no such listener, so a source that became ready there used to auto-play
+                // panel installs no such listener, so a source that becomes ready there would auto-play
                 // with sound). Only the first ready; later readys (a re-buffer, a multi-source item swap)
                 // must not yank playback.
                 var didFirstReadyPause = false
@@ -605,8 +605,8 @@ fun VideoEditorScreen(
         )
         ov.prepare()
         // Start the music immediately if the video is already playing: the sync listener below only
-        // reacts to a play/pause CHANGE, so music added mid-playback used to stay silent until the user
-        // toggled play. Match the current state right after (re)preparing the overlay.
+        // reacts to a play/pause CHANGE, so music added mid-playback would stay silent until play is
+        // toggled. Match the current state right after (re)preparing the overlay.
         if (previewPlayer?.playWhenReady == true) ov.play() else ov.pause()
     }
     // Follow the video player's play / pause / seek so the two stay in lockstep during

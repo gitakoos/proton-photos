@@ -39,6 +39,10 @@ import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -47,8 +51,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.net.toUri
+import androidx.hilt.navigation.compose.hiltViewModel
 import eu.akoos.photos.BuildConfig
 import eu.akoos.photos.R
+import eu.akoos.photos.presentation.whatsnew.ThankYouViewModel
 import eu.akoos.photos.presentation.settings.components.RowDivider
 import eu.akoos.photos.presentation.settings.components.SectionLabel
 import eu.akoos.photos.presentation.settings.components.SettingsSubPageScaffold
@@ -60,6 +66,10 @@ fun AboutScreen(
 ) {
     val context = LocalContext.current
     val colors = AppColors.current
+    val thankYouVm: ThankYouViewModel = hiltViewModel()
+    // Hidden preview trigger: tapping the version line seven times raises the 2.5.0 thank-you popup on
+    // any build, without a visible affordance and without marking it seen.
+    var versionTaps by remember { mutableIntStateOf(0) }
 
     fun openUrl(url: String) {
         val intent = Intent(Intent.ACTION_VIEW, url.toUri())
@@ -93,6 +103,13 @@ fun AboutScreen(
                 ),
                 color = colors.fgDim,
                 fontSize = 13.sp,
+                modifier = Modifier.clickable {
+                    versionTaps++
+                    if (versionTaps >= 7) {
+                        versionTaps = 0
+                        thankYouVm.showPreview(thenWhatsNew = true)
+                    }
+                },
             )
             Spacer(Modifier.height(12.dp))
             Text(

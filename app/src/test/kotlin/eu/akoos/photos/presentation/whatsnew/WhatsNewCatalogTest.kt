@@ -150,11 +150,11 @@ class WhatsNewCatalogTest {
 
     @Test
     fun the_current_release_is_2_5_0_with_feature_cards() {
-        // 2.5.0 ships as previews, so this card holds only the newest preview's delta rather than
-        // the whole release. It leads with feature cards (no hero) and announces at least one.
+        // 2.5.0 is the stable release: this card holds the whole release since 2.4.0, consolidated
+        // to its main features. It leads with feature cards (no hero) and announces at least one.
         val latest = LatestWhatsNewRelease
         assertEquals("2.5.0", latest.version)
         assertTrue("2.5.0 leads with feature cards, not a hero card", latest.hero == null)
-        assertTrue("2.5.0 announces its preview cards", latest.features.isNotEmpty())
+        assertTrue("2.5.0 announces its feature cards", latest.features.isNotEmpty())
     }
 }
